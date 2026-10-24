@@ -69,6 +69,12 @@ const ENV_KEYS = [
   'OS_MULTI_ORG_ENABLED',
   'OS_PLATFORM_OWNER_EMAIL',
   'OS_LOCALIZATION_TIMEZONE',
+  // [#25495] The same seed writes `localization.currency` from the host's
+  // POSIX locale; cleared so the "no localization write" cases below cannot
+  // pick up a currency write from the machine running them.
+  'LC_ALL',
+  'LC_MONETARY',
+  'LANG',
 ] as const;
 
 /** Publishes an in-memory SQLite driver the way a datasource plugin does. */

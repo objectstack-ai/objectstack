@@ -309,14 +309,20 @@ describe('#6216 — the REST face assembles through the SHARED assembler, output
             // It carries the environment whose auth service actually validated
             // the caller, which is the left-hand side of the ownership
             // comparison `enforceEnvironmentOwnership` makes at
-            // `GET /ui/view/:object/:type`. ⚠️ Unlike `__kernel` it IS an
-            // authorization input, at exactly one reader inside `rest-server.ts`
-            // — ⛔ nothing downstream of this transport may branch on it, and
+            // `GET /ui/view/:object/:type` and `enforceAuth` makes on every route
+            // behind it. ⚠️ Unlike `__kernel` it IS an authorization input, read
+            // only inside `rest-server.ts` — ⛔ nothing downstream of this transport may branch on it, and
             // it is deliberately NOT an `ExecutionContext` field because it
             // describes how the context was OBTAINED, not what the principal
             // may do. The assembled field set is unchanged; this sits beside it,
             // in the same `as any` the class doc-comment already covers.
             '__authEnvironmentId',
+            // The THIRD post-assembly internal key, the right-hand side of the
+            // same comparison: the environment the request RESOLVED to. Read by
+            // `enforceAuth` on every route behind it (`credentialAnchoredElsewhere`
+            // in `rest-server.ts`), which refuses a credential validated in a
+            // different environment. Same status as `__authEnvironmentId`.
+            '__environmentId',
         ]));
     });
 

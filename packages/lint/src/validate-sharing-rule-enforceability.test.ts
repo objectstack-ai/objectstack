@@ -319,11 +319,13 @@ const anchoredOn = (owd: unknown, extra: Record<string, unknown> = {}) => ({
 });
 
 describe('validateSharingRuleEnforceability — an anchor no gate would consult goes RED', () => {
-  it('flags `public_read_write` — nothing left to widen', () => {
+  it('advises on `public_read_write` — effective for external recipients only (#25549)', () => {
     const findings = validateSharingRuleEnforceability(anchoredOn('public_read_write'));
     expect(findings).toHaveLength(1);
     expect(findings[0]).toMatchObject({
-      severity: 'error',
+      // Advice, not a refusal: the runtime admits the grant for a recipient who
+      // is an `external` member of the record's organization.
+      severity: 'warning',
       rule: SHARING_RULE_OBJECT_NOT_SHAREABLE,
       // The defect is on `object`, not on `condition` — a different field with
       // a different fix, so it gets its own path.
@@ -333,12 +335,12 @@ describe('validateSharingRuleEnforceability — an anchor no gate would consult 
     // An author must be able to act on this: it has to name the object, the
     // rule (the `where` above), and WHY the rule cannot take effect.
     expect(findings[0].message).toBe(
-      'anchor object "crm_opportunity" declares sharingModel \'public_read_write\', so the grant is refused ' +
-        '(SHARING_NOT_ENABLED) and the rule restricts nothing',
+      'anchor object "crm_opportunity" declares sharingModel \'public_read_write\', so the rule is effective for ' +
+        'external recipients only',
     );
     expect(explanationOf(SHARING_RULE_OBJECT_NOT_SHAREABLE)).toMatch(/`buildReadFilter` returns `null`/);
-    // …and both honest fixes, because which one is right is the author's call.
-    expect(findings[0].hint).toMatch(/delete it/);
+    // …and both honest choices, because which one is right is the author's call.
+    expect(findings[0].hint).toMatch(/Keep it if its audience is external/);
     expect(findings[0].hint).toMatch(/sharingModel: 'private'/);
   });
 
@@ -654,7 +656,7 @@ describe('[#22161] one-line verdicts — the four ids', () => {
   const MOVED: Record<string, readonly string[]> = {
     [SHARING_RULE_UNLOWERABLE_CONDITION]: ['`createDeclaredSharingRuleSource`', 'one WARN line in the log', 'ADR-0049', 'SharingRuleService', 'INVALID_FILTER'],
     [SHARING_RULE_RUNTIME_VARIABLE_CONDITION]: ['MATERIALISED', 'no "current user"', 'the rule is SKIPPED'],
-    [SHARING_RULE_OBJECT_NOT_SHAREABLE]: ['WIDENS', 'ADR-0090 D1', '`assertNotInertGrant`', 'not under record-sharing enforcement', 'restriction that does not exist'],
+    [SHARING_RULE_OBJECT_NOT_SHAREABLE]: ['WIDENS', 'ADR-0090 D1', '`assertNotInertGrant`', 'consulted only for an external member', 'restriction that does not exist'],
     [SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT]: ['ADR-0055', 'no shares to widen', '`assertNotInertGrant`', 'whatever the MASTER grants them'],
   };
 

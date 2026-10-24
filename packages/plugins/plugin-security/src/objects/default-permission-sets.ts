@@ -8,6 +8,7 @@ import {
   ORGANIZATION_ADMIN_NO_BYPASS,
   BUILTIN_IDENTITY_ORG_ADMIN,
   BUILTIN_IDENTITY_ORG_OWNER,
+  BUILTIN_IDENTITY_ORG_EXTERNAL,
   MEMBERSHIP_ROLE_DELEGATED_ADMIN,
 } from '@objectstack/spec';
 import {
@@ -216,6 +217,14 @@ const auditLedgerRowScope = () => [
     using: 'tenant_id == current_user.organization_id',
   },
 ];
+
+/**
+ * [ruling of record 6355206139, E4] The external population's baseline set —
+ * see its declaration below. Named once, here: the `org_external` identity
+ * position binds it and the permission-set resolution swaps it in for the
+ * deployment's baseline.
+ */
+export const EXTERNAL_DEFAULT_PERMISSION_SET = 'external_default';
 
 /** The identity object whose `Admin` field group the sets below withhold or keep. */
 const IDENTITY_OBJECT = 'sys_user';
@@ -1223,6 +1232,180 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // compliance ledger's organization scope, which this set's wildcard read
       // reaches. See `auditLedgerRowScope` above for why the copy stays.
       ...auditLedgerRowScope(),
+    ],
+  }),
+
+  // ── External members: the self-service floor, never the directory ─────────
+  //
+  // [ruling of record 6355206139, letter B, E4] The baseline of a holder of the
+  // `external` organization role — a portal user (a supplier's, a customer's)
+  // admitted through the organization invite. Its holder is NOT given the
+  // `everyone` anchor (the resolver withholds it from `org_external`), so
+  // neither `member_default`, nor an app's `isDefault` set, nor an accepted
+  // package default reaches it; this set is what its identity position names
+  // (`builtin-positions.ts`) and what the plugin's additive baseline resolves
+  // for it in their place (`security-plugin-permission-sets.ts`).
+  //
+  // What it carries is `member_default`'s OWN-ROW reach and nothing else:
+  //   - every object it names reads under an own-row scope — a `_self`
+  //     carve-out below, or the object's own declared `_self` default
+  //     (`sys_account`, `sys_team_member`, the two OAuth token tables);
+  //   - `sys_user_org_members` is the one carve-out it leaves out: that scope
+  //     opens every fellow member's identity row, and policies OR-combine, so
+  //     no application set could narrow it again;
+  //   - `sys_member` gains the own-row scope `member_default` never needed
+  //     (`sys_member_self`): an external reads its own membership, not the
+  //     member list;
+  //   - the objects `member_default` reads with NO row scope are not named
+  //     (`sys_team`, the SSO provider and the OAuth resource tables), and
+  //     nothing is granted on the structure tables.
+  //
+  // ⛔ No `'*'` wildcard and no `allowDelete` anywhere: anchor-safe, like the
+  // baseline it stands in for (ADR-0090 D5). ⛔ Not a member of
+  // `MANAGED_DENY_TARGET_SETS`: the registry-driven injection there is a READ
+  // grant on every managed table this set does not name, which would hand an
+  // external every newly declared identity table. Data beyond its own rows
+  // comes only through explicit grants — positions, permission sets, sharing.
+  //
+  // [Stage 2 — the owner_only floor] The platform's write ownership floor,
+  // `owner_only_writes` / `owner_only_deletes`, in the same spelling as
+  // `member_default`'s and bound to `org_external`: an external may modify and
+  // delete the records it created, not other users', whatever object grant it
+  // holds. Same object, name and predicate, so the floor's provenance
+  // (`platform-ownership-policies.ts`) recognises it, and every composition
+  // that relieves a member's floor relieves this one identically — an
+  // edit-level share, a `public_read_write` update, a covering master gate.
+  // Without it an external's by-id write reached every row its grant opened
+  // while a member's stopped at its own: the EXTERNAL ⊆ MEMBER nesting
+  // (ADR-0095 D2) broken on the write side. The OWD half of the same floor is
+  // plugin-sharing's (`owdForAudience`, `@objectstack/core`).
+  PermissionSetSchema.parse({
+    name: EXTERNAL_DEFAULT_PERMISSION_SET,
+    label: 'External Member — Own Records',
+    objects: {
+      // Self-service profile edits, bounded exactly as `member_default`'s
+      // (`sys_user_self` below + the ADR-0092 D2 column whitelist).
+      sys_user: { allowRead: true, allowCreate: false, allowEdit: true, allowDelete: false },
+      sys_member: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+      sys_organization: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+      sys_invitation: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+      sys_account: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+      sys_session: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+      sys_two_factor: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+      sys_team_member: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+      // Revoke-own-key, bounded as `member_default`'s (`sys_api_key_self` +
+      // the `revoked`-only column whitelist).
+      sys_api_key: { allowRead: true, allowCreate: false, allowEdit: true, allowDelete: false },
+      sys_device_code: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+      sys_oauth_application: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+      sys_oauth_consent: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+      sys_oauth_access_token: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+      sys_oauth_refresh_token: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+      sys_user_preference: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
+      sys_inbox_message: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+      sys_notification_receipt: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+    },
+    // The `Admin` group stays withheld on the holder's own row, as on a
+    // member's (field security is row-blind). See `identityAdminFieldSecurity`.
+    fields: identityAdminFieldSecurity('withhold'),
+    rowLevelSecurity: [
+      {
+        name: 'sys_organization_self',
+        object: 'sys_organization',
+        operation: 'all',
+        using: 'id == current_user.organization_id',
+      },
+      {
+        name: 'sys_user_self',
+        object: 'sys_user',
+        operation: 'all',
+        using: 'id == current_user.id',
+      },
+      {
+        name: 'sys_member_self',
+        object: 'sys_member',
+        operation: 'select',
+        using: 'user_id == current_user.id',
+      },
+      {
+        name: 'sys_session_self',
+        object: 'sys_session',
+        operation: 'all',
+        using: 'user_id == current_user.id',
+      },
+      {
+        name: 'sys_two_factor_self',
+        object: 'sys_two_factor',
+        operation: 'all',
+        using: 'user_id == current_user.id',
+      },
+      {
+        name: 'sys_user_preference_self',
+        object: 'sys_user_preference',
+        operation: 'all',
+        using: 'user_id == current_user.id',
+      },
+      {
+        name: 'sys_api_key_self',
+        object: 'sys_api_key',
+        operation: 'all',
+        using: 'user_id == current_user.id',
+      },
+      {
+        name: 'sys_device_code_self',
+        object: 'sys_device_code',
+        operation: 'all',
+        using: 'user_id == current_user.id',
+      },
+      {
+        name: 'sys_oauth_consent_self',
+        object: 'sys_oauth_consent',
+        operation: 'all',
+        using: 'user_id == current_user.id',
+      },
+      {
+        name: 'sys_oauth_application_self',
+        object: 'sys_oauth_application',
+        operation: 'all',
+        using: 'user_id == current_user.id',
+      },
+      {
+        name: 'sys_inbox_message_self',
+        object: 'sys_inbox_message',
+        operation: 'select',
+        using: 'user_id == current_user.id',
+      },
+      {
+        name: 'sys_notification_receipt_self',
+        object: 'sys_notification_receipt',
+        operation: 'select',
+        using: 'user_id == current_user.id',
+      },
+      // The addressee's own invitation, so an external invited to a second
+      // organization can read and accept it (`member_default`'s policy).
+      {
+        name: 'sys_invitation_self',
+        object: 'sys_invitation',
+        operation: 'select',
+        using: 'email == current_user.email',
+      },
+      // [ADR-0131 D7] For a ledger read an explicit grant may give.
+      ...auditLedgerRowScope(),
+      // The owner_only write floor (see the note above the set).
+      {
+        name: 'owner_only_writes',
+        object: '*',
+        operation: 'update',
+        using: 'created_by == current_user.id',
+        positions: [BUILTIN_IDENTITY_ORG_EXTERNAL],
+      },
+      {
+        name: 'owner_only_deletes',
+        object: '*',
+        operation: 'delete',
+        using: 'created_by == current_user.id',
+        positions: [BUILTIN_IDENTITY_ORG_EXTERNAL],
+      },
     ],
   }),
 

@@ -61,7 +61,7 @@
 
 ## 分诊两级盘点细则
 
-- 小时层三读法之一,sweep 析取①② = `list_issues` + `since`。
+- 小时层三读法之一,sweep 析取①–⑤ = `list_issues` + `since`。
 - 标签变更会刷新 `updated_at`,半标注照样入窗。
 - 之二,解锁扫描反演 = 逐仓 `state=CLOSED` + `since` 与 `Blocked-by:` 反向索引求交,命中走双查。
 - 之三,健康指标 = 逐标签 `perPage: 1` 只读 `totalCount`。
@@ -146,8 +146,12 @@
 - 终报 `needs_decision` ⇒ 席位附四维分析与推荐,并入决裁批次呈维护者裁;⛔ 无裁决线程。
 - 容器重启杀本地后台循环:席位等服务端信号(PR 订阅事件、座位 Routine),本地 watcher 可选。
 
-## subagent 批派发前置:先把本地检出钉到 main
+## 派发前置:前提核实,再把本地检出钉到 main
 
+- 派发前前提核实由只读子代理做(下限档);卡线程卡在交候选给 coordinator 之前做。
+- 成立 ⇒ 派;不成立而改法明确 ⇒ 改卡再派;判不了 ⇒ 入决策箱,⛔ 不占卡线程槽。
+- 改法明确 = 目标不变,只换落点或修法:评论记原前提、读数与改法,再改正文。
+- 砍范围、降级、关卡是卡的命运,归人工地板 ⛔ 不借改卡裁;读数落认领 `Premise:` 行。
 - subagent 读 PM 容器本地检出的 agent 定义与技能文本,不读 `origin/main`:过期则整批过期。
 - 每批派发前:`git -C <repo-root> fetch origin main && git -C <repo-root> checkout --detach origin/main`。
 - 游离 HEAD 使停止钩子跳过分支块,⛔ 不快进会话分支;只拒与切换冲突的脏改动,不拒分叉。

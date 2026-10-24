@@ -29,8 +29,8 @@
  * door withholds or adds around the identity, and whether it admits at all,
  * never who the caller is.
  *
- * A door's own additions after the function returns (REST's `__kernel` and
- * `__authEnvironmentId`, see its `drive`) are not the composition and are
+ * A door's own additions after the function returns (REST's `__kernel`,
+ * `__authEnvironmentId` and `__environmentId`, see its `drive`) are not the composition and are
  * set aside before the comparison, by name.
  *
  * A projection can drop a parameter's whole effect: the settings context
@@ -342,10 +342,12 @@ async function driveRest(w: World, headers: Record<string, string>): Promise<Exe
   if (!ctx) return undefined;
   // The door's own additions after the function returns, set aside by name:
   // the resolved kernel (none on this wiring) and the environment whose auth
-  // service validated the caller (none named on this wiring).
-  const { __kernel, __authEnvironmentId, ...context } = ctx;
+  // service validated the caller and the environment the request resolved to
+  // (none named on this wiring).
+  const { __kernel, __authEnvironmentId, __environmentId, ...context } = ctx;
   expect(__kernel).toBeUndefined();
   expect(__authEnvironmentId).toBeUndefined();
+  expect(__environmentId).toBeUndefined();
   return context as ExecutionContext;
 }
 

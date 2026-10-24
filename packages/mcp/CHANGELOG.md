@@ -1,5 +1,127 @@
 # @objectstack/plugin-mcp-server
 
+## 18.1.0
+
+### Patch Changes
+
+- 3937697: fix(mcp)!: the stdio data bridge reads objects from the protocol's merged view, so `list_objects` and `describe_object` see every object `GET /api/v1/meta/object` lists, a package object declared `apiEnabled: false` is refused by every data verb, and so is every object of a disabled package (`404 OBJECT_PACKAGE_DISABLED`)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is which definition the stdio MCP transport consults: its object discovery and its API-exposure gate now read the protocol's merged view, the definition REST and the `/mcp` HTTP bridge already serve and enforce, instead of the metadata service's copy. An object's own `enable.apiEnabled` / `enable.apiMethods` declaration is now enforced where it was not read; the remedy is the declaration the author already wrote, never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (the stdio data verbs' accept set narrows to the object's own declaration), shipped as `patch`: it changes which requests the stdio transport serves, not what a metadata author can write.
+  
+  The long-lived stdio MCP server (`objectstack mcp`, `OS_MCP_STDIO_ENABLED`) answered `list_objects` and `describe_object` from the `metadata` service, and gated its data verbs and its record resource on the same service's copy of the object. That service holds a copy of an object only where something put one there. On a kernel with an `environmentId` (`os dev`, `os serve`, `os start`, and the cloud single-environment runtime) nothing copies the objects a package registers during the boot. So `list_objects` answered `{ objects: [], totalCount: 0 }` for such a package, `describe_object` answered "not found" for each of its objects, and the gate read the missing copy as "no declaration" and served them. REST and the `/mcp` HTTP bridge listed and refused the same objects.
+  
+  - **Before.** On that kernel, an object a package registered during the boot was missing from `list_objects` and answered `Object "NAME" not found` by `describe_object` and `validate_expression`. Declared `apiEnabled: false`, it was served by `query_records`, `get_record`, `aggregate_records` and the `objectstack://objects/NAME/records/ID` resource, and `create_record`, `update_record` and `delete_record` reached the store. Its `internal: true` fields were echoed in the `create_record` and `update_record` responses.
+  - **Now.** `list_objects` and `describe_object` answer from the listing `GET /api/v1/meta/object` serves. Every data verb and the record resource refuse such an object `404 OBJECT_API_DISABLED`, or `405 OBJECT_API_METHOD_NOT_ALLOWED` for a verb its `apiMethods` leaves out, as `RestServer` and the HTTP bridge do. Its `internal: true` fields are omitted from the write responses, and its nested-relation conditions are gated on their targets.
+  - **Also changed.** A disabled package's objects, where the `metadata` service still held a copy, were listed and described; they are now omitted, as REST omits them. Every data verb and the record resource now refuse a disabled package's object `404 OBJECT_PACKAGE_DISABLED`, whatever the object declares: before, the stdio transport served it on every verb, because each verb asks the engine and never the protocol. When the metadata store cannot be read, `list_objects` and `describe_object` answer the store's `503 SERVICE_UNAVAILABLE`, as `GET /api/v1/meta/object` does, instead of the `metadata` service's listing.
+  - **Unchanged.** Objects that already had a copy (every object on a kernel without an `environmentId`, a marketplace install on any kernel, and a runtime-authored object) are listed and gated as before. A host with no `protocol` service, or one without the merged reads, keeps reading the `metadata` service. If the protocol's by-name read fails, the gate judges the `metadata` service's copy, as it did before.
+  - **What to do.** Nothing, if the declarations say what you mean. A stdio client that relied on reaching an object declared `apiEnabled: false` was relying on the defect: set `enable.apiEnabled` (or `enable.apiMethods`) on the object to the exposure you want. A stdio client that read a disabled package's objects was relying on the same kind of defect: re-enable the package to restore access, as REST says.
+- 3937697: fix(mcp)!: the `objectstack://objects` resources read the stdio transport's merged object view, so they list and describe every object `list_objects` and `describe_object` answer, and omit a disabled package's objects as those tools do
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is which definition the stdio MCP transport's two object resources read: the protocol's merged listing, the one its `list_objects` / `describe_object` tools and `GET /api/v1/meta/object` already serve, instead of the metadata service's copy. No published signature moves: `MCPServerRuntime.bridgeResources` keeps its two parameters, and the view reaches it through a package-internal function `index.ts` does not publish. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (the object resources stop serving a disabled package's objects), shipped as `patch`: it changes which reads the stdio transport answers, not what a metadata author can write.
+  
+  The long-lived stdio MCP server (`objectstack mcp`, `OS_MCP_STDIO_ENABLED`) answered `resources/read` of `objectstack://objects` and `objectstack://objects/NAME` from the `metadata` service. That service holds a copy of an object only where something put one there. On a kernel with an `environmentId` (`os dev`, `os serve`, `os start`, and the cloud single-environment runtime) nothing copies the objects a package registers during the boot. So `objectstack://objects` answered `{ objects: [], totalCount: 0 }` for such a package and `objectstack://objects/NAME` answered `404 RESOURCE_NOT_FOUND` for each of its objects, while `list_objects` and `describe_object` listed and described them.
+  
+  - **Before.** On that kernel, an object a package registered during the boot was missing from `objectstack://objects`, and `objectstack://objects/NAME` answered `{ error: 'Object "NAME" not found', code: 'RESOURCE_NOT_FOUND', status: 404 }` for it.
+  - **Now.** Both resources read the view `list_objects` and `describe_object` answer from: the protocol's merged listing, the one `GET /api/v1/meta/object` serves. `objectstack://objects/NAME` answers the same body `describe_object` answers for that name.
+  - **Also changed.** A disabled package's objects, where the `metadata` service still held a copy, were listed by `objectstack://objects` and described by `objectstack://objects/NAME`. They are now omitted, and `objectstack://objects/NAME` answers `404 RESOURCE_NOT_FOUND` for them, as `describe_object` answers "not found". When the protocol's merged listing throws, both resource reads fail with that error, as `list_objects` does, instead of answering the `metadata` service's listing.
+  - **Unchanged.** Objects that already had a copy (every object on a kernel without an `environmentId`, a marketplace install on any kernel, and a runtime-authored object) are listed and described as before. The completeness verdict is still the `metadata` service's: a loader outage still withholds `totalCount` and answers `partial: true`, and a miss during an outage still answers `503 SERVICE_UNAVAILABLE`. A host with no `protocol` service, or one without the merged listing, keeps reading the `metadata` service. A host that calls `MCPServerRuntime.bridgeResources` itself reads the `metadata` service as before.
+  - **What to do.** Nothing. A stdio client that read a disabled package's object through these resources was reading a stale copy the rest of the platform no longer serves: re-enable the package to restore it, as REST says.
+- 3937697: fix(cli,mcp): `os dev`'s boot banner and the served SKILL.md name the MCP server the same way
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `os dev`'s "connect a coding agent" block printed `claude mcp add --transport http FOLDER URL`, where FOLDER was the basename of the directory `os dev` ran in. The served `SKILL.md` (`GET /api/v1/mcp/skill`) and the console's Connect an Agent snippets name the server `objectstack`. So one endpoint ended up in an agent's config under two names, depending on which instructions were followed.
+  
+  Both producers now read one exported constant, `OBJECTSTACK_MCP_SERVER_NAME` (`'objectstack'`), from `@objectstack/mcp`. The banner's `Connect` row prints `claude mcp add --transport http objectstack URL`. If you registered the server under the folder name from an earlier banner, that entry keeps working. Remove it with `claude mcp remove FOLDER` if you also added it as `objectstack`.
+  
+  `printMcpConnectHint` no longer takes a `name` option.
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [4395cbc]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [9f39094]
+  - @objectstack/spec@18.1.0
+  - @objectstack/core@18.1.0
+  - @objectstack/formula@18.1.0
+  - @objectstack/types@18.1.0
+
 ## 18.0.0
 
 ### Minor Changes

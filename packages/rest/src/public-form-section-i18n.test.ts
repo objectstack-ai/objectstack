@@ -92,7 +92,12 @@ const BUNDLE: Record<string, any> = {
             ticket: {
                 fields: { subject: { label: '主题' }, email: { label: '邮箱' }, status: { label: '状态' } },
                 _sections: {
-                    about: { label: ABOUT_ZH, description: ABOUT_DESC_ZH },
+                    about: {
+                        label: ABOUT_ZH,
+                        description: ABOUT_DESC_ZH,
+                        // A section entry's override copy (read only by the entry pins below).
+                        fields: { subject: { label: '您的问题', placeholder: '一句话概括', helpText: '我们据此分派工单' } },
+                    },
                     more: { label: '更多' },
                 },
             },
@@ -357,4 +362,39 @@ describe('[#23497] a form matched outside `config` is served as matched', () => 
             expect(renderedFields(res)).toEqual([['subject'], ['email']]);
         });
     }
+});
+
+describe('GET /forms/:slug — a section entry\'s label, placeholder and helpText are localized under Accept-Language', () => {
+    /** The form view with an entry object overriding the `subject` field's copy in `about`, and one in `details` the bundle has no key for. */
+    const entryFormView = () => {
+        const view = formView();
+        view.config.sections[0].fields = [
+            { field: 'subject', label: 'Your question', placeholder: 'One line, please', helpText: 'We route the ticket by it' },
+            'contact_id',
+        ] as any;
+        view.config.sections[1].fields = [{ field: 'email', label: 'Your email', placeholder: 'you@example.com' }] as any;
+        return view;
+    };
+    const entry = (res: any, index: number) => res.body.form.sections[index].fields[0];
+
+    it('zh-CN: a pack with `_sections.<section>.fields.<field>` serves the translated entry label, placeholder and helpText', async () => {
+        const res = await buildServer(entryFormView()).get('zh-CN');
+        expect(entry(res, 0)).toEqual({
+            field: 'subject', label: '您的问题', placeholder: '一句话概括', helpText: '我们据此分派工单',
+        });
+        // The strip still ran over the translated section: its lookup is gone.
+        expect(renderedFields(res)[0]).toEqual(['subject']);
+    });
+
+    it('zh-CN: an entry the pack has no key for is served its authored copy', async () => {
+        const res = await buildServer(entryFormView()).get('zh-CN');
+        expect(entry(res, 1)).toEqual({ field: 'email', label: 'Your email', placeholder: 'you@example.com' });
+    });
+
+    it('CONTROL — en: the entry is served its authored copy', async () => {
+        const res = await buildServer(entryFormView()).get('en');
+        expect(entry(res, 0)).toEqual({
+            field: 'subject', label: 'Your question', placeholder: 'One line, please', helpText: 'We route the ticket by it',
+        });
+    });
 });

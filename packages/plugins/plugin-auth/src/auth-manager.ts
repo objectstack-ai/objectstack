@@ -2,7 +2,6 @@
 
 import type { Auth, BetterAuthOptions } from 'better-auth';
 import type { JSONWebKeySet } from 'jose';
-import type { OrganizationOptions } from 'better-auth/plugins/organization';
 import type { SCIMIdentityState, SCIMTransactionContext } from '@better-auth/scim';
 // better-auth value imports (betterAuth + plugins) are deferred via dynamic
 // import() in getOrCreateAuth() / buildPluginList() so that disabled plugins
@@ -27,11 +26,8 @@ import {
   type VerificationDeclarant,
 } from './audience-posture.js';
 import {
-  PLATFORM_IDP_PROVIDER_ID,
   type LinkingAuthContext,
-  refuseImplicitAccountLink,
 } from './implicit-account-linking.js';
-import { CLOUD_MANAGED_REFUSAL_CODE, CLOUD_MANAGED_REFUSAL_MESSAGES } from './cloud-managed.js';
 import { IdpLocaleSync } from './idp-locale-claim.js';
 import type { IDataEngine } from '@objectstack/core';
 import {
@@ -42,7 +38,6 @@ import {
   // [#25083] Is this process a cloud-managed (hosted) environment? The ONE
   // accessor every managed-mode judgement here asks, and nothing else.
   isCloudManaged,
-  resolveUserAuthzGrants,
 } from '@objectstack/core';
 import type { AuthGate } from '@objectstack/core';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -55,57 +50,29 @@ import type {
   PrincipalSessionMintOptions,
 } from '@objectstack/spec/contracts';
 import {
-  readEnvWithDeprecation,
   resolveTenancyPosture,
-  resolveOrgLimit,
   isMcpServerEnabled,
 } from '@objectstack/types';
-import { resolveMembershipLimitOption } from './membership-limit.js';
-import {
-  MEMBERSHIP_ROLE_DELEGATED_ADMIN,
-} from '@objectstack/spec';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
 import type { RegisteredErrorCode, StandardErrorCode } from '@objectstack/spec/api';
-import { createObjectQLAdapterFactory, withSystemContext, withSystemReadContext } from './objectql-adapter.js';
+import { createObjectQLAdapterFactory, withSystemReadContext } from './objectql-adapter.js';
+import { type ExternalDirectoryDoorDeps } from './external-directory-door.js';
+import { isExternalMembershipRole } from './external-membership.js';
 import { permissionSetInEffect } from './catalog-set-in-effect.js';
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
-import { setAuthActorResolver } from './auth-actor-attribution.js';
 import {
-  SIGN_IN_EMAIL_PATH,
   type AuthEventAuditSurface,
 } from './auth-session-audit.js';
 import {
   type BetterAuthRouteOwnership,
 } from './better-auth-route-ownership.js';
 import {
-  rotateCallerBearerOnImpersonation,
-} from './impersonation-bearer-rotation.js';
-import { echoInstalledSessionToken } from './two-factor-rotated-token-echo.js';
-import { resetVerifiedOnTwoFactorReenrollment } from './two-factor-reenrollment-verified-reset.js';
-import { codeInviteRoleNotFound } from './invite-role-not-found-code.js';
-import { attachSessionToCredentialResponse } from './session-envelope-completion.js';
-import {
-  applyPlatformAdminImpersonation,
-  VENDOR_ROLE_SCALAR_ADMIN_PATHS,
-} from './admin-impersonate-endpoint.js';
-import {
-  carriesPrincipalSession,
   mintPrincipalSession,
   type PrincipalSessionAuthContext,
 } from './principal-session-mint.js';
-import {
-  applyDeclaredInvitationVerificationToListing,
-} from './list-user-invitations-verification.js';
-import {
-  invitationRoleCapFailure,
-  isPlainMemberInvitation,
-} from './invitation-role-cap.js';
 import { isPlaceholderEmail } from './placeholder-email.js';
-import { readAccountInvitation, settleImportResetDelivery } from './account-invitation-marker.js';
 import { resolveClientAddress } from './client-address.js';
-import { vendorClientAddressOptions } from './client-address-vendor.js';
-import { readRequestClientAddress } from './request-client-address.js';
 import {
   type MembershipPolicy,
   type ReconcileOutcome,
@@ -114,33 +81,10 @@ import type { TenancyService } from './tenancy-service.js';
 import { OtpSendGuard, assertOtpCooldownSeconds } from './otp-send-guard.js';
 import type { CounterStore } from './rate-limit-storage.js';
 import {
-  isLastLocalCredentialHolder,
-  LAST_LOCAL_CREDENTIAL_CODE,
-  LAST_LOCAL_CREDENTIAL_MESSAGE,
-} from './last-local-credential.js';
-import {
   applyUserBan,
   applyUserUnban,
   SCIM_DEACTIVATION_BAN_REASON,
 } from './user-ban-write.js';
-import { invitationRoleLabel } from './invitation-role-label.js';
-import {
-  AUTH_USER_CONFIG,
-  AUTH_SESSION_CONFIG,
-  AUTH_ACCOUNT_CONFIG,
-  AUTH_VERIFICATION_CONFIG,
-  buildOrganizationPluginSchema,
-  buildTwoFactorPluginSchema,
-  buildOauthProviderPluginSchema,
-  buildDeviceAuthorizationPluginSchema,
-  buildAdminPluginSchema,
-  buildPhoneNumberPluginSchema,
-} from './auth-schema-config.js';
-import {
-  ORGANIZATION_DELETE_PATH,
-  isDefaultOrganizationTarget,
-  removeOrganizationAuthStructure,
-} from './organization-delete.js';
 // [#25224 cut 1] The actor and organization guards; the methods of the same
 // names below hand each body the members it reads (`ActorGuardHost`).
 import {
@@ -249,6 +193,20 @@ import {
   ownsRoute,
   type RequestRoutingHost,
 } from './auth-manager-request-routing.js';
+// [#25224 cut 11] The WebContainer password hasher; the method of the same
+// name below calls it, and hands it nothing, because it reads no member of
+// this class.
+import { resolvePasswordHasher } from './auth-manager-password-hasher.js';
+// [#25224 cut 14] The body of `createAuthInstance`; the method of the same
+// name below hands it the members it reads (`AuthInstanceHost`). The global
+// after-hook (cut 12) and before-hook (cut 13) are now imported there, by the
+// two arrows that moved with it.
+import { createAuthInstance, type AuthInstanceHost } from './auth-manager-auth-instance.js';
+// [#25224 cut 16] The body of `buildPluginList`; the method of the same name
+// below hands it the members it reads (`PluginListHost`). The organization
+// plugin's factory (cut 15) is now imported there, by the arrow that moved
+// with it.
+import { buildPluginList, type PluginListHost } from './auth-manager-plugin-list.js';
 
 /**
  * Detect WebContainer (StackBlitz) environment.
@@ -259,7 +217,7 @@ import {
  * propagate the store across `await` boundaries the way Node's native
  * implementation does.
  */
-function isWebContainerRuntime(): boolean {
+export function isWebContainerRuntime(): boolean {
   if (typeof globalThis === 'undefined') return false;
   const proc = (globalThis as any).process;
   return (
@@ -376,7 +334,7 @@ class SubjectErasureRollback extends Error {
   }
 }
 
-function readBooleanEnv(name: string, legacyName?: string): boolean | undefined {
+export function readBooleanEnv(name: string, legacyName?: string): boolean | undefined {
   const env = (globalThis as any)?.process?.env as Record<string, string | undefined> | undefined;
   const raw = env?.[name] ?? (legacyName ? env?.[legacyName] : undefined);
   if (raw == null) return undefined;
@@ -384,7 +342,7 @@ function readBooleanEnv(name: string, legacyName?: string): boolean | undefined 
   return !['0', 'false', 'off', 'no'].includes(normalized);
 }
 
-function readDisableSignUpEnv(): boolean | undefined {
+export function readDisableSignUpEnv(): boolean | undefined {
   const signupEnabled = readBooleanEnv('OS_AUTH_SIGNUP_ENABLED');
   if (signupEnabled != null) return !signupEnabled;
   return readBooleanEnv('OS_DISABLE_SIGNUP');
@@ -1352,8 +1310,12 @@ export function authEmailLocaleFromRequest(source: unknown): string | undefined 
  * context, or anything carrying either. Never throws: a vendor changing the
  * shape it hands a callback must degrade to the deployment default, never fail
  * the send.
+ *
+ * Exported for `organization-default-currency.ts`, which reads the creating
+ * request's language off the endpoint context the same way (#25495): one
+ * reader, not two.
  */
-function acceptLanguageHeader(source: unknown): string | undefined {
+export function acceptLanguageHeader(source: unknown): string | undefined {
   if (!source || typeof source !== 'object') return undefined;
   const nested = (source as { request?: unknown }).request;
   const bags = [
@@ -1392,7 +1354,7 @@ const SLUG_GUARD_READ_FAULT_CODE: StandardErrorCode = 'SERVICE_UNAVAILABLE';
  * never "allowed", which is what swallowing the fault used to answer. The
  * driver's own failure rides `cause`, so its diagnostic is not lost.
  */
-async function slugGuardReadFaultApiError(object: string, cause: unknown): Promise<Error> {
+export async function slugGuardReadFaultApiError(object: string, cause: unknown): Promise<Error> {
   const { APIError } = await import('better-auth/api');
   const err = new APIError('SERVICE_UNAVAILABLE', {
     message:
@@ -1413,17 +1375,17 @@ async function slugGuardReadFaultApiError(object: string, cause: unknown): Promi
 // `ApiErrorSchema` rejects.
 
 /** `beforeCreateOrganization`: the reserved `__global__` id or slug (ADR-0120 D3), a value the request may not carry. */
-const ORGANIZATION_RESERVED_IDENTIFIER_CODE: StandardErrorCode = 'VALIDATION_ERROR';
+export const ORGANIZATION_RESERVED_IDENTIFIER_CODE: StandardErrorCode = 'VALIDATION_ERROR';
 /** `beforeCreateOrganization`: the effective tenancy posture enforces no organization wall, so no caller may create one. */
-const ORGANIZATION_CREATION_DISABLED_CODE: RegisteredErrorCode = 'ORGANIZATION_CREATION_DISABLED';
+export const ORGANIZATION_CREATION_DISABLED_CODE: RegisteredErrorCode = 'ORGANIZATION_CREATION_DISABLED';
 /** `beforeCreateInvitation`: placement intent, and no delegated-administration runtime to authorize it. */
-const INVITE_PLACEMENT_UNSUPPORTED_CODE: RegisteredErrorCode = 'INVITE_PLACEMENT_UNSUPPORTED';
+export const INVITE_PLACEMENT_UNSUPPORTED_CODE: RegisteredErrorCode = 'INVITE_PLACEMENT_UNSUPPORTED';
 /** `beforeCreateInvitation`: the delegated-administration gate's own verdict that the placement is outside the issuer's scope. */
-const INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE_CODE: RegisteredErrorCode = 'INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE';
+export const INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE_CODE: RegisteredErrorCode = 'INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE';
 /** `beforeCreateInvitation`: the placement check failed before the gate reached a verdict — the status's own name. */
 const INVITE_PLACEMENT_READ_FAULT_CODE: StandardErrorCode = 'SERVICE_UNAVAILABLE';
 /** `beforeUpdateOrganization`: a change to a new slug while the organization has an active environment. */
-const ORGANIZATION_SLUG_LOCKED_CODE: RegisteredErrorCode = 'ORGANIZATION_SLUG_LOCKED_BY_ACTIVE_ENVIRONMENTS';
+export const ORGANIZATION_SLUG_LOCKED_CODE: RegisteredErrorCode = 'ORGANIZATION_SLUG_LOCKED_BY_ACTIVE_ENVIRONMENTS';
 
 /**
  * [#24243] Is this throw out of `assertIssuable` the delegated-administration
@@ -1433,7 +1395,7 @@ const ORGANIZATION_SLUG_LOCKED_CODE: RegisteredErrorCode = 'ORGANIZATION_SLUG_LO
  * no runtime dependency on plugin-security (see
  * {@link InvitationPlacementServiceLike}).
  */
-function isInvitationPlacementGateRefusal(err: unknown): boolean {
+export function isInvitationPlacementGateRefusal(err: unknown): boolean {
   return !!err && typeof err === 'object' && (err as { code?: unknown }).code === 'PERMISSION_DENIED';
 }
 
@@ -1450,7 +1412,7 @@ function isInvitationPlacementGateRefusal(err: unknown): boolean {
  * invitation row is written. The thrown failure rides `cause`, and its message
  * is not relayed, so a driver's text does not reach the caller.
  */
-async function invitationPlacementReadFaultApiError(cause: unknown): Promise<Error> {
+export async function invitationPlacementReadFaultApiError(cause: unknown): Promise<Error> {
   const { APIError } = await import('better-auth/api');
   const err = new APIError('SERVICE_UNAVAILABLE', {
     message:
@@ -1482,7 +1444,7 @@ export const OAUTH_ORGANIZATION_CLAIM = 'organization_id';
  * token carries no claim, which is the ruled outcome for a user with no
  * organization, never a guessed or default one.
  */
-function consentOrganizationOf(session: Record<string, unknown> | null | undefined): string | undefined {
+export function consentOrganizationOf(session: Record<string, unknown> | null | undefined): string | undefined {
   const organizationId = session?.activeOrganizationId;
   return typeof organizationId === 'string' && organizationId ? organizationId : undefined;
 }
@@ -1689,1453 +1651,60 @@ export class AuthManager {
   /**
    * Create a better-auth instance from configuration
    */
-  private async createAuthInstance(): Promise<Auth<any>> {
-    const { betterAuth } = await import('better-auth');
-    const { createAuthMiddleware, setShouldSkipSessionRefresh } = await import('better-auth/api');
-    const plugins = await this.buildPluginList();
-    const passwordHasher = await this.resolvePasswordHasher();
-    const betterAuthConfig: BetterAuthOptions = {
-      // Base configuration
-      secret: this.resolveAuthSecret(),
-      // Absolute origin (getCanonicalOrigin prepends https:// when baseUrl is a
-      // bare host) so the reset-password / verify-email / magic-link URLs
-      // better-auth derives from baseURL are always clickable links.
-      baseURL: this.getCanonicalOrigin(),
-      basePath: this.configuredBasePath(),
-      // The deployment's product name, from the one authority every auth
-      // email already reads (`getAppName()`: the `branding.workspace_name`
-      // override, else the configured `appName`, else 'ObjectStack').
-      // better-auth 1.7.12 (re-read 2026-10-21 for #25096) reads this key once,
-      // into its context's `appName` (unset ⇒ "Better Auth"), and reads that
-      // in exactly two places: the
-      // issuer and label prefix of the otpauth URI that `/two-factor/enable`
-      // and `/two-factor/get-totp-uri` answer. No cookie name derives from it
-      // (the prefix is the literal "better-auth") and nothing stores it, so an
-      // authenticator enrolled under the old label keeps producing codes that
-      // verify: the issuer is a display label beside an unchanged secret.
-      //
-      // Read when this instance is built. A later branding rename reaches the
-      // issuer only when the instance is rebuilt (a config patch or a
-      // restart), while auth emails call `getAppName()` on every send.
-      appName: this.getAppName(),
-
-      // Database adapter configuration
-      database: await this.createDatabaseConfig(),
-
-      // Model/field mapping: camelCase (better-auth) → snake_case (ObjectStack)
-      // These declarations tell better-auth the actual table/column names used
-      // by ObjectStack's protocol layer, enabling automatic transformation via
-      // createAdapterFactory.
-      user: {
-        ...AUTH_USER_CONFIG,
-        // NOTE: the env-side AI-seat marker `sys_user.ai_access` is deliberately
-        // NOT declared as a better-auth additionalField. sys_user is a
-        // better-auth-MANAGED table and better-auth SELECTs explicit columns, so
-        // declaring it here would make getSession query a column that may not
-        // exist on every env yet → broken auth. Instead the column is owned by
-        // the objectql `SysUser` object def (provisioned by boot schema-sync)
-        // and read by a GUARDED system query in resolveCtx (can only no-op,
-        // never break auth). better-auth stays oblivious to the extra column.
-
-        // ── #7735 — self-service email change, ON with verification ────────
-        // better-auth ships `changeEmail` OFF, so `POST /change-email` answered
-        // 400 CHANGE_EMAIL_DISABLED on every deployment while
-        // `auth-route-ledger.ts` booked the route as a live SDK surface. The
-        // ledger was right about the product and wrong about the runtime;
-        // maintainer ruling 2026-08-12 settled it by making the runtime true:
-        // 「`user.changeEmail` 在 plugin-auth 配置开启,带验证流程(变更需确认,
-        // 策略按 better-auth 常规)」.
-        //
-        // THE FLOW, as better-auth 1.7 actually implements it (read off
-        // `better-auth/dist/api/routes/update-user.mjs`, not off the docs):
-        //   1. `POST /change-email {newEmail}` mints a JWT carrying
-        //      `{ email: current, updateTo: newEmail, requestType:
-        //      'change-email-verification' }` and hands it to
-        //      `emailVerification.sendVerificationEmail` — the same callback
-        //      (and `auth.verify_email` template) sign-up verification uses,
-        //      addressed to the NEW address. Nothing is written yet.
-        //   2. `GET /verify-email?token=…` applies it: `updateUserByEmail(old,
-        //      { email: newEmail, emailVerified: true })`, then re-issues the
-        //      session cookie on the new identity.
-        // So the change is confirmed by proving control of the new mailbox —
-        // 「变更需确认」 — and an unclicked request changes nothing.
-        //
-        // TWO OPTIONS DELIBERATELY LEFT AT THEIR DEFAULTS, because each is a
-        // policy this ruling did not decide:
-        //   • `updateEmailWithoutVerification` — would let a user whose CURRENT
-        //     address is unverified swap emails with no confirmation at all.
-        //     That is the one thing the ruling names; leaving it false keeps
-        //     every path confirmed.
-        //   • `sendChangeEmailConfirmation` — better-auth's opt-in EXTRA step
-        //     that asks the OLD address to approve first (old → new, two
-        //     clicks). Stronger against a hijacked session, and it needs a
-        //     decision about which address is authoritative plus its own
-        //     template; 「策略按 better-auth 常规」 is the single-step default,
-        //     so the two-step variant stays a deliberate future design.
-        //
-        // ── #8019 — the OLD address is NOTIFIED, and still not gated ───────
-        // Maintainer ruling 2026-08-12 (later the same day, and deliberately
-        // narrower than the one above): 「notify the OLD address — do not gate
-        // on it」. #7735's ruling keeps governing the CONFIRMATION option; this
-        // one adds only the notice. So `sendChangeEmailConfirmation` stays
-        // absent above — and that is a measured decision, not an omission:
-        //
-        //   `user.changeEmail` declares EXACTLY three members: `enabled`,
-        //   `sendChangeEmailConfirmation`, and `updateEmailWithoutVerification`.
-        //   Measured 2026-08-20 against the installed
-        //   `@better-auth/core@1.7.1`, in the file the package actually SHIPS —
-        //   `dist/types/init-options.d.mts:835-857`. (The previous stamp cited
-        //   `src/types/init-options.ts:946-971`; no `src/` is published, so
-        //   that reference could not be checked by anyone reading it.)
-        //   There is NO notify-only hook, and
-        //   `sendChangeEmailConfirmation` is not one: in better-auth 1.7.1's
-        //   `dist/api/routes/update-user.mjs:457` it becomes
-        //   `canSendConfirmation`, and the branch opening at `:496` RETURNS at
-        //   `:505` right after invoking it — the new address is never mailed
-        //   until the old one clicks. Setting it is therefore structurally the
-        //   approval gate the ruling refuses, not a way to notify.
-        //
-        // The notice is consequently sent by the framework, from the global
-        // `after` hook on `/change-email` (search `__osChangeEmailFrom`), using
-        // the `auth.email_change_notice` template. It is failure-isolated by
-        // construction: it runs after better-auth has already produced the
-        // response, and its own errors are swallowed, so a dead mailbox cannot
-        // turn a notification into a block. That is the "do not gate" half,
-        // enforced mechanically rather than promised in prose.
-        //
-        // No email transport wired ⇒ the `emailVerification` block below is
-        // absent ⇒ better-auth answers 400 "Verification email isn't enabled".
-        // That is the honest answer for a deployment with no mailbox, and a
-        // different sentence from "the platform does not offer this".
-        //
-        // The write itself already worked: `sys_user.email` is schema-`readonly`
-        // and the readonly-strip drops non-system updates, but the adapter runs
-        // better-auth's own writes as system (#3164, `withSystemContext` in
-        // objectql-adapter.ts), so the applied change persists.
-        //
-        // ⛔ `deleteUser` is NOT configured here, by the same ruling — see the
-        // `disabled` row for `POST /api/v1/auth/delete-user` in
-        // `auth-route-ledger.ts` for why, and for what has to be decided first.
-        changeEmail: {
-          enabled: true,
-        },
-
-        // ── [#11739] Audience posture — THE enforcement point ──────────────
-        // better-auth's own admission gate, invoked by internalAdapter
-        // .createUser for EVERY creation path with a method-discriminated
-        // `source` (email-password, oauth, sso-oidc/saml, magic-link,
-        // email-otp, phone-number, anonymous, admin, scim, …), failing CLOSED
-        // by vendor construction. One seam, one owner — see
-        // `audience-posture.ts` for the decision semantics, the pinned
-        // domain-matching rules, and the creation-class table.
-        //
-        // The same seam also carries the implicit-account-linking gate: the
-        // vendor calls it with `action: 'link-account'` right before an
-        // implicit link is written — see `implicit-account-linking.ts`. The
-        // audience gate judges only `create-user`, so the two never answer
-        // the same call.
-        //
-        // It is also where better-auth hands over the IdP's raw profile, so
-        // the profile's `locale` claim is STAGED here, refusing nothing; the
-        // session the sign-in mints settles it (`idp-locale-claim.ts`).
-        validateUserInfo: async (data: any, ctx: any) => {
-          this.idpLocale.stage(data, ctx);
-          return (await refuseImplicitAccountLink(data, ctx, {
-            requireLocalEmailVerified: this.implicitLinkRequiresLocalEmailVerified(),
-            resolveContext: () => this.linkingContext(),
-            logInfo: (m, meta) => this.config.logger?.info?.(m, meta),
-          })) ?? this.validateAudienceAdmission(data, ctx);
-        },
-      },
-      account: {
-        ...AUTH_ACCOUNT_CONFIG,
-        // Implicit account linking: an OAuth / OIDC / SSO sign-in whose
-        // identity is not linked yet, but whose email matches an existing
-        // local user, links to that user. The rules — every provider needs a
-        // VERIFIED local row, except the platform's own cloud IdP
-        // (`PLATFORM_IDP_PROVIDER_ID`, whose owner-seeded rows are born
-        // `emailVerified=false`), and a user's unlink is honoured — are
-        // enforced in `refuseImplicitAccountLink` (the `validateUserInfo`
-        // seam above). Why there, and why the vendor flag below is pinned
-        // `false` by default: `implicit-account-linking.ts`, module header.
-        //
-        // Custom-deployment consumers can extend the trusted set via
-        // `config.account.accountLinking.trustedProviders`; we always
-        // include `objectstack-cloud` because it is the platform IdP.
-        // Trust relaxes only the IdP-side `email_verified` clause; it never
-        // relaxes the local-verification requirement.
-        accountLinking: {
-          enabled: true,
-          ...((this.config as any)?.account?.accountLinking ?? {}),
-          // better-auth's flag is ONE global boolean with no per-provider
-          // form, so it cannot carry the cloud exception: `true` would refuse
-          // the cloud owner row before our gate runs. It is therefore `false`
-          // unless the operator explicitly asked for the strict form for
-          // EVERY provider (`true`), and the requirement itself is enforced
-          // by our gate (`implicitLinkRequiresLocalEmailVerified`).
-          requireLocalEmailVerified:
-            (this.config as any)?.account?.accountLinking?.requireLocalEmailVerified === true,
-          trustedProviders: Array.from(new Set([
-            PLATFORM_IDP_PROVIDER_ID,
-            ...((this.config as any)?.account?.accountLinking?.trustedProviders ?? []),
-          ])),
-        },
-      },
-      verification: {
-        ...AUTH_VERIFICATION_CONFIG,
-        // A host `secondaryStorage` would otherwise make the cache the ONLY
-        // home of every verification value (better-auth drops the
-        // `verification` model from the schema), and the implicit-linking
-        // unlink records (`implicit-account-linking.ts`) must be durable: an
-        // evicted record re-opens implicit re-linking without a sound. With
-        // `storeInDatabase` every verification value is a `sys_verification`
-        // row — exactly what it is when no `secondaryStorage` is configured,
-        // ObjectStack's default — and the cache only fronts it.
-        ...(this.config.secondaryStorage ? { storeInDatabase: true } : {}),
-      },
-
-      // Social / OAuth providers
-      ...(this.config.socialProviders ? { socialProviders: this.config.socialProviders as any } : {}),
-
-      // Email and password configuration.
-      // `disableSignUp`: env overrides config/settings so deployments can
-      // lock the registration policy without relying on UI state.
-      emailAndPassword: (() => {
-        const disableSignUpFromEnv = readDisableSignUpEnv();
-        // SSO-only ("enforced") and a cloud-managed environment force
-        // self-registration off (see `signUpForcedOff`). `enabled` stays true
-        // so the break-glass password endpoint keeps working for the env
-        // owner / local admin.
-        const effectiveDisableSignUp = this.signUpForcedOff()
-          ? true
-          : (disableSignUpFromEnv ?? this.config.emailAndPassword?.disableSignUp);
-        return {
-          enabled: this.config.emailAndPassword?.enabled ?? true,
-          ...(passwordHasher ? { password: passwordHasher } : {}),
-          ...(effectiveDisableSignUp != null
-            ? { disableSignUp: effectiveDisableSignUp } : {}),
-          // [#11739] Invariant: a posture that permits self-registration
-          // (email_domain / open) FORCES email verification on — an
-          // unverified allowlisted-domain signup is colleague impersonation
-          // and makes the domain gate decorative. [#20389] One exception:
-          // under `open` the deployment may declare it off with an explicit
-          // `false`. The entry validation (assertAudienceConfig) already
-          // refused every other explicit false, so this never overrides a
-          // value it accepted; getPublicConfig() reads the SAME resolver, so
-          // the advertised flag cannot disagree with the wired one.
-          ...((() => {
-            const posture = this.getAudience().posture;
-            const declared = this.config.emailAndPassword?.requireEmailVerification;
-            return audiencePermitsSelfRegistration(posture) || declared != null
-              ? { requireEmailVerification: resolveEmailVerificationRequirement(posture, declared) }
-              : {};
-          })()),
-          ...(this.config.emailAndPassword?.minPasswordLength != null
-            ? { minPasswordLength: this.config.emailAndPassword.minPasswordLength } : {}),
-          ...(this.config.emailAndPassword?.maxPasswordLength != null
-            ? { maxPasswordLength: this.config.emailAndPassword.maxPasswordLength } : {}),
-          ...(this.config.emailAndPassword?.resetPasswordTokenExpiresIn != null
-            ? { resetPasswordTokenExpiresIn: this.config.emailAndPassword.resetPasswordTokenExpiresIn } : {}),
-          ...(this.config.emailAndPassword?.autoSignIn != null
-            ? { autoSignIn: this.config.emailAndPassword.autoSignIn } : {}),
-          ...(this.config.emailAndPassword?.revokeSessionsOnPasswordReset != null
-            ? { revokeSessionsOnPasswordReset: this.config.emailAndPassword.revokeSessionsOnPasswordReset } : {}),
-        // #14319 — better-auth calls this as `sendResetPassword(data, ctx.request)`.
-        // [#23598] better-auth CATCHES what this callback throws
-        // (`runInBackgroundOrAwait`) and still answers `{ status: true }`, so a
-        // failed send can never reach the identity import that asked for it.
-        // `settleImportResetDelivery` settles the import's own delivery receipt
-        // with the outcome (and re-raises it unchanged); a call that carries a
-        // `Request` — the public door — is handed straight through.
-        // `account-invitation-marker.ts` holds the legs that keep it server-only.
-        sendResetPassword: async ({ user, url, token }: { user: { id: string; email: string; name?: string }; url: string; token: string }, request?: unknown) => settleImportResetDelivery(user.email, request, async () => {
-          // #2766 V1.5 — placeholder addresses (phone-only users) are never
-          // real recipients. Refuse loudly instead of "sending" into the void;
-          // the reset path for these users is phone sign-in / an admin
-          // set-user-password, not email.
-          if (isPlaceholderEmail(user.email)) {
-            throw new Error(
-              `Password-reset email refused: ${user.email} is a placeholder address (PLACEHOLDER_EMAIL). ` +
-              'This account has no real mailbox — use an admin password reset instead.',
-            );
-          }
-          const email = this.getEmailService();
-          if (!email) {
-            // No transport wired but password reset is enabled — a
-            // misconfiguration. THROW (don't silently drop): better-auth
-            // invokes this via `runInBackgroundOrAwait` and the forget-password
-            // route always returns `{status:true}`, so this never leaks whether
-            // an address exists AND never turns the request into a 500 — it just
-            // surfaces the failure in the logs instead of vanishing.
-            throw new Error(
-              `Password-reset email could not be sent to ${user.email}: no email service is configured for this deployment.`,
-            );
-          }
-          // The lifetime the token in `url` really has: better-auth mints it
-          // with `resetPasswordTokenExpiresIn || 3600` seconds (better-auth
-          // 1.7.12 `routes/password.mjs`, re-measured 2026-10-21 for #25096) — `||`, so a configured `0` is its
-          // default too, and the mail must not say "0 minutes" for it.
-          const ttlSec = this.config.emailAndPassword?.resetPasswordTokenExpiresIn || 60 * 60;
-          // [#23343] An account an administrator created (the identity
-          // import) is INVITED through this same reset mint, because
-          // better-auth hands the link to nobody but this callback. The import
-          // marks its own request; that one send names the new account and
-          // its inviter instead of a reset nobody asked for. Every other
-          // reset — above all a public `POST /request-password-reset`, which
-          // always carries its Request — reads no marker and sends
-          // `auth.password_reset` exactly as before. The marker's header
-          // (`account-invitation-marker.ts`) holds the four legs that keep it
-          // server-only, and why it rides better-auth's request state.
-          const invitation = await readAccountInvitation(user.email, request);
-          // Surface both template-resolution throws and transport failures
-          // (status:'failed'); resilience is preserved by better-auth's
-          // background-task handling (see sendVerificationEmail) and the
-          // forget-password route always returns {status:true}, so this never
-          // leaks whether an address exists nor turns the request into a 500.
-          // commit 35e94c96b — the ladder's stored rung. It matters most HERE: an
-          // admin-initiated send (`admin-import-users.ts` calls
-          // `requestPasswordReset` server-side) reaches this callback with NO
-          // request at all (measured on 1.7.3, #23343; unchanged on 1.7.12,
-          // re-read for #25096), so without this rung
-          // the user's mail carries only the deployment default. Best-effort;
-          // `undefined` leaves the #14319 ladder exactly as it was.
-          const storedLocale = await this.storedRecipientLocale({ id: user.id });
-          // [ADR-0131 D7, ruling of record 6257510973, Q2 A] Both mails are
-          // about a person, not an organization: identity mail, recorded in
-          // the deployment-level `sys_identity_email`, with no organization.
-          const result = await email.sendTemplate(invitation
-            ? {
-              // Exactly the variables `auth.account_invitation` declares —
-              // what the import really holds, and nothing it does not (no
-              // organization, no role). No request rung on the locale: the
-              // marker is honoured only when there is no request, and the one
-              // that started the import is the ADMIN's anyway.
-              template: 'auth.account_invitation',
-              to: { address: user.email, ...(user.name ? { name: user.name } : {}) },
-              ...this.emailLocaleArg(undefined, storedLocale),
-              data: {
-                user: { name: user.name || user.email, email: user.email },
-                inviter: { name: invitation.inviter.name, email: invitation.inviter.email },
-                setPasswordUrl: url,
-                expiresInMinutes: Math.round(ttlSec / 60),
-                appName: this.getAppName(),
-              },
-              relatedObject: 'sys_user',
-              relatedId: user.id,
-              identityMail: true,
-            }
-            : {
-              template: 'auth.password_reset',
-              to: { address: user.email, ...(user.name ? { name: user.name } : {}) },
-              ...this.emailLocaleArg(request, storedLocale),
-              data: {
-                user: { name: user.name || user.email, email: user.email, id: user.id },
-                resetUrl: url,
-                token,
-                expiresInMinutes: Math.round(ttlSec / 60),
-                appName: this.getAppName(),
-              },
-              relatedObject: 'sys_user',
-              relatedId: user.id,
-              identityMail: true,
-            });
-          if (result?.status === 'failed') {
-            throw new Error(
-              `${invitation ? 'Account-invitation' : 'Password-reset'} email could not be sent to ${user.email}: ${result.error ?? 'delivery failed'}`,
-            );
-          }
-        }),
-        // [#25060, ruling 1B on #25040] The mail half of "a sign-up for an
-        // address that already has an account answers like a success". The
-        // vendor calls this only when the address already has a row AND its
-        // anti-enumeration shield is on, after its timing-equalizing password
-        // hash, and awaits it inline (no background-task handler is set);
-        // what it throws is caught and logged by the vendor, and the answer is
-        // its generic success either way (better-auth 1.7.12
-        // `routes/sign-up.mjs`, re-read for #25060). So the DECISION cannot
-        // live here: it is made first, in the `/sign-up/email` before-hook,
-        // which keeps the explicit refusal wherever this mail could not be
-        // promised. This hands over the existing row, which is what the
-        // recipient's stored-locale rung needs.
-        onExistingUserSignUp: async ({ user }: { user: { id: string; email: string; name?: string | null } }) =>
-          this.sendExistingAccountSignUpNotice(user),
-        };
-      })(),
-
-      // Email verification
-      ...(this.config.emailVerification || this.config.emailService ? {
-        emailVerification: {
-          ...(this.config.emailVerification?.sendOnSignUp != null
-            ? { sendOnSignUp: this.config.emailVerification.sendOnSignUp } : {}),
-          ...(this.config.emailVerification?.sendOnSignIn != null
-            ? { sendOnSignIn: this.config.emailVerification.sendOnSignIn } : {}),
-          ...(this.config.emailVerification?.autoSignInAfterVerification != null
-            ? { autoSignInAfterVerification: this.config.emailVerification.autoSignInAfterVerification } : {}),
-          ...(this.config.emailVerification?.expiresIn != null
-            ? { expiresIn: this.config.emailVerification.expiresIn } : {}),
-          // #14319 — better-auth calls this as `sendVerificationEmail(data, ctx.request)`.
-          sendVerificationEmail: async ({ user, url, token }: { user: { id: string; email: string; name?: string }; url: string; token: string }, request?: unknown) => {
-            const email = this.getEmailService();
-            if (!email) {
-              // Verification is enabled (this callback only exists when it is)
-              // but no email transport is wired — a misconfiguration, not a
-              // transient blip. THROW so the explicit `/send-verification-email`
-              // resend endpoint (which awaits this) surfaces a real error
-              // instead of a false "email sent" success. Sign-up stays
-              // resilient regardless: better-auth runs the sendOnSignUp call
-              // through `runInBackgroundOrAwait`, which logs (never rethrows)
-              // a failure, so the account is still created and the user lands
-              // on the verify screen (where an honest resend now reports the
-              // problem). Previously this was swallowed, leaving every user
-              // permanently stuck with no signal and no resend that could work.
-              throw new Error(
-                `Verification email could not be sent to ${user.email}: no email service is configured for this deployment.`,
-              );
-            }
-            const ttlSec = this.config.emailVerification?.expiresIn ?? 60 * 60;
-            // Let send failures propagate (see above): sendTemplate THROWS on
-            // template/loader errors, and returns status:'failed' on transport
-            // errors — surface both so resend is honest and signup stays
-            // resilient via better-auth's background-task error handling.
-            // commit 35e94c96b — the stored rung, same ladder as the reset above. An
-            // admin re-triggering verification for a user is the same
-            // requester-is-not-the-recipient shape.
-            const storedLocale = await this.storedRecipientLocale({ id: user.id });
-            const result = await email.sendTemplate({
-              template: 'auth.verify_email',
-              to: { address: user.email, ...(user.name ? { name: user.name } : {}) },
-              ...this.emailLocaleArg(request, storedLocale),
-              data: {
-                user: { name: user.name || user.email, email: user.email, id: user.id },
-                verificationUrl: url,
-                token,
-                expiresInMinutes: Math.round(ttlSec / 60),
-                appName: this.getAppName(),
-              },
-              relatedObject: 'sys_user',
-              relatedId: user.id,
-              // [ADR-0131 D7, Q2 A] The mail is about a person, who may belong
-              // to no organization yet: identity mail, in `sys_identity_email`.
-              identityMail: true,
-            });
-            if (result?.status === 'failed') {
-              throw new Error(
-                `Verification email could not be sent to ${user.email}: ${result.error ?? 'delivery failed'}`,
-              );
-            }
-          },
-        },
-      } : {}),
-
-      // Session configuration
-      //
-      // ⚠️ `session.cookieCache` is the OTHER door into the architecture #4785
-      // rejected, and it is deliberately not opened here. What that costs, and
-      // what is actually known about it, measured 2026-08-27 against the
-      // installed better-auth `1.7.1` (read out of `node_modules`, never off
-      // the `^1.7.1` range) — each claim names the file it came from so a
-      // version bump is re-checkable one grep at a time:
-      //
-      //  - **The failure DIRECTION is the sibling's.** With `cookieCache`
-      //    enabled, `/get-session` answers from a signed payload in the
-      //    client's own `session_data` cookie and returns before any adapter
-      //    read (`dist/api/routes/session.mjs:48-130`). ObjectStack revokes by
-      //    writing the `sys_session` row — `enforceSessionControls` /
-      //    `enforceConcurrentCap` stamp `revoked_at` + a past `expires_at`
-      //    (ADR-0069 D4), and `hideRevokedSessionRow` hides a tombstoned row
-      //    from better-auth's reads (`session-tombstone.ts`). All of it is
-      //    read-path enforcement, so for as long as the cookie answers, a
-      //    revoked session keeps authenticating and nobody gets an error. Same
-      //    silent direction as `secondaryStorage` (see `secondary-storage.ts`).
-      //
-      //  - ⭐ **The REACH is materially smaller, and saying so is the point.**
-      //    Three differences, all measured, not inferred:
-      //    1. The session of RECORD does not move. `cookieCache` is read-side
-      //       only — `createSession` still writes the `sys_session` row, so
-      //       admin session lists, the concurrent-cap count and D4's audit
-      //       trail all stay correct. `secondaryStorage` skips the row.
-      //    2. The staleness window is BOUNDED and per-client:
-      //       `cookieCache.maxAge`, default 300s (`dist/cookies/index.mjs:50`,
-      //       `:99`). It cannot be extended without a database read either —
-      //       better-auth force-disables the stateless `refreshCache` whenever
-      //       a `database` is configured, which ObjectStack always does
-      //       (`dist/context/create-context.mjs:149-165`). Under
-      //       `secondaryStorage` the cache IS the record and the window has no
-      //       bound at all.
-      //    3. Sensitive operations already bypass it: better-auth's own
-      //       `getAuthoritativeSessionFromCtx` / `sensitiveSessionMiddleware`
-      //       re-read with `disableCookieCache: true` when a `database` is
-      //       configured (`dist/api/routes/session.mjs:270-280`). There is no
-      //       equivalent escape from `secondaryStorage`.
-      //
-      //  - **It is not reachable from ObjectStack config today, by
-      //    construction rather than by refusal.** The spec's
-      //    `AuthConfigSchema.session` declares `expiresIn` / `updateAge` only,
-      //    and this block reads only those two, so a `cookieCache` key on
-      //    `AuthManagerOptions.session` is DROPPED, not honoured — pinned
-      //    end-of-chain in `session-of-record.test.ts`. The one way in is
-      //    `authInstance`, where the host has replaced this whole config.
-      //
-      // ⛔ So this is a disclosed cost on a door a host must build to reach —
-      // NOT a guard, and deliberately not one. The #4785 posture is opt-in with
-      // the cost stated (maintainer ruling 2026-08-27), the same posture
-      // `cacheSecondaryStorage()` is exported under. Plumbing `cookieCache`
-      // through is therefore a decision that re-opens #4785, not a feature: it
-      // would trade D4's revocation latency for request latency, and the trade
-      // has to be made deliberately, by a maintainer, with the window written
-      // down. If you are here to add it, that ruling is what you need first.
-      session: {
-        ...AUTH_SESSION_CONFIG,
-        expiresIn: this.config.session?.expiresIn || 60 * 60 * 24 * 7, // 7 days default
-        updateAge: this.config.session?.updateAge || 60 * 60 * 24, // 1 day default
-      },
-
-      // ADR-0069 D2 — per-IP rate limiting (native). Only set when configured
-      // so better-auth keeps its own defaults otherwise. The settings bind
-      // supplies stricter `customRules` for the auth endpoints.
-      //
-      // Where the counters live, in precedence order:
-      //  1. a host-supplied `secondaryStorage` → better-auth's own
-      //     `storage: 'secondary-storage'` (unchanged behaviour);
-      //  2. otherwise `rateLimitStorage` → `customStorage`, the counters-only
-      //     seam AuthPlugin fills with the lazily-resolved kernel cache
-      //     (#4772). better-auth ignores `storage` when `customStorage` is set.
-      // Neither → better-auth's per-process 'memory' default.
-      ...(this.config.rateLimit || this.config.secondaryStorage || this.config.rateLimitStorage
-        ? {
-            rateLimit: {
-              ...(this.config.rateLimit ?? {}),
-              ...(this.config.secondaryStorage
-                ? { storage: 'secondary-storage' as const }
-                : this.config.rateLimitStorage
-                  ? { customStorage: this.config.rateLimitStorage }
-                  : {}),
-            },
-          }
-        : {}),
-
-      // ADR-0069 D2 — shared KV for cross-node rate-limit + session state.
-      ...(this.config.secondaryStorage ? { secondaryStorage: this.config.secondaryStorage } : {}),
-
-      // better-auth plugins — registered based on AuthPluginConfig flags
-      plugins,
-
-      // Database hooks (fired by better-auth's adapter writes — the ONE seam
-      // every user-creation path flows through, SSO JIT-provisioning included).
-      // ADR-0093 D2 makes that seam the single owner of the user-lifecycle
-      // invariants; see the `databaseHooks` option doc for why, and for the
-      // #4802 correction of the "adapter bypasses ObjectQL middleware" claim
-      // this comment used to carry. The framework's identity-source stamp
-      // (`account.create.after`) is always composed in, preserving any
-      // host-supplied hooks.
-      databaseHooks: this.composeDatabaseHooks(this.config.databaseHooks),
-
-      // Bootstrap bypass for `disableSignUp`. The first-run owner wizard
-      // (`/_account/setup`) calls `POST /auth/sign-up/email` to create
-      // the very first user — if `OS_DISABLE_SIGNUP=true` is set on a
-      // fresh install we'd lock the operator out of their own instance.
-      // Solution: when the request hits `/sign-up/email` AND no users
-      // exist yet, temporarily flip `disableSignUp` off for *this*
-      // request's context. Once the owner is created the next request
-      // sees `userCount > 0` and the toggle is enforced again.
-      hooks: {
-        before: createAuthMiddleware(async (ctx: any) => {
-          // ── #4586: hand the attribution scope its actor resolver ─────
-          // FIRST, and unconditionally: this global before-hook is the one
-          // seam every better-auth endpoint passes through (`matcher: () =>
-          // true`, plugin routes included), and it is the only layer where
-          // the session actor exists at all. Registering here is O(1) — the
-          // resolver is STORED, not run; the session lookup happens only if
-          // a write later asks who to credit, and at most once per request.
-          //
-          // What travels is `attributedUserId`, which no security middleware
-          // reads. The adapter's writes stay `isSystem` (see
-          // `withSystemContext`): better-auth already authorized them under
-          // its own ACL, and re-authorizing as the human would open the
-          // second adjudication track ADR-0095 D3 closed.
-          setAuthActorResolver(async () => {
-            const actor = await this.resolveActor(ctx);
-            return actor?.userId ?? null;
-          });
-
-          // ── #23813: a minted principal session is never refreshed ───────
-          // Also FIRST: the switch must be set before anything in this
-          // request reads the session (the actor resolver above may, later).
-          // A renewal of a minted session writes the row and re-sets its
-          // cookie, so `bearer()` answers `set-auth-token` on every request
-          // and the console re-resolves identity forever. Request-scoped
-          // (better-auth's own state), so it reaches the nested session reads
-          // of every endpoint on both lanes and in-process — see
-          // `principal-session-mint.ts` (3b).
-          if (carriesPrincipalSession(ctx)) await setShouldSkipSessionRefresh(true);
-
-          // ── #2780: per-number OTP send guard (admission control) ─────
-          // MUST run BEFORE the phone-number endpoints: better-auth's
-          // send-otp handler stores a fresh code and only THEN invokes
-          // `sendOTP` — a guard that throws inside the callback would
-          // still rotate (invalidate) the previously delivered code, so a
-          // blocked resend (or an attacker spamming the endpoint) could
-          // keep voiding the user's valid OTP. Rejecting here leaves the
-          // stored code untouched. Applies uniformly to registered and
-          // unregistered numbers (no account-existence oracle).
-          if (
-            ctx?.path === '/phone-number/send-otp' ||
-            ctx?.path === '/phone-number/request-password-reset'
-          ) {
-            const phone = typeof ctx?.body?.phoneNumber === 'string' ? ctx.body.phoneNumber : '';
-            await this.assertPhoneOtpSendAllowed(phone);
-          }
-
-          // ── ADR-0069 D1: password complexity (validator) ────────────
-          // better-auth enforces only min/max length; class-mix is custom.
-          // Runs on the password-mutating endpoints; reads the candidate from
-          // the path-appropriate body field (sign-up: `password`; reset /
-          // change: `newPassword`).
-          if (
-            ctx?.path === '/sign-up/email' ||
-            ctx?.path === '/reset-password' ||
-            ctx?.path === '/change-password'
-          ) {
-            const candidate =
-              (typeof ctx?.body?.password === 'string' && ctx.body.password) ||
-              (typeof ctx?.body?.newPassword === 'string' && ctx.body.newPassword) ||
-              '';
-            if (candidate) await this.assertPasswordComplexity(candidate);
-
-            // ── ADR-0069 D1: password history (reject reuse) ────────────
-            // change/reset only (sign-up has no prior history). Reuses
-            // better-auth's native password.verify — no bespoke crypto. Stashes
-            // the old hash so the after-hook appends it to the bounded ring on
-            // success.
-            if (
-              candidate &&
-              (ctx?.path === '/reset-password' || ctx?.path === '/change-password')
-            ) {
-              const userId = await this.resolvePasswordChangeUserId(ctx).catch(() => undefined);
-              if (userId) {
-                // Stash for the after-hook (password_changed_at stamp), regardless
-                // of whether history is enabled.
-                ctx.context.__osPwChangeUserId = userId;
-                const pw = ctx?.context?.password;
-                const verify = typeof pw?.verify === 'function' ? pw.verify.bind(pw) : undefined;
-                const oldHash = await this.assertPasswordNotReused(userId, candidate, verify);
-                if (oldHash !== undefined) ctx.context.__osPwHistory = { userId, oldHash };
-              }
-            }
-            // fall through to the path's own handling below
-          }
-
-          // ── #8019: capture the address a change-email would move AWAY from ──
-          // The notice goes out from the after-hook, but the OLD address only
-          // exists BEFORE the endpoint runs — and `ctx.context.session` is not
-          // it: better-auth's own `sensitiveSessionMiddleware` populates that,
-          // and endpoint middleware runs AFTER this global before-hook, so the
-          // field is still empty here. Resolve the session explicitly, the same
-          // hook-order-independent way `/oauth2/authorize` below has to.
-          //
-          // Stashed, never sent from here: at this point the request has not
-          // been accepted yet (it can still fail on `newEmail` equal to the
-          // current address, on rate limiting, or on a missing transport), and
-          // a notice for a request better-auth then refuses would be a false
-          // alarm about an identity move that never happened.
-          if (ctx?.path === '/change-email') {
-            try {
-              const { getSessionFromCtx } = await import('better-auth/api');
-              const s: any = await getSessionFromCtx(ctx as any).catch(() => null);
-              const from = s?.user?.email;
-              if (typeof from === 'string' && from) {
-                ctx.context.__osChangeEmailFrom = {
-                  email: from,
-                  ...(typeof s?.user?.name === 'string' && s.user.name ? { name: s.user.name } : {}),
-                  ...(typeof s?.user?.id === 'string' && s.user.id ? { id: s.user.id } : {}),
-                };
-              }
-            } catch {
-              // Unresolvable session → no stash → no notice. better-auth's own
-              // session middleware still rejects the request with 401, so this
-              // never silently drops a notice for a change that proceeds.
-            }
-          }
-
-          // ── #8289: remove-member answers its PERMISSION denial itself ──
-          // better-auth's `removeMember` orders "only an owner may remove an
-          // owner" AHEAD of its real permission check and reports it with the
-          // sole-owner invariant's code and a 400, so a caller who merely lacks
-          // permission is told they "cannot leave the organization as the only
-          // owner" — every clause false, and a 400 where every sibling denial is
-          // a 403. Answer the permission class here instead; the sole-owner
-          // invariant and every 200 path stay the vendor's, untouched.
-          // `remove-member-permission-guard.ts` carries the full reading,
-          // including why this MUST be a before-hook (an after-hook cannot
-          // change the status) and why the guard's refusal set is exactly the
-          // vendor's.
-          if (ctx?.path === '/organization/remove-member') {
-            await this.assertRemoveMemberPermitted(ctx);
-            // fall through — the vendor still re-decides everything it owns
-          }
-
-          // ── #24948: organization delete refuses while records remain ──
-          // Before the vendor's handler, so a refused delete writes nothing:
-          // the vendor clears the caller's active organization and deletes the
-          // members before its own `beforeDeleteOrganization` hook runs.
-          // `organization-delete.ts` carries the contract.
-          if (ctx?.path === ORGANIZATION_DELETE_PATH) {
-            await this.assertOrganizationDeletable(ctx);
-            // fall through — the vendor still authorizes and deletes
-          }
-
-          // ── #9714: a revoke that identifies NO record must not report ──
-          // success. better-auth 1.7.1's `revoke-session` handler skips the
-          // delete when the token matches zero rows (or another user's row)
-          // and still answers `200 { status: true }` — its success line is
-          // unconditional. Refuse those requests HERE, with the vendor's own
-          // admission predicate asked through the vendor's own adapter call,
-          // so the handler only ever runs on requests whose success answer is
-          // true. Before-hook on purpose: an after-hook cannot change the
-          // status. `revoke-session-match-guard.ts` carries the full reading,
-          // including the 404-over-`{status:false}` decision and the
-          // no-existence-oracle property.
-          if (ctx?.path === '/revoke-session') {
-            await this.assertRevokeSessionIdentifiesRecord(ctx);
-            // fall through — the vendor still performs the revoke itself
-          }
-
-          // ── ADR-0069 D3: the admin plugin's role-scalar actions refuse a ──
-          // caller the authentication policy holds. better-auth serves these
-          // itself and authorizes them on a session plus the legacy `role`
-          // scalar, so no ObjectStack judge runs and nothing on the path read
-          // the posture: measured on a real boot, a held caller carrying that
-          // scalar was admitted to every one of them, writes included. The
-          // refusal is the session gate's, asked of the session gate's own
-          // posture carrier (`assertActorNotHeld`), and it runs FIRST — before
-          // the vendor's authorization and before the record guard below — the
-          // order the session gate applies. No resolvable session falls through
-          // to the vendor's own 401. `VENDOR_ROLE_SCALAR_ADMIN_PATHS`
-          // (`admin-impersonate-endpoint.ts`) classifies every other path the
-          // plugin registers. With no gate feature active the posture holds no
-          // one, so the session read is skipped, as the transport seams skip it
-          // (`isAuthGateActive`, the same caches the computation reads).
-          if (VENDOR_ROLE_SCALAR_ADMIN_PATHS.has(ctx?.path) && this.isAuthGateActive()) {
-            const actor = await this.resolveActor(ctx);
-            if (actor?.userId) await this.assertActorNotHeld(actor);
-            // fall through — the vendor still authorizes everything it owns
-          }
-
-          // ── #10069: the ADMIN revoke that identifies NO record must not ──
-          // report success either. better-auth 1.7.1's `admin/revoke-user-
-          // session` handler calls `deleteSession(ctx.body.sessionToken)`
-          // blindly and answers `200 { success: true }` unconditionally —
-          // measured on this pipeline: zero-match AND already-revoked tokens
-          // both answered success. NOT the #9714 predicate: no ownership
-          // dimension here (the caller is an admin acting on arbitrary
-          // users) — the question is only "does any session carry this
-          // token", and it is asked AFTER the vendor's own permission
-          // question so non-admins keep the vendor's 401/403 and gain no
-          // existence oracle. Before-hook on purpose: an after-hook cannot
-          // change the status. `admin-revoke-user-session-match-guard.ts`
-          // carries the full reading.
-          if (ctx?.path === '/admin/revoke-user-session') {
-            await this.assertAdminRevokeUserSessionIdentifiesRecord(ctx);
-            // fall through — the vendor still performs the revoke itself
-          }
-
-          // ── ADR-0069 D3: nor may a held caller rewrite or delete one ──────
-          // `@better-auth/sso` lets a provider's OWNER (who, past the
-          // registration gate below, is a platform admin) update its issuer,
-          // endpoints and secrets or delete it, on a session alone. Measured on
-          // a real boot: a held platform admin who owned a provider rewrote its
-          // issuer to another host (200, landed) and deleted another (200, row
-          // gone) — login routing, rewritten by a caller the policy holds. The
-          // same refusal as registration, asked the same way; the vendor still
-          // decides who may manage the provider.
-          if (
-            (ctx?.path === '/sso/update-provider' || ctx?.path === '/sso/delete-provider') &&
-            this.isAuthGateActive()
-          ) {
-            const actor = await this.resolveActor(ctx);
-            if (actor?.userId) await this.assertActorNotHeld(actor);
-            // fall through — the vendor's own provider-access check still runs
-          }
-
-          // ── ADR-0135 D6 + ADR-0068 D4: registering an identity provider is ──
-          // a PLATFORM-OPERATOR action.
-          //
-          // `@better-auth/sso`'s POST /sso/register only checks org-admin when
-          // `body.organizationId` is present (index.mjs: `if (ctx.body
-          // .organizationId) { … hasOrgAdminRole … }`). A GLOBAL (org-less)
-          // provider therefore passes with nothing but a valid session — so any
-          // authenticated member can register an env-wide external IdP, a JIT-
-          // provisioning / login-routing vector. So ObjectStack decides the
-          // authorization here, regardless of whether `organizationId` is
-          // supplied.
-          //
-          // [#10009] The admit set is PLATFORM ADMIN ONLY — the same posture
-          // #9653 landed on the `/admin/sso/*` bridges. It previously ALSO
-          // admitted an owner/admin of the caller's active org, and that gap
-          // made the bridge tightening honest labelling rather than a boundary:
-          // one principal, refused 403 at `/admin/sso/register` and admitted
-          // here, for the same underlying registration. Maintainer ruling
-          // 2026-08-20 closed the wider door (ADR-0068 D4 — platform-operator
-          // actions gate on the platform admin, sole operator). An org-scoped
-          // self-serve channel for org-scoped providers is a deliberate FUTURE
-          // ruling if multi-org IdP self-serve becomes a product goal — it is
-          // not the vendor default, inherited by omission.
-          //
-          // Unauthenticated requests fall through to better-auth's
-          // `sessionMiddleware` (→ 401). Fail-CLOSED: an unverifiable actor is
-          // denied. (D5.1's `/oauth2/authorize` gate is a different surface —
-          // the OP issuing codes, not the env's RP config.)
-          //
-          // ADR-0069 D3: a caller the authentication policy holds is refused
-          // FIRST, with the session gate's refusal (`assertActorNotHeld`) —
-          // identity, then posture, then the platform-admin question, the order
-          // `judgePlatformAdmin` applies on the `/admin/sso/*` bridges. Measured
-          // on a real boot before this: a held platform admin's registration
-          // answered `200` and the provider row landed, in every held state.
-          if (ctx?.path === '/sso/register') {
-            const actor = await this.resolveActor(ctx);
-            if (actor?.userId) {
-              await this.assertActorNotHeld(actor);
-              const ok = await this.isPlatformAdminUserId(actor.userId);
-              if (!ok) {
-                const { APIError } = await import('better-auth/api');
-                throw new APIError('FORBIDDEN', {
-                  message: 'Only a platform admin can register an SSO provider.',
-                  code: 'SSO_REGISTER_FORBIDDEN',
-                });
-              }
-            }
-            return;
-          }
-
-          // ── D5.1: cloud-as-IdP authorization gate ───────────────────
-          // On the OIDC OP's /oauth2/authorize, when a host gate is set
-          // (cloud control plane), an AUTHENTICATED subject must be
-          // authorized for the requesting client (env) before a code is
-          // issued — this enforces org-membership (app-assignment). Unset
-          // (open editions / self-host) → no gate. Unauthenticated → fall
-          // through so the OP redirects to login; the gate runs on the
-          // return pass (or immediately for a bearer/cookie session).
-          //
-          // [#8102] The acting subject is resolved through the shared,
-          // hook-order-independent {@link resolveActor} — NOT a second inline
-          // copy of it. This branch used to carry its own token lookup, line
-          // for line the same logic, and the two diverged the moment one was
-          // fixed: #8101 taught `resolveActor` to strip the signature from a
-          // bearer credential (`session.token` stores the UNSIGNED value while
-          // `bearer()` hands clients the SIGNED form in `set-auth-token`), and
-          // the copy here kept looking the signed credential up verbatim. It
-          // resolved nothing — and because the unresolved case is deliberately
-          // fail-open, an AUTHENTICATED caller on the documented API lane was
-          // read as unauthenticated and this env-access check never evaluated
-          // at all. Two resolution sites are what let them diverge, so the fix
-          // is to delete one, not to correct it in place.
-          if (ctx?.path === '/oauth2/authorize' && this.config.oidcAuthorizeGate) {
-            const clientId = ctx?.query?.client_id;
-            if (clientId) {
-              const actor = await this.resolveActor(ctx);
-              // Unauthenticated → fall through, per the contract above. Only an
-              // AUTHENTICATED subject is gated here. `resolveActor` also returns
-              // `activeOrgId`; this gate deliberately does not consume it — the
-              // D5.1 host contract is `(userId, clientId)` and the control plane
-              // derives org membership / app assignment from the user itself.
-              if (actor?.userId) {
-                const allowed = await this.config.oidcAuthorizeGate({
-                  userId: actor.userId,
-                  clientId: String(clientId),
-                });
-                if (!allowed) {
-                  const { APIError } = await import('better-auth/api');
-                  throw new APIError('FORBIDDEN', {
-                    message: 'You are not authorized to sign in to this environment.',
-                    code: 'ENV_ACCESS_DENIED',
-                  });
-                }
-              }
-            }
-            return;
-          }
-
-          // ── Break-glass: never remove the LAST local-password login ──────
-          // Under enforced SSO the managed team holds no local credential; the
-          // env owner / a local admin keeps one as the break-glass escape hatch
-          // so an IdP outage can never lock the org out. Refuse to delete or
-          // ban the last user holding a `credential` account. Generic over the
-          // IdP. Managed (credential-less) users are unaffected. Fail-open on
-          // lookup hiccups (a transient query error must not block legit ops).
-          if (
-            ctx?.path === '/delete-user' ||
-            ctx?.path === '/admin/remove-user' ||
-            ctx?.path === '/admin/ban-user'
-          ) {
-            // ⚠️ `/admin/ban-user` no longer reaches this hook — #9652 mounts an
-            // ObjectStack raw route on that path ahead of the catch-all (the
-            // ADR-0068 gate better-auth cannot express), so the request never
-            // enters better-auth's router. The path stays listed here because
-            // the mount is conditional on the admin plugin, and because the
-            // guard itself now lives in ONE module both call sites share —
-            // `last-local-credential.ts`, whose header records this trap.
-            //
-            // ⚠️ `/admin/remove-user` IS ALSO SHADED NOW (commit 6dd3e6968) — and it DOES
-            // still reach this hook, which is the opposite of the line above
-            // and is the point. Its mount only runs `gateAdmin` and then
-            // RE-DISPATCHES the request through `handleRequest`, so it re-enters
-            // better-auth's router and this hook fires exactly as before —
-            // just AFTER authorization instead of before it. That is the whole
-            // fix: an authenticated non-admin is now refused by the mount and
-            // never reaches the lookup below, while an admitted platform admin
-            // reaches the identical lookup and the identical `CONFLICT`.
-            // ⛔ Do not "reconcile" the two notes by deleting this path from
-            // the list — that would silently drop the guard on the one route
-            // that still depends on this hook to run it.
-            // ── [#10776] AUTHENTICATE FIRST ────────────────────────────
-            // A `hooks.before` runs AHEAD of the endpoint's own
-            // `use: [adminMiddleware]`, and that middleware is the only layer
-            // establishing identity on this lane. So this guard used to read an
-            // unauthenticated request's body, ask the database a question about
-            // the named user, and answer it — a per-record answer to a caller
-            // nobody had authenticated, where every sibling `/admin/` route
-            // answers 401. Resolving the actor first makes the guard's decision
-            // (and its distinctive refusal) reachable only once the caller has
-            // an identity; an anonymous caller falls through to the vendor's own
-            // `sessionMiddleware`/`adminMiddleware` and hears the ordinary 401.
-            //
-            // Maintainer ruling 2026-08-22 (decision-inbox digest, accepted
-            // verbatim 「接受所有」): option A, authentication before the guard.
-            //
-            // ⚠️ This changes WHEN the guard decides, never WHAT it decides:
-            // an authenticated caller reaches exactly the same lookup and the
-            // same `CONFLICT`. `break-glass-guard-authentication-order.test.ts`
-            // pins both halves — the disclosure closing AND the invariant
-            // surviving — because closing the first by deleting the guard would
-            // satisfy a disclosure-only suite.
-            //
-            // Same shape as the `/oauth2/authorize` gate above: unauthenticated
-            // → fall through, never a refusal invented here.
-            const breakGlassActor = await this.resolveActor(ctx);
-
-            let isLastLocalCredential = false;
-            if (breakGlassActor?.userId) {
-              try {
-                // `/delete-user` names no target in the vendor's own contract:
-                // the subject IS the authenticated caller. That must hold
-                // UNCONDITIONALLY — a body-supplied `userId` on this
-                // self-service route is never the target, present or not.
-                // (A prior `if (!targetId && …)` form let a body value win
-                // whenever one was supplied, turning the guard's refusal into
-                // a per-record oracle over the break-glass holder for any
-                // authenticated caller, not just the caller acting on
-                // themselves. `/admin/remove-user` and `/admin/ban-user`
-                // legitimately name a target in their own contract, so only
-                // this route's resolution is keyed on the actor instead of
-                // the body.)
-                const targetId: string | undefined =
-                  ctx.path === '/delete-user'
-                    ? breakGlassActor.userId
-                    : (ctx?.body?.userId ?? ctx?.body?.user_id);
-                if (targetId) {
-                  isLastLocalCredential = await isLastLocalCredentialHolder(
-                    ctx.context.adapter,
-                    targetId,
-                  );
-                }
-              } catch {
-                // Fail-open — never block a legitimate op on a lookup error.
-              }
-            }
-            if (isLastLocalCredential) {
-              const { APIError } = await import('better-auth/api');
-              throw new APIError('CONFLICT', {
-                message: LAST_LOCAL_CREDENTIAL_MESSAGE,
-                code: LAST_LOCAL_CREDENTIAL_CODE,
-              });
-            }
-            // fall through to better-auth's own handler
-          }
-
-          // ── [#11739] Audience posture on the PASSWORD sign-up route ──
-          // The DECISION is validateAudienceAdmission — the same single owner
-          // the user.validateUserInfo gate calls for every creation path.
-          // This route alone needs the refusal raised HERE, before the
-          // handler: better-auth's sign-up route wraps createUser in an
-          // anti-enumeration shield (dist/api/routes/sign-up.mjs:163,235 —
-          // `shouldReturnGenericDuplicateResponse`, on whenever
-          // requireEmailVerification is on) that converts ANY 403 from the
-          // creation seam into a synthetic 200 "success". Correct for
-          // account-existence oracles; wrong for an audience refusal, which
-          // is deterministic per (posture, domain, invitation) and reveals
-          // nothing about any account — swallowed, it would turn the domain
-          // gate's refusal into a silent black hole (fake success, no
-          // verification mail ever). Measured: with posture `open`/
-          // `email_domain` (verification forced on) the validateUserInfo
-          // refusal came back 200 `{token:null,user:{synthetic}}`. The
-          // validateUserInfo gate stays wired for this route too — the
-          // decision is idempotent, so the second ask cannot disagree.
-          if (ctx?.path === '/sign-up/email') {
-            const refusal = await this.validateAudienceAdmission(
-              {
-                user: {
-                  ...(typeof ctx?.body?.email === 'string'
-                    ? { email: ctx.body.email.toLowerCase() }
-                    : {}),
-                },
-                source: { action: 'create-user', method: 'email-password' },
-              },
-              ctx,
-            );
-            if (refusal) {
-              const { APIError } = await import('better-auth/api');
-              throw new APIError('FORBIDDEN', {
-                code: refusal.error,
-                message: refusal.errorDescription ?? refusal.error,
-              });
-            }
-
-            // ── [#15587] The UNIQUENESS refusal, raised here for the same
-            // reason the audience refusal above is — and STRICTLY after it.
-            //
-            // Same shield, its other arm. `shouldReturnGenericDuplicateResponse`
-            // (better-auth 1.7.12 sign-up.mjs:155) is on whenever
-            // `requireEmailVerification` is on OR `autoSignIn === false`, and it
-            // guards TWO sites: the 403 catch at :227 (what the audience block
-            // above steps around) and the duplicate pre-check at :192–204. On
-            // the second, the vendor finds the
-            // existing row, logs it, and returns `buildGenericDuplicateResponse()`
-            // — a 200 carrying a freshly `generateId()`-ed user that is never
-            // written — INSTEAD of throwing USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL.
-            //
-            // We turn that shield on ourselves: a posture that permits
-            // self-registration forces `requireEmailVerification` on by default
-            // (see `createAuthInstance` — always under `email_domain`, and under
-            // `open` unless the deployment declared it off, #20389), so
-            // `email_domain` and `open` sign-ups for an address that already
-            // exists answered 200 while `invite_only` answered 422 on the same
-            // population. Measured on a real ObjectQL
-            // engine with the posture held CONSTANT and only the verification flag
-            // moved, so the divergence is the flag's, not the posture's: zero
-            // inserts reach the engine, no `sys_account` appears, and the next
-            // sign-in is 401 with nothing anywhere explaining it. The silent
-            // success shape, on the recovery path a locked-out deployment walks.
-            //
-            // ORDER IS LOAD-BEARING: this runs only for a caller the posture
-            // ALREADY ADMITTED. Asking it first would hand an uninvited stranger
-            // an account-existence oracle under the `invite_only` DEFAULT (422 for
-            // a real address vs 403 for an unknown one) — inventing on the closed
-            // posture exactly what the vendor's shield exists to prevent. After
-            // the gate, `invite_only` is untouched: a stranger still gets
-            // SELF_REGISTRATION_CLOSED and learns nothing.
-            //
-            // [#25060, ruling 1B on #25040] ONE exception, decided here and
-            // nowhere else ({@link existingAddressSignUpAnswersSuccess}): under
-            // `open` and `email_domain`, where the vendor's shield is on and a
-            // mail transport is live, the request FALLS THROUGH. The vendor then
-            // finds the row, answers its generic success — the same shape a new
-            // sign-up gets there, and no row, credential or session is written —
-            // and its `onExistingUserSignUp` hook mails the address's holder
-            // ({@link sendExistingAccountSignUpNotice}). Every other case keeps
-            // the explicit refusal: `invite_only`, a shield that is off (a new
-            // sign-up's answer there carries a session, which an existing
-            // address cannot mirror without one for someone else's account), and
-            // a transport that is not live (a success with no mail is the black
-            // hole this refusal replaced). The refusal is the platform's at this
-            // one seam, so it never depends on the vendor also refusing; where
-            // the vendor would have answered, its code and message are the
-            // vendor's OWN constant, so the two lanes are byte-identical by
-            // construction rather than by copying.
-            const signUpAddress = typeof ctx?.body?.email === 'string' ? ctx.body.email : '';
-            if (signUpAddress && (await this.hasExistingUserFor(signUpAddress))) {
-              if (!this.existingAddressSignUpAnswersSuccess(ctx?.context?.options?.emailAndPassword)) {
-                const { APIError, BASE_ERROR_CODES } = await import('@better-auth/core/error');
-                throw APIError.from(
-                  'UNPROCESSABLE_ENTITY',
-                  BASE_ERROR_CODES.USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL,
-                );
-              }
-              // The answer will carry a user id that no row holds: tell the
-              // after-hook, so it stamps nothing on that id (it would report a
-              // lost write for a user that was never created).
-              if (ctx?.context) ctx.context.__osExistingAddressSignUp = true;
-            }
-            // fall through — the vendor still decides everything it owns
-          }
-
-          // ── [#25083] cloud-managed: invite-member issues nothing ────
-          // `beforeCreateInvitation` refuses a NEW invitation, but
-          // better-auth answers `resend: true` for an invitee who is
-          // already pending BEFORE it consults that hook: it extends the
-          // row's `expiresAt` and sends the invitation e-mail again
-          // (`organization/routes/crud-invites.mjs`, better-auth 1.7.12).
-          // The console reaches exactly that branch through
-          // `sys_invitation`'s `resend_invitation` action. On a
-          // cloud-managed environment no invitation leaves this door in
-          // either shape, so the route refuses ahead of the vendor's
-          // handler; the hook keeps its own arm as the second line. The
-          // fact is public (`features.cloudManaged` on `/auth/config`), so
-          // answering it ahead of the session check tells an anonymous
-          // caller nothing new.
-          if (ctx?.path === '/organization/invite-member' && isCloudManaged()) {
-            const { APIError } = await import('better-auth/api');
-            throw new APIError('CONFLICT', {
-              message: CLOUD_MANAGED_REFUSAL_MESSAGES.invitation,
-              code: CLOUD_MANAGED_REFUSAL_CODE,
-            });
-          }
-
-          // ── ADR-0069 D2: account lockout (gate) ─────────────────────
-          // Reject a sign-in for a locked identity BEFORE better-auth checks
-          // the password — a lock must hold even against the correct password.
-          // The refusal is a refused sign-in, so it writes its `login_failed`
-          // row (`auth-session-audit.ts`, account events) before it throws.
-          if (ctx?.path === SIGN_IN_EMAIL_PATH) {
-            const email = typeof ctx?.body?.email === 'string' ? ctx.body.email : '';
-            if (email) await this.assertAccountNotLocked(email, ctx);
-            return;
-          }
-
-          if (ctx?.path !== '/sign-up/email') return;
-          const ep = ctx?.context?.options?.emailAndPassword;
-          if (!ep?.disableSignUp) return;
-          // [#11767] Same population question, same owner. This site used to
-          // ask `ctx.context.adapter.findOne({ model: 'user', where: [] })`,
-          // which the real ObjectQL engine REFUSES (#4419 —
-          // `requireFindOnePredicate`) rather than answers; the surrounding
-          // `catch` read that refusal as "users exist" and the declared
-          // bypass never fired on a real deployment. `isBootstrapCreation`
-          // owns the answerable form — see its doc.
-          // [#14157] …and the deployment's own boot command provisioning its
-          // admin is the OTHER way through this door. It is not a
-          // self-registration and must not depend on a self-registration
-          // carve-out: an app that seeds people makes the bootstrap probe
-          // answer "populated" before the seed ever runs. Cheap synchronous
-          // check first, so the ticket path costs no I/O.
-          // [#14373] The email alone no longer admits — see
-          // `stageOperatorProvisioning`'s doc. `ctx.body` is the vendor's own
-          // zod-validated body, which keeps any key outside the declared
-          // schema (`signUpEmailBodySchema.and(z.record(...))`), so the
-          // in-process seed call's ticket field survives here untouched.
-          const signUpEmail = typeof ctx?.body?.email === 'string' ? ctx.body.email : undefined;
-          const provisioningTicket = ctx?.body?.[AuthManager.OPERATOR_PROVISIONING_TICKET_FIELD];
-          if (
-            this.isOperatorProvisioning(signUpEmail, provisioningTicket) ||
-            (await this.isBootstrapCreation())
-          ) {
-            ctx.context.__osDisableSignUpOrig = ep.disableSignUp;
-            ep.disableSignUp = false;
-          }
-        }),
-        after: createAuthMiddleware(async (ctx: any) => {
-          // ── #8243: impersonation must actually take effect for a bearer ──
-          // FIRST among the after-hooks that touch the response, because the
-          // bearer plugin's own after-hook runs behind this one and must see
-          // what we stage: it re-reads `Access-Control-Expose-Headers` to add
-          // `set-auth-token`, so the recovery header we expose here survives
-          // only by being merged before it. See
-          // `impersonation-bearer-rotation.ts` for the mechanism — the short
-          // version is that `bearer()` converts the caller's token back into
-          // the ADMIN's session cookie on every later request, so without
-          // rotating that token, `/admin/impersonate-user` is a 200 no-op.
-          await rotateCallerBearerOnImpersonation(ctx);
-
-          // ── #10701: a 2FA verification must echo the session it INSTALLED ─
-          // On the enrolment lane `/two-factor/verify-totp` rotates the
-          // caller's session and then echoes the PRE-rotation token — the row
-          // it just deleted. A client that stores it (the console's
-          // `auth-session-token` pattern) is holding a revoked credential, and
-          // because `bearer()` overwrites the request cookie with whatever the
-          // Authorization header carries, presenting it destroys the valid
-          // rotated cookie too. See `two-factor-rotated-token-echo.ts`. This
-          // corrects the echoed VALUE only; resolver precedence is untouched.
-          await echoInstalledSessionToken(ctx);
-
-          // ── #17234: complete the SessionResponse envelope with the session
-          // the route just committed ────────────────────────────────────────
-          // `/sign-in/email` and `/sign-up/email` answer `{ token, user }`
-          // (plus `redirect` on sign-in) with no `session` member anywhere in
-          // the body or the headers, so `SessionResponseSchema` never parsed
-          // either method's return value. The session is not absent — it is
-          // the row `internalAdapter.createSession` already committed before
-          // the endpoint returned — so this reads it back by the response's
-          // own token, the same seam `/get-session` uses, and attaches it.
-          // See `session-envelope-completion.ts` for the full measurement and
-          // why this can never fabricate an id or an expiry.
-          await attachSessionToCredentialResponse(ctx);
-
-          // ── #10700: `verified` must describe the secret stored beside it ──
-          // A second `/two-factor/enable` on an already-confirmed account
-          // rewrites the TOTP secret on the one `sys_two_factor` row the
-          // account has and INHERITS `verified` from the enrollment before it,
-          // so a secret nobody confirmed is honoured at the sign-in challenge.
-          // better-auth already gates that challenge on the flag — a first
-          // enrollment is inert until the session-lane verify flips it — so
-          // restoring the flag restores the gate rather than adding a second
-          // one. See `two-factor-reenrollment-verified-reset.ts`, whose header
-          // also states what this deliberately does NOT do.
-          await resetVerifiedOnTwoFactorReenrollment(ctx);
-
-          // ── ADR-0069 D2: account lockout (counter) ──────────────────
-          // better-auth catches an INVALID_EMAIL_OR_PASSWORD APIError and runs
-          // the after-hook with it on `ctx.context.returned`; a success leaves
-          // the session payload there. Count failures, reset on success.
-          if (ctx?.path === SIGN_IN_EMAIL_PATH) {
-            const email = typeof ctx?.body?.email === 'string' ? ctx.body.email : '';
-            if (email) {
-              let succeeded = true;
-              try {
-                const { isAPIError } = await import('better-auth/api');
-                succeeded = !isAPIError(ctx?.context?.returned);
-              } catch {
-                succeeded = !(ctx?.context?.returned instanceof Error);
-              }
-              const lockStamped = await this.recordSignInOutcome(email, succeeded);
-              // A refused sign-in writes `login_failed`, and the one that
-              // stamped the lockout also writes `account_locked`. A successful
-              // one is recorded as `login` by the session hook, unchanged.
-              if (!succeeded) await this.auditRefusedSignIn(ctx, email, lockStamped);
-              if (succeeded) {
-                const uid = ctx?.context?.returned?.user?.id;
-                if (typeof uid === 'string') await this.enforceConcurrentCap(uid);
-                // ADR-0069 D7 — login audit: stamp last_login_at/ip on success.
-                // Independent of lockout config (recordSignInOutcome no-ops when
-                // lockout is off). The IP is the address `handleRequest`
-                // established for this request by the client-address trust rule,
-                // the same address the D5 allow-list judged; none when it was
-                // undetermined. ⛔ Never re-read from a header here.
-                if (typeof uid === 'string') {
-                  await this.stampLastLogin(uid, await readRequestClientAddress());
-                }
-              }
-            }
-            return;
-          }
-
-          // ── ADR-0069 D1: on a successful change/reset — stamp
-          //    password_changed_at (expiry) and commit password history.
-          if (ctx?.path === '/change-password' || ctx?.path === '/reset-password') {
-            let succeeded: boolean;
-            try {
-              const { isAPIError } = await import('better-auth/api');
-              succeeded = !isAPIError(ctx?.context?.returned);
-            } catch {
-              succeeded = !(ctx?.context?.returned instanceof Error);
-            }
-            if (succeeded) {
-              const stampId = ctx?.context?.__osPwChangeUserId;
-              if (stampId) await this.stampPasswordChangedAt(stampId);
-              const stash = ctx?.context?.__osPwHistory;
-              if (stash?.userId) await this.recordPasswordHistory(stash.userId, stash.oldHash);
-            }
-            delete ctx.context.__osPwChangeUserId;
-            delete ctx.context.__osPwHistory;
-            return;
-          }
-
-          // ── #8019: tell the OLD address, without gating on it ──────────────
-          // Maintainer ruling 2026-08-12 — 「notify the OLD address — do not
-          // gate on it」. See the `changeEmail` config site for why this cannot
-          // be `sendChangeEmailConfirmation` (that option IS the gate).
-          //
-          // Why HERE is the whole design:
-          //   • after-hook ⇒ better-auth has already produced its response, so
-          //     nothing this code does can change the endpoint's outcome. The
-          //     "does not gate" property is structural, not a promise;
-          //   • gated on success ⇒ a refused request sends nothing;
-          //   • `sendChangeEmailNotice` swallows its own failures ⇒ a dead
-          //     mailbox, an unseeded template or a missing transport cannot
-          //     turn the notification into a block. That inversion — a security
-          //     notice that takes the flow down with it — is precisely the
-          //     failure mode the ruling exists to avoid.
-          //
-          // Sent at REQUEST time, which is also the strongest moment available:
-          // the owner learns while the attacker still has to prove control of
-          // the new mailbox, so the warning arrives inside the window where it
-          // can still be acted on. It is also the only moment that exists
-          // exactly once per attempt — the apply step (`GET /verify-email`)
-          // does not carry the old address, and better-auth mints a fresh
-          // session there when the link is opened without one, so an
-          // apply-time notice would silently miss that path.
-          if (ctx?.path === '/change-email') {
-            const from = ctx?.context?.__osChangeEmailFrom;
-            delete ctx.context.__osChangeEmailFrom;
-            let succeeded: boolean;
-            try {
-              const { isAPIError } = await import('better-auth/api');
-              succeeded = !isAPIError(ctx?.context?.returned);
-            } catch {
-              succeeded = !(ctx?.context?.returned instanceof Error);
-            }
-            const newEmail = typeof ctx?.body?.newEmail === 'string' ? ctx.body.newEmail : '';
-            if (succeeded && from?.email && newEmail) {
-              // #14319 — the notice goes to the account owner, who IS the
-              // caller here, so the request rung applies.
-              await this.sendChangeEmailNotice(from, newEmail, ctx);
-            }
-            return;
-          }
-
-          // ── #24750: invite-member's unknown-role refusal carries its code ──
-          // better-auth throws it with only a message; the spec promises
-          // `ROLE_NOT_FOUND` (see `invite-role-not-found-code.ts`). It throws
-          // on a match, so it stays after every section above.
-          await codeInviteRoleNotFound(ctx);
-
-          if (ctx?.path !== '/sign-up/email') return;
-          // ADR-0069 D1 — stamp password_changed_at for a newly-created local
-          // user (expiry clock starts at sign-up). Best-effort.
-          {
-            const newUserId = ctx?.context?.returned?.user?.id;
-            let signupOk: boolean;
-            try {
-              const { isAPIError } = await import('better-auth/api');
-              signupOk = !isAPIError(ctx?.context?.returned);
-            } catch {
-              signupOk = !(ctx?.context?.returned instanceof Error);
-            }
-            // [#25060] Not for an existing address answered as a success: that
-            // answer's user id belongs to no row, and nothing was created.
-            if (signupOk && typeof newUserId === 'string' && ctx?.context?.__osExistingAddressSignUp !== true) {
-              await this.stampPasswordChangedAt(newUserId);
-            }
-          }
-          const ep = ctx?.context?.options?.emailAndPassword;
-          if (ep && ctx.context.__osDisableSignUpOrig !== undefined) {
-            ep.disableSignUp = ctx.context.__osDisableSignUpOrig;
-            delete ctx.context.__osDisableSignUpOrig;
-          }
-        }),
-      },
-
-      // Where better-auth redirects a browser flow that fails server-side —
-      // most importantly an OAuth callback error (expired/replayed `state`,
-      // IdP error). The default is `${baseURL}/error`, which bounces to
-      // `/?error=<code>`; the root→console redirect then DROPS the query, so
-      // the user lands on a silent login form right after a successful IdP
-      // sign-in (objectui#2458 item 1). Point it at the console login page,
-      // which renders `?error=` as an inline banner.
-      onAPIError: {
-        errorURL: this.getConsolePageUrl('/login'),
-      },
-
-      // Trusted origins for CSRF protection (supports wildcards like "https://*.example.com")
-      // Auto-includes origins from OS_CORS_ORIGIN env var so CORS and CSRF stay in sync.
-      ...(() => {
-        const origins: string[] = [...(this.config.trustedOrigins || [])];
-        // Sync with OS_CORS_ORIGIN env var (comma-separated), judged ENTRY BY
-        // ENTRY: an entry that admits every host never enters the trusted set,
-        // however the list around it is spelled. That is `*`, or a pattern whose
-        // host part is the bare `*` (`https://*`, `*://*`, `http://*:*`) —
-        // better-auth's own matcher reads each of them as every origin — the
-        // same narrow class the CORS transport refuses with credentials
-        // (`isAllHostOriginPattern`, `@objectstack/plugin-hono-server`, which
-        // this package does not depend on). `docs/HARDENING.md` § CORS governs;
-        // `@objectstack/http-conformance`'s CORS-doors pin holds the two equal.
-        const corsOrigin = readEnvWithDeprecation('OS_CORS_ORIGIN', 'CORS_ORIGIN', { silent: true });
-        if (corsOrigin) {
-          const admitsEveryHost = (entry: string) => /^(?:[^:/]+:\/\/)?\*+(?::(?:\d+|\*))?$/.test(entry);
-          corsOrigin.split(',').map(s => s.trim()).filter(Boolean).forEach(o => {
-            if (!admitsEveryHost(o) && !origins.includes(o)) origins.push(o);
-          });
-        }
-        // When CORS allows all origins (default) and no explicit trustedOrigins,
-        // trust all localhost ports in development for convenience. Also trust
-        // `*.localhost` subdomains so per-project tenant subdomains (the dev
-        // default root domain — see project-provisioning.ts) pass CSRF checks
-        // without operators having to configure trustedOrigins manually.
-        //
-        // NON-PRODUCTION ONLY (commit bbe643c08). This substitution is a development
-        // convenience and is now gated on the same `NODE_ENV` dev signal used
-        // by the fallback auth secret and the dev Origin synthesis below, so
-        // the boundary this comment claims is the boundary that is enforced.
-        // Previously the condition tested only emptiness, so a production
-        // deployment whose trusted-origin list resolved empty silently
-        // CSRF-trusted every `localhost` / `*.localhost` origin.
-        //
-        // What production gets instead: `trustedOrigins` is omitted from the
-        // better-auth config entirely (see the tail of this block). That is
-        // NOT an absent policy — better-auth seeds its trusted set from the
-        // resolved `baseURL` origin and treats `trustedOrigins` as purely
-        // ADDITIVE, so an empty list and an omitted key are equivalent and
-        // both leave exactly the deployment's own origin trusted; every other
-        // origin is refused with `403 INVALID_ORIGIN`. Measured against the
-        // then-installed better-auth 1.7.1 (`getTrustedOrigins` in
-        // `dist/context/helpers.mjs`, `validateOrigin` in
-        // `dist/api/middlewares/origin-check.mjs`).
-        if (
-          process.env.NODE_ENV !== 'production' &&
-          !origins.length && (!corsOrigin || corsOrigin === '*')
-        ) {
-          origins.push('http://localhost:*');
-          origins.push('http://*.localhost:*');
-          origins.push('https://*.localhost:*');
-        }
-        // ── ADR-0135 D6: runtime self-service external-IdP registration ───────
-        // `@better-auth/sso`'s `validateDiscoveryUrl` requires the IdP's
-        // *discovery* origin to be in `trustedOrigins` — even for a publicly-
-        // routable IdP (stricter than its own sub-endpoint check, which allows
-        // any public host). Without help that breaks ADR-0135 D6's "register your
-        // IdP at runtime, no boot config" promise for every real IdP
-        // (Okta/Entra/Google). When the SSO RP is enabled, expose
-        // `trustedOrigins` as a per-request FUNCTION that, for a
-        // `/sso/register` | `/sso/update-provider` POST, additionally trusts the
-        // PUBLIC-ROUTABLE issuer / discovery origins declared in the request
-        // body. Private / internal hosts are never auto-trusted — they still
-        // require explicit `trustedOrigins` config (the documented SSRF escape
-        // hatch), and better-auth's own DNS-resolution checks still apply.
-        if (this.isSsoWired()) {
-          return {
-            trustedOrigins: async (request?: Request) => {
-              const base = [...origins];
-              try {
-                for (const o of await this.ssoDiscoveryTrustedOrigins(request)) {
-                  if (!base.includes(o)) base.push(o);
-                }
-              } catch { /* never let trust resolution throw */ }
-              return base;
-            },
-          };
-        }
-        return origins.length ? { trustedOrigins: origins } : {};
-      })(),
-
-      // Advanced options (cross-subdomain cookies, secure cookies, CSRF, etc.),
-      // and — always — the library's own client-address source: the one
-      // platform-owned header `handleRequest` writes from the address the
-      // client-address trust rule established (`client-address-vendor.ts`).
-      // Never left at the library's default reader, which knows neither the
-      // transport's peer address nor `server.trustProxy`.
-      advanced: {
-        ...(this.config.advanced?.crossSubDomainCookies
-          ? { crossSubDomainCookies: this.config.advanced.crossSubDomainCookies } : {}),
-        ...(this.config.advanced?.useSecureCookies != null
-          ? { useSecureCookies: this.config.advanced.useSecureCookies } : {}),
-        ...(this.config.advanced?.disableCSRFCheck != null
-          ? { disableCSRFCheck: this.config.advanced.disableCSRFCheck } : {}),
-        ...(this.config.advanced?.cookiePrefix != null
-          ? { cookiePrefix: this.config.advanced.cookiePrefix } : {}),
-        ipAddress: vendorClientAddressOptions(),
-      },
+  private createAuthInstance(): Promise<Auth<any>> {
+    // [#25224 cut 14] The body moved to `auth-manager-auth-instance.ts` (see `AuthInstanceHost`).
+    const readConfig = () => this.config;
+    const readIdpLocale = () => this.idpLocale;
+    const host: AuthInstanceHost = {
+      assertAccountNotLocked: (...a) => this.assertAccountNotLocked(...a),
+      assertActorNotHeld: (...a) => this.assertActorNotHeld(...a),
+      assertAdminRevokeUserSessionIdentifiesRecord: (...a) => this.assertAdminRevokeUserSessionIdentifiesRecord(...a),
+      assertOrganizationDeletable: (...a) => this.assertOrganizationDeletable(...a),
+      assertPasswordComplexity: (...a) => this.assertPasswordComplexity(...a),
+      assertPasswordNotReused: (...a) => this.assertPasswordNotReused(...a),
+      assertPhoneOtpSendAllowed: (...a) => this.assertPhoneOtpSendAllowed(...a),
+      assertRemoveMemberPermitted: (...a) => this.assertRemoveMemberPermitted(...a),
+      assertRevokeSessionIdentifiesRecord: (...a) => this.assertRevokeSessionIdentifiesRecord(...a),
+      auditRefusedSignIn: (...a) => this.auditRefusedSignIn(...a),
+      buildPluginList: (...a) => this.buildPluginList(...a),
+      composeDatabaseHooks: (...a) => this.composeDatabaseHooks(...a),
+      get config() { return readConfig(); },
+      configuredBasePath: (...a) => this.configuredBasePath(...a),
+      createDatabaseConfig: (...a) => this.createDatabaseConfig(...a),
+      emailLocaleArg: (...a) => this.emailLocaleArg(...a),
+      enforceConcurrentCap: (...a) => this.enforceConcurrentCap(...a),
+      existingAddressSignUpAnswersSuccess: (...a) => this.existingAddressSignUpAnswersSuccess(...a),
+      externalDirectoryDoorDeps: (...a) => this.externalDirectoryDoorDeps(...a),
+      getAppName: (...a) => this.getAppName(...a),
+      getAudience: (...a) => this.getAudience(...a),
+      getCanonicalOrigin: (...a) => this.getCanonicalOrigin(...a),
+      getConsolePageUrl: (...a) => this.getConsolePageUrl(...a),
+      getEmailService: (...a) => this.getEmailService(...a),
+      hasExistingUserFor: (...a) => this.hasExistingUserFor(...a),
+      get idpLocale() { return readIdpLocale(); },
+      implicitLinkRequiresLocalEmailVerified: (...a) => this.implicitLinkRequiresLocalEmailVerified(...a),
+      isAuthGateActive: (...a) => this.isAuthGateActive(...a),
+      isBootstrapCreation: (...a) => this.isBootstrapCreation(...a),
+      isOperatorProvisioning: (...a) => this.isOperatorProvisioning(...a),
+      isPlatformAdminUserId: (...a) => this.isPlatformAdminUserId(...a),
+      isSsoWired: (...a) => this.isSsoWired(...a),
+      linkingContext: (...a) => this.linkingContext(...a),
+      recordPasswordHistory: (...a) => this.recordPasswordHistory(...a),
+      recordSignInOutcome: (...a) => this.recordSignInOutcome(...a),
+      resolveActor: (...a) => this.resolveActor(...a),
+      resolveAuthSecret: (...a) => this.resolveAuthSecret(...a),
+      resolvePasswordChangeUserId: (...a) => this.resolvePasswordChangeUserId(...a),
+      resolvePasswordHasher: (...a) => this.resolvePasswordHasher(...a),
+      sendChangeEmailNotice: (...a) => this.sendChangeEmailNotice(...a),
+      sendExistingAccountSignUpNotice: (...a) => this.sendExistingAccountSignUpNotice(...a),
+      signUpForcedOff: (...a) => this.signUpForcedOff(...a),
+      ssoDiscoveryTrustedOrigins: (...a) => this.ssoDiscoveryTrustedOrigins(...a),
+      stampLastLogin: (...a) => this.stampLastLogin(...a),
+      stampPasswordChangedAt: (...a) => this.stampPasswordChangedAt(...a),
+      storedRecipientLocale: (...a) => this.storedRecipientLocale(...a),
+      validateAudienceAdmission: (...a) => this.validateAudienceAdmission(...a),
     };
-
-    const auth = betterAuth(betterAuthConfig);
-
-    // ⛔ Do not return before better-auth's plugin `init` hooks have settled.
-    //
-    // `betterAuth()` returns synchronously and runs those hooks behind
-    // `auth.$context`, so anything a plugin does at init is a promise NOBODY
-    // holds. That was harmless while init did no I/O. It stopped being harmless
-    // when the oauth-provider began seeding the RFC 8707 `sys_oauth_resource`
-    // row from its own `init`: a failure there had no catcher and surfaced as
-    // an UNHANDLED REJECTION — which Node terminates the process for by default
-    // — and, in tests, as a boot write racing its engine's teardown and failing
-    // with "No driver available for object 'sys_oauth_resource'" long after the
-    // test that triggered it had passed.
-    //
-    // Awaiting it here makes the seed part of "the instance is ready": a boot
-    // failure now rejects THIS call, where callers can see and handle it,
-    // instead of escaping the stack. `$context` is absent when better-auth is
-    // mocked, and `await undefined` is a no-op, so this is safe on that path.
-    await (auth as { $context?: Promise<unknown> } | undefined)?.$context;
-
-    return auth;
+    return createAuthInstance.call(host);
   }
 
   /**
@@ -3157,40 +1726,11 @@ export class AuthManager {
    * Returns `undefined` outside WebContainer so production deployments keep
    * the native (fast) hasher and never load `@noble/hashes`.
    */
-  private async resolvePasswordHasher(): Promise<
+  private resolvePasswordHasher(): Promise<
     { hash: (password: string) => Promise<string>; verify: (args: { hash: string; password: string }) => Promise<boolean> } | undefined
   > {
-    if (!isWebContainerRuntime()) return undefined;
-    try {
-      const { scryptAsync } = await import('@noble/hashes/scrypt.js');
-      const PARAMS = { N: 16384, r: 16, p: 1, dkLen: 64, maxmem: 128 * 16384 * 16 * 2 } as const;
-      const toHex = (b: Uint8Array): string => {
-        let s = '';
-        for (let i = 0; i < b.length; i++) s += b[i]!.toString(16).padStart(2, '0');
-        return s;
-      };
-      const generateKey = (password: string, saltHex: string): Promise<Uint8Array> =>
-        scryptAsync(password.normalize('NFKC'), saltHex, PARAMS);
-      return {
-        hash: async (password: string) => {
-          const saltBytes = (globalThis as any).crypto.getRandomValues(new Uint8Array(16));
-          const saltHex = toHex(saltBytes);
-          const key = await generateKey(password, saltHex);
-          return `${saltHex}:${toHex(key)}`;
-        },
-        verify: async ({ hash, password }) => {
-          const [saltHex, keyHex] = hash.split(':');
-          if (!saltHex || !keyHex) throw new Error('Invalid password hash');
-          const target = await generateKey(password, saltHex);
-          return toHex(target) === keyHex;
-        },
-      };
-    } catch (err: any) {
-      console.warn(
-        `[AuthManager] WebContainer detected but pure-JS scrypt unavailable: ${err?.message ?? err}. Falling back to default.`,
-      );
-      return undefined;
-    }
+    // [#25224 cut 11] The body moved to `auth-manager-password-hasher.ts`; it reads no member of this class.
+    return resolvePasswordHasher();
   }
 
   /**
@@ -3326,1340 +1866,41 @@ export class AuthManager {
    *   core auth stays up): organization, admin, phoneNumber, magicLink,
    *   genericOAuth, jwt+oauthProvider, sso, scim, deviceAuthorization.
    */
-  private async buildPluginList(): Promise<any[]> {
-    this.degradedFeatures.clear();
-    // Same lifecycle as degradedFeatures: an operator who fixes the cause and
-    // triggers a rebuild gets a fresh verdict, and a fresh log line if it is
-    // still broken. (The Ed25519 probe itself is NOT reset — it is a property
-    // of the runtime, which a rebuild cannot change.)
-    this.jwtSigningFailureReported = false;
-    const pluginConfig: Partial<AuthPluginConfig> = this.config.plugins ?? {};
-    const plugins: any[] = [];
-
-    // Defaults — kept in sync with `AuthPluginConfigSchema` in
-    // @objectstack/spec/system/auth-config.zod.ts. The frontend AuthProvider
-    // (in @object-ui/app-shell) calls `/api/v1/auth/organization/list` on
-    // every load; making the org plugin opt-out (default true) avoids
-    // 404s and the noisy "Failed to load organizations" warning.
-    //
-    // `OS_OIDC_PROVIDER_ENABLED` lets operators flip the OIDC IdP on
-    // without re-deploying with a code change (mirrors the
-    // `OS_MULTI_ORG_ENABLED` / `OS_DISABLE_SIGNUP` pattern). When set, the
-    // env var WINS over the config-file setting so platform operators can
-    // override per-environment without touching the application bundle.
-    // Use the shared `readBooleanEnv` parser (same as OS_AUTH_TWO_FACTOR /
-    // OS_AUTH_PASSWORD_REJECT_BREACHED / OS_DISABLE_SIGNUP) so these accept the
-    // platform-standard truthy set (`true`/`1`/`yes`/`on`, case-insensitive)
-    // instead of only the literal string `'true'` — a repeated operator footgun
-    // (`OS_SSO_ENABLED=1` silently parsed as disabled).
-    //
-    // Precedence for `scim` / `sso` / `ssoDomainVerification` (#13439,
-    // maintainer ruling 2026-08-31): an EXPLICIT config value wins over the
-    // env var; the env var decides only where the config leaves the key unset
-    // (tri-state `z.boolean().optional()` in AuthPluginConfigSchema). This is
-    // deliberately the OPPOSITE of the env-wins order the OIDC/2FA/HIBP keys
-    // above keep: for these three, config is how the code constructing the
-    // AuthPlugin states a value the deployment env must not silently outrank
-    // (the cloud control plane's plan-derived `plugins.scim` is the known
-    // writer), while the operator per-environment override survives for every
-    // deployment that leaves the keys unset.
-    const ssoFromEnv = readBooleanEnv('OS_SSO_ENABLED');
-    // Opt-in DNS domain-verification for external SSO providers (ADR-0135 D6).
-    // OFF by default → today's behavior exactly (register → login immediately).
-    // ON → @better-auth/sso mounts /sso/{request-domain-verification,verify-domain}
-    // AND enforces a HARD login gate: a provider whose domain is not DNS-verified
-    // rejects logins ("Provider domain has not been verified"). The two are
-    // coupled in @better-auth/sso (the endpoints only register when
-    // `domainVerification.enabled`), so this single flag governs both. Requires
-    // `OS_SSO_ENABLED` (the sso plugin must be loaded to honor it).
-    const ssoDomainVerifyFromEnv = readBooleanEnv('OS_SSO_DOMAIN_VERIFICATION');
-    // @better-auth/scim's `active:false` → ban runs through the admin plugin,
-    // and org-scoped tokens need the organization plugin — so enabling SCIM
-    // forces `admin` on (organization already defaults on). See ADR-0134.
-    // An explicit `plugins.admin: false` beside effective SCIM is a
-    // contradiction refused below (#13816) — never silently honoured.
-    const scimEffective = resolveScimEnabled(pluginConfig);
-    // Re-checked here (the constructor already refused a conflicted BOOT
-    // config) because this is where the env var is actually read: an
-    // OS_SCIM_ENABLED that appears between construction and the lazy
-    // better-auth build would otherwise mount SCIM with its ADR-0134
-    // deprovisioning path silently declined.
-    assertScimAdminCoherence(pluginConfig);
-    const twoFactorFromEnv = readBooleanEnv('OS_AUTH_TWO_FACTOR');
-    const hibpFromEnv = readBooleanEnv('OS_AUTH_PASSWORD_REJECT_BREACHED');
-    const enabled = {
-      organization: pluginConfig.organization ?? true,
-      twoFactor: twoFactorFromEnv ?? pluginConfig.twoFactor ?? false,
-      passwordRejectBreached: hibpFromEnv ?? pluginConfig.passwordRejectBreached ?? false,
-      passkeys: pluginConfig.passkeys ?? false,
-      magicLink: pluginConfig.magicLink ?? false,
-      // Shared decision point (env → config → follows OS_MCP_SERVER_ENABLED),
-      // see resolveOidcProviderEnabled — keep auth-plugin.ts / features in sync.
-      oidcProvider: resolveOidcProviderEnabled(pluginConfig),
-      deviceAuthorization: pluginConfig.deviceAuthorization ?? false,
-      admin: pluginConfig.admin ?? scimEffective,
-      // #2766 V1.5 — phone+password sign-in. Opt-in; OTP flows stay off until
-      // SMS infrastructure exists (tracked separately).
-      phoneNumber: (pluginConfig as any).phoneNumber ?? false,
-      sso: pluginConfig.sso ?? ssoFromEnv ?? false,
-      ssoDomainVerification: pluginConfig.ssoDomainVerification ?? ssoDomainVerifyFromEnv ?? false,
-      scim: scimEffective,
+  private buildPluginList(): Promise<any[]> {
+    // [#25224 cut 16] The body moved to `auth-manager-plugin-list.ts` (see `PluginListHost`).
+    const readConfig = () => this.config;
+    const readDegradedFeatures = () => this.degradedFeatures;
+    const readJwtSigningFailureReported = () => this.jwtSigningFailureReported;
+    const writeJwtSigningFailureReported = (v: AuthManager['jwtSigningFailureReported']) => { this.jwtSigningFailureReported = v; };
+    const readOrgRolesMap = () => this.orgRolesMap;
+    const writeOrgRolesMap = (v: AuthManager['orgRolesMap']) => { this.orgRolesMap = v; };
+    const host: PluginListHost = {
+      addOptionalPlugin: (...a) => this.addOptionalPlugin(...a),
+      buildJwtPlugin: (...a) => this.buildJwtPlugin(...a),
+      computeAuthGate: (...a) => this.computeAuthGate(...a),
+      get config() { return readConfig(); },
+      get degradedFeatures() { return readDegradedFeatures(); },
+      deliverPhoneOtp: (...a) => this.deliverPhoneOtp(...a),
+      emailLocaleArg: (...a) => this.emailLocaleArg(...a),
+      enforceSessionControls: (...a) => this.enforceSessionControls(...a),
+      getAppName: (...a) => this.getAppName(...a),
+      getConsolePageUrl: (...a) => this.getConsolePageUrl(...a),
+      getDataEngine: (...a) => this.getDataEngine(...a),
+      getEmailService: (...a) => this.getEmailService(...a),
+      getMcpResourceUrl: (...a) => this.getMcpResourceUrl(...a),
+      isPlatformAdminUserId: (...a) => this.isPlatformAdminUserId(...a),
+      get jwtSigningFailureReported() { return readJwtSigningFailureReported(); },
+      set jwtSigningFailureReported(v) { writeJwtSigningFailureReported(v); },
+      multiOrgPostureEffective: (...a) => this.multiOrgPostureEffective(...a),
+      get orgRolesMap() { return readOrgRolesMap(); },
+      set orgRolesMap(v) { writeOrgRolesMap(v); },
+      reconcileScimUserLifecycle: (...a) => this.reconcileScimUserLifecycle(...a),
+      resolveAuthSecret: (...a) => this.resolveAuthSecret(...a),
+      resolveMembershipRole: (...a) => this.resolveMembershipRole(...a),
+      resolveTwoFactorAccountLockout: (...a) => this.resolveTwoFactorAccountLockout(...a),
+      storedRecipientLocale: (...a) => this.storedRecipientLocale(...a),
     };
-
-    // bearer() — ALWAYS enabled.
-    //
-    // Enables token-based authentication for cross-origin and mobile clients
-    // where third-party cookies are blocked (e.g. Safari ITP, Chrome CHIPS,
-    // native apps). The plugin:
-    //   • Accepts `Authorization: Bearer <token>` on incoming requests and
-    //     transparently resolves the session as if a cookie had been sent.
-    //   • Emits a `set-auth-token` response header on sign-in / session-refresh
-    //     that the client can store (e.g. in `localStorage`) and replay on
-    //     subsequent requests.
-    //
-    // This mirrors how Salesforce, Notion, Supabase and first-party mobile
-    // SDKs handle auth. Cookie-based auth remains available for same-origin
-    // browser deployments; bearer is additive, not a replacement.
-    const { bearer } = await import('better-auth/plugins/bearer');
-    plugins.push(bearer());
-
-    if (enabled.organization) {
-      await this.addOptionalPlugin(plugins, 'organization', async () => {
-      const { organization } = await import('better-auth/plugins/organization');
-      // [ADR-0108 / #3723] The org-role vocabulary is CLOSED — better-auth's
-      // own `owner`/`admin`/`member` plus `delegated_admin`. App-declared
-      // `position` / `permission` names are NOT registered here.
-      //
-      // They were, until this change: an app role registered with better-auth
-      // became storable in `sys_member.role`, and every value in that column is
-      // projected into `current_user.positions` by `resolve-authz-context`. So
-      // the membership role was a capability channel carrying none of ADR-0090
-      // D12's controls — no `granted_by`, no validity window, no subtree or
-      // allowlist check — which is exactly what ADR-0057 D4 ("never as the
-      // authority for RBAC") and ADR-0090 D3's word ban forbid. An app that
-      // wants `sales_rep` declares a POSITION; the one-step admission flow is
-      // an invitation carrying placement (ADR-0105 D8), which is governed and
-      // reaches further (a delegated admin may use it; this never could).
-      //
-      // [ADR-0105 D8 / #3697] The map registers `delegated_admin` — the one
-      // role that may reach `/organization/invite-member` without being an org
-      // admin. Without it D8's scope-bounded issuance gate has no caller:
-      // better-auth grants `invitation:["create"]` to owner/admin only, and
-      // under a wall-enforcing posture those two are auto-elevated to tenant
-      // admins, for whom the gate short-circuits and narrows nothing.
-      //
-      // Deliberately `create` WITHOUT `cancel`: better-auth's cancel route
-      // (`crud-invites.mjs`) checks only `invitation:["cancel"]` — no inviterId
-      // attribution — so the permission would mean "cancel anyone's pending
-      // invitation in the org". Attributed cancel needs its own guard first.
-      let customOrgRoles: Record<string, any> | undefined;
-      try {
-        const accessMod = await import('better-auth/plugins/organization/access');
-        const { defaultAc, memberAc, defaultRoles } = accessMod as any;
-        // Better-Auth's `hasPermission` does `{...options.roles || defaultRoles}`
-        // (precedence: `||` then spread). When we pass our own `roles`, the
-        // built-in owner/admin/member are silently dropped, so even the org
-        // owner loses `invitation:create` and every mutation 403s. We must
-        // re-include the defaults alongside `delegated_admin` — and if the
-        // library ever stops exporting them, build NOTHING and let better-auth
-        // fall back to its own defaults rather than ship a map missing `owner`.
-        if (defaultAc && memberAc && defaultRoles && typeof memberAc.statements === 'object') {
-          const built: Record<string, any> = { ...defaultRoles };
-          const stmts = memberAc.statements;
-          built[MEMBERSHIP_ROLE_DELEGATED_ADMIN] = defaultAc.newRole({
-            ...stmts,
-            invitation: ['create'],
-          });
-          customOrgRoles = built;
-        }
-      } catch {
-        customOrgRoles = undefined;
-      }
-      // [#8289] Same map, same request lifetime — see the field's doc for why
-      // the before-hook cannot read it back off `ctx`.
-      this.orgRolesMap = customOrgRoles;
-      // [#16569] Held as a named object rather than an inline literal: the
-      // rebuilt `/organization/list-user-invitations` endpoint below needs the
-      // VERY object the vendor plugin was constructed with — it is what the
-      // vendor's own `getOrgAdapter(ctx.context, options)` reads, and the
-      // declaration it honours lives on it.
-      const organizationOptions = {
-        schema: buildOrganizationPluginSchema(),
-        // Enable the team sub-feature so the framework's `sys_team` /
-        // `sys_team_member` tables (already declared in platform-objects)
-        // are actually wired up to better-auth's CRUD endpoints
-        // (`/organization/{create,update,remove,list}-team[s]` and
-        // `/organization/{add,remove,list}-team-member[s]`). The Account
-        // portal exposes a Teams page; without this flag those endpoints
-        // 404 and the section silently breaks.
-        teams: { enabled: true },
-        // Without a mailer wired in framework, requiring email verification
-        // before accepting invitations dead-ends every invite flow with
-        // FORBIDDEN EMAIL_VERIFICATION_REQUIRED…. Default-off here keeps
-        // the built-in /accept-invitation route usable for pilots; operators
-        // who wire a real mailer can re-enable downstream.
-        requireEmailVerificationOnInvitation: false,
-        // Cap how many orgs a user can CREATE (OS_ORG_LIMIT). Counts only orgs
-        // the user OWNS (role=owner) — never orgs they were merely invited into —
-        // so a generous cap stops scripted org/free-env spam (each new org can
-        // auto-provision a free environment on the cloud control plane) WITHOUT
-        // ever blocking a collaborator who belongs to many orgs. Unset → no
-        // limit (self-host default). Fail-open: if the count can't be taken we
-        // allow creation rather than block a legitimate user on an infra hiccup.
-        organizationLimit: async (user: { id?: string }) => {
-          const limit = resolveOrgLimit();
-          if (limit == null) return false;
-          const engine = this.config.dataEngine;
-          const uid = typeof user?.id === 'string' ? user.id : '';
-          if (!engine || !uid) return false;
-          try {
-            // `sys_member` is tenant-scoped (organization_id). We need to count
-            // the user's owned orgs ACROSS tenants, so read with the system
-            // context (isSystem) to bypass org-scoping — otherwise the query
-            // returns nothing and the limit never fires.
-            const owned = await withSystemReadContext(engine).count('sys_member', {
-              where: { user_id: uid, role: 'owner' },
-            });
-            return (owned ?? 0) >= limit;
-          } catch {
-            return false;
-          }
-        },
-        // How many MEMBERS one organization may hold — a different question
-        // from `organizationLimit` above, and one this platform does not limit:
-        // entitlements meter AI seats, and plain membership is not a billed
-        // axis. It must still be stated, because better-auth substitutes a
-        // vendor default of 100 for an absent `membershipLimit`
-        // (`count >= (membershipLimit || 100)`), which reaches the operator as
-        // `Organization membership limit reached` — a refusal nobody here ever
-        // chose, on an axis nothing here bills. A deployment that DOES want a
-        // ceiling sets `OS_ORG_MEMBERSHIP_LIMIT`.
-        //
-        // MAX_SAFE_INTEGER rather than Infinity: the value is compared, but it
-        // also travels through option plumbing that may assume a finite number,
-        // and nine quadrillion members is unlimited by any measure that matters.
-        membershipLimit: resolveMembershipLimitOption(),
-        ...(customOrgRoles ? { roles: customOrgRoles } : {}),
-        // ── Slug-change guard ─────────────────────────────────────
-        // An org's slug is baked into every env hostname at creation
-        // time (see service-tenant `project-provisioning.ts`). Renaming
-        // it while live envs exist would silently desync the URL from
-        // the org identity. Block the change here; the cloud Console
-        // surfaces this as an actionable error and points users to
-        // `change_hostname` or archiving the env. Org `name` (display
-        // label) is unaffected — only `slug` is guarded.
-        //
-        // We resolve the data engine lazily so non-cloud apps (which
-        // never seed `sys_environment`) keep working: any lookup error
-        // is treated as "no envs to protect".
-        organizationHooks: {
-          // Gate fresh organization creation behind the deployment's TENANCY
-          // POSTURE. The plugin itself is always installed (so list/update/invite
-          // endpoints keep responding); only the `create` operation is denied,
-          // and only where no organization wall is enforced — creating an
-          // organization there would mint a boundary nothing keeps (ADR-0049 at
-          // the deployment layer).
-          //
-          // [#5233] The judge is the tenancy POSTURE, never the
-          // `OS_MULTI_ORG_ENABLED` boolean ADR-0105 D1 demoted — that one reads
-          // `false` on a deployment configured with only the authoritative
-          // `OS_TENANCY_POSTURE=isolated`, so the whole organization wall
-          // mounted and every org-less user's guided "create your workspace"
-          // path still 403'd. Same defect shape as cloud#1020.
-          //
-          // [#5261] And the judge is the EFFECTIVE posture
-          // (`multiOrgPostureEffective()` — the `tenancy` service's answer),
-          // not the requested one, so this gate and `/auth/config`'s
-          // `features.multiOrgEnabled` are literally the same derivation. On the
-          // ADR-0093 D5 degraded shape they used to disagree: the console hid
-          // the button while the route minted organizations no engine walls.
-          beforeCreateOrganization: async ({ organization }: any = {}) => {
-            // [ADR-0120 D3] `'__global__'` is the platform's name for the
-            // NULL-organization bucket: the autonumber sequence table keys
-            // org-less rows by it, and every organization-scoped unique index
-            // folds NULL into it via `COALESCE(organization_id, '__global__')`.
-            // An organization minted with that token as its id (or slug — the
-            // only caller-controllable identifier here) would collide with the
-            // platform bucket, so the token is reserved at this seam.
-            if (organization?.id === '__global__' || organization?.slug === '__global__') {
-              const { APIError } = await import('better-auth/api');
-              throw new APIError('BAD_REQUEST', {
-                message:
-                  "'__global__' is reserved for the platform (no-organization) bucket " +
-                  '(ADR-0120 D3) and cannot be used as an organization id or slug.',
-                code: ORGANIZATION_RESERVED_IDENTIFIER_CODE,
-              });
-            }
-            if (!this.multiOrgPostureEffective()) {
-              const { APIError } = await import('better-auth/api');
-              throw new APIError('FORBIDDEN', {
-                message:
-                  'Creating additional organizations is disabled on this deployment.',
-                code: ORGANIZATION_CREATION_DISABLED_CODE,
-              });
-            }
-          },
-          // Run host-provided org-creation side effects (e.g. the cloud control
-          // plane provisions the org's born-with production environment). The
-          // org-plugin's models don't fire core databaseHooks, so this is the
-          // only server-side seam for "every org is born with its prod env".
-          // Failure-isolated: org creation must not roll back on a side-effect miss.
-          afterCreateOrganization: async ({ organization, member, user }: any) => {
-            const cb = this.config.onOrganizationCreated;
-            if (typeof cb !== 'function') return;
-            try {
-              await cb({
-                organizationId: organization?.id,
-                userId: user?.id ?? member?.userId,
-                name: organization?.name,
-                slug: organization?.slug,
-              });
-            } catch (err: any) {
-              console.warn('[auth] onOrganizationCreated callback failed:', err?.message ?? String(err));
-            }
-          },
-          // [ADR-0105 D8] Issuance gate. A placement intent on an invitation
-          // is a REQUEST; the authority to honour it is the ISSUER's
-          // `adminScope` (ADR-0090 D12), judged HERE — at issuance, while the
-          // actor is the inviter — not at acceptance, when the actor is the
-          // invitee. Rejecting throws out of the endpoint, so no invitation
-          // row is created.
-          //
-          // Fail closed on a missing service: without plugin-security there
-          // is no gate, and honouring an unchecked placement would hand
-          // `organization_admin` the RBAC-write authority it is deliberately
-          // denied (auto-org-admin-grant.ts keeps it read-only on those
-          // tables precisely so a fresh org admin cannot rebind themselves).
-          beforeCreateInvitation: async ({ invitation, inviter, organization }: any) => {
-            // [#25083] A cloud-managed environment creates no invitation at
-            // all: the organisation that hosts it invites its people in the
-            // cloud. The `before` hook refuses `/organization/invite-member`
-            // first, resends included; this arm is the second line, for any
-            // other path that reaches the hook. First here, before the role
-            // cap and the placement gate, because no invitation is issuable
-            // whatever its role or placement.
-            if (isCloudManaged()) {
-              const { APIError } = await import('better-auth/api');
-              throw new APIError('CONFLICT', {
-                message: CLOUD_MANAGED_REFUSAL_MESSAGES.invitation,
-                code: CLOUD_MANAGED_REFUSAL_CODE,
-              });
-            }
-            const inviterUserId = inviter?.id ?? inviter?.userId ?? null;
-            const organizationId = organization?.id ?? invitation?.organizationId;
-
-            // [#3697] Role cap — FIRST, and for EVERY invitation, placement or
-            // not: the escalation it closes (invite an `admin`, acceptance
-            // auto-elevates to `organization_admin` → tenant admin) needs no
-            // placement intent at all. Skipped for a plain `member` invitation,
-            // which can never trip the cap — so the ordinary path pays nothing.
-            if (!isPlainMemberInvitation(invitation?.role)) {
-              // [#23945] Each refusal carries its ADR-0112 code beside its
-              // message, the way better-auth's own `owner` refusal on this
-              // endpoint does. A membership read that THROWS never reaches
-              // this verdict: `resolveMembershipRole` answers it as an outage
-              // (503 `SERVICE_UNAVAILABLE`), not as a refusal.
-              const refusal = invitationRoleCapFailure(
-                invitation?.role,
-                await this.resolveMembershipRole(inviterUserId, organizationId),
-              );
-              if (refusal) {
-                const { APIError } = await import('better-auth/api');
-                throw new APIError('FORBIDDEN', { message: refusal.message, code: refusal.code });
-              }
-            }
-
-            const intent = readInvitationPlacementIntent(invitation);
-            if (!intent) return;
-
-            const svc = await this.config.invitationPlacement?.().catch(() => undefined);
-            if (!svc) {
-              const { APIError } = await import('better-auth/api');
-              throw new APIError('FORBIDDEN', {
-                message:
-                  'Invitation placement (business unit + positions) requires the delegated-administration runtime; this deployment cannot authorize it.',
-                code: INVITE_PLACEMENT_UNSUPPORTED_CODE,
-              });
-            }
-
-            try {
-              await svc.assertIssuable({
-                intent,
-                // WHO is issuing — not a context. The service resolves this
-                // user's real grants through the shared authz resolver; a
-                // hand-built context here would carry no positions and refuse
-                // every delegate.
-                actorUserId: inviterUserId,
-                organizationId,
-              });
-            } catch (err: any) {
-              // [#24243] Only the gate's own refusal is a scope verdict. A throw
-              // that is not one (the issuer's grants could not be read) reached
-              // no verdict, so it answers 503 with its code rather than wearing
-              // the refusal's 403, its code and a driver's message.
-              if (!isInvitationPlacementGateRefusal(err)) {
-                throw await invitationPlacementReadFaultApiError(err);
-              }
-              const { APIError } = await import('better-auth/api');
-              throw new APIError('FORBIDDEN', {
-                message: err?.message ?? 'Invitation placement is outside your delegated administration scope.',
-                code: INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE_CODE,
-              });
-            }
-          },
-          // [ADR-0105 D8] Accept-time application + host seam. The placement
-          // the issuance gate approved lands WITH the better-auth membership,
-          // so the invitee arrives already in the right unit and role. The
-          // apply is idempotent (a replayed acceptance converges) and
-          // failure-isolated — a placement miss must not undo a valid
-          // membership; the host seam still fires either way.
-          afterAcceptInvitation: async ({ invitation, member, user, organization }: any) => {
-            const intent = readInvitationPlacementIntent(invitation);
-            if (intent) {
-              try {
-                const svc = await this.config.invitationPlacement?.();
-                if (svc) {
-                  await svc.apply({
-                    intent,
-                    userId: String(user?.id ?? member?.userId),
-                    organizationId: organization?.id ?? invitation?.organizationId ?? member?.organizationId,
-                    grantedBy: invitation?.inviterId ?? invitation?.inviter_id ?? null,
-                  });
-                }
-              } catch (err: any) {
-                console.warn(
-                  '[auth] invitation placement failed (membership kept):',
-                  err?.message ?? String(err),
-                );
-              }
-            }
-
-            const cb = this.config.onInvitationAccepted;
-            if (typeof cb !== 'function') return;
-            try {
-              await cb({
-                invitationId: invitation?.id,
-                organizationId: organization?.id ?? invitation?.organizationId ?? member?.organizationId,
-                userId: user?.id ?? member?.userId,
-                memberId: member?.id,
-                role: member?.role ?? invitation?.role,
-                email: invitation?.email,
-                invitation,
-                member,
-              });
-            } catch (err: any) {
-              console.warn('[auth] onInvitationAccepted callback failed:', err?.message ?? String(err));
-            }
-          },
-          beforeUpdateOrganization: async ({ organization, member }: any) => {
-            const newSlug = organization?.slug;
-            const orgId = member?.organizationId;
-            if (!newSlug || !orgId) return;
-
-            // [#21941] The guard reads only what this composition registers,
-            // and FAILS CLOSED when a registered read cannot answer.
-            //
-            //  - NO DATA ENGINE ⇒ the guard does not apply. Only a standalone
-            //    `AuthManager` lacks one (`AuthPlugin` declares ObjectQL a hard
-            //    dependency), and it then runs on better-auth's in-memory store:
-            //    no engine registers `sys_environment`, so no environment can
-            //    reference the organization.
-            //  - `sys_environment` NOT REGISTERED ⇒ the guard does not apply,
-            //    for the same reason, and nothing is read. It is a cloud-provided
-            //    object (`CLOUD_PROVIDED_OBJECT_NAMES`), so this is the
-            //    open-source composition's answer. The question is the
-            //    registry's own (`getSchema`), never a caught throw; an engine
-            //    that cannot be asked reads as before — it is asked, and a fault
-            //    refuses.
-            //  - A REGISTERED READ THAT THROWS ⇒ refused, `503
-            //    SERVICE_UNAVAILABLE` (`slugGuardReadFaultApiError`). It used to
-            //    end the hook without refusing, which let the slug change through
-            //    whenever either read faulted.
-            const rawEngine = this.config.dataEngine;
-            if (!rawEngine) return;
-            const schemaOf = (rawEngine as { getSchema?: (object: string) => unknown }).getSchema;
-            if (typeof schemaOf === 'function' && !schemaOf.call(rawEngine, 'sys_environment')) return;
-
-            // Both reads run as the platform (`withSystemContext`): this hook
-            // IS the slug guard — the organization id is the `where`, not the
-            // reader — so neither read reaches the engine with no principal
-            // and no opt-in (the security middleware's former principal-less
-            // hand-off, which ADR-0096 D5 replaced with a refusal).
-            const dataEngine = withSystemContext(rawEngine) as any;
-
-            let currentSlug: string | undefined;
-            try {
-              const current = await dataEngine.findOne('sys_organization', {
-                where: { id: orgId },
-              });
-              currentSlug = current?.slug;
-            } catch (err) {
-              throw await slugGuardReadFaultApiError('sys_organization', err);
-            }
-            if (!currentSlug || currentSlug === newSlug) return;
-
-            let activeEnvs = 0;
-            try {
-              const envs = await dataEngine.find('sys_environment', {
-                where: { organization_id: orgId },
-              });
-              activeEnvs = (envs ?? []).filter(
-                (e: any) => e?.status !== 'archived' && e?.status !== 'failed',
-              ).length;
-            } catch (err) {
-              throw await slugGuardReadFaultApiError('sys_environment', err);
-            }
-
-            if (activeEnvs > 0) {
-              const { APIError } = await import('better-auth/api');
-              // [#24243] The message states only what the guard read: environment
-              // rows by `organization_id`, counted by `status`. No hostname is
-              // read, so none is named as a remedy.
-              throw new APIError('FORBIDDEN', {
-                message:
-                  `Cannot change the organization slug while the organization has ${activeEnvs} ` +
-                  `active environment(s), meaning any environment that is neither archived nor ` +
-                  `failed. Archive those environments first, or keep the current slug.`,
-                code: ORGANIZATION_SLUG_LOCKED_CODE,
-              });
-            }
-          },
-          // [#24948] The teams, their members and the organization-admin
-          // grants are the organization's own auth structure, and better-auth's
-          // delete leaves them behind. They go here, inside the request's
-          // transaction (`handleRequest`), after the `hooks.before` refusal has
-          // found no records left. The Default Organization is the
-          // last-administrator guard's to answer, so its structure is not
-          // touched: when that guard admits the delete, the engine's own
-          // refusal still holds while anything names it.
-          beforeDeleteOrganization: async ({ organization }: any) => {
-            const engine = this.getDataEngine();
-            const organizationId = organization?.id;
-            if (!engine || typeof organizationId !== 'string' || !organizationId) return;
-            if (await isDefaultOrganizationTarget(engine, organization, postureEnforcesWall(resolveTenancyPosture()))) return;
-            await removeOrganizationAuthStructure(engine, organizationId);
-          },
-        },
-        // No mailer is wired in framework yet — log the accept URL so
-        // operators / UI can fall back to copy-paste flows. Replace this
-        // with a real mail integration when available.
-        sendInvitationEmail: async ({ email: recipientEmail, invitation, organization: org, inviter }) => {
-          // The accept-invitation page is a Console SPA route; the Console
-          // builds the very same link for its "copy invitation link" action
-          // (`${origin}${BASE_URL}accept-invitation/<id>`). Compose it through
-          // the single-source helper so the `/_console` prefix and absolute
-          // https origin are guaranteed.
-          const acceptUrl = this.getConsolePageUrl(`/accept-invitation/${invitation.id}`);
-          // #2766 V1.5 — placeholder addresses are never real recipients.
-          if (isPlaceholderEmail(recipientEmail)) {
-            throw new Error(
-              `Invitation email refused: ${recipientEmail} is a placeholder address (PLACEHOLDER_EMAIL).`,
-            );
-          }
-          const emailService = this.getEmailService();
-          if (!emailService) {
-            // #2766 — the accept URL is a bearer credential; only print it in
-            // dev, never in production logs.
-            const dev = (globalThis as any)?.process?.env?.NODE_ENV !== 'production';
-            console.warn(
-              `[AuthManager] Invitation email not configured. ` +
-              `To: ${recipientEmail} (org: ${org?.name ?? invitation.organizationId}, ` +
-              `role: ${invitation.role}, inviter: ${inviter?.user?.email ?? 'unknown'})` +
-              (dev ? ` URL: ${acceptUrl}` : ' (accept URL suppressed outside dev)'),
-            );
-            return;
-          }
-          // #14641 — the invitee's OWN stored language, when the address
-          // already carries a `sys_user` row. Two branches, and the split is
-          // the whole point:
-          //
-          //  1. the address HAS a row — an existing platform user invited into
-          //     a second organization, or a re-invitation (better-auth's
-          //     `create-invitation` refuses only an address that is already a
-          //     member of THIS org, measured in the installed 1.7.x
-          //     `routes/crud-invites.mjs`, so an existing account being invited
-          //     elsewhere reaches this callback normally). Their column is a
-          //     language they chose for themselves — the same authority the
-          //     reset / verification sends read since commit 35e94c96b.
-          //  2. NO row — a genuinely new invitee. Their language is still truly
-          //     unknown at invitation time, so the deployment default stands,
-          //     exactly as before.
-          //
-          // Matched EXACTLY on the address, which is safe here rather than
-          // merely tolerable: better-auth lowercases the invitee address on the
-          // invite route (`crud-invites.mjs` — both the create and the resend
-          // branch) and lowercases the stored `user.email` on sign-up
-          // (`api/routes/sign-up.mjs`), so both sides of this predicate are
-          // already in the same case. A spelling that resolves no row lands on
-          // the deployment default, which is the documented floor rather than a
-          // failure.
-          const storedLocale = await this.storedRecipientLocale({ email: recipientEmail });
-          // #14319 — DELIBERATELY no request argument, and the only one of
-          // the five sends without one. better-auth DOES hand this callback
-          // a `ctx.request`, but it is the INVITER's: stamping their
-          // browser language onto the invitee's mail would recreate this
-          // very card one seat over. The 2026-09-02 ruling enumerates
-          // signup, sign-in and password reset — sends where the requester
-          // IS the recipient — and the superseded 2026-08-13 ruling named
-          // invitations as its own counterexample. #13881's ruling item 3
-          // fixes the chain as RECIPIENT locale → deployment default, so
-          // the inviter direction stays rejected: what #14641 added above
-          // is the invitee's own column, never the inviter's header.
-          const mailLocale = this.emailLocaleArg(undefined, storedLocale);
-          // #24154 — `{{role}}` names the membership role by its option LABEL
-          // in the mail's own locale (`成员`, not `member`): every body of the
-          // template interpolates this one value, so the zh-CN mail stops
-          // printing the stored enum inside a Chinese sentence. Never throws;
-          // a value with no label is named as stored, with one warn.
-          const roleLabel = await invitationRoleLabel(invitation.role || '', mailLocale.locale, {
-            getI18n: this.config.getI18n,
-            warn: (msg, meta) =>
-              this.config.logger ? this.config.logger.warn(msg, meta) : console.warn(msg, meta),
-          });
-          try {
-            await emailService.sendTemplate({
-              template: 'auth.invitation',
-              to: recipientEmail,
-              ...mailLocale,
-              data: {
-                inviter: {
-                  name: inviter?.user?.name ?? inviter?.user?.email ?? 'A teammate',
-                  email: inviter?.user?.email ?? '',
-                },
-                organization: { name: org?.name ?? invitation.organizationId },
-                role: roleLabel,
-                acceptUrl,
-                appName: this.getAppName(),
-              },
-              relatedObject: 'sys_invitation',
-              relatedId: invitation.id,
-              // commit b706af987 — the invitation HOLDS its organization; thread it so
-              // the sys_email row is stamped: tenant mail. Mail about a person
-              // (reset / verification / magic link) is identity mail instead.
-              ...(invitation.organizationId
-                ? { organizationId: String(invitation.organizationId) }
-                : {}),
-            });
-          } catch (err: any) {
-            // Do NOT rethrow: the invitation row was already persisted by
-            // better-auth; an email-transport failure must not turn the
-            // invite request into a 500. The admin can resend the invite.
-            console.error(`[AuthManager] sendInvitationEmail failed (swallowed): ${err?.message ?? err}`);
-          }
-        },
-      } satisfies OrganizationOptions;
-      const organizationPlugin: any = organization(organizationOptions);
-
-      // [#16569] `GET /organization/list-user-invitations` — make the vendor's
-      // listing honour the `requireEmailVerificationOnInvitation: false`
-      // declared above, the way `accept-invitation`, `reject-invitation` and
-      // `get-invitation` already do. better-auth 1.7.2's `listUserInvitations`
-      // refuses every unverified session UNCONDITIONALLY (it never reads the
-      // option), so on exactly the no-mailer deployment the declaration exists
-      // for, an invitee could accept an invitation but never list it and the
-      // SDK's `organizations.invitations.listMine()` inbox was empty-by-403.
-      // Rebuilt IN PLACE on this plugin's own endpoints record — the same
-      // shape as `applyPlatformAdminImpersonation` above, for the same reasons
-      // (one owner for the path; every hook keyed on it still fires; the
-      // request contract is the vendor's own options object, never a copy).
-      // The listing itself stays the vendor's `getOrgAdapter(...)
-      // .listUserInvitations(sessionEmail)`: no second definition of which
-      // rows a session may see. `list-user-invitations-verification.ts`
-      // carries the full reading.
-      const listingRewired = await applyDeclaredInvitationVerificationToListing(
-        organizationPlugin,
-        organizationOptions,
-      );
-      if (!listingRewired) {
-        // The vendor renamed or dropped the endpoint. Say so loudly: the
-        // route then falls back to the vendor's own handler, which refuses
-        // every unverified session — an empty inbox, not an open door.
-        // `warn`, not `error` (AGENTS.md → Degradation log levels): the
-        // system is VISIBLY smaller — the inbox answers a 403 the caller sees
-        // — and nothing claims a persistence it did not perform.
-        console.warn(
-          '[AuthManager] better-auth\'s organization plugin no longer exposes a ' +
-          '`listUserInvitations` endpoint at /organization/list-user-invitations, ' +
-          'so the declared `requireEmailVerificationOnInvitation` could NOT be ' +
-          'applied to the invitation inbox. Unverified users will be refused ' +
-          '(403 EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION) until ' +
-          'list-user-invitations-verification.ts is updated for the new vendor shape.',
-        );
-      }
-      return organizationPlugin;
-      });
-    }
-
-    if (enabled.twoFactor) {
-      const { twoFactor } = await import('better-auth/plugins/two-factor');
-      plugins.push(twoFactor({
-        schema: buildTwoFactorPluginSchema(),
-        // ADR-0069 D2 (#3690) — the operator's lockout policy governs BOTH
-        // stages of sign-in, not just the password one.
-        accountLockout: this.resolveTwoFactorAccountLockout(),
-      }));
-    }
-
-    // Breached-password rejection (ADR-0069 D1). Native, stateless: a
-    // k-anonymity range check against Have I Been Pwned on better-auth's
-    // password-mutating endpoints (sign-up / change / reset — the plugin's
-    // defaults). The plaintext password is never sent; only the first 5 SHA-1
-    // hex chars leave the process. Rejects with PASSWORD_COMPROMISED.
-    if (enabled.passwordRejectBreached) {
-      const { haveIBeenPwned } = await import('better-auth/plugins/haveibeenpwned');
-      plugins.push(haveIBeenPwned({
-        customPasswordCompromisedMessage:
-          'This password has appeared in a known data breach. Please choose a different one.',
-      }));
-    }
-
-    if (enabled.admin) {
-      await this.addOptionalPlugin(plugins, 'admin', async () => {
-        const { admin } = await import('better-auth/plugins/admin');
-        // Platform admin: ban/unban, set-password, impersonate, set-role.
-        // Schema mapping ensures the plugin's added user/session columns
-        // match ObjectStack's snake_case conventions (ban_reason,
-        // ban_expires, impersonated_by). `role` and `banned` are already
-        // snake_case-compatible.
-        const adminPlugin: any = admin({
-          schema: buildAdminPluginSchema(),
-        });
-
-        // ADR-0068 D2 — re-authorize `/admin/impersonate-user` on ObjectStack's
-        // platform-admin predicate, IN PLACE on this plugin's own endpoints
-        // record. See `admin-impersonate-endpoint.ts` for the measurement that
-        // picked this shape over a second plugin (which boots and serves, but
-        // makes `checkEndpointConflicts` log an error on every start) and over
-        // a raw Hono mount (forbidden: hand-rolled signed cookies, and it would
-        // silently detach the #8243 rotation hook keyed on this path).
-        //
-        // Every OTHER better-auth-native `/admin/*` route still gates on the
-        // legacy scalar and still refuses platform admins — that is the parent
-        // card's remaining surface, deliberately untouched here. (A caller the
-        // ADR-0069 policy holds is refused on those ahead of the vendor, by the
-        // global before-hook — `VENDOR_ROLE_SCALAR_ADMIN_PATHS`.)
-        //
-        // ADR-0069 D3 — the same endpoint refuses a caller the policy holds,
-        // asked of the session gate's own posture carrier (`computeAuthGate`,
-        // the first entry of `resolveUserAuthGates`); see the endpoint module.
-        const rewired = await applyPlatformAdminImpersonation(
-          adminPlugin,
-          (userId: string) => this.isPlatformAdminUserId(userId),
-          (userId: string, organizationId: string | undefined) =>
-            this.computeAuthGate(userId, organizationId, false),
-        );
-        if (!rewired) {
-          // The vendor renamed or dropped the endpoint. Say so loudly: the
-          // route then falls back to the vendor's own handler, which refuses
-          // every platform admin — a broken button, not an open door.
-          console.error(
-            '[AuthManager] better-auth\'s admin plugin no longer exposes a ' +
-            '`impersonateUser` endpoint at /admin/impersonate-user, so the ' +
-            'ADR-0068 platform-admin authorization could NOT be applied. ' +
-            'Impersonation will refuse every ObjectStack platform admin until ' +
-            'admin-impersonate-endpoint.ts is updated for the new vendor shape.',
-          );
-        }
-        return adminPlugin;
-      });
-    }
-
-    if (enabled.phoneNumber) {
-      await this.addOptionalPlugin(plugins, 'phoneNumber', async () => {
-      const { phoneNumber } = await import('better-auth/plugins/phone-number');
-      // #2766 V1.5 wired phone+password sign-in; #2780 opens the OTP surface
-      // (`/phone-number/send-otp` + `/verify`, `/request-password-reset` +
-      // `/reset-password`) whenever an SMS service is available — resolved
-      // lazily per send so the plugin list stays stable while the capability
-      // upgrades at kernel:ready. Without one, sendOTP still fails loudly
-      // (400 SMS_SERVICE_REQUIRED) instead of silently logging. signUpOnVerification
-      // stays deliberately NOT configured — phone-only accounts are created
-      // by the admin create-user/import routes with a placeholder email
-      // (see placeholder-email.ts), never by OTP self-signup.
-      const otpCfg = this.config.phoneOtp ?? {};
-      return phoneNumber({
-        schema: buildPhoneNumberPluginSchema(),
-        // Wrong-code attempts before the stored OTP is invalidated. Explicit
-        // (even though 3 is the better-auth default) — #2780 names it a
-        // security requirement, so it must not drift with a dependency bump.
-        allowedAttempts: otpCfg.allowedAttempts ?? 3,
-        ...(otpCfg.expiresIn != null ? { expiresIn: otpCfg.expiresIn } : {}),
-        ...(otpCfg.otpLength != null ? { otpLength: otpCfg.otpLength } : {}),
-        // Reject garbage before an SMS is paid for (same shape rule as the
-        // admin endpoints' normalizePhoneNumber).
-        phoneNumberValidator: (phone: string) =>
-          /^\+?[0-9]{6,15}$/.test(String(phone ?? '').replace(/[\s\-().]/g, '')),
-        // Sign-in / verify OTP. Throws surface to the endpoint (better-auth
-        // awaits this callback on /phone-number/send-otp), so the guard's
-        // TOO_MANY_REQUESTS becomes an honest 429 to the client.
-        sendOTP: async ({ phoneNumber: phone, code }) => {
-          await this.deliverPhoneOtp(phone, code);
-        },
-        // Self-service password reset OTP (`/phone-number/request-password-
-        // reset`). better-auth invokes this via runInBackgroundOrAwait —
-        // errors are logged, the route still answers {status:true} — so a
-        // throw here can neither 500 the request nor leak whether the number
-        // is registered.
-        sendPasswordResetOTP: async ({ phoneNumber: phone, code }) => {
-          await this.deliverPhoneOtp(phone, code);
-        },
-      });
-      });
-    }
-
-    if (enabled.magicLink) {
-      await this.addOptionalPlugin(plugins, 'magicLink', async () => {
-      const { magicLink } = await import('better-auth/plugins/magic-link');
-      // magic-link reuses the `verification` table — no extra schema mapping needed.
-      //
-      // The link's lifetime, in seconds, and the ONE source for it: the mount
-      // states it and the mail's `expiresInMinutes` is derived from it, so the
-      // copy says what the link does. 300 s is the lifetime the link already
-      // had through the vendor default (`opts.expiresIn || 300`, better-auth
-      // 1.7.12 `plugins/magic-link/index.mjs`), now written down so a
-      // dependency bump cannot move it under the mail. ⛔ Lengthening it
-      // relaxes a sign-in credential's validity — a security-boundary change
-      // for the maintainer, not a copy fix.
-      const magicLinkExpiresInSec = 5 * 60;
-      return magicLink({
-        expiresIn: magicLinkExpiresInSec,
-        // #14319 — this one is called with the endpoint CTX, not a Request
-        // (measured; magic-link/index.mjs `sendMagicLink({...}, ctx)`).
-        sendMagicLink: async ({ email: recipientEmail, url, token }, ctx?: unknown) => {
-          // #2766 V1.5 — placeholder addresses are never real recipients.
-          if (isPlaceholderEmail(recipientEmail)) {
-            throw new Error(
-              `Magic-link email refused: ${recipientEmail} is a placeholder address (PLACEHOLDER_EMAIL).`,
-            );
-          }
-          const emailService = this.getEmailService();
-          if (!emailService) {
-            // #2766 — a magic link IS a session credential; only print it in
-            // dev, never in production logs.
-            const dev = (globalThis as any)?.process?.env?.NODE_ENV !== 'production';
-            console.warn(
-              `[AuthManager] Magic-link requested for ${recipientEmail} but no email service is wired.` +
-              (dev ? ` URL: ${url}` : ' (link suppressed outside dev)'),
-            );
-            return;
-          }
-          // #15106 — the recipient's OWN stored language, the last auth mail
-          // to reach the top rung of the #14788 option-D ladder. Same rung and
-          // same helper as the other four sends; only the predicate differs,
-          // because this callback is handed an address rather than a user row
-          // — the #14641 invitation shape, and for the same reason it has two
-          // branches:
-          //
-          //  1. the address HAS a `sys_user` row — the ordinary case, since a
-          //     magic link is how an existing account signs in without a
-          //     password → their own `locale`;
-          //  2. NO row — magic link doubles as sign-up (measured in the
-          //     installed 1.7.x: `/sign-in/magic-link` sends WITHOUT checking
-          //     for an account, and `/magic-link/verify` creates one unless
-          //     `disableSignUp`), so an unknown address is legitimate here and
-          //     its language is genuinely unknown → the rungs below stand.
-          //
-          // ⚠️ Lowercased, unlike the invitation predicate, and the difference
-          // is measured rather than stylistic: better-auth lowercases the
-          // invitee address on the invite route, but `signInMagicLinkBodySchema`
-          // applies no such transform, so what arrives here is whatever the
-          // caller typed. `internalAdapter.findUserByEmail` — the lookup
-          // `/magic-link/verify` resolves this very link with — matches on
-          // `email.toLowerCase()`. Reading the column on the same spelling
-          // keeps the row the mail is ABOUT identical to the row the link will
-          // sign into; an address that resolves nothing lands on the rungs
-          // below, which is the documented floor rather than a failure.
-          //
-          // ⛔ The request rung is NOT removed: ruling D inserts the column
-          // ABOVE `Accept-Language`, it does not replace it. A magic link is
-          // requested by its own recipient, so `ctx` here carries the
-          // recipient's own header and stays a legitimate second rung for an
-          // account that has stated no language.
-          const storedLocale = await this.storedRecipientLocale({
-            email: recipientEmail.toLowerCase(),
-          });
-          try {
-            await emailService.sendTemplate({
-              template: 'auth.magic_link',
-              to: recipientEmail,
-              ...this.emailLocaleArg(ctx, storedLocale),
-              data: {
-                magicLinkUrl: url,
-                token,
-                expiresInMinutes: Math.round(magicLinkExpiresInSec / 60),
-                appName: this.getAppName(),
-              },
-              // [ADR-0131 D7, Q2 A] A sign-in link for a person: identity mail.
-              identityMail: true,
-            });
-          } catch (err: any) {
-            console.error(`[AuthManager] sendMagicLink failed: ${err?.message ?? err}`);
-            throw err;
-          }
-        },
-      });
-      });
-    }
-
-    // OIDC / Generic OAuth2 providers (enterprise SSO via genericOAuth plugin)
-    if (this.config.oidcProviders?.length) {
-      const oidcProviders = this.config.oidcProviders;
-      await this.addOptionalPlugin(plugins, 'genericOAuth', async () => {
-      const { genericOAuth } = await import('better-auth/plugins/generic-oauth');
-      return genericOAuth({
-        config: oidcProviders.map(p => ({
-          providerId: p.providerId,
-          ...(p.discoveryUrl ? { discoveryUrl: p.discoveryUrl } : {}),
-          ...(p.issuer ? { issuer: p.issuer } : {}),
-          ...(p.authorizationUrl ? { authorizationUrl: p.authorizationUrl } : {}),
-          ...(p.tokenUrl ? { tokenUrl: p.tokenUrl } : {}),
-          ...(p.userInfoUrl ? { userInfoUrl: p.userInfoUrl } : {}),
-          clientId: p.clientId,
-          clientSecret: p.clientSecret,
-          ...(p.scopes ? { scopes: p.scopes } : {}),
-          ...(p.pkce != null ? { pkce: p.pkce } : {}),
-        })),
-      });
-      });
-    }
-
-    // OAuth/OIDC Provider — turn this server into an OpenID Connect Identity
-    // Provider so external apps can SSO via ObjectStack. Adds the
-    // `/oauth2/{authorize,token,userinfo,register,consent,endsession}` and
-    // `/.well-known/openid-configuration` endpoints under the auth route.
-    //
-    // Migrated from the deprecated `better-auth/plugins/oidc-provider` to the
-    // standalone `@better-auth/oauth-provider` package. The new plugin uses
-    // `oauthClient`, `oauthAccessToken`, `oauthRefreshToken`, and `oauthConsent`
-    // models — see `buildOauthProviderPluginSchema()` for the snake_case
-    // mappings to ObjectStack's `sys_oauth_*` tables.
-    if (enabled.oidcProvider) {
-      // jwt + oauthProvider are one atomic unit: on failure neither lands.
-      // This is the plugin that broke every fresh 15.1.0 project (modelName
-      // TypeError from a 1.6/1.7 version mix) — see addOptionalPlugin.
-      await this.addOptionalPlugin(plugins, 'oidcProvider', async () => {
-      // The new @better-auth/oauth-provider package requires the `jwt`
-      // plugin (used to sign id_tokens / JWT access tokens). Register it
-      // automatically — it is otherwise an internal implementation detail
-      // and forcing every consumer to opt in would be poor DX.
-      const { jwt } = await import('better-auth/plugins');
-      const jwtPlugin = await this.buildJwtPlugin(jwt);
-
-      const { oauthProvider } = await import('@better-auth/oauth-provider');
-      const dcr = resolveDcrEnabled(pluginConfig);
-      return [jwtPlugin, oauthProvider({
-        // Console SPA renders both pages (replaces the legacy Account SPA at
-        // /_account). Override `uiBasePath` in AuthConfig if Console is
-        // mounted elsewhere.
-        loginPage: this.getConsolePageUrl('/login'),
-        consentPage: this.getConsolePageUrl('/oauth/consent'),
-        schema: buildOauthProviderPluginSchema(),
-        // ⛔ No `silenceWarnings` here. It was added for the #3420 double
-        // print of oauth-provider's "Please ensure /.well-known/… exists"
-        // notice — a false positive, because registerOidcDiscoveryRoutes
-        // mounts those documents at the issuer ROOT where RFC 8414 §3 requires
-        // them. The pinned 1.7.2 emits no such notice: neither the option name
-        // nor the `oauthAuthServerConfig` key nor the notice text occurs
-        // anywhere in `@better-auth/oauth-provider` or `better-auth`, so the
-        // option silenced nothing and was the same dead-option shape as the
-        // `validAudiences` defect below. If a future bump reintroduces the
-        // notice, re-add the silencer with a fresh reading — do NOT restore it
-        // on the strength of this comment.
-        // ── MCP OAuth track (#2698) ────────────────────────────────
-        // Coarse tool-family scopes for the platform's own MCP endpoint,
-        // advertised alongside the standard OIDC scopes. Names are
-        // single-sourced in @objectstack/spec so AS / resource server /
-        // tool layer cannot drift.
-        scopes: ['openid', 'profile', 'email', 'offline_access', ...MCP_OAUTH_SCOPES],
-        // MCP clients bind tokens to the resource via RFC 8707
-        // (`resource=<mcp url>`). In @better-auth/oauth-provider 1.7.2 a
-        // requested `resource` is resolved from the `oauthResource` table
-        // (`sys_oauth_resource`) — a miss is refused at /oauth2/authorize with
-        // `invalid_target: requested resource <id> is not configured` — and
-        // `enforcePerClientResources` defaults to TRUE, so the client must
-        // additionally be linked in `oauthClientResource`
-        // (`sys_oauth_client_resource`). Both rows have to exist before the
-        // first Connect, so both are declared here:
-        //
-        //   • `resources` seeds the sys_oauth_resource row from the plugin's
-        //     own `init` (idempotent, `resourceSeedMode: "insertOnly"` by
-        //     default, so an admin's later CRUD edits are never reverted);
-        //   • `clientRegistrationDefaultResources` links every newly
-        //     registered client to it inside the DCR transaction — a client
-        //     that registers anonymously one second before the login cannot
-        //     be linked by an admin in between.
-        //
-        // ⛔ `enforcePerClientResources` is deliberately NOT passed: the
-        // per-client linkage check stays at its `true` default. The fix makes
-        // the link happen; it does not switch the check off. A client with no
-        // link row is still refused, and
-        // auth-manager.mcp-oauth-resource.test.ts asserts exactly that.
-        //
-        // ⛔ Do not reintroduce `validAudiences`: 1.7.2 reads no such option
-        // (0 occurrences in its dist), and audience validation now runs
-        // through the resource table instead. A field that is passed and read
-        // by nobody looks like configuration and enforces nothing — that is
-        // how this defect survived a version bump.
-        resources: [this.getMcpResourceUrl()],
-        clientRegistrationDefaultResources: [this.getMcpResourceUrl()],
-        // RFC 7591 Dynamic Client Registration. `allowUnauthenticated…` is
-        // required: MCP clients register BEFORE any user is logged in (the
-        // whole point of the self-serve flow). Registration is rate-limited
-        // by the plugin, clients get only the scopes advertised above, and
-        // every token still requires an interactive PKCE login + consent —
-        // an anonymous registration mints no authority by itself.
-        allowDynamicClientRegistration: dcr,
-        allowUnauthenticatedClientRegistration: dcr,
-        // ── Native MCP clients that omit `application_type` (#25118, ruling 6329352251, A1) ──
-        // Local MCP clients (Claude Code, Cursor, VS Code, Codex CLI) register
-        // over DCR with a loopback `http` or a custom-scheme redirect, as RFC
-        // 8252 §7.3 and the MCP authorization spec have native clients do, and
-        // send no `application_type`. The provider's default fills a missing
-        // type with `web` (OIDC Registration §2), whose redirect rule refuses
-        // both forms, so every such client was refused before its browser
-        // opened.
-        //
-        // `'infer'` is the provider's own classifier; there is no second rule
-        // here. A dynamic registration that omits the type becomes `native`
-        // when ANY redirect uses a non-http(s) scheme or `http` on exactly
-        // `localhost`, `127.0.0.1` or `[::1]`, and each redirect is then held to
-        // the native rule; otherwise it stays `web`. A type the client sends is
-        // never overridden. It acts on `/oauth2/register` only (the Setup
-        // form's managed `create-client` door is unaffected) and only while
-        // `dcr` is on: with DCR off the provider refuses every registration.
-        //
-        // The measured boundary, pinned on the real provider in
-        // auth-manager.mcp-oauth-dcr-infer.test.ts:
-        //   • a public client with a loopback or custom-scheme redirect → `native`;
-        //   • `https://evil.example/cb` alone stays `web`; `http://evil.example/cb`,
-        //     `http://localhost.evil.example`, and an explicit `web` with a
-        //     loopback redirect stay refused;
-        //   • NOT "public clients only": the classifier reads redirect URIs and
-        //     never `token_endpoint_auth_method`, so a CONFIDENTIAL registration
-        //     (`client_secret_basic`, or the method omitted, which the provider
-        //     fills as `client_secret_basic`) with a loopback or custom-scheme
-        //     redirect and no type also registers as `native` and is issued a
-        //     `client_secret`. That body was already accepted with
-        //     `application_type: 'native'` spelled out, so no registrable client
-        //     shape is added; only the meaning of an omitted field changes
-        //     (RFC 8252 §8.4 allows a per-instance secret provisioned by DCR);
-        //   • PKCE stays required at /oauth2/authorize for every one of these
-        //     clients: unconditionally for a public client, and for a
-        //     confidential DCR client because `clientRegistrationRequirePKCE`
-        //     keeps its `true` default. ⛔ Do not pass it as `false`.
-        //
-        // ⛔ No hook on `/oauth2/register` and no second classification rule
-        // beside this one: ruling A1 declined both.
-        clientRegistrationDefaultApplicationType: 'infer',
-        // ── The organization an OAuth consent binds (ruling 6232069920, A) ──
-        // At consent the consenting session's active organization becomes the
-        // consent's `reference_id`, and the installed provider carries that
-        // value onto the authorization code, the refresh family it starts, and
-        // every access token minted from either, where `customAccessTokenClaims`
-        // emits it as `organization_id` (`verifyMcpAccessToken` reads it back).
-        //
-        // ⛔ The value is the SESSION's, never the client's: the hook reads the
-        // session the provider hands it and nothing else. The authorize query,
-        // the consent body and the client's metadata never reach it, so no
-        // request parameter can choose the organization a token acts in.
-        //
-        // ⛔ No session organization ⇒ no reference and no claim. Never a
-        // guessed or default one: the principal then resolves with global
-        // grants only.
-        //
-        // Existing consents re-confirm once, by the provider's own lookup: it
-        // finds a consent by (client, user, reference) whenever this hook
-        // answers a reference, so a consent stored before this binding (its
-        // `reference_id` is null) no longer satisfies an authorize made in an
-        // organization, and the user sees the consent page again. Until then an
-        // old refresh family keeps minting tokens with no claim, because a
-        // refresh carries the family's own reference, never the session's.
-        //
-        // `postLogin` is declared as one object, so its two other members are
-        // required beside the hook. `shouldRedirect` answers false: the
-        // organization is the one the session already has, not a choice made
-        // on an extra page. `page` is read only when `shouldRedirect` answers
-        // true, which it never does here; it names the consent page so that it
-        // could only ever point at a page that exists.
-        postLogin: {
-          page: this.getConsolePageUrl('/oauth/consent'),
-          shouldRedirect: () => false,
-          consentReferenceId: ({ session }) => consentOrganizationOf(session),
-        },
-        // `organization_id` is not in the provider's reserved access-token
-        // claim set, which it strips at issuance. This is the claim the
-        // `IAuthService.verifyMcpAccessToken` contract names.
-        customAccessTokenClaims: ({ referenceId }) =>
-          referenceId ? { [OAUTH_ORGANIZATION_CLAIM]: referenceId } : {},
-      })];
-      });
-    }
-
-    // External SSO (OIDC / SAML) relying-party — lets this environment federate
-    // login to a customer's own IdP (Okta / Entra / Google …). Per-env, runtime-
-    // registered providers live in `sys_sso_provider` (ADR-0135 D6: the OPEN SSO
-    // mechanism — cloud-free for self-host). Endpoints mount under
-    // /api/v1/auth/sso/{register,providers,delete-provider,callback,…}.
-    //
-    // Toggle with `OS_SSO_ENABLED` (mirrors `OS_OIDC_PROVIDER_ENABLED`).
-    if (enabled.sso) {
-      await this.addOptionalPlugin(plugins, 'sso', async () => {
-      const { sso } = await import('@better-auth/sso');
-      // NOTE: the `ssoProvider` model is bridged to `sys_sso_provider` by the
-      // better-auth adapter / a global model map, not per-plugin here (see the
-      // `ssoProvider` NOTE in auth-schema-config.ts).
-      //
-      // That bridge dates from 1.6.20, where @better-auth/sso hardcoded the
-      // model and read no `schema` option. Re-measured against the installed
-      // 1.7.1 (`node_modules/@better-auth/sso/dist`) on 2026-08-19 — the pin
-      // moved off 1.7.0-rc.2, so the previous stamp here had itself expired
-      // (#8224): still no longer true — `SSOOptions.schema.ssoProvider` exists
-      // (index-CZytzKv6.d.mts) and the runtime honours `modelName` plus a
-      // per-field `fieldName` map (index.mjs, the plugin's `schema:` block). The
-      // adapter-level bridge is kept as-is here because it is what the rest of
-      // the auth stack is wired to; whether to move it onto the plugin option is
-      // a separate change, not a silent one. Only the mapping surface below was
-      // re-verified in depth — see register-sso-provider.ts for the
-      // `oidcConfig.mapping` strict-object findings.
-      //
-      // `organizationProvisioning.defaultRole` (cloud ADR-0024 V1): a first-time
-      // federated login is JIT-provisioned into the user's domain-matched org
-      // with this role, so a member who arrives via an external IdP lands with
-      // an explicit default role (belt-and-suspenders over SecurityPlugin's
-      // `member_default` fallback, which already grants baseline access to any
-      // authenticated user). Requires the `organization` plugin — on by default.
-      // `domainVerification.enabled` (ADR-0135 D6, opt-in via OS_SSO_DOMAIN_VERIFICATION):
-      // when on, @better-auth/sso mounts /sso/request-domain-verification +
-      // /sso/verify-domain (DNS TXT proof-of-ownership) AND enforces that an
-      // external IdP's email domain be DNS-verified before it may complete a
-      // login — preventing an org admin from registering a provider for a domain
-      // they don't control. Off by default to preserve the register→login flow.
-      return sso({
-        organizationProvisioning: { defaultRole: 'member' },
-        ...(enabled.ssoDomainVerification ? { domainVerification: { enabled: true } } : {}),
-      });
-      });
-    }
-
-    // External SCIM 2.0 Service Provider (@better-auth/scim, MIT) — lets an
-    // external IdP (Okta / Entra) auto-provision / deprovision THIS env's users
-    // (the paid Identity lifecycle, cloud ADR-0071). The env is the SCIM Service
-    // Provider; SCIM 2.0 endpoints mount under /api/v1/auth/scim/v2/{Users,…}.
-    // `active:false` → ban + session revoke (needs the admin plugin, forced on
-    // above). This plugin still accepts no `schema` option (`SCIMOptions`
-    // declares no `schema` / `modelName` / `fields` member on the installed
-    // 1.7.1), so its seven models are bridged to the `sys_scim_*` platform
-    // objects via AUTH_MODEL_TO_PROTOCOL. Toggle with `OS_SCIM_ENABLED`.
-    //
-    // Connections are RUNTIME DATA, not boot config (#3653): the stable
-    // constructor's three-way requirement (static `connections` | bearer
-    // verifier | managed catalog) is satisfied with an application-owned
-    // `verifyBearerToken` that resolves the connection from a
-    // `sys_scim_connection_credential` row at request time. ObjectStack owns
-    // the whole credential lifecycle — mint / store / verify — in
-    // `scim-connection-service.ts`; only a keyed one-way digest is ever
-    // persisted (pinned by `credential-at-rest-posture.test.ts`). The rc.1
-    // `storeSCIMToken` / `/scim/generate-token` surface no longer exists on
-    // stable, and the upstream `managedConnections` catalog is deliberately
-    // NOT adopted (maintainer ruling 2026-08-25).
-    if (enabled.scim) {
-      await this.addOptionalPlugin(plugins, 'scim', async () => {
-        const { scim } = await import('@better-auth/scim');
-        const { verifyScimBearerToken } = await import('./scim-connection-service.js');
-        const secret = this.resolveAuthSecret();
-        return scim({
-          connections: [],
-          authentication: {
-            verifyBearerToken: async (input) => {
-              // ⛔ No `scimRequestScope.enterWith(...)` here. The SCIM request
-              // scope that makes the adapter open a REAL engine transaction is
-              // opened by `handleRequest` with `run(...)` around the whole
-              // request (see `SCIM_PROTOCOL_PATH_PREFIX`). It used to be
-              // stamped from this callback and never reached the writes: an
-              // `enterWith` marks only the async resource it runs in and that
-              // resource's descendants, and the vendor resumes the endpoint
-              // handler from a continuation captured BEFORE this verifier ran
-              // (measured on 1.7.2 — zero engine transactions across a SCIM
-              // POST + PATCH; pinned by `scim-transaction-scope.test.ts`).
-              const engine = this.config.dataEngine;
-              if (!engine) return null; // no store to verify against — fail closed
-              return verifyScimBearerToken(engine as never, secret, input.token);
-            },
-          },
-          // [#14360] The host half of `active`: stable @better-auth/scim
-          // writes no `banned` itself any more (the 1.6.x coupling left the
-          // package in 1.7.0) — it hands the aggregate lifecycle state to
-          // this callback inside the SCIM transaction and only revokes
-          // sessions. Routed to the platform's own ban write; the break-glass
-          // last-administrator guard judges it at the engine. See
-          // `reconcileScimUserLifecycle` for the contract and the measurement.
-          identity: {
-            reconcileUser: (state, context) => this.reconcileScimUserLifecycle(state, context),
-          },
-        });
-      });
-    }
-
-    // Device Authorization Grant (RFC 8628) — for CLI / TV-style devices.
-    // Exposes the standard `/device/{code,token,approve,deny}` endpoints
-    // and persists pending requests in `sys_device_code`.
-    //
-    // The verification URI points at the account portal page that lets a
-    // signed-in user approve or deny a pending CLI login. The page reads
-    // the `user_code` query parameter that better-auth appends to
-    // `verification_uri_complete`.
-    if (enabled.deviceAuthorization) {
-      await this.addOptionalPlugin(plugins, 'deviceAuthorization', async () => {
-        const { deviceAuthorization } = await import('better-auth/plugins/device-authorization');
-        return deviceAuthorization({
-          verificationUri: this.getConsolePageUrl('/auth/device'),
-          schema: buildDeviceAuthorizationPluginSchema(),
-        });
-      });
-    }
-
-    // customSession() — augments the session payload with the canonical
-    // `positions: string[]` array (ADR-0068 D1/D2, renamed ADR-0090 D3) and its
-    // derived `isPlatformAdmin` alias.
-    //
-    // [#15136] `positions[]` is the SECURITY axis — the same set
-    // `/auth/me/permissions` reports and every server-side evaluator resolves:
-    // the active organization's membership mapped to canonical
-    // `org_owner`/`org_admin`/`org_member`, the ADR-0057 D4 `sys_user_position`
-    // assignments, the ADR-0090 D5 `everyone` anchor, and `platform_admin`. It
-    // is not derived here; it is asked of `resolveUserAuthzGrants`, the ONE
-    // authority, for the reason spelled out at the call site below.
-    //
-    // ⛔ The better-auth `user.role` scalar is NOT a source of it. It used to be
-    // (split on commas and unioned in), which put auth-layer role names on an
-    // array whose declared meaning — `EvalUserSchema`, "built-in identity names
-    // + position names" — is the security axis, and left the real position names
-    // off it entirely.
-    //
-    // IMPORTANT: `user.role` is NOT overwritten — consumers must gate on
-    // `positions[]` / `isPlatformAdmin` (e.g. via objectui's
-    // `useWorkspaceAdminStatus`), never on `user.role === 'admin'`. A consumer
-    // that genuinely wants the better-auth role reads `user.role`, which stays
-    // on the payload verbatim; the raw membership role stays on the organization
-    // plugin's `member` payload.
-    const dataEngine = this.config.dataEngine;
-    if (dataEngine) {
-      const { customSession } = await import('better-auth/plugins/custom-session');
-      plugins.push(customSession(async ({ user, session }) => {
-        if (!user?.id) return { user, session };
-
-        // ADR-0068 D1/D2 (renamed ADR-0090 D3) — emit ONE canonical
-        // positions[] (identity names + position names), with NO singular
-        // overwrite. isPlatformAdmin is a DERIVED alias of
-        // `'platform_admin' in positions`, retained for back-compat clients.
-        // [#10348] Asked through the ONE authority, exactly as `/sso/register`
-        // and `/admin/impersonate-user` ask it — so the session payload can no
-        // longer disagree with the gates about who a platform admin is.
-        //
-        // [#15136 — maintainer ruling 2026-09-05, option A] ONE name, ONE
-        // meaning: `positions[]` is the SECURITY axis on every surface.
-        //
-        // This used to be a hand-rolled union — the better-auth `sys_user.role`
-        // scalar split on commas, plus the active membership mapped to `org_*`,
-        // plus `platform_admin`. It read NOTHING from `sys_user_position`, the
-        // ADR-0057 D4 table that is the source of truth for custom positions, so
-        // a user genuinely holding a business position got a payload without it
-        // and every client-side gate narrowed by that position answered FALSE —
-        // silently, because the root and the key were both bound and CEL raised
-        // nothing. `EvalUserSchema` had declared the opposite all along
-        // ("built-in identity names + position names", "evaluates identically
-        // wherever it is written"); the Console binds this array straight through
-        // as `current_user`, so the payload WAS the contract violation.
-        //
-        // The derivation is not repaired here — it is DELETED and asked of the
-        // authority instead. `resolve-authz-context.ts` states that every entry
-        // point must resolve authorization through it and never re-read the
-        // `sys_*` grant tables itself; this callback was doing exactly what that
-        // forbids, which is how it drifted out of agreement with
-        // `/auth/me/permissions` (served from the same `grants.positions`) and
-        // with every server-side evaluator (`ExecutionContext.positions`) in the
-        // first place. The same move `isPlatformAdminUserId` made at #10348.
-        //
-        // Scoped to the session's ACTIVE organization, so a position held in one
-        // organization does not answer while the caller operates in another —
-        // the resolver's own rule, now applied to the payload too.
-        //
-        // `isPlatformAdmin` comes from the posture RUNG on the same envelope,
-        // never from the array. ⛔ `positions.includes('platform_admin')` is the
-        // form `resolve-authz-context.ts` explicitly forbids, because an
-        // ADR-0057 D4 `sys_user_position` row MAY SPELL THAT VERY NAME and a
-        // platform-RBAC assignment is not the ADR-0068 D2 capability grant.
-        // Under ruling A that stopped being theoretical: moving `positions` to
-        // the security axis moved the string `platform_admin` into a space a
-        // tenant admin can WRITE (`sys_user_position` is `apiEnabled`), so an
-        // array read here would have let a tenant mint platform standing and
-        // pass the `/admin/*` mount gate. `grants.posture === 'PLATFORM_ADMIN'`
-        // is byte-for-byte what `hasPlatformAdminStanding` returns, so the
-        // payload, that predicate and `judgePlatformAdmin` cannot disagree.
-        // ADR-0068 D2 defines the alias as `'platform_admin' in roles`; that
-        // wording predates D4 rows being able to spell built-in names, and
-        // core's later ⛔ is the specific rule.
-        //
-        // Fail CLOSED on an unreadable grant store, matching what both halves of
-        // the old derivation already did (`isPlatformAdminUserId` returns false
-        // on any lookup error; `activeOrgRoles` caught to `[]`). Warned rather
-        // than swallowed — an empty `positions[]` hides UI, and this card is
-        // about exactly that going unannounced.
-        //
-        // The seed email is the session's own, spelled as `resolveAuthzContext`
-        // spells it for this session (`String(user.email)` when present), so an
-        // in-process session read that `resolveAuthzContext` makes asks for
-        // EXACTLY the resolution its own step 2 asks for — and core's
-        // request-scoped memo serves that step this resolution instead of
-        // issuing every grant read twice per request. It shapes nothing read
-        // here: `grants.email` is the only output it reaches, and the
-        // platform-admin config anchor compares the STORED `sys_user.email`,
-        // never a seed (core §6b-config).
-        let positions: string[] = [];
-        let platformAdmin = false;
-        try {
-          const grants = await resolveUserAuthzGrants(dataEngine as any, user.id, {
-            tenantId: (session as any)?.activeOrganizationId ?? undefined,
-            seedEmail: user.email ? String(user.email) : undefined,
-          });
-          positions = grants.positions;
-          platformAdmin = grants.posture === 'PLATFORM_ADMIN';
-        } catch (err: any) {
-          console.warn(
-            '[auth] could not resolve authorization grants for the session payload; '
-            + 'positions[] is empty and position-gated UI will be hidden:',
-            err?.message ?? String(err),
-          );
-        }
-
-        // ADR-0069 — authentication-policy gate posture (password expiry,
-        // enforced MFA). Computed only when a gate feature is enabled (else
-        // zero extra reads on the hot path); surfaced as `user.authGate` for
-        // the transport seams to enforce. See computeAuthGate().
-        // ADR-0069 D4 — session controls (idle / absolute). Best-effort;
-        // revokes the session in place when exceeded (next request → 401).
-        await this.enforceSessionControls((session as any)?.id, (session as any)?.createdAt);
-
-        // An impersonation session carries the administrator who started it
-        // (`impersonatedBy`, written by the admin plugin's impersonation and
-        // stored as `sys_session.impersonated_by`); which postures hold the
-        // session depends on it — see computeAuthGate().
-        const impersonatedBy = (session as any)?.impersonatedBy;
-        const authGate = await this.computeAuthGate(
-          user.id,
-          (session as any)?.activeOrganizationId,
-          (user as any)?.twoFactorEnabled === true,
-          { impersonation: typeof impersonatedBy === 'string' && impersonatedBy.trim() !== '' },
-        );
-
-        return {
-          user: { ...user, positions, isPlatformAdmin: platformAdmin, ...(authGate ? { authGate } : {}) },
-          session,
-        };
-      }));
-    }
-
-    return plugins;
+    return buildPluginList.call(host);
   }
 
   /**
@@ -7489,6 +4730,37 @@ export class AuthManager {
    * hold, an expired session, a credential that does not parse or one
    * carrying a control character still answers `null`.
    */
+  /**
+   * [Ruling 6355206139 E2] The reads `narrowDirectoryForExternalCaller` makes,
+   * bound to this manager's engine under the system read context. With no
+   * engine every caller reads as no member, so nothing is narrowed — the
+   * mock-mode status quo.
+   */
+  private externalDirectoryDoorDeps(): ExternalDirectoryDoorDeps {
+    const engine = this.config.dataEngine;
+    const sys = engine ? (withSystemReadContext(engine) as any) : undefined;
+    const first = async (object: string, where: Record<string, unknown>) => {
+      if (!sys) return undefined;
+      const rows: any[] = await sys.find(object, { where, limit: 1 });
+      return Array.isArray(rows) ? rows[0] : undefined;
+    };
+    return {
+      resolveActor: (ctx) => this.resolveActor(ctx),
+      readMemberRole: async (userId, organizationId) =>
+        (await first('sys_member', { user_id: userId, organization_id: organizationId }))?.role,
+      readUserEmail: async (userId) => (await first('sys_user', { id: userId }))?.email,
+      resolveOrganizationSlug: async (slug) => (await first('sys_organization', { slug }))?.id,
+      readUserTeamIds: async (userId) => {
+        if (!sys) return [];
+        const rows: any[] = await sys.find('sys_team_member', { where: { user_id: userId }, fields: ['team_id'], limit: 1000 });
+        return (Array.isArray(rows) ? rows : [])
+          .map((r) => r?.team_id)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0);
+      },
+      isExternalRole: isExternalMembershipRole,
+    };
+  }
+
   private resolveActor(
     ctx: any,
     options?: { failedReadThrows?: boolean },

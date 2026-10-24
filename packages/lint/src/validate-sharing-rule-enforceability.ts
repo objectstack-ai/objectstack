@@ -61,6 +61,13 @@
  * a warning. It fails closed (the recipient under-sees rather than over-sees),
  * which is why it was survivable, not why it is acceptable.
  *
+ * [#25549] One arm is no longer an `error`: on a `public` anchor the runtime
+ * admits the grant for a recipient who is an `external` member of the record's
+ * organization (the external floor consults a share row there) and refuses the
+ * rest, so that rule IS live for its external half. Whether a rule's audience
+ * is external is runtime data, not metadata, so the arm reports a `warning`
+ * saying what the rule does — "effective for external recipients only".
+ *
  * Measured before shipping: every sharing-rule condition and RLS predicate
  * declared anywhere in this repo (examples, platform permission sets) lowers
  * cleanly, so the gate turns nothing red that works today.
@@ -439,10 +446,13 @@ function masterOf(obj: AnyRec): string | undefined {
  * `buildReadFilter`, all three postures), the arms differ in the direction
  * that decides the wording:
  *
- *  - **`public` OWD** → grant refused, `buildReadFilter` returns `null`, zero
- *    share rows. Nothing is filtered, so the intended audience already reads
- *    every row — and so does everyone else. Nobody UNDER-sees; the harm is
- *    that the declaration advertises a restriction that does not exist.
+ *  - **`public` OWD** → grant refused for an internal recipient,
+ *    `buildReadFilter` returns `null` for an internal reader, zero share rows
+ *    for staff. Nothing is filtered for them, so the intended staff audience
+ *    already reads every row — and so does everyone else. Nobody UNDER-sees;
+ *    the harm is that the declaration advertises a restriction that does not
+ *    exist. An `external` recipient is admitted and its row is consulted
+ *    (#25549), which is why this arm is a `warning`.
  *  - **`controlled_by_parent`** → grant refused with a DIFFERENT reason
  *    ("share the master record instead"), and the detail's visibility comes
  *    from its master's path (ADR-0055), not from this rule. Here the author
@@ -524,21 +534,26 @@ function anchorFindings(
       ? `declares sharingModel 'public_read_write'`
       : 'declares no sharingModel and is a system object, which resolves to public';
 
+  // [#25549] Advice, not a refusal: the runtime admits this rule's grants for
+  // the recipients who are `external` members of the record's organization
+  // (their owner_only floor consults a share row on a public object) and skips
+  // the rest. Whether the rule's audience is external is runtime data
+  // (`sys_member.role`), not metadata, so this door can say what the rule does
+  // and cannot say it is wrong.
   return [{
-    severity: 'error',
+    severity: 'warning',
     rule: SHARING_RULE_OBJECT_NOT_SHAREABLE,
     where,
     path,
     // [#22161] One verdict sentence; why a public baseline has nothing to
-    // widen, and the measured read filter, is the `os explain` entry's.
+    // widen for staff, and the measured read filter, is the `os explain` entry's.
     message:
-      `anchor object "${object}" ${declared}, so the grant is refused (SHARING_NOT_ENABLED) and the rule ` +
-      'restricts nothing',
-    // [#22161] One remedy line naming both honest fixes; how to tell which
+      `anchor object "${object}" ${declared}, so the rule is effective for external recipients only`,
+    // [#22161] One remedy line naming the honest choices; how to tell which
     // half is wrong, and why re-homing the rule fixes nothing, are the
     // `os explain` entry's.
     hint:
-      `If everyone should reach these records, delete it; if only its audience should, set "${object}"'s ` +
+      `Keep it if its audience is external; if staff should be narrowed too, set "${object}"'s ` +
       `sharingModel: 'private' or 'public_read'`,
   }];
 }

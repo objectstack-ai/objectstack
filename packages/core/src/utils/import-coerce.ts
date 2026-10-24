@@ -335,8 +335,9 @@ function readTimeOfDayCell(s: string): string | undefined {
  * stored as `2026-07-15T14:00Z` on a New York host and `…T02:00Z` on a
  * Shanghai one, a `date` a day apart) and reads `07/08/2026` month-first. A
  * space before a zone (`2026-07-15 10:00Z`) is refused as the write door
- * refuses it. The one other text shape read at all is the year-first date,
- * {@link YEAR_FIRST_CELL}.
+ * refuses it. The other text shapes read at all are the year-first date,
+ * {@link YEAR_FIRST_CELL}, and the year-first day spellings
+ * {@link YEAR_FIRST_DOTTED_DAY} and {@link YEAR_FIRST_COMPACT_DAY}.
  */
 const ISO_TEMPORAL_CELL =
   /^(\d{4})-(\d{2})-(\d{2})(?:(T| )(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(Z|[+-]\d{2}:?\d{2})?)?$/;
@@ -450,6 +451,44 @@ function readYearFirstCell(s: string): IsoTemporalCell | undefined {
   return { day, wall };
 }
 
+/**
+ * [#25582, maintainer ruling 6377844879 letter A] Two more year-first spellings
+ * of a bare calendar day, after trimming, each with a four-digit year and a
+ * two-digit month and day and nothing else in the cell:
+ *
+ * - `YYYY.MM.DD` (`2011.07.01`) — the dotted date written in Chinese
+ *   correspondence and ledgers;
+ * - `YYYYMMDD` (`20090615`) — the compact date an ERP export writes. Read only
+ *   from a TEXT cell: a number is never a temporal cell ({@link outsideYears}),
+ *   so a JSON `20090615` stays refused. An xlsx cell holding that number reaches
+ *   here as the text it shows (`import-prepare.ts`), so it is read.
+ *
+ * The year comes first and every part has a fixed width, so there is no field
+ * order to guess. The ruling widens these two forms and no other: a one-digit
+ * month or day (`2011.7.1`), a clock after either (`2011.07.01 9:00`), a
+ * two-digit year (`11.07.01`), six or seven digits (`200961`) and a day-first
+ * dotted date (`01.07.2011`) stay refused. The day must exist
+ * ({@link namesRealCalendarDay}): `20090230` is refused, never rolled over.
+ * Read for a `date` and a `datetime` (midnight UTC, as a bare `2026/7/15` is
+ * read there), never for a `time`, which holds no day.
+ */
+const YEAR_FIRST_DOTTED_DAY = /^(\d{4})\.(\d{2})\.(\d{2})$/;
+/** See {@link YEAR_FIRST_DOTTED_DAY}. */
+const YEAR_FIRST_COMPACT_DAY = /^(\d{4})(\d{2})(\d{2})$/;
+
+/**
+ * Read a trimmed cell as a {@link YEAR_FIRST_DOTTED_DAY} or (a text cell only)
+ * {@link YEAR_FIRST_COMPACT_DAY} day, or `undefined`. The day is the ISO
+ * `YYYY-MM-DD` spelled from the cell's own digits.
+ */
+function readYearFirstDay(s: string, fromText: boolean): IsoTemporalCell | undefined {
+  const m = YEAR_FIRST_DOTTED_DAY.exec(s) ?? (fromText ? YEAR_FIRST_COMPACT_DAY.exec(s) : null);
+  if (!m) return undefined;
+  const [, y, mo, d] = m;
+  if (!namesRealCalendarDay(Number(y), Number(mo), Number(d))) return undefined;
+  return { day: `${y}-${mo}-${d}` };
+}
+
 /** The `HH:MM:SS` UTC clock of an instant. */
 function utcClock(t: Date): string {
   return `${pad2(t.getUTCHours())}:${pad2(t.getUTCMinutes())}:${pad2(t.getUTCSeconds())}`;
@@ -472,7 +511,9 @@ function utcClock(t: Date): string {
  * A text cell is read only in an {@link ISO_TEMPORAL_CELL} shape — ISO 8601,
  * or the export's own `YYYY-MM-DD HH:mm:ss` — or as a year-first date
  * ({@link YEAR_FIRST_CELL}: `2026/7/15`, `2026/7/15 9:00`, stored padded, the
- * clock read exactly as the export shape's), and only on a calendar day that
+ * clock read exactly as the export shape's), or — a `date` / `datetime` only —
+ * as a dotted or compact year-first day (`2011.07.01`, `20090615`;
+ * {@link YEAR_FIRST_DOTTED_DAY}, #25582), and only on a calendar day that
  * exists. A `time` cell is read by core's one `time` rule instead
  * ({@link readTimeOfDayCell}, #20722): a bare `HH:MM[:SS[.f…]]` or an ISO
  * 8601 instant, as the write door reads it, and otherwise in the year-first
@@ -561,7 +602,10 @@ export function parseDateCell(
   // [#20722] Core's rule is the whole verdict on an ISO 8601 `time` cell, so a
   // `time` cell it refuses is read in the year-first form alone — the one
   // reading the import has beyond the write door (#20534, maintainer ruling).
-  const cell = (kind === 'time' ? undefined : readIsoTemporalCell(s)) ?? readYearFirstCell(s);
+  // [#25582] The dotted and compact year-first days name a day and no clock,
+  // so a `time` cell never reads them.
+  const cell = (kind === 'time' ? undefined : readIsoTemporalCell(s) ?? readYearFirstDay(s, typeof raw === 'string'))
+    ?? readYearFirstCell(s);
   if (!cell) return undefined;
 
   if (cell.wall) {
@@ -608,8 +652,19 @@ function outsideYears(raw: unknown, kind: 'date' | 'datetime'): { firstYear: str
 
 /**
  * Match a cell against a field's options, accepting **either** the option value
- * (code) or its human label (case-insensitive). Returns the canonical option
- * value to store, or `undefined` on no match.
+ * (code) or its human label, each case-insensitively. Returns the canonical
+ * option value to store — the declared value, never the cell's spelling — or
+ * `undefined` on no match.
+ *
+ * Three passes, in order: the exact value, then the label case-insensitively,
+ * then [#25582, maintainer ruling 6377844879 letter A] the value
+ * case-insensitively (`CN` stores `cn`). The value pass comes last so that a
+ * cell matched before it existed stores what it stored. A cell that names, by
+ * case alone, two declared values that differ only by case (`cn` and `CN`) is
+ * not resolved by that pass — picking one would be a guess — so it gets the
+ * no-match answer it got before. The spec cannot declare such a pair (an option
+ * value is a lowercase `SystemIdentifierSchema`); a programmatically registered
+ * object can.
  */
 export function matchOption(
   raw: unknown,
@@ -626,7 +681,14 @@ export function matchOption(
   for (const o of options) {
     if (o && typeof o.label === 'string' && o.label.trim().toLowerCase() === lower) return o.value;
   }
-  return undefined;
+  // [#25582] Case-insensitive value match, unless it names two declared values.
+  let hit: { value: unknown } | undefined;
+  for (const o of options) {
+    if (!o || o.value === undefined || String(o.value).toLowerCase() !== lower) continue;
+    if (hit && String(hit.value) !== String(o.value)) return undefined;
+    hit ??= { value: o.value };
+  }
+  return hit?.value;
 }
 
 /** Split a multi-value cell on commas / semicolons / Chinese comma / newlines. */

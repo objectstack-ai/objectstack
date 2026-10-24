@@ -55,15 +55,17 @@ export const ShowcaseProjectDataset = defineDataset({
   ],
   measures: [
     { name: 'project_count', label: 'Projects', aggregate: 'count' },
-    // `budget`/`spent` are currency fields with NO fixed currency (no
-    // `currencyConfig`, so no currency of their own). The column's currency
-    // resolves through the measure's own `currency` → the field's
-    // `currencyConfig.defaultCurrency`, read only under `currencyMode: 'fixed'`
-    // → the tenant `localization.currency` default; with none set it shows a
-    // plain grouped number (never a hardcoded "$"). To pin a symbol, set a
-    // measure `currency`, or give the field a fixed currency:
-    // `currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' }`.
-    { name: 'budget_sum', label: 'Total Budget', aggregate: 'sum', field: 'budget', format: '0,0' },
-    { name: 'spent_sum', label: 'Total Spent', aggregate: 'sum', field: 'spent', format: '0,0' },
+    // `budget`/`spent` are currency fields with a FIXED currency
+    // (`currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' }`).
+    // The column's currency resolves through the measure's own `currency` →
+    // the field's `currencyConfig.defaultCurrency`, read only under
+    // `currencyMode: 'fixed'` → the tenant `localization.currency` default, so
+    // these measures need no `currency` of their own (never a hardcoded "$"
+    // in `format`). `0,0.00` writes a total the way the Projects list writes
+    // an amount, with two decimals. The Command Center's `cc_k6` tile, which
+    // aggregates `budget` without this dataset, declares the same pattern and
+    // currency, so both dashboards read one total budget alike.
+    { name: 'budget_sum', label: 'Total Budget', aggregate: 'sum', field: 'budget', format: '0,0.00' },
+    { name: 'spent_sum', label: 'Total Spent', aggregate: 'sum', field: 'spent', format: '0,0.00' },
   ],
 });

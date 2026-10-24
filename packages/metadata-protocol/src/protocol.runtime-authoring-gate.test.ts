@@ -49,6 +49,7 @@ import { EXPRESSION_INVALID, runAuthoringRules } from '@objectstack/lint';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import type { MetadataAuthoringChannel } from './protocol.js';
 import { SDUI_MANIFEST_SERVICE } from './index.js';
+import { RLS_MEMBERSHIP_RESOLVER_SERVICE } from '@objectstack/spec/contracts';
 import { PUBLIC_FORM_INTAKE_UNAVAILABLE, stampHtmlPageRequires } from './runtime-authoring-gate.js';
 
 /** The issue's body. Zod-valid: `approvers[].value` is just a string to the schema. */
@@ -4383,4 +4384,92 @@ describe('runtime authoring gate on VIEW writes — a bulk confirmText template 
             expect(JSON.parse(activeViewRows(rows)[0]!.metadata)).toEqual(stored);
         });
     }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #25234 refusal 12 — the HOST fact the door judges membership-key ownership
+// with. `assertRuntimeAuthoringRules` reads the registered membership
+// resolver's `keys` per publish (`RLS_MEMBERSHIP_RESOLVER_SERVICE`), `[]` when
+// none is registered; with that list the gate refuses a policy reading
+// `current_user.KEY` as a set that no kernel key, declaration or resolver owns.
+// Without a readable list (no registry, or a resolver whose `keys` is not a
+// string list) the door judges no ownership, as the CLI does.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('runtime authoring gate on PERMISSION writes — membership-key ownership (#25234)', () => {
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+
+    const policySet = () => ({
+        name: 'portal_team',
+        label: 'Portal Team',
+        objects: { leave_request: { allowRead: true, readScope: 'own' } },
+        rowLevelSecurity: [
+            { name: 'portal_rows', object: 'leave_request', operation: 'select', using: 'owner in current_user.portal_ids' },
+        ],
+    });
+
+    const publish = (services: (() => Map<string, any>) | undefined) => {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine, services as any, 'env_test') as any;
+        const saved = protocol
+            .saveMetaItem({ type: 'permission', name: 'portal_team', item: policySet() })
+            .then((r: unknown) => ({ result: r, err: null }), (e: unknown) => ({ result: null, err: e }));
+        return { rows, saved };
+    };
+    const permissionRows = (rows: Map<string, Row>) =>
+        Array.from(rows.values()).filter((r) => r.type === 'permission');
+
+    it('no resolver registered: a key nothing owns is refused, and nothing is written', async () => {
+        const { rows, saved } = publish(() => new Map());
+        const { err } = await saved;
+        expect({ code: (err as any)?.code, status: (err as any)?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issues = (err as { issues: Array<{ rule: string; path: string; message: string }> }).issues;
+        expect(issues.map((i) => ({ rule: i.rule, path: i.path }))).toEqual([
+            { rule: 'rls-predicate-unknown-user-variable', path: 'permissions.portal_team.rowLevelSecurity[0].using' },
+        ]);
+        expect(issues[0]!.message).toContain('current_user.portal_ids');
+        expect(permissionRows(rows)).toHaveLength(0);
+    });
+
+    it('a registered resolver that owns the key: the same policy publishes', async () => {
+        const { rows, saved } = publish(
+            () => new Map([[RLS_MEMBERSHIP_RESOLVER_SERVICE, { keys: ['portal_ids'], resolve: async () => ({}) }]]),
+        );
+        const { result, err } = await saved;
+        expect(err).toBeNull();
+        expect((result as { success: boolean }).success).toBe(true);
+        expect(permissionRows(rows)).toHaveLength(1);
+    });
+
+    it('a resolver owning OTHER keys does not own this one', async () => {
+        const { saved } = publish(
+            () => new Map([[RLS_MEMBERSHIP_RESOLVER_SERVICE, { keys: ['team_ids'], resolve: async () => ({}) }]]),
+        );
+        const { err } = await saved;
+        expect((err as { issues: Array<{ rule: string }> }).issues.map((i) => i.rule)).toEqual([
+            'rls-predicate-unknown-user-variable',
+        ]);
+    });
+
+    it('no readable ownership fact (no registry, or unreadable `keys`): no ownership is judged', async () => {
+        for (const services of [
+            undefined,
+            () => new Map([[RLS_MEMBERSHIP_RESOLVER_SERVICE, { resolve: async () => ({}) }]]),
+            () => new Map([[RLS_MEMBERSHIP_RESOLVER_SERVICE, { keys: [42] }]]),
+        ]) {
+            const { rows, saved } = publish(services);
+            const { result, err } = await saved;
+            expect(err).toBeNull();
+            expect((result as { success: boolean }).success).toBe(true);
+            expect(permissionRows(rows)).toHaveLength(1);
+        }
+    });
 });

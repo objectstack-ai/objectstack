@@ -2,6 +2,7 @@
 
 **Status**: Accepted (2026-07-14) — implemented: D1 tenant Layer 0 (`plugin-security/src/tenant-layer.ts`), D2/D3 posture ladder (`core/src/security/posture-ladder.ts`), locked by `authz-matrix-gate.test.ts` + `posture-ladder.test.ts` (#2920 B1–B4)
 · **Amended** (2026-10-18, ruling of record 6250748677 on #24164, letter E′) — D1: Layer 0 is inert on 22 of the 23 platform objects that are to declare a default row scope, and walls the 23rd, `sys_user_preference`, to its organisation; on all 23, Layer 1 silence is to mean the object's declared default row scope, a protocol key (#24338), not no filter. See the note under D1.
+· **Amended** (2026-10-23, ruling of record 6355206139 on #25233, letter B) — D2: the `EXTERNAL` rung admits explicit grants only (shares and share links, sharing rules, and held position and permission-set grants with their RLS evaluated), never the OWD baseline; the resolver returns it for a holder of the `external` organization role (#25541). See the note under D2.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0002](./0002-environment-database-isolation.md) (environment-per-database), [ADR-0057](./0057-erp-authorization-core-business-units-and-scope-depth.md) (scope depth), [ADR-0066](./0066-unified-authorization-model.md) (unified authz model, superuser bypass), [ADR-0090](./0090-permission-model-v2-concept-convergence.md) (permission model v2), [ADR-0093](./0093-tenancy-mode-and-membership-lifecycle.md) (tenancy service)
 **Scopes**: the "cross-tenant RLS does not exist here" claim in [ADR-0073](./0073-automation-execution-identity.md) (see Context)
@@ -28,9 +29,9 @@ drafting this ADR).
    enum `PLATFORM_ADMIN > TENANT_ADMIN > MEMBER > EXTERNAL`, resolved once in
    `resolveAuthzContext`. Each rung maps to **exactly one** row-visibility
    injection rule; visibility is strictly nested down the ladder. The
-   `EXTERNAL` rung's semantics are defined and test-locked now (explicit shares
-   only, never OWD); its enforcement path ships when an external principal type
-   exists.
+   `EXTERNAL` rung's semantics are defined and test-locked now (explicit grants
+   only, never OWD; channel list amended 2026-10-23, see D2); its enforcement
+   path shipped with the `external` organization role (#25233).
 3. **D3 — Posture derives from capabilities, never from roles.** The
    platform-admin tier derives from held capabilities
    (`viewAllRecords`/`modifyAllRecords`), and better-auth `role='admin'` is
@@ -207,7 +208,7 @@ enum AuthzPosture {
   PLATFORM_ADMIN = 3, // crosses the tenant wall where object posture permits (D1)
   TENANT_ADMIN   = 2, // all rows within the organization
   MEMBER         = 1, // business RLS (ownership / unit depth / sharing) within the organization
-  EXTERNAL       = 0, // explicitly shared rows only — never OWD-derived visibility
+  EXTERNAL       = 0, // explicit grants only — shares, sharing rules, grant RLS; never the OWD baseline
 }
 ```
 
@@ -219,15 +220,36 @@ enum AuthzPosture {
   set at rung *n* is a superset of rung *n−1*. The
   `resolve-authz-context.test.ts` suite upgrades from per-case assertions to a
   `role × object × expected-rows` matrix snapshot asserting the nesting.
-- **EXTERNAL is defined and locked now, enforced later.** Semantics fixed by
-  this ADR: an EXTERNAL principal sees only rows explicitly shared to it —
-  sharing rules and OWD-derived baselines never apply; a misconfiguration can
-  only *shrink* its visibility, never widen it. No external principal type
-  exists today (the sharing chain has no such concept), so the resolver cannot
-  yet return `EXTERNAL`; the enum value, its injection rule, and its
-  semantics tests land with D2 so the rung cannot be reinvented differently
-  when portal/external membership arrives (aligned with ADR-0093's membership
-  model when it does).
+- **EXTERNAL — the channel list (amended 2026-10-23, ruling of record
+  6355206139 on #25233, letter B).** An EXTERNAL principal is a member of the
+  organization's member pool who holds the `external` organization role. It
+  reaches rows through explicit grants only:
+  - shares, share links included;
+  - sharing rules (the grants they materialise);
+  - the position and permission-set grants it holds, with their row-level
+    security evaluated, so a predicate such as
+    `supplier in current_user.<key>` reaches it as it reaches a member.
+
+  It never reaches the internal OWD baseline: its org-wide default is
+  owner-only on every object unless a held grant's RLS (`using`) speaks for
+  that object and operation class, and its writes carry the member's
+  owner-only floor (`external_default`). A `controlled_by_parent` detail is
+  not floored on its own; its rows follow the master, which is. Nor does it
+  reach the everyone-anchored default sets or the member directory. A
+  misconfiguration can only *shrink* its visibility, never widen it. The
+  resolver stamps `audience: 'external'` on a holder and `derivePosture`
+  returns `EXTERNAL` (#25515, #25541).
+
+  One limit, named: an object with no `owner_id` whose effective model is
+  public is under no OWD for any principal, so an external holding an
+  RLS-less grant on it reads every row. Reaching such an object takes an
+  administrator's explicit grant.
+
+  _Originally (2026-07-14): "an EXTERNAL principal sees only rows explicitly
+  shared to it — sharing rules and OWD-derived baselines never apply … No
+  external principal type exists today, so the resolver cannot yet return
+  `EXTERNAL`." Sharing rules now apply; the deny-by-default direction
+  stands._
 
 ### D3 — Posture derives from capabilities, never from roles
 
@@ -243,6 +265,13 @@ enum AuthzPosture {
   source that grants that position** (the existing `mapMembershipRole`
   normalization becomes a grant-provisioning concern, not an
   enforcement-time input).
+- `EXTERNAL` (2026-10-23, #25233) derives from the reserved `org_external`
+  position, which the resolver projects from `sys_member.role = external` in
+  the active organization. As with `role='admin'` above, the role is the one
+  source of a position; enforcement reads the posture, never the role. It is
+  the one rung whose evidence is an identity position rather than a
+  capability bit, and it outranks `TENANT_ADMIN` (only `PLATFORM_ADMIN`
+  precedes it). ADR-0099 I3 records the exception.
 - **No enforcement-time code path may consult the better-auth role directly.**
   This removes dual-track adjudication: #2836-class conflicts (explicit deny
   from one track out-composing a wildcard allow from the other) become

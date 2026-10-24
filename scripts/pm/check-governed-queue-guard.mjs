@@ -4151,6 +4151,24 @@ export async function selfTest() {
     tierPass.exitCode === EXIT_CLEAR && tierPass.conclusion === 'cleared' && tierPass.entries[0].record.state === 'stands',
     JSON.stringify(tierPass.entries[0].record),
   );
+  // ⭐ Maintainer 2026-10-24 (「守卫在合并队列里只认「另一账户复审」，这个没必要，去掉这条规则」):
+  // the record stands on TIER ALONE. A project-thread pull request (its body
+  // carries the `claude-projects-attribution` login) whose record was written
+  // from the SAME account — even one still carrying a `Reviewed-by-account:`
+  // line naming that login — clears, and no account is compared or printed.
+  // This case is what keeps the retired account leg retired.
+  const sameAccountRecord = recordComment();
+  sameAccountRecord.body = sameAccountRecord.body.replace('Reviewed-by: `session_01SEAT`', 'Reviewed-by: `session_01SEAT`\nReviewed-by-account: `lane-account-a`');
+  const sameAccount = await tierRun({
+    prBody: `<!-- claude-projects-attribution: {"github_login":"lane-account-a"} -->\n_Requested by **Elon**_\n\nFixes #${REF_CARD}`,
+    comments: [sameAccountRecord],
+  });
+  assert(
+    'a-project-thread-PR-whose-record-was-written-from-the-SAME-account-PASSES-the-record-stands-on-tier-alone',
+    sameAccount.exitCode === EXIT_CLEAR && sameAccount.conclusion === 'cleared' && sameAccount.entries[0].record.state === 'stands' &&
+      !/Reviewed-by-account|accounts compared|SAME account/.test(renderGuardVerdict(sameAccount)),
+    JSON.stringify(sameAccount.entries[0].record),
+  );
   // ⭐ #19133, end to end: the generalised tier. An agents + settings diff lands
   // on the same record — and its lit control, the same diff with NO record, is
   // refused (the card's own acceptance line).

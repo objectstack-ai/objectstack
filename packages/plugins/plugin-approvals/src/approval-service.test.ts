@@ -190,6 +190,16 @@ const ADMIN_SESSIONS: Array<[string, any]> = [
 const asUser = (userId: string) =>
   ({ userId, tenantId: 't1', positions: [], permissions: [] }) as any;
 
+/**
+ * Give each of `ids` a `sys_user` row. A reassign target must name an account
+ * (#25485), so a test that hands a slot to a user id staffs the directory with
+ * it first; the doubles start with an empty `sys_user`.
+ */
+function staffDirectory(engine: { _tables: Record<string, FakeRow[]> }, ...ids: string[]): void {
+  const users = (engine._tables['sys_user'] ??= []);
+  for (const id of ids) if (!users.some(u => u.id === id)) users.push({ id });
+}
+
 function nodeConfig(approvers: string[], extra: Record<string, any> = {}) {
   return {
     approvers: approvers.map(v => ({ type: 'user' as const, value: v })),
@@ -1407,6 +1417,7 @@ describe('ApprovalService (node era)', () => {
 
     it('reassign: names the record', async () => {
       const id = await openRequestId(openInput(['u9']), CTX);
+      staffDirectory(engine, 'u7');
       const out = await svc.reassign(id, { actorId: 'u9', to: 'u7' }, asUser('u9'));
       expect(named('approval_reassign', out)).toBe('Reassigned "Acme Renewal"');
     });
@@ -1509,6 +1520,7 @@ describe('ApprovalService (node era)', () => {
 
   it('reassign: hands the slot to a new approver and audits the move on structured fields (#4365)', async () => {
     const req = await svc.openNodeRequest(openInput(['u9', 'u2']), CTX);
+    staffDirectory(engine, 'u7');
     const out = await svc.reassign(req.id, { actorId: 'u9', to: 'u7' }, asUser('u9'));
     expect(out.request.pending_approvers).toEqual(['u7', 'u2']);
     const actions = await svc.listActions(req.id, SYS);
@@ -1521,6 +1533,7 @@ describe('ApprovalService (node era)', () => {
 
   it('reassign: a user comment is stored verbatim alongside the structured fields (#4365)', async () => {
     const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+    staffDirectory(engine, 'u7');
     await svc.reassign(req.id, { actorId: 'u9', to: 'u7', comment: 'On leave next week' }, asUser('u9'));
     const actions = await svc.listActions(req.id, SYS);
     expect(actions.at(-1)).toMatchObject({
@@ -1549,6 +1562,7 @@ describe('ApprovalService (node era)', () => {
     // approval-requested-notification.integration.test.ts); this test reads
     // only what the step under test sends after it.
     expect(emitted.splice(0).map(e => e.topic)).toEqual(['approval.requested']);
+    staffDirectory(engine, 'u7');
     await svc.reassign(req.id, { actorId: 'u9', to: 'u7' }, asUser('u9'));
     expect(emitted).toHaveLength(1);
     expect(emitted[0]).toMatchObject({ topic: 'approval.reassigned', audience: ['u7'] });
@@ -1558,6 +1572,148 @@ describe('ApprovalService (node era)', () => {
     const req = await svc.openNodeRequest(openInput(['u9', 'u2']), CTX);
     await expect(svc.reassign(req.id, { actorId: 'intruder', to: 'u7' }, asUser('intruder'))).rejects.toThrow(/FORBIDDEN/);
     await expect(svc.reassign(req.id, { actorId: 'u9', to: 'u2' }, asUser('u9'))).rejects.toThrow(/VALIDATION_FAILED/);
+  });
+
+  // ── reassign target resolution (#25485) ─────────────────────────
+  //
+  // A `to` that resolves to no one used to be written onto the slate, so the
+  // request waited on nobody until an override actor moved it again. Each
+  // refusal pins all three halves: the named VALIDATION_FAILED, the slate and
+  // its index unchanged, and no audit row or notice for a move that did not
+  // happen. Each preservation pin reads what the slate actually became.
+  describe('reassign target resolution (#25485)', () => {
+    const PLATFORM_ADMIN_CTX = { userId: 'root', tenantId: 't1', positions: [], permissions: ['admin_full_access'] } as any;
+    let emitted: any[];
+
+    beforeEach(() => {
+      emitted = [];
+      svc.attachMessaging({ async emit(input) { emitted.push(input); } });
+    });
+
+    /** Open on `slate` and hand back the request id, with the opening's notices cleared. */
+    async function openOn(slate: string[]): Promise<string> {
+      const { id } = (await svc.openNodeRequest(openInput(slate), CTX)) as { id: string };
+      // The request takes the acting context's organization here (no schema on
+      // the double), and every screen below is judged against it.
+      expect(engine._tables['sys_approval_request'].find(r => r.id === id)?.organization_id).toBe('t1');
+      emitted.splice(0);
+      return id;
+    }
+
+    async function expectRefusedUnchanged(id: string, move: Promise<unknown>, message: RegExp, slate: string[]) {
+      await expect(move).rejects.toThrow(message);
+      const row = engine._tables['sys_approval_request'].find(r => r.id === id)!;
+      expect(row.pending_approvers).toBe(slate.join(','));
+      const indexed = (engine._tables['sys_approval_approver'] ?? []).filter(r => r.request_id === id);
+      expect(indexed.map(r => r.approver).sort()).toEqual([...slate].sort());
+      const moves = (engine._tables['sys_approval_action'] ?? []).filter(r => r.request_id === id && r.action === 'reassign');
+      expect(moves).toEqual([]);
+      expect(emitted.filter(e => e.topic === 'approval.reassigned')).toEqual([]);
+    }
+
+    it('refuses a user id no account carries, as the slot holder and as a platform admin (the card\'s two measurements)', async () => {
+      const id = await openOn(['u9']);
+      await expectRefusedUnchanged(
+        id, svc.reassign(id, { actorId: 'u9', to: 'nobody-at-all' }, asUser('u9')),
+        /^VALIDATION_FAILED: cannot reassign to 'nobody-at-all' — it names no user in this request's organization\./, ['u9'],
+      );
+      await expectRefusedUnchanged(
+        id, svc.reassign(id, { actorId: 'root', to: 'usr_does_not_exist', from: 'u9' }, PLATFORM_ADMIN_CTX),
+        /^VALIDATION_FAILED: cannot reassign to 'usr_does_not_exist' — /, ['u9'],
+      );
+    });
+
+    it('refuses the admin rescue onto an unresolvable target too: the override does not exempt the new slot', async () => {
+      const id = await openOn(['position:ghost']);
+      await expectRefusedUnchanged(
+        id, svc.reassign(id, { actorId: 'root', to: 'usr_does_not_exist' }, PLATFORM_ADMIN_CTX),
+        /^VALIDATION_FAILED: cannot reassign to 'usr_does_not_exist' — /, ['position:ghost'],
+      );
+    });
+
+    it('refuses an email no account carries', async () => {
+      engine._tables['sys_user'] = [{ id: 'u7', email: 'ada@example.com' }];
+      const id = await openOn(['u9']);
+      await expectRefusedUnchanged(
+        id, svc.reassign(id, { actorId: 'u9', to: 'grace@example.com' }, asUser('u9')),
+        /^VALIDATION_FAILED: cannot reassign to 'grace@example.com' — it names no user/, ['u9'],
+      );
+    });
+
+    it('refuses a user who is provably a member of other organizations only, in the same words as a missing user', async () => {
+      engine._tables['sys_user'] = [{ id: 'u_other' }];
+      engine._tables['sys_member'] = [{ id: 'm1', user_id: 'u_other', organization_id: 't2' }];
+      const id = await openOn(['u9']);
+      const missing = await svc.reassign(id, { actorId: 'u9', to: 'u_missing' }, asUser('u9')).catch((e: Error) => e.message);
+      const elsewhere = await svc.reassign(id, { actorId: 'u9', to: 'u_other' }, asUser('u9')).catch((e: Error) => e.message);
+      // One text for both, so the answer is not a probe of other tenants' directories.
+      expect(elsewhere).toBe(String(missing).replace('u_missing', 'u_other'));
+      await expectRefusedUnchanged(
+        id, svc.reassign(id, { actorId: 'u9', to: 'u_other' }, asUser('u9')),
+        /^VALIDATION_FAILED: cannot reassign to 'u_other' — it names no user in this request's organization\./, ['u9'],
+      );
+    });
+
+    it('refuses a position no one holds in the request\'s organization, a holder in another one included', async () => {
+      engine._tables['sys_user_position'] = [{ id: 'up1', user_id: 'u_far', position: 'finance', organization_id: 't2' }];
+      const id = await openOn(['u9']);
+      await expectRefusedUnchanged(
+        id, svc.reassign(id, { actorId: 'u9', to: 'position:finance' }, asUser('u9')),
+        /^VALIDATION_FAILED: cannot reassign to 'position:finance' — no one holds position 'finance' in this request's organization\./,
+        ['u9'],
+      );
+    });
+
+    it('refuses every other type:value literal: no actor takes a team, department or membership-tier address', async () => {
+      engine._tables['sys_team'] = [{ id: 'ops', organization_id: 't1' }];
+      const id = await openOn(['u9']);
+      for (const literal of ['team:ops', 'department:sales', 'org_membership_level:admin', 'role:sales_manager']) {
+        await expectRefusedUnchanged(
+          id, svc.reassign(id, { actorId: 'u9', to: literal }, asUser('u9')),
+          new RegExp(`^VALIDATION_FAILED: cannot reassign to '${literal}' — it is a slot literal no approver acts under`),
+          ['u9'],
+        );
+      }
+    });
+
+    it('a caller who may not move the slot is refused FORBIDDEN before the target is resolved: no directory answer leaks', async () => {
+      const id = await openOn(['u9']);
+      const reads = engine._finds.length;
+      await expect(svc.reassign(id, { actorId: 'intruder', to: 'nobody-at-all' }, asUser('intruder')))
+        .rejects.toThrow(/^FORBIDDEN:/);
+      // The caller's OWN account is read (its email is an acting address);
+      // the target is never looked up.
+      expect(engine._finds.slice(reads).filter(f => JSON.stringify(f.options?.where ?? f.options?.filter ?? {})
+        .includes('nobody-at-all'))).toEqual([]);
+    });
+
+    it('moves the slot to a user id of a member here, and to one with no membership rows at all (no tenancy fact, as the sibling screens read it)', async () => {
+      engine._tables['sys_user'] = [{ id: 'u7' }, { id: 'u8' }];
+      engine._tables['sys_member'] = [{ id: 'm1', user_id: 'u7', organization_id: 't1' }, { id: 'm2', user_id: 'u7', organization_id: 't2' }];
+      const id = await openOn(['u9', 'u2']);
+      const first = await svc.reassign(id, { actorId: 'u9', to: 'u7' }, asUser('u9'));
+      expect(first.request.pending_approvers).toEqual(['u7', 'u2']);
+      const second = await svc.reassign(id, { actorId: 'u2', to: 'u8' }, asUser('u2'));
+      expect(second.request.pending_approvers).toEqual(['u7', 'u8']);
+      expect(emitted.filter(e => e.topic === 'approval.reassigned').map(e => e.audience)).toEqual([['u7'], ['u8']]);
+    });
+
+    it('moves the slot to an email an account carries, in the spelling the account stores', async () => {
+      engine._tables['sys_user'] = [{ id: 'u7', email: 'ada@example.com' }];
+      const id = await openOn(['u9']);
+      const out = await svc.reassign(id, { actorId: 'u9', to: 'ada@example.com' }, asUser('u9'));
+      expect(out.request.pending_approvers).toEqual(['ada@example.com']);
+    });
+
+    it('moves the slot to a position someone holds here, and its holder then takes it', async () => {
+      engine._tables['sys_user_position'] = [{ id: 'up1', user_id: 'u_fin', position: 'finance', organization_id: 't1' }];
+      const id = await openOn(['u9']);
+      const out = await svc.reassign(id, { actorId: 'u9', to: 'position:finance' }, asUser('u9'));
+      expect(out.request.pending_approvers).toEqual(['position:finance']);
+      const decided = await svc.decideNode(id, { decision: 'approve' } as any,
+        { userId: 'u_fin', tenantId: 't1', positions: ['finance'], permissions: [] } as any);
+      expect(decided.request.status).toBe('approved');
+    });
   });
 
   it('remind: notifies pending approvers, audits, and throttles repeats', async () => {
@@ -1674,6 +1830,7 @@ describe('ApprovalService (node era)', () => {
     expect(await svc.redeemActionToken(short.approve)).toMatchObject({ ok: false, reason: 'expired' });
 
     const live = await svc.issueActionTokens(req.id, 'u9');
+    staffDirectory(engine, 'u7');
     await svc.reassign(req.id, { actorId: 'u9', to: 'u7' }, asUser('u9'));
     expect(await svc.redeemActionToken(live.approve)).toMatchObject({ ok: false, reason: 'not_approver' });
 
@@ -1788,6 +1945,7 @@ describe('ApprovalService (node era)', () => {
     const req = await svc.openNodeRequest(
       openInput(['u9', 'u2'], {}, { escalation: { timeoutHours: 1, action: 'reassign', escalateTo: 'boss', notifySubmitter: false } }), CTX,
     );
+    staffDirectory(engine, 'u7', 'boss');
     await svc.reassign(req.id, { actorId: 'u9', to: 'u7' }, SYS);
     expect(indexRows().map(r => r.approver).sort()).toEqual(['u2', 'u7']);
 
@@ -1926,6 +2084,7 @@ describe('ApprovalService (node era)', () => {
   });
 
   it('runEscalations: reassign replaces the approver set with escalateTo', async () => {
+    staffDirectory(engine, 'boss');
     const req = await svc.openNodeRequest(
       openInput(['u9', 'u2'], {}, { escalation: { timeoutHours: 1, action: 'reassign', escalateTo: 'boss', notifySubmitter: false } }), CTX,
     );
@@ -1972,6 +2131,137 @@ describe('ApprovalService (node era)', () => {
     await svc.runEscalations();
     expect(emitted).toHaveLength(1);
     expect(emitted[0].audience).toEqual(['u9', 'u5']);
+  });
+
+  // ── SLA reassign target resolution (#25598) ─────────────────────
+  //
+  // An escalation `reassign` whose `escalateTo` expands to no position holder
+  // falls back to the literal. A literal that resolves to no one used to be
+  // written onto the slate, stranding the request the way the reassign door
+  // did (#25485). Now the door's predicate judges it: the slate stays, its
+  // approvers are told, and the audit row says why.
+  describe('SLA reassign target resolution (#25598)', () => {
+    let emitted: any[];
+
+    beforeEach(() => {
+      emitted = [];
+      svc.attachMessaging({ async emit(input) { emitted.push(input); } });
+    });
+
+    /** Open an overdue `reassign` escalation to `escalateTo` on `slate`, the opening's notices cleared. */
+    async function overdueReassign(escalateTo: string, recordId = 'opp1'): Promise<string> {
+      const { id } = (await svc.openNodeRequest(
+        openInput(['u9', 'u2'], { recordId, record: { id: recordId } }, { escalation: { timeoutHours: 1, action: 'reassign', escalateTo, notifySubmitter: true } }), CTX,
+      )) as { id: string };
+      expect(engine._tables['sys_approval_request'].find(r => r.id === id)?.organization_id).toBe('t1');
+      makeOverdue(id);
+      emitted.splice(0);
+      return id;
+    }
+
+    const requestRow = (id: string) => engine._tables['sys_approval_request'].find(r => r.id === id)!;
+    const indexedOf = (id: string) => (engine._tables['sys_approval_approver'] ?? [])
+      .filter(r => r.request_id === id).map(r => r.approver).sort();
+    const escalateRow = (id: string) => (engine._tables['sys_approval_action'] ?? [])
+      .find(r => r.request_id === id && r.action === 'escalate');
+
+    async function expectKeptAndNotified(id: string, escalateTo: string, why: string) {
+      const before = { ...requestRow(id) };
+      emitted.splice(0);
+      expect(await svc.runEscalations()).toMatchObject({ escalated: 1 });
+      const row = requestRow(id);
+      expect(row.status).toBe('pending');
+      expect(row.pending_approvers).toBe('u9,u2');
+      expect(row.pending_approver_labels).toEqual(before.pending_approver_labels);
+      expect(indexedOf(id)).toEqual(['u2', 'u9']);
+      expect(escalateRow(id)?.comment).toBe(
+        `reassign → ${escalateTo} — not applied: ${why} The pending approvers were kept and notified.`,
+      );
+      // The current slate hears the lapse; the target that resolves to no one
+      // is not in the audience, and nothing announces a move.
+      expect(emitted.map(e => e.topic)).toEqual(['approval.sla_breached', 'approval.sla_breached']);
+      expect(emitted[0].audience).toEqual(['u9', 'u2']);
+      expect(emitted.some(e => e.topic === 'approval.escalated')).toBe(false);
+      // The submitter is told the action that was TAKEN.
+      expect(emitted[1].audience).toEqual(['u1']);
+      expect(emitted[1].payload.body).toContain("escalation action 'notify' was taken");
+      // Still single-shot: the escalate row is the marker.
+      expect(await svc.runEscalations()).toMatchObject({ escalated: 0 });
+    }
+
+    it('keeps the slate when escalateTo names no account (a departed user, a mistyped id)', async () => {
+      const id = await overdueReassign('ghost_user');
+      await expectKeptAndNotified(id, 'ghost_user', 'it names no user in this request\'s organization.');
+    });
+
+    it('keeps the slate when escalateTo is a position name nobody holds here', async () => {
+      engine._tables['sys_user_position'] = [
+        { id: 'up1', user_id: 'u5', position: 'approvals_supervisor', organization_id: 't2' }, // other tenant only
+      ];
+      const id = await overdueReassign('approvals_supervisor');
+      await expectKeptAndNotified(id, 'approvals_supervisor', 'it names no user in this request\'s organization.');
+    });
+
+    it('keeps the slate when escalateTo is a user whose only membership is another organization', async () => {
+      engine._tables['sys_user'] = [{ id: 'u_far' }];
+      engine._tables['sys_member'] = [{ id: 'm1', user_id: 'u_far', organization_id: 't2' }];
+      const id = await overdueReassign('u_far');
+      await expectKeptAndNotified(id, 'u_far', 'it names no user in this request\'s organization.');
+    });
+
+    it('keeps the slate when escalateTo is a slot literal no approver acts under, or a position:<p> nobody holds', async () => {
+      const team = await overdueReassign('team:night_shift');
+      await expectKeptAndNotified(team, 'team:night_shift', 'it is a slot literal no approver acts under, so no one could ever decide the request.');
+      const ghost = await overdueReassign('position:ghost', 'opp2');
+      await expectKeptAndNotified(ghost, 'position:ghost', 'no one holds position \'ghost\' in this request\'s organization.');
+    });
+
+    it('a failed sys_user read moves nothing and records nothing, so the next sweep escalates', async () => {
+      staffDirectory(engine, 'boss');
+      const id = await overdueReassign('boss');
+      const find = engine.find.bind(engine);
+      (engine as any).find = async (object: string, q: any) => {
+        if (object === 'sys_user') throw new Error('directory down');
+        return find(object, q);
+      };
+      expect(await svc.runEscalations()).toMatchObject({ escalated: 0 });
+      expect(requestRow(id).pending_approvers).toBe('u9,u2');
+      expect(escalateRow(id)).toBeUndefined();
+      expect(emitted).toEqual([]);
+      (engine as any).find = find;
+      expect(await svc.runEscalations()).toMatchObject({ escalated: 1 });
+      expect(requestRow(id).pending_approvers).toBe('boss');
+    });
+
+    it('still reassigns to an account\'s user id, its email, and a position:<p> someone holds here', async () => {
+      engine._tables['sys_user'] = [{ id: 'boss', email: 'boss@example.com' }];
+      engine._tables['sys_member'] = [{ id: 'm1', user_id: 'boss', organization_id: 't1' }];
+      engine._tables['sys_user_position'] = [
+        { id: 'up1', user_id: 'u5', position: 'finance', organization_id: 't1' },
+      ];
+      const byId = await overdueReassign('boss');
+      const byEmail = await overdueReassign('boss@example.com', 'opp2');
+      const byPosition = await overdueReassign('position:finance', 'opp3');
+      expect(await svc.runEscalations()).toMatchObject({ escalated: 3 });
+      expect(requestRow(byId).pending_approvers).toBe('boss');
+      expect(requestRow(byEmail).pending_approvers).toBe('boss@example.com');
+      expect(requestRow(byPosition).pending_approvers).toBe('position:finance');
+      expect(indexedOf(byPosition)).toEqual(['position:finance']);
+      for (const [id, to] of [[byId, 'boss'], [byEmail, 'boss@example.com'], [byPosition, 'position:finance']]) {
+        expect(escalateRow(id)?.comment).toBe(`reassign → ${to}`);
+      }
+      // A `type:value` slot is no messaging address (`notify` drops it), so the
+      // position's hand-off announces itself to no one; that is today's notice.
+      expect(emitted.filter(e => e.topic === 'approval.escalated').map(e => e.audience))
+        .toEqual([['boss'], ['boss@example.com']]);
+      const submitterNotices = emitted.filter(e => e.topic === 'approval.sla_breached');
+      expect(submitterNotices).toHaveLength(3);
+      expect(submitterNotices.every(e => e.payload.body.includes("escalation action 'reassign' was taken"))).toBe(true);
+      // …and the holder of the position then decides with the default actor.
+      await svc.decideNode(byPosition, { decision: 'approve', actorId: 'u5' },
+        { userId: 'u5', tenantId: 't1', positions: ['finance'], permissions: [] } as any);
+      expect(requestRow(byPosition).status).toBe('approved');
+    });
   });
 
   it('runEscalations: skips requests that are not yet due or have no SLA', async () => {
@@ -2187,6 +2477,7 @@ describe('ApprovalService — admin override (#3424)', () => {
 
   it('an admin can reassign a stuck request to a real approver, who then decides normally', async () => {
     const req = await svc.openNodeRequest(stuckInput(), CTX);
+    staffDirectory(engine, 'u7');
     const out = await svc.reassign(req.id, { actorId: 'owner', to: 'u7' }, TENANT_ADMIN);
     expect(out.request.pending_approvers).toEqual(['u7']);
     const decided = await svc.decideNode(
@@ -3414,6 +3705,7 @@ describe('ApprovalService — decision_progress & deep links (#2678 P1.5)', () =
     const emitted: any[] = [];
     svc.attachMessaging({ async emit(input) { emitted.push(input); } });
     const req = await svc.openNodeRequest(openInput(['u1', 'u2']), CTX);
+    staffDirectory(engine, 'u7');
     await svc.reassign(req.id, { actorId: 'u1', to: 'u7' }, SYS);
     const note = emitted.find(e => e.topic === 'approval.reassigned');
     expect(note.payload.actionUrl).toBe(`/system/approvals?request=${encodeURIComponent(req.id)}`);
@@ -4433,6 +4725,7 @@ describe('ApprovalService — every slot reader takes the acting addresses (#213
     await expect(svc.reassign(req.id, { to: 'u_next' } as any, BYSTANDER))
       .rejects.toThrow("FORBIDDEN: 'u_bystander' is not a pending approver on this request");
     // With `from` unnamed, the slot handed over is the one the holder takes.
+    staffDirectory(engine, 'u_next');
     const moved = await svc.reassign(req.id, { to: 'u_next' } as any, HOLDER);
     expect(moved.request.pending_approvers).toEqual(['u_next']);
     const [reassigned] = actionsOf(engine, req.id, 'reassign');
@@ -4654,6 +4947,7 @@ describe('ApprovalService — the `role:` arm retired; the override decides what
       const svc = svcFor(engine);
       const { id } = await plant(engine, svc);
       const [, admin] = RESCUERS[2];
+      staffDirectory(engine, 'u_holder');
       const moved = await svc.reassign(id, { actorId: admin.userId, to: 'u_holder' } as any, admin);
       expect(moved.request.pending_approvers).toEqual(['u_holder']);
       const out = await svc.decideNode(id, { decision: 'approve' } as any, HOLDER);

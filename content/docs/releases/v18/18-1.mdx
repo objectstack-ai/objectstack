@@ -3,22 +3,21 @@ title: 18.1.0
 description: "Release notes and upgrade checklist for 18.1.0, the first minor of the v18 line: a minor that carries breaking changes. ADR-0131 finishes (an organization-less row confers nothing), a production os serve with no organization object is refused, nine metadata narrowings with automatic conversions, one federation rule at every datasource door, and an unreadable SQLite file is refused instead of replaced."
 ---
 
-<Callout type="warn">
-**How this page was compiled.** From the 18.1.0 changesets on `main` at
-`b2c0752900` (2026-10-23), before the 18.1.0 cut, through a rehearsed
-`pnpm run version` in a throwaway clone: 73 packages move to 18.1.0, and their
-`## 18.1.0` sections hold **227 distinct entries**. The five sections below use
-the grouping the GitHub Release body uses, and the counts are that grouping's:
-**73** need you to act, **9** are converted for you, **41** add capabilities,
-**0** declare a semantic change, and **104** are other fixes. Nothing here was
-read off a published 18.1.0 package or walked on an upgrade yet: every refusal
-is described as its changeset describes it. Anything that lands on `main` before
-the cut is in the CHANGELOG and not on this page.
+<Callout type="info">
+**How this page was compiled.** From the `## 18.1.0` sections of the published
+CHANGELOGs (version commit `e649c2d91e`, #25606): 73 packages carry one, and
+together they hold **265 distinct entries**. The five sections below use the
+grouping the GitHub Release body uses, and the counts are that grouping's:
+**82** need you to act, **9** are converted for you, **50** add capabilities,
+**2** declare a semantic change, and **122** are other fixes. The
+[upgrade checklist](#upgrade-checklist) was walked on 2026-10-24 from 18.0.0;
+each line it measured says so. A refusal it did not reach is described as its
+changeset describes it.
 </Callout>
 
 ## Highlights — 18.1.0
 
-- ⚠️ **A minor that breaks.** 18.1.0 is a minor version, and 82 of its
+- ⚠️ **A minor that breaks.** 18.1.0 is a minor version, and 91 of its
   changesets are declared breaking. Under the level rule the maintainer ruled
   on 2026-10-21 (#25105, "ruling A"), the v18 line takes no further major: a
   change to the metadata protocol takes `minor`, and every other change takes
@@ -62,6 +61,46 @@ the cut is in the CHANGELOG and not on this page.
   sets on its hosted containers (`c6bdcac`, #25399). It ships as `patch` and
   is breaking: see [Cloud-managed environments](#cloud-managed-environments-os_cloud_managed1).
   Self-hosted deployments are unchanged.
+- **An `external` membership grade for portal users** (`9019af9`, #25515). A
+  supplier's or customer's portal user is a member of the organization but
+  reads only its own identity rows, and reaches data only through grants made
+  to it (`45f9962`, #25541). A roster object can declare **membership keys** that a row policy reads
+  as `current_user.KEY` (`dc532e8`, #25513; `e5eab06`, #25528).
+
+---
+
+## Release facts, as measured
+
+Read with `npm view` and `npm pack` on 2026-10-24, after the publish:
+
+| | Measured |
+| :--- | :--- |
+| `latest` | `18.1.0`, on every `@objectstack/*` package read (`spec`, `cli`, `runtime`, `core`, `objectql`, `skills`, `organizations`, `console`) and on `create-objectstack` |
+| `next` | `18.0.0-next.5`, still **older** than `latest`. ⛔ Never install `@next` for 18 |
+| `rc` | `17.0.0-rc.6` (`@objectstack/skills` and `@objectstack/organizations` carry no `rc` tag) |
+| Published | `@objectstack/cli@18.1.0` at 2026-10-24 09:06 UTC; 73 GitHub Releases, one per package, tagged `<package>@18.1.0`, between 09:12 and 09:13 UTC |
+| Version commit | `e649c2d91e` (#25606). The first 18.1.0 version commit, `74fa3cb6df` (#24876), was reverted before anything published (#25605) |
+
+Read the 18.1.0 CHANGELOGs with two cautions:
+
+- **The commit beside an entry is mostly not its own.** 260 of the 265 entries
+  open with `3937697`, the commit of #25605 that reverted the first cut and
+  re-added every pending changeset; only the five changesets merged after it
+  carry their own commit. The same is true in the published tarballs: all 34
+  entries of `@objectstack/cli@18.1.0`'s `## 18.1.0` section read `3937697`.
+  To find the change behind an entry, search its headline in the repository's
+  history; this page cites each entry's own commit.
+- **A pinned `@objectstack/cli` still ranges.** The published CLI declares
+  eight of its `@objectstack/*` dependencies as caret ranges: `core`,
+  `driver-memory`, `driver-mongodb`, `driver-sql`, `driver-sqlite-wasm`,
+  `objectql`, `observability` and `runtime` (`^18.1.0` in 18.1.0, `^18.0.0` in
+  18.0.0). An app that pins every `@objectstack/*` package exactly therefore
+  gets a newer 18.x of those, and of the packages they depend on, as soon as one
+  publishes. Measured: an app pinned to exactly `18.0.0` installed today holds
+  17 `@objectstack/*` packages at 18.1.0 beside 60 at 18.0.0. See
+  [Move the pins](#1-move-the-pins) for the override that holds them.
+
+The Docker image was not read for this page.
 
 ---
 
@@ -81,15 +120,23 @@ else:
 | Everything else: REST, drivers, services, the CLI, the Console, `feat:` and `fix!:` alike | `patch` |
 
 So a **patch** release can break a REST client, a boot or a deployment
-script, and 18.1.0 carries 37 changesets graded `patch` that say **BREAKING**,
-beside 45 graded `minor` ones. Pin exact `@objectstack/*` versions, and read the
+script, and 18.1.0 carries 43 changesets graded `patch` that say **BREAKING**,
+beside 48 graded `minor` ones. Pin exact `@objectstack/*` versions, and read the
 release notes for every version you cross. Each entry in a CHANGELOG states its
 kind on its own `Metadata-protocol:` line, and the GitHub Release body groups the
 entries under the same five headings this page uses.
 
+From 18.1.0 the scaffolds follow the same advice: `npm create objectstack`,
+`os init` and `os create` write the exact `@objectstack/*` version
+(`18.1.0`, not `^18.1.0`), and `--in-repo` still writes `workspace:*`
+(`975d5b3`, #25539). A project scaffolded earlier keeps its caret ranges until
+you change them. Measured: `create-objectstack@18.1.0` wrote `"18.1.0"` for all
+nine `@objectstack/*` entries, and `create-objectstack@18.0.0`, run on
+2026-10-24, wrote `^18.0.0` and installed 18.1.0.
+
 ### Breaking changes you must act on
 
-The 73 entries that are breaking and have no ADR-0087 conversion, and one boot
+The 82 entries that are breaking and have no ADR-0087 conversion, and one boot
 refusal (`db1c7cc`) that its changeset declares as an addition. Each line names
 the one fix; the CHANGELOG entry carries the full FROM → TO.
 
@@ -103,6 +150,14 @@ the one fix; the CHANGELOG entry carries the full FROM → TO.
   is too. Fix: set `OS_AUTH_SECRET`, and enable auth on a stack that mounts
   none. A development boot (`os dev`, `--dev`) and an embedded kernel are not
   affected.
+- **A boot with no `OS_AUTH_SECRET` uses the temporary secret on a development
+  boot only** (`6abee03`, #25563). It used it whenever `NODE_ENV` was anything
+  but exactly `production` (unset, `staging`, a typo); now any boot other than
+  `NODE_ENV=development` or `test` throws `OS_AUTH_SECRET is required outside
+  development`. `os serve` and `os start` already default an unset `NODE_ENV`
+  to `production`, so CLI boots behave as before: an embedder that builds its
+  own kernel is the one that meets it. Fix: set `OS_AUTH_SECRET`, or
+  `NODE_ENV=development` for a local boot.
 - **A production `os serve` whose `@objectstack/plugin-auth` fails to load is
   refused, naming the load error** (`b2e964f`, #25231), `os start` included.
   18.0.0 booted it without auth, silently or with one
@@ -205,6 +260,28 @@ door (`422 INVALID_METADATA`), where 18.0.0 accepted it.
   at read time.
 - **`rollbackMetaItem` and `revertCommit` refuse a version the save door
   refuses** (`69913f8`, #25312), instead of writing it back live.
+- **A bulk action `confirmText` the template cannot fill** (`ecb4e69`,
+  #25451): a hole over a name that is neither `count` nor one of the action's
+  params, a single-brace `{x}`, logic or an unknown formatter inside a hole, or
+  a blank `''`. 18.0.0 warned. Fix: write holes over `count` or the params,
+  double a literal single brace, and delete a blank `confirmText`. A view
+  already stored still loads. *Probed on 18.1.0:* a view saved with
+  `confirmText: 'Retitle {x} notes?'` answered `422 INVALID_METADATA` with
+  `` A bulk action's `confirmText` reads `{{ }}` template holes (ADR-0032 §3),
+  not the single-brace `{…}` dialect `` and named `count` and the param as the
+  holes it binds; `'Retitle {{ count }} notes?'` saved.
+- **A row policy that reads `x in current_user.KEY` which nothing owns, at the
+  permission save door** (`b531016`, #25550). It answered 200 and matched no
+  rows; it is now `422 INVALID_METADATA`. An object write is now judged by the
+  RLS rule too, so an object whose `defaultRowScope` the CLI refuses, or a
+  write that drops a field or membership key a stored policy reads, is refused.
+  The gate blames a write only for a finding it adds, and drafts are not gated.
+  Fix: declare the key on its roster object's `membershipKeys`, or register the
+  resolver that stages it, before publishing the policy; use `in`, not `==`;
+  change the policy before dropping what it reads. A bad `membershipKeys`
+  declaration (a `userField` that is not a single user reference, a
+  `valueField` that is not a reference, a key declared twice) is refused at
+  `os validate` and `os build` too.
 
 #### Datasources and drivers
 
@@ -222,6 +299,14 @@ door (`422 INVALID_METADATA`), where 18.0.0 accepted it.
   starts empty, and a read-only boot no longer opens an empty in-memory database
   over a file it cannot open or create (`4d99158`, #25007). Fix: restore from a
   backup, or move the file aside yourself; an absent file is created empty.
+- **`SqlDriver.findWithWindowFunctions()` serves a closed set** (`6abee03`,
+  #25563), and so do `driver-sqlite-wasm` and `driver-turso`'s local and
+  replica transports: the function is one of `row_number`, `rank`,
+  `dense_rank`, `percent_rank` or `cume_dist`, the direction `asc` or `desc`,
+  and every `partitionBy` / `orderBy` field is quoted as a column. Anything
+  else answers `400 INVALID_QUERY`. Fix: use one of those; send a window that
+  takes an argument (`lag`, `lead`, `ntile`) through `execute()` with bound
+  parameters.
 - **On PostgreSQL, `introspectSchema` reads each table in its own schema**, and
   refuses a `search_path` that reaches one table name in two schemas (`74fcec1`,
   #24920). Fix: point the connection at one schema.
@@ -238,6 +323,17 @@ door (`422 INVALID_METADATA`), where 18.0.0 accepted it.
   #25150; `5801a4f`, #25288). Fix: code that builds an `ExecutionContext` with
   `onBehalfOf` by hand sets `tenantId` to such an organization, or leaves it
   unset.
+- **An out-of-office delegation applies only in its own organization**
+  (`b3fddd1`, #25439). A `sys_approval_delegation` row with no organization
+  reroutes nothing, and logs a warning. Fix: under `single`, run the ownership
+  ceremony; under a wall, recreate the delegation in the organization it is
+  for.
+- **A `runAs: 'system'` flow that writes `sys_user_position`,
+  `sys_user_permission_set`, `sys_invitation` or `sys_member` is refused**
+  `403 PERMISSION_DENIED` (`a285ff2`, #25483). Fix: run a flow that grants
+  positions or permission sets as `runAs: 'user'`, so the caller's own rights
+  decide; invite, cancel, change a membership grade or remove a member through the
+  organization endpoints.
 - **Deleting a business unit that still has child units is refused**
   (`4b8f597`, #24984). Fix: re-parent or delete the children first.
 
@@ -252,10 +348,34 @@ door (`422 INVALID_METADATA`), where 18.0.0 accepted it.
   refused by every data verb (`8010b64`, `72fad92`, `a1e51d6`, `fb7501b`,
   `882372d`). Fix: nothing if the declarations say what you mean; otherwise set
   `enable.apiEnabled`, or re-enable the package.
+- **Reassigning an approval to an address that resolves to no one is
+  refused** (`a57643d`, #25592): `POST /api/v1/approvals/requests/:id/reassign`
+  and `ApprovalService.reassign` answer `400 VALIDATION_FAILED` naming the
+  address, where a `to` nobody holds was written onto the slate and the request
+  waited on no one. A user id or email must belong to a member of the request's
+  organization, and `position:<name>` must have a holder there; `team:`,
+  `department:` and other addresses are always refused. Fix: reassign to a
+  person in the organization, or to a held position.
+- **`POST /api/v1/meta/:type/:name/rollback` takes `toVersion` as a JSON whole
+  number of at least 1** (`0fab7ba`, #25532), and anything else answers
+  `400 INVALID_REQUEST`. The query form `?toVersion=3` still works. Fix: send
+  `{"toVersion": 2}`, not `"2"` or `2.5`. *Measured in the walk:* `{"toVersion":"1"}`
+  and `{"toVersion":1.5}` answered `400` with `'toVersion' (positive integer) is
+  required`, and `{"toVersion":1}` rolled the view back.
 - **The Data API refuses a malformed or negative page window with `400`**
   naming the parameter (`17f3c65`, #25260), and the published list-query
   schemas declare it a non-negative integer (`5f30f00`, #25300). Fix: send a
   whole count of zero or more, or leave it out.
+- **A credential is honoured only in the environment whose auth service
+  validated it** (`1361a5a`, #25565), on every route behind the shared REST
+  auth gate: crud, actions, import and export, batch, sharing, approvals,
+  analytics, search and security, scoped and unscoped. Before, an environment
+  with no `auth` service of its own fell back to the default environment's.
+  A mismatch now answers the same `401` as an unauthenticated request. Only a
+  multi-environment host whose per-environment kernels carry no `auth`
+  service meets it; a single-kernel deployment is unchanged. Fix: give each
+  environment's kernel its own `auth` service, and sign in to the environment
+  you call.
 - **`GET {base}/docs`, the OpenAPI HTML viewer page, is retired**
   (`1b3b65e`, #25124). `GET {base}/openapi.json` stays: point your own viewer
   at it.
@@ -359,7 +479,27 @@ rows.
 - **Package upgrades report what they un-make.** At boot an administrator is
   told when a package upgrade renamed, removed or collided with an access item
   the customer switched off, cloned or authored (`54df640`, #25311), and the
-  marketplace door asks for confirmation (above).
+  marketplace door asks for confirmation (above). A second report covers
+  flows, actions, webhooks, overlays, object extensions, navigation
+  contributions and settings, on the `system.upgrade_impact` topic (`e207b97`,
+  #25512). Under a wall, `OS_PLATFORM_OWNER_ORGANIZATION` names the
+  organization where both reports reach the operators in-app (`915e940`,
+  #25489).
+- **An `external` membership grade** (`9019af9`, #25515). A portal user added
+  with it holds `org_external` instead of the `everyone` anchor, so the
+  deployment's default permission sets do not reach it, and it reads only its
+  own identity rows, through the shipped `external_default` set. It is never
+  placed in a business unit: grant it data through an organization-wide
+  position or a permission set. `org_external` is now a reserved name, so a
+  position can no longer take it.
+- **`ObjectSchema.membershipKeys`** (`dc532e8`, #25513): a roster object
+  declares the `current_user.KEY` sets it defines (`userField`, `valueField`,
+  an optional `filter`), the metadata twin of a registered membership resolver.
+  `defineStack` refuses one key declared on two objects, and `os lint` judges
+  the declaration and the policies that read it (#25550). See
+  [Semantic changes](#semantic-changes-in-1810) for what reads it.
+- **Setup → Email states which mail transport is live** (`ab510f4`, #25448),
+  and says so when no mail leaves the machine.
 - **Setup → Positions says who holds each position and what it grants**,
   through `GET /meta/position?include=grants` (`27b3f1f`, #25369). Create User
   can grant a permission set in the same step (`3306cad`, #25381), and Create Key
@@ -387,8 +527,44 @@ rows.
 
 ### Semantic changes in 18.1.0
 
-No changeset in 18.1.0 declares `Metadata-protocol: semantic`. A change of
-meaning that also breaks is listed with the breaking changes above.
+- **A declared membership key is staged per request** (`e5eab06`, #25528), so
+  a row policy reading `current_user.KEY` now reads the roster object's rows:
+  the distinct `valueField` values on the rows whose `userField` is the
+  signed-in user and on which `filter` holds, inside the caller's own
+  organization. Before this change such a policy matched no rows. Every miss
+  fails closed: no roster row, more than 1,000 values, a failed read, a
+  `filter` that does not compile, or a key two objects declare leaves the key
+  unresolved, and a policy reading it matches nothing. Whoever can write a
+  roster row can grant the key, and the object-level explain names each key a
+  policy reads.
+- **An `external` holder is its own posture** (`45f9962`, #25541). Its
+  execution context carries `audience: 'external'`, and for it every object's
+  org-wide default is owner-only: it reads and writes the rows it owns and
+  the rows shared to it, by a share or a sharing rule, and a `public_read` or
+  `public_read_write` object is not open to it. A row policy on a permission
+  set or position it holds lifts that floor and bounds the rows instead. A
+  `controlled_by_parent` detail follows its master. Nothing changes for a
+  principal that does not hold the `external` grade, and no earlier release
+  shipped it.
+- **A share or sharing rule on a public object reaches an external member**
+  (`4a25192`, #25591). On a `public_read_write` object, or a system object
+  with no `sharingModel`, `SharingService.grant` now admits a `user` recipient
+  who is an `external` member of the record's organization, and a sharing
+  rule writes rows for the external members it expands to and skips the
+  internal ones. Every other recipient keeps `422 SHARING_NOT_ENABLED`. The
+  lint's `sharing-rule-object-not-shareable` on a public object is now a
+  warning.
+- **`FlowSchema.runAs` now says what a `system` run may not write**
+  (`025f6de`, #25564): its description names the refused writes to the four
+  identity-assignment objects (above, under security), and ADR-0087 D3 records
+  the change of meaning as `flow-run-as-system-identity-assignment-write-refused`,
+  so `os migrate meta` lists it for a flow that wrote those rows. It carries no
+  conversion, and every flow parses as before.
+
+#25541 and #25591 declare `Metadata-protocol: semantic` too; the GitHub Release
+body files them under new capabilities, because each widens what a door
+admits, and the counts above follow it. A change of meaning that also breaks
+is listed with the breaking changes above.
 
 ### Notable fixes in 18.1.0
 
@@ -421,16 +597,20 @@ meaning that also breaks is listed with the breaking changes above.
 - **Setup.** Passwords typed into action dialogs are masked (`7035682`,
   #24867), forms show option labels instead of machine values (`bdf762c`,
   #25370), and the scaffolds ship a starter test so a new project's `npm test`
-  passes (`6bc8cc6`, #25236; `9c431ba`, #25196).
+  passes (`6bc8cc6`, #25236; `9c431ba`, #25196). Saving the mail provider
+  "None (log only)" stops delivery, where the SMTP transport the boot built kept
+  sending (`0ec4c5a`, #25497). `POST /api/v1/data/:object/import` reads a
+  dotted (`2011.07.01`) or compact (`20090615`) year-first day, and matches a
+  select cell's option value in any case (`9f39094`, #25596).
 
 The other fixes are in the per-package CHANGELOGs.
 
 ### New in Console (Studio) — objectui pins in 18.1.0
 
 18.0.0 bundled objectui at `616df6598b42`. 18.1.0 bundles it at the pin
-committed at the cut, `1d178e06ac5e` when this page was compiled, through six
-refreshes, each with its own `@objectstack/console` changeset: 91 entries that
-objectui declared, five of them `minor`.
+committed at the cut, `2958f17e9c6a` when this page was compiled, through
+eight refreshes, each with its own `@objectstack/console` changeset: 130
+entries that objectui declared, ten of them `minor`.
 
 - **Approvals.** An approver who is not an administrator sees the whole
   approval request page again, and the Approvals Inbox opens a request on the
@@ -447,6 +627,11 @@ objectui declared, five of them `minor`.
   ask before they drop unsaved edits; a member who can read none of an app's
   objects lands on one page saying whom to ask; a page node or tab whose
   `visibleWhen` faults is no longer drawn.
+- **Organizations and actions.** The console labels the `external`
+  membership grade, an action's `confirmText`, `successMessage` and
+  `errorMessage` fill their `{{ }}` holes, a single-record action launched with
+  0 or several rows selected is refused before its dialog opens, and on a
+  cloud-managed environment Setup → Users says where people are invited.
 - **Charts and branding.** A dataset chart draws its null bucket under its
   `nullLabel`, a single-series bar chart uses its series colour, and the console
   document carries the runtime branding in its `<title>` and Open Graph tags
@@ -475,23 +660,74 @@ also requires.
 ### 18.1.0
 
 <Callout type="warn">
-**Not walked yet.** This list is compiled from the changesets before the cut.
-No app has been moved from 18.0.0 to 18.1.0 for it, and no refusal below was
-read off a published package.
+**How far this list has been walked.** On 2026-10-24, from 18.0.0, once: an app
+scaffolded with `create-objectstack@18.0.0` (the `blank` template, pnpm, no
+skills), pinned to exactly `18.0.0` with the override in step 1, was booted on
+18.0.0 with `objectstack start` and `OS_AUTH_SECRET` set. It created a SQLite
+database holding one administrator, signed up through the auth API, and three
+notes. It was then moved to 18.1.0 from npm, and each step below was run. Each
+line says how it was measured:
+
+- **Measured in the walk** — the step was run, and the quoted text is what
+  18.1.0 printed.
+- **Probed on 18.1.0** — the walk's app carries none of it, so a probe was sent
+  to the running 18.1.0 server, and the quoted text is its answer.
+
+⛔ The walk was one small app on SQLite, under the `single` posture. Walled
+postures, Postgres, MySQL, Turso, a multi-environment host, an embedded kernel,
+a flow, a webhook and the skills sync were not walked, and no upgrade of a
+production application was run for this page. A line with no mark is compiled
+from the changesets.
 </Callout>
 
 #### 1. Move the pins
 
-Move every `@objectstack/*` dependency to `18.1.0` together, and
-`@objectstack/skills` with them, as in the
-[18.0.0 walk](/docs/releases/v18/18-0#1-move-the-pins). Pin the exact version:
-a caret range takes every later 18.x by itself, and a patch can break a
-non-protocol surface.
+- **Move every `@objectstack/*` dependency to `18.1.0` together**, and
+  `@objectstack/skills` with them, as in the
+  [18.0.0 walk](/docs/releases/v18/18-0#1-move-the-pins). Pin the exact
+  version: a caret range takes every later 18.x by itself, and a patch can
+  break a non-protocol surface. A project `npm create objectstack` scaffolded
+  before 18.1.0 carries caret ranges: replace each `^18.x.y` with `18.1.0` and
+  reinstall. The walk moved nine exact `18.0.0` pins to `18.1.0`, and
+  `pnpm install` left no `@objectstack/*` package at 18.0.0 in the lockfile and
+  printed no peer-dependency warning. *Measured in the walk.*
+- **Hold the CLI's own ranges with an override.** An exact pin does not hold
+  the eight packages `@objectstack/cli` ranges (see
+  [Release facts](#release-facts-as-measured)). With pnpm, add this to
+  `pnpm-workspace.yaml`, at the version you pin:
+
+  ```yaml
+  overrides:
+    '@objectstack/core': '18.1.0'
+    '@objectstack/driver-memory': '18.1.0'
+    '@objectstack/driver-mongodb': '18.1.0'
+    '@objectstack/driver-sql': '18.1.0'
+    '@objectstack/driver-sqlite-wasm': '18.1.0'
+    '@objectstack/objectql': '18.1.0'
+    '@objectstack/observability': '18.1.0'
+    '@objectstack/runtime': '18.1.0'
+  ```
+
+  On the walk's app pinned to `18.0.0`, those eight lines (at `'18.0.0'`) took
+  the tree from 17 packages at 18.1.0 to none. pnpm 10.28 ignored the same
+  block under `"pnpm": { "overrides": … }` in `package.json` while
+  `pnpm-workspace.yaml` exists. npm's `overrides` was not tried. Move the
+  override with the pins at every upgrade. *Measured in the walk.*
 
 #### 2. Before the first boot
 
-- Production `os serve` or `os start`: set `OS_AUTH_SECRET`, and do not rely on
-  `--no-server` or `OS_MIGRATE_AND_EXIT=1` to boot without it.
+- **Production `os serve`: set `OS_AUTH_SECRET`**, and do not rely on
+  `--no-server` or `OS_MIGRATE_AND_EXIT=1` to boot without it. A kernel you
+  embed needs it too, unless it boots with `NODE_ENV=development` or `test`.
+  Without it, `os serve` exited `1` with
+  `✗ This stack enables auth, but no auth secret is set, so AuthPlugin was not
+  composed and no caller can authenticate` and the line to set it.
+  *Measured in the walk.*
+- **`os start` does not refuse: it mints a secret.** With no secret set, it
+  wrote a new one to `.objectstack/auth-secret` and booted. Boot with the
+  secret 18.0.0 used: with the same `OS_AUTH_SECRET`, the session signed in on
+  18.0.0 was still valid on 18.1.0; a new secret ends every session.
+  *Measured in the walk.*
 - A stack that mounts no auth (`auth` tier off, `--preset minimal`) fails a
   production boot: enable auth.
 - CORS: list every cross-origin front-end in `OS_CORS_ORIGIN`, loopback origins
@@ -509,22 +745,47 @@ os build
 os migrate meta --from 17     # the step-18 conversions, listed for your sources
 ```
 
+On the walk's app, `os validate` and `os build` passed on 18.1.0 with no
+edit. `os migrate meta --from 17` exited `0` and printed
+`417 manual change(s) require your judgment` (18.0.0 printed 406): read it as a
+list to search, as on 18.0.0. `--from 18` replays nothing, and says so
+(`No migration step exists for protocol 18 → 18`), so keep `--from 17`.
+*Measured in the walk.*
+
 Fix each refusal with the line in
 [Breaking changes you must act on](#breaking-changes-you-must-act-on) and
 [Converted for you](#converted-for-you-by-os-migrate-meta). The ones an app is
 most likely to meet: `addRecord` without `enabled`, a webhook without
 `'webhooks'` and `'realtime'` in `requires`, an HTML email template hole, a
-`validations[]` rule that reads `parent`, and an `external` object on a managed
-datasource.
+`validations[]` rule that reads `parent`, a bulk action `confirmText` hole over
+a name that is neither `count` nor a param, and an `external` object on a
+managed datasource.
 
 #### 4. After the boot
 
+- The data is as 18.0.0 left it. The walk's three notes read back, and the
+  administrator signed in. A clean boot printed no upgrade report at the
+  default log level. *Measured in the walk.*
 - Run `os migrate meta --stored` to list stored rows the step-18 conversions
-  rewrite.
+  rewrite. It takes no `--from` (`--stored=true cannot also be provided when
+  using --from`); on the walk's app, which had stored no metadata, it printed
+  `Examined 0 stored metadata row(s)` and a warning that an empty run attests
+  nothing. *Measured in the walk.*
 - Run `os migrate plan`. On a database 18.0.0 created, it lists the tenant
   columns still nullable; the ownership ceremony tightens them to `NOT NULL`
-  when you choose to run it.
+  when you choose to run it. On the walk's database it printed
+  `33 tenant column(s) are still nullable (ADR-0131 D1)`, said the ceremony
+  tightens 31 of them, and ended
+  `✓ Physical schema is in sync with metadata — nothing to migrate.`
+  *Measured in the walk.*
 - If the boot reports a notification preference collision, resolve it with
   `os migrate duplicates` and restart.
 - Check that REST and MCP callers do not depend on a disabled package's actions
-  or on an object declared `apiEnabled: false`.
+  or on an object declared `apiEnabled: false`, and that a client calling
+  metadata rollback sends `toVersion` as a JSON number.
+- Run each `runAs: 'system'` flow that writes positions, permission-set
+  assignments, invitations or memberships, and move it to `runAs: 'user'` or
+  the organization endpoints.
+- Read the boot's upgrade impact report beside the access upgrade report.
+- On a multi-environment host, give each environment's kernel its own `auth`
+  service before callers reach it, or they get `401`.

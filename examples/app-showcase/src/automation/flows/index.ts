@@ -1747,6 +1747,29 @@ export const InquiryPurgeFlow = defineFlow({
  * pattern (钉钉/Salesforce style) that needs no parallel branches. Set
  * `minApprovals` > 1 for "two from each group"; use `behavior: 'quorum'` +
  * `minApprovals` for M-of-N collective sign-off.
+ *
+ * **The decision is written back onto the report** — an explicit
+ * `update_record` on each outcome branch: approve → `status: 'approved'`,
+ * reject → `status: 'draft'` (back to the submitter, who can rework and
+ * resubmit — the same revert-on-reject {@link InvoiceDualSignoffFlow} does).
+ * Without these two nodes both outcomes were bare `end`s, so an expense report
+ * both groups had approved kept reading "Submitted" forever.
+ *
+ * Why not the approval node's `approvalStatusField` mirror instead: the mirror
+ * writes the REQUEST's status vocabulary verbatim (`pending` on open,
+ * `approved` / `rejected` on decide, `recalled`, `returned`), has no value
+ * mapping, and writes only values the target field declares among its options
+ * (anything else is skipped with a warn). `status` here is the report's own
+ * lifecycle select (`draft` / `submitted` / `approved` / `reimbursed`) — it
+ * declares neither `pending` nor `rejected`, so a mirror onto it would warn on
+ * every submit and leave a REJECTED report reading "Submitted", the very
+ * defect being fixed. The spec also advises a mirror target be readonly, and
+ * this one is the field the submitter edits. A business-lifecycle field
+ * driven by the decision is what `update_record` per branch is for.
+ *
+ * `runAs: 'system'` for the same reason as the invoice flow: the write-back is
+ * an outcome of the approval process, not an act of the submitter, so it must
+ * land whatever the submitter's edit rights on a submitted report are.
  */
 export const ExpenseSignoffFlow = defineFlow({
   name: 'showcase_expense_signoff',
@@ -1754,6 +1777,7 @@ export const ExpenseSignoffFlow = defineFlow({
   description: 'Manager + finance per-group sign-off (会签) on a submitted expense report (#3266).',
   type: 'autolaunched',
   status: 'active',
+  runAs: 'system',
   nodes: [
     {
       id: 'start',
@@ -1779,13 +1803,35 @@ export const ExpenseSignoffFlow = defineFlow({
         lockRecord: true,
       },
     },
+    {
+      id: 'mark_approved',
+      type: 'update_record',
+      label: 'Mark Report Approved',
+      config: {
+        objectName: 'showcase_expense_report',
+        filter: { id: { dialect: 'cel', source: 'record.id' } },
+        fields: { status: 'approved' },
+      },
+    },
+    {
+      id: 'return_to_draft',
+      type: 'update_record',
+      label: 'Return Report to Draft',
+      config: {
+        objectName: 'showcase_expense_report',
+        filter: { id: { dialect: 'cel', source: 'record.id' } },
+        fields: { status: 'draft' },
+      },
+    },
     { id: 'approved', type: 'end', label: 'Approved' },
     { id: 'rejected', type: 'end', label: 'Rejected' },
   ],
   edges: [
     { id: 'e1', source: 'start', target: 'dual_signoff' },
-    { id: 'e2', source: 'dual_signoff', target: 'approved', label: 'approve' },
-    { id: 'e3', source: 'dual_signoff', target: 'rejected', label: 'reject' },
+    { id: 'e2', source: 'dual_signoff', target: 'mark_approved', label: 'approve' },
+    { id: 'e3', source: 'dual_signoff', target: 'return_to_draft', label: 'reject' },
+    { id: 'e4', source: 'mark_approved', target: 'approved' },
+    { id: 'e5', source: 'return_to_draft', target: 'rejected' },
   ],
 });
 
@@ -1797,6 +1843,11 @@ export const ExpenseSignoffFlow = defineFlow({
  * `minApprovals` clamps to the approver count so a misconfiguration can never
  * deadlock. Where `per_group` requires one from EACH group, `quorum` counts a
  * flat tally across all approvers.
+ *
+ * The decision is written back onto the report exactly as in
+ * {@link ExpenseSignoffFlow} (approve → `approved`, reject → `draft`), and for
+ * the same reasons — see that flow's docblock for why this is an
+ * `update_record` per branch and not an `approvalStatusField` mirror.
  */
 export const CommitteeQuorumFlow = defineFlow({
   name: 'showcase_committee_quorum',
@@ -1804,6 +1855,7 @@ export const CommitteeQuorumFlow = defineFlow({
   description: 'Any 2-of-3 committee members approve a high-value expense report (#3266 quorum / M-of-N).',
   type: 'autolaunched',
   status: 'active',
+  runAs: 'system',
   nodes: [
     {
       id: 'start',
@@ -1830,13 +1882,35 @@ export const CommitteeQuorumFlow = defineFlow({
         lockRecord: true,
       },
     },
+    {
+      id: 'mark_approved',
+      type: 'update_record',
+      label: 'Mark Report Approved',
+      config: {
+        objectName: 'showcase_expense_report',
+        filter: { id: { dialect: 'cel', source: 'record.id' } },
+        fields: { status: 'approved' },
+      },
+    },
+    {
+      id: 'return_to_draft',
+      type: 'update_record',
+      label: 'Return Report to Draft',
+      config: {
+        objectName: 'showcase_expense_report',
+        filter: { id: { dialect: 'cel', source: 'record.id' } },
+        fields: { status: 'draft' },
+      },
+    },
     { id: 'approved', type: 'end', label: 'Approved' },
     { id: 'rejected', type: 'end', label: 'Rejected' },
   ],
   edges: [
     { id: 'e1', source: 'start', target: 'committee' },
-    { id: 'e2', source: 'committee', target: 'approved', label: 'approve' },
-    { id: 'e3', source: 'committee', target: 'rejected', label: 'reject' },
+    { id: 'e2', source: 'committee', target: 'mark_approved', label: 'approve' },
+    { id: 'e3', source: 'committee', target: 'return_to_draft', label: 'reject' },
+    { id: 'e4', source: 'mark_approved', target: 'approved' },
+    { id: 'e5', source: 'return_to_draft', target: 'rejected' },
   ],
 });
 

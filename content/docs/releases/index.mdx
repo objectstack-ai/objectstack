@@ -18,7 +18,7 @@ migration steps, then covers new capabilities and notable fixes.
 
 ## Versions
 
-- [v18](/docs/releases/v18) — The line that carries ADR-0131, total organization ownership with no NULL `organization_id`; its breaking changes landed in stages through the `18.0.0-next.N` prereleases on npm's `next` tag, each with its own changeset and migration, and its GA release, 18.0.0, publishes to npm's `latest` tag and moves it from 17.x to 18 (current series: 18.0.0, released 2026-10-20).
+- [v18](/docs/releases/v18) — The line that carries ADR-0131, total organization ownership with no NULL `organization_id`; its breaking changes landed in stages through the `18.0.0-next.N` prereleases on npm's `next` tag, each with its own changeset and migration, and its GA release, 18.0.0, publishes to npm's `latest` tag and moves it from 17.x to 18 (current series: 18.1.0, released 2026-10-24).
 - [v17.0.0](/docs/releases/v17) — Files become owned `sys_file` records with server-enforced `accept`/`maxSize` and a governed download path, bulk export becomes its own opt-in privilege, the SDK is reconciled against the routes the server actually mounts (21 dead methods out, 40+ real ones in), approval nodes route approvers dynamically via CEL expressions and decision outputs, a datasource that cannot connect fails the boot, and Node 22 becomes the supported floor; 17.1 adds partial field masking, record-view auditing on `sys_audit_log`, and a per-object read-only approval visibility tier — and makes a deactivated permission set or position actually stop granting access, withdraws the bulk-export wildcard from the shipped admin sets, and gives all three flow doors one honest HTTP status table; 17.2 tightens by-id `update`/`delete` against a silently-dropped `where` predicate or a mismatched id, retires `sys_position.permissions` and other dead ADR-0049 surfaces, and stops analytics from answering the wrong number on a cross-object filter (final release: 17.7.0).
 - [v16.0.0](/docs/releases/v16) — One org identifier (`organizationId`) across hooks and actions, quorum + per-group sign-off (会签) approvals with metadata-declared decision actions, time-relative automations, filtered roll-ups, strict dashboard widgets, an identity-scoped MCP stdio transport, and a platform-wide enforce-or-remove sweep that makes dead metadata loud; 16.1 adds a `requires` capability-provider preflight, two more dashboard build gates, and `runAs:'user'` automations that run with the triggering user's real grants (final release: 16.1.0).
 - [v15.0.0](/docs/releases/v15) — Explain record access layer by layer, a docked AI workspace in the Console, project-ready Gantt charts, and phone sign-in; 15.1 adds permission-following attachments, no-code third-party connectors, dashboard-wide filters, pinyin search, and whole-record inline editing — with materially safer multi-tenant and write-path defaults (final release: 15.1.1).
@@ -72,7 +72,7 @@ meaning takes `minor`, and every other change takes `patch` — a REST door, a
 driver, a boot refusal, the CLI or the Console — breaking or not. A
 non-protocol breaking change keeps its `**BREAKING**` banner and its ADR-0087
 disposition. 18.1.0 is the first release cut under the rule: a minor carrying
-82 changesets declared breaking, 37 of them graded `patch`.
+91 changesets declared breaking, 43 of them graded `patch`.
 
 What that means when you read a version number:
 

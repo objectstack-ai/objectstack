@@ -75,6 +75,19 @@ const sysUser = {
     email: { name: 'email', label: 'Email', type: 'text' as const },
   },
 };
+/**
+ * Just enough of `sys_user_position` for a `position:` reassign target to have
+ * a holder: a reassign target must resolve to someone (#25485).
+ */
+const sysUserPosition = {
+  name: 'sys_user_position',
+  label: 'User Position',
+  fields: {
+    id: { name: 'id', label: 'Id', type: 'text' as const, primaryKey: true },
+    user_id: { name: 'user_id', label: 'User', type: 'text' as const },
+    position: { name: 'position', label: 'Position', type: 'text' as const },
+  },
+};
 const deal = {
   name: 'crm_deal',
   label: 'Deal',
@@ -153,7 +166,7 @@ describe('ADR-0118 D1 — every sys_user lookup approvals writes holds an id or 
     }), true);
     await engine.init();
     objects = await packageObjects();
-    for (const def of [sysUser, deal, ...objects]) {
+    for (const def of [sysUser, sysUserPosition, deal, ...objects]) {
       engine.registry.registerObject(def as any, 'approvals-test', 'approvals-test');
     }
     await engine.syncSchemas();
@@ -161,6 +174,8 @@ describe('ADR-0118 D1 — every sys_user lookup approvals writes holds an id or 
     // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
     await installDefaultOrganization(engine);
     for (const u of USERS) await engine.insert('sys_user', u, { context: SYSTEM } as any);
+    // The `position:finance` reassign target below has a holder.
+    await engine.insert('sys_user_position', { id: 'up_finance', user_id: 'u_boss', position: 'finance' }, { context: SYSTEM } as any);
 
     svc = new ApprovalService({
       engine: engine as any,

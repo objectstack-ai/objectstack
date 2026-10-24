@@ -57,9 +57,10 @@ export type ExplainOperation = z.input<typeof ExplainOperationSchema>;
  * rule, and visibility is strictly nested down the ladder
  * (PLATFORM_ADMIN ⊇ TENANT_ADMIN ⊇ MEMBER ⊇ EXTERNAL). Explain reports which
  * rung the principal evaluated at so a consumer can answer "was this decided by
- * the tenant-admin tier or ordinary business RLS?". `EXTERNAL` is defined and
- * reservable now; its enforcement path ships when an external principal type
- * exists (ADR-0095 D2).
+ * the tenant-admin tier or ordinary business RLS?". `EXTERNAL` is the rung of
+ * the organization's `external` members (ruling of record 6355206139): explicit
+ * grants only — shares, sharing rules, and position and permission-set grants
+ * with their RLS — never the OWD baseline or the `everyone` default sets.
  */
 export const AuthzPostureSchema = z.enum([
   'PLATFORM_ADMIN',
@@ -68,7 +69,8 @@ export const AuthzPostureSchema = z.enum([
   'EXTERNAL',
 ]).describe(
   'ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object posture permits; ' +
-  'TENANT_ADMIN sees all rows in the org; MEMBER gets business RLS; EXTERNAL sees only explicitly shared rows.',
+  'TENANT_ADMIN sees all rows in the org; MEMBER gets business RLS; EXTERNAL (an external organization member) ' +
+  'reaches explicit grants only — shares, sharing rules, and grant RLS — never the OWD baseline.',
 );
 export type AuthzPosture = z.input<typeof AuthzPostureSchema>;
 

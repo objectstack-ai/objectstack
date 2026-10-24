@@ -547,6 +547,7 @@ export const zhCN: PlatformTranslationData = {
       actions: {
         test: { label: '测试连接' },
         test_embedder: { label: '测试 Embedder' },
+        reset: { label: '重置为环境变量默认值' },
       },
       banners: {
         log_prompts_warning: { title: 'Prompt 可能含有 PII', text: '可能泄露 PII,合规场景请关闭。' },

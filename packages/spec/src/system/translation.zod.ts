@@ -415,6 +415,9 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
    * Convention:
    *   objects.<object>._sections.<section_name>.label
    *   objects.<object>._sections.<section_name>.description
+   *   objects.<object>._sections.<section_name>.fields.<field>.label
+   *   objects.<object>._sections.<section_name>.fields.<field>.placeholder
+   *   objects.<object>._sections.<section_name>.fields.<field>.helpText
    * Three authoring surfaces name a section under this key (e.g.
    * "Opportunity Information" → "商机信息"): an object-bound form view's
    * `sections[].name` (`FormSectionSchema.name`), a `record:details`
@@ -427,14 +430,35 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
    * overlays a served form view's `config.sections`). A metadata-editing
    * form's sections are keyed elsewhere, at
    * `metadataForms.<type>.sections.<section_name>`.
+   *
+   * `fields` carries the override copy of one object-bound form view
+   * section's entries (`FormSectionSchema.fields[]`), keyed by each entry's
+   * own `field`: the `label`, `placeholder` and `helpText` an entry authors
+   * over the object field it renders, for that form alone. `translateView`
+   * overlays them onto the served section's entries; an entry that authors
+   * none of the three keeps the object field's own copy, translated at
+   * `objects.<object>.fields.<field>`.
    */
   _sections: z.record(z.string(), strictObject({
     surface: 'this section translation',
     history: TRANSLATION_HISTORY,
-    aliases: { name: 'label', title: 'label', heading: 'label' },
+    aliases: { name: 'label', title: 'label', heading: 'label', entries: 'fields' },
   }, {
     label: z.string().optional().describe('Translated section label'),
     description: z.string().optional().describe('Translated section description'),
+    fields: z.record(z.string(), strictObject({
+      surface: 'this form section entry translation',
+      history: TRANSLATION_HISTORY,
+      // `helpText` is the spelling a form section entry declares
+      // (`FormFieldSchema.helpText`); `help` is the FIELD translation's, one
+      // level up at `objects.<object>.fields.<field>`. Neighbouring-surface
+      // borrowing, which edit distance reads as a legitimate word.
+      aliases: { help: 'helpText', hint: 'helpText', tooltip: 'helpText', name: 'label', title: 'label' },
+    }, {
+      label: z.string().optional().describe('Translated entry label (overlays the section entry\'s `label` override)'),
+      placeholder: z.string().optional().describe('Translated entry placeholder (overlays the section entry\'s `placeholder` override)'),
+      helpText: z.string().optional().describe('Translated entry help text (overlays the section entry\'s `helpText` override)'),
+    })).optional().describe('Form section entry translations keyed by the entry\'s `field`'),
   })).optional().describe('Section translations keyed by section name'),
 
   /**

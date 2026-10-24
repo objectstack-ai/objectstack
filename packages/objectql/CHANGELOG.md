@@ -1,5 +1,459 @@
 # @objectstack/objectql
 
+## 18.1.0
+
+### Minor Changes
+
+- 3937697: **Shipped in 18.0.0**, whose CHANGELOG missed this entry; listed here one release late.
+  
+  feat!: an organization-less row on a tenant table no longer draws its autonumber from the `__global__` counter, and a production server boot with no auth secret is refused
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (runtime-export-retired @objectstack/objectql#GLOBAL_TENANT) The one author-reachable removal is a runtime export: the string constant `GLOBAL_TENANT` leaves `@objectstack/objectql`'s published entry. No key of any metadata schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone; the two run-time narrowings (the driver's counter, `os serve`'s boot) carry their own remedy below. -->
+  
+  **BREAKING** accept-set narrowing, shipped as `minor` under the repo's launch-window convention for breaking changes (ADR-0131 D9, stage 8d).
+  
+  - **`os serve`: a production server boot whose auth did not compose for a missing secret is refused.** With the `auth` tier on and no `OS_AUTH_SECRET` (outside `--dev`), `serve` used to skip AuthPlugin with a warning and serve anyway. That boot had no security model: anonymous object data is always denied, so its data API was unusable. It also had no organization object, so its inline seed wrote rows with `organization_id` NULL and drew their autonumbers from the `__global__` counter. Measured on `examples/app-showcase` before this change: health 200, two NULL-organization rows and a `__global__` counter row on a fresh install. The boot now stops before the kernel starts, so nothing is written, and the message names both fixes. A kernel-only boot (`--no-server`) is refused the same way: it runs the same seed, so it would write the same ownerless rows. Unchanged: a development boot still uses its fallback secret, and the cloud host kernel (`ObjectOSEnvironmentPlugin`, where auth is each project's) still only warns. `os start` never reaches the refusal: it always supplies a secret to the `serve` child it spawns.
+  - **`@objectstack/driver-sql` (and `@objectstack/driver-turso`'s remote face, which calls the same rule): the counter refuses an organization-less row on a tenant table.** Wherever the driver registered the organization object (`sys_organization`), a `create` / `bulkCreate` / `upsert` on an object with a tenant column, whose row carries no organization and whose options carry no `tenantId`, is refused with `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` (status 500), the code the engine already answers for the same write. It is refused before any counter row is read or written, and nothing is written. New exports: `OrganizationlessCounterRefusal`, `ORGANIZATIONLESS_COUNTER_REFUSAL_CODE`, `ORGANIZATIONLESS_COUNTER_REFUSAL_STATUS`, `renderOrganizationlessCounterRefusal`. Unchanged: `__global__` stays the counter key of an object with no tenant column, and of a composition that registers no organization object on the driver (a lean `@objectstack/objectql/core` embedding), where no organization can exist. Counter rows a 17.x install filed under `__global__` for a tenant table stay in `_objectstack_sequences`; the counter no longer reads them, and `os migrate duplicates` still reports them.
+  - **`@objectstack/objectql`: `GLOBAL_TENANT` is no longer exported**, and `SystemWriteOrganizationRequiredError`'s message no longer describes the `__global__` counter as where the write would land. The code, status and fields are unchanged.
+  - **Texts.** The lint explanation of `unique/legacy-organization-composite`, the `UniqueScopeSchema` TSDoc and the error-code ledger now say that a NULL-organization row is residue an earlier release wrote, not something a new write produces.
+  
+  **The remedy.**
+  - A production boot refused for the missing secret: set `OS_AUTH_SECRET` (a long random value, identical across restarts and nodes), or compose auth by other means (mount `AuthPlugin` in `plugins`). Running kernel-only with `--no-server` does not avoid the refusal.
+  - A direct driver write refused by the counter: carry the organization — `driver.create(object, { ...row, organization_id: orgId })` or `driver.create(object, row, { tenantId: orgId })` — or write through the engine, which derives it under `single`.
+  
+  The retired export:
+  
+  - FROM `GLOBAL_TENANT` TO `GLOBAL_TENANT` imported from `@objectstack/driver-sql`, where the counter and the index emitters keep it (or the literal `'__global__'`).
+- 3937697: feat(driver-sql,driver-turso,driver-memory,objectql,metadata-protocol,cli): an organization-scoped unique index keys the plain organization column, and an index an earlier release built with `COALESCE(organization_id, '__global__')` is read as the same index on a certified database
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  18.x step 7b-1 + 7b-2 (ADR-0131 D1: the tenant column is NOT NULL, so the NULL-organization bucket of ADR-0120 D3 has no rows left to hold).
+  
+  - **New DDL is plain.** A field-level `unique: true` / `'organization'` on a tenant-scoped object, and a declared index with `unique: 'organization'`, now build `UNIQUE (organization_id, …)` instead of `UNIQUE (COALESCE(organization_id, '__global__'), …)`. Index names do not change. The same holds for the Turso remote face, the MySQL hash shadow (its generated column now hashes the plain column), the in-memory driver's unique enforcement, `os generate migration` (which now emits the organization composite it used to list as NOT EMITTED), and the `sys_setting` row-identity index (`COALESCE(user_id, '')` stays).
+  - **Existing indexes stay as they are.** Nothing is renamed, and no declared organization composite is dropped or rebuilt by the boot, `os migrate plan` or `os migrate apply`; on SQLite the ownership ceremony's NOT NULL step rebuilds the tables it tightens, and their composites come back plain, enforcing the same constraint. One index is re-keyed: the `sys_setting` row-identity index, which the metadata protocol rebuilds on every boot, keys the plain `organization_id` from the next boot on (probe-first; a pure relaxation, so it cannot fail on existing rows). The schema differ reads `COALESCE(<tenant>, …)` and the plain tenant column as one key part, in both directions, where the column is physically `NOT NULL` or the database is certified (its organization-ownership birth marker, or the ownership ceremony's marker at the current shape generation). So `os migrate plan` and the boot report no `recreate_index` for those indexes. On an uncertified database with a nullable tenant column the two forms stay different constraints: the finding is reported, and it names `os migrate organization-ownership` as its remedy.
+  - **What widens.** Where a tenant column is still nullable (every table of a database 18.0.0 created, an uncertified 17.x / 18.0 database, a rotation shard, a Turso remote table, a table the ceremony reported), a unique index created from now on does not constrain rows whose organization is NULL, exactly like a NULL in any other key part; in the in-memory driver a record with no organization is exempt from an organization-scoped unique. The unique duplicate pre-flight no longer reports groups of rows with a NULL key part, since the index never refuses them.
+  - **Who sees it.** A fresh install and every ceremonied table whose tenant column is NOT NULL see nothing. A database 18.0.0 created from empty is certified by its birth marker yet keeps nullable tenant columns: its existing indexes are kept unchanged, and a new organization unique declared on one of its tables constrains only rows that carry an organization.
+- 3937697: feat(objectql): a caller value that a stored field's `expression` replaced is reported through `onFieldsDropped` / `droppedFields` under the new `DroppedFieldsEvent.reason` value `stored_expression`
+  
+  Clause-②: yes (widening)
+  
+  The engine computes a stored (non-`formula`) field's declared `expression` on every write, so a value the caller sends for such a field never stands. Until now nothing said so. `onFieldsDropped` stayed silent, so the PATCH and `/batch` doors answered with no `droppedFields`, and a flow's `update_record` reported success over a row that holds the computed value instead of the one sent.
+  
+  - **New `reason` value.** `DroppedFieldsEventSchema.reason` (`@objectstack/spec/data`) gains `stored_expression`. It means the field is a stored column the engine computes from its `expression`, and the caller's value was replaced by the computed one. The field IS written, so `computed` (a `formula` with no column, whose key is dropped) would be wrong for it. The four existing values are unchanged.
+  - **When it is reported.** On insert (single, batch, and `insertMany`'s per-row `droppedFields`), on update by id, and on a predicate update, in every context, `isSystem` included. It is reported only when the caller sent the field and the value stored differs from the caller's value. A client that sends the computed value (the console's line-item grid) or no value is told nothing. A value another strip already took, such as a stored expression field that is also `readonly`, is reported once, under that strip's reason.
+  - **`strictReadonlyWrites` is unchanged.** The maintainer's ruling 「甲」 says only the loud half ships in 18.x. A strict write whose value for such a field differs from the computed one is NOT refused: it completes with the computed value, and the replacement is reported through `onFieldsDropped` under strict as well. A refusal is runtime behaviour that no conversion can carry, so the strict refusal of a `stored_expression` replacement is deferred to 19.0. A strict write that also carries a refusable drop (`readonly`, `readonly_when`, `primary_key`, `computed`) is refused as before, for those drops only, and fires no listener.
+  - **Flow step warning.** `@objectstack/service-automation` words the new reason. Its warning says the requested value(s) were not stored, rather than that the field was not written, and its closing sentence says the write succeeded with the computed value(s).
+  
+  **For consumers that branch on `reason`.** A `Record<DroppedFieldsEvent['reason'], …>` table fails its typecheck until it has a `stored_expression` row. That is the intended signal: add the row. A client running behind the server should treat a reason it does not recognise as "not applied", never as one of the known reasons.
+- 3937697: fix(objectql,plugin-security): an update's re-point of `organization_id` that the Layer 0 wall admits is stored as sent, not silently dropped
+  
+  Clause-②: yes (widening) — an update re-point of `organization_id` the Layer 0 wall admits is now stored instead of silently dropped, and an in-process `strictReadonlyWrites: true` update naming an organization the wall admits is now stored instead of refused `ERR_READONLY_FIELD_REJECTED`.
+  
+  **What was wrong.** Under the `group` posture, a member whose active organization is A can name C, another organization it belongs to, in an update's `organization_id`. The Layer 0 write wall admitted C, on the payload and on the row about to be stored. Then the engine's static-`readonly` update strip took it, because the platform's injected tenant column is `readonly: true`, and the row stayed in A. The update answered 2xx, by id and by predicate alike, and the only signals were a `droppedFields` entry and a WARN. An object that declares its own writable `organization_id` stored the same re-point, so the app objects on the injected column were the inconsistent half. This is the update half of the insert fix shipped beside it.
+  
+  **What changed.**
+  
+  - **`@objectstack/objectql`.**
+    - `ObjectQL.update` reads `PostHookWriteImageCheck.judgesOrganization` (reached as `OperationContext.postHookWriteImageCheck`) once per update, for a non-system caller, and hands that one value to every static-`readonly` pass: the pre-hook hide pass, the by-id strip, the predicate strip, and the stored view the `readonlyWhen` strips and the master-detail settlement read.
+    - Where it is set, and the object's `organization_id` is the platform's injected column on an object the insert strip also judges, those passes leave the caller's re-point on the row. The wall then stores it as sent where it admits it and refuses it where it does not.
+    - The decision is one helper, shared with `ObjectQL.insert`, so the two write verbs spare exactly the same objects.
+    - The member's published doc now covers updates. No member is added.
+  - **`@objectstack/plugin-security`.**
+    - Step 3.7 sets `judgesOrganization` on the stored-image seam it composes for a single-payload update, only where it composes the wall's own parts in, as it already did for an insert.
+    - It does not set the member on a business-`check`-only seam, on a crossing platform operator's update (which gets no wall seam), or on an update whose payload is an array (step 3.7 composes no seam for one).
+    - The wall's admit/refuse set is unchanged: a re-point outside the caller's scope is still refused `403 PERMISSION_DENIED`, and so is an emptied one (`null` or `''`).
+  
+  **What a caller sees.** Every change below is a widening. None of them admits a `(caller, organization)` pair the wall does not already admit, and the engine's own gates (the wall, the strip and the strict flag) refuse nothing they accepted before.
+  
+  - **The re-point is stored as sent.** Under `group`, an update naming another organization of the caller's membership set moves the row there, by id and by predicate. Under `isolated`, an update naming the active organization is stored as before.
+  - **No longer reported.** Such a re-point is no longer reported as dropped: not in `droppedFields`, not through the `onFieldsDropped` listener, and not by the read-only WARN.
+  - **`strictReadonlyWrites` stores it.** An in-process `engine.update(..., { strictReadonlyWrites: true })` naming such an organization is now stored, where it used to be refused `ERR_READONLY_FIELD_REJECTED`: strict refuses exactly what the strip takes. No REST door can set that flag.
+  - **`beforeUpdate` hooks see it.** On a walled update, `beforeUpdate` hooks now see the caller's `organization_id`, because the value will be stored. Before, it was withheld from them.
+  - **A member with no active organization.** Under `group`, such a member re-points within its membership set the same way, and outside it is refused.
+  - **An on-behalf-of update (ADR-0090 D10).** Take a platform operator who crosses the wall and acts for a walled delegator. The re-point is held to the delegator's wall: stored as sent where that wall admits it, refused `403` where it does not. Before, an admitted re-point was taken and the row kept its organization.
+  - **Outcomes that read the stored organization now follow the admitted value.** An organization-scoped unique key, a validation rule, a `readonlyWhen` / `requiredWhen` predicate, and a hook that reads `organization_id` now see the organization the row is moved to, not the one it used to keep. So a re-point that collides with an organization-scoped unique key in its new organization is refused there, as it already was on an object that declares its own `organization_id`; before, the re-point was dropped and the write reported success.
+  - **Only the platform's injected column on an app object is spared.** A `sys_` object, a platform-internal `managedBy` bucket (`engine-owned`, `append-only`, `better-auth`), and an object whose author declares its own `organization_id` with `readonly: true` keep the update strip: the value is still taken, reported, and refused under strict, exactly as before. The organization-scoped grant tables (`sys_user_position`, `sys_user_permission_set`) declare a writable `organization_id` the strip never took, so their re-points keep meeting their own guards exactly as before.
+  - **Where no wall judges the column, nothing changes.** The re-point is still taken and reported, and strict still refuses it. That includes `single`, a composition without the security plugin, a tenancy-disabled object, a platform operator crossing the wall on its own behalf, and `preserveAudit`, whose update-only exemption never reaches `organization_id`.
+  - **The `update`-mode `validate()` preview is unchanged.** It runs no middleware, so it holds no seam: it still reports an admitted re-point as dropped while the write stores it.
+- 3937697: fix(objectql,plugin-security): an insert's explicit `organization_id` that the Layer 0 wall judges is stored as sent, not replaced by the active organization
+  
+  Clause-②: yes (widening) — `PostHookWriteImageCheck` gains the optional published member `judgesOrganization`, and an in-process `strictReadonlyWrites: true` insert naming an organization the wall admits is now stored instead of refused `ERR_READONLY_FIELD_REJECTED`.
+  
+  **What was wrong.** Under the `group` posture, a member whose active organization is A can name C, another organization it belongs to, in an insert's `organization_id`. The Layer 0 write wall admitted C. Then the engine's static-`readonly` strip took it, because the platform's injected tenant column is `readonly: true`, and the driver stamped A. The insert answered 2xx with the row in A, single and array alike. The only signals were a `droppedFields` entry and a WARN. Under `isolated`, a caller that named its own active organization saw the same strip and report, for a value that ended up stored anyway.
+  
+  **What changed.**
+  
+  - **`@objectstack/objectql`.**
+    - `PostHookWriteImageCheck` (reached as `OperationContext.postHookWriteImageCheck`) gains an optional member, `judgesOrganization?: boolean`. An enforcement layer sets it when the seam's `evaluate` holds every inserted row's `organization_id` to the tenant wall.
+    - `ObjectQL.insert` reads that member to decide. When it is set and the object's `organization_id` is the platform's injected tenant column, a non-system caller's explicit `organization_id` stays out of the pre-hook withhold and out of the static-`readonly` strip. The injected column is told apart by the registry's provenance reader; an authored column keeps the strip. The value is then stored as sent where the wall admits it, and refused by the wall where it does not.
+    - When the member is absent or `false`, both passes run exactly as before. That covers a seam that carries only a business `check`, a stack without an enforcement layer, and `validate()`, which runs no middleware.
+  - **`@objectstack/plugin-security`.**
+    - Step 3.7 sets the member only where it composes the wall's own parts into an insert's stored-image seam.
+    - It does not set the member on a business-`check`-only seam, on a crossing platform operator's seam, or on any update.
+    - The wall's admit/refuse set is unchanged: an organization outside the caller's scope is still refused `403 PERMISSION_DENIED`.
+  
+  **What a caller sees.** Every change below is a widening. None of them admits a `(caller, organization)` pair the wall does not already admit, and nothing accepted before is refused now.
+  
+  - **The optional member.** `PostHookWriteImageCheck.judgesOrganization` (`OperationContext.postHookWriteImageCheck`) is new published surface on `@objectstack/objectql`.
+  - **The value is stored as sent.**
+    - Under `group`, an insert naming an organization of the caller's membership set is stored there.
+    - Under `isolated`, an insert naming the active organization is stored as before.
+  - **No longer reported.** Such an organization is no longer reported as dropped: not in `droppedFields`, not through the `onFieldsDropped` listener, and not by the read-only WARN.
+  - **`strictReadonlyWrites` stores it.** An in-process `engine.insert(..., { strictReadonlyWrites: true })` naming such an organization is now stored, where it used to be refused `ERR_READONLY_FIELD_REJECTED`: strict refuses exactly what the strip takes. No REST door can set that flag.
+  - **`beforeInsert` hooks see it.** On a walled insert, `beforeInsert` hooks now see the caller's `organization_id`, because the value will be stored. Before, it was withheld from them.
+  - **A member with no active organization.** Under `group`, such a member with a non-empty membership set can now insert a row naming one of those organizations: it is stored there. It used to be refused `403 PERMISSION_DENIED` under ADR-0123 D2, because the value was taken and the row then named no organization. A row naming none is still refused under D2, and one naming an organization outside the set is still refused by the wall.
+  - **An on-behalf-of insert (ADR-0090 D10).** Take a platform operator who crosses the wall and acts for a walled delegator. The named organization is held to the delegator's wall: stored as sent where that wall admits it, refused `403` where it does not. Before, an admitted value was taken and the active organization stored.
+  - **An explicit empty value in an array insert.** A row naming `organization_id: null` or `''` is no longer taken, reported, or refused under strict. It is still stored as the active organization, because the driver's stamp fills an empty value.
+  - **Only the platform's injected column is spared.** On an object whose author declares its own `organization_id` with `readonly: true`, a caller's value is still taken, reported, and refused under strict, exactly as before. The wall still judges that column. The author's declaration is what keeps the strip, and the injected column is told apart by the registry's provenance reader (`resolveInjectedColumnProvenance`).
+  - **Where no wall judges the column, nothing changes.** The value is still taken and reported, and strict still refuses it. That includes `single`, a composition without the security plugin, a tenancy-disabled object, and a platform operator crossing the wall on its own behalf.
+- 3937697: fix(objectql, plugin-auth)!: deleting an organization that still owns records is refused with 409 and a per-table count, before anything is deleted; an empty one is deleted whole, its teams and organization-admin grants with it; the engine never clears a tenant column
+  
+  **The 18.0.0 defect this fixes.** `POST /api/v1/auth/organization/delete` ran better-auth's delete, which removes the organization's members, then its invitations, then the organization row, as three separate writes. The engine's delete cascade then applied the tenant column's `set_null` default to every row the organization still owned. On a database whose tenant column is NOT NULL (one that took the v18 organization-ownership ceremony), the delete answered 500 on `sys_team.organization_id` after the members and invitations were already gone, so the organization survived with no owner and nobody could delete it. On a database 18.0.0 created, where the column is still nullable, the delete answered 200 and left the organization's teams and records with `organization_id = NULL`, owned by nobody and visible to nobody. Every organization created through the door owns a default team, so on a NOT NULL database not even an empty organization could be deleted. Deployments that run `single` are not reached the same way: their one organization is the Default Organization, which the last-administrator guard answers first, and they cannot create another.
+  
+  **What happens now.**
+  
+  - An organization that still owns records is refused with `409` and the standard `DELETE_RESTRICTED` code. The body names each table and its row count, `dependents: [{ object, count }]`, and never a row's values. The refusal runs before better-auth's handler, so nothing is written, the caller's active organization included. A caller the organization does not let delete it still gets better-auth's own `403`, with no count.
+  - Append-only ledgers (objects declared `managedBy: 'append-only'`, such as `sys_activity`, `sys_audit_log` and `sys_email`) are history, not records. They never refuse the delete, and their rows are kept: every reference they hold to the organization (`organization_id` on `sys_activity` and `sys_email`, the attribution `tenant_id` on `sys_audit_log`) goes on naming the deleted organization, never NULL and never deleted. The delete writes activity rows of its own, so counting them would refuse every delete.
+  - Engine-owned rows (objects declared `managedBy: 'engine-owned'`) are treated the same way. The platform writes them as a consequence of records or activity, and an administrator cannot delete them over the data API: approval requests, approvers and tokens; automation runs; notifications, their receipts and deliveries; outgoing HTTP deliveries; mailboxes and mirrored mail; record shares and share links; import jobs; audience-binding suggestions; and organization-level settings values and their audit. They never refuse the delete, and they are kept, still naming the deleted organization.
+  - So engine-owned and append-only rows outlive the organization, and go on naming it. Under tenant scoping no organization reads them.
+  - An attribution column `organization_id` on an object whose tenancy is disabled is kept the same way: not counted, not cleared. A pointer to the organization, such as a session's or an API key's `active_organization_id`, is cleared as before.
+  - The Default Organization (slug `default`, or the deployment's only organization, never under an organization wall) is asked the last-administrator guard's question first, and answers `403 PERMISSION_DENIED` while deleting it would leave no platform administrator. Once the guard admits, it is counted like any other organization, before better-auth deletes anything, except that only its members and invitations are left out: its teams and grants are not removed, so they count, and the delete is refused `409 DELETE_RESTRICTED` while it holds them.
+  - An organization that owns nothing but its own auth structure is deleted whole: its members and invitations (better-auth), and its teams, their members and the organization-admin grants its owners and admins hold (plugin-auth, from `beforeDeleteOrganization`). Any other grant scoped to the organization counts as a record.
+  - The request runs as one engine transaction and rolls back on any error answer, so a delete either removes all of that or none of it. On a datasource whose driver has no transactions, the refusals are the guarantee, because all of them run before the first write: the record count above, and, for the Default Organization, the last-administrator guard, whose `403` is now asked before better-auth deletes any member (it used to arrive after the members and invitations were gone).
+  - Under all of this, the engine itself refuses to delete a `sys_organization` row while any row still names it in its tenant column, whatever path reaches the delete: `409 DELETE_RESTRICTED` with the same `dependents` list, which better-auth's door now carries to the wire too. It counts each table rather than reading its rows. An organization is deleted by id only: a delete matching organizations by a filter (`multi: true`) is refused with `409 DELETE_RESTRICTED` naming the by-id route, because only the by-id delete runs this referential pass. A tenant column is never set to NULL.
+  - `ObjectQL.organizationOwnedRowCounts(organizationId, { exclude })` answers, per object, how many rows name an organization in their tenant column. It is the question the refusal asks.
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is the answer the organization delete gives while the organization still owns records (409 instead of a 500 that left a partial delete, or a 200 that orphaned the rows to NULL), and the engine's answer to a `sys_organization` delete that rows still name in their tenant column. The remedy is an operator action on the organization's records, never a rewrite of a package source or a stored row. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed, one engine method is added (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (the organization delete's accept set narrows), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  - **FROM:** deleting an organization that still owned records answered `500` after deleting its members and invitations (tenant column NOT NULL), or `200` with its teams and records orphaned to `organization_id = NULL` (tenant column nullable, an 18.0.0-born database). A direct engine delete of such a `sys_organization` row did the same.
+  - **TO:** both answer `409 DELETE_RESTRICTED`, with `dependents: [{ object, count }]` naming every table that still holds rows. Nothing is deleted or changed.
+  - **Fix:** delete the organization's records, or move them to another organization, then delete the organization. The refusal names the tables to look at. Business units, positions and sharing rules count as records. Activity, audit and mail-log rows do not, nor do engine-owned rows (approval state, runs, deliveries, shares, settings values).
+  - **Seed datasets:** on a composition with the organizations runtime (`@objectstack/organizations`) and an app that ships seed datasets, a new organization receives that seed replay at creation, so it owns records from its first moment and its delete is refused until they are removed. The refusal lists them. Delete them (or move them) like any other records, then delete the organization. Measured on the showcase: a fresh organization owns 132 seeded rows in 19 tables.
+  - **Already orphaned on 18.0.0?** Rows an earlier organization delete set to `organization_id = NULL` are not touched by this release. Organization-less rows are what the v18 organization-ownership ceremony (`os migrate organization-ownership`) attributes or reports.
+- 3937697: feat(cli, objectql): `os db orphans` — report the detail rows whose required master-detail master does not exist, and delete them only behind `--delete`, after a pre-delete export
+  
+  Clause-②: yes (widening)
+  
+  **What was wrong.** A system-context write is exempt from the write-time reference check, so an elevated writer could store a master-detail id that names no master. Such a row's access derives from that master, so every user door answered 404 for it, the administrator's `GET` and `DELETE` included, and a list query left it out. The integrity audit reported the row and, by design, never rewrites it. No door existed to remove it, so it stayed until someone edited the database by hand.
+  
+  **`os db orphans` (new command).** An explicit operator command. Nothing on any boot, upgrade, migrate or lifecycle path runs it.
+  
+  - **The default run is a report** that writes no row or table and creates no file. It boots read-only, as `os migrate plan` does. It lists each detail row whose required `master_detail` master does not exist, with its object, record id, field and missing master id. It also lists the deeper detail rows that the delete's cascade removes with it. `--json` prints one document, `{ mode: 'report', plan }`.
+  - **What is never deleted, and is said.** A reference whose target object could not be checked (not registered, no driver, or a failed read) is counted as `undetermined`. Unknown is not missing. A dangling reference on the same objects through a field that is not a required master-detail is listed in `otherDangling`. An orphan whose cascade could not be read is listed as `withheld`, with the reason. A scan bounded by `--max-rows` (default 100000) names every object it could not read in full.
+  - **`--delete` requires `--export <path>`.** The export holds every record the run deletes, as the driver stores it. It is written owner-only, is created rather than overwritten, and is read back before the first delete. If it cannot be written or does not hold every record, the run refuses with nothing deleted. Just before deleting, the run reads the report again and skips an orphan whose master now exists, or whose cascade now reaches a record the export does not hold. Each delete is the engine's own system-context delete, so the master-detail's cascade removes the deeper details. A `restrict` dependent refuses the delete, and a cascade on one datasource is one unit of work, so nothing of that orphan is removed. A `set_null` reference to a deleted row is cleared. A roll-up on the missing master cannot be recomputed, and the run notes this rather than failing. Each delete is judged by reading its records back.
+  - **Refusals**, each exit 1 with nothing deleted, and the code under `--json` as `error`: `export_required`, `export_exists`, `export_failed`, `export_incomplete`, `confirmation_required` (`--json` without `--yes`), `boot_failed`, `no_engine` and `scan_failed`.
+  
+  **`@objectstack/objectql`: `ObjectQL.inspectCascadeDelete(object, id)` (new method).** A read-only method that returns every record a by-id `delete()` of that record removes, root first. It is the cascade set the delete collects for itself, read through the same walk. It writes nothing, runs no hook, and files no reference-check elevation record, because no delete happens. It reads as the system with no organization. `restrict` and `set_null` relations are not listed, because neither removes a record. A dependents probe that fails propagates.
+  
+  Nothing that ran before changes: the audit still reports and never rewrites, and the system-write exemption is unchanged.
+- 3937697: fix(objectql)!: under `strictReadonlyWrites`, a write whose value a stored field's `expression` replaces (`stored_expression`) is refused, and nothing is written
+  
+  Clause-②: no (narrowing: under `strictReadonlyWrites`, a write whose value a stored expression replaces is refused instead of reported; it ships now under the amended 「甲」, #6015 `6303865025`)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition, stored shape or exported declaration is added, removed, renamed or narrowed, and no stored row is read, rewritten or converted, so there is nothing for `objectstack migrate meta` to rewrite. What changes is the answer the engine gives an in-process caller that opts into `strictReadonlyWrites` and sends a value a stored expression then replaces: that write is refused where it completed and was reported. The remedy is the caller's own payload (leave the field out, or send the computed value), which no ledger entry can derive. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (the strict mode's refusal set grows by one reason), shipped as `minor` under the amended ruling 「甲」: a narrowing that no conversion carries ships now, in 18.x. It applies only to a caller that opts into the in-process `strictReadonlyWrites` option. No REST or wire caller can set that option, and every write without it behaves exactly as before.
+  
+  `strictReadonlyWrites` refuses every drop that `onFieldsDropped` reports. Since the `stored_expression` reason landed, one reported drop was left out: a caller's value for a stored (non-`formula`) field that declares an `expression`, which the engine replaces with the computed value. Under strict, such a write completed and was only reported. It is now refused like every other strip's drop.
+  
+  - **FROM:** a write with `strictReadonlyWrites: true` that sent a value for a stored expression field, different from the value the engine computes, completed. The row held the computed value, and `onFieldsDropped` received a `stored_expression` event.
+  - **TO:** the same write throws `ReadonlyFieldRejectedError` (`code: 'ERR_READONLY_FIELD_REJECTED'`), whose `drops` carries the `stored_expression` event. Nothing is written, and `onFieldsDropped` does not fire. This holds on insert (a single row, a batch, and `insertMany`, which refuses the whole call as it does for the other strict drops), on update by id, and on a predicate update.
+  - **One refusal names everything.** When the same payload also carries another strip's drop (`readonly`, `readonly_when`, `primary_key`, `computed`), the one refusal names all of them together, `stored_expression` last. Before, such a write was refused for the other drops alone. The message's per-reason form gains a `stored_expression` remedy, spoken only when that reason is present, so every other refusal's message is unchanged.
+  - **Ordering is kept.** The strips' refusal still comes first: if the stored-expression pass itself throws, for example a predicate update whose patch computes different values on different matched rows (`VALIDATION_FAILED`), a strict write that also carries a strip's drop is still refused with `ERR_READONLY_FIELD_REJECTED` naming those drops, as before.
+  - **`@objectstack/spec` (patch):** the TSDoc on `WriteObservabilityOptions.strictReadonlyWrites` and `DroppedFieldsEvent.reason`, which ships in the published declarations, now says the `stored_expression` arm is refused under strict. No schema, `.describe()` text or export changes.
+  - **Unchanged:** a strict write that sends the computed value, or no value for the field, is not refused, because nothing it sent was replaced. A stored expression field also declared `readonly` is still refused once, as `readonly`. Without `strictReadonlyWrites`, the write completes with the computed value and the replacement is reported, as before. The error code is unchanged.
+  - **The fix for a strict caller:** leave the stored expression field out of the payload, or send the value its expression computes. To let the replacement happen and merely observe it, drop `strictReadonlyWrites` and pass `onFieldsDropped`.
+  
+  This supersedes the `strictReadonlyWrites` bullet of the `stored_expression` reason's entry, which deferred this refusal to a later major.
+  
+  Measured before the change: no non-test caller in this repository passes `strictReadonlyWrites` (the examples, dogfood suites and runtime doors pass none), so no in-repo producer moves.
+- 3937697: feat(objectql, plugin-security): the engine composes its `ReadableIds` leaf for a delegated (on-behalf-of) caller, scoped to the delegator intersection, instead of refusing it (ADR-0139 D5.1 as amended; O5 answered)
+  
+  Clause-②: no
+  
+  **Before.** A read carrying an on-behalf-of link whose final `where` held a `ReadableIds` leaf was refused `INTERNAL_ERROR` / 500 before any driver was asked (ADR-0139 D5.1 as accepted), and `getReadFilter` answered the deny sentinel for every delegated context, so the leaf's consumers routed such a caller to their bounded, fail-closed probe.
+  
+  **Now.**
+  
+  - `@objectstack/objectql`: the executor boundary composes the leaf for a delegated caller exactly as for any other. It asks `canReadObject` and `getReadFilter` with the delegated context as it stands (`onBehalfOf` intact) and composes what the security service answers; it derives no intersection of its own. The two remaining D5 classes, a parent an object-scoped read middleware narrows and a parent bound to another datasource, are still refused by name with the same envelope.
+  - `@objectstack/plugin-security`: `getReadFilter` answers a delegated context the ADR-0090 D10 intersection, the six layers the engine middleware ANDs into a delegated `find` of the same object: the principal's row-level security and `controlled_by_parent` derivation, the delegator's two over the delegator's own rebuilt context, and the sharing visibility filter under each identity at its own depth. A delegated read through the leaf serves exactly the rows a delegated direct read of the parent serves. It fails closed as the chain does: a delegator who does not exist, a delegator the object does not admit, a principal or a delegator that resolves no permission set, and any resolution failure answer the deny sentinel, and the leaf is `$in: []`.
+  
+  **What a reader sees.** No shipped consumer writes a leaf for a delegated caller yet (each still routes it to its probe; that routing retires per consumer on its own card), so a delegated read of `sys_activity`, `sys_audit_log`, `sys_comment`, `sys_comment_reaction` or `sys_attachment` is served as before. A door that binds `getReadFilter` directly, such as the analytics raw-SQL path, scopes a delegated context to the intersection now; as accepted it denied that context outright.
+  
+  **Unchanged.** `controlled_by_parent`'s own read scope (ADR-0055 §2 mechanism (b), the pre-resolved id set) and the nested master chain, which keep their own cards; the delegated `find`, `findOne`, `count` and `aggregate` through the engine middleware, which already applied the intersection.
+- 3937697: feat(objectql): the engine composes a `ReadableIds` leaf that sits inside a composed read scope — the nested master chain (ADR-0139 D6 as amended)
+  
+  Clause-②: no
+  
+  **Before.** The executor boundary composed every `ReadableIds` leaf in a read's own `where` with the parent's read scope, and handed the driver that scope as answered. A scope that itself carried a leaf — a parent whose read scope is derived from ITS master, `{ master_fk: { $in: ReadableIds.of(G) } }`, the shape a two-level `controlled_by_parent` chain takes once its scope is spelled as a leaf — reached the driver uncomposed inside the parent's subquery, and the driver refused it, `INTERNAL_ERROR` / 500 (measured on driver-sql).
+  
+  **Now.** Every leaf a composed scope carries is composed the same way, before the leaf that encloses it — the same five steps, the same caller context at every level (a delegated context included), recursively. The driver receives one composed leaf whose scope holds composed leaves and compiles one statement with the subqueries nested; a two-level chain serves exactly the rows today's id-list pre-scan serves, for a direct and for a delegated caller (measured on the real stack: `find` and `count` agree, one statement per read). Each parent is asked once per read, at whichever level it first appears. The closed doors hold at every level: `canReadObject` false, the deny sentinel, a throw on either half, or a parent the registry does not hold answer `$in: []` inside the composed scope. Refused by name, `INTERNAL_ERROR` / 500, before any driver is asked: D5's two classes at a nested level (a middleware-gated or federated master), a nested leaf outside a `$in` comparand or a composed leaf the engine did not compose inside a scope, a chain that returns to a parent already on its branch, and a chain deeper than 8 scopes (the same cut as the `controlled_by_parent` derivation's).
+  
+  **What a reader sees.** No shipped security service answers a read scope carrying a leaf yet — `controlled_by_parent`'s scope is still the pre-resolved id list (ADR-0055 §2 mechanism (b)) until the plugin-security switch lands on its own card — so every shipped read is served as before. The six consumers' leaves compose exactly as they did: a scope with no leaf is composed by reference, one level asked.
+  
+  **Unchanged.** `controlled_by_parent`'s own read scope and the id-list pre-scan, ADR-0055, every consumer's probe routing, and the drivers' compilation of the composed leaf (driver-sql and driver-memory already compile a scope that holds a composed leaf, through their own filter path).
+- 3937697: feat(spec,core,objectql): one package entry of a release artifact may state its own `source`, and the registry records it
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  `ArtifactPackageSchema` (one `packages[]` entry of an assembled release artifact) gains an optional `source: 'code' | 'marketplace'` beside `manifest`. The values are the new `ArtifactPackageSourceSchema`, the subset of `InstalledPackageSourceSchema` a load path can register; `authored` and any other value are refused at the entry gate as `INVALID_ARTIFACT_PACKAGE_ENTRY` (422).
+  
+  The `manifest` service registers each package with the `source` its entry states, so a merged artifact that carries marketplace installs beside the deployment's own code lists them as `marketplace` on `GET /api/v1/packages`. An entry that states nothing takes the registering door's statement as before (`register(artifact, { source })`, `code` when absent), so existing artifacts register unchanged. An entry's own statement wins over the door's.
+  
+  `@objectstack/core` adds `resolveArtifactPackageEntries(artifact)`, which returns each package to register as `{ manifest, source? }` in dependency order. `resolveArtifactPackageOrder` is unchanged and still returns the bodies alone.
+
+### Patch Changes
+
+- 3937697: fix: no shipped text says the SQL driver reads organization-less rows, and the in-memory HTTP outbox no longer does
+  
+  Clause-②: no (one fix and texts: the in-memory HTTP outbox's `redeliver()` now answers as `SqlHttpOutbox` already did; no accept set, served body or error code of a shipped composition moves)
+  
+  ADR-0131 D8 retired the driver's `OR organization_id IS NULL` arm. Several shipped texts still described it as the live tenant predicate. They now state the current rule: the tenant term is `organization_id = :tenant`, or `IN (:tenants)` under the `group` posture, and nothing else. No tenant-scoped read reaches an organization-less row on a tenant table.
+  
+  - **`@objectstack/service-messaging` — fix.** `MemoryHttpOutbox.redeliver()` no longer lets a tenant-scoped caller replay a row with no organization. It answers `RESOURCE_NOT_FOUND`, as `SqlHttpOutbox` does through the driver's tenant scope (ADR-0131 D8: no layer has a NULL arm). A caller with no tenant is still unscoped. No shipped composition constructs the in-memory outbox; the messaging plugin always builds `SqlHttpOutbox`. Code that embeds `MemoryHttpOutbox` directly sees the change.
+  - **`@objectstack/service-automation`.** The `[http]` node's warning for a durable callout with no organization no longer says the `sys_http_delivery` row is "a global row every organization's redeliver door can reach". It now says no organization's redeliver door reaches that row.
+  - **`@objectstack/objectql`.** The `sys_record_share` entry of the platform-object tenancy inventory carries an updated `evidence` text.
+  - **`@objectstack/lint`.** `os explain unique/legacy-organization-composite` now says that a new row carries its organization wherever the organization object is registered. A composition that registers no organization object still writes rows whose organization column is NULL.
+  - **`@objectstack/spec`.** The TSDoc of `SharingRuleRow` no longer calls it a 1-to-1 stored shape: `deploymentWide` has no `sys_sharing_rule` column. The TSDoc of `DriverOptions.tenantIds` and of the events `organizationId` member describe the predicate without a NULL arm.
+  - **The other packages.** Code comments only.
+- 3937697: fix(objectql): an advisory validation rule that cannot be evaluated logs one line saying the write proceeded, not two saying it was rejected (#24782)
+  
+  Clause-②: no (log text only: no response, status, code, outcome or export moves)
+  
+  A `severity: 'warning'` or `'info'` validation rule whose predicate cannot be evaluated never blocks the write. Only `error` rules fail closed (#4649). The write answers 2xx and the row persists. The server log said the opposite, twice. The predicate evaluator logged "— write rejected: a rule that cannot be evaluated fails closed, it is never skipped" before the rule's severity was consulted. Then the advisory per-write line repeated the unevaluable violation's own message, which also ends "— write rejected.".
+  
+  Such a rule now logs ONE line: `Validation rule 'NAME' (warning): the rule could not be evaluated (FAULT) — write proceeded: the rule is advisory, so it was not applied to this write`. This covers a `script` / `cross_field` condition, a `conditional`'s `when`, and the relationship-traversal refusal. On the seed / boot path the same text folds into that load's advisory summary line, which keeps its shape.
+  
+  Unchanged: an unevaluable `error` rule is refused with the same `400 VALIDATION_FAILED` body, and its log line still says the write was rejected and the rule fails closed. Which rules block is unchanged. An unevaluable rule still stays out of a write answer's `warnings`. `requiredWhen`, `readonlyWhen` and the option `visibleWhen` gate still refuse on every severity.
+- 3937697: fix(objectql): a unique refusal's user-facing sentence names the object and the field by label
+  
+  Clause-②: no (text only: the user-facing sentence names the object and field by label, and `developerMessage` opens with the API names; no code, status, outcome or export moves)
+  
+  `DuplicateRecordError.message` is the sentence every door keeps as thrown, so a record save and a screen flow refused by a unique constraint show it to the end user word for word. It named the object, and the field when the driver reported one, by API name: `Duplicate record refused on 'crm_account': …`.
+  
+  - **The sentence now uses the declared `label`.** The engine looks up the object's and the field's labels in its registry on every write door that raises the refusal: insert (single and batch), and update by id and by predicate. Example: `Duplicate record refused on 'Account': a unique constraint on 'Account Name' already holds this value. No record was written.` Where no label is declared, the sentence uses the API name, exactly as before. The opening words and `No record was written.` are unchanged.
+  - **The API names stay available for diagnostics.** They are still on `object` and `field`, and `developerMessage` now opens with them: `Duplicate record refused on object 'crm_account', field 'name'. …`.
+  - **Unchanged:** the code (`DUPLICATE_RECORD` in the engine, `UNIQUE_VIOLATION` on every wire route), the 409 status and the outcome. `DuplicateRecordError`'s constructor takes an optional fourth argument with the labels. Callers that pass three arguments get the API-name sentence.
+  - **For HTTP clients:** on the REST data routes the curated `error` text is unchanged. The wire `developerMessage` (which carries the engine's sentence) now names the labels, and the body's `object` and `field` keys still carry the API names.
+- 3937697: fix(objectql): the write preview (`validate()`, the import dry run) answers a row's `organization_id` from the Layer 0 tenant wall's own verdict
+  
+  Clause-②: yes (widening)
+  
+  Metadata-protocol: none
+  
+  `validate()` runs no middleware, so the tenant write wall never judged a preview row. On a walled deployment (`group` or `isolated`) the preview reported a caller's `organization_id` as dropped where the write stores it as sent, and answered valid a row naming an organization the write refuses with 403.
+  
+  - **New, optional: `ObjectQL.registerWriteWallVerdict(fn)`**, beside `registerWriteGateProbe`, with its types `WriteWallVerdict` and `WriteWallRowVerdict`. The layer that owns the wall registers it (`@objectstack/plugin-security` does), and the engine never decides the verdict itself.
+  - **`validate()` reads each row's verdict.** A row whose organization the wall judges keeps `organization_id` through the static `readonly` strip, so no `droppedFields` entry names it, as on the write. A row the wall refuses answers `valid: false` with the write's own code (`PERMISSION_DENIED`) and message, under `organization_id` for a refused value and `_record` for the caller's state, and it drops nothing. Rows stay independent, and the set's `valid` stays the conjunction. A row the strips changed is asked about again, as the write's stored-image half judges it.
+  - **Unregistered, nothing changes**: the strip runs as before, which is what the write does in a composition without the security plugin.
+  - **Named limit:** the preview runs no hooks, so an organization a `beforeInsert` / `beforeUpdate` hook writes is judged by the write alone.
+- 3937697: fix(objectql, driver-sql, spec): a stored field whose `expression` reads an `autonumber` stores the value computed with the number
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A stored (non-`formula`) field whose `expression` reads a record number, such as `record.case_number + " - " + record.subject`, was computed before the number existed. On insert it stored `null` (or the `has()` fallback) until a later update by id computed it again. Now the insert computes it again right after the number is issued, and writes the row once, carrying both.
+  
+  - **`IDataDriver.issueAutonumbers` (new, optional).** A driver that owns its record-number counter can issue a row's numbers ahead of the write, in place, and answer after a unique violation whether the collision was on a number it issued (re-seeding the counter and emptying those slots). `SqlDriver` implements it over its existing counter, so `driver-sqlite-wasm` and `driver-turso` (both faces) inherit it. A driver without it is unchanged.
+  - **The engine.** For an object whose stored expression reads a record number (directly or through another stored field), the engine asks the driver for the number after validation, where it already issued numbers itself, so a rejected row still burns none. It computes the readers again and hands `create()` / `bulkCreate()` the row with the number filled: one INSERT, no transaction. A collision on a single row is re-issued through the member by the engine's existing retry loop, which computes the readers again. A batch collision re-seeds the counter and is not re-issued (the batch policy the engine already had). Objects with no such field keep the driver's own issue-at-write path. Where the engine issues the number itself (driver-memory, driver-mongodb), the readers are computed again after it does.
+  - **A driver that owns its counter without the member** stores the readers computed without the number, as before, and the engine now says so once per object at `error` level, with the remedy.
+  - **`ObjectQL.registerInsertRecomputeListener(id, fn)` (new).** Called per row after that second computation, on the row the driver is handed. `plugin-pinyin-search` registers on it, so a `__search` companion whose name field reads the record number is stamped from the value that carries the number, and `$search` finds the record by pinyin and by its number.
+  - **One change in what a refused insert reports.** On an object whose stored expression reads the number, a SQL driver's collision that survives every retry now leaves as `ERR_AUTONUMBER_COLLISION` (the engine's three attempts) instead of `DUPLICATE_RECORD` (the driver's own retries). Every other object is unchanged.
+- 3937697: fix(objectql): a federated object whose datasource the connect policy denied is reported at info, not in the ERROR that claims its reads hit the wrong table
+  
+  Clause-②: no (log text and level only: no response, status, outcome, boot verdict or export moves)
+  Metadata-protocol: none (a boot log line's level and text; nothing a metadata author writes changes)
+  
+  - **What it was.** At `kernel:ready`, `ObjectQLPlugin` re-binds every federated (`external`) object to its remote table and reports, at ERROR, each one it could not bind. The ERROR says the object stays served while every read against it "resolves to a table named after the OBJECT … no such table, or the wrong table". It said that about an object whose datasource the host's connect policy had denied on purpose. `os migrate apply` on the stock showcase, whose managed-only policy denies every `schemaMode: 'external'` datasource, printed it after a successful apply.
+  - **What changed.** When the datasource layer records the datasource as refused by policy (availability `blocked`), its unbound objects are reported in one `info` line instead. The line names the objects and their datasource, and says every read against them is refused with `DatasourceUnavailableError` until the policy allows that datasource. That is what the engine already does for such a read. The same line appears on every composition, serving or not, because it follows the recorded verdict alone.
+  - **Unchanged.** The ERROR, word for word, for every other object it covered: a datasource that was never declared, a connect that FAILED (availability `failed`), a driver without external-object registration, and a registration that threw. On a boot with both, the info line covers the denied objects and the ERROR covers the rest, and the ERROR's counts exclude the denied ones. No binding, connect policy or read result changes.
+  - **What to do.** Nothing. A log filter or agent that keyed on the ERROR for a policy-denied datasource now finds the info line, which names the same objects and datasource.
+- 3937697: fix(objectql)!: a `controlled_by_parent` detail whose master the engine cannot compose a read over now refuses the boot, instead of booting and failing at read time
+  
+  Clause-②: yes (narrowing)
+  
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A boot refusal of one deployment composition: no key of any metadata schema is added, removed, renamed or re-shaped, and `ObjectSchema.parse` accepts exactly what it accepted before, so `objectstack migrate meta` has nothing to rewrite and no tombstone is owed. Both facts the refusal reads are deployment facts (datasource mapping, a package's default datasource, lifecycle routing, the middleware registrations), and the remedy is the author's choice among three, which no ledger entry can derive. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this composition (not already-registered); and nothing exported is removed or narrowed, one engine method is added (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (a narrowing of what boots). A stack declaring a `controlled_by_parent` detail over either class of master below booted before this change. It is now refused at `kernel:bootstrapped`, before `kernel:listening` opens the socket. It ships as `patch` because no metadata protocol shape moves.
+  
+  ADR-0139 D5.2 and D5.3 record two classes of master the engine composes no `ReadableIds` leaf over, and refuses by name at read time:
+  
+  - **(a)** a master bound to another datasource than the detail. No driver evaluates a subquery across two datasources.
+  - **(b)** a master whose rows an object-scoped read middleware narrows (`registerMiddleware(fn, { object })`), for example `sys_attachment`, `sys_comment`, `sys_activity`, `sys_audit_log`, `sys_mail_message` or `sys_approval_request`. That WHERE is built at read time and is no part of the master's read scope, so a leaf over it would be wider than a read of the master.
+  
+  A `controlled_by_parent` detail derives its access from its one required master (ADR-0055 §1). A detail over such a master is a declaration the runtime cannot honour, so under ADR-0049 it is no longer admitted. `ObjectQLPlugin` refuses the boot with `INVALID_METADATA` / 422, naming each detail, its master field, the master and the class, and the remedies below.
+  
+  - The check is judged at `kernel:bootstrapped`, not at `kernel:ready` or `registerApp`. Several platform plugins (mailbox, audit, attachment storage) register their object-scoped read middleware from their own `kernel:ready` handler, which runs after the engine's, so only then are both facts final.
+  - It reuses the read path's own predicate (`hasObjectMiddleware` and the datasource binding resolution), so the boot rule and the read rule cannot drift. The read-time refusal is unchanged.
+  - New engine method: `ObjectQL#findUnservableControlledByParentMasters()` lists the offending details.
+  
+  No producer is known to be affected. HotCRM's six `controlled_by_parent` objects all sit on one datasource over masters with no object-scoped read middleware, and no in-repo declaration has either shape.
+  
+  ### Remedy
+  
+  Pick one, for each detail the refusal names:
+  
+  - bind the detail and its master to one datasource (the same `datasource`, mapping rule or package default);
+  - or choose a master that no object-scoped read middleware narrows;
+  - or declare the detail with a sharing model other than `controlled_by_parent`, and grant its access directly.
+- 3937697: refactor(objectql)!: the per-table platform-object tenancy ledger is retired, and the tenant-audit mute is decided by the object's schema (ADR-0131 D13)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @objectstack/objectql#PLATFORM_OBJECT_TENANCY, @objectstack/objectql#classifyPlatformObjectTenancy, @objectstack/objectql#isPlatformObjectOutOfTenantAuditScope, @objectstack/objectql#tenantScopedPlatformObjects, @objectstack/objectql#PlatformObjectTenancy, @objectstack/objectql#PlatformObjectTenancyEntry) The only author-reachable removals are runtime exports of `@objectstack/objectql`'s published entry: the ledger table, its three predicates and its two types. No key of any metadata schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. -->
+  
+  **BREAKING** for code that imports the ledger from `@objectstack/objectql`. It ships as `patch` because the metadata protocol is unchanged.
+  
+  - **`@objectstack/objectql`: the ledger and its exports are gone.** No write ever depended on them: since ADR-0131 C8 stage 8b, every object with a tenant column takes the system-write rule's derived organization or is refused, whatever its name. The ledger's last reader was the engine's tenant-audit mute, which is now read off the schema.
+  - **The tenant-audit mute (`bypassTenantAudit` on an elevated write) is decided by the object's schema alone.** An elevated write is muted only when the object has no tenant column (`tenancy.enabled: false`, `systemFields.tenant: false`, or no tenant field) or is federated. A platform-namespace object that has a tenant column is now audited like any other. On a walled posture (`isolated` / `group`), an elevated write on such an object that reaches the SQL driver with no `tenantId` therefore prints the `[tenant-audit]` warning, once per object and operation. Nothing a write touches changes: the mute only decides whether that line is printed.
+  - **`@objectstack/driver-sql`: the `[tenant-audit]` warning names both readings.** It no longer tells every unscoped write to "pass tenantId". A write that belongs to one organization should run in that organization's context. A write that crosses organizations on purpose, such as a platform admin the organization wall exempts or a system job over every organization, needs no fix, and the caller declares it with `bypassTenantAudit: true`. The line still starts `[tenant-audit] <op> on tenant-scoped object "<object>"`, and its metadata is unchanged.
+  
+  **Migration** for code that imported the ledger:
+  
+  - FROM `PLATFORM_OBJECT_TENANCY` TO the object's schema: an object is in tenant scope when `resolveTenantFieldName(schema)` (still exported) answers non-null. `scripts/platform-object-tenancy-census.json` in the repository lists, per platform object, the schema declaration that puts it outside.
+  - FROM `classifyPlatformObjectTenancy(name)` TO `resolveTenantFieldName(schema) !== null` on the registered schema.
+  - FROM `isPlatformObjectOutOfTenantAuditScope(name)` TO `resolveTenantFieldName(schema) === null`.
+  - FROM `tenantScopedPlatformObjects()` TO the census's `reach: "in"` rows.
+  - FROM `PlatformObjectTenancy` TO delete it: no classification exists any more.
+  - FROM `PlatformObjectTenancyEntry` TO delete it: no classification exists any more.
+- 3937697: fix(objectql): the engine declares the organization wall's exemption to the driver, so an exempt platform admin's predicate write is not told to declare an option it cannot set
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Under a walled posture an exempt platform admin's predicate update or delete reaches the driver with no `tenantId`, because the wall lifted the scope on purpose (ADR-0131 D8). The SQL driver's `[tenant-audit]` line then told the caller to declare `bypassTenantAudit: true`, an option no REST caller can set.
+  
+  The engine now fills in `bypassTenantAudit: true` on the driver options when the Layer 0 verdict the security layer recorded for the operation is `none` and the same decision without the exemption would have walled it. It does not fill it in when no verdict was recorded (a by-id write, a system context, no security layer), under the `single` posture, for an insert, for an object outside the tenant machinery, or when the caller supplied its own value.
+  
+  Diagnostics only: the driver's scope was already the recorded verdict's, and the option only silences the warning.
+- 3937697: feat(plugin-security): a declared membership key is staged per request, so a policy reading `current_user.KEY` reads the roster
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  `ObjectSchema.membershipKeys` is now applied. The security plugin's request staging (`stageRlsMembership`, the one producer of `ExecutionContext.rlsMembership`) gains the declarative second source beside the registered `rls-membership-resolver`: when a row policy about to compile reads `current_user.KEY` and an object declares `KEY`, the key is resolved from that roster object's rows.
+  
+  - **What the key holds.** The distinct values of `valueField` on the roster rows whose `userField` is the signed-in user and on which the optional `filter` holds, inside the caller's own organization wall.
+  - **How it is read.** Lazily and once per request: only a key a policy about to compile reads is resolved, on the read door and the write `check` alike, and one request that reads the key on several objects issues one read. The read is the platform's own system read: the caller needs no read on the roster object, and the caller's posture and audience do not change it (a portal contact and an internal member resolve a key the same way). The roster object's own row policies are not consulted.
+  - **Every miss fails closed.** No roster row stages an empty set. More than 1,000 values (`MEMBERSHIP_KEY_MAX_VALUES`), a failed read, a `filter` that does not compile for the roster object (a shape that does not lower, a column the object lacks, any `current_user.*`), a key two objects declare, and a key the registered resolver also owns leave the key unresolved. Every policy reading such a key matches no rows, through the compiler's existing warning. A key both sources claim is logged as an error at boot, naming both owners, and again by the request that meets it.
+  - **Explain.** The object-level `rls` layer names each key the policies read: its label and description, the roster object, `valueField`, `userField`, the filter, and the size it resolved to or why it did not, and the permission sets whose holders can write the roster object (whoever can write a roster row can grant the key). A record-grained rule reads `via: 'membership:KEY'`, and its detail names the roster row that links the record to the principal.
+  - **`@objectstack/objectql`: an `extend` contribution cannot declare a membership key.** `SchemaRegistry.registerObject` refuses one that carries `membershipKeys`, with `INVALID_METADATA` (`status: 422`) and the error name `ExtensionMembershipKeysRefusedError`, naming the object and the extending package, beside the `defaultRowScope` refusal. The extension merge never carried the key onto the object, so it registered and then never resolved. The manifest path already refused it at authoring.
+  - **`@objectstack/spec`**: the `membershipKeys` describe and the row-level security docs no longer say the key is not applied, and the liveness row is `live`.
+- 3937697: fix: Setup field help is written for administrators, and the two access-review fields nothing uses yet are hidden from the Setup forms
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A Setup pass met field help written for the platform's developers: "Foreign key to sys_user.id", "NULL only on a grant written before the column existed", "via isGrantActive", "(P3 digest middleware)", "Owned by objectql (better-auth is oblivious to this column)", "LifecycleService (Reaper / Rotator / Archiver)" and ADR numbers. Each now says what the field means and what to do with it, in every shipped locale (`en` regenerated from the source; `zh-CN`, `ja-JP` and `es-ES` translated):
+  
+  - the user, OAuth application, session and refresh-token fields of the permission-set and position assignments and of the OAuth token, consent and client-resource objects, and the package-version field of stored metadata;
+  - the permission set picked on an assignment;
+  - the start time of an approval delegation;
+  - the digest cadence and quiet hours of a notification preference, which now say how each value behaves;
+  - the AI Access and Locale fields of a user;
+  - the Data Lifecycle settings page and its retention overrides.
+  
+  `Last Certified At` and `Certified By` on `sys_user_permission_set` and `sys_user_position` are reserved for a future access-review feature and nothing writes or reads them. They are now `hidden: true`, so the Setup forms and detail pages no longer show them. The columns and any stored values stay.
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [4395cbc]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [9f39094]
+  - @objectstack/spec@18.1.0
+  - @objectstack/core@18.1.0
+  - @objectstack/metadata-protocol@18.1.0
+  - @objectstack/metadata-core@18.1.0
+  - @objectstack/formula@18.1.0
+  - @objectstack/types@18.1.0
+  - @objectstack/metadata@18.1.0
+
 ## 18.0.0
 
 ### Major Changes

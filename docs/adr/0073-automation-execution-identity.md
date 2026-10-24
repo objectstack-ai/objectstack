@@ -11,6 +11,20 @@
 
 ---
 
+## Amendment: a `runAs:'system'` run writes no identity assignment (2026-10-24, #25251)
+
+M2's last bullet below says "`runAs:'system'` stays god-mode throughout". That no longer holds for one family of writes. Ruling 6354966423 (letter B) on #25251 carved identity assignment out of a flow's system elevation, the same way the 2026-10-03 ruling carved the stored-metadata tables out of app-authored work: a flow is app-authored automation, and `runAs` declares its authorization posture, not an identity (D2).
+
+**What is refused.** An insert, update, delete, transfer, restore or purge of a row of `sys_user_position`, `sys_user_permission_set`, `sys_invitation` or `sys_member`, from a context that carries `isSystem` **and** a `flowRunId`. That is the context a `runAs:'system'` run's data nodes write under (`resolveRunDataContext`). The security middleware refuses it ahead of its `isSystem` short-circuit with `PERMISSION_DENIED` (403), and nothing is written. The refusal holds at any depth of the flow's own write: a cascade leg or a hook's write under the same context is refused the same way. Landed in #25483 (plugin-security, the run-time arm) and #25564 (the `FlowSchema.runAs` description and the ADR-0087 D3 entry `flow-run-as-system-identity-assignment-write-refused`).
+
+**What is unchanged.** A system run's reads of the four objects, and its writes to every other object. A `runAs:'user'` run, which carries a `flowRunId` without `isSystem` and reaches the ADR-0090 D12 delegated-administration gate as the user it acts for. Every platform writer whose system context carries no flow run: the seeders, the publish materializer, better-auth and its reconciliation, invitation placement, and the organization-administrator grant.
+
+**The remedy the refusal names.** For position holdings and permission-set grants, `runAs:'user'`: the D12 gate then judges the acting user and records that user as `granted_by`. For invitations and memberships, the organization endpoints (`invite-member`, `cancel-invitation`, `update-member-role`, `remove-member`), which apply the invitation's placement and role-cap checks.
+
+So `system` stays full elevation everywhere else, and the M2 bullet is read with this one exception.
+
+---
+
 ## Amendment: user-less data ops are now REFUSED (2026-07-28, #3760)
 
 Two load-bearing claims below turned out to be wrong. Both were about *severity*, not about the model — D1–D5 stand unchanged, and D5 shipped in full.
@@ -21,7 +35,7 @@ Two load-bearing claims below turned out to be wrong. Both were about *severity*
 
 **Consequently `runAs:'user'` + no trigger user now REFUSES the data operation** (`UnscopedRunDataAccessError`, thrown from `resolveRunDataContext` — the single place every data node resolves its context). This implements D5's ruling ("user-less `runAs:'user'` is a configuration error") at the only layer that can see the record-change case, since whether a triggering write carries a user is not knowable at authoring time.
 
-Note what this deliberately is **not**: it does not re-badge these runs as `isSystem`. The security middleware's `isSystem` short-circuit precedes its package-managed-row / system-row / audience-anchor / delegated-admin gates, all of which a principal-less context still has to clear — so "unscoped" was never equivalent to "system", and elevating would have *widened* these runs (e.g. letting them write `sys_user_position`) rather than preserving the status quo.
+Note what this deliberately is **not**: it does not re-badge these runs as `isSystem`. The security middleware's `isSystem` short-circuit precedes its package-managed-row / system-row / audience-anchor / delegated-admin gates, all of which a principal-less context still has to clear — so "unscoped" was never equivalent to "system", and elevating would have *widened* these runs (e.g. letting them write `sys_user_position`) rather than preserving the status quo — a write that, since the 2026-10-24 Amendment above, a `runAs:'system'` run is itself refused.
 
 This is an **interim** posture, not a replacement for D2. Refusal is strictly safer than today and forward-compatible: when the `automation` principal lands, the refusal point becomes the place that resolves it, and these runs go from *refused* to *RLS-enforced* with no third state. Ordering is unchanged — D2 still waits for a real consumer.
 

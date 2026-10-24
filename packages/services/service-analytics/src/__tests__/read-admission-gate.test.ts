@@ -150,24 +150,38 @@ describe('analytics — object-level read admission at the door', () => {
       ).rejects.toThrow(/employer_member/);
     });
 
-    it('fails CLOSED when the admission provider throws', async () => {
-      const seen = emptySeen();
-      const svc = makeService(
-        {
-          capabilities,
-          admitObjectRead: () => {
-            throw new Error('permission-set resolution exploded');
+    // [#25561] A provider that THROWS reached no verdict. It still refuses —
+    // fail-closed, nothing runs — but it does not answer as a denial: the
+    // denial above and this fault were byte-identical on the wire, so a caller
+    // could not tell "you may not read this" from "the server could not decide".
+    it.each(DOORS)(
+      'fails CLOSED when the admission provider throws, answering SERVICE_UNAVAILABLE / 503 — $label',
+      async ({ run }) => {
+        const seen = emptySeen();
+        const svc = makeService(
+          {
+            capabilities,
+            admitObjectRead: () => {
+              throw new Error('permission-set resolution exploded');
+            },
           },
-        },
-        seen,
-      );
+          seen,
+        );
 
-      await expect(
-        svc.queryDataset(memberCount, { measures: ['cnt'] }, CALLER),
-      ).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
-      expect(seen.sql).toEqual([]);
-      expect(seen.aggregate).toEqual([]);
-    });
+        const refusal = await run(svc).then(
+          () => undefined,
+          (e: unknown) => e as Error & { code?: string; status?: number; object?: string },
+        );
+        expect(refusal).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503, object: 'employer_member' });
+        expect(refusal?.code).not.toBe('PERMISSION_DENIED');
+        // The no-oracle rule holds for the fault too: the object, and not the
+        // cause, which stays in the server log.
+        expect(refusal?.message).toContain('employer_member');
+        expect(refusal?.message).not.toContain('exploded');
+        expect(seen.sql).toEqual([]);
+        expect(seen.aggregate).toEqual([]);
+      },
+    );
 
     it('refuses when the caller may read the BASE object but not a JOINED one', async () => {
       const seen = emptySeen();

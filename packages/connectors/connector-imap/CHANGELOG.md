@@ -1,5 +1,9 @@
 # @objectstack/connector-imap
 
+## 18.1.0
+
+No changes in this release.
+
 ## 18.0.0
 
 ### Minor Changes

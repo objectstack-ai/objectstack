@@ -95,6 +95,12 @@ export interface ReaderLabels {
   flowLabel(flowName: string): string | undefined;
   stepLabel(flowName: string, nodeId: string): string | undefined;
   objectLabel(objectName: string): string | undefined;
+  /**
+   * [#25576] A catalog sentence (`messages.<id>`) rendered with `params`, by
+   * the same `t()` and the same negotiated locale. Not memoised: the params
+   * differ per row.
+   */
+  sentence(key: string, params: Readonly<Record<string, string>>): string | undefined;
 }
 
 /**
@@ -132,18 +138,20 @@ export function readerLabelsFor(
   if (typeof requested !== 'string' || requested.length === 0) return undefined;
   if (!service || typeof service.t !== 'function') return undefined;
   const locale = negotiatedLocale(service, requested);
+  const render = (key: string, params?: Readonly<Record<string, string>>): string | undefined => {
+    try {
+      const text = service.t(key, locale, params);
+      // `II18nService.t` echoes the key back on a miss.
+      if (typeof text === 'string' && text.trim().length > 0 && text !== key) return text;
+    } catch {
+      // A misbehaving i18n service must not fail the read: the stored label stands.
+    }
+    return undefined;
+  };
   const picked = new Map<string, string | undefined>();
   const pick = (key: string): string | undefined => {
     if (picked.has(key)) return picked.get(key);
-    let answer: string | undefined;
-    try {
-      const text = service.t(key, locale);
-      // `II18nService.t` echoes the key back on a miss.
-      if (typeof text === 'string' && text.trim().length > 0 && text !== key) answer = text;
-    } catch {
-      // A misbehaving i18n service must not fail the read: the stored label stands.
-      answer = undefined;
-    }
+    const answer = render(key);
     picked.set(key, answer);
     return answer;
   };
@@ -151,6 +159,7 @@ export function readerLabelsFor(
     flowLabel: (flowName) => pick(flowLabelKey(flowName)),
     stepLabel: (flowName, nodeId) => pick(approvalStepLabelKey(flowName, nodeId)),
     objectLabel: (objectName) => pick(objectLabelKey(objectName)),
+    sentence: (key, params) => render(key, params),
   };
 }
 

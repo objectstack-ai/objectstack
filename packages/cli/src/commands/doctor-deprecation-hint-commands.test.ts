@@ -61,13 +61,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { doctorConfig } from '../utils/__tests__/doctor-config.js';
 import Doctor from './doctor.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** `packages/cli/src/commands` — where oclif's pattern strategy finds commands. */
 const COMMANDS_DIR = HERE;
-/** `packages/cli` — the oclif root the real command is loaded against below. */
-const CLI_ROOT = path.resolve(HERE, '..', '..');
 const DOCTOR_SRC = path.join(COMMANDS_DIR, 'doctor.ts');
 
 /**
@@ -251,7 +250,7 @@ describe('os doctor --scan-deprecations, end to end', () => {
     }) as never);
 
     try {
-      await Doctor.run(argv, { root: CLI_ROOT });
+      await Doctor.run(argv, await doctorConfig());
     } catch (err) {
       if (!(err instanceof Error) || !err.message.startsWith('__PROCESS_EXIT__')) throw err;
     } finally {

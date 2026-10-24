@@ -390,8 +390,12 @@ describe('#15068 · 0 · the publish-then-read path really runs', () => {
         const { publishRequest } = await publishThenRead({ activeOrganizationId: ORG });
 
         // The door threads no organization into `publishPackageDrafts` (nor
-        // into `applyPublishedSeeds`), even with one active.
-        expect(publishRequest()).toEqual({ packageId: PKG });
+        // into `applyPublishedSeeds`), even with one active. [#25484] The
+        // caller's execution context does ride along, verbatim: the build
+        // probes read a widget's dataset AS that caller (the renderer's path),
+        // and nothing in the publish derives a write scope from it.
+        const caller = PKG_ADMIN(ORG).executionContext;
+        expect(publishRequest()).toEqual({ packageId: PKG, context: caller });
         expect(publishRequest()).not.toHaveProperty('organizationId');
     });
 });

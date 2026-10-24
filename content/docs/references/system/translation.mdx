@@ -93,7 +93,7 @@ Translation data for a single object
 | **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Field-level translations |
 | **_views** | `Record<string, { label?: string; description?: string; title?: string; emptyState?: object; … }>` | optional | View translations keyed by view name |
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
-| **_sections** | `Record<string, { label?: string; description?: string }>` | optional | Section translations keyed by section name |
+| **_sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | Section translations keyed by section name |
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
 | **_validations** | `Record<string, { message?: string }>` | optional | Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`) |
 
@@ -136,6 +136,7 @@ Translation data for a single field
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated section label |
 | **description** | `string` | optional | Translated section description |
+| **fields** | `Record<string, { label?: string; placeholder?: string; helpText?: string }>` | optional | Form section entry translations keyed by the entry's `field` |
 
 ### Nested Shape: `ObjectTranslationData._tabs[string]`
 
@@ -194,7 +195,7 @@ Translation data for a single object
 | **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Field-level translations |
 | **_views** | `Record<string, { label?: string; description?: string; title?: string; emptyState?: object; … }>` | optional | View translations keyed by view name |
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
-| **_sections** | `Record<string, { label?: string; description?: string }>` | optional | Section translations keyed by section name |
+| **_sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | Section translations keyed by section name |
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
 | **_validations** | `Record<string, { message?: string }>` | optional | Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`) |
 
@@ -397,7 +398,7 @@ Translation data for a single object
 | **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Field-level translations |
 | **_views** | `Record<string, { label?: string; description?: string; title?: string; emptyState?: object; … }>` | optional | View translations keyed by view name |
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
-| **_sections** | `Record<string, { label?: string; description?: string }>` | optional | Section translations keyed by section name |
+| **_sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | Section translations keyed by section name |
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
 | **_validations** | `Record<string, { message?: string }>` | optional | Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`) |
 
@@ -560,7 +561,7 @@ Translation data for a single object
 | **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Field-level translations |
 | **_views** | `Record<string, { label?: string; description?: string; title?: string; emptyState?: object; … }>` | optional | View translations keyed by view name |
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
-| **_sections** | `Record<string, { label?: string; description?: string }>` | optional | Section translations keyed by section name |
+| **_sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | Section translations keyed by section name |
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
 | **_validations** | `Record<string, { message?: string }>` | optional | Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`) |
 

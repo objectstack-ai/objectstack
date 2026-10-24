@@ -48,9 +48,12 @@
 // ## The verdict
 //
 //   enabled                        green.
-//   disabled (any reason)          red on a writing run, a warning otherwise:
-//                                  fork PRs receive no secrets, and a PR only
-//                                  reads.
+//   disabled (any reason)          red on a writing run, a warning otherwise;
+//                                  a NOTICE on a run the credentials are
+//                                  withheld from by design (`pull_request`, or
+//                                  a dispatch off main -- see
+//                                  isCredentialedRun), since nothing there is
+//                                  broken.
 //   unavailable, transient         a warning on every run. `Could not connect`
 //   (`Could not connect`,          and `Unexpected server error` are Vercel's
 //   `Unexpected server error`)     side; the build is still correct, and a
@@ -131,6 +134,15 @@ export function readRemoteState(entries) {
 export function isWritingRun(eventName, ref) {
   if (eventName === 'merge_group') return true;
   return (eventName === 'push' || eventName === 'workflow_dispatch') && ref === 'refs/heads/main';
+}
+
+/**
+ * Whether this run is GIVEN the remote-cache credentials: `merge_group`, or any
+ * run on refs/heads/main. Every carrier spells the same condition on its
+ * TURBO_TOKEN and TURBO_REMOTE_CACHE_SIGNATURE_KEY lines; keep the two in step.
+ */
+export function isCredentialedRun(eventName, ref) {
+  return eventName === 'merge_group' || ref === 'refs/heads/main';
 }
 
 /** `'ok' | 'warn' | 'fail' | 'refuse'` for one state on one kind of run. */
@@ -249,6 +261,15 @@ function main() {
   if (verdict === 'ok') return;
   const title = `Turbo remote cache ${read.state} (${args.site})`;
   if (verdict === 'warn') {
+    if (read.state === 'disabled' && !isCredentialedRun(process.env.GITHUB_EVENT_NAME, process.env.GITHUB_REF)) {
+      annotate(
+        'notice',
+        title,
+        `${read.sentence} -- expected: the remote-cache credentials are passed only to merge_group runs and ` +
+          'runs on main, so this run built from the restored Actions-cache seed.',
+      );
+      return;
+    }
     annotate('warning', title, read.sentence);
     return;
   }
@@ -275,6 +296,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'structured log parsing': 3,
   'remote state': 7,
   'writing run': 5,
+  'credentialed run': 5,
   'verdict table': 9,
   'cache counts': 5,
   'rendering': 3,
@@ -336,6 +358,13 @@ function selfTest() {
   t('workflow_dispatch on main writes', isWritingRun('workflow_dispatch', 'refs/heads/main'));
   t('pull_request only reads', !isWritingRun('pull_request', 'refs/pull/1/merge'));
   t('schedule only reads', !isWritingRun('schedule', 'refs/heads/main'));
+
+  battery('credentialed run');
+  t('merge_group is credentialed', isCredentialedRun('merge_group', 'refs/heads/gh-readonly-queue/main/pr-1-abc'));
+  t('push to main is credentialed', isCredentialedRun('push', 'refs/heads/main'));
+  t('the hourly schedule on main is credentialed', isCredentialedRun('schedule', 'refs/heads/main'));
+  t('pull_request is not', !isCredentialedRun('pull_request', 'refs/pull/1/merge'));
+  t('workflow_dispatch off main is not', !isCredentialedRun('workflow_dispatch', 'refs/heads/claude/some-branch'));
 
   battery('verdict table');
   t('enabled is green on a writing run', judge('enabled', '', true) === 'ok');

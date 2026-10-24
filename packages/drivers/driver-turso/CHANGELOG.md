@@ -1,5 +1,235 @@
 # @objectstack/driver-turso
 
+## 18.1.0
+
+### Minor Changes
+
+- 3937697: **Shipped in 18.0.0**, whose CHANGELOG missed this entry; listed here one release late.
+  
+  feat!: an organization-less row on a tenant table no longer draws its autonumber from the `__global__` counter, and a production server boot with no auth secret is refused
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (runtime-export-retired @objectstack/objectql#GLOBAL_TENANT) The one author-reachable removal is a runtime export: the string constant `GLOBAL_TENANT` leaves `@objectstack/objectql`'s published entry. No key of any metadata schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone; the two run-time narrowings (the driver's counter, `os serve`'s boot) carry their own remedy below. -->
+  
+  **BREAKING** accept-set narrowing, shipped as `minor` under the repo's launch-window convention for breaking changes (ADR-0131 D9, stage 8d).
+  
+  - **`os serve`: a production server boot whose auth did not compose for a missing secret is refused.** With the `auth` tier on and no `OS_AUTH_SECRET` (outside `--dev`), `serve` used to skip AuthPlugin with a warning and serve anyway. That boot had no security model: anonymous object data is always denied, so its data API was unusable. It also had no organization object, so its inline seed wrote rows with `organization_id` NULL and drew their autonumbers from the `__global__` counter. Measured on `examples/app-showcase` before this change: health 200, two NULL-organization rows and a `__global__` counter row on a fresh install. The boot now stops before the kernel starts, so nothing is written, and the message names both fixes. A kernel-only boot (`--no-server`) is refused the same way: it runs the same seed, so it would write the same ownerless rows. Unchanged: a development boot still uses its fallback secret, and the cloud host kernel (`ObjectOSEnvironmentPlugin`, where auth is each project's) still only warns. `os start` never reaches the refusal: it always supplies a secret to the `serve` child it spawns.
+  - **`@objectstack/driver-sql` (and `@objectstack/driver-turso`'s remote face, which calls the same rule): the counter refuses an organization-less row on a tenant table.** Wherever the driver registered the organization object (`sys_organization`), a `create` / `bulkCreate` / `upsert` on an object with a tenant column, whose row carries no organization and whose options carry no `tenantId`, is refused with `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` (status 500), the code the engine already answers for the same write. It is refused before any counter row is read or written, and nothing is written. New exports: `OrganizationlessCounterRefusal`, `ORGANIZATIONLESS_COUNTER_REFUSAL_CODE`, `ORGANIZATIONLESS_COUNTER_REFUSAL_STATUS`, `renderOrganizationlessCounterRefusal`. Unchanged: `__global__` stays the counter key of an object with no tenant column, and of a composition that registers no organization object on the driver (a lean `@objectstack/objectql/core` embedding), where no organization can exist. Counter rows a 17.x install filed under `__global__` for a tenant table stay in `_objectstack_sequences`; the counter no longer reads them, and `os migrate duplicates` still reports them.
+  - **`@objectstack/objectql`: `GLOBAL_TENANT` is no longer exported**, and `SystemWriteOrganizationRequiredError`'s message no longer describes the `__global__` counter as where the write would land. The code, status and fields are unchanged.
+  - **Texts.** The lint explanation of `unique/legacy-organization-composite`, the `UniqueScopeSchema` TSDoc and the error-code ledger now say that a NULL-organization row is residue an earlier release wrote, not something a new write produces.
+  
+  **The remedy.**
+  - A production boot refused for the missing secret: set `OS_AUTH_SECRET` (a long random value, identical across restarts and nodes), or compose auth by other means (mount `AuthPlugin` in `plugins`). Running kernel-only with `--no-server` does not avoid the refusal.
+  - A direct driver write refused by the counter: carry the organization — `driver.create(object, { ...row, organization_id: orgId })` or `driver.create(object, row, { tenantId: orgId })` — or write through the engine, which derives it under `single`.
+  
+  The retired export:
+  
+  - FROM `GLOBAL_TENANT` TO `GLOBAL_TENANT` imported from `@objectstack/driver-sql`, where the counter and the index emitters keep it (or the literal `'__global__'`).
+- 3937697: feat(driver-sql,driver-turso,driver-memory,objectql,metadata-protocol,cli): an organization-scoped unique index keys the plain organization column, and an index an earlier release built with `COALESCE(organization_id, '__global__')` is read as the same index on a certified database
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  18.x step 7b-1 + 7b-2 (ADR-0131 D1: the tenant column is NOT NULL, so the NULL-organization bucket of ADR-0120 D3 has no rows left to hold).
+  
+  - **New DDL is plain.** A field-level `unique: true` / `'organization'` on a tenant-scoped object, and a declared index with `unique: 'organization'`, now build `UNIQUE (organization_id, …)` instead of `UNIQUE (COALESCE(organization_id, '__global__'), …)`. Index names do not change. The same holds for the Turso remote face, the MySQL hash shadow (its generated column now hashes the plain column), the in-memory driver's unique enforcement, `os generate migration` (which now emits the organization composite it used to list as NOT EMITTED), and the `sys_setting` row-identity index (`COALESCE(user_id, '')` stays).
+  - **Existing indexes stay as they are.** Nothing is renamed, and no declared organization composite is dropped or rebuilt by the boot, `os migrate plan` or `os migrate apply`; on SQLite the ownership ceremony's NOT NULL step rebuilds the tables it tightens, and their composites come back plain, enforcing the same constraint. One index is re-keyed: the `sys_setting` row-identity index, which the metadata protocol rebuilds on every boot, keys the plain `organization_id` from the next boot on (probe-first; a pure relaxation, so it cannot fail on existing rows). The schema differ reads `COALESCE(<tenant>, …)` and the plain tenant column as one key part, in both directions, where the column is physically `NOT NULL` or the database is certified (its organization-ownership birth marker, or the ownership ceremony's marker at the current shape generation). So `os migrate plan` and the boot report no `recreate_index` for those indexes. On an uncertified database with a nullable tenant column the two forms stay different constraints: the finding is reported, and it names `os migrate organization-ownership` as its remedy.
+  - **What widens.** Where a tenant column is still nullable (every table of a database 18.0.0 created, an uncertified 17.x / 18.0 database, a rotation shard, a Turso remote table, a table the ceremony reported), a unique index created from now on does not constrain rows whose organization is NULL, exactly like a NULL in any other key part; in the in-memory driver a record with no organization is exempt from an organization-scoped unique. The unique duplicate pre-flight no longer reports groups of rows with a NULL key part, since the index never refuses them.
+  - **Who sees it.** A fresh install and every ceremonied table whose tenant column is NOT NULL see nothing. A database 18.0.0 created from empty is certified by its birth marker yet keeps nullable tenant columns: its existing indexes are kept unchanged, and a new organization unique declared on one of its tables constrains only rows that carry an organization.
+- 3937697: fix(spec,driver-turso)!: a turso datasource that declares `encryptionKey` on a local file or an embedded replica is refused where it is written and when the driver is built, instead of being accepted and written in plaintext
+  
+  Clause-②: no (narrowing) — the accept set of the `turso` `datasource.config` contract, of the published `TursoConfigSchema` mirror and of `new TursoDriver()` narrows by one key beside a `file:` url or `:memory:`, in every mode. No key is added, removed or renamed, and no exported symbol moves. `@objectstack/service-datasource` is graded `patch`: the TSDoc of its exported `TursoDriverConfigInput.encryptionKey` no longer promises an encrypted file, and nothing else in it changes.
+  
+  `encryptionKey` was declared as an "AES-256 encryption key for the local database file", and nothing applied it. The turso driver reads and writes a local or replica file through better-sqlite3, which has no encryption codec (`PRAGMA key` is a silent no-op there). Measured on the driver source with a test key: a local datasource with `encryptionKey` constructed, connected and wrote its rows, and plain better-sqlite3, opening the file read-only with no key, read them back. An embedded replica fared no better: only its sync client was handed the key, after the local engine had already written the file in plaintext, and a file that client encrypted is one the local engine cannot open. An operator who declared the key got an unencrypted file and no signal.
+  
+  **BREAKING** accept-set narrowing on a published schema and a published constructor, shipped as `minor` under the repo's launch-window convention for breaking changes (`scripts/check-changeset-no-major.mjs`). A non-empty `encryptionKey` on a local datasource (a `file:` url or `:memory:`) or an embedded replica (a `file:` url beside `syncUrl`), detected or forced with `mode`, is refused now, at both doors together, with one message per mode that names the mode and what does encrypt. The key is judged by where the database lives, not by the mode: the same `file:` url or `:memory:` under a forced `mode: 'remote'` is refused too, in its own words, because the driver hands that url to the libSQL client it builds, which is handed no key, so the file was written in plaintext all the same:
+  
+  - **at authoring**, as one `custom` issue on `encryptionKey` (`config.encryptionKey` on a datasource): `DatasourceSchema`, `validateDriverConfig`, `defineStack` / `os validate`, and a save or test connection through the datasource admin service;
+  - **at construction**, `VALIDATION_ERROR` / 400 from `new TursoDriver()` (and `createTursoDriver()`), before any database file is opened.
+  
+  For a local or replica datasource the message is the same text at all three places; for a `file:` url or `:memory:` under a forced `mode: 'remote'`, the schema and the constructor give the forced-remote text, while the driver mirror, which declares no `mode` and strips it, refuses the same config in the local text. A test holds the constructor's copy equal to the schema's issue byte for byte in every mode, and the mirror's verdict and words equal to the schema's wherever no `mode` is forced. It comes last among the local-engine refusals: a url the engine cannot open, a lone `sync` and a forced `mode` the driver would ignore each keep their own message. An empty `encryptionKey` is unset and is still accepted. A remote url (`libsql://`, `https://`, `ws(s)://`) is not judged by this refusal. The `encryptionKey` describe texts no longer promise an encrypted file.
+  
+  ### Migration: FROM → TO
+  
+  | You wrote | Write instead |
+  | --- | --- |
+  | `url: 'file:./data/app.db', encryptionKey: '…'` | drop `encryptionKey`; put the file on an encrypted disk or volume if it must be encrypted at rest |
+  | `url: 'file:./data/replica.db', syncUrl: 'libsql://my-db.turso.io', encryptionKey: '…'` | drop `encryptionKey`, the same way |
+  | `url: 'file:./data/app.db', mode: 'remote', encryptionKey: '…'` (or `url: ':memory:'`) | drop `encryptionKey`, the same way |
+  | either, where the data must be encrypted at rest and no encrypted volume is available | a remote Turso database (`url: 'libsql://my-db.turso.io'`), whose storage encryption is the server's to configure, not this key's |
+  
+  The fix in one line: delete `encryptionKey` from every turso datasource whose `url` is a `file:` url or `:memory:`.
+  
+  A datasource row stored in this shape is not re-parsed when it loads, so it now fails when the driver is built. `factory.create` throws the refusal. The connection service records the datasource as `failed-degraded` with the message, and a test connection answers `ok: false` ("Failed to build driver: …"). Under ADR-0062 D5, the boot fails fast when objects bind to that datasource or are routed to it, or when it is boot-critical. Otherwise it is left unconnected with a warning. Before this change the same row booted and wrote its file in plaintext.
+  
+  Blast radius, measured on this tree: no example, template, CLI scaffold or published skill authors the key, and no host default or environment variable sets it (a turso `encryptionKey` reaches the driver only from an authored `datasource.config`). Whether any out-of-repo deployment declares such a config is NOT measured and is not claimed to be zero.
+  
+  <!-- adr-0087: registered turso-config-local-encryption-key-refused -->
+- 3937697: feat(spec,driver-turso)!: turso `config.encryptionKey` is removed — it never encrypted anything, in any mode, and is now refused everywhere it is written instead of accepted on a remote datasource
+  
+  Clause-②: no (narrowing)
+  
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered turso-config-encryption-key-removed, turso-config-encryption-key-retired -->
+  
+  `encryptionKey` was declared as an AES-256 key for the database file. Nothing ever applied it. A local or embedded-replica file is read and written through better-sqlite3, which has no encryption codec, so #25020 already refused the key there. A remote database was never handed the key either: its storage encryption is configured on the server. That left a key that parsed on a remote datasource and did nothing. It was also the one credential-shaped key a datasource could still write in plain text (`STILL_WRITABLE_CREDENTIAL_KEYS`). Under ADR-0049 (enforce-or-remove) it is removed.
+  
+  **BREAKING** accept-set narrowing on a published schema, a published constructor and an exported type. It ships as `minor` under the repo's launch-window convention for breaking changes (`scripts/check-changeset-no-major.mjs`).
+  
+  - **`@objectstack/spec`**: `TursoConfigSchema.encryptionKey` is a `retiredKey()` tombstone. Authoring it is a `tsc` error and a parse error at `config.encryptionKey`, in every mode and with any value, the empty string included. The error carries the removal prescription. It is the only issue reported on that config, whatever else is wrong. The misspellings `encryption_key` and `encryptionkey` get the same prescription. The #25020 local and replica refusal arms are gone, since the tombstone subsumes them.
+  - **`@objectstack/driver-turso`**: the published mirror `TursoConfigSchema` refuses the key the same way, as `z.never()`. `TursoDriverConfig.encryptionKey` is typed `never`. `new TursoDriver()` and `createTursoDriver()` refuse a defined `encryptionKey` with `VALIDATION_ERROR` / 400 in every mode, before anything else is checked, in the schema's words.
+  - **`@objectstack/service-datasource`**: the exported `TursoDriverConfigInput.encryptionKey` is typed `never`. The shared loader still forwards a declared value, so a legacy stored row reaches the constructor's refusal instead of being dropped in silence.
+  
+  ### Migration: FROM → TO
+  
+  | You wrote | Write instead |
+  | --- | --- |
+  | `url: 'libsql://my-db.turso.io', encryptionKey: '…'` (also `https://`, `ws(s)://`) | delete `encryptionKey`. Storage encryption for a remote database is configured on the Turso server |
+  | `encryptionKey: ''` (or any unset value) | delete `encryptionKey` |
+  | `url: 'file:./data/app.db', encryptionKey: '…'` (also `:memory:`, or a replica beside `syncUrl`) | delete `encryptionKey` (already refused since #25020). Put the file on an encrypted disk or volume if it must be encrypted at rest |
+  
+  The fix in one line: delete `encryptionKey` from every turso datasource.
+  
+  ### The ADR-0087 disposition
+  
+  - **D2 `turso-config-encryption-key-removed`** deletes the key from a turso datasource's `config` when its value is unset (any non-string, or `''`) or when it sits beside a remote url (`libsql://`, `https://`, `http://`, `ws://`, `wss://`, in any case). It emits one notice per key. Nothing is lost: the driver never read the value.
+  - A non-empty key beside a local url is **not** deleted. Removing it would let a datasource whose operator believed the file was encrypted boot in silence. It keeps the #25020 posture instead: the row fails at driver construction with the prescription, and the author deletes the key by hand.
+  - The conversion is retired from the load path. A live author is refused at parse and taught. Stored rows (the datasource loaders), built artifacts inside their declared-floor window and `os migrate meta --from 17` replay it.
+  - `RETIRED_KEYS_BY_MAJOR[18]` gains `data/TursoConfig:encryptionKey`. The D3 entry is `turso-config-encryption-key-retired`.
+  
+  ### Stored rows stay redacted
+  
+  A tombstone is excluded from the schema-derived credential list, by its `[REMOVED]` prefix. Measured: after the retirement, no existing path would have withheld a stored `encryptionKey` on read. The derived turso list (`authToken`) is non-empty, so the canonical fallback never applies. `STILL_WRITABLE_CREDENTIAL_KEYS` is therefore renamed `RETIRED_CREDENTIAL_KEYS` and keeps `turso: ['encryptionKey']`. A legacy row's value is still withheld and still named in `redactedConfigKeys`, on the admin door and the metadata door alike.
+  
+  ### Blast radius
+  
+  Measured on this tree: no example, template, CLI scaffold, published skill, host default or environment variable authors the key. A tree-scoped absence pin now holds that. Whether any out-of-repo deployment declares it is not measured, and is not claimed to be zero.
+
+### Patch Changes
+
+- 3937697: feat(driver-sql,driver-turso)!: a table the driver creates carries its tenant column NOT NULL, so a write that names no organization is refused at the database
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A storage constraint at CREATE TABLE: no key of any metadata schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. No export, type or error code is removed or renamed; `TENANT_SCOPE_FIELD_DEF` keeps its shape and only its description text is corrected. The remedy is a run-time one, stated below. -->
+  
+  **BREAKING** accept-set narrowing at the database (ADR-0131 D1: "There is no nullable tenant column anywhere"). It changes what a data writer can store, not what a metadata author can write, so it ships as `patch` with this banner.
+  
+  - **Before.** The SQL driver created a table's tenant column (`organization_id`, or a declared `tenancy.tenantField`) nullable, as the injected field's declaration says (`required: false`, no `storage`). A write that reached the driver without an organization landed a row no organization owns.
+  - **Now.** Every table the driver CREATES takes its tenant column `NOT NULL`, with no metadata change: the plain managed table (`initObjects`), every newly rotated shard (asked of the base table's declaration), and a table the Turso remote face creates (`syncSchema`, `syncSchemasBatch`, `initObjects`). A write with no organization on such a table is refused by the database (`NOT NULL constraint failed: <table>.organization_id`, `violates not-null constraint`, or `cannot be null`). That includes an `upsert` whose payload omits the organization: the database checks the proposed row before it resolves the conflict.
+  - **Unchanged.** A tenant column ADDED to a table that already exists stays nullable, and so does an existing shard or an existing remote table: a table that already holds rows is the organization-ownership ceremony's to tighten (`os migrate organization-ownership`), which reports a shard and the Turso remote face as unable to. The schema differ reports no drift over the tenant column's nullability either way. On a database that has not taken the ceremony, a table this release creates (a newly rotated shard, or a cold table a newly configured lifecycle tier creates) is NOT NULL beside nullable siblings: an organization-less row the lifecycle mover would carry into it is refused there, and stays where it is until the ceremony attributes it. An object with no tenant column (`tenancy: { enabled: false }`, `systemFields: { tenant: false }`) is untouched, even when it carries a field named `organization_id`.
+  - **Who sees it.** A composed `os serve` / `os dev` / `os start` with auth stamps every write with its organization, so nothing changes there. A production `os serve` whose `AuthPlugin` did not compose (no `OS_AUTH_SECRET`) and a lean embedding (`@objectstack/objectql/core` or `createStandaloneStack` over a SQL driver, with no organization object) used to write those rows with a NULL organization; now each such write fails, loudly.
+  
+  **The remedy.** Carry the organization on the write: `ql.insert(object, { ...row, organization_id: orgId })`, or `{ context: { tenantId: orgId } }`. Compose authentication (set `OS_AUTH_SECRET`) so the platform derives it. If the object's rows legitimately belong to no organization, declare it so and it has no tenant column: `systemFields: { tenant: false }` or `tenancy: { enabled: false }`.
+- 3937697: fix(plugin-security): a `controlled_by_parent` detail's read scope is the engine's `ReadableIds` leaf over its master — one statement per read, no master id list, 200 past the dialect's bind limit
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@objectstack/plugin-security`.** The read derivation for a `controlled_by_parent` object answers `{ masterFK: { $in: ReadableIds.of(master) } }` (ADR-0139 D6, the leaf's seventh consumer) in place of a master id list it pre-scanned under a system context and bound into `$in`. The engine composes the leaf at its executor boundary from this service's own `canReadObject` / `getReadFilter` of the master — recursively down a master chain — and the driver compiles one statement with the master inside a subquery. Measured before: 2 statements per find and 4 per find + count on a detail, and `DATABASE_ERROR` / 500 past ~32,800 masters (`too many SQL variables`). Now: 1 and 2, no scan of the master, and 200 with the right rows at 33,000 masters. Every row set is unchanged: plain, restricted, unrestricted (`viewAllRecords`), delegated (the ADR-0090 D10 intersection), two-level chains, null and dangling master pointers (still excluded), and a caller the master object does not admit (still nothing). A metadata cycle and a chain past the depth bound still answer zero rows, now from a registry-only walk that pre-empts the engine's own refusal. A write verb's predicate carries no leaf (ADR-0139 D1): a predicate write of a detail is narrowed by the read door's answer and judged per master, as before.
+  - **`@objectstack/service-analytics`.** The engine-bound merges (`ObjectQLStrategy.withReadScope`, its FK attribute map, and the plugin's record-label pass) admit the leaf and hand the scope to the engine, which composes it as a find does. `NativeSQLStrategy.canHandle` declines a query whose base or joined object's read scope carries the leaf, so a `controlled_by_parent` object's analytics query routes to the ObjectQL strategy and serves the find path's rows. `compileScopedFilterToSql` refuses a scope carrying the leaf by name, in its existing `READ_SCOPE_COMPILE_FAILED` / 500 envelope: the `/api/v1/analytics/sql` dry-run echo of a `controlled_by_parent` object now refuses where it rendered the bound id list — it runs no composition and shows no statement it would not run. A filter an author writes keeps its judgement on every face.
+  - **`@objectstack/driver-turso`.** The remote face resolves a composed leaf nested inside a composed leaf's scope through `toRemoteWhere` with the outer read's options, so a two-level `controlled_by_parent` chain on a remote Turso datasource answers rows instead of `INTERNAL_ERROR` / 500.
+  - **`@objectstack/spec`.** One nested-leaf row in `READABLE_IDS_CASES`, so every driver's conformance suite measures the shape, and the comparand-shape door's docblock names both callers that pass `admitReadableIds`. No schema, accept set or export of a metadata key moves.
+- 3937697: fix(objectql, driver-sql, spec): a stored field whose `expression` reads an `autonumber` stores the value computed with the number
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A stored (non-`formula`) field whose `expression` reads a record number, such as `record.case_number + " - " + record.subject`, was computed before the number existed. On insert it stored `null` (or the `has()` fallback) until a later update by id computed it again. Now the insert computes it again right after the number is issued, and writes the row once, carrying both.
+  
+  - **`IDataDriver.issueAutonumbers` (new, optional).** A driver that owns its record-number counter can issue a row's numbers ahead of the write, in place, and answer after a unique violation whether the collision was on a number it issued (re-seeding the counter and emptying those slots). `SqlDriver` implements it over its existing counter, so `driver-sqlite-wasm` and `driver-turso` (both faces) inherit it. A driver without it is unchanged.
+  - **The engine.** For an object whose stored expression reads a record number (directly or through another stored field), the engine asks the driver for the number after validation, where it already issued numbers itself, so a rejected row still burns none. It computes the readers again and hands `create()` / `bulkCreate()` the row with the number filled: one INSERT, no transaction. A collision on a single row is re-issued through the member by the engine's existing retry loop, which computes the readers again. A batch collision re-seeds the counter and is not re-issued (the batch policy the engine already had). Objects with no such field keep the driver's own issue-at-write path. Where the engine issues the number itself (driver-memory, driver-mongodb), the readers are computed again after it does.
+  - **A driver that owns its counter without the member** stores the readers computed without the number, as before, and the engine now says so once per object at `error` level, with the remedy.
+  - **`ObjectQL.registerInsertRecomputeListener(id, fn)` (new).** Called per row after that second computation, on the row the driver is handed. `plugin-pinyin-search` registers on it, so a `__search` companion whose name field reads the record number is stamped from the value that carries the number, and `$search` finds the record by pinyin and by its number.
+  - **One change in what a refused insert reports.** On an object whose stored expression reads the number, a SQL driver's collision that survives every retry now leaves as `ERR_AUTONUMBER_COLLISION` (the engine's three attempts) instead of `DUPLICATE_RECORD` (the driver's own retries). Every other object is unchanged.
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [4395cbc]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [9f39094]
+- Updated dependencies [3937697]
+  - @objectstack/spec@18.1.0
+  - @objectstack/core@18.1.0
+  - @objectstack/driver-sql@18.1.0
+
 ## 18.0.0
 
 ### Minor Changes

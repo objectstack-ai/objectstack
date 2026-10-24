@@ -4,6 +4,7 @@
 · **Amended** (2026-10-13, ADR-0138 D3/D4) — D9's `guest` anchor bindings resolve for anonymous requests, in the organization ADR-0138 D4 resolves; an empty set denies all.
 · **Amended** (2026-10-14, [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D3/D13) — two of the row objects D3 renames into, `sys_position` and `sys_position_permission_set`, and the `sys_capability` D5 names, are retired by #15204 stage 8 (`66949b7729`, 2026-10-13): a position is a metadata-registry definition that names its sets in `PositionSchema.permissionSets`; `sys_user_position` stays. See the notes under D3, D5 and D8.
 · **Amended** (2026-10-14, ruling of record 6159300530 on #23268, letter A) — D11's external org-wide default is retired: external visibility is the [ADR-0095](./0095-authz-kernel-tenant-layer-and-posture-ladder.md) `EXTERNAL` rung, explicitly shared rows only. See the note under D11.
+· **Re-amended** (2026-10-23, ruling of record 6355206139 on #25233, letter B) — D11: externals are a population inside the member pool, by role, and reach rows through explicit grants, sharing rules and held grants' RLS included. See the second note under D11.
 · **Amended** (2026-10-15, ruling of record 6181988435 on #23488, letter A) — D12's position↔set binding right and its environment-set authoring right are retired (`AdminScope.manageBindings` and `AdminScope.authorEnvironmentSets`, ADR-0049 enforce-or-remove): a position's sets and a permission set's body are environment definitions, and the definition write is `manage_metadata`'s per [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D3, never a delegate scope's. D12's *what* is user↔position assignments (and direct set grants) inside the subtree; read its bindings and authoring clauses as superseded by this line.
 · **Amended** (2026-10-14, [ADR-0138](./0138-guest-model-anonymous-principal-doors-grants-and-organization.md) D3 item 5, ruling C of record 6159279205 on #23267) — D9's last bullet holds for `everyone` alone: a package suggests `everyone` bindings and the admin confirms each, while no door binds a set to `guest` (no package suggestion, no confirmation, no operator bind) until ADR-0138 D3 item 5's bind door is built, an act of the environment's administrator, never of a package. Read that bullet's `guest` half as superseded by this line.
 · **Amended** (2026-10-17, ruling of record 6228728551 on #23960, letter B) — D12 names three kinds of administrator, tenant-level, organization-level and delegated: an organization administrator (`organization_admin` / `organization_admin_no_bypass` for the organization, not a platform administrator) creates and removes `sys_user_position` / `sys_user_permission_set` rows for that organization's members when every set the row distributes has no `*` wildcard superuser bit, no `adminScope` and only `scope: 'org'` capabilities; `admin_full_access`, platform sets, `organization_admin` itself and every delegated set stay outside, and organization-administrator status is conferred by membership grade only. Strict containment and the `everyone` / `guest` anchors are unchanged. See the note under D12.
@@ -492,6 +493,17 @@ alias tax on every API.
 > sharing sets, Power Pages' table-permission scopes) and share links, drawn from an identity pool
 > separate from members (the pool below is kept). The bullets that follow record the decision as
 > taken; read their `externalSharingModel` and external-OWD clauses as superseded by this note.
+
+> **Re-amended 2026-10-23 (ruling of record 6355206139 on #25233, letter B).** In the note above,
+> "drawn from an identity pool separate from members (the pool below is kept)" is replaced:
+> external principals are the population inside the member pool that holds the `external`
+> organization role, and they reach rows through explicit shares, share links, sharing rules, and
+> the position and permission-set grants they hold with their RLS evaluated (a sharing set's
+> "records related to the principal's account" is such a predicate). The bullets' "from a separate
+> portal / partner identity pool" reads the same way. The last bullet's "the D6 access matrix
+> gains an external-audience column" is retired: it rode `externalSharingModel`, and audience is a
+> property of the principal, so a metadata-only matrix has no column to fill. The EXTERNAL rung's
+> cells live in the authorization matrix gate (#25541).
 
 Portal and partner scenarios need the Salesforce insight: internal and external record baselines
 are **two different dials, and external must never be wider**. Decision:

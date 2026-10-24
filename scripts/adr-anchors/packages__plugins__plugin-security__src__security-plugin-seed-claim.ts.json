@@ -1,0 +1,7 @@
+{
+  "file": "packages/plugins/plugin-security/src/security-plugin-seed-claim.ts",
+  "adrs": [
+    "ADR-0138"
+  ],
+  "invariant": "ADR-0138 D1 — for the guest envelope the owner stays unset, and only the scenario's own writers (a hook, a flow, an assignment rule) set it; so the seed-ownership claim this file runs on every `app:seeded` (`claimSeedOwnershipOnSettle`) and at the first promotion re-owns a NULL-owner row only when the seed reported landing on it (`readSeededRecordIds`, the `seed-settlement` contract's `seededRecordIds`), and widening that arm back to every unowned row hands guest-written and public-form rows to the platform admin on the next boot."
+}

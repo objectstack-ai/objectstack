@@ -145,6 +145,12 @@ Two markings do that work, at two levels:
   loudly when the stamp does not land — a row that silently keeps the wrong `source` is how a
   managed user is offered the local-password action D5.2 exists to hide.
 
+> **Note (2026-10-23, objectstack, ruling of record 6355206139 on #25233).** A third population
+> runs across D2's two: an organization member of either source who holds the `external` role
+> (the `EXTERNAL` rung, [ADR-0095](./0095-authz-kernel-tenant-layer-and-posture-ladder.md) D2).
+> It is marked by role on `sys_member`, not by `sys_user.source`, and D4's markings are unchanged.
+> Cloud ADR-0024's own text is not amended here.
+
 ### D5 — Identity comes from the IdP; authorization is decided in the environment
 
 Authentication may be delegated. **Authorization never is.** What a signed-in principal may do is
