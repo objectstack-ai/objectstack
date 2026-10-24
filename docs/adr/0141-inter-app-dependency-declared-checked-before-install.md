@@ -81,15 +81,15 @@ The first consumer is a HotCRM module shipping on its own, revenue first.
 ### What the platform does today (measured at `47af3dde42`)
 
 **Declaration exists and is editable.** `ManifestSchema.dependencies` is `z.record(z.string(), z.string()).optional()`,
-documented as a "Map of package IDs to version requirements" (`packages/spec/src/kernel/manifest.zod.ts:715`). The
-package door edits it after install and validates only its shape (`packages/runtime/src/domains/packages.ts:2319–2335`,
-recorded on the registry by `packages/objectql/src/registry.ts:6302`).
+documented as a "Map of package IDs to version requirements" (`packages/spec/src/kernel/manifest.zod.ts#ManifestSchema`). The
+package door edits it after install and validates only its shape (`packages/runtime/src/domains/packages.ts`,
+recorded on the registry by `packages/objectql/src/registry.ts#SchemaRegistry`).
 
 **Reference is already judged against the declared closure — at the runtime save door only.**
 `resolveWritePackageScope` computes the transitive closure of the written package's `manifest.dependencies`
-(`packages/metadata-protocol/src/protocol.ts:7526–7606`), and the lint gate keeps an object when it belongs to the
+(`packages/metadata-protocol/src/protocol.ts#resolveWritePackageScope`), and the lint gate keeps an object when it belongs to the
 package, to a declared dependency, to the platform, or to no package. A view bound outside it is refused `422`
-(`list-view-object-outside-closure`, `packages/lint/src/rule-explanations.ts:3323`), whose fix line already reads
+(`list-view-object-outside-closure`, `packages/lint/src/rule-explanations.ts#LIST_VIEW_OBJECT_OUTSIDE_CLOSURE_EXPLANATION`), whose fix line already reads
 "declare a dependency on the package that defines the object". The same explanation records the boundary of that
 judgement: `os validate`, `os build` and `os lint` "judge neither: a stack there is one app, and an unresolved binding
 may be a dependency package's object the stack does not carry". A closure that does not resolve a declared dependency
@@ -97,19 +97,19 @@ keeps it in the closure and stops walking — an absent dependency is not a faul
 
 **At install, `manifest.dependencies` is read by exactly one consumer, and it orders — it never checks.** The dispatch
 for this record assumed nothing at install reads the key; the measurement corrects that by one reader.
-`artifactPackages` (`packages/core/src/artifact-packages.ts:331–337`) feeds each declared id to `resolvePluginOrder` as an
+`resolveArtifactPackageEntries` (`packages/core/src/artifact-packages.ts#resolveArtifactPackageEntries`) feeds each declared id to `resolvePluginOrder` as an
 **optional** edge, so packages inside one artifact register in dependency order (ADR-0130 D5) and a declared id that is
-not in the artifact "is simply not an edge here" — silently skipped by design (its header, lines 112–135). No install
-door asks whether a declared dependency is installed, or at what version. `dependency_missing` is an enum value at
-`packages/spec/src/system/app-install.zod.ts:88`; across the tree it occurs only there, in that file's test and in the
+not in the artifact "is simply not an edge here" — silently skipped by design (its module header). No install
+door asks whether a declared dependency is installed, or at what version. `dependency_missing` is an enum value of
+`packages/spec/src/system/app-install.zod.ts#AppCompatibilityCheckSchema`; across the tree it occurs only there, in that file's test and in the
 generated reference page — zero producers. `packages/core/src/dependency-resolver.ts` serves kernel plugins, not
 installed packages.
 
 **The namespace gate admits co-owners from one source only.** `SchemaRegistry.installPackage` builds its co-owner set
-from the artifact scope the load path passes (`registry.ts:5974`, `scope?.packageIds`) and refuses a package whose
-non-shareable namespace an installed non-co-owner owns, throwing `NamespaceConflictError` (`registry.ts:5989–6005`, the
-throw at `6003`; the class at `1886`, `422 NAMESPACE_CONFLICT`). Its other half, `refuseCoOwnedObjectNameCollision`
-(`registry.ts:6153`), refuses two co-owners defining one object name (`ArtifactObjectNameConflictError`,
+from the artifact scope the load path passes (`packages/objectql/src/registry.ts#installPackage`, `scope?.packageIds`, line 5974) and refuses a package whose
+non-shareable namespace an installed non-co-owner owns, throwing `NamespaceConflictError` (lines 5989–6005, the
+throw at 6003; the class `packages/objectql/src/registry.ts#NamespaceConflictError`, `422 NAMESPACE_CONFLICT`). Its other half, `refuseCoOwnedObjectNameCollision`
+(`packages/objectql/src/registry.ts#refuseCoOwnedObjectNameCollision`), refuses two co-owners defining one object name (`ArtifactObjectNameConflictError`,
 `DUPLICATE_ARTIFACT_OBJECT_NAME`) and returns early when the co-owner set is empty. So a module published as its own
 artifact with HotCRM's namespace `crm` is refused next to an installed HotCRM today, whatever it declares.
 
@@ -117,12 +117,12 @@ artifact with HotCRM's namespace `crm` is refused next to an installed HotCRM to
 
 | Carrier | Shape | Who reads it at `47af3dde42` |
 |:---|:---|:---|
-| `ManifestSchema.dependencies` (`kernel/manifest.zod.ts:715`) | record `{ [packageId]: versionRange }`, optional | the save-door closure; the intra-artifact sort; the package door's edit |
-| `PackageManifestSchema.dependencies` (`marketplace/package-version.zod.ts:109`), entries `PackageDependencySchema` (`:56`) | array of `{ packageId, versionRange, optional = false }`, default `[]` | no runtime reader in this repository |
-| `AppManifestSchema.dependencies` (`system/app-install.zod.ts:60`) | array of bare strings, no version, default `[]` | no reader outside `packages/spec` |
+| `ManifestSchema.dependencies` (`packages/spec/src/kernel/manifest.zod.ts#ManifestSchema`) | record `{ [packageId]: versionRange }`, optional | the save-door closure; the intra-artifact sort; the package door's edit |
+| `PackageManifestSchema.dependencies` (`packages/spec/src/marketplace/package-version.zod.ts#PackageManifestSchema`), entries `#PackageDependencySchema` | array of `{ packageId, versionRange, optional = false }`, default `[]` | no runtime reader in this repository |
+| `AppManifestSchema.dependencies` (`packages/spec/src/system/app-install.zod.ts#AppManifestSchema`) | array of bare strings, no version, default `[]` | no reader outside `packages/spec` |
 
 `os package publish` snapshots the compiled `dist/objectstack.json` into `sys_package_version.manifest_json`
-(`packages/cli/src/commands/package/publish.ts:11–12`), so the snapshot carries the record shape where
+(`packages/cli/src/commands/package/publish.ts`, its header steps 1–2), so the snapshot carries the record shape where
 `PackageManifestSchema` declares an array. Whether the control plane parses that snapshot against the array schema lives
 in `objectstack-ai/cloud` — **not measured** here.
 
@@ -354,7 +354,7 @@ The letters as filed on #25403 and on ruling `6377678758`:
    recognition rule makes the answer harmless; the card records it).
 3. **Declared ids that are not installable packages.** `ManifestSchema.dependencies`' own documentation example names an
    npm-style id (`@steedos/plugin-auth`). Measured population in this repository: one declaring manifest,
-   `examples/app-multi-package/src/packages/orders/index.ts:65`, whose dependency is delivered by the same artifact (D2's
+   `examples/app-multi-package/src/packages/orders/index.ts`, whose dependency is delivered by the same artifact (D2's
    second arm). HotCRM's manifests are **not measured**. If an id that names no installable package turns up, the card
    reports it; D2 does not exempt it.
 4. **`optional` and `AppManifestSchema.dependencies`** — D8 items 2 and 3.
@@ -378,10 +378,10 @@ These are the points this draft decided where the rulings were silent, listed so
 ## Verification notes
 
 - **The dispatch's assumption "nothing at install reads `manifest.dependencies`"** holds for checking and fails for
-  ordering: `artifactPackages` reads every declared id as an optional sort edge (Context above). It changes no decision —
+  ordering: `resolveArtifactPackageEntries` reads every declared id as an optional sort edge (Context above). It changes no decision —
   the sort skips an absent id silently, which is exactly why D2 is needed — but the record states the reader.
 - **The namespace refusal** is `NamespaceConflictError` in `packages/objectql/src/registry.ts`, as assumed. The line
-  comment `6370024454` cites (`:5942`) and ruling `6377678758`'s range (`~5929–5942`) have moved: at `47af3dde42` the
+  comment `6370024454` cites (line 5942) and ruling `6377678758`'s range (`~5929–5942`) have moved: at `47af3dde42` the
   gate is `5989–6005`, the throw `6003`, the co-owner set `5974`.
 - **"`revenue` first per ADR-0130 §1.3(c)"** (ruling `6369704387`): §1.3(c) names CPQ as the unsellable module, not
   revenue. Revenue first is HotCRM's own ordering (module-split plan, hotcrm#2271); §1.3(c) is the general consequence
