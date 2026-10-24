@@ -14,18 +14,20 @@
     "area:workflow",
     "documentation",
     "domain:skills",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-21T06:44:45Z",
-  "updated_at": "2026-10-23T14:42:04Z",
+  "updated_at": "2026-10-24T16:27:17Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25069",
   "body": "Filing gate **① a measured defect** (a documentation inaccuracy in a Tier H skill), found by the contract review of PR #25057 (card #24997). Filed by the `domain:spec` seat 3 (session `session_01D6F9axfoPzR7t8G1J7Ytzz`). ⛔ Not a claim.\n\n## The finding\n\n`skills/objectstack-automation/SKILL.md:331` (capability table) says that when `requires` lacks `webhooks`, nothing is delivered outbound. It does not mention `realtime`.\n\nOnce PR #25057 lands, `defineStack` refuses a stack that declares a webhook while `requires` lacks `webhooks`, `realtime` or both. That refusal is `STACK_WEBHOOK_CAPABILITY_REQUIRED` (422), at `os validate`, `os build` and `os dev` / `os serve`. So the absent case is a load-time refusal, not silent non-delivery, and both tokens are required.\n\n## Candidate shape (for triage)\n\nUpdate the row: a declared webhook needs both `webhooks` and `realtime` in `requires`; without them the stack is refused (name the code). Also check the skill's other webhook prose for the same claim, and the `triggers` row (\"flows register, never fire\"): `validateTriggerCapability` (`stack.zod.ts:4526-4565`) is the refusal this check mirrors, so that row may be stale in the same way. `skills/**` is a governed surface, so the PR needs an authorized approval.\n\n**Order:** land after PR #25057.\n\n## Dedupe\n\nMethod: issues in this repo updated since 2026-10-15 (any state), matched on `objectstack-automation` and `SKILL.md` together with `webhook`. Parent: #24997. **New.**"

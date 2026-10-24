@@ -1,0 +1,36 @@
+{
+  "number": 25684,
+  "kind": "pull_request",
+  "title": "test(plugin-auth): seed the stored-issuer pre-flight fixture in one transaction",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "sunhaolin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T16:10:57Z",
+  "updated_at": "2026-10-24T17:11:12Z",
+  "closed_at": "2026-10-24T17:11:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-24T17:11:11Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25684",
+  "body": "Fixes #25648\n\nClause-②: no\nMetadata-protocol: none\n\n## What changed\n\nOne file: `packages/plugins/plugin-auth/src/account-identity-preflight-stored-issuer.test.ts`, test-only.\n\n`arrangeAccountTable`, the fixture every case in the file uses, seeded `sys_account` with one `knex(...).insert(row)` per row. Each insert was its own autocommit on the case's SQLite file. The better-sqlite3 build here compiles `DEFAULT_SYNCHRONOUS=2` (FULL), and `tmpdir()` sits on a real disk (ext4 in this container), so every row also paid an fsync. The \"walk of several pages\" case seeds 1,200 rows, so it made 1,200 commits before reaching the code under test.\n\nThe fixture now seeds with `knex.batchInsert(SYS_ACCOUNT_OBJECT, rows, SEED_CHUNK_ROWS)`, which runs every chunk inside one transaction, with `SEED_CHUNK_ROWS = 200`. knex compiles a multi-row SQLite insert as one `select ... union all select ...`, so a chunk is limited by SQLite's compound-select limit (`MAX_COMPOUND_SELECT=500` in this build) and its bound-variable limit (`MAX_VARIABLE_NUMBER=32766`). 200 rows of five columns is 200 terms and 1,000 bindings, inside both. The seed still goes straight through knex, independent of the code under test, as the fixture's doc comment requires. driver-sql's own suite seeds the same way (`sql-driver-json-backfill-depth-limit.test.ts`).\n\nWhat is unchanged:\n\n- **Every assertion in the file is unchanged.** The diff touches only the body of `arrangeAccountTable` and adds one constant above it.\n- **The row count stays 1,200.** The walk's page size is `PAGE_SIZE = 500`, a module constant in `account-identity-preflight.ts`. `AccountIdentityPreflightOptions` exposes only `max`, so the case cannot set the page size. With 1,200 rows the walk reads pages of 500, 500 and 200, and the colliding rows `acc_0000` and `acc_1199` sit on the first and last page. `expect(after.scanned).toBe(1_200)` and the first-and-last-page collision assertions are untouched.\n- **No timeout was raised or added.** After the change the case takes about 50 ms, all of it engine init and the two walks. That is real work, but it is far from the 10 s default (`testTimeout: 10_000` in the package's vitest config), so no per-case timeout is needed.\n\n## Measurements\n\nThe same command was used before and after. Before is `9dac9eb8d6` (origin/main at dispatch); after is `8d612d65f1` (the fix) and `ac38bbde12` (the fix merged with main). This is a shared 4-core container with up to three agents running at once, so the absolute numbers are shared-box readings. The ratios are what to read.\n\n**The case alone:** `pnpm --filter @objectstack/plugin-auth exec vitest run src/account-identity-preflight-stored-issuer.test.ts --reporter=verbose`, three runs each:\n\n| | run 1 | run 2 | run 3 | whole file's `tests` time |\n|:--|--:|--:|--:|:--|\n| before (`9dac9eb8d6`) | 1722 ms | 1895 ms | 1701 ms | 1.96 s / 2.16 s / 1.95 s |\n| after (`8d612d65f1`) | 57 ms | 68 ms | 49 ms | 299 ms / 299 ms / 269 ms |\n| after, merged (`ac38bbde12`) | 47 ms | | | 242 ms |\n\n**Under load:** `pnpm --filter @objectstack/plugin-auth test --reporter=verbose`, the whole 193-file suite, with this case's duration read from the verbose log:\n\n| | this case | suite | result |\n|:--|--:|--:|:--|\n| before (`9dac9eb8d6`) | 2090 ms | 302.86 s | 193/193 files, 3667 passed, 10 skipped |\n| after (`8d612d65f1`) | 82 ms | 359.34 s | 193/193 files, 3667 passed, 10 skipped |\n\nThe after run fell on a busier box (suite wall 359 s against 303 s), and the case still dropped from 2090 ms to 82 ms, about 25x. Locally, seeding was about 1.65 s of the case's 1.72 s. In the failing schedule run the case went past 10 s while `objectql`'s 466 files ran in the same turbo run. Removing 1,199 fsyncs takes out the part of the case that is disk-bound, which is the part that grows with I/O contention; the rest is CPU.\n\n## Verification\n\nAll on the final head `ac38bbde12` unless noted:\n\n- `pnpm exec turbo run build --concurrency=2 --filter='@objectstack/plugin-auth...'`, then the single-file run (10/10 passed), then `pnpm --filter @objectstack/plugin-auth typecheck` (`check:test-typecheck: OK`): `os-verify-lock: VERDICT command-exit 0`.\n- `tsc --noEmit --listFiles -p tsconfig.test.json` lists this test file once, and none of the 88 ledgered test-layer errors is in it.\n- `eslint packages/plugins/plugin-auth --no-inline-config`: exit 0, no output.\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 58 commands at `ac38bbde12`. All 58 were run, each exit code recorded before any pipe. 57 exited 0. `pnpm check:dual-build-cjs-loads` exited 3 (`PREREQUISITE NOT MET`: it needs `dist/` for about 42 packages outside plugin-auth's closure), so it is **NOT MEASURED** locally. This is a declared narrowing: the gate reads built output, and this diff changes no built output. Its reading is CI's. `--ran` reconciliation: \"58 derived, 57 run, 1 NOT-MEASURED, 0 UNRUN\", exit 0.\n- `test:repo` (the vitest `repo` project) was not run locally: the diff touches none of its tests. It belongs to CI's `Test Core`.\n\nNo ablation: the diff changes no tested behaviour, only how a fixture writes its rows.\n\n## Acceptance notes\n\n- The card's acceptance, \"the test passes in the hourly full battery\", can only be read on the schedule `CI` runs after this merges.\n- No changeset: the diff publishes nothing. plugin-auth's `files[]` is `dist`, `README.md` and `CHANGELOG.md`. After building, `arrangeAccountTable` and `SEED_CHUNK_ROWS` appear in 0 of those files, and the positive control `probeAccountIdentityCollisions` appears in 5. The PR takes `skip-changeset`.\n- The other nine cases in the file use the same fixture, so they got cheaper too: the file's whole `tests` time fell from about 2.0 s to about 0.3 s.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JVTd3PprStGa26aez5omLB)_\n"
+}

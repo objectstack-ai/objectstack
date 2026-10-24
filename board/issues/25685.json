@@ -1,0 +1,35 @@
+{
+  "number": 25685,
+  "kind": "issue",
+  "title": "tooling(objectui-readiness): make the objectui tree merge-ready in its own repo before cutover — one react line, one zod range, uiRoot() helper, tsc heap, workspace-aware Console chunk tests, typecheck alias (parent #25677, 2/6)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:epic",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T16:11:05Z",
+  "updated_at": "2026-10-24T18:23:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25685",
+  "body": "Filing gate ④: sub-issue 2/6 of the epic #25677 (`pm:epic`; epic PM `session_01RSDL3SFtJaKzcymvCD8RsU`). Part of #25677. ⛔ Not a claim.\n\nBlocked-by: none — #25678 (sub-issue 1, the spike) is done; its report (#25678, comment 6386424164) is the evidence for every line below.\n\n**Who does it, where it lands:** the epic PM dispatches it (os-dev, objectui checkout). Deliverables are ordinary PRs to **objectstack-ai/objectui `main`**, each small enough to review on its own, each with a changeset where a published package changes; the `domain:ui` lane's PR rules apply to them. The card lives here because the subtree is indexed on this parent. No governed surface is touched. Why in objectui and not on the merge branch: objectui keeps developing until cutover day, so anything changed on a prep branch of the merged tree would conflict with objectui `main` moving; landing it in objectui first means the cutover import (sub-issue 5) brings it in for free and the freeze window stays at 1–2 days.\n\n## 维护者速读\n\n子卡 1 的 spike 证明合并可行，但 objectui 这棵树里有 6 件事是\"默认自己是独立仓\"的假设，在并入 `ui/` 后会直接让构建或测试失败。本卡把这 6 件事在 objectui 自己的仓里先修掉（每件一个小 PR，单独都无害），这样切换日只剩 `git subtree add` + 重算 lockfile。不碰受管面；切换前 objectui 照常开发。\n\n## Scope (each item one PR, in this order)\n\n1. **One react line.** Lift `react` / `react-dom` from 19.2.8 to 19.3.0 and `@types/react` 19.2.18 → 19.3.0 (`@types/react-dom` 19.2.4 → 19.3.0) in every manifest that pins them (12 manifests pin react, 29 pin `@types/react`, plus the root `pnpm.overrides`). Why: `@objectstack/client-react` requires ^19.3.0; two `@types/react` copies broke `@object-ui/plugin-view`'s declaration build in the merged tree (report finding 3). Keep the root overrides for now; they go with the pin field at cutover.\n2. **One zod range.** `@object-ui/app-shell`, `components`, `types`, `test-support`, `plugin-timeline`: `^4.4.3` / `^4.6.1` → `^4.6.5`, matching objectstack. Lock stays single-instance in the Console (the canary passed), this just removes the second version from the merged lockfile (finding 4).\n3. **`uiRoot()` helper.** 71 files under `scripts/`, `packages/*`, `apps/*` locate the repo root via `.git`, `git rev-parse --show-toplevel`, `pnpm-workspace.yaml` or find-up; in the merged tree that is the objectstack root and `filter-icontains-alignment-8976.test.ts` already reads `<root>/packages/core/...` and fails (finding 6). Add one helper (`scripts/ui-root.mjs` + a TS twin for tests) that resolves the objectui tree root from `import.meta.dirname` and works both standalone and under `ui/`; migrate the 71 call sites; add a gate that refuses new `show-toplevel`/`.git` root lookups outside the helper.\n4. **tsc heap.** `@object-ui/app-shell` and `@object-ui/console` `tsc` need 2.3 GB (3 574 files, 1.15 M lines of `.d.ts`) and OOM at Node's default heap in the merged tree (finding 2). Put `NODE_OPTIONS=--max-old-space-size=4096` into those two packages' `build` / `type-check` scripts (cross-platform via `cross-env` or a tiny node wrapper, not a bash prefix) so CI and local builds carry it everywhere.\n5. **Workspace-aware Console chunk tests.** Port the 14-line change from the spike commit `3efb112efb` (`ui/apps/console/vite.config.ts`: `VENDOR_OBJECTSTACK_TEST`, `SPEC_MODULE_TEST`, the lazy-linter `LINT` test accept `<repo root>/packages/<name>/` beside the node_modules spellings; `lint` still excluded) and check `scripts/vite-objectstack-client-dist.ts` for the same node_modules assumption (finding 5). Standalone, the new alternative matches nothing, so behaviour is unchanged.\n6. **Task names and floor checks.** Add a root `typecheck` script aliasing `type-check` so the merged root `turbo run typecheck` reaches ui packages (finding 7; the full turbo merge is sub-issue 3's). Make `scripts/objectstack-floor.mjs`, `scripts/check-spec-range-floors.mjs` and the `declaredSpecFloor` tests read a `workspace:` protocol as \"floor = the workspace version\" instead of failing (finding 1; 12 files); their deletion is sub-issue 4's.\n\n## Done when\n\n- Six PRs merged on objectui `main`, each green on objectui's own CI, with changesets where a published manifest changed.\n- Re-running the spike import (`git subtree add` of the new objectui `main` onto objectstack `main`, the wiring of #25678's `ec74d9ecfa`) builds `@object-ui/console^...` and the Console at the default workspace settings with **no** root react/@types override, and `vitest run --project unit packages/core packages/i18n` from `ui/` is green.\n- `grep -rE \"show-toplevel|'\\.git'\" scripts packages apps` outside the helper returns 0.\n\n**Size:** L (six small PRs; item 3 is the bulk). **Clause-②:** no (no accept set or public surface widens). **Metadata-protocol:** none.\n\n## Dedupe\n\n`search_issues` 2026-10-24 16:10Z: objectui 「bump react to 19.3 @types/react one version line pins 19.2.8」0 hits; objectui 「repo root helper show-toplevel monorepo nested workspace」4 hits, all closed and about other things (#9355 BASELINE sha, #7987 setup.sh, #5700 worktree refs, #3515 vitest.setup programs); objectstack 「objectui merge readiness ui/ workspace tsc heap」14 hits, the live ones are this epic's own #25677/#25678, the rest closed pin bumps. **New.**"
+}

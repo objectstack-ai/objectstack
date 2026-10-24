@@ -2,7 +2,7 @@
   "number": 25642,
   "kind": "pull_request",
   "title": "refactor(metadata-protocol): move package install and update out of protocol.ts into protocol-package-install.ts (#25467 cut 7)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-24T12:23:39Z",
-  "updated_at": "2026-10-24T14:17:53Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-24T15:01:16Z",
+  "closed_at": "2026-10-24T15:01:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-24T15:01:15Z",
   "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/25642",

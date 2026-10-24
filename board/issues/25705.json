@@ -1,0 +1,33 @@
+{
+  "number": 25705,
+  "kind": "pull_request",
+  "title": "fix(objectql): a free-text search resolves only over the fields the caller may query",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "sunhaolin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T19:01:38Z",
+  "updated_at": "2026-10-24T19:02:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25705",
+  "body": "Fixes #25672\n\nClause-②: no\nMetadata-protocol: none\n\n## What\n\nA free-text `search` now resolves only over the fields the caller may query. `expandSearchOnAst` (`packages/objectql/src/engine.ts`) asks the registered `security` service's `getQueryableFields(object, context)` and passes the answer to `expandSearchToFilter` as `queryableFields`. `search-filter.ts` then withholds every resolved field outside that set. The answer is read through the engine's existing `SECURITY_SERVICE_SOURCE_SLOT`, and the context is the one the middleware will see. This applies to `find`, `findOne`, `count` and `aggregate`.\n\n- **One readability source.** `getQueryableFields` is the published complement of what the field-read predicate guard refuses (same `computeQueryGuardFieldPerms` derivation), and `searchAll` already narrows with it. The engine adds no second field-permission rule.\n- **The guard is unchanged.** It still judges every predicate the caller wrote.\n- **Named fields are not withheld.** A field the caller names in `searchFields` (either spelling) reaches the guard and is refused with 403, as before.\n- **Narrowing happens after resolution.** A declared set that is entirely hidden stays empty and does not fall through to the auto-default.\n- **Empty set.** A set withheld down to nothing answers the existing #24284 refusal (`400 INVALID_FIELD`, `param: search`), with a message that names field-level security as the cause.\n- **No answer, no narrowing.** No context, no service, no method, or an `undefined` answer leaves the set as it is, and the guard decides as today.\n\n## Proof (fresh boot, `pnpm dev:crm -- --fresh`, a non-admin org member vs the seeded admin)\n\n| Request | Member | Admin |\n|---|---|---|\n| `GET /api/v1/data/sys_user?search=Mia` | 200, Mia Member | 200, same row |\n| `?search=admin@objectos` (email) | 200, Dev Admin | n/a |\n| console shape `populate=primary_business_unit_id&top=25&search=Adm&filter=[\"banned\",\"!=\",true]` | 200, Dev Admin | 200, same row |\n| `?filter=[\"ban_reason\",\"=\",\"x\"]` | **403** `PERMISSION_DENIED` (guard holds) | n/a |\n| `?search=x&$searchFields=ban_reason` | **403** naming `ban_reason` | n/a |\n| `?search=x&searchFields=name,role` | **403** naming `role` | n/a |\n| `?search=user` | n/a | 200, both users (matched on `role`: the admin's set is unchanged) |\n\n- **Ablation.** I replaced `{ ...expandOptions, queryableFields }` with `{ ...expandOptions }` via `scripts/ablation-replace.mjs` (anchor 1 → 0, blob `7383042fc6ad` → `cf902b78f292`), rebuilt, and `ablation-dist-preflight --absent` passed. Re-booted, the member's three searches answered **403 `... not readable by the caller: role, ban_reason, last_login_ip`**, the card's exact refusal. The admin rows matched the fixed run byte for byte, ids aside.\n- **Restore.** `git checkout HEAD --`, disk blob `7383042fc6ad` = HEAD blob, `git status --porcelain` empty, rebuilt, and the preflight finds the marker in `dist/core.{js,mjs}`.\n- **Generality.** The second object is a unit-level proof (`engine-search-queryable-fields.test.ts`: an auto-default object loses its hidden `private_note`). The CRM example has no non-`sys_user` object with a member-hidden searchable field to drive over HTTP.\n\n## Tests (at `61177d0f12`)\n\n- `pnpm --filter @objectstack/objectql exec vitest run`: 468/468 files, 8719/8719 tests.\n- `pnpm --filter @objectstack/objectql typecheck`: exit 0, test layer included.\n- `plugin-security`: 222 files, 4628 passed, 45 skipped. `plugin-audit`: 60 files, 985 passed. Both use the rebuilt objectql `dist`.\n- New: `engine-search-queryable-fields.test.ts` (each verb, generality, named-field pass-through, every no-answer road, blank term, all-withheld → 400) and 4 cases in `search-filter.test.ts`.\n\n## Gates\n\n- `dispatch-gates --commands`: 73 derived, all run, all exit 0.\n- `--ran` reconciliation: 73/73 with exit codes, 0 NOT-MEASURED.\n- Two families (`check-engine-split-ratio`, `check-plugin-teardown-shape --self-test`) first refused on the shallow clone and passed after `git fetch --unshallow`.\n- `eslint --no-inline-config` on the four touched files: exit 0.\n\n## Acceptance notes\n\n- `packages/platform-objects/src/identity/sys-user.object.ts` is untouched: the general route made the narrower one unnecessary, so there is no overlap with #25626.\n- `count` narrows with the same set, so the paged `total` agrees with `records` for a member.\n- `getQueryableFields` withholds masked fields too, matching the guard: a member's search no longer matches on a field they see masked, where it used to 403.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018sBs7EHHJdB92hpDWae2e2)_\n"
+}

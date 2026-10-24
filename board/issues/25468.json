@@ -2,8 +2,8 @@
   "number": 25468,
   "kind": "issue",
   "title": "app-showcase: \"Mark Done\" lets a member who may not edit tasks write them — the script body runs elevated, the action declares no requiredPermissions, and the console still offers the button",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "marchtian",
@@ -14,7 +14,6 @@
     "area:access",
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2",
     "security"
   ],
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-23T15:25:51Z",
-  "updated_at": "2026-10-24T13:50:29Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-24T14:51:40Z",
+  "closed_at": "2026-10-24T14:47:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25468",
   "body": "<!-- claude-projects-attribution: {\"github_login\":\"marchtian\"} -->\n_Requested by **田騏** · [project thread](https://claude.ai/code/project/chan_01VmuUhXU9SSUzqJYyXSmYSi?thread=cmsg_01VmuUhXU9SSUzqJYyXSmYSi7SkqaNxU2Ef8P2DMmp2hPJ)_\n\nFound during an exploratory walkthrough of the showcase as a non-admin persona.\n\n## Environment\n\n- objectstack `main` @ `b9c7a8f`, `PORT=3000 pnpm dev` (showcase, fresh DB)\n- objectui `main` @ `6fb31dc` console on :5180\n- Signed in as the seeded persona `phone.demo@example.com` (Mei Phone)\n\n## What the persona is allowed to do\n\nThe persona's grant on `showcase_task` is read + create only (the member-level set in `src/security/permission-sets.ts` carries `showcase_task: { allowRead: true, allowCreate: true }`). The console agrees: the task record page shows no **编辑 / Edit** button for this user, and a direct write is refused:\n\n```\nPATCH /api/v1/data/showcase_task/JVVzP8bTy9ZhbTCd  {\"priority\":\"high\"}\n→ 403 {\"code\":\"PERMISSION_DENIED\",\"object\":\"showcase_task\", ...}\n```\n\n## Steps\n\n1. As the persona, open task **Content backlog** (it is assigned to the persona, so the select RLS lets it be read).\n2. Click **Mark Done** in the record header.\n\n## Actual\n\nToast \"Task marked done.\", and the write lands:\n\n```\nGET /api/v1/data/showcase_task/JVVzP8bTy9ZhbTCd\n→ done: true, progress: 100, updated_by: usr_showcase_phone_demo\n```\n\nSo a user who cannot edit a task can edit it through the action.\n\n## Why it happens\n\nThis is the documented posture, not a runtime accident: a script action body is trusted application code and its `ctx.api` runs `isSystem` (`buildActionExecutionContext`; the `actionAiExposureError` docblock says a body's reads and writes \"are NOT bounded by the caller's RLS/FLS\"). The gate an author is expected to use is `requiredPermissions` (ADR-0066 D4, `actionPermissionError`). `showcase_mark_done` declares `capabilities: ['api.write']` and no `requiredPermissions`, and its `visible` predicate only checks `record.done`, so every reader of a task gets a working write button.\n\nThe showcase is the reference app people copy actions from, so the pattern it teaches is \"a record-header script action that writes is open to every reader\". The same shape probably applies to the other `api.write` actions in `src/ui/actions/index.ts`; I only exercised Mark Done. **Log Time** (`type: 'form'`) is also offered to this persona, but I did not check what its submit does for a user without edit.\n\n## Expected\n\nEither the showcase action is gated (a `requiredPermissions` entry, or a `visible`/`disabled` predicate tied to edit access) so the demo models the safe pattern, or the platform makes the gap visible to authors.\n\n## Possible platform follow-ups (for triage, not part of the showcase fix)\n\n- a lint warning for a script action whose body declares `api.write` and whose action declares no `requiredPermissions`, since that combination is always an elevation for every caller who can see the record;\n- or the console hiding/disabling a record action that writes the current object when the caller's object permission has no `allowEdit`, the way it already hides Edit."

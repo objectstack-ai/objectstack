@@ -1,0 +1,31 @@
+{
+  "number": 25676,
+  "kind": "issue",
+  "title": "deps: @azure/msal-node GHSA-xcx6-jx8p-x3h5 (high) stays in the lockfile until an @azure/identity release admits msal-node 7.1.0",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:blocked",
+    "priority:p3",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T15:05:23Z",
+  "updated_at": "2026-10-24T15:05:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25676",
+  "body": "Filing gate ①: a named advisory, measured on `main`, that its producer card (#25631, PR #25657) could not clear. Filed by the `domain:devx` seat (seat post #6023, session `session_01LKHDniRQSWjRJyDtacwpEd`). ⛔ Not a claim.\nBusiness reason: once #25657 lands, this is the only high left in `pnpm audit --prod` for the framework, so `--audit-level=high` keeps exiting 1. The vulnerable path is used only by a deployment that installs the optional mssql driver and signs in to Azure AD through it.\nReader: the `domain:devx` lane, when the upstream release named below ships. Until then the card is `pm:blocked`.\nDedupe (open AND closed): \"msal-node GHSA-xcx6-jx8p-x3h5 azure identity tedious\" → 0 hits besides #25631.\nreach: optional driver path, measured once (#25631 os-dev-report, comment 6385752021).\ntype: Bug\n\n## Measured\n\n- `@azure/msal-node` 5.4.1 resolves through `@azure/identity` 4.13.1 (which declares `^5.1.0`), under `tedious` 18.6.2. `tedious` sits under `@objectstack/driver-sql`'s optional `mssql` peer.\n- The fix for GHSA-xcx6-jx8p-x3h5 exists only in msal-node 7.1.0.\n- No `@azure/identity` release admits 7.1.0: both 4.14.0 and 4.15.0-beta.1 declare `^6.0.0`.\n- Forcing msal-node to 7.x with a `pnpm.overrides` entry would take it two majors past identity's declared range, on a sign-in path no test in this workspace runs. #25631 left it out on purpose and recorded why in `pnpm-workspace.yaml`.\n\n## Wanted\n\n- When an `@azure/identity` release admits `@azure/msal-node` ≥ 7.1.0, take it: lift the override or the lockfile, regenerate with pnpm, and confirm that `pnpm audit --prod --audit-level=high` exits 0.\n- Until that release exists, nothing is to be built. If the maintainer prefers to force the override now, that is the maintainer's decision, and it needs an mssql/Azure AD sign-in test before it lands."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 25681,
+  "kind": "issue",
+  "title": "Object fields: `repeater` / `composite` cannot declare typed sub-fields, so they are untyped JSON in forms and flows",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:spec",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T15:40:14Z",
+  "updated_at": "2026-10-24T16:37:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25681",
+  "body": "Ruled: 6386744473 · batch #12 item 4 · letter b · 2026-10-24T16:30:45Z (object-level `repeater` / `composite` stay untyped JSON; docs + `FieldType` description + lint; a typed list is a child object; no sub-field member)\n\nCategory: ② maintainer decision / feature gap.\n\n## Need\n\n`repeater` (and `composite`) are listed in `FieldType` as \"embedded sub-object array with declared sub-fields\", but an object field has no member to declare those sub-fields: `FieldSchema` refuses `fields` / `subFields`, and objectui's structured cell says so explicitly (\"the spec's `FieldSchema` has no sub-field member for either type\"). So a repeater on an object is an untyped JSON array: the form maps it to `field:grid` with no columns, sub-values get humanized keys instead of labels, there are no per-column types, options, required flags or translations, and nothing can validate or address one row.\n\nWho benefits / scenario: business apps that want a short typed list on a record without a separate object. hotsrm (objectstack-ai/hotsrm#38, PR objectstack-ai/hotsrm#46) designed a supplier audit with `checklist` (item, score, note) and `findings` (finding, severity, requirement, linked SCAR) repeaters, and plans an 8D `steps` repeater (date, owner, attachment per D1–D8) for the supplier portal in v0.6. Without declared sub-fields none of these is usable in the form, and a flow cannot write back to one row (e.g. link the SCAR raised from a finding).\n\n## What hotsrm does regardless\n\nFindings are a child object (`srm_supplier_audit_finding`, master_detail) and per-item checklist scores stay in an attached scoresheet; that stays even if repeaters gain sub-fields, because findings need their own record identity for SCAR links and counts. The 8D `steps` repeater is the remaining consumer that would use the feature.\n\n## Decision asked\n\nEither ~~(a) add a declared sub-field member (label, type, options, required, i18n keys) to `repeater` / `composite` object fields, rendered by the form grid~~ (not chosen, ruling 6386744473); or **(b) state in the `FieldType` description and docs that object-level repeaters are untyped JSON and that a typed list should be a child object, and refuse or lint a repeater that expects columns.** ← ruled b.\n\nWho acts: ~~maintainer ruling, then~~ the spec seat (`packages/spec` data/field, docs, one lint rule); objectui form grid: no work.\n\nDedupe: `repo:objectstack-ai/objectstack repeater in:title,body` → 0 hits (open + closed); `repo:objectstack-ai/objectstack subFields composite` → 0 hits.\n\nSession: `session_01RSBzVuyvrxknGC9yW432s4`"
+}

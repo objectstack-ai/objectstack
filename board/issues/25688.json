@@ -1,0 +1,32 @@
+{
+  "number": 25688,
+  "kind": "pull_request",
+  "title": "docs(skills): objectstack-platform declares engines.protocol '^18', the major the 18.x boot handshake accepts",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T16:21:34Z",
+  "updated_at": "2026-10-24T16:36:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25688",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1X5YusjSEHT8KRnVbiKjJ22B)_\n\nFixes #25671\n\nClause-②: no\nMetadata-protocol: none\n\n## What changed\n\nThe published `objectstack-platform` skill taught `engines: { protocol: '^17' }` in its `defineStack` manifest example. On `main`, `PROTOCOL_VERSION` is `18.0.0` (`packages/spec/src/kernel/protocol-version.ts`), and the boot handshake in `packages/runtime/src/app-plugin.ts` refuses a range that excludes the runtime major (`OS_PROTOCOL_INCOMPATIBLE`, 422), so a config copied from the skill failed to boot on 18.x. The scaffold (`create-objectstack`) and every example app already write `'^18'`.\n\nLanding point — the three sites the card names, plus one sibling line in the same eval file:\n\n- `skills/objectstack-platform/SKILL.md` L142: `'^17'` → `'^18'`.\n- `skills/objectstack-platform/evals/config-plugins-ops.json` L7 (expected output): `'^17'` → `'^18'`; and L6 (the eval prompt) `targets protocol 17` → `targets protocol 18`, so the eval stays internally consistent — a prompt asking for 17 with an expected output of `'^18'` would grade a correct answer wrong. Same file, same byte length, no extra line.\n- `skills/objectstack-upgrade/SKILL.md` L89: the sentence stating what every scaffold and example writes now says `'^18'`, which is what they write. The `'^17'` → `--from 17` worked example on L91 is unchanged on purpose: it demonstrates taking the floor of a range, and `--from 17` is a real upgrade path.\n- `.changeset/25671-skills-protocol-caret.md`: `@objectstack/skills` patch.\n\nAcceptance check from the card: `git grep -n \"protocol: '\\^17'\" skills/` at head `401e0bc0` returns only `skills/objectstack-upgrade/SKILL.md:91`, the worked upgrade example.\n\n## Published-skills readings (lines · tokens as `ceil(utf8 bytes / 4)`, `origin/main` `b2909fd4` → head `401e0bc0`)\n\nPer changed file, before → after:\n\n- `skills/objectstack-platform/SKILL.md`: 488 lines · 5826 tokens → 488 · 5826\n- `skills/objectstack-platform/evals/config-plugins-ops.json`: 65 · 1211 → 65 · 1211\n- `skills/objectstack-upgrade/SKILL.md`: 483 · 6176 → 483 · 6176\n\nWhole bundle (sum of every `skills/*/SKILL.md`): 4389 lines · 52625 tokens → 4389 · 52625. Whole `skills/` tree: 13355 · 157586 → 13355 · 157586. Net line budget for `skills/**`: 0 added, 0 removed (4 lines rewritten in place at equal byte length). `check-skills-token-ratchet` verdict at head: `54 authored bundle file(s) within their ceilings`.\n\n## 维护者速读(草稿)\n\n**改了什么:** 对外发布的 `objectstack-platform` 技能里,`defineStack` 示例的 `engines.protocol` 从 `'^17'` 改为 `'^18'`;同一技能的 eval 用例(提示词与期望输出一起)同步到 18;`objectstack-upgrade` 里「脚手架和示例都写 `'^17'`」这句改为 `'^18'`,与脚手架实际写入一致。`'^17'` → `--from 17` 的升级演算示例保留不动。附一个 `@objectstack/skills` patch changeset。\n\n**为什么改:** 当前运行时协议版本是 18.0.0,启动握手会拒绝排除了 18 的范围(`OS_PROTOCOL_INCOMPATIBLE`)。客户项目从技能文本照抄配置,一启动就失败;脚手架与所有示例早已写 `'^18'`,只有技能文本落后了一个大版本。\n\n**风险与代价(含回滚):** 纯文档与 eval 文本,运行时零改动;四行等长替换,技能包的行数与 token 计数前后完全不变。回滚即 revert 本 PR;唯一代价是客户项目再次拿到会启动失败的示例。\n\n**席位意见:**\n\n**你要做的:** `skills/**` 为 Tier H,本 PR 保持 draft 等待授权审批;审批后由席位落地。\n\n## Acceptance notes\n\n- No gate catches this class today: `check:skill-compatibility` reads only the frontmatter, and nothing cross-checks a `protocol:` literal in skill prose against `PROTOCOL_VERSION`. Noted, not filed: a read-only observation with no reproduced wrong answer beyond this card's; carrier: none.\n- The eval prompt edit (L6) is the one line outside the three the card names. Omitting it would have left the eval asking for protocol 17 and expecting `'^18'`.\n- `check:doc-formula-expressions` first answered exit 3 (`PREREQUISITE NOT MET`: `@objectstack/formula` and `@objectstack/lint` unbuilt in a fresh worktree). After `turbo run build --filter=@objectstack/formula --filter=@objectstack/lint` under the verify lock it answered exit 0 (`23 record-scoped formula example(s) across 478 files judged clean`). The 3 was never a finding.\n\n## Gates (local subset at head `401e0bc0`; exit codes captured before any pipe)\n\n`dispatch-gates --commands --repo objectstack-ai/objectstack` derived 47 families for this diff. 43 ran locally, every one exit 0, among them: `node scripts/check-skills-token-ratchet.mjs` (and `--self-test`), `pnpm --filter @objectstack/spec run check:skill-docs` (`Skill docs in sync`), `pnpm check:skill-frame-sync`, `pnpm check:skill-identifier-liveness`, `pnpm check:skill-compatibility`, `pnpm check:skill-top-level-keys`, `pnpm check:pm-skill-id-lint`, `pnpm check:role-word`, `pnpm check:doc-authoring`, `pnpm check:corpus-claim-drift`, `pnpm check:nul-bytes`, `pnpm check:merge-driver`, `pnpm check:published-files`, `pnpm check:pm-governed-merges`, `check-adr-0087-registration`, `check-changeset-no-major`, `check-empty-changeset`, `pnpm check:changeset-gate-self-tests`, `pnpm --filter @objectstack/lint run check:doc-formula-expressions`.\n\nDeclared to CI, not run locally (4 of 47, matched only through the `Build Core` job path filter in `ci.yml`, none of them reads a `skills/**` file, each needs a full core build): `pnpm check:dts-closure`, `pnpm check:dual-build-cjs-loads`, `pnpm check:lean-entry-closure`, `pnpm check:sourcemap-no-sources-content`. `--ran` reconciliation: `47 derived, 43 run, 0 NOT-MEASURED, 4 UNRUN` naming exactly those four. `test:repo` and the full lint farm are CI's.\n\nNo package build or test closure is owed: the diff touches no workspace package source.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_014FZ3TJucS1L7BdMe5DAzXC)_\n\n"
+}

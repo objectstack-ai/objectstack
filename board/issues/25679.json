@@ -1,0 +1,36 @@
+{
+  "number": 25679,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): the claim template carries the `Premise:` line the pre-dispatch premise check writes",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T15:23:18Z",
+  "updated_at": "2026-10-24T15:56:50Z",
+  "closed_at": "2026-10-24T15:56:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-24T15:56:48Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25679",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DMMchS2pMx7VafJmdzGaxFv)_\n\nFixes #25663\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读(草稿)\n\n- **改了什么**:认领模板(`SKILL.md` 〈模板与表〉)在 `Thread-read:` 之后加一行 `Premise:`,即 #25552 规定的派发前前提核实读数;棘轮上限 318 → 319。\n- **为什么改**:runbook 要求读数落认领 `Premise:` 行,模板却没有,照模板抄就会漏。\n- **风险与代价(含回滚)**:一行模板文字 + 一个上限数字;一次 revert 可回。\n- **你要做的(一个动作)**:无。上限按您的裁决 6385407063(「同意 318→319」)抬;复核通过、CI 全绿由席位按 Tier S 落地。\n\n## What changed\n\n- `.claude/skills/pm-dispatch/SKILL.md` 〈模板与表〉, after `Thread-read:`: `Premise: holds | corrected <comment id> | inbox (the pre-dispatch premise reading, dispatch-runbook.md 派发前置)` (116 bytes). The three values are `dispatch-runbook.md` 〈派发前置〉's three outcomes: 成立 ⇒ 派, 改法明确 ⇒ 改卡再派, 判不了 ⇒ 入决策箱.\n- `scripts/pm/check-skill-line-ratchet.mjs`: the `SKILL.md` row 318 → 319, its comment citing ruling 6385407063. `SKILL.md` is not a `CROSS_FILE_MOVES` destination, so no `ruledRaises` record applies.\n\n## Gates\n\nOn this head: `pnpm check:pm-skill-ratchet` ✓ (319 / 319), `pnpm check:pm-skill-id-lint` ✓, `pnpm check:skill-frame-sync` ✓, `pnpm check:skill-frame-freshness` ✓, `pnpm check:pm-governed-prose` ✓; self-tests of the claim readers ✓ (`post-stamped.mjs`, `check-half-states.mjs`, `check-expected-skips.mjs`, `check-governed-queue-guard.mjs`, `check-dispatch-gates.mjs`); `check-commit-card-trailers.mjs` ✓. No claim parser keys on `Premise:` yet, so the line is inert to them. No package moves: `skip-changeset`.\n\n## Acceptance notes\n\n- Carrier of the deferral in PR #25658 (card #25490); ruling recorded on #25663 as 6385407063.\n- Governed surface `.claude/**` (Tier S); opened through the fleet-write relay `pr_create`; every later write goes through the relay too.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01REMuzhz6MWRjg8uohedMnM\n"
+}

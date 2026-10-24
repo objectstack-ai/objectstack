@@ -2,8 +2,8 @@
   "number": 25666,
   "kind": "issue",
   "title": "skills: `objectstack-platform/references/bootstrap.md` still teaches `^17.0.0` for every @objectstack/* dependency, while the scaffolders now write the exact version (the governed half of #25510)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "documentation",
     "domain:skills",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,9 +21,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-24T14:09:49Z",
-  "updated_at": "2026-10-24T14:11:33Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-24T15:22:26Z",
+  "closed_at": "2026-10-24T15:21:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 1,
   "locked": false,
