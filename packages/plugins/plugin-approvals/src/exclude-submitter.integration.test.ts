@@ -60,7 +60,6 @@ const SOLO_ORG = 'org_solo';
 const as = (userId: string, org: string, permissions: string[] = []) =>
   ({ userId, tenantId: org, positions: [], permissions }) as any;
 const SUB = as('u_sub', ORG);
-const OWNER = as('u_owner', ORG, ['organization_admin']);
 
 const USERS = ['u_sub', 'u_owner', 'u_admin', 'u_alice', 'u_bob', 'u_fallback', 'u_dir', 'u_away']
   .map((id) => ({ id, name: id, email: `${id}@example.com` }));
