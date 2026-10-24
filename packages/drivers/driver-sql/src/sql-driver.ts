@@ -175,6 +175,18 @@ import {
 // index DDL `execute` ran); the methods of the same names below hand each body
 // the members it reads (`RawExecutionHost`).
 import { execute, noteRuntimeIndexDdl, rawStatementFault } from './sql-driver-raw-execution.js';
+// [#25521 cut 3] The transaction doors (`beginTransaction`, `commit`, `rollback`,
+// their deprecated aliases, and the SQLite single-connection guard
+// `assertBareKnexSafe`); the methods of the same names below hand each body the
+// members it reads (`TransactionHost`).
+import {
+  assertBareKnexSafe,
+  beginTransaction,
+  commit,
+  commitTransaction,
+  rollback,
+  rollbackTransaction,
+} from './sql-driver-transactions.js';
 import { makeDatabaseDirectory, probeAbsentSqliteDatabaseFile, SqliteDatabaseFileError } from './sqlite-database-file.js';
 import { jsonMembershipPredicate } from '@objectstack/core';
 import knex, { Knex } from 'knex';
@@ -10900,11 +10912,19 @@ export class SqlDriver implements IDataDriver {
   // Transactions
   // ===================================
 
-  async beginTransaction(): Promise<Knex.Transaction> {
-    const trx = await this.knex.transaction();
-    this.openTransactions.add(trx as unknown as object);
-    this.activeTransactions++;
-    return trx;
+  beginTransaction(): Promise<Knex.Transaction> {
+    // [#25521 cut 3] The body moved to `sql-driver-transactions.ts` (see `TransactionHost`).
+    const readActiveTransactions = () => this.activeTransactions;
+    const writeActiveTransactions = (v: SqlDriver['activeTransactions']) => { this.activeTransactions = v; };
+    const readKnex = () => this.knex;
+    const readOpenTransactions = () => this.openTransactions;
+    const host: ThisParameterType<typeof beginTransaction> = {
+      get activeTransactions() { return readActiveTransactions(); },
+      set activeTransactions(v) { writeActiveTransactions(v); },
+      get knex() { return readKnex(); },
+      get openTransactions() { return readOpenTransactions(); },
+    };
+    return beginTransaction.call(host);
   }
 
   /** Idempotently drop a transaction from the open-count (safe on double close). */
@@ -10934,44 +10954,51 @@ export class SqlDriver implements IDataDriver {
    * `this.knex`.
    */
   protected assertBareKnexSafe(op: string): void {
-    if (this.isProductionEnv()) return;
-    if (!this.isSqlite) return;
-    if (this.activeTransactions === 0) return;
-    throw new Error(
-      `[driver-sql] refusing to run '${op}' on a fresh pooled connection while a ` +
-        `transaction is open: SQLite's pool has a single connection, so acquiring a ` +
-        `second one would dead-lock (surfacing later as "Knex: Timeout acquiring a ` +
-        `connection"). Bind this operation to the active transaction instead of using ` +
-        `this.knex.`,
-    );
+    // [#25521 cut 3] The body moved to `sql-driver-transactions.ts` (see `TransactionHost`).
+    const readActiveTransactions = () => this.activeTransactions;
+    const readIsSqlite = () => this.isSqlite;
+    const host: ThisParameterType<typeof assertBareKnexSafe> = {
+      get activeTransactions() { return readActiveTransactions(); },
+      isProductionEnv: (...a) => this.isProductionEnv(...a),
+      get isSqlite() { return readIsSqlite(); },
+    };
+    return assertBareKnexSafe.call(host, op);
   }
 
   /** IDataDriver standard */
-  async commit(transaction: unknown): Promise<void> {
-    try {
-      await (transaction as Knex.Transaction).commit();
-    } finally {
-      this.releaseTransaction(transaction);
-    }
+  commit(transaction: unknown): Promise<void> {
+    // [#25521 cut 3] The body moved to `sql-driver-transactions.ts` (see `TransactionHost`).
+    const host: ThisParameterType<typeof commit> = {
+      releaseTransaction: (...a) => this.releaseTransaction(...a),
+    };
+    return commit.call(host, transaction);
   }
 
   /** IDataDriver standard */
-  async rollback(transaction: unknown): Promise<void> {
-    try {
-      await (transaction as Knex.Transaction).rollback();
-    } finally {
-      this.releaseTransaction(transaction);
-    }
+  rollback(transaction: unknown): Promise<void> {
+    // [#25521 cut 3] The body moved to `sql-driver-transactions.ts` (see `TransactionHost`).
+    const host: ThisParameterType<typeof rollback> = {
+      releaseTransaction: (...a) => this.releaseTransaction(...a),
+    };
+    return rollback.call(host, transaction);
   }
 
   /** @deprecated Use commit() instead */
-  async commitTransaction(trx: Knex.Transaction): Promise<void> {
-    await this.commit(trx);
+  commitTransaction(trx: Knex.Transaction): Promise<void> {
+    // [#25521 cut 3] The body moved to `sql-driver-transactions.ts` (see `TransactionHost`).
+    const host: ThisParameterType<typeof commitTransaction> = {
+      commit: (...a) => this.commit(...a),
+    };
+    return commitTransaction.call(host, trx);
   }
 
   /** @deprecated Use rollback() instead */
-  async rollbackTransaction(trx: Knex.Transaction): Promise<void> {
-    await this.rollback(trx);
+  rollbackTransaction(trx: Knex.Transaction): Promise<void> {
+    // [#25521 cut 3] The body moved to `sql-driver-transactions.ts` (see `TransactionHost`).
+    const host: ThisParameterType<typeof rollbackTransaction> = {
+      rollback: (...a) => this.rollback(...a),
+    };
+    return rollbackTransaction.call(host, trx);
   }
 
   // ===================================
