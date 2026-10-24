@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { Config } from '@oclif/core';
 
 /** `packages/cli` — the root a `Doctor.run()` loads its Config from. */
-const CLI_ROOT = resolve(fileURLToPath(import.meta.url), '../../..');
+const CLI_ROOT = resolve(fileURLToPath(import.meta.url), '../../../..');
 
 let loaded: Promise<Config> | undefined;
 

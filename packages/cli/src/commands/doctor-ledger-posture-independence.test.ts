@@ -66,7 +66,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { doctorConfig } from '../../test/helpers/doctor-config.js';
+import { doctorConfig } from './__tests__/doctor-config.js';
 import Doctor from './doctor.js';
 
 // [#10126] Pay the first transform of these dist-resolved workspace deps at MODULE
