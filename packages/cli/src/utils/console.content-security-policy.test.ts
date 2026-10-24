@@ -91,7 +91,7 @@ async function mount(opts: { runtimeConfig?: ConstructorParameters<typeof Runtim
   }
   await createConsoleStaticPlugin(distPath).start({ getServiceAsync: async () => server, logger });
   const app = server.getRawApp();
-  return (p: string, init?: RequestInit): Promise<Response> => app.request(`${ORIGIN}${p}`, init);
+  return async (p: string, init?: RequestInit): Promise<Response> => app.request(`${ORIGIN}${p}`, init);
 }
 
 /** The policy's directives by name; a directive named twice fails. */
