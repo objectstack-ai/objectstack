@@ -47,7 +47,7 @@ import { postureEnforcesWall } from '@objectstack/spec/security';
 import { provisionSearchCompanion, SEARCH_COMPANION_FIELD } from './search-companion.js';
 import { ObjectStackManifest, ManifestSchema, InstalledPackage, InstalledPackageSchema, InstalledPackageSourceSchema, type InstalledPackageSource, checkFieldCompleteness } from '@objectstack/spec/kernel';
 import { DEFAULT_FLOW_FUNCTION_EFFECT } from '@objectstack/spec/automation';
-import { AppSchema } from '@objectstack/spec/ui';
+import { AppSchema, ActionSchema } from '@objectstack/spec/ui';
 import { applyProtection } from '@objectstack/spec/shared';
 // [ADR-0130 D1] The ONE derivation of the key a package is installed under
 // (`id || name`). The install gate's co-ownership set must name packages by the
@@ -151,6 +151,71 @@ export function describeUnboundActionTargets(
   err.status = 422;
   err.httpStatus = 422;
   return err;
+}
+
+/**
+ * [#25649] The refusal of a code package's `action` that does not satisfy
+ * `ActionSchema` — the `INVALID_METADATA` envelope (ADR-0112) the unbound-target
+ * refusal above answers, with `issues[]` locating each failure.
+ */
+interface PackageActionSchemaError extends Error {
+  code: 'INVALID_METADATA';
+  status: 422;
+  httpStatus: 422;
+  issues: Array<{ path: string; message: string; code: string }>;
+}
+
+/**
+ * [#25649] A code package's `action` item, as its `ActionSchema` parse — the
+ * body {@link SchemaRegistry.registerItem} stores — or the loud refusal of one
+ * that does not parse.
+ *
+ * Why the stored item has to BE the parse: `ActionSchema` is not only a judge,
+ * it is a producer. Its transform lowers `requiresMembershipReach` and
+ * `requiresFeature` into the CEL `visible` predicate and deletes the two keys,
+ * and nothing downstream reads either key raw — so an action stored as authored
+ * carries both gates declared and inert. A platform object's actions are parsed
+ * where they are authored (`ObjectSchema.create`), and a strict `defineStack`
+ * parses a stack's actions; a programmatic `registerApp`, a nested plugin's
+ * manifest, a `strict: false` stack or a raw plugin manifest reached this store
+ * with no parse at all, and {@link SchemaRegistry.attachBoundActions} served
+ * what it found. Parsing at this seam, once, means every reader — the bound
+ * attachment, the router's rung 2, `GET /meta/action` — holds the one parsed
+ * body, by reference.
+ *
+ * The parse is idempotent over its own output (a lowered action carries no
+ * `requiresFeature` left to lower), so an action a strict `defineStack` already
+ * parsed is stored deep-equal to what it arrived as. Besides the lowering, the
+ * parse fills the schema's defaults (`type`, `refreshAfter`, …), turns a
+ * CEL-string shorthand into its `{ dialect, source }` envelope, and refuses an
+ * undeclared key; the ADR-0010 envelope (`_packageId`, `_packageVersion`,
+ * `_provenance`, `_lock`) is declared on the schema and passes through.
+ *
+ * Refused rather than stored unparsed: an action that fails the parse would be
+ * served with whatever gates it declares never taking effect, and `defineStack`
+ * and `os validate` refuse the same declaration at authoring time.
+ */
+function parsePackageAction(item: unknown, name: string, packageId: string): unknown {
+  const parsed = ActionSchema.safeParse(item);
+  if (parsed.success) return parsed.data;
+  const issues = parsed.error.issues.map((issue) => ({
+    path: issue.path.map(String).join('.'),
+    message: issue.message,
+    code: issue.code,
+  }));
+  const err = new Error(
+    `Action '${name}' of package '${packageId}' does not satisfy the action contract (ActionSchema): `
+    + issues.map((issue) => (issue.path ? `${issue.path}: ${issue.message}` : issue.message)).join('; ')
+    + '. Every action a package ships is stored as its schema parse — the parse that lowers '
+    + '`requiresFeature` and `requiresMembershipReach` into `visible` — so an action that does not parse '
+    + 'is refused rather than served with its declared gates inert. Correct the declaration; `defineStack` '
+    + 'and `os validate` report the same issues.',
+  ) as PackageActionSchemaError;
+  err.code = 'INVALID_METADATA';
+  err.status = 422;
+  err.httpStatus = 422;
+  err.issues = issues;
+  throw err;
 }
 
 /**
@@ -5159,6 +5224,18 @@ export class SchemaRegistry {
     // caller stamped it, and both load paths produce the same lock state and
     // package envelope. Every other caller gets the id alone.
     applyProtection(item as any, { packageId });
+
+    // [#25649] A code package's action is stored as its `ActionSchema` parse —
+    // `requiresFeature` / `requiresMembershipReach` lowered into `visible` —
+    // or refused before anything below stores it ({@link parsePackageAction}).
+    // After `applyProtection`, so the envelope the parse passes through is the
+    // one this call stamped, and `isCodeArtifactBody` reads the stamped
+    // provenance. ⛔ A registration with no `packageId` is the bare slot —
+    // `sys_metadata` hydration, the metadata write-through — and is never
+    // judged here: a stored row is parsed at the metadata save door.
+    if (type === 'action' && packageId && isCodeArtifactBody(item)) {
+      item = parsePackageAction(item, baseName, packageId) as T;
+    }
 
     // A picklist's own values must not repeat any value its extensions
     // already add — refused before anything is stored, like the extension
