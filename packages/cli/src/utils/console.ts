@@ -45,7 +45,7 @@
  */
 import path from 'path';
 import fs from 'fs';
-import { createHash } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { createRequire } from 'module';
 import { pathToFileURL, fileURLToPath } from 'url';
 
@@ -61,6 +61,13 @@ export const CONSOLE_PATH = '/_console';
  * exactly when the page it redirects to would be served the form.
  */
 const PUBLIC_FORM_DOOR = '/api/v1/forms';
+
+/**
+ * The Console's public form page, `/f/<slug>` under {@link CONSOLE_PATH}: the
+ * page the `/forms/:slug` redirect lands on, and the one page the Console's
+ * public-forms screen offers as an `<iframe>` snippet for other sites.
+ */
+const PUBLIC_FORM_PAGE = '/f';
 
 /**
  * The anonymous door that serves the Console's branding. The shell's inline
@@ -679,6 +686,122 @@ function ifNoneMatchHits(header: string | undefined, etag: string): boolean {
 }
 
 /**
+ * The env var an operator names extra `connect-src` sources in, separated by
+ * whitespace: a scheme (`https:`) or a scheme with a host
+ * (`https://tiles.example.com`, `wss://*.example.com:8443/path/`). The Console
+ * fetches a map view's authored `mapStyle` (and the tiles, sprites and glyphs
+ * it names) straight from that host, and the server cannot know those hosts
+ * ahead of the request.
+ */
+const CONSOLE_CSP_CONNECT_SRC_ENV = 'OS_CONSOLE_CSP_CONNECT_SRC';
+
+/**
+ * One source the operator may name in {@link CONSOLE_CSP_CONNECT_SRC_ENV}. The
+ * character set leaves out whitespace, `;`, `,` and quotes, so a value can add
+ * a source and nothing else: never a keyword such as `'unsafe-inline'`, and
+ * never a second directive.
+ */
+const CONNECT_SOURCE = /^(?:https?|wss?):(?:\/\/(?:\*\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*(?::(?:\d{1,5}|\*))?(?:\/[a-z0-9._~!$&()*+=:@%/-]*)?)?$/i;
+
+/** The sources named in {@link CONSOLE_CSP_CONNECT_SRC_ENV}; a malformed one refuses the boot. */
+function readExtraConnectSources(env: NodeJS.ProcessEnv): string[] {
+  const sources = String(env[CONSOLE_CSP_CONNECT_SRC_ENV] ?? '').split(/\s+/).filter(Boolean);
+  const malformed = sources.filter((source) => !CONNECT_SOURCE.test(source));
+  if (malformed.length > 0) {
+    throw new Error(
+      `${CONSOLE_CSP_CONNECT_SRC_ENV} names ${malformed.map((m) => JSON.stringify(m)).join(', ')}, which is not a `
+      + 'connect-src source this server accepts. Name each source as a scheme (https:) or as a scheme and host '
+      + '(https://tiles.example.com), separated by spaces.',
+    );
+  }
+  return sources;
+}
+
+/**
+ * The default map style the Console's map view loads when the view names none
+ * (objectui `plugin-map`, `DEFAULT_MAP_STYLE`). Its style, tiles and glyphs are
+ * all on this host.
+ */
+const DEFAULT_MAP_STYLE_ORIGIN = 'https://demotiles.maplibre.org';
+
+/**
+ * The `content-security-policy` the Console document is served with. Each
+ * allowance below was measured against the published Console build: its
+ * `index.html`, its `assets/` and the objectui source that produced them.
+ *
+ * - `script-src 'self' 'nonce-…'` is the boundary this policy exists for. The
+ *   Console keeps its session token where any script on the page can read it,
+ *   so only the build's own files and the document's own inline scripts (the
+ *   early-branding, process-polyfill, crypto-shim and boot-splash scripts, and
+ *   the server's react-pages disable global) may run: a script element that
+ *   markup injected later carries no nonce, and an inline event handler never
+ *   matches one. No public CDN is listed. A CDN host in `script-src` admits
+ *   every file that CDN serves, so the Studio's Monaco editor, which loads its
+ *   core from jsdelivr, shows its built-in plain-text fallback under this
+ *   policy instead.
+ * - `'wasm-unsafe-eval'`: the AI chat's code blocks are highlighted by shiki,
+ *   whose grammar engine is WebAssembly compiled in the page. It permits
+ *   compiling WebAssembly and nothing else; JavaScript `eval` stays refused.
+ * - `'unsafe-eval'` only while the `kind:'react'` page tier is on (ADR-0081;
+ *   on unless `OS_PAGE_REACT=off`). That runtime evaluates the author's
+ *   transpiled page source with `Function`, which nothing but `'unsafe-eval'`
+ *   permits. With the tier off, the policy refuses it.
+ * - `style-src 'self' 'unsafe-inline'`: the document's own `<style>` (the boot
+ *   splash), the `style` attributes React and Radix write on every positioned
+ *   element, and the `<style>` elements that toasts, maps and diagrams insert
+ *   at run time, which carry no nonce.
+ * - `img-src 'self' data: blob: https:`: the stylesheets' inline SVG icons
+ *   (`data:`), previews of files picked for upload (`blob:`), and images whose
+ *   host is data, not code: branding logos and favicons, avatars, image field
+ *   values, and images inside an email template preview.
+ * - `connect-src`: the server itself (`'self'`, which also covers the
+ *   same-origin realtime WebSocket and the metadata event stream), the default
+ *   map style's host, the error-reporting endpoint when the runtime serves a
+ *   DSN (`telemetry.errorReporting.dsn` from `GET /api/v1/runtime/config`), and
+ *   the hosts an operator names in `OS_CONSOLE_CSP_CONNECT_SRC`.
+ * - `default-src 'self'` covers the rest the Console uses: the module workers
+ *   maplibre starts from its own file, the PWA manifest, and the same-origin
+ *   frames (the Studio's live canvas). The build ships no web fonts.
+ * - `object-src 'none'` and `base-uri 'self'`: no plugins, and only the
+ *   server's own `<base href>`.
+ * - `frame-ancestors 'self'`, except on the public form page: the Console's
+ *   public-forms screen hands authors an `<iframe>` snippet to embed that page
+ *   on their own site, so it keeps loading in any frame.
+ */
+function consoleContentSecurityPolicy(input: {
+  nonce: string;
+  reactPages: boolean;
+  errorReportingOrigin: string | undefined;
+  extraConnectSources: readonly string[];
+  embeddable: boolean;
+}): string {
+  const scriptSrc = ["'self'", `'nonce-${input.nonce}'`, "'wasm-unsafe-eval'"];
+  if (input.reactPages) scriptSrc.push("'unsafe-eval'");
+  const connectSrc = ["'self'", DEFAULT_MAP_STYLE_ORIGIN];
+  if (input.errorReportingOrigin !== undefined) connectSrc.push(input.errorReportingOrigin);
+  connectSrc.push(...input.extraConnectSources);
+  const directives: string[][] = [
+    ['default-src', "'self'"],
+    ['script-src', ...scriptSrc],
+    ['style-src', "'self'", "'unsafe-inline'"],
+    ['img-src', "'self'", 'data:', 'blob:', 'https:'],
+    ['connect-src', ...new Set(connectSrc)],
+    ['object-src', "'none'"],
+    ['base-uri', "'self'"],
+  ];
+  if (!input.embeddable) directives.push(['frame-ancestors', "'self'"]);
+  return directives.map((directive) => directive.join(' ')).join('; ');
+}
+
+/**
+ * Every `<script>` start tag in `html` with `nonce` added, unless it already
+ * carries one. Only start tags match: `</script>` and escaped text do not.
+ */
+function stampScriptNonce(html: string, nonce: string): string {
+  return html.replace(/<script\b(?![^>]*\snonce=)/gi, (tag) => `${tag} nonce="${nonce}"`);
+}
+
+/**
  * Create a lightweight kernel plugin that serves the pre-built Console
  * portal static files at `/_console/*`.
  *
@@ -697,9 +820,15 @@ function ifNoneMatchHits(header: string | undefined, etag: string): boolean {
  *
  * The HTML is written per request: besides the `<base>` tag, its `<title>`,
  * description and Open Graph tags carry the runtime branding this request is
- * served by `GET /api/v1/runtime/config` (`readRuntimeBranding`,
+ * served by `GET /api/v1/runtime/config` (`readShellConfig`,
  * `writeBrandedHead`), so a link preview, which runs no script, shows the
  * product's name.
+ *
+ * Every HTML answer carries a `content-security-policy` header with a fresh
+ * script nonce, and every `<script>` the build ships is stamped with it
+ * (`consoleContentSecurityPolicy`, `stampScriptNonce`). This plugin is the one
+ * place the document is served from: `os dev` and `os start` (and the Docker
+ * image, whose command is `os start`) all spawn `os serve`, which mounts it.
  *
  * It also answers the path an author writes as a public form's
  * `sharing.publicLink`: `GET /forms/<slug>` redirects (302) to the Console's
@@ -723,6 +852,9 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
 
       const app = httpServer.getRawApp();
       const absoluteDist = path.resolve(distPath);
+      // Read once, at boot: a malformed value refuses here, loudly, rather
+      // than reaching the header of every document.
+      const extraConnectSources = readExtraConnectSources(process.env);
 
       const indexPath = path.join(absoluteDist, 'index.html');
       if (!fs.existsSync(indexPath)) {
@@ -741,21 +873,23 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
         return v === 'off' || v === '0' || v === 'false' || v === 'no' || v === 'disabled';
       };
 
-      // A branding read that fails leaves the shell's head as the build shipped
-      // it, which is a smaller page, not a broken one: said once, at `warn`.
-      let reportedBrandingReadFailure = false;
-      const reportBrandingReadFailure = (cause: string) => {
-        if (reportedBrandingReadFailure) return;
-        reportedBrandingReadFailure = true;
+      // A runtime-config read that fails leaves the shell's head as the build
+      // shipped it, which is a smaller page, not a broken one: said once, at
+      // `warn`.
+      let reportedShellConfigReadFailure = false;
+      const reportShellConfigReadFailure = (cause: string) => {
+        if (reportedShellConfigReadFailure) return;
+        reportedShellConfigReadFailure = true;
         ctx.logger?.warn?.(
           `Console static: the branding read from ${RUNTIME_CONFIG_DOOR} failed (${cause}), so the console `
           + 'document is served without its server-written title, description and Open Graph tags, and link '
-          + 'previews show a blank title. The page itself still loads and sets its title in the browser. '
-          + 'Reported once; every later console document retries the read.',
+          + 'previews show a blank title. Its content-security-policy does not name a configured error-reporting '
+          + 'endpoint either, so browser error reports from that page are blocked. The page itself still loads '
+          + 'and sets its title in the browser. Reported once; every later console document retries the read.',
         );
       };
 
-      const readIndexHtml = async (c: any) => {
+      const readIndexHtml = (reactPages: boolean, nonce: string): string => {
         const raw = fs.readFileSync(indexPath, 'utf-8');
         // Inject <base href="${CONSOLE_PATH}/"> so:
         //   1. Relative asset URLs ('./assets/...') resolve to the
@@ -770,15 +904,37 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
           const baseTag = `<base href="${CONSOLE_PATH}/">`;
           html = html.replace(/<head(\s[^>]*)?>/i, (m) => `${m}\n    ${baseTag}`);
         }
-        if (reactPagesDisabled()) {
+        if (!reactPages) {
           const capTag =
             `<script>window.__OBJECTUI_CAPABILITIES_DISABLED__=(window.__OBJECTUI_CAPABILITIES_DISABLED__||[]).concat('react-pages');</script>`;
           html = html.replace(/<head(\s[^>]*)?>/i, (m) => `${m}\n    ${capTag}`);
         }
+        // Stamped while the document holds only the build's markup and the
+        // server's own tags: nothing read at request time is written yet, so
+        // no runtime value can ever carry the nonce.
+        return stampScriptNonce(html, nonce);
+      };
+
+      const serveDocument = async (c: any, reqPath: string): Promise<Response> => {
+        const nonce = randomBytes(16).toString('base64');
+        // One read per document, so the injected disable global and the
+        // policy's `'unsafe-eval'` always agree.
+        const reactPages = !reactPagesDisabled();
+        const html = readIndexHtml(reactPages, nonce);
+        const shell = await readShellConfig(app, c, reportShellConfigReadFailure);
+        const policy = consoleContentSecurityPolicy({
+          nonce,
+          reactPages,
+          errorReportingOrigin: shell?.errorReportingOrigin,
+          extraConnectSources,
+          embeddable: reqPath.startsWith(`${PUBLIC_FORM_PAGE}/`),
+        });
         // The title, description and Open Graph tags, written here because a
         // link-preview crawler runs no script: the early-branding script sets
         // the same title in the browser, from the same door.
-        return writeBrandedHead(html, await readRuntimeBranding(app, c, reportBrandingReadFailure), requestOrigin(c));
+        return new Response(writeBrandedHead(html, shell?.branding, requestOrigin(c)), {
+          headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': policy },
+        });
       };
 
       // The Console is the default end-user surface — root `/` redirects
@@ -810,7 +966,7 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
         const slug = String(c.req.param('slug') ?? '');
         if (slug && (await anonymousFormDoorServes(app, c, slug))) {
           const query = new URL(c.req.url).search;
-          return c.redirect(`${CONSOLE_PATH}/f/${encodeURIComponent(slug)}${query}`, 302);
+          return c.redirect(`${CONSOLE_PATH}${PUBLIC_FORM_PAGE}/${encodeURIComponent(slug)}${query}`, 302);
         }
         await next();
       });
@@ -828,11 +984,7 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
         // Try serving the exact file (HTML files go through the base-tag
         // injection path so all entry points stay path-portable).
         if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-          if (filePath.endsWith('.html')) {
-            return new Response(await readIndexHtml(c), {
-              headers: { 'content-type': 'text/html; charset=utf-8' },
-            });
-          }
+          if (filePath.endsWith('.html')) return serveDocument(c, reqPath);
           const content = fs.readFileSync(filePath);
           if (isContentHashedConsoleAsset(reqPath)) {
             return new Response(content, {
@@ -855,9 +1007,7 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
         }
 
         // SPA fallback
-        return new Response(await readIndexHtml(c), {
-          headers: { 'content-type': 'text/html; charset=utf-8' },
-        });
+        return serveDocument(c, reqPath);
       });
 
       // Suppress unused-parameter lint when isDev isn't needed.
@@ -1206,6 +1356,13 @@ async function anonymousFormDoorServes(app: any, c: any, slug: string): Promise<
   return res.status === 200;
 }
 
+/** What the console document is written from, read from {@link RUNTIME_CONFIG_DOOR}. */
+interface ConsoleShellConfig {
+  branding?: ConsoleShellBranding;
+  /** The origin of `telemetry.errorReporting.dsn`, for the document's `connect-src`. */
+  errorReportingOrigin?: string;
+}
+
 /** The branding values the console document's head tags are written from. */
 interface ConsoleShellBranding {
   /** `branding.productName`: the `<title>` and `og:title`. */
@@ -1224,8 +1381,11 @@ interface ConsoleShellBranding {
 const BRANDING_PROBE_DROPPED_HEADERS = ['accept-encoding', 'if-none-match', 'if-modified-since', 'range'];
 
 /**
- * The branding the runtime serves to THIS request, read from the door the
- * console's early-branding script reads ({@link RUNTIME_CONFIG_DOOR}).
+ * The branding, and the error-reporting endpoint, the runtime serves to THIS
+ * request, read from the door the console's early-branding script reads
+ * ({@link RUNTIME_CONFIG_DOOR}). The endpoint is the DSN's origin, the one
+ * host the browser's error reports are sent to; the console document's
+ * `connect-src` names it.
  *
  * The door is asked, not copied, for the reason {@link anonymousFormDoorServes}
  * gives: which product name a request is served is decided inside
@@ -1236,16 +1396,16 @@ const BRANDING_PROBE_DROPPED_HEADERS = ['accept-encoding', 'if-none-match', 'if-
  * to the door and dispatched in-process through the same app, with the same
  * host and cookies.
  *
- * `undefined` means there is nothing to write. A composition that mounts no
+ * `undefined` means there is nothing to read. A composition that mounts no
  * branding door answers `404`, which is not a failure. Any other answer that
  * is not a `200` JSON body, a thrown dispatch included, is reported through
  * `onFailure`.
  */
-async function readRuntimeBranding(
+async function readShellConfig(
   app: any,
   c: any,
   onFailure: (cause: string) => void,
-): Promise<ConsoleShellBranding | undefined> {
+): Promise<ConsoleShellConfig | undefined> {
   let res: Response;
   try {
     const url = new URL(RUNTIME_CONFIG_DOOR, c.req.url);
@@ -1273,13 +1433,33 @@ async function readRuntimeBranding(
     onFailure('it answered a body that is not JSON');
     return undefined;
   }
-  const branding = (payload as { branding?: unknown } | null)?.branding;
+  const body = payload as { branding?: unknown; telemetry?: { errorReporting?: { dsn?: unknown } } } | null;
+  return { branding: shellBranding(body?.branding), errorReportingOrigin: dsnOrigin(body?.telemetry?.errorReporting?.dsn) };
+}
+
+/** The served `branding` block's head-tag values; `undefined` when there is no block. */
+function shellBranding(branding: unknown): ConsoleShellBranding | undefined {
   if (branding === null || typeof branding !== 'object') return undefined;
   const text = (key: string): string | undefined => {
     const value = (branding as Record<string, unknown>)[key];
     return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined;
   };
   return { productName: text('productName'), description: text('pwaDescription'), logoUrl: text('logoUrl') };
+}
+
+/**
+ * The `http(s)` origin a served DSN sends reports to, without the DSN's key.
+ * The runtime refuses a malformed DSN before serving it, so this only keeps a
+ * value that is not an `http(s)` URL out of the header.
+ */
+function dsnOrigin(dsn: unknown): string | undefined {
+  if (typeof dsn !== 'string') return undefined;
+  try {
+    const url = new URL(dsn);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.origin : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
