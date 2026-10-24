@@ -61,7 +61,7 @@
 
 ## 分诊两级盘点细则
 
-- 小时层三读法之一,sweep 析取①②③④ = `list_issues` + `since`。
+- 小时层三读法之一,sweep 析取①–⑤ = `list_issues` + `since`。
 - 标签变更会刷新 `updated_at`,半标注照样入窗。
 - 之二,解锁扫描反演 = 逐仓 `state=CLOSED` + `since` 与 `Blocked-by:` 反向索引求交,命中走双查。
 - 之三,健康指标 = 逐标签 `perPage: 1` 只读 `totalCount`。
