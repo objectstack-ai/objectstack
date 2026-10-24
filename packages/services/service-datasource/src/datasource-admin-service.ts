@@ -344,7 +344,8 @@ function withRemaining(remaining: string[]): { remaining?: string[] } {
  * does not exist — and the read sibling already said the latter.
  */
 function datasourceNotFoundError(name: string): Error {
-  const err = new Error(`Datasource '${name}' not found.`) as Error & { code?: string; status?: number };
+  // GET's own words, so every by-name door names the missing datasource alike.
+  const err = new Error(`Datasource "${name}" does not exist.`) as Error & { code?: string; status?: number };
   err.code = 'RESOURCE_NOT_FOUND';
   err.status = 404;
   return err;

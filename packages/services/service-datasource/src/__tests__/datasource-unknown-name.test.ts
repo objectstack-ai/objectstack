@@ -124,18 +124,19 @@ describe('an unknown datasource name is 404 RESOURCE_NOT_FOUND at every by-name 
     });
   }
 
-  it('all four doors give one answer for the same unknown name — the sibling read is the reference', async () => {
+  it('all four doors give one answer for the same unknown name — status, code and message; the sibling read is the reference', async () => {
     const door = makeDoor();
-    const answers: Array<{ door: string; status: number; code: string }> = [];
+    const answers: Array<{ door: string; status: number; code: string; message: string }> = [];
     for (const d of BY_NAME_DOORS) {
       const res = await door.send(d.method, d.path('no_such_ds'), d.body);
-      const body = (await res.json()) as { error: { code: string } };
-      answers.push({ door: d.door, status: res.status, code: body.error.code });
+      const body = (await res.json()) as { error: { code: string; message: string } };
+      answers.push({ door: d.door, status: res.status, code: body.error.code, message: body.error.message });
     }
     const [reference] = answers;
     expect(reference).toMatchObject({ status: 404, code: 'RESOURCE_NOT_FOUND' });
     for (const a of answers) {
-      expect({ status: a.status, code: a.code }, a.door).toEqual({ status: reference.status, code: reference.code });
+      expect({ status: a.status, code: a.code, message: a.message }, a.door)
+        .toEqual({ status: reference.status, code: reference.code, message: reference.message });
     }
   });
 

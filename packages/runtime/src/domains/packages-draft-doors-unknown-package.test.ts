@@ -44,15 +44,21 @@ const NOTHING_DISCARDED = { success: true, discardedCount: 0, failedCount: 0, di
 
 function makeDoor(opts: {
     publishResult?: Record<string, unknown>;
+    discardResult?: Record<string, unknown>;
     apps?: Array<Record<string, unknown>>;
+    /** Make the ADR-0045 visibility flip's app read throw. */
+    failAppRead?: boolean;
     /** Commit ids the trail holds, per package id. */
     commits?: Record<string, string[]>;
 } = {}) {
     const publishPackageDrafts = vi.fn().mockImplementation(async () =>
         JSON.parse(JSON.stringify(opts.publishResult ?? NOTHING_TO_PUBLISH)));
-    const discardPackageDrafts = vi.fn().mockImplementation(async () => ({ ...NOTHING_DISCARDED }));
+    const discardPackageDrafts = vi.fn().mockImplementation(async () => ({ ...(opts.discardResult ?? NOTHING_DISCARDED) }));
     const apps = opts.apps ?? [];
-    const getMetaItems = vi.fn().mockImplementation(async () => ({ items: apps.map((a) => ({ ...a })) }));
+    const getMetaItems = vi.fn().mockImplementation(async () => {
+        if (opts.failAppRead) throw new Error('meta backend down');
+        return { items: apps.map((a) => ({ ...a })) };
+    });
     const saveMetaItem = vi.fn().mockImplementation(async () => ({ ok: true }));
     // The commit trail answers `[]` for ANY id it has no commits for — the
     // shape that let an unknown package read as one with no history.
@@ -140,6 +146,27 @@ describe('the package draft doors answer an unknown package 404, like GET /packa
         expect(result.response?.body?.data?.outcome).toBe('published');
     });
 
+    it('control: a visibility flip that FAILED for that id is answered 200 with its unhideError, never hidden behind a 404', async () => {
+        const door = makeDoor({ failAppRead: true });
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+        const result = await door.send(`/${UNKNOWN}/publish-drafts`, 'POST');
+
+        expect(result.response?.status).toBe(200);
+        expect(result.response?.body?.data?.outcome).toBe('nothing_to_publish');
+        expect(result.response?.body?.data?.unhideError).toEqual(expect.any(String));
+        vi.restoreAllMocks();
+    });
+
+    it('control: drafts the protocol holds for an id the registry lacks are still discarded, 200', async () => {
+        const door = makeDoor({
+            discardResult: { success: true, discardedCount: 1, failedCount: 0, discarded: [{ type: 'view', name: 'orphan_view' }], failed: [] },
+        });
+        const result = await door.send(`/${UNKNOWN}/discard-drafts`, 'POST');
+
+        expect(result.response?.status).toBe(200);
+        expect(result.response?.body?.data?.discardedCount).toBe(1);
+    });
+
     it('control: an unpublished app the door un-hid for that id is reported, not answered 404', async () => {
         const door = makeDoor({ apps: [{ name: 'crm', _unpublished: true }] });
         const result = await door.send(`/${UNKNOWN}/publish-drafts`, 'POST');
@@ -163,6 +190,7 @@ describe('GET /packages/:id/commits answers an unknown package 404, like GET /pa
     it('gives the read sibling\'s answer for the same id — status, code and message', async () => {
         const door = makeDoor();
         const read = answer(await door.send(`/${UNKNOWN}`, 'GET', undefined));
+        expect(read).toMatchObject({ status: 404, code: 'RESOURCE_NOT_FOUND' });
         expect(answer(await door.send(`/${UNKNOWN}/commits`, 'GET', undefined))).toEqual(read);
     });
 

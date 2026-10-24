@@ -1929,10 +1929,13 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     if (flipped.length > 0) (result as any).unhiddenApps = flipped;
                     // A request that touched nothing about a package this
                     // registry does not hold is `404`, never `200
-                    // nothing_to_publish` — see `packageIsUnknown`.
+                    // nothing_to_publish` — see `packageIsUnknown`. A flip that
+                    // FAILED did not establish that nothing is bound to the id,
+                    // so its recorded `unhideError` is answered, never hidden.
                     if (
                         (result as any)?.outcome === 'nothing_to_publish'
                         && flipped.length === 0
+                        && (result as any)?.unhideError === undefined
                         && packageIsUnknown(registry, id)
                     ) {
                         return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
