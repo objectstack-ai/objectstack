@@ -2,16 +2,17 @@
 
 /**
  * The run context and resume of {@link AutomationEngine}: how a run's context,
- * grants and declared lookups are resolved; how a suspended run is loaded,
- * gated and resumed; and how a suspended run is failed, settled or cancelled,
- * along with its ancestors.
+ * grants and declared lookups are resolved; how a suspended run is persisted,
+ * loaded, gated and resumed, and how one is forgotten or evicted; how a
+ * suspended run is failed, settled or cancelled, along with its ancestors; and
+ * how a subflow child's parent strand is taken.
  *
- * [#25222] Slice 6 of the `engine.ts` split, move-only. Each function here is
- * the body of the `AutomationEngine` method of the same name, moved unedited.
- * The class keeps that method (its name, docblock and position are in the
- * published `.d.ts`) and calls the body with a {@link RunResumeHost} literal
- * holding exactly the members the body reads. An async method's stub is no
- * longer `async`: it returns the promise the moved function makes.
+ * [#25222] Slices 6 and 8 of the `engine.ts` split, move-only. Each function
+ * here is the body of the `AutomationEngine` method of the same name, moved
+ * unedited. The class keeps that method (its name, docblock and position are
+ * in the published `.d.ts`) and calls the body with a {@link RunResumeHost}
+ * literal holding exactly the members the body reads. An async method's stub
+ * is no longer `async`: it returns the promise the moved function makes.
  */
 
 import type { FlowParsed, FlowRunSummary } from '@objectstack/spec/automation';
@@ -29,7 +30,9 @@ import {
     type AutomationEngine,
     type NodeExecutionResult,
     type StepLogEntry,
+    type SubflowParentStrand,
     type SuspendedRun,
+    type SuspensionReleaseReason,
 } from './engine.js';
 
 /**
@@ -72,6 +75,8 @@ export interface RunResumeHost {
     readonly loadSuspendedRun: AutomationEngine['loadSuspendedRun'];
     readonly failSuspendedRun: AutomationEngine['failSuspendedRun'];
     readonly consumedSuspensions: AutomationEngine['consumedSuspensions'];
+    readonly releaseSuspension: AutomationEngine['releaseSuspension'];
+    readonly subflowParentStrands: AutomationEngine['subflowParentStrands'];
 }
 
 /** The body of {@link AutomationEngine.resolveRunContext}, moved unedited; that method's docblock is its contract. */
@@ -686,4 +691,187 @@ export async function failAncestors(
         below = parent.runId;
         parentId = (parent.context as Record<string, unknown> | undefined)?.$parentRunId;
     }
+}
+
+/** The body of {@link AutomationEngine.persistSuspendedRun}, moved unedited; that method's docblock is its contract. */
+export async function persistSuspendedRun(this: Pick<RunResumeHost, 'suspendedRuns' | 'store' | 'cacheOnlySuspensions' | 'logger'>, run: SuspendedRun): Promise<void> {
+    // [#16129] THE MAP WRITE IS FIRST, and `cacheOnlySuspensions` is written
+    // only after the save below settles => for the whole duration of that
+    // await this entry is in the map and is NOT yet qualified. A concurrent
+    // per-id `loadSuspendedRunStrict` therefore reads a store that
+    // truthfully has no row yet, finds no qualifier, and takes
+    // `evictConsumedSuspension` on a run being parked RIGHT NOW. Reachable
+    // without out-of-band knowledge of the id, because the map write is what
+    // publishes it to `listSuspendedRuns`.
+    //
+    // Bounded, measured, and pinned in
+    // `suspended-run-mid-park-eviction-window.test.ts`: the store-first
+    // strict load keeps the run resumable once the save lands, and the cost
+    // falls entirely on `listSuspendedRuns`, which merely OMITS the run --
+    // inside that listing's declared latitude. Do not widen the marking, add
+    // a lock, or move the save above this line without reading that pin's
+    // header.
+    //
+    // [#16151] The ONE compound case that ESCAPED those bounds — an evicting
+    // read inside the window, and then the save FAILING, leaving the run
+    // with neither a durable row nor a map entry — is closed in the catch
+    // below, which re-seats this entry. The base window itself is
+    // deliberately unchanged: while the save is still in flight a per-id
+    // read still evicts, and bound 1 still carries it.
+    this.suspendedRuns.set(run.runId, run);
+    if (this.store) {
+        try {
+            await this.store.save(run);
+            // [#13617] The store now holds this pause, so it — not this map
+            // — is the answer for it. Cleared here and not only on the
+            // failure path: a re-suspend whose save lands after an earlier
+            // one failed must stop being read out of memory.
+            this.cacheOnlySuspensions.delete(run.runId);
+        } catch (err) {
+            // [#13617] The store was never given the row, so its "no such
+            // run" is silence about this run rather than an answer. This is
+            // what lets `loadSuspendedRunStrict` keep serving it from the
+            // map — the in-process resumability the message below promises.
+            this.cacheOnlySuspensions.add(run.runId);
+            // [#16151] RE-SEAT THE MAP ENTRY — the marking above qualifies
+            // an entry that may no longer be there. The map write at the
+            // top of this method is NOT yet qualified for the whole
+            // duration of the await, so a concurrent per-id
+            // `loadSuspendedRunStrict` reads a store that truthfully has no
+            // row, finds no qualifier, and evicts a run being parked right
+            // now. Compound that with THIS save failing and the run was
+            // left with neither a durable row nor a map entry:
+            // `hasSuspendedRun` answered `false` and `resume` answered
+            // `RUN_NOT_FOUND` — the run lost IN-PROCESS, while the record
+            // below told the operator it was "kept in memory only" and that
+            // they had until the next restart to act.
+            //
+            // Re-seating restores exactly this method's own write, on the
+            // one path where the store refused the row. It cannot resurrect
+            // a CONSUMED suspension: consumption goes through
+            // `forgetSuspendedRun`, which is reachable only once
+            // `loadSuspendedRunStrict` answers for this run, and for the
+            // whole of this await it answers `null` for the reason above.
+            // Nor can it clobber a NEWER entry: `persistSuspendedRun` is the
+            // only writer of this map, and a second park of the same run
+            // needs a resume that the same `null` refuses.
+            //
+            // ⛔ NOT a widening of the cache-only marking, which #16129
+            // forbids taking unilaterally because it would weaken #13617's
+            // store authority: the marking still happens only after the
+            // save has settled, and only when it settled as a FAILURE.
+            this.suspendedRuns.set(run.runId, run);
+            // #6499 — the cause is the datasource DRIVER's own text, so it
+            // goes to the logger's STRUCTURED slot, never spliced into the
+            // message; see `forgetSuspendedRun`'s catch below for the full
+            // mechanism (#6299) — this seam is its nearest twin, on the
+            // same `SuspendedRunStore` driver.
+            //
+            // #4632 verdict: DURABILITY — the level STAYS `error`, where
+            // #4460 put it: the docblock above argues it (#4420 is this
+            // exact seam's accident). Third argument per the `Logger`
+            // contract (`error(message, error?, meta?)`); the `Error` slot
+            // stays empty on purpose (#5575).
+            this.logger.error(
+                `[automation] failed to persist suspended run '${run.runId}' to the durable store — it is ` +
+                    `kept in memory only: this process keeps it resumable, and hasSuspendedRun() and ` +
+                    `listSuspendedRuns() both still answer for it — if they do not, this run is already ` +
+                    `gone and that is a defect in this engine, not in the store. It will NOT be resumable ` +
+                    `after a restart. Fix the store failure in this record's meta.`,
+                undefined,
+                describeThrownForLog(err),
+            );
+        }
+    }
+}
+
+/** The body of {@link AutomationEngine.forgetSuspendedRun}, moved unedited; that method's docblock is its contract. */
+export async function forgetSuspendedRun(
+    this: Pick<RunResumeHost, 'suspendedRuns' | 'cacheOnlySuspensions' | 'store' | 'logger' | 'releaseSuspension'>,
+    run: SuspendedRun,
+    reason: SuspensionReleaseReason,
+    /**
+     * [#14333] Set only by the resume path, and only when
+     * {@link claimAdvance} has ALREADY removed the durable row as its
+     * compare-and-set. The unconditional delete below would then be a
+     * second round-trip that can only re-delete what is gone — while the
+     * rest of this choke point (the cache entry, the cache-only
+     * qualifier, and the executor's release notification) is still owed
+     * exactly once. Nothing else may pass it: for every other consumption
+     * the durable row is still there and this method is what removes it.
+     */
+    durableRecordAlreadyConsumed = false,
+): Promise<void> {
+    this.suspendedRuns.delete(run.runId);
+    // [#13617] The qualifier goes with the entry it qualifies — this is the
+    // one choke point every consumption passes through, so nothing can leave
+    // a run marked "the store never took this" after its map entry is gone.
+    this.cacheOnlySuspensions.delete(run.runId);
+    if (this.store && !durableRecordAlreadyConsumed) {
+        try {
+            await this.store.delete(run.runId);
+        } catch (err) {
+            // #6299 — the cause goes to the logger's STRUCTURED slot, never
+            // spliced into the message: it is the datasource DRIVER's own
+            // failure text, we do not control how many lines it has, and
+            // `ObjectLogger.write()` adds exactly one `<ts> <LEVEL>` head
+            // per call — so a newline in it turns this ONE record into
+            // several physical lines of which only the first is greppable.
+            // The family of #5048 / #5575 / #5636 / #5661 / #5737 / #5912 /
+            // #6230, and cloud#971's shape.
+            //
+            // #4632 verdict: DURABILITY — raised from `warn` to `error`, and
+            // deliberately NOT a copy of #6230's "the level stays warn". The
+            // hot cache is dropped on the line ABOVE the try, and this
+            // method is the single choke point every consumption of a
+            // suspension passes through (resume / terminal failure /
+            // cancel), so on this path the suspension is gone in-process
+            // while the durable row SURVIVES. Every caller still reports
+            // success — `resume()` returns a successful result, `cancelRun()`
+            // returns `true`, `recordLog` writes a terminal record — and the
+            // surviving row is read straight back out after the next
+            // restart: `rearmSuspendedWaitTimers` lists it and `resume()`
+            // rehydrates it through `loadSuspendedRunStrict`'s store read,
+            // re-running a continuation that has already run. Nothing
+            // retries this delete. That is the shape the durability gate's
+            // own vocabulary already grades `error` for the metadata store
+            // (`deleteMetaItemFromLoader`, #5259: "the surviving row is read
+            // straight back out of storage … so the 'deleted' item reappears
+            // and survives every restart"). `check:durability-log-level`
+            // cannot see it HERE only because `SuspendedRunStore.delete` is
+            // not in its declared callee vocabulary — which is exactly why
+            // this level is pinned by a test instead.
+            //
+            // THIRD argument, per the `Logger` contract
+            // (`packages/spec/src/contracts/logger.ts`):
+            // `error(message, error?, meta?)`. The `Error` slot is left
+            // empty on purpose (#5575) — a raw `Error` there ships its stack
+            // trace on every record.
+            this.logger.error(
+                `[automation] suspended run '${run.runId}' was consumed (${reason}) but could NOT be deleted from ` +
+                    `the durable store — the in-memory suspension is already gone while the durable row SURVIVES, ` +
+                    `so this run reads as terminal now and as still-suspended after the next restart, where ` +
+                    `rearmSuspendedWaitTimers lists it and resume() rehydrates it from the store and re-runs a ` +
+                    `continuation that has already run. Nothing retries this delete. Fix the store failure in this ` +
+                    `record's meta, then delete the row for '${run.runId}' by hand.`,
+                undefined,
+                describeThrownForLog(err),
+            );
+        }
+    }
+    await this.releaseSuspension(run, reason);
+}
+
+/** The body of {@link AutomationEngine.evictConsumedSuspension}, moved unedited; that method's docblock is its contract. */
+export function evictConsumedSuspension(this: Pick<RunResumeHost, 'store' | 'cacheOnlySuspensions' | 'suspendedRuns'>, runId: string): void {
+    if (!this.store) return;
+    if (this.cacheOnlySuspensions.has(runId)) return;
+    this.suspendedRuns.delete(runId);
+}
+
+/** The body of {@link AutomationEngine.takeSubflowParentStrand}, moved unedited; that method's docblock is its contract. */
+export function takeSubflowParentStrand(this: Pick<RunResumeHost, 'subflowParentStrands'>, childRunId: string): SubflowParentStrand | undefined {
+    const found = this.subflowParentStrands.get(childRunId);
+    if (found) this.subflowParentStrands.delete(childRunId);
+    return found;
 }
