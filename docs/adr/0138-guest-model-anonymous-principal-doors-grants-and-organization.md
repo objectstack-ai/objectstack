@@ -497,8 +497,8 @@ enforcer in the same change:
 | guest grants | unchanged: the form doors keep the form grant (D2 class 1), now resolved under the bound organization. No set is bound to `guest` (D3 item 5). |
 | allowed doors | the two public form doors (D2 class 1) only. The class 4 and 5 endpoint doors keep D4's located refusal on a multi-organization deployment. |
 
-A form that lists no organization keeps D4 exactly. The decision is
-`packages/core/src/security/public-form-organization.ts#resolvePublicFormOrganization`; the doors ask it in
+A form that lists no organization keeps D4 exactly. The decision is `resolvePublicFormOrganization`
+(`@objectstack/core`, beside D4's guest-organization refusal); the doors ask it in
 `packages/rest/src/form-routes.ts#registerFormEndpoints`.
 
 ### D6 — Disclosure and explain: unchanged
