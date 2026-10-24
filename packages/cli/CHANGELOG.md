@@ -4,7 +4,7 @@
 
 ### Minor Changes
 
-- 3937697: **Shipped in 18.0.0**, whose CHANGELOG missed this entry; listed here one release late.
+- df8bb40: **Shipped in 18.0.0**, whose CHANGELOG missed this entry; listed here one release late.
   
   feat!: an organization-less row on a tenant table no longer draws its autonumber from the `__global__` counter, and a production server boot with no auth secret is refused
   
@@ -26,7 +26,7 @@
   The retired export:
   
   - FROM `GLOBAL_TENANT` TO `GLOBAL_TENANT` imported from `@objectstack/driver-sql`, where the counter and the index emitters keep it (or the literal `'__global__'`).
-- 3937697: feat(driver-sql,driver-turso,driver-memory,objectql,metadata-protocol,cli): an organization-scoped unique index keys the plain organization column, and an index an earlier release built with `COALESCE(organization_id, '__global__')` is read as the same index on a certified database
+- d5d8146: feat(driver-sql,driver-turso,driver-memory,objectql,metadata-protocol,cli): an organization-scoped unique index keys the plain organization column, and an index an earlier release built with `COALESCE(organization_id, '__global__')` is read as the same index on a certified database
   
   Clause-②: yes (widening)
   Metadata-protocol: semantic
@@ -37,7 +37,7 @@
   - **Existing indexes stay as they are.** Nothing is renamed, and no declared organization composite is dropped or rebuilt by the boot, `os migrate plan` or `os migrate apply`; on SQLite the ownership ceremony's NOT NULL step rebuilds the tables it tightens, and their composites come back plain, enforcing the same constraint. One index is re-keyed: the `sys_setting` row-identity index, which the metadata protocol rebuilds on every boot, keys the plain `organization_id` from the next boot on (probe-first; a pure relaxation, so it cannot fail on existing rows). The schema differ reads `COALESCE(<tenant>, …)` and the plain tenant column as one key part, in both directions, where the column is physically `NOT NULL` or the database is certified (its organization-ownership birth marker, or the ownership ceremony's marker at the current shape generation). So `os migrate plan` and the boot report no `recreate_index` for those indexes. On an uncertified database with a nullable tenant column the two forms stay different constraints: the finding is reported, and it names `os migrate organization-ownership` as its remedy.
   - **What widens.** Where a tenant column is still nullable (every table of a database 18.0.0 created, an uncertified 17.x / 18.0 database, a rotation shard, a Turso remote table, a table the ceremony reported), a unique index created from now on does not constrain rows whose organization is NULL, exactly like a NULL in any other key part; in the in-memory driver a record with no organization is exempt from an organization-scoped unique. The unique duplicate pre-flight no longer reports groups of rows with a NULL key part, since the index never refuses them.
   - **Who sees it.** A fresh install and every ceremonied table whose tenant column is NOT NULL see nothing. A database 18.0.0 created from empty is certified by its birth marker yet keeps nullable tenant columns: its existing indexes are kept unchanged, and a new organization unique declared on one of its tables constrains only rows that carry an organization.
-- 3937697: feat(spec,lint): a bulk action's `confirmText` is a `template` slot over `count` and the action's params
+- 925fd07: feat(spec,lint): a bulk action's `confirmText` is a `template` slot over `count` and the action's params
   
   Clause-②: yes (widening)
   Metadata-protocol: semantic
@@ -50,7 +50,7 @@
   - **`os i18n extract`.** A bulk `confirmText` written as the envelope is seeded exactly as the bare string: the extractor reads the slot's text through `templateSlotSource`, so the envelope form no longer records as an absent key with nothing to translate.
   - **Served translations.** The catalog overlay on a served view or an object's `listViews` compares a bulk `confirmText` with its packaged base by the slot's text, whichever form either side holds: an unchanged envelope still takes the catalog's sentence, and an edited one keeps the authored sentence.
   - **Unchanged.** The `confirm` / `confirmmessage` near-misses still name `confirmText`. Every other bulk-def key, the default confirm sentence and the flow text slots' verdicts are unchanged.
-- 3937697: fix(cli): `os migrate apply` on an empty database writes the organization-ownership birth marker, so the fresh install's first `os serve` starts
+- 19484af: fix(cli): `os migrate apply` on an empty database writes the organization-ownership birth marker, so the fresh install's first `os serve` starts
   
   Clause-②: yes
   
@@ -60,7 +60,7 @@
   - **Never on a database that was not empty.** The decision is the serving boot's own: the database counts as created from empty only when none of the tables this release declares existed before the apply. A database an earlier release created gains no marker from `os migrate apply`, even when the apply creates a table in it, and is still refused until the ceremony runs: `os migrate organization-ownership --out PLAN`, then `--apply --plan-file PLAN --backup-taken`.
   - **A failed write fails the command.** If the tables are created and the marker cannot be written, `os migrate apply` exits `1` and names the ceremony, which certifies such a database.
   - **Unchanged.** A database that already carries a marker keeps it as it is. `os migrate plan` writes nothing. On a Turso remote (`libsql://`) primary, `os migrate apply` creates no tables (its schema sync is skipped there), so the first serving boot creates them and writes the marker, as before.
-- 3937697: feat(cli,plugin-audit): `os migrate audit-mail-bodies` also masks the mail bodies in the audit copies already moved to the `archive` datasource
+- 3d8960c: feat(cli,plugin-audit): `os migrate audit-mail-bodies` also masks the mail bodies in the audit copies already moved to the `archive` datasource
   
   Clause-②: yes (widening)
   
@@ -74,7 +74,7 @@
   - **Run it with the server stopped**, or re-run it once and read 0 to mask in both halves. A live server's Archiver can move a row between the hot run and the archive run.
   - **New in the `--json` document:** an `archive` array, one entry per declared target: `{ datasource, objects, status, report?, connection? }`, with `status` one of `examined`, `none`, `not-connected` or `unknown`. The `report` key and its shape are unchanged.
   - **New exports from `@objectstack/plugin-audit`:** `migrateArchivedMailLogBodyCopies(driver, logger, options)`, the runner over a datasource's driver, and an `objects` option on both runners, which limits a run to the named copy tables. Types `MailLogBodyArchiveDriver`, `MailLogBodyCopyObject` and `MailLogBodyMigrationOptions`.
-- 3937697: feat(service-messaging,spec,cli)!: `sys_notification_subscription` retires — no reader ever expanded a subscription into recipients (ADR-0030 L3, amended)
+- 63085c3: feat(service-messaging,spec,cli)!: `sys_notification_subscription` retires — no reader ever expanded a subscription into recipients (ADR-0030 L3, amended)
   
   Clause-②: yes (narrowing)
   
@@ -92,7 +92,7 @@
   - **`os migrate organization-ownership` (`@objectstack/cli`).** The inventory row for `sys_notification_subscription` moves FROM fate 3 (`attribution`: organization-less rows went to the Default Organization under `single`) TO fate 4 (`report`: rows listed by id, never attributed, never deleted). The table is exempt from NOT NULL, because no declaration anchors tenancy on its column any more. The row stays, so a database that still holds the table plans instead of being refused as carrying an uninventoried platform table. The plan's `inventoryDigest` changes: a plan file written by an earlier CLI no longer matches, and `--apply --plan-file` refuses it with `plan-digest-mismatch`. Re-run `os migrate organization-ownership --out PLAN`, review it, and apply that.
   
   **Existing databases.** The table is left in place untouched: no backfill, no reaper, no migrate command. Schema sync is additive and never drops a table, so a database an earlier release provisioned keeps `sys_notification_subscription` and any rows an administrator wrote, and nothing reads them. Export any row worth keeping. Dropping the table is the operator's call, by hand: `DROP TABLE sys_notification_subscription`.
-- 3937697: fix(cli)!: `os migrate apply` exits `1` when the confirmation it needs is not given, as every other `os migrate` subcommand with a `--yes` gate already does
+- 62bc129: fix(cli)!: `os migrate apply` exits `1` when the confirmation it needs is not given, as every other `os migrate` subcommand with a `--yes` gate already does
   
   In a non-interactive shell (stdin is not a terminal) or under `--json`, `os migrate apply` without `--yes` applies nothing and prints `⚠ Confirmation required. Re-run with --yes to apply, or use "os migrate plan" to preview.` (under `--json`, its `confirmation_required` document). It exited `0` there, so a deploy script or an agent reading the exit status took a run that applied nothing for an applied one, and the next boot still reported the drift. Every other `os migrate` subcommand that writes behind `--yes` — `comment-reactions --apply`, `meta --stored --apply`, `recorded-by --apply`, `resume --run` and the rest — already exits `1` in that situation, as `organization-ownership --apply` does without `--backup-taken`. `apply` now answers the same way, in both faces. The warning and the `--json` document are unchanged.
   
@@ -106,7 +106,7 @@
   - **TO:** nothing applied, exit `1`. The printed warning and the `--json` document (`message: 'confirmation_required'`, `hint: 'pass --yes'`) are unchanged.
   - **Unchanged:** answering `n` at the `[y/N]` prompt in a terminal still prints `Aborted — no changes made.` and exits `0`; a run with `--yes` applies and exits `0`; a database with nothing to apply exits `0` without asking.
   - **The fix for a script:** a script that means to apply passes `--yes` (`os migrate apply --yes`, or `os migrate apply --allow-destructive --yes`); one that only wants to know what would change runs `os migrate plan`.
-- 3937697: feat(cli, objectql): `os db orphans` — report the detail rows whose required master-detail master does not exist, and delete them only behind `--delete`, after a pre-delete export
+- 157ebd0: feat(cli, objectql): `os db orphans` — report the detail rows whose required master-detail master does not exist, and delete them only behind `--delete`, after a pre-delete export
   
   Clause-②: yes (widening)
   
@@ -122,7 +122,7 @@
   **`@objectstack/objectql`: `ObjectQL.inspectCascadeDelete(object, id)` (new method).** A read-only method that returns every record a by-id `delete()` of that record removes, root first. It is the cascade set the delete collects for itself, read through the same walk. It writes nothing, runs no hook, and files no reference-check elevation record, because no delete happens. It reads as the system with no organization. `restrict` and `set_null` relations are not listed, because neither removes a record. A dependents probe that fails propagates.
   
   Nothing that ran before changes: the audit still reports and never rewrites, and the system-write exemption is unchanged.
-- 3937697: feat(spec): a `page:tabs` item label gains a translation key, `pages.<page>.components.<tabsId>.items.<value>.label`
+- 30d21f6: feat(spec): a `page:tabs` item label gains a translation key, `pages.<page>.components.<tabsId>.items.<value>.label`
   
   Clause-②: yes (widening)
   
@@ -132,7 +132,7 @@
   - **`objectstack validate`.** `@objectstack/lint`'s translation-reference check accepts the key over a declared `page:tabs` item `value`. It refuses it as `translation-target-unknown` over an unknown value (with "Did you mean"), over a component of another type (a `page:accordion` is pointed at the inline locale map, since its panels have no stable key), and under a component id the page does not declare.
   - **`os i18n extract` / coverage.** The extractor writes a slot for every valued tab item, and the coverage check demands it. An inline locale map on the item label is counted as authored, as before.
   - **Unchanged.** Every existing `pages` key, and an inline locale map on a tab label that the bundle does not key.
-- 3937697: feat(spec): a form view's `title` is translated through `objects.<object>._views.<view>.title`, and `GET /forms/:slug` serves it in the visitor's language
+- eddffc3: feat(spec): a form view's `title` is translated through `objects.<object>._views.<view>.title`, and `GET /forms/:slug` serves it in the visitor's language
   
   Clause-②: yes (widening)
   
@@ -145,7 +145,7 @@
 
 ### Patch Changes
 
-- 3937697: feat(cloud-connection, plugin-security, spec, cli): a marketplace upgrade that would un-make an access choice is refused until it is confirmed (ADR-0126 §6 wall 3)
+- 448374d: feat(cloud-connection, plugin-security, spec, cli): a marketplace upgrade that would un-make an access choice is refused until it is confirmed (ADR-0126 §6 wall 3)
   
   Clause-②: yes (narrowing): a marketplace re-install that installed before is now refused `409` while it would un-make an access choice made in this system, until the same call confirms it (narrowing); the door gains the `confirmAccessUpgrade` body field and the `ACCESS_UPGRADE_CONFIRMATION_REQUIRED` code, plugin-security gains the `security.accessUpgradeCheck` service and its exports, and the CLI gains `--confirm-access-upgrade <token>` (widening).
   Metadata-protocol: none
@@ -163,14 +163,14 @@
   - **Unchanged.** A fresh install is never checked. An upgrade with no finding installs exactly as before.
   
   The error-code ledger registers `ACCESS_UPGRADE_CONFIRMATION_REQUIRED` under `@objectstack/cloud-connection`. `@objectstack/plugin-security` exports `ACCESS_UPGRADE_CHECK_SERVICE`, `createAccessUpgradeCheck` and `accessUpgradeDelta`, and `SecurityPlugin` registers the check under `security.accessUpgradeCheck`.
-- 3937697: fix(cli): `os dev`'s in-place upgrade line no longer says every refused database is "still in the v17 organization-ownership shape"
+- feb09db: fix(cli): `os dev`'s in-place upgrade line no longer says every refused database is "still in the v17 organization-ownership shape"
   
   Clause-②: no (printed text of `os dev` only: no exit code, refusal, recovered boot or IPC message moves)
   
   When the organization-ownership boot guard refuses the server `os dev` starts, `os dev` copies the development database and upgrades it in place. The line it printed first said the database was "still in the v17 organization-ownership shape", for every refusal. That was wrong for a database an 18.0 pre-release created, and for every refusal that is not about the database's origin at all: a marker that is unverified, unreadable or from an older shape generation, or a read or write the guard could not make.
   
   The line now names no origin. It points at the guard's own refusal, printed just above it, which says what the guard found, and it says that `os dev` upgrades the database in place, keeping a copy first. The verdict line printed after the upgrade still gives the copy's path. Which databases `os dev` upgrades, how it upgrades them, and what a bare `os serve` prints are unchanged.
-- 3937697: fix(cli): `os lint` and `os i18n check` ask for an approval flow's label and each approval step's label (#24916)
+- 2a2f5c2: fix(cli): `os lint` and `os i18n check` ask for an approval flow's label and each approval step's label (#24916)
   
   Clause-②: no
   Metadata-protocol: none
@@ -195,7 +195,7 @@
   ```
   
   `os i18n extract` writes the empty slots for you and keeps the strings a pack already translates. No key, schema or export changes: both keys were already part of the translation contract, and `os validate` already accepted them.
-- 3937697: fix(cli): `os migrate plan` names the organization-ownership ceremony, not `--allow-destructive`, for the `organization_id` drops `os migrate apply` refuses (#24925)
+- 5f11cec: fix(cli): `os migrate plan` names the organization-ownership ceremony, not `--allow-destructive`, for the `organization_id` drops `os migrate apply` refuses (#24925)
   
   Clause-②: no
   
@@ -206,7 +206,7 @@
   - **Unchanged.** On a database whose ceremony has verified, or one with no `organization_id` drop, the plan reads as before, byte for byte, and on the second it reads no marker. The `--json` document, the exit code and `os migrate apply` are unchanged.
   
   **What to do.** Nothing. On a 17.x database, follow the plan's footer: run the ceremony, then re-run `os migrate plan`.
-- 3937697: fix(cli): `os migrate plan` and `os migrate apply` name the command each held drop waits for, never `--allow-destructive`, for every drop `apply` refuses (#24958)
+- 1a1f5c3: fix(cli): `os migrate plan` and `os migrate apply` name the command each held drop waits for, never `--allow-destructive`, for every drop `apply` refuses (#24958)
   
   Clause-②: no
   
@@ -217,7 +217,7 @@
   - **Unchanged.** A database with no held drop prints what it printed before, byte for byte, in both commands. The `--json` documents, the exit codes and every refusal of `os migrate apply --allow-destructive` (its rule and its text) are unchanged.
   
   **What to do.** Nothing. Follow the footer: run the command each held drop names, then re-run `os migrate plan`.
-- 3937697: fix(cli): `os lint` and `os i18n check` ask for the label of a navigation item another package contributes into an app (#24993)
+- 68a57ad: fix(cli): `os lint` and `os i18n check` ask for the label of a navigation item another package contributes into an app (#24993)
   
   Clause-②: no
   Metadata-protocol: none
@@ -237,7 +237,7 @@
   ```
   
   `os i18n extract` now writes these slots too, and keeps the strings a pack already translates. No key, schema or export changes: the key was already part of the translation contract.
-- 3937697: fix(plugin-auth): `os migrate apply`'s `sys_account.issuer` pre-flight report names each colliding row's stored issuer instead of `(none)`
+- 4bf079c: fix(plugin-auth): `os migrate apply`'s `sys_account.issuer` pre-flight report names each colliding row's stored issuer instead of `(none)`
   
   Clause-②: yes (widening)
   
@@ -248,7 +248,7 @@
   - **`@objectstack/cli`.** `os migrate account-issuer` reads through the probe's reader instead of its own, so it and `os migrate apply` read one table one way. Its output is unchanged.
   
   **Unchanged.** The collision verdict (`ok`, the colliding keys, row ids, users, counts), the `apply` refusal and its exit code. A database whose `sys_account` has no `issuer` column reports each row as `(none)`, as before.
-- 3937697: fix(driver-sql,cli): `os migrate plan` / `apply` no longer offer `--allow-destructive` for a unique index the existing rows already violate
+- 8c73398: fix(driver-sql,cli): `os migrate plan` / `apply` no longer offer `--allow-destructive` for a unique index the existing rows already violate
   
   Clause-②: yes (widening)
   Metadata-protocol: none
@@ -259,7 +259,7 @@
   - **`os migrate plan` / `os migrate apply` (`@objectstack/cli`).** The apply-limit seam reads the entry's own limit first, then the driver's per-op one. A blocked unique index is listed with the conflicting groups as the reason it cannot be applied, the footer and the skip lines stop offering `--allow-destructive` for it, and it is counted among the changes that remain drift. A database with no blocked index prints as before.
   
   Unchanged: `os migrate apply --allow-destructive` still names such an entry as not applied and reports the run PARTIAL with exit 1, because the database still differs from its metadata. To clear it, deduplicate the listed rows and run `os migrate plan` again.
-- 3937697: fix(plugin-auth)!: lift the better-auth family from 1.7.3 to 1.7.12 for the security fixes published since
+- 03966ce: fix(plugin-auth)!: lift the better-auth family from 1.7.3 to 1.7.12 for the security fixes published since
   
   `@objectstack/plugin-auth` declares the better-auth family exactly, so a fresh install resolves what this package tested. All five declared ranges (`better-auth`, `@better-auth/core`, `@better-auth/oauth-provider`, `@better-auth/scim`, `@better-auth/sso`) move from `1.7.3` to `1.7.12`, still exact. The lift takes the fixes published in 1.7.4 to 1.7.12 for packages this plugin mounts: GHSA-965c-763c-88jm and GHSA-r4xp-prcw-77qf (1.7.7), and the oauth-provider, SSO, SCIM, JWT and password-reset fixes up to 1.7.12. Every symbol this package imports from the family is still exported. It also pulls in `better-call` 1.4.4, `@better-auth/utils` 0.5.0 and `@better-fetch/fetch` 1.3.2, the versions 1.7.12 declares.
   
@@ -289,13 +289,13 @@
   - **`@objectstack/spec` and `@objectstack/cli` (patch, text only, not breaking):** the TSDoc on the organization schema's optional `updatedAt` now records that its better-auth measurement still holds on 1.7.12, and the `os migrate account-issuer` description no longer names a better-auth version. No schema, type, flag or behaviour changes in either package.
   - **`@objectstack/service-datasource` (patch, text only, not breaking):** the `resolveSqliteDriver` docs now describe the error better-sqlite3 13 actually throws for an addon that was never built: its loader's `require()` of the absent `build/Release/better_sqlite3.node`, which Node answers with `MODULE_NOT_FOUND`. The docs used to name a helper package's message that 13.x no longer produces. Development still steps down to wasm SQLite on that error, as before. No code changes.
   - **What to do as an operator:** tell users that a Magic Link, social, SSO or account-linking sign-in begun before the upgrade must be started again after it. Check each OIDC SSO provider's configured issuer against its discovery document and set it to the exact `issuer` string the document publishes. An OAuth client that branched on `401` for a PKCE failure should branch on `400 invalid_grant`. A browser client that read every non-`200` `/get-session` answer as "signed out" should treat a `500` as "try again".
-- 3937697: fix(cli): retire the scaffold's five stale `peerDependencyRules` entries on the better-auth 1.7.12 pin
+- 80ec71d: fix(cli): retire the scaffold's five stale `peerDependencyRules` entries on the better-auth 1.7.12 pin
   
   Clause-②: no
   Metadata-protocol: none
   
   A project scaffolded by `objectstack init` or `npx create-objectstack` no longer carries a `peerDependencyRules.allowedVersions` block in its `pnpm-workspace.yaml`. All five entries suppressed peer mismatches that better-auth 1.7.12 no longer has: `better-auth` declares no `better-sqlite3` peer, and `@better-auth/core`, `@better-auth/oauth-provider`, `@better-auth/scim` and `@better-auth/sso` each peer `@better-auth/utils` as `^0.4.2 || ^0.5.0`, which the resolved 0.5.0 satisfies. `allowedVersions` only silences a report, so a scaffold resolves the same lockfile as before and its first `pnpm install` stays free of unmet-peer warnings. Projects scaffolded earlier can keep or delete the block; either way nothing changes.
-- 3937697: fix(cli)!: a production `os serve` that composes no organization object is refused whether or not `--server`, so `--no-server` no longer writes ownerless rows
+- ab488d9: fix(cli)!: a production `os serve` that composes no organization object is refused whether or not `--server`, so `--no-server` no longer writes ownerless rows
   
   Clause-②: yes (narrowing)
   Metadata-protocol: none
@@ -315,7 +315,7 @@
   - A cloud migrate-and-exit job (`OS_MIGRATE_AND_EXIT=1`) must carry `OS_AUTH_SECRET` in production; without it the job is now refused, naming the variable.
   
   **Release-notes correction.** The 18.0 release page says a production `os serve` with no auth secret can "serve without the data API (`--no-server`)". That remedy is withdrawn: `--no-server` is refused the same way. The pending changeset `24583-7b3-organizationless-counter-retired` is corrected in this change to match.
-- 3937697: feat(cli): `os migrate plan` lists the tenant columns still nullable and names the voluntary organization-ownership ceremony; the ceremony reports a rotation shard already NOT NULL as such (#25134)
+- 6251f59: feat(cli): `os migrate plan` lists the tenant columns still nullable and names the voluntary organization-ownership ceremony; the ceremony reports a rotation shard already NOT NULL as such (#25134)
   
   Clause-②: yes (widening) — `os migrate plan --json` gains the `nullableTenantColumns` field, and the ceremony's `not-null` step gains the `already-not-null` outcome and the `alreadyNotNull` summary count. No exit code, drift entry, op, refusal or accepted input moves.
   
@@ -328,7 +328,7 @@
   - **The ceremony's `not-null` step.** A rotation shard that the driver created `NOT NULL` used to be reported as `unsupported`, with a note saying each new shard is created nullable. That has not been true since the driver began creating shards `NOT NULL`. Such a shard is now `already-not-null` (counted in `alreadyNotNull`) and gets no note. A shard rotated in before then stays `unsupported`, and its note says it is dropped when its period leaves the base table's retention.
   
   **What to do.** Nothing is required: the server starts either way. To tighten the columns the plan lists, run `os migrate organization-ownership --out PLAN`, review it, then run `os migrate organization-ownership --apply --plan-file PLAN --backup-taken`.
-- 3937697: fix(cli)!: a production `os serve` whose `@objectstack/plugin-auth` fails to load is refused, naming the load error, instead of booting with no organization object
+- b2e964f: fix(cli)!: a production `os serve` whose `@objectstack/plugin-auth` fails to load is refused, naming the load error, instead of booting with no organization object
   
   Clause-②: yes (narrowing)
   Metadata-protocol: none
@@ -343,7 +343,7 @@
   **Unchanged:** `os dev` and `--dev` (a development boot keeps the warning and boots without auth); the cloud runtime's host kernel (`ObjectOSEnvironmentPlugin`), whose auth is each project's; a production boot with no auth secret or with no auth at all, which is still refused by the existing refusals; and an embedded kernel, which never runs this command.
   
   **The remedy.** Repair the install the error names: `@objectstack/plugin-auth` is a dependency of `@objectstack/cli`, so reinstall the deployment's dependencies (e.g. `npm ci` or `pnpm install --frozen-lockfile`). Running kernel-only (`--no-server`) does not avoid the refusal.
-- 3937697: fix(cli,create-objectstack): new projects declare vitest `~4.1.12`, outside GHSA-qxg6-89mg-rqv8, and still install on npm 10
+- b6e8707: fix(cli,create-objectstack): new projects declare vitest `~4.1.12`, outside GHSA-qxg6-89mg-rqv8, and still install on npm 10
   
   Clause-②: no
   Metadata-protocol: none
@@ -353,7 +353,7 @@
   npm 10, the npm Node 22 bundles, still installs every scaffold. The `overrides.vitest` entry, which equals `devDependencies.vitest`, is what makes that hold: it settles vitest 4.1.12's contradictory optional peer (`@vitest/browser-webdriverio`), which npm 10 otherwise crashes on with `Cannot read properties of null (reading 'edgesOut')`. Measured on npm 10.9.4, 10.9.9 and 11.21.1. pnpm ignores npm's `overrides` field.
   
   **An existing project made by an earlier `create-objectstack`, `os init` or `os create plugin`** keeps its own `~4.0.0`. To move it, set `overrides.vitest` to `~4.1.12` in `package.json`, and `devDependencies.vitest` too where the project declares it, then run `npm install`. npm refuses an override that differs from the direct dependency (`EOVERRIDE`), so the two move together.
-- 3937697: fix(cli,create-objectstack): new projects override `uuid` below 12.0.0 to `^11.1.1`, so `npm audit` lists no GHSA-w5hq-g745-h8pq entry
+- d0c56a2: fix(cli,create-objectstack): new projects override `uuid` below 12.0.0 to `^11.1.1`, so `npm audit` lists no GHSA-w5hq-g745-h8pq entry
   
   Clause-②: no
   Metadata-protocol: none
@@ -363,7 +363,7 @@
   The selector stops at `<12.0.0`, so a project can still add a newer `uuid` of its own: `npm install uuid@14` installs. A spec-less `npm install uuid` is refused with `EOVERRIDE` (npm reads it as `uuid@*`, which meets the selector); name the major instead.
   
   **An existing project made by an earlier `create-objectstack`, `os init` or `os create plugin`**, or any other npm project that installs `@objectstack/rest`, directly or through `@objectstack/runtime`, `@objectstack/cli`, `@objectstack/plugin-auth` or `@objectstack/verify`: add `"uuid@<12.0.0": "^11.1.1"` to the `overrides` block of its root `package.json` and run `npm install`. npm reads `overrides` only from the root manifest, so no `@objectstack/*` release can apply it for you.
-- 3937697: fix(cli): `os create plugin` ships a starter test, so a new project's `npm test` passes
+- 6bc8cc6: fix(cli): `os create plugin` ships a starter test, so a new project's `npm test` passes
   
   Clause-②: no
   Metadata-protocol: none
@@ -373,7 +373,7 @@
   The starter test lives in `src/`, which `tsc` compiles, so the template also writes `tsconfig.build.json`: it extends `tsconfig.json` and excludes `src/**/*.test.ts`, and `build` and `dev` now run `tsc -p tsconfig.build.json`. `typecheck` still reads `tsconfig.json`, so a type error in a test still fails it, while `dist/` holds no compiled test and `npm test` after `npm run build` runs each test once.
   
   **An existing project made by an earlier `os create plugin`** still has no test file. Add a `*.test.ts` file, for example a copy of the `src/index.test.ts` that a new `os create plugin NAME` writes. If you put it under `src/`, also copy `tsconfig.build.json` and point the `build` and `dev` scripts at it (`tsc -p tsconfig.build.json`), or `tsc` compiles the test into `dist/` and vitest runs it twice.
-- 3937697: fix(cli): `os init -t plugin` ships a starter test, so a new project's `npm test` passes
+- 9c431ba: fix(cli): `os init -t plugin` ships a starter test, so a new project's `npm test` passes
   
   Clause-②: no
   Metadata-protocol: none
@@ -381,7 +381,7 @@
   A project made by `os init NAME -t plugin` declared `"test": "vitest run"` and contained no test file, so its first `npm test` exited 1 with `No test files found, exiting with code 1`. The template now writes `package.test.ts` beside `objectstack.config.ts`. The test imports the package's stack, which runs `defineStack()` and its protocol check as the file loads, and asserts that the stack declares itself a `plugin` and contains every object `src/objects/index.ts` exports. A fresh project's `npm test` reports `Test Files 1 passed`. The test boots no engine. Its header links the `@objectstack/verify` harness for tests that need one.
   
   **An existing project made by an earlier `os init -t plugin`** still has no test file. Add a `*.test.ts` file, for example a copy of the `package.test.ts` that a new `os init NAME -t plugin` writes.
-- 3937697: fix(plugin-sharing): the declared-rule organization walk ends on the rows read, and a row with no readable id answers unknown; texts that still described the retired NULL-organization reading are corrected
+- 24360dc: fix(plugin-sharing): the declared-rule organization walk ends on the rows read, and a row with no readable id answers unknown; texts that still described the retired NULL-organization reading are corrected
   
   Clause-②: no
   Metadata-protocol: none
@@ -390,7 +390,7 @@
   - **`@objectstack/plugin-security`.** The Organization help on `sys_user_position` and `sys_user_permission_set` no longer says an empty value means "global" or "applies in every org context". A grant or assignment applies only in its own organization, and one with no organization applies nowhere. The four locale bundles carry the new text.
   - **`@objectstack/cli`.** `os migrate organization-ownership`'s warning about rows whose owner cannot be derived reads "…while one stays NULL, except on a table whose column is not the tenancy anchor." where it read "(but on a table …)".
   - **`@objectstack/spec`.** Wording only, no schema moves: the upgrade guide's `driver-read-scope-follows-tenant-wall` entry names update and delete "by id or by predicate"; the `sharing-rule-declared-mirror-retired` entry no longer paraphrases ADR-0131 D13 as asking an entry of every retirement; `IEmailService`'s `organizationId` TSDoc no longer says an absent value leaves the row unstamped (the engine stamps the derivable organization or refuses the insert); a TSDoc citation in `schedule-organization.zod.ts` names the run store instead of a deleted file.
-- 3937697: feat(cli): the ownership ceremony gives a walled organization-less self-registration grant its user's sole membership's organization
+- 1eb1afa: feat(cli): the ownership ceremony gives a walled organization-less self-registration grant its user's sole membership's organization
   
   Clause-②: no
   Metadata-protocol: none
@@ -406,7 +406,7 @@
   - its user already holds the same permission set in that organization, because the grant's unique index would refuse the write.
   
   Each reported row's reason names its case. The remedy is unchanged: assign the organization, or delete the row by hand, then re-run `--apply`. Under `single` nothing changes, and the Default Organization takes every organization-less grant.
-- 3937697: fix(core,plugin-auth)!: the last-admin guard judges a `sys_organization` insert that moves the Default Organization, and one definition of the Default Organization is exported from core
+- 8dfd126: fix(core,plugin-auth)!: the last-admin guard judges a `sys_organization` insert that moves the Default Organization, and one definition of the Default Organization is exported from core
   
   Clause-②: yes (narrowing)
   Metadata-protocol: none
@@ -421,7 +421,7 @@
   - **One definition of the Default Organization (`@objectstack/core`).** New exports: `findDefaultOrganization(read)` (the rule, over a read the caller supplies), `DEFAULT_ORGANIZATION_SLUG`, and `readDefaultOrganizationId(ql)` (the resolver's own read, which fails loud on an unreachable store). plugin-auth's boot invariant, default-organization bootstrap, tenancy service and last-admin guard, plugin-security's `resolveDefaultOrganizationId`, and the ownership ceremony's plan now name the organization through it. Each keeps its own read policy: whether a failed read throws or reads as none, the guard's simulation of a pending write, and the ceremony's raw SQL. Two edge answers align with the resolver's. A `default`-slugged row with a blank id now falls through to the only-organization reading in the ceremony's plan. A numeric id is now read as its string in plugin-security's reader.
   
   **What an operator does.** Before you create a second organization on a `single` deployment whose only organization has another slug, either give that organization the slug `default` (while it is the only one, that changes nothing else), or make sure another account can administer: an organization owner or admin, or an address in `OS_PLATFORM_OWNER_EMAIL`.
-- 3937697: feat(cli): the console document carries the runtime branding in its `<title>`, description and Open Graph tags, written on the server, so a link preview shows the product's name
+- 7b047b4: feat(cli): the console document carries the runtime branding in its `<title>`, description and Open Graph tags, written on the server, so a link preview shows the product's name
   
   Clause-②: no
   Metadata-protocol: none
@@ -438,7 +438,7 @@
   Every value is HTML-escaped, and a missing value writes no tag. A composition that mounts no `runtime/config` door gets the document exactly as before. A branding read that fails serves the document as before and logs one `warn`.
   
   Nothing to change: `OS_PRODUCT_NAME`, `OS_PWA_DESCRIPTION`, `OS_LOGO_URL`, the `RuntimeConfigPlugin` options and, under `single`, a saved Setup → Branding name and logo reach the tags the way they reach the console.
-- 3937697: fix(cli,mcp): `os dev`'s boot banner and the served SKILL.md name the MCP server the same way
+- 4374f3c: fix(cli,mcp): `os dev`'s boot banner and the served SKILL.md name the MCP server the same way
   
   Clause-②: no
   Metadata-protocol: none
@@ -448,13 +448,13 @@
   Both producers now read one exported constant, `OBJECTSTACK_MCP_SERVER_NAME` (`'objectstack'`), from `@objectstack/mcp`. The banner's `Connect` row prints `claude mcp add --transport http objectstack URL`. If you registered the server under the folder name from an earlier banner, that entry keeps working. Remove it with `claude mcp remove FOLDER` if you also added it as `objectstack`.
   
   `printMcpConnectHint` no longer takes a `name` option.
-- 3937697: fix: `os migrate apply --allow-destructive` no longer says the organization-ownership ceremony verified on a database that was created from empty
+- fa06169: fix: `os migrate apply --allow-destructive` no longer says the organization-ownership ceremony verified on a database that was created from empty
   
   Clause-②: no
   Metadata-protocol: none
   
   On a database an 18.x release created from empty, the ceremony's `sys_migration` row is the birth marker the boot guard writes (`details.birth`): it records that no ceremony was owed, not that one ran. When such a database dropped an `organization_id` column, the success line still read "the organization-ownership ceremony verified (TIME)", with TIME being the database's creation. The line now says which row let the drop through: for a birth marker, that the database was created from empty (its creation time and the platform version that created it) and the ceremony is not needed for it; for a ceremony run, the same sentence as before. The line is read from the marker the gate already reads, with no second database read. `--json` output, exit codes and which drops are allowed are unchanged.
-- 3937697: fix(create-objectstack, cli): a scaffolded project pins every `@objectstack/*` dependency to the exact version of the tool that wrote it, not a `^` range
+- 975d5b3: fix(create-objectstack, cli): a scaffolded project pins every `@objectstack/*` dependency to the exact version of the tool that wrote it, not a `^` range
   
   Clause-②: no
   Metadata-protocol: none
@@ -464,252 +464,252 @@
   - **`npm create objectstack`** (`create-objectstack`), **`os init`** and **`os create`** (the default standalone placement) now write the scaffolder's own version, exactly, for every `@objectstack/*` entry in the emitted `package.json`: `18.0.0`, not `^18.0.0`. A prerelease is written verbatim (`18.1.0-rc.2`).
   - **Unchanged.** `os create --in-repo` still writes `workspace:*`. Third-party ranges (`typescript`, `vitest`, `zod`, `@types/node`) are not touched. Every `@objectstack/*` package is released on one version, so the exact version is published for each of them.
   - **An existing project** keeps whatever its `package.json` says. To follow the docs, replace each `^18.x.y` on an `@objectstack/*` entry with the exact version you run (for example `"@objectstack/runtime": "18.0.0"`), then reinstall.
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
+- Updated dependencies [54df640]
+- Updated dependencies [448374d]
+- Updated dependencies [e207b97]
+- Updated dependencies [94842ba]
+- Updated dependencies [7cacad5]
+- Updated dependencies [df8bb40]
+- Updated dependencies [0091d84]
+- Updated dependencies [d5d8146]
+- Updated dependencies [5e9b100]
+- Updated dependencies [7532ea3]
+- Updated dependencies [fde7456]
+- Updated dependencies [74fcec1]
+- Updated dependencies [8cfe1f9]
+- Updated dependencies [b42c621]
+- Updated dependencies [de9cd1f]
+- Updated dependencies [9a06f0b]
+- Updated dependencies [f90ea67]
+- Updated dependencies [7035682]
+- Updated dependencies [d606fc1]
+- Updated dependencies [c2d4072]
+- Updated dependencies [a8b44d4]
+- Updated dependencies [78ab647]
+- Updated dependencies [78ab647]
+- Updated dependencies [78ab647]
+- Updated dependencies [78ab647]
+- Updated dependencies [abd5acd]
+- Updated dependencies [6b9e6df]
+- Updated dependencies [fbb42d9]
+- Updated dependencies [73a2b52]
+- Updated dependencies [950f949]
+- Updated dependencies [5872450]
+- Updated dependencies [9ea5afe]
+- Updated dependencies [6440cf1]
+- Updated dependencies [72518d2]
+- Updated dependencies [e5b3de0]
+- Updated dependencies [88cc145]
+- Updated dependencies [925fd07]
+- Updated dependencies [ad8cf92]
+- Updated dependencies [e7befa7]
+- Updated dependencies [02e6d73]
+- Updated dependencies [4cef6e2]
+- Updated dependencies [28ff8a9]
+- Updated dependencies [55d7aab]
+- Updated dependencies [98c3d00]
+- Updated dependencies [5050442]
+- Updated dependencies [2b1382a]
+- Updated dependencies [eee65af]
+- Updated dependencies [3fbef41]
+- Updated dependencies [72a302a]
+- Updated dependencies [fcb40ad]
+- Updated dependencies [ba69b16]
+- Updated dependencies [865d2c8]
+- Updated dependencies [865d2c8]
+- Updated dependencies [2941a19]
+- Updated dependencies [3b3830c]
+- Updated dependencies [abc25a3]
+- Updated dependencies [e282f32]
+- Updated dependencies [644e4b2]
+- Updated dependencies [3d8960c]
+- Updated dependencies [0715fac]
+- Updated dependencies [60b42cd]
+- Updated dependencies [ea08ce5]
+- Updated dependencies [19e5338]
+- Updated dependencies [9cfc575]
+- Updated dependencies [b9a79ef]
+- Updated dependencies [63085c3]
+- Updated dependencies [0603bfa]
+- Updated dependencies [0b8bce4]
+- Updated dependencies [5d2c5a1]
+- Updated dependencies [b811c73]
+- Updated dependencies [066dabc]
+- Updated dependencies [4b8f597]
+- Updated dependencies [f802213]
+- Updated dependencies [86d2360]
+- Updated dependencies [688052e]
+- Updated dependencies [5d27d32]
+- Updated dependencies [6b656bf]
+- Updated dependencies [2069b81]
+- Updated dependencies [0a3ce08]
+- Updated dependencies [5d66021]
+- Updated dependencies [c5915b2]
+- Updated dependencies [7f99616]
+- Updated dependencies [4d99158]
+- Updated dependencies [9532e27]
+- Updated dependencies [157ebd0]
+- Updated dependencies [1862d8d]
+- Updated dependencies [30d21f6]
+- Updated dependencies [eddffc3]
+- Updated dependencies [58cd58f]
+- Updated dependencies [58cd58f]
+- Updated dependencies [69712d5]
+- Updated dependencies [dfe60e3]
+- Updated dependencies [d68aab6]
+- Updated dependencies [aaee084]
+- Updated dependencies [42b60b9]
+- Updated dependencies [c0ae356]
+- Updated dependencies [e939357]
+- Updated dependencies [045858f]
+- Updated dependencies [baedcec]
+- Updated dependencies [03c12a5]
+- Updated dependencies [31f0f27]
+- Updated dependencies [f8c5fb3]
+- Updated dependencies [d96f618]
+- Updated dependencies [b289090]
+- Updated dependencies [386f60f]
+- Updated dependencies [c24203f]
+- Updated dependencies [d6a5fa3]
+- Updated dependencies [27dc53b]
+- Updated dependencies [28c9a2c]
+- Updated dependencies [4bf079c]
+- Updated dependencies [8c73398]
+- Updated dependencies [0f1eeee]
+- Updated dependencies [f46ef4d]
+- Updated dependencies [3782b2d]
+- Updated dependencies [2354058]
+- Updated dependencies [ba244f1]
+- Updated dependencies [edcc8ce]
+- Updated dependencies [e5f194b]
+- Updated dependencies [2aaee3b]
+- Updated dependencies [a39389e]
+- Updated dependencies [9340181]
+- Updated dependencies [9340181]
+- Updated dependencies [2e242bb]
+- Updated dependencies [fccbd9d]
+- Updated dependencies [459afea]
+- Updated dependencies [c8f4c43]
+- Updated dependencies [4f97aeb]
+- Updated dependencies [c4b49c3]
+- Updated dependencies [db9c02a]
+- Updated dependencies [284e048]
+- Updated dependencies [c6bdcac]
+- Updated dependencies [4e2c42f]
+- Updated dependencies [02ad31a]
+- Updated dependencies [0148071]
+- Updated dependencies [03966ce]
+- Updated dependencies [ae58b26]
+- Updated dependencies [1b3b65e]
+- Updated dependencies [331613c]
+- Updated dependencies [5801a4f]
+- Updated dependencies [425c743]
+- Updated dependencies [d609f60]
+- Updated dependencies [6b44efa]
+- Updated dependencies [c71d03a]
+- Updated dependencies [a1e51d6]
+- Updated dependencies [e3aa111]
+- Updated dependencies [80ec71d]
+- Updated dependencies [863c580]
+- Updated dependencies [7f5b19d]
+- Updated dependencies [8010b64]
+- Updated dependencies [fb7501b]
+- Updated dependencies [504d8b3]
+- Updated dependencies [14e7239]
+- Updated dependencies [b6e8707]
+- Updated dependencies [fe0ec2b]
+- Updated dependencies [d0c56a2]
+- Updated dependencies [dfab597]
+- Updated dependencies [9127f23]
+- Updated dependencies [1f78b64]
+- Updated dependencies [bc5daf0]
+- Updated dependencies [3a440b0]
+- Updated dependencies [279fdcf]
+- Updated dependencies [24360dc]
+- Updated dependencies [ecb4e69]
+- Updated dependencies [8dfd126]
+- Updated dependencies [bda53bb]
+- Updated dependencies [17f3c65]
+- Updated dependencies [b62f959]
+- Updated dependencies [b62f959]
+- Updated dependencies [b964ea1]
 - Updated dependencies [4395cbc]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
+- Updated dependencies [9019af9]
+- Updated dependencies [45f9962]
+- Updated dependencies [b531016]
+- Updated dependencies [e5eab06]
+- Updated dependencies [dc532e8]
+- Updated dependencies [72fad92]
+- Updated dependencies [d196748]
+- Updated dependencies [9d60b42]
+- Updated dependencies [a285ff2]
+- Updated dependencies [829cb77]
+- Updated dependencies [9d96b2b]
+- Updated dependencies [5f30f00]
+- Updated dependencies [09e07c2]
+- Updated dependencies [b9c7a8f]
+- Updated dependencies [69913f8]
+- Updated dependencies [7db1697]
+- Updated dependencies [b3fddd1]
+- Updated dependencies [f5b6b3f]
+- Updated dependencies [c109bfc]
+- Updated dependencies [f4112a7]
+- Updated dependencies [f4112a7]
+- Updated dependencies [f4112a7]
+- Updated dependencies [db1c7cc]
+- Updated dependencies [258f4e6]
+- Updated dependencies [882372d]
+- Updated dependencies [303aef0]
+- Updated dependencies [eee2f0d]
+- Updated dependencies [b3034ee]
+- Updated dependencies [d12e650]
+- Updated dependencies [b3f3298]
+- Updated dependencies [830a63a]
+- Updated dependencies [1000cc7]
+- Updated dependencies [ee63b47]
+- Updated dependencies [bdf762c]
+- Updated dependencies [27b3f1f]
+- Updated dependencies [ab510f4]
+- Updated dependencies [3306cad]
+- Updated dependencies [c898bd8]
+- Updated dependencies [4374f3c]
+- Updated dependencies [d0a1361]
+- Updated dependencies [431327b]
+- Updated dependencies [97aa34e]
+- Updated dependencies [2b7c331]
+- Updated dependencies [8878c36]
+- Updated dependencies [832a84e]
+- Updated dependencies [832a84e]
+- Updated dependencies [2581efb]
+- Updated dependencies [8a49e37]
+- Updated dependencies [8d9e8b9]
+- Updated dependencies [7c68b10]
+- Updated dependencies [915e940]
+- Updated dependencies [0b8dbea]
+- Updated dependencies [0ec4c5a]
+- Updated dependencies [0fab7ba]
+- Updated dependencies [35d942e]
 - Updated dependencies [a57643d]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
+- Updated dependencies [b8c9590]
+- Updated dependencies [74496c6]
+- Updated dependencies [aa2dbab]
+- Updated dependencies [975d5b3]
+- Updated dependencies [ce18e73]
 - Updated dependencies [4a25192]
-- Updated dependencies [3937697]
+- Updated dependencies [025f6de]
 - Updated dependencies [9f39094]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
+- Updated dependencies [cc8d886]
+- Updated dependencies [1000cc7]
+- Updated dependencies [51e804c]
+- Updated dependencies [06900c9]
+- Updated dependencies [9a48ae8]
+- Updated dependencies [d44c893]
+- Updated dependencies [9057fd4]
+- Updated dependencies [7adfaec]
+- Updated dependencies [6abee03]
+- Updated dependencies [6abee03]
+- Updated dependencies [1361a5a]
+- Updated dependencies [f7d7403]
   - @objectstack/plugin-security@18.1.0
   - @objectstack/plugin-sharing@18.1.0
   - @objectstack/cloud-connection@18.1.0

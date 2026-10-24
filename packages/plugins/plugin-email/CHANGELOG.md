@@ -4,7 +4,7 @@
 
 ### Patch Changes
 
-- 3937697: **Shipped in 18.0.0**, whose CHANGELOG missed this entry; listed here one release late.
+- abd5acd: **Shipped in 18.0.0**, whose CHANGELOG missed this entry; listed here one release late.
   
   fix(plugin-email, service-sms): Setup's "Send test email" and "Send test SMS" send to the signed-in admin when the request names no recipient (#24767)
   
@@ -21,7 +21,7 @@
   - The request and result shapes of `POST /api/settings/mail/test` and `POST /api/settings/sms/test`: no key, route or setting is added.
   - Which provider and credentials a test uses: the saved values overlaid with the form's unsaved edits, as before.
   - Saving the Mail form still judges a required field only when the save writes it, or writes a key its visibility depends on.
-- 3937697: feat(plugin-auth, plugin-email): under the `open` and `email_domain` postures, a sign-up for an address that already has an account answers like a new sign-up and mails that address, while mail is really delivered
+- 2aaee3b: feat(plugin-auth, plugin-email): under the `open` and `email_domain` postures, a sign-up for an address that already has an account answers like a new sign-up and mails that address, while mail is really delivered
   
   Clause-②: yes
   Metadata-protocol: none
@@ -38,7 +38,7 @@
   - **For a client of the sign-up door.** In the configurations above, a screen that showed an "already registered" message on the refusal now receives the success answer instead, and should show its usual "check your email" step.
   - **A send that fails after the answer.** The answer is still the success, and the server logs one error-level line saying the mail was not sent. A verification mail that fails for a new address leaves the same gap.
   - **Unchanged.** A sign-up for a new address, every refusal the audience posture raises, and every other auth mail.
-- 3937697: feat(spec, plugin-email): `IEmailService.isConfigured()` answers whether mail sent through the service is actually delivered
+- fccbd9d: feat(spec, plugin-email): `IEmailService.isConfigured()` answers whether mail sent through the service is actually delivered
   
   Clause-②: yes (widening: an optional member on `IEmailService`)
   Metadata-protocol: none
@@ -47,7 +47,7 @@
   - **Absent means unknown.** The member is optional, so every existing implementation stays valid. A consumer must never read an absent member as delivering: a flow whose success depends on a mail reaching someone treats absent the same as `false` and keeps its explicit refusal, so a service that is merely wired is never mistaken for one that delivers.
   - **The implementation.** `@objectstack/plugin-email`'s `EmailService.isConfigured()` answers `false` while its transport is the `LogTransport` (the default when no mail transport is configured) and `true` for any other transport. It follows the transport the plugin rebuilds from the `mail` settings, so saving an SMTP or API-provider configuration turns it `true` without a restart.
   - **Unchanged.** Sending, templates, persistence and the boot warning for the `log` transport behave as before. No consumer reads the member yet.
-- 3937697: feat: Setup → Email states which mail transport is live, and says so when no mail leaves this machine
+- ab510f4: feat: Setup → Email states which mail transport is live, and says so when no mail leaves this machine
   
   Clause-②: yes (widening: service-settings exports SettingsService.registerLiveStatus / liveStatusOf, SettingsLiveStatus, SettingsLiveStatusProvider and SETTINGS_LIVE_STATUS_BANNER_ID; nothing is refused)
   Metadata-protocol: none
@@ -56,7 +56,7 @@
   
   - **`@objectstack/service-settings`:** `SettingsService.registerLiveStatus(namespace, provider)` lets the package that owns a live object state it on that namespace's page. `GET /api/settings/:namespace` asks the provider on every read and puts its answer first in the manifest's specifiers, as an `info_banner` with the reserved id `live_status` (`SETTINGS_LIVE_STATUS_BANNER_ID`). The registered manifest and in-process `getNamespace()` are unchanged. If the provider throws, the page says the live status could not be read; the statement is never silently dropped. New exports: `SettingsLiveStatus`, `SettingsLiveStatusProvider`, `SETTINGS_LIVE_STATUS_BANNER_ID`.
   - **`@objectstack/plugin-email`:** registers the `mail` statement from `EmailService.isConfigured()`. When it answers `false` (the log transport), the banner reads "No mail leaves this machine". When it answers `true`, the banner names the live transport, for example "Mail is delivered through SMTP (smtp.example.com:587)". The statement waits for any settings re-apply still running, so a read made just after a save names the transport that save built.
-- 3937697: fix(plugin-email): the Send test email refusals name what the admin does on the page instead of a REST recipe (#25424)
+- 0b8dbea: fix(plugin-email): the Send test email refusals name what the admin does on the page instead of a REST recipe (#25424)
   
   Clause-②: no
   Metadata-protocol: none
@@ -64,7 +64,7 @@
   When **Send test email** (`mail/test`) could not go to the signed-in admin's own address, its refusal said to pass "to" in the request body. The mail settings page has no recipient field, so that advice could not be followed from it. Each refusal now says that nothing was sent and what the admin can do on the page: press Send test email signed in as an admin whose account has an email address, or press it again once the account can be read. A `to` in the request still wins, as before. It is now documented only in the handler's TSDoc, for API callers.
   
   No route, response shape, status or code changes: only the message text does. A caller that compared these strings verbatim must update its copy.
-- 3937697: fix(plugin-email): saving mail provider "None (log only — no real delivery)" stops delivery
+- 0ec4c5a: fix(plugin-email): saving mail provider "None (log only — no real delivery)" stops delivery
   
   Clause-②: no
   Metadata-protocol: none
@@ -72,101 +72,101 @@
   Setup → Email offers the provider `log` as "None (log only — no real delivery)". Saving it used to leave the live transport in place, so after a boot with SMTP (saved on the page, or built from `OS_EMAIL_SMTP_*` / `providerOptions`) every message kept going out over SMTP while the page label and the info log both said nothing was delivered. A saved `log` now installs the `LogTransport`, replacing whatever was live, as a saved SMTP host or API key already replaces it. The live-status banner, the re-apply's log line (which names the transport it replaced) and "Send test email" all report that no mail leaves the machine.
   
   If a deployment saved `log` on the settings page while relying on SMTP from `OS_EMAIL_SMTP_*` or on a transport the host supplies, mail now stops at boot. To deliver again, select SMTP (or Resend / Postmark) in Setup → Email and save. Alternatively, pin the provider with `OS_MAIL_PROVIDER`.
-- 3937697: fix(plugin-email): "Send test email" with "None (log only)" picked but not saved no longer delivers over the live transport
+- aa2dbab: fix(plugin-email): "Send test email" with "None (log only)" picked but not saved no longer delivers over the live transport
   
   Clause-②: no
   Metadata-protocol: none
   
   Setup → Email's "Send test email" tests what the form says, saved or not: an SMTP host on the form gets a one-shot SMTP connection, a Resend / Postmark key a one-shot client. With "None (log only — no real delivery)" picked and not saved, the test used to go through the live service instead, so with SMTP live a real message was delivered and the answer was "Sent test email to …". The test now goes through a one-shot `LogTransport` (recorded in `sys_email` like any other test send) and answers with a warning that nothing was delivered and no mail left the machine, naming the live transport it did not use. Once `log` is saved the answer is the existing warning that no delivery transport is active. The other providers are unchanged.
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
+- Updated dependencies [448374d]
+- Updated dependencies [94842ba]
+- Updated dependencies [7cacad5]
+- Updated dependencies [df8bb40]
+- Updated dependencies [0091d84]
+- Updated dependencies [5e9b100]
+- Updated dependencies [7532ea3]
+- Updated dependencies [fde7456]
+- Updated dependencies [de9cd1f]
+- Updated dependencies [7035682]
+- Updated dependencies [d606fc1]
+- Updated dependencies [a8b44d4]
+- Updated dependencies [78ab647]
+- Updated dependencies [73a2b52]
+- Updated dependencies [5872450]
+- Updated dependencies [9ea5afe]
+- Updated dependencies [925fd07]
+- Updated dependencies [e7befa7]
+- Updated dependencies [55d7aab]
+- Updated dependencies [644e4b2]
+- Updated dependencies [0715fac]
+- Updated dependencies [60b42cd]
+- Updated dependencies [b9a79ef]
+- Updated dependencies [63085c3]
+- Updated dependencies [0b8bce4]
+- Updated dependencies [5d2c5a1]
+- Updated dependencies [066dabc]
+- Updated dependencies [4b8f597]
+- Updated dependencies [2069b81]
+- Updated dependencies [1862d8d]
+- Updated dependencies [30d21f6]
+- Updated dependencies [eddffc3]
+- Updated dependencies [69712d5]
+- Updated dependencies [dfe60e3]
+- Updated dependencies [e939357]
+- Updated dependencies [045858f]
+- Updated dependencies [baedcec]
+- Updated dependencies [03c12a5]
+- Updated dependencies [386f60f]
+- Updated dependencies [28c9a2c]
+- Updated dependencies [2354058]
+- Updated dependencies [ba244f1]
+- Updated dependencies [edcc8ce]
+- Updated dependencies [fccbd9d]
+- Updated dependencies [c8f4c43]
+- Updated dependencies [02ad31a]
+- Updated dependencies [03966ce]
+- Updated dependencies [e3aa111]
+- Updated dependencies [863c580]
+- Updated dependencies [7f5b19d]
+- Updated dependencies [14e7239]
+- Updated dependencies [fe0ec2b]
+- Updated dependencies [dfab597]
+- Updated dependencies [9127f23]
+- Updated dependencies [24360dc]
+- Updated dependencies [ecb4e69]
+- Updated dependencies [8dfd126]
+- Updated dependencies [bda53bb]
+- Updated dependencies [b964ea1]
 - Updated dependencies [4395cbc]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
+- Updated dependencies [9019af9]
+- Updated dependencies [45f9962]
+- Updated dependencies [e5eab06]
+- Updated dependencies [dc532e8]
+- Updated dependencies [d196748]
+- Updated dependencies [9d96b2b]
+- Updated dependencies [5f30f00]
+- Updated dependencies [7db1697]
+- Updated dependencies [f5b6b3f]
+- Updated dependencies [c109bfc]
+- Updated dependencies [f4112a7]
+- Updated dependencies [f4112a7]
+- Updated dependencies [db1c7cc]
+- Updated dependencies [303aef0]
+- Updated dependencies [b3034ee]
+- Updated dependencies [d12e650]
+- Updated dependencies [830a63a]
+- Updated dependencies [1000cc7]
+- Updated dependencies [ee63b47]
+- Updated dependencies [bdf762c]
+- Updated dependencies [27b3f1f]
+- Updated dependencies [3306cad]
+- Updated dependencies [c898bd8]
+- Updated dependencies [97aa34e]
+- Updated dependencies [832a84e]
+- Updated dependencies [7c68b10]
+- Updated dependencies [025f6de]
 - Updated dependencies [9f39094]
-- Updated dependencies [3937697]
+- Updated dependencies [f7d7403]
   - @objectstack/spec@18.1.0
   - @objectstack/core@18.1.0
   - @objectstack/platform-objects@18.1.0
