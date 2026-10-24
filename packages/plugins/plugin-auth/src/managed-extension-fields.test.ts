@@ -631,7 +631,7 @@ function findCollisions(
 function authManagerPluginFactories(): string[] {
   // [#25224] The auth manager's source: `auth-manager.ts` and the method
   // bodies moved out of it whole. A factory imported in any of them is one it loads.
-  const source = ['auth-manager.ts', 'auth-manager-actor-guards.ts', 'auth-manager-organization-plugin.ts']
+  const source = ['auth-manager.ts', 'auth-manager-actor-guards.ts', 'auth-manager-organization-plugin.ts', 'auth-manager-plugin-list.ts']
     .map((file) => readFileSync(join(HERE, file), 'utf8'))
     .join('\n');
   const found = new Set<string>();
