@@ -3294,10 +3294,18 @@ jobs:
   #     step; the seven names match the `ui_consumers` filter).
   #   - objectui's per-job "Decide whether this change needs a full run" step is
   #     replaced by the `filter` job's `ui` / `ui_consumers` outputs.
-  #   - commands that are objectui ROOT scripts run with `working-directory: ui`,
-  #     because they assume cwd = the objectui root; turbo runs from this repo's
-  #     root with directory filters, because `ui/package.json`'s own `lint` /
-  #     `type-check` scripts are `turbo run <task>` and would recurse.
+  #   - objectui's own commands are spelled `pnpm --dir ui run <its alias>`
+  #     (or `pnpm --dir ui exec ...`), so they run with cwd = the objectui root,
+  #     which they assume. ⛔ Not `node scripts/<x>` or `pnpm run <x>` under
+  #     `working-directory: ui`: this repo's workflow gates (check-self-test-
+  #     wired, dispatch-gates' derivation and others) key `scripts/<x>` and
+  #     `pnpm <alias>` against THIS repo's root and do not read
+  #     `working-directory`, so objectui's `scripts/check-entry-guard.mjs`
+  #     would be credited to objectstack's file of the same name, and a name
+  #     only objectui has would read as a missing script;
+  #   - turbo runs from this repo's root with directory filters, because
+  #     `ui/package.json`'s own `lint` / `type-check` scripts are
+  #     `turbo run <task>` and would recurse.
   #   - objectui's root-only turbo tasks `//#lint:root` and `//#type-check:e2e`
   #     are steps here (turbo.json carries no dependsOn on a package that does
   #     not exist yet; turbo refuses the whole run over one).
@@ -3361,8 +3369,7 @@ jobs:
       # structural mistake: turbo skips a package with no `type-check` script,
       # so without it a package that lacks one reads as passing.
       - name: Verify type-check coverage
-        working-directory: ui
-        run: node scripts/check-type-check-coverage.mjs
+        run: pnpm --dir ui run type-check:coverage
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -3382,86 +3389,66 @@ jobs:
             --filter=@objectstack/types...
 
       - name: Verify every imported package is declared by the package that ships it
-        working-directory: ui
-        run: pnpm run check:phantom-deps
+        run: pnpm --dir ui run check:phantom-deps
 
       - name: Verify no package imports itself by name
-        working-directory: ui
-        run: pnpm run check:self-import
+        run: pnpm --dir ui run check:self-import
 
       - name: Verify no covered package ships a source file nothing reaches
-        working-directory: ui
-        run: pnpm run check:unreferenced-sources
+        run: pnpm --dir ui run check:unreferenced-sources
 
       - name: Verify no doc comment prescribes a spelling a shared reader owns
-        working-directory: ui
-        run: pnpm run check:doc-example-readers
+        run: pnpm --dir ui run check:doc-example-readers
 
       - name: Verify every handler key a registered renderer reads is declared by its arm
-        working-directory: ui
-        run: pnpm run check:handler-key-reads
+        run: pnpm --dir ui run check:handler-key-reads
 
       - name: Verify every object-metadata write door applies the write guard
-        working-directory: ui
-        run: pnpm run check:metadata-write-doors
+        run: pnpm --dir ui run check:metadata-write-doors
 
       - name: Verify published build tsconfigs exclude tooling directories
-        working-directory: ui
-        run: pnpm run check:published-tsconfig-exclude
+        run: pnpm --dir ui run check:published-tsconfig-exclude
 
       - name: Verify every sideEffects array names exactly its registering modules
-        working-directory: ui
-        run: pnpm run check:side-effects-array
+        run: pnpm --dir ui run check:side-effects-array
 
       - name: Verify every ElementDataSourceGate wrapper reaches the declaration seam
-        working-directory: ui
-        run: pnpm run check:element-data-source-declaration
+        run: pnpm --dir ui run check:element-data-source-declaration
 
       - name: Verify published ESM packages emit resolvable relative specifiers
-        working-directory: ui
-        run: pnpm run check:esm-specifiers
+        run: pnpm --dir ui run check:esm-specifiers
 
       - name: Verify spec-named symbols are derived, not hand-written
-        working-directory: ui
-        run: pnpm run check:spec-symbols
+        run: pnpm --dir ui run check:spec-symbols
 
       - name: Verify action renderers forward every key the runtime reads
-        working-directory: ui
-        run: pnpm run check:action-forward-parity
+        run: pnpm --dir ui run check:action-forward-parity
 
       - name: Verify designer field payloads declare only keys FieldSchema accepts
-        working-directory: ui
-        run: pnpm run check:designer-field-key-parity
+        run: pnpm --dir ui run check:designer-field-key-parity
 
       - name: Verify authored icon names are live lucide icons keys
-        working-directory: ui
-        run: pnpm run check:icon-record-names
+        run: pnpm --dir ui run check:icon-record-names
 
       - name: Verify t() call-site keys exist in the en locale pack
-        working-directory: ui
-        run: pnpm run check:i18n-keys
+        run: pnpm --dir ui run check:i18n-keys
 
       - name: Verify changed en strings were followed by the nine translations
-        working-directory: ui
-        run: pnpm run check:i18n-drift
+        run: pnpm --dir ui run check:i18n-drift
 
       - name: Verify the metadata-admin designer string tables stay paired
-        working-directory: ui
-        run: pnpm run check:i18n-designer-parity
+        run: pnpm --dir ui run check:i18n-designer-parity
 
       - name: Type-check the ui scripts
-        working-directory: ui
-        run: pnpm run type-check:scripts
+        run: pnpm --dir ui run type-check:scripts
 
       - name: Type-check the ui root Vitest config
-        working-directory: ui
-        run: pnpm run type-check:vitest-config
+        run: pnpm --dir ui run type-check:vitest-config
 
       # objectui's `//#type-check:e2e` root task, which its turbo.json made a
       # dependency of every `type-check`; here it is this step.
       - name: Type-check the ui e2e suite
-        working-directory: ui
-        run: pnpm run type-check:e2e
+        run: pnpm --dir ui run type-check:e2e
 
       # A pull_request or merge_group run type-checks the ui packages turbo
       # reports changed since the base, plus their dependents — a change to
@@ -3501,8 +3488,7 @@ jobs:
           fi
 
       - name: Type-check ui repo-root vitest setup files
-        working-directory: ui
-        run: pnpm run type-check:vitest-setup
+        run: pnpm --dir ui run type-check:vitest-setup
 
       - name: Save Turbo cache (main only)
         if: always() && github.event_name == 'push'
@@ -3605,23 +3591,13 @@ jobs:
             --filter=@objectstack/sdui-parser... \
             --filter=@objectstack/types...
 
+      # objectui's full-battery runs also pass its per-file timings reporter
+      # and upload the result for the weekly dataset refresh. Both belong to
+      # that refresh workflow, which is in the governance-workflow audit
+      # (sub-issue 4 of the epic); until it is ported the committed dataset
+      # is what the sequencer reads.
       - name: Run the ui tests (shard ${{ matrix.shard }}/16)
-        working-directory: ui
-        env:
-          OBJECTUI_TEST_TIMINGS_OUT: ${{ runner.temp }}/test-file-timings/shard-${{ matrix.shard }}.json
-        run: pnpm test --shard=${{ matrix.shard }}/16 --reporter=default --reporter=github-actions --reporter=./scripts/test-file-timings.mjs
-
-      # The per-file timings the shard dataset is regenerated from. Only main's
-      # runs feed it, as in objectui; the refresh workflow itself is part of the
-      # governance-workflow audit (sub-issue 4 of the epic).
-      - name: Upload this shard's per-file timings
-        if: "!cancelled() && (github.event_name == 'push' || github.event_name == 'schedule')"
-        uses: actions/upload-artifact@v7
-        with:
-          name: ui-test-file-timings-${{ matrix.shard }}
-          path: ${{ runner.temp }}/test-file-timings/
-          retention-days: 7
-          if-no-files-found: warn
+        run: pnpm --dir ui run test --shard=${{ matrix.shard }}/16 --reporter=default --reporter=github-actions
 
       - name: Save Turbo cache (main only)
         if: always() && github.event_name == 'push' && matrix.shard == 1
@@ -3676,20 +3652,17 @@ jobs:
             ${{ runner.os }}-turbo-build-core-
 
       - name: Verify ui lint coverage
-        working-directory: ui
-        run: node scripts/check-lint-coverage.mjs
+        run: pnpm --dir ui run lint:coverage
 
       - name: Verify every ui scripts entry guard goes through one predicate
-        working-directory: ui
         run: |
-          node scripts/check-entry-guard.mjs --self-test
-          node scripts/check-entry-guard.mjs
+          pnpm --dir ui run check:entry-guard --self-test
+          pnpm --dir ui run check:entry-guard
 
       - name: Verify the ui shell holds the bash 3.2 floor
-        working-directory: ui
         run: |
-          node scripts/check-bash32-floor.mjs --self-test
-          node scripts/check-bash32-floor.mjs
+          pnpm --dir ui run check:bash32-floor --self-test
+          pnpm --dir ui run check:bash32-floor
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -3708,8 +3681,7 @@ jobs:
       # objectui's `//#lint:root` root task, which its turbo.json made a
       # dependency of every `lint`; here it is this step.
       - name: Lint the ui repo-root files
-        working-directory: ui
-        run: pnpm run lint:root
+        run: pnpm --dir ui run lint:root
 
       - name: Lint the ui packages
         env:
@@ -3721,19 +3693,16 @@ jobs:
             --filter='./ui/examples/*'
 
       - name: Check every vi.mock override matches the declared export shape
-        working-directory: ui
-        run: node scripts/check-vi-mock-override-shape.mjs
+        run: pnpm --dir ui run check:vi-mock-override-shape
 
       - name: Verify no ui test resolves a repository path from the process cwd
-        working-directory: ui
-        run: node scripts/check-test-path-roots.mjs
+        run: pnpm --dir ui run check:test-path-roots
 
       - name: Build the ui CLI the self-check runs
         run: pnpm exec turbo run build --concurrency=4 --filter='./ui/packages/cli...'
 
       - name: Verify the ui CLI's own check command passes on the ui tree
-        working-directory: ui
-        run: pnpm run check
+        run: pnpm --dir ui run check
 
       - name: Save Turbo cache (main only)
         if: always() && github.event_name == 'push'
@@ -3806,10 +3775,9 @@ jobs:
             --filter=@objectstack/types...
 
       - name: Build the Console for E2E
-        working-directory: ui/apps/console
         env:
           VITE_BASE_PATH: /console/
-        run: pnpm exec vite build
+        run: pnpm --dir ui/apps/console exec vite build
 
       - name: Verify the Console build artifact
         run: |
@@ -3821,10 +3789,9 @@ jobs:
 
       - name: Get the Playwright version
         id: playwright-version
-        working-directory: ui
         run: |
           set -eo pipefail
-          if ! version=$(pnpm list @playwright/test --depth=0 --json | jq -r '.[0].devDependencies["@playwright/test"].version'); then
+          if ! version=$(pnpm --dir ui list @playwright/test --depth=0 --json | jq -r '.[0].devDependencies["@playwright/test"].version'); then
             echo "::error::Reading the @playwright/test version failed (pnpm list --json | jq). Refusing to write a Playwright browser cache key from it."
             exit 1
           fi
@@ -3843,16 +3810,16 @@ jobs:
 
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
-        working-directory: ui
-        run: pnpm exec playwright install chromium
+        run: pnpm --dir ui exec playwright install chromium
 
+      # Run from inside ui/scripts: the script is cwd-agnostic apart from its
+      # `pnpm exec playwright`, which resolves ui/package.json upwards.
       - name: Ensure Chromium can launch
-        working-directory: ui
-        run: bash scripts/ensure-chromium-ready.sh
+        working-directory: ui/scripts
+        run: bash ensure-chromium-ready.sh
 
       - name: Run the ui E2E tests
-        working-directory: ui
-        run: pnpm run test:e2e --project=chromium
+        run: pnpm --dir ui run test:e2e --project=chromium
 
       - name: Upload failure artefacts
         if: ${{ !cancelled() && failure() }}

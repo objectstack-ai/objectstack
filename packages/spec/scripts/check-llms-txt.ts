@@ -227,6 +227,10 @@ export const DECLARED_WATCH_HINTS = [
   'packages/**/package.json',
   'apps/*/package.json',
   'examples/*/package.json',
+  // The objectui tree's workspace roots (`ui`, `ui/packages/*`, `ui/apps/*`,
+  // `ui/examples/*`, objectstack#25677). This gate opens every manifest under
+  // them once the tree is imported; until then the globs match nothing.
+  'ui/**/package.json',
 ];
 
 /** A domain directory with no `*.zod.ts` under it is not a schema domain. */
