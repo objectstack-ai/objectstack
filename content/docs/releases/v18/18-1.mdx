@@ -64,7 +64,7 @@ the cut is in the CHANGELOG and not on this page.
   sets on its hosted containers (`c6bdcac`, #25399). It ships as `patch` and
   is breaking: see [Cloud-managed environments](#cloud-managed-environments-os_cloud_managed1).
   Self-hosted deployments are unchanged.
-- **An `external` organization role for portal users** (`9019af9`, #25515). A
+- **An `external` membership grade for portal users** (`9019af9`, #25515). A
   supplier's or customer's portal user is a member of the organization but
   reads only its own identity rows, and reaches data only through grants made
   to it. A roster object can declare **membership keys** that a row policy reads
@@ -266,7 +266,7 @@ door (`422 INVALID_METADATA`), where 18.0.0 accepted it.
   `sys_user_permission_set`, `sys_invitation` or `sys_member` is refused**
   `403 PERMISSION_DENIED` (`a285ff2`, #25483). Fix: run a flow that grants
   positions or permission sets as `runAs: 'user'`, so the caller's own rights
-  decide; invite, cancel, change a role or remove a member through the
+  decide; invite, cancel, change a membership grade or remove a member through the
   organization endpoints.
 - **Deleting a business unit that still has child units is refused**
   (`4b8f597`, #24984). Fix: re-parent or delete the children first.
@@ -399,7 +399,7 @@ rows.
   #25512). Under a wall, `OS_PLATFORM_OWNER_ORGANIZATION` names the
   organization where both reports reach the operators in-app (`915e940`,
   #25489).
-- **An `external` organization role** (`9019af9`, #25515). A portal user added
+- **An `external` membership grade** (`9019af9`, #25515). A portal user added
   with it holds `org_external` instead of the `everyone` anchor, so the
   deployment's default permission sets do not reach it, and it reads only its
   own identity rows, through the shipped `external_default` set. It is never
@@ -513,7 +513,7 @@ entries that objectui declared, ten of them `minor`.
   objects lands on one page saying whom to ask; a page node or tab whose
   `visibleWhen` faults is no longer drawn.
 - **Organizations and actions.** The console labels the `external`
-  organization role, an action's `confirmText`, `successMessage` and
+  membership grade, an action's `confirmText`, `successMessage` and
   `errorMessage` fill their `{{ }}` holes, a single-record action launched with
   0 or several rows selected is refused before its dialog opens, and on a
   cloud-managed environment Setup → Users says where people are invited.
