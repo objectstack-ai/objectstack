@@ -7,6 +7,7 @@ feat(lint)!: `objectstack validate`, `compile` and the publish gate refuse an ac
 
 Clause-②: no (narrowing: an action's copy sentence that is blank, holes an unbound root, carries a single-brace or raw-shown `${…}` token, or holds logic in a hole is refused at `objectstack validate`, `compile` and the publish gate; it ships now under the amended 「甲」, #6015 `6303865025`, as #25205 did for the bulk slot)
 Metadata-protocol: narrowed
+Ruling-ref: `6365736632` (on #24814, the refusal half); triage `6386348015`
 
 An action's person-facing copy is an ADR-0032 `template` slot over the roots the console's runner binds (#24814): `confirmText` over `record` (and `params` beside static values), `successMessage` over `result` and `record`, `errorMessage` over none. That covers a page action row (`action:button`, `action:icon`, an `action:group` / `action:menu` member), a page component's inline `properties.action`, and a registered action (`stack.actions[]`, an object's `actions[]`). `validateStackExpressions`, the rule all three doors run, judges each sentence through `closedScopeTemplateRefusal`, then compiles it as a template. Its findings were warnings. They are now errors, all but one. This supersedes the warning-only behaviour #24814 described earlier in this release line; a refused finding no longer ends with "A warning, not a refusal".
 
