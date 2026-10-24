@@ -346,7 +346,7 @@ node `config`** (the start `config` is a free-form record with no Zod shape):
 | `config` key | Purpose |
 |:-------------|:--------|
 | `hookId` | URL path token (default `'default'`). **Rotate it to revoke** a leaked endpoint |
-| `secret` | HMAC-SHA256 shared secret. **Required** — without a non-blank one the flow is refused at registration (`os validate` too) and never armed at boot; the signature goes in `x-objectstack-signature` |
+| `secretRef` / `secret` | The HMAC-SHA256 shared secret, **required** as one of the two — without it the flow is refused at registration (`os validate` too). A package ships `secretRef: 'NAME'`, the name the deployment fills (an env var in the open tier, never `OS_*`), read per post — unfilled ⇒ `503`; never commit a literal `secret` |
 
 - **Signature:** `t=<unix seconds>,v1=<hex>` — `v1` = HMAC-SHA256 of `<t>.<raw body>` under `secret`; refused when `t` is over 300 s from the server clock.
 - **Idempotency:** `x-idempotency-key` dedupes retries — author the flow to be idempotent (delivery is at-least-once).

@@ -235,6 +235,11 @@ The enterprise tier swaps in a vault/KMS-backed resolver
 (`AutomationServicePluginOptions.credentialResolver`) without changing what
 you author: the entry still just names a ref.
 
+The same resolver serves an `api` flow's start-node `config.secretRef`, the
+name of its inbound hook secret. That one is read at every post rather than at
+boot, so a name with no value refuses each post with `503` instead of failing
+the boot ([Flows](/docs/automation/flows)).
+
 Inlining a secret is rejected when the stack is validated. Writing the runtime
 shape on a provider-bound instance —
 
