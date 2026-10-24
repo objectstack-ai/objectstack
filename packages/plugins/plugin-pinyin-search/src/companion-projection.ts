@@ -13,7 +13,8 @@
  * display/name field) is present in the write — i.e. only when the source
  * actually changed, avoiding write amplification. Writes that bypass hooks
  * (bulk import, direct migration) leave the companion empty; the boot
- * backfill and the `rebuildSearchCompanion` reconcile entry cover that.
+ * reconcile (`boot-reconcile.ts`) and the `rebuildSearchCompanion` entry
+ * cover that.
  */
 
 import {
@@ -28,7 +29,7 @@ const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
 export const PINYIN_SEARCH_HOOK_PACKAGE = 'plugin-pinyin-search:companion';
 
-interface MinimalEngine {
+export interface MinimalEngine {
   registerHook(
     event: string,
     handler: (ctx: any) => any | Promise<any>,
@@ -40,6 +41,8 @@ interface MinimalEngine {
     fn: (event: { object: string; row: Record<string, unknown>; fields: string[] }) => void | Promise<void>,
   ): void;
   find(object: string, query?: any, options?: any): Promise<any[]>;
+  findOne?(object: string, query?: any, options?: any): Promise<any | null>;
+  insert?(object: string, data: any, options?: any): Promise<any>;
   update(object: string, data: any, options?: any): Promise<any>;
   registry?: {
     getObject(name: string): any;
@@ -47,10 +50,11 @@ interface MinimalEngine {
   };
 }
 
-interface MinimalLogger {
+export interface MinimalLogger {
   info?: (msg: any, ...rest: any[]) => void;
   warn?: (msg: any, ...rest: any[]) => void;
   debug?: (msg: any, ...rest: any[]) => void;
+  error?: (msg: any, ...rest: any[]) => void;
 }
 
 /**
@@ -131,12 +135,137 @@ export interface CompanionBackfillOptions {
    * companion is empty but whose source has CJK content).
    */
   force?: boolean;
+  /**
+   * Stop between pages once aborted (#25634): the boot reconcile runs after
+   * readiness, so a shutdown must be able to end it. An aborted object is
+   * reported in `aborted`, never as a clean pass.
+   */
+  signal?: AbortSignal;
 }
 
 export interface CompanionBackfillResult {
   objects: number;
   scanned: number;
   updated: number;
+  /** Pages read across every walked object (#25634: the cost a reboot pays). */
+  pages: number;
+  /** True when `signal` stopped the pass before every object was walked. */
+  aborted?: boolean;
+}
+
+/** One object's walk, as {@link walkCompanionObject} reports it. */
+export interface CompanionObjectWalk {
+  scanned: number;
+  pages: number;
+  updated: number;
+  /** Rows whose update failed and were skipped. */
+  skipped: number;
+  /** The scan itself failed (a page read threw); the walk is incomplete. */
+  failed: boolean;
+  /** `signal` stopped the walk before the object was exhausted. */
+  aborted: boolean;
+}
+
+/** The companion-bearing schemas a pass walks, each with its source fields. */
+export function companionObjects(
+  engine: MinimalEngine,
+  object?: string,
+): Array<{ schema: any; sources: string[] }> {
+  const all = object
+    ? [engine.registry?.getObject?.(object)].filter(Boolean)
+    : engine.registry?.getAllObjects?.() ?? [];
+  const out: Array<{ schema: any; sources: string[] }> = [];
+  for (const schema of all) {
+    if (!schema?.name || !schema?.fields?.[SEARCH_COMPANION_FIELD]) continue;
+    const sources = resolveSearchCompanionSources(schema);
+    if (sources.length === 0) continue;
+    out.push({ schema, sources });
+  }
+  return out;
+}
+
+/**
+ * Walk ONE companion-bearing object and fill (or, with `force`, recompute)
+ * its companion. `where` narrows the walk — the boot reconcile passes the
+ * rows written since its last completed pass (#25634); omitted, every row is
+ * read.
+ */
+export async function walkCompanionObject(
+  engine: MinimalEngine,
+  schema: any,
+  sources: string[],
+  options: { batchSize: number; force?: boolean; where?: unknown; signal?: AbortSignal },
+  logger?: MinimalLogger,
+): Promise<CompanionObjectWalk> {
+  const out: CompanionObjectWalk = { scanned: 0, pages: 0, updated: 0, skipped: 0, failed: false, aborted: false };
+  const fields = ['id', ...sources, SEARCH_COMPANION_FIELD];
+
+  // Seek by `id` (#4363). This walk UPDATES the rows it reads, and an offset
+  // counts into a set those writes are changing, so rows slide past the
+  // cursor and never get their companion blob — a backfill that reports a
+  // clean pass while leaving records unsearchable.
+  const walk = keysetWalk<any>(
+    (q) => engine.find(schema.name, { ...q, fields, context: SYSTEM_CTX }),
+    { pageSize: options.batchSize, where: options.where },
+  );
+
+  try {
+    for await (const rows of walk.pages()) {
+      out.pages++;
+      out.scanned += rows.length;
+
+      for (const row of rows) {
+        if (row?.id == null) continue;
+        if (!needsWrite(row, sources, options.force)) continue;
+        try {
+          // [#25634] The walk now runs while the server takes writes, so a
+          // row renamed after its page was read must not get the OLD name's
+          // blob written over the one its own hook just stamped: read the row
+          // again right before writing it. Only rows about to be written pay
+          // this read, and in backfill mode those are rare by construction.
+          const current = engine.findOne
+            ? await engine.findOne(schema.name, { where: { id: row.id }, fields, context: SYSTEM_CTX })
+            : row;
+          if (!current || !needsWrite(current, sources, options.force)) continue;
+          const value = await computeSearchCompanionValue(sources.map((s) => current[s]));
+          if (!options.force && value == null) continue;
+          if (value === current[SEARCH_COMPANION_FIELD]) continue;
+          await engine.update(
+            schema.name,
+            { id: row.id, [SEARCH_COMPANION_FIELD]: value },
+            { context: SYSTEM_CTX },
+          );
+          out.updated++;
+        } catch (err: any) {
+          out.skipped++;
+          logger?.warn?.('[pinyin-search] backfill row skipped', {
+            object: schema.name,
+            id: row.id,
+            error: err?.message,
+          });
+        }
+      }
+
+      if (options.signal?.aborted) {
+        out.aborted = true;
+        break;
+      }
+    }
+  } catch (err: any) {
+    out.failed = true;
+    logger?.warn?.('[pinyin-search] backfill scan failed', { object: schema.name, error: err?.message });
+  }
+  return out;
+}
+
+/**
+ * Backfill mode touches only rows missing a blob they should have; force
+ * mode recomputes everything (also clears stale blobs).
+ */
+function needsWrite(row: any, sources: string[], force?: boolean): boolean {
+  if (force) return true;
+  const hasBlob = typeof row[SEARCH_COMPANION_FIELD] === 'string' && row[SEARCH_COMPANION_FIELD] !== '';
+  return !hasBlob && sources.some((s) => containsCJK(row[s]));
 }
 
 /**
@@ -149,6 +278,11 @@ export interface CompanionBackfillResult {
  * recomputes unconditionally (the periodic reconcile / rebuild entry).
  * Idempotent; per-row failures are skipped so one bad row never aborts the
  * pass.
+ *
+ * This reads EVERY row of every companion-bearing object. The plugin's boot
+ * pass does not call it: it runs `reconcileSearchCompanion`
+ * (`boot-reconcile.ts`), which reads only what changed since its last
+ * completed pass (#25634).
  */
 export async function backfillSearchCompanion(
   engine: MinimalEngine,
@@ -156,64 +290,27 @@ export async function backfillSearchCompanion(
   options?: CompanionBackfillOptions,
 ): Promise<CompanionBackfillResult> {
   const batchSize = Math.max(1, options?.batchSize ?? 1000);
-  const all = options?.object
-    ? [engine.registry?.getObject?.(options.object)].filter(Boolean)
-    : engine.registry?.getAllObjects?.() ?? [];
+  const result: CompanionBackfillResult = { objects: 0, scanned: 0, updated: 0, pages: 0 };
 
-  const result: CompanionBackfillResult = { objects: 0, scanned: 0, updated: 0 };
-
-  for (const schema of all) {
-    if (!schema?.name || !schema?.fields?.[SEARCH_COMPANION_FIELD]) continue;
-    const sources = resolveSearchCompanionSources(schema);
-    if (sources.length === 0) continue;
+  for (const { schema, sources } of companionObjects(engine, options?.object)) {
+    if (options?.signal?.aborted) {
+      result.aborted = true;
+      break;
+    }
     result.objects++;
-
-    // Seek by `id` (#4363). This walk UPDATES the rows it reads, and an offset
-    // counts into a set those writes are changing, so rows slide past the
-    // cursor and never get their companion blob — a backfill that reports a
-    // clean pass while leaving records unsearchable.
-    const walk = keysetWalk<any>(
-      (q) => engine.find(schema.name, {
-        ...q,
-        fields: ['id', ...sources, SEARCH_COMPANION_FIELD],
-        context: SYSTEM_CTX,
-      }),
-      { pageSize: batchSize },
+    const walk = await walkCompanionObject(
+      engine,
+      schema,
+      sources,
+      { batchSize, force: options?.force, signal: options?.signal },
+      logger,
     );
-
-    try {
-      for await (const rows of walk.pages()) {
-      result.scanned += rows.length;
-
-      for (const row of rows) {
-        if (row?.id == null) continue;
-        const hasBlob = typeof row[SEARCH_COMPANION_FIELD] === 'string' && row[SEARCH_COMPANION_FIELD] !== '';
-        const hasCjkSource = sources.some((s) => containsCJK(row[s]));
-        // Backfill mode: touch only rows missing a blob they should have.
-        // Force mode: recompute everything (also clears stale blobs).
-        if (!options?.force && (hasBlob || !hasCjkSource)) continue;
-        try {
-          const value = await computeSearchCompanionValue(sources.map((s) => row[s]));
-          if (!options?.force && value == null) continue;
-          if (value === row[SEARCH_COMPANION_FIELD]) continue;
-          await engine.update(
-            schema.name,
-            { id: row.id, [SEARCH_COMPANION_FIELD]: value },
-            { context: SYSTEM_CTX },
-          );
-          result.updated++;
-        } catch (err: any) {
-          logger?.warn?.('[pinyin-search] backfill row skipped', {
-            object: schema.name,
-            id: row.id,
-            error: err?.message,
-          });
-        }
-      }
-      }
-    } catch (err: any) {
-      logger?.warn?.('[pinyin-search] backfill scan failed', { object: schema.name, error: err?.message });
-      continue;
+    result.scanned += walk.scanned;
+    result.pages += walk.pages;
+    result.updated += walk.updated;
+    if (walk.aborted) {
+      result.aborted = true;
+      break;
     }
   }
 

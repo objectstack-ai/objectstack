@@ -1914,6 +1914,9 @@ importers:
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql
+      '@objectstack/spec':
+        specifier: workspace:*
+        version: link:../../spec
       '@objectstack/types':
         specifier: workspace:*
         version: link:../../types
