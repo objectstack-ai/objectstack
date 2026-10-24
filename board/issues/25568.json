@@ -2,8 +2,8 @@
   "number": 25568,
   "kind": "issue",
   "title": "Drop the cross-account review rule: the queue guard stops refusing a same-account review of record, and contract-review.md stops requiring Reviewed-by-account (maintainer 2026-10-24)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-24T01:19:50Z",
-  "updated_at": "2026-10-24T01:22:31Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-24T02:40:44Z",
+  "closed_at": "2026-10-24T02:40:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 1,
   "locked": false,

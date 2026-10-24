@@ -2,7 +2,7 @@
   "number": 25585,
   "kind": "pull_request",
   "title": "fix(pm): drop the cross-account review rule — the queue guard accepts a same-account Tier S record again, and contract-review.md stops requiring Reviewed-by-account",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-24T01:49:27Z",
-  "updated_at": "2026-10-24T02:05:27Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-24T02:40:44Z",
+  "closed_at": "2026-10-24T02:40:43Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-24T02:40:43Z",
   "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/25585",

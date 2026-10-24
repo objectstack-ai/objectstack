@@ -1,0 +1,32 @@
+{
+  "number": 25604,
+  "kind": "pull_request",
+  "title": "test(dogfood): pin the reason #25591's verdict gives a staff share on a real showcase_project record",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T05:11:53Z",
+  "updated_at": "2026-10-24T05:12:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25604",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuDsgJg9TZyi9CRq2YkCkKxa)_\n\nFixes #25602\n\nClause-②: no\nMetadata-protocol: none\n\n`main`'s `Dogfood Regression Gate (1/3)` has been red since #25591 landed (`4a251927c`, and again on `a57643d3d`): one test, `showcase-d3-d4-capabilities.dogfood.test.ts:135`. This PR moves that pin to the reason #25591's ruled verdict gives, and keeps the contrast the pin exists to draw. Test-only, in the private `@objectstack/dogfood` package (`skip-changeset`). Branch `claude/project-thread-pluvu5` is harness-assigned and does not follow `claude/issue-N-…`; the card is #25602.\n\n## Why the new reason is the intended one\n\n#25591 (letter A of the ruling on #25549) made the D7 pre-flight in `plugin-sharing` read the recipient on an effective-`public` object with a real `owner_id`: an `external` member of the record's organization is admitted, every other recipient is refused with \"… consulted only for an external member of the record's organization, and the recipient is not one\", and a grant whose organization cannot be resolved is refused with \"… and that organization could not be resolved\". The old pin granted on `showcase_project` (`public_read_write`) to a record id naming no row, so on today's `main` it is refused for the third reason, an incidental one. Nothing in `plugin-sharing` changes here.\n\n## What changes\n\n| Where | Before | After |\n|:--|:--|:--|\n| `beforeAll` | — | inserts one `showcase_project` (`D34 Project`, the file's own account) and reads the signed-up member's `sys_user` id |\n| third case, the contrast | `recordId: 'pj_absent'`, recipient `u_d34_probe`, expects \"is not under record-sharing enforcement\" | the real project and the member; asserts the project carries an organization and the member's `sys_member.role` there is `member`; expects \"… has a public sharing model, so a share row on it is consulted only for an external member of the record's organization, and the recipient is not one\" |\n| comments | \"refused for the OWD alone\", \"caller- and record-independent\" | the D7 verdict on a public object reads whether the recipient is an `external` member of the record's organization; the retired rules' `position` recipients were that organization's staff, which is the population the contrast now uses. The header's `showcase_project` sentence says \"nothing to widen for the organization's staff\" |\n\nThe `showcase_contact` half (a share on a private-OWD object is accepted) is unchanged.\n\n## Verification (local, worktree on `main` `a57643d3`, then merged with `main` `9f390945`)\n\n- The file, at `c29e83c4`: `os-verify-lock.sh -c 'pnpm --filter @objectstack/dogfood exec vitest run test/showcase-d3-d4-capabilities.dogfood.test.ts'` → `VERDICT command-exit 0`, Tests 5 passed (5).\n- Ablation 1, the pin tells the reasons apart (`scripts/ablation-replace.mjs`, wrap mode): `recordId: pjId` → `recordId: 'pj_absent'`, anchor 1 → 0, blob `3b0184f2` → `1593274b`. Red, 1 failed / 4 passed, received \"… and that organization could not be resolved\". Restored: blob equals HEAD, `git diff HEAD` empty.\n- Ablation 2, the pin catches the verdict admitting staff: in `plugin-sharing/src/sharing-service.ts`, `if (recipient === 'external') return null;` → `if (recipient === 'external' || recipient === 'internal') return null;` (hold mode, blob `c1f616f5` → `d0e5e5e9`), rebuilt `plugin-sharing`; `ablation-dist-preflight.mjs` found the marker in both `dist/` bundles. Red, 1 failed / 4 passed, \"promise resolved … instead of rejecting\". Restored: blob equals HEAD, rebuilt (cache hit, 6 files), preflight `--absent` passes, tree clean; the file is green again (5/5).\n- `pnpm exec eslint --no-inline-config` on the file: exit 0. `tsc --noEmit --listFiles` for `@objectstack/dogfood` under the lock: exit 0, the file listed once.\n- Final head `61e0a268` (this commit merged with `main` `9f390945`, which touches only `core`'s import coercion), closure rebuilt under the lock:\n  - Full dogfood battery, `os-verify-lock.sh -c 'pnpm --filter @objectstack/dogfood test'` (no shard, no path): `VERDICT command-exit 0`, Test Files 292 passed / 3 skipped (295), Tests 2508 passed / 18 skipped (2526).\n  - `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 58 commands; all 58 exit 0, each exit captured before any pipe. Two first answered exit 3 (PREREQUISITE NOT MET: the pinned control commit for `check-plugin-teardown-shape --self-test` absent from the shallow clone, and seven dists outside the dogfood closure for `check:dual-build-cjs-loads`); after fetching that commit and building those seven packages both re-ran exit 0. `--ran` reconciliation: 58 derived, 58 run, 0 NOT-MEASURED, 0 UNRUN.\n- CI skips the `Dogfood Regression Gate` shards on `pull_request` and `merge_group`, so the CI proof for shard 1/3 is `main`'s first push battery after this lands.\n\n## Acceptance notes\n\n- **Prose that #25591 left stale, outside this card's surface, no checker reads it:** the header of `examples/app-showcase/src/security/sharing-rules.ts` says that on `showcase_project` / `showcase_task` \"no sharing rule can ever take effect there\", and `examples/app-showcase/test/inert-wirings.test.ts` §6's docblock describes the refusal as the object-only one. Since #25591 a rule there is effective for external recipients. Noted, not filed.\n- **Merge freeze:** opened as a draft during the 18.1.0 freeze; it is landed only after the coordinator relays the unfreeze.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_014rFBGqoBLiroi35e82xEa7)_\n"
+}

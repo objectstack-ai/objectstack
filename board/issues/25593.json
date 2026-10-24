@@ -1,0 +1,32 @@
+{
+  "number": 25593,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): an app repo's business rationale is reviewed by the director seat its project summons; an app's director is its own maintainer",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T03:09:46Z",
+  "updated_at": "2026-10-24T03:18:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25593",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DMMchS2pMx7VafJmdzGaxFv)_\n\nFixes #25558\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读(草稿)\n\n- **改了什么**:把批 #10 裁决 D(评论 6378083450,您 01:17:34Z「#25558 记为 D」)写进 pm-dispatch:应用仓卡的业务理由由该应用项目召唤的总监席做首触复核,三出口同分诊,没把握的报该应用自己的总监(人)裁;第三方应用的总监是其自身维护者。规则文字只写角色,不出现登录名。\n- **为什么改**:应用仓没有分诊席,#25552 落地后立卡人与判断人可能是同一席;您 00:46:47Z 还点出「第三方会开发应用，不是都有我来审核」。\n- **风险与代价(含回滚)**:纯规则文本,三处:`lanes/director.md` +1 行职责、`lanes/triage.md` 在「应用仓无分诊席」后 +1 行、`cross-repo-coordination.md` 机械三务一行原地改。两处上限 director.md 87→88、triage.md 7→8,已在 Skills 席位线程用决策卡请您点头,点头前不落地。一次 revert 可回。\n- **你要做的(一个动作)**:在 Skills 席位线程的决策卡上选「同意抬上限」。之后按您 14:14Z 的长期授权,复核通过、CI 全绿由席位落地。\n\n## What changed\n\n| File | Change |\n|:--|:--|\n| `references/lanes/director.md` (87 → 88) | +1 under 授权与形态: 「应用仓召唤本席复核卡的业务理由首触,三出口同分诊;没把握 ⇒ 报该应用的总监(人)裁。」 |\n| `references/lanes/triage.md` (7 → 8) | +1 after 「应用仓无分诊席」: 「应用仓业务理由由该项目召唤的总监席复核;第三方应用的总监是其自身维护者。」 (the ruling's own sentence) |\n| `references/cross-repo-coordination.md` (51, in place) | 机械三务: 「自做首触(含 `finding` 与业务理由,判据评论同分诊)」 → 「自做首触(含 `finding`;业务理由归召唤的总监席)」 |\n| `scripts/pm/check-skill-line-ratchet.mjs` | ceilings director.md 88, triage.md 8, each row's comment citing ruling 6378083450; director.md is the destination of a declared cross-file move, so its +1 is also recorded as a `ruledRaises` entry on that move |\n\nRuling items 3 (app cards that need a platform change go to objectstack's triage) and 4 (the director's daily-digest sampling demoted to a fallback) describe existing behaviour and add no text. Every edited line is at or under 120 bytes; no adjacent pair in either raised file merges under 120 bytes, so the two lines could not be paid in place.\n\n## Gates\n\nOn this head: `pnpm check:pm-skill-ratchet` ✓ (director.md 88/88, triage.md 8/8, cross-repo-coordination.md 51/51; the director.md move reads +17 less 1 ruled line against −17), `pnpm check:pm-skill-id-lint` ✓, `pnpm check:skill-frame-sync` ✓, `pnpm check:skill-frame-freshness` ✓, `pnpm check:pm-governed-prose` ✓, `node scripts/check-commit-card-trailers.mjs --range origin/main..HEAD` ✓. No package moves: `skip-changeset`.\n\n## Acceptance notes\n\n- Governed surface `.claude/**` (Tier S). Landing waits on the maintainer's answer to the ceiling-raise card, then a `CONTRACT_REVIEW_TIER` PASS record on the head and green checks.\n- Built on `main` after #25552 (which wrote 「应用仓无分诊席」 into `lanes/triage.md`) and #25585.\n- Opened through the fleet-write relay `pr_create`; every later write goes through the relay too.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01REMuzhz6MWRjg8uohedMnM\n"
+}

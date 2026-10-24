@@ -2,8 +2,8 @@
   "number": 25570,
   "kind": "issue",
   "title": "service-automation: a hosted environment has no way to enable `schedule` / `time_relative` flows for an installed app (OS_AUTOMATION_SCHEDULED_WORK_ENABLED is deployment-wide and off on cloud)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,19 +14,22 @@
     "area:workflow",
     "domain:server",
     "enhancement",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-24T01:25:03Z",
-  "updated_at": "2026-10-24T01:25:03Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-24T05:20:19Z",
+  "closed_at": "2026-10-24T05:18:40Z",
+  "closed_by": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25570",
-  "body": "Ruled: 6377885876 · batch #9 item 1 (#25496, 6377842908) · letter B · 2026-10-24T00:43:45Z (a per-environment switch the tenant admin or operator turns on; multi-organisation shared kernels stay off)\n\nFiled from the objectstack-ai/hotsrm v0.1 platform evaluation (2026-10-23, spec 18.0.0, probes run with `@objectstack/verify`). Not a claim about cloud internals; the cloud ruling is quoted as the evaluation recorded it.\n\n## What was measured\n- A package that declares a `schedule` flow (daily certificate-expiry sweep) and `time_relative` flows (30/15/7-day reminders) installs cleanly, but none of them run: `/automation/_status` answers `disabled by deployment policy`.\n- They are gated by the deployment switch `OS_AUTOMATION_SCHEDULED_WORK_ENABLED`, default off. Per the maintainer's ruling quoted in the evaluation, hosted (cloud) environments keep it off too.\n- With the switch on, everything works as designed: `time_relative` fires once per record and repeats are idempotent, the cron sweep marks expired certificates, `multi: true` bulk updates fire record flows row by row (schedule.test, flows.test in the evaluation).\n\n## Why it matters for an app\nCertificate-expiry alerting is one of three things in hotsrm v0.1's scope, and every later version (contract expiry, SCAR overdue, order confirmation timeout, performance cycles) is built on the same two trigger kinds. An app author has no supported path on a hosted environment today. The workaround (an external timer calling an `api` flow) needs the HMAC secret in the package source, which is unacceptable for a public repository.\n\n## Wanted\nOne of:\n- a per-environment or per-package enablement (an allow-list the tenant admin or the cloud operator can set) instead of the deployment-wide switch, or\n- ~~scheduled work on by default on hosted environments, with the operator switch as the opt-out, or~~ (not chosen — ruling B keeps the switch off by default; 6377885876)\n- ~~a documented ruling that scheduled work is not available on hosted environments, so app authors design around it from the start.~~ (not chosen; 6377885876)\n\n## Acceptance\nAn app that declares a `schedule` flow is installed on a hosted environment and the flow runs on its cron without the app author touching deployment configuration, or the docs say plainly that it cannot.\n\nDedupe words: OS_AUTOMATION_SCHEDULED_WORK_ENABLED hosted cloud schedule time_relative disabled by deployment policy per-tenant enable.\n\n---\n\nRe-filed as `objectstack-fleet[bot]` from #25442, same body and labels. #25442 was written off the fleet relay, under the maintainer's personal account, by a project-thread session through GitHub MCP; pm-dispatch allows content writes only through the relay. #25442's thread (triage, ruling, comments) stays there for reference; this card replaces it in the queue.\nSession: `session_018fnREjMeK9XQeHDwkJXKMW`"
+  "body": "Ruled: 6380294239 · re-ruling of batch #9 item 1 sub-item #25442 · letter D · 2026-10-24T05:17:26Z (nothing to build: hosted environments already arm scheduled work per kernel by plan — Team and above run `schedule` / `time_relative`, Free is off by cloud#2337 ruling C; the evaluation measured a local verify stack with `OS_AUTOMATION_SCHEDULED_WORK_ENABLED` unset; ruling G on #17396 untouched; closed not planned; hotsrm docs owe one line; supersedes letter B below)\n\n~~Ruled: 6377885876 · batch #9 item 1 (#25496, 6377842908) · letter B · 2026-10-24T00:43:45Z (a per-environment switch the tenant admin or operator turns on; multi-organisation shared kernels stay off)~~ (superseded by D, 6380294239)\n\nFiled from the objectstack-ai/hotsrm v0.1 platform evaluation (2026-10-23, spec 18.0.0, probes run with `@objectstack/verify`). Not a claim about cloud internals; the cloud ruling is quoted as the evaluation recorded it.\n\n## What was measured\n- A package that declares a `schedule` flow (daily certificate-expiry sweep) and `time_relative` flows (30/15/7-day reminders) installs cleanly, but none of them run: `/automation/_status` answers `disabled by deployment policy`.\n- They are gated by the deployment switch `OS_AUTOMATION_SCHEDULED_WORK_ENABLED`, default off. ~~Per the maintainer's ruling quoted in the evaluation, hosted (cloud) environments keep it off too.~~ (premise corrected by ruling D: hosted Team-and-above kernels run scheduled work by plan; only Free is off)\n- With the switch on, everything works as designed: `time_relative` fires once per record and repeats are idempotent, the cron sweep marks expired certificates, `multi: true` bulk updates fire record flows row by row (schedule.test, flows.test in the evaluation).\n\n## Why it matters for an app\nCertificate-expiry alerting is one of three things in hotsrm v0.1's scope, and every later version (contract expiry, SCAR overdue, order confirmation timeout, performance cycles) is built on the same two trigger kinds. An app author has no supported path on a hosted environment today. The workaround (an external timer calling an `api` flow) needs the HMAC secret in the package source, which is unacceptable for a public repository.\n\n## Wanted\nOne of:\n- ~~a per-environment or per-package enablement (an allow-list the tenant admin or the cloud operator can set) instead of the deployment-wide switch, or~~ (letter B, superseded by D)\n- ~~scheduled work on by default on hosted environments, with the operator switch as the opt-out, or~~\n- a documented ruling ~~that scheduled work is not available on hosted environments~~ — ruled D: scheduled work runs on hosted Team-and-above plans and on self-hosted kernels with the variable set; Free is off (cloud#2337 ruling C); the docs say so, so app authors design to it from the start.\n\n## Acceptance\nAn app that declares a `schedule` flow is installed on a hosted environment and the flow runs on its cron without the app author touching deployment configuration, or the docs say plainly that it cannot.\n\nDedupe words: OS_AUTOMATION_SCHEDULED_WORK_ENABLED hosted cloud schedule time_relative disabled by deployment policy per-tenant enable.\n\n---\n\nRe-filed as `objectstack-fleet[bot]` from #25442, same body and labels. #25442 was written off the fleet relay, under the maintainer's personal account, by a project-thread session through GitHub MCP; pm-dispatch allows content writes only through the relay. #25442's thread (triage, ruling, comments) stays there for reference; this card replaces it in the queue.\nSession: `session_018fnREjMeK9XQeHDwkJXKMW`"
 }

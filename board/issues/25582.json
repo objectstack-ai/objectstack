@@ -14,7 +14,7 @@
     "area:records",
     "domain:server",
     "enhancement",
-    "pm:dispatched",
+    "pm:queue",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +23,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-24T01:31:23Z",
-  "updated_at": "2026-10-24T01:40:14Z",
+  "updated_at": "2026-10-24T05:55:07Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25582",
   "body": "Ruled: 6377844879 · batch #9 item 3a · letter A · 2026-10-24T00:43:45Z (proposals 1, 2, 4; not 3)\n\n## Context\n\nTrial import of a simulated messy supplier ledger (hotsrm#10, the kind of sheet a purchasing department keeps in Excel for years). These are the cell shapes that failed rows which a person reads without hesitation. Each failure rejects the whole row, including rows where the bad cell is an optional field.\n\n| Cell | Field type | Result | Expected |\n|---|---|---|---|\n| `2011.07.01` | date | `invalid_date` | 2011-07-01 (`YYYY.MM.DD` is the most common Chinese written date form) |\n| `20090615` | date | `invalid_date` | 2009-06-15 (8-digit compact date, common in ERP exports) |\n| `2005/3/8` | date | accepted ✓ | — |\n| `CN` | select, option value `cn` | `invalid_option` | match option **values** case-insensitively (labels already are) |\n| `中国大陆` / `物流` | select (labels `中国` / `物流商`) | `invalid_option` | fine to refuse, but there is no way to declare **synonyms** on an option or picklist, so every legacy sheet needs a hand clean-up |\n\nAnd one reporting problem: when a row has several bad cells, only the **first** coercion error is reported (`coerceRow` collects all errors, the runner keeps `errors[0]`). The operator fixes one cell, re-runs, finds the next one. Two to three rounds per row in our trial.\n\n## Proposal\n\n1. Accept `YYYY.MM.DD` and `YYYYMMDD` in `parseDateCell` (unambiguous, year first).\n2. Case-insensitive match on option values.\n3. ~~Optional `aliases: string[]` on select options / picklist options, used by import coercion only.~~ (not in letter A — a new permanent metadata key waits for a second app; ruling 6377844879)\n4. Report all cell errors of a row (e.g. `errors: [{ field, code, message }]` next to the existing first-error keys).\n\n## Temporary measure in hotsrm\n\nThe import guide lists a cleaning checklist (date format, option labels, ISO country labels) to run on the sheet before importing.\n\n---\n\nRe-filed as `objectstack-fleet[bot]` from #25493, same body and labels. #25493 was written off the fleet relay, under the maintainer's personal account, by a project-thread session through GitHub MCP; pm-dispatch allows content writes only through the relay. #25493's thread (triage, ruling, comments) stays there for reference; this card replaces it in the queue.\nSession: `session_018fnREjMeK9XQeHDwkJXKMW`"

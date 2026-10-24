@@ -1,0 +1,35 @@
+{
+  "number": 25607,
+  "kind": "pull_request",
+  "title": "fix(release): annotate-shipped passes over a reverted cut instead of reading it as the version commit",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T06:42:02Z",
+  "updated_at": "2026-10-24T07:01:31Z",
+  "closed_at": "2026-10-24T07:01:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-24T07:01:29Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25607",
+  "body": "Clause-②: no\nMetadata-protocol: none\n\n**Release fix for 18.1.0.** This is the second landing the merge freeze lets through, after #25605.\n\n## Defect\n\n#25605 reverted the unpublished 18.1.0 version commit `74fa3cb6d`, which moved `packages/cli/package.json` back to 18.0.0. When the refresh stroke regenerated the Version Packages PR as #25606, the root `version` script's first step, `release-pending-publish.mjs annotate-shipped`, went wrong:\n\n- `locateLastVersionCommit` took the revert as the commit that introduced 18.0.0.\n- 18.0.0 is on npm, so it gave every changeset the revert restored the lead line \"**Shipped in 18.0.0**, whose CHANGELOG missed this entry; listed here one release late.\"\n- #25606's CHANGELOGs carry that line 412 times. The true count is 8.\n\n## Fix\n\n- A commit that moves the CLI version **back** did not introduce the version it returns to. The walk passes over it and over the reverted cut's span, and keeps looking for the forward commit that did.\n- `compareVersions` orders `X.Y.Z` and `X.Y.Z-tag.N`. A prerelease sorts before its release, and numeric prerelease ids compare as numbers.\n- `findVersionCommit`, the release gate's `select`, is unchanged. After the next cut, the head's version (18.1.0) is introduced by a forward commit, so it never meets this case.\n\n## Evidence\n\n- `node scripts/release-pending-publish.mjs --self-test`: 115 cases across 29 batteries pass. That includes a new battery that builds the 18.1.0 shape: a cut that leaves one changeset unconsumed, then a later cut that consumes everything, is never published, and is reverted. Only the first cut's leak is annotated.\n- On `main` (`393769720`), `annotate-shipped` with this change reads the last version commit as `06cab4849a` (18.0.0-next.5 → 18.0.0) and annotates 8 changesets. Their adding commits are `6b9e6df`, `7cacad5`, `950f949`, `9a06f0b`, `abd5acd`, `de9cd1f`, `df8bb40` and `e5b3de0`, exactly the 8 that `74fa3cb6d`'s own cut annotated.\n\n## After it lands\n\nThe relay's refresh stroke regenerates the Version Packages PR again. Its CHANGELOGs then carry the 8 true \"Shipped in 18.0.0\" lines and no others.\n\n`skip-changeset`: `scripts/` publishes nothing from any released package.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

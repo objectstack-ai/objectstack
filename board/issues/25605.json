@@ -1,0 +1,38 @@
+{
+  "number": 25605,
+  "kind": "pull_request",
+  "title": "fix(release): revert the red 18.1.0 version commit and fix the dogfood proof that reddened it",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T05:29:31Z",
+  "updated_at": "2026-10-24T06:34:53Z",
+  "closed_at": "2026-10-24T06:34:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-24T06:34:51Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25605",
+  "body": "Clause-②: no\nMetadata-protocol: none\n\n**Release fix for 18.1.0.** The maintainer chose to revert the version commit and re-cut 18.1.0. This pull is the one landing the merge freeze lets through.\n\n## What happened\n\n- #24876 merged as `74fa3cb6d` at 04:58Z. Its release run (40064441171) was refused by `Full battery green at the version commit`. The reason: the newest full-battery run at or before it, the 04:01Z hourly run 40060651935 on `a57643d3d`, concluded `failure`.\n- The red is one dogfood test. `showcase-d3-d4-capabilities.dogfood.test.ts` (\"[#9237] the grant the rule reconciles is one the gates CONSULT\") still matched the pre-#25549 sentence `'showcase_project' is not under record-sharing enforcement`. #25591 (#25549) changed `SharingService.inertGrantReason` on purpose: on a public object a share row is now consulted for an external member of the record's organization. The refusal therefore names the recipient's standing: \"has a public sharing model, so a share row on it is consulted only for an external member of the record's organization, and that organization could not be resolved\".\n- Dogfood runs on main's push, hourly and dispatch runs only, never in the merge queue, so the red first showed on `main`. The push and 05:00Z hourly runs on `74fa3cb6d` itself fail the same way.\n- The release gate never reads a run after the version commit, so no re-run and no later fix can turn `74fa3cb6d` green. A new version commit is needed.\n\n## The diff\n\n1. `test(dogfood)`: the contrast now matches the public-OWD sentence #25549 writes, up to \"consulted only for an external member\". The object and the code stay asserted, and a comment records why the wording moved. Locally, `vitest run test/showcase-d3-d4-capabilities.dogfood.test.ts` in `packages/qa/dogfood` gives 5 passed (5).\n2. `Revert \"chore: version packages (#24876)\"`: a plain `git revert 74fa3cb6d` with no conflicts. Every package version goes back to 18.0.0, and the 265 changesets it consumed come back.\n   - These include five that landed after the Version Packages PR was generated and so were not in its changelog: #25591 (#25549, `minor`, semantic), #25592, #25596 and two patches. Their code is in `74fa3cb6d`'s tree.\n   - Once this lands, the refreshed Version Packages PR versions 18.1.0 again, with a changelog that names everything that ships.\n\nNothing was published. `npm view @objectstack/cli version` still answers 18.0.0, and no 18.1.0 tag or GitHub Release exists.\n\n## After it lands\n\n- The fleet relay's refresh stroke (`release.yml`, `refresh_version_pr: true`) regenerates the Version Packages PR.\n- The maintainer approves its checks and merges it, then approves the `release` deployment once `Full battery green at the version commit` reads the new version commit green.\n\n## Out of scope\n\nNo product code, `content/docs/releases/`, or workflow changes. The 18.1 release page (#25460, #25553, #25590) already describes 18.1.0.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

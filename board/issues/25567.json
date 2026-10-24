@@ -2,7 +2,7 @@
   "number": 25567,
   "kind": "pull_request",
   "title": "refactor(service-automation): move the run-context and resume bodies into run-resume.ts (#25222 slice 6)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-24T01:13:45Z",
-  "updated_at": "2026-10-24T01:46:44Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-24T02:33:59Z",
+  "closed_at": "2026-10-24T02:33:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-24T02:33:57Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/25567",

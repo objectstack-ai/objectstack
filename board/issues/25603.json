@@ -1,0 +1,34 @@
+{
+  "number": 25603,
+  "kind": "pull_request",
+  "title": "docs(sharing): record the external-recipient arm on ADR-0111 D7 and the grant contract",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "needs-user-decision",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T04:37:41Z",
+  "updated_at": "2026-10-24T05:24:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25603",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6Jao9sUfiwLBMYyhPAkzpzFo9P)_\n\nPart of #25549\n\nClause-②: no\nMetadata-protocol: none\n\nThe Tier H follow-up to #25591, which landed letter A of the ruling on #25549 (record 6377844010): on a public object, a share or sharing rule is admitted for a recipient who is an `external` member of the record's organization. This PR records that decision where the governing texts live, and carries the two wording nits from the seat's contract review of #25591.\n\n## 维护者速读(草稿)\n\n**改了什么：** 只改文字，不改行为。ADR-0111 D7 第 2 条加一行带日期的修订，写明「全员可读写」对象上的分享可以给该组织的外部成员（供应商门户用户），其他人照旧拒绝；`ISharingService.grant` 的接口说明同步改正；共享规则跳过收件人时的那句提示，补上「记录所属组织解析不出来」这种情况；一处测试注释里写错的文件名改正。\n\n**为什么改：** #25591 已按裁决 A 落地，但 ADR 和接口说明仍写着「公开对象上的分享永远无效」，以后读文档的人（包括 AI）会被误导。ADR 属于受管文件，需要单独的 PR 由你批准。\n\n**风险与代价（含回滚）：** 无运行时风险，提示文字改了一句（没有程序解析这句话）。回滚即还原这一个提交。\n\n**席位意见：**\n\n**你要做的：** 看一眼 ADR 修订那一段的措辞，同意即批准合并。\n\n## What changes\n\n- **ADR-0111 D7 item 2** (`docs/adr/0111-record-share-management-authority-and-verb-boundary.md`): one dated amendment paragraph under the item, the text drafted in the os-dev-report of #25591 (comment 6378915159 on #25549).\n- **`ISharingService.grant` docblock** (`packages/spec/src/contracts/sharing-service.ts`): \"a share on a public / bypass / owner-less / `controlled_by_parent` object enforces nothing\" becomes \"a bypass / owner-less / `controlled_by_parent` object enforces nothing; on a public object it is admitted only for a recipient who is an `external` member of the record's organization\". Comment only.\n- **Review nit 1, the pass note** (`plugin-sharing` `sharing-rule-service.ts` `internalHalfNote`): the per-recipient refusal a pass skips is also raised when a record's organization cannot be resolved, which admits no recipient. The note now says so: \"rows were written only for external members of each record's organization; none for the other recipients this rule expands to (internal members already reach its records, and a record whose organization could not be resolved admits no recipient)\". The `note` field's docblock says the same. Two test assertions follow the text.\n- **Review nit 2** (`system-caller-inert-grant.test.ts`, the `RULE_ABORTING_OBJECTS` comment): it named `external-recipient-public-object.test.ts`, which does not exist; it now points at block 3 of the same file.\n- **Changeset** `.changeset/25549-external-share-followup-wording.md`: `@objectstack/plugin-sharing` and `@objectstack/spec` `patch`.\n\n## Verification (head `3aae2160`; re-reconciled at `297cfe51` after the sharing-service.mdx drift fix: 123 derived, 123 run, 0 NOT-MEASURED)\n\n- `pnpm --filter @objectstack/plugin-sharing typecheck` exit 0; the suite under `os-verify-lock`: 55/55 files, 1233 tests passed.\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` at `3aae2160` derived 100 families, each run with its exit code captured before any pipe. First sweep: 98 exit 0, 2 exit 3 (PREREQUISITE NOT MET: workspace dists for `check:dual-build-cjs-loads` and `check:i18n`); after `check:type-check-debt`'s locked workspace build, both re-ran exit 0. `--ran` reconciliation: 100 derived, 100 run, 0 NOT-MEASURED, 0 UNRUN.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01AjwMndyviznGagEUcX7QVx"
+}

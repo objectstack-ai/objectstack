@@ -2,7 +2,7 @@
   "number": 25587,
   "kind": "pull_request",
   "title": "docs(adr): ADR-0073 amendment and ADR-0096 row for the system flow's refused identity-assignment writes",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-24T02:13:00Z",
-  "updated_at": "2026-10-24T02:23:58Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-24T02:43:52Z",
+  "closed_at": "2026-10-24T02:43:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-24T02:43:50Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/25587",
