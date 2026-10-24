@@ -17,6 +17,7 @@ import {
     resolveNamedMapping, applyMappingToRows, refuseUnknownMappingTargets, type MappingArtifactLike,
 } from './import-mapping.js';
 import { asXlsxLoadInput, loadExcelJs } from './xlsx-module.js';
+import { isBlank } from '@objectstack/core';
 
 /**
  * Minimal RFC-4180-style CSV parser used by the bulk-import endpoint
@@ -192,6 +193,112 @@ export async function parseXlsxToRows(
         out.push(obj);
     }
     return out;
+}
+
+/**
+ * [#25491] The per-cell rules of one inline `FieldMappingEntry`
+ * (`ImportRequestSchema.mapping` in its array form), keyed by the entry's
+ * target: the column has already been renamed to it when the rules run.
+ */
+interface InlineEntryRule {
+    sourceField: string;
+    targetField: string;
+    transform: InlineTransform;
+    hasDefault: boolean;
+    defaultValue?: unknown;
+    required: boolean;
+}
+
+/**
+ * The transforms an inline mapping entry may declare that this path applies,
+ * each to a string cell (any other value passes through). `none` and `lookup`
+ * copy the cell: a `lookup` cell is resolved to a record id by the import's
+ * reference resolution downstream, as the named mapping's `lookup` is.
+ */
+const INLINE_TRANSFORMS = {
+    none: (s: string) => s,
+    lookup: (s: string) => s,
+    trim: (s: string) => s.trim(),
+    uppercase: (s: string) => s.toUpperCase(),
+    lowercase: (s: string) => s.toLowerCase(),
+} as const;
+type InlineTransform = keyof typeof INLINE_TRANSFORMS;
+
+type ImportRefusal = { ok: false; status: number; code: string; error: string };
+
+/**
+ * Read one inline entry's rules, refusing a transform this path does not
+ * apply instead of running the import without it. `date_format` is declared
+ * by the spec, but an entry carries no format for it to apply. Returns no
+ * rule for a plain rename (no transform, no default, not required), which
+ * leaves the row exactly as the rename built it.
+ */
+function readInlineEntryRule(
+    e: { sourceField: string; targetField: string; transform?: unknown; defaultValue?: unknown; required?: unknown },
+): { ok: true; rule?: InlineEntryRule } | ImportRefusal {
+    const transform = e.transform === undefined ? 'none' : e.transform;
+    if (typeof transform !== 'string' || !Object.prototype.hasOwnProperty.call(INLINE_TRANSFORMS, transform)) {
+        const named = typeof transform === 'string' ? `"${transform}"` : String(transform);
+        const why = transform === 'date_format'
+            ? 'a mapping entry carries no date format for it to apply; a cell mapped to a date or datetime field is already parsed as a date, so drop the transform'
+            : `the transforms a mapping entry may declare are ${Object.keys(INLINE_TRANSFORMS).join(', ')}`;
+        return {
+            ok: false, status: 400, code: 'UNSUPPORTED_TRANSFORM',
+            error: `Mapping entry "${e.sourceField}" to "${e.targetField}" declares transform ${named}, which the import path does not apply, `
+                + `so the import is refused rather than run with that transform skipped: ${why}.`,
+        };
+    }
+    const hasDefault = e.defaultValue !== undefined;
+    const required = e.required === true;
+    if (transform === 'none' && !hasDefault && !required) return { ok: true };
+    return {
+        ok: true,
+        rule: {
+            sourceField: e.sourceField, targetField: e.targetField,
+            transform: transform as InlineTransform, hasDefault, defaultValue: e.defaultValue, required,
+        },
+    };
+}
+
+/**
+ * Apply each inline entry's rules to every row, in place, before the cells
+ * are coerced: the transform to a string cell, then `defaultValue` to a cell
+ * that is blank (what cell coercion calls blank: absent, empty, whitespace or
+ * one of the request's `nullValues`), then `required` to what is left. A
+ * required cell still blank refuses the whole request before any row is
+ * written, on the dry run and the commit alike, naming the column and the
+ * rows (numbered as the row report numbers them).
+ */
+function applyInlineEntryRules(
+    rows: Array<Record<string, any>>,
+    rules: InlineEntryRule[],
+    nullValues: string[] | undefined,
+): ImportRefusal | undefined {
+    const misses = new Map<InlineEntryRule, number[]>();
+    rows.forEach((row, i) => {
+        for (const rule of rules) {
+            let value = row[rule.targetField];
+            if (typeof value === 'string') value = INLINE_TRANSFORMS[rule.transform](value);
+            if (rule.hasDefault && isBlank(value, nullValues)) value = rule.defaultValue;
+            if (value !== undefined) row[rule.targetField] = value;
+            if (rule.required && isBlank(value, nullValues)) {
+                const at = misses.get(rule) ?? [];
+                at.push(i + 1);
+                misses.set(rule, at);
+            }
+        }
+    });
+    if (misses.size === 0) return undefined;
+    const listed = [...misses].map(([rule, at]) => {
+        const shown = at.length > 10 ? `${at.slice(0, 10).join(', ')} and ${at.length - 10} more` : at.join(', ');
+        return `"${rule.sourceField}" to "${rule.targetField}" (row${at.length === 1 ? '' : 's'} ${shown})`;
+    });
+    return {
+        ok: false, status: 400, code: 'MISSING_REQUIRED_FIELD',
+        error: `The mapping marks ${listed.length === 1 ? 'a column' : 'columns'} required that some rows leave blank: ${listed.join('; ')}. `
+            + 'The import is refused before any row, on the dry run and the commit alike. '
+            + 'Fill those cells, give the entry a defaultValue, or drop required from it.',
+    };
 }
 
 /** Everything the import runner needs, parsed & validated from a request body. */
@@ -453,12 +560,18 @@ export async function prepareImportRequest(
     }
 
     // Normalize `mapping` to a `{ sourceColumn: targetField }` record. Accepts
-    // either that compact form or a FieldMappingEntry[].
+    // either that compact form or a FieldMappingEntry[]. An entry's own
+    // per-cell rules (`transform` / `defaultValue` / `required`) are kept
+    // beside the rename and applied once the rows are built (#25491).
     const mapping: Record<string, string> = {};
+    const entryRules: InlineEntryRule[] = [];
     if (Array.isArray(body?.mapping)) {
         for (const e of body.mapping) {
             if (e && typeof e.sourceField === 'string' && typeof e.targetField === 'string') {
                 mapping[e.sourceField] = e.targetField;
+                const read = readInlineEntryRule(e);
+                if (!read.ok) return read;
+                if (read.rule) entryRules.push(read.rule);
             }
         }
     } else if (body?.mapping && typeof body.mapping === 'object') {
@@ -497,6 +610,11 @@ export async function prepareImportRequest(
 
     if (rows.length > maxRows) {
         return { ok: false, status: 413, code: 'PAYLOAD_TOO_LARGE', error: `Import limit is ${maxRows} rows per request (got ${rows.length}).` };
+    }
+
+    if (entryRules.length > 0) {
+        const refused = applyInlineEntryRules(rows, entryRules, nullValues);
+        if (refused) return refused;
     }
 
     // Resolve the object's field metadata so cells coerce to storage values

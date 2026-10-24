@@ -165,9 +165,10 @@ describe('[#20935] analytics — a field the caller is served masked is readable
         getQueryableFields: () => { throw new Error('reader unavailable'); },
         logger,
       });
+      // [#25561] No verdict was reached: the fault's 503, not a masked field's 403.
       await expect(
         service.query({ cube: LEDGER, measures: ['count'], dimensions: ['title'] } as never, CALLER),
-      ).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403, object: LEDGER });
+      ).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503, object: LEDGER });
       expect(executed).toEqual([]);
       expect(error.mock.calls.map((c) => String(c[0])).join('\n')).toMatch(/field-level read admission could not be resolved .*\(fail-closed\)/);
     });

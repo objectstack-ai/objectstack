@@ -21,8 +21,7 @@ import {
 } from './screen-input-contract.js';
 import type { Logger } from '@objectstack/spec/contracts';
 import type { FlowUnboundCause } from '@objectstack/spec/contracts';
-import { FLOW_HOOK_SECRET_KEY, flowCredentialClassLabel, flowCredentialPositions } from './flow-credential-projection.js';
-import { FlowSchema, FLOW_RESERVED_NODE_TYPES, FLOW_STRUCTURAL_NODE_TYPES, validateControlFlow, collectFlowGraphs } from '@objectstack/spec/automation';
+import { FLOW_RESERVED_NODE_TYPES, FLOW_STRUCTURAL_NODE_TYPES } from '@objectstack/spec/automation';
 // [#14328] The ONE answer to "which trigger kind does this flow ask for?" —
 // shared with `defineStack`'s trigger-capability refusal and `@objectstack/lint`'s
 // `validate-flow-trigger-readiness`, so the runtime cannot drift from what
@@ -33,7 +32,7 @@ import {
     scheduledWorkDisabledReason,
     type ScheduledWorkPolicy,
 } from '@objectstack/types';
-import { applyConversionsToFlow, CONVERSION_TODO_CODE, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
+import { CONVERSION_TODO_CODE, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
 // [ADR-0126 §7.3, #20761] "Does a code package ship this flow?" is NOT read
 // off a definition here. The subflow guards, the arming gate and the
 // activation door ask {@link AutomationEngine.packagedFlowOwner} — the loader's
@@ -70,17 +69,10 @@ import { summarizeRun } from './run-summary.js';
 // provider factory's text), so it renders it as structured `meta` rather than
 // interpolating it into the log message. See ./thrown-cause-diagnostics.ts.
 import { describeThrownForLog } from './thrown-cause-diagnostics.js';
-// [#15788] The refusing `end` node renders its `message` through the SAME
-// interpolator a screen `description` gets — the ruling's own words, so a
-// shared function rather than a second template engine. A value import from
-// `./builtin/` is safe in this direction: `template.ts` imports only
-// `../guard-refusal.js` and package-external contracts, so nothing it pulls in
-// reaches back here.
-import { renderTextSlot, FlowTextTemplateError } from './builtin/template.js';
 // [#22450] The one bundle-locale negotiation rule (exact → case-insensitive →
 // base language → variant expansion), asked about the locales the i18n service
 // holds — the same question objectql's `negotiatedMessageLocale` asks it.
-import { flowRefusalMessageKey, resolveBundleLocale } from '@objectstack/spec/system';
+import { resolveBundleLocale } from '@objectstack/spec/system';
 // [#25222] The registration-time checks' bodies, and the declarations only
 // they read. Each `AutomationEngine` method of the same name calls its body.
 import {
@@ -161,6 +153,76 @@ import {
     cloneVariablesAtPause,
     failAncestors,
 } from './run-resume.js';
+// [#25222] The dispatch and suspension claims' bodies: claiming, settling and
+// reading a dispatch, minting a run id, announcing a degraded advance claim and
+// releasing a suspension. Each `AutomationEngine` method of the same name calls
+// its body.
+import {
+    claim,
+    claimInProcess,
+    settleDispatch,
+    readDispatch,
+    nextRunId,
+    warnAdvanceClaimDegraded,
+    releaseSuspension,
+} from './dispatch-claims.js';
+// [#25222] The flow definitions' bodies: canonicalising, unregistering,
+// refusing and rolling back a flow, reporting its runtime states and trigger
+// bindings, and the function, connector and credential surfaces a flow reads.
+// Each `AutomationEngine` method of the same name calls its body.
+import {
+    resolveFunction,
+    registerConnectorProvider,
+    canonicalizeStoredFlow,
+    canonicalizeFlow,
+    unregisterFlow,
+    recordFlowRefusal,
+    getFlowRuntimeStates,
+    describeUnboundReason,
+    getTriggerBindingAudit,
+    flowCredentialHoldings,
+    hookSecretResolver,
+    rollbackFlow,
+} from './flow-definitions.js';
+// [#25222] The subflow guards' bodies: finding and describing disabled or
+// packaged subflows and their callers, and refusing what would reach a disabled
+// subflow. Each `AutomationEngine` method of the same name calls its body.
+import {
+    describeDisabledFlow,
+    subflowTargets,
+    packagedSubflowCallers,
+    parkedRunsOf,
+    refuseUnderReachingCallers,
+    disabledPackagedSubflows,
+    ledgerDisabledChainReaches,
+    refuseEnableOntoDisabledSubflow,
+    describeDisabledSubflows,
+    rejudgeSubflowCallers,
+    refuseCustomerAuthoredToggle,
+} from './subflow-guards.js';
+// [#25222] The consumed-suspension restore's bodies: resolving a consumed
+// suspension's witnesses, and restoring, peeking at or inspecting one. Each
+// `AutomationEngine` method of the same name calls its body.
+import {
+    rowSupersedesJournal,
+    resolveConsumedSuspensionWitnesses,
+    restoreConsumedSuspension,
+    resolveRestoreChain,
+    peekConsumedSuspension,
+    inspectConsumedSuspension,
+} from './consumed-suspension-restore.js';
+// [#25222] The DAG traversal's node-level helpers: the node-type vocabulary
+// checks a run makes, a failed node's error variable, and rendering refusal
+// messages and flow text slots. Each `AutomationEngine` method of the same name
+// calls its body.
+import {
+    unknownNodeTypes,
+    warnIfNodeTypeVocabularyNeverSealed,
+    setNodeError,
+    renderRefusalMessage,
+    renderFlowTextSlot,
+    translatedFlowTemplate,
+} from './node-text-rendering.js';
 
 // ─── Node Executor Interface (Plugin Extension Point) ───────────────
 
@@ -764,7 +826,7 @@ export const MAX_CONSUMED_SUSPENSIONS = 50;
  * the repair can reach exactly as deep as the cascade could, and a corrupt
  * context cannot make either loop run forever.
  */
-const MAX_RESTORE_CHAIN_HOPS = 32;
+export const MAX_RESTORE_CHAIN_HOPS = 32;
 
 /**
  * [#15222] The child run a parked run is awaiting, read off the correlation
@@ -777,7 +839,7 @@ const MAX_RESTORE_CHAIN_HOPS = 32;
  * to. Naming it once here is what keeps the restore walk and the resume walk
  * reading one fact.
  */
-function nestedChildRunId(correlation: string | undefined): string | undefined {
+export function nestedChildRunId(correlation: string | undefined): string | undefined {
     if (typeof correlation !== 'string') return undefined;
     for (const prefix of ['subflow:', 'map:']) {
         if (correlation.startsWith(prefix)) return correlation.slice(prefix.length) || undefined;
@@ -786,7 +848,7 @@ function nestedChildRunId(correlation: string | undefined): string | undefined {
 }
 
 /** [#15222] One chain member's outcome, projected from its own restore result. */
-function chainEntryOf(runId: string, result: SuspensionRestoreResult): ChainRestoreEntry {
+export function chainEntryOf(runId: string, result: SuspensionRestoreResult): ChainRestoreEntry {
     return {
         runId,
         restored: result.restored,
@@ -1268,7 +1330,7 @@ export interface FlowTextSlotTranslation {
  * whenever there is nothing to negotiate against (no `getLocales`, a throwing or
  * empty answer, no match).
  */
-function negotiatedServiceLocale(service: RefusalI18nService, requested: string): string {
+export function negotiatedServiceLocale(service: RefusalI18nService, requested: string): string {
     if (typeof service.getLocales !== 'function') return requested;
     let available: unknown;
     try {
@@ -2206,7 +2268,7 @@ export const IN_PROCESS_DISPATCH_CLAIM_TTL_MS = 48 * 60 * 60 * 1000;
  *   door refuses it for the same reason (its declared `^17.0.0` floor is a
  *   dependency range, not an age), in the module named above.
  */
-const CONVERSIONS_NOT_REPLAYED_AT_REHYDRATION: readonly string[] = [
+export const CONVERSIONS_NOT_REPLAYED_AT_REHYDRATION: readonly string[] = [
     'flow-decision-mode-inclusive-explicit',
 ];
 
@@ -2225,7 +2287,7 @@ const FLOW_REGISTRATION_TODO_SURFACE = 'flow — a site AutomationEngine.registe
  * check's own words follow, as a refused-shape TODO's do: the site stays as
  * stored, and the flow does not register.
  */
-function flowRegistrationTodo(flowName: string, site: RegistrationCheckSite): ConversionTodoNotice {
+export function flowRegistrationTodo(flowName: string, site: RegistrationCheckSite): ConversionTodoNotice {
     const reason = 'No conversion rewrites it, and registerFlow refuses it: left as stored, the flow is not '
         + `registered at boot and never runs. Flow \`${flowName}\`, ${site.detail}`;
     return {
@@ -2264,7 +2326,7 @@ function flowRegistrationTodo(flowName: string, site: RegistrationCheckSite): Co
  * so the parse never lowers it, so there is no envelope on the parsed side to
  * copy and the recursion finds a string facing a string.
  */
-function graftConditionEnvelopes(converted: unknown, parsed: unknown): unknown {
+export function graftConditionEnvelopes(converted: unknown, parsed: unknown): unknown {
     if (Array.isArray(converted)) {
         if (!Array.isArray(parsed)) return converted;
         let changed = false;
@@ -2796,39 +2858,29 @@ export class AutomationEngine implements IAutomationService {
      *    it — so a store outage never blocks a dispatch, and never double-fires
      *    within one process lifetime either.
      */
-    async claim(key: string): Promise<boolean> {
-        if (this.flowDispatchStore) {
-            try {
-                return await this.flowDispatchStore.claim(key);
-            } catch (err) {
-                this.logger.warn(
-                    `[automation] flow-dispatch claim '${key}' failed against the persisted ledger — ` +
-                        `falling back to in-process dedup for this key (availability over strict-once: ` +
-                        `the dispatch proceeds unless this process already made it; a kernel rebuild may re-dispatch it). ` +
-                        `The store failure is in this record's meta.`,
-                    describeThrownForLog(err),
-                );
-                return this.claimInProcess(key);
-            }
-        }
-        if (!this.dispatchClaimDegradationWarned) {
-            this.dispatchClaimDegradationWarned = true;
-            this.logger.warn(
-                '[automation] no persisted flow-dispatch ledger (no ObjectQL engine, or sys_flow_dispatch not registered) — ' +
-                    'trigger dispatch dedup is IN-PROCESS ONLY and will NOT survive a kernel rebuild: ' +
-                    'the same record/window can be re-dispatched after a restart.',
-            );
-        }
-        return this.claimInProcess(key);
+    claim(key: string): Promise<boolean> {
+        // The body lives in ./dispatch-claims.ts (#25222).
+        const readFlowDispatchStore = () => this.flowDispatchStore;
+        const readDispatchClaimDegradationWarned = () => this.dispatchClaimDegradationWarned;
+        const writeDispatchClaimDegradationWarned = (v: AutomationEngine['dispatchClaimDegradationWarned']) => { this.dispatchClaimDegradationWarned = v; };
+        const host: ThisParameterType<typeof claim> = {
+            get flowDispatchStore() { return readFlowDispatchStore(); },
+            logger: this.logger,
+            claimInProcess: (...a) => this.claimInProcess(...a),
+            get dispatchClaimDegradationWarned() { return readDispatchClaimDegradationWarned(); },
+            set dispatchClaimDegradationWarned(v) { writeDispatchClaimDegradationWarned(v); },
+        };
+        return claim.call(host, key);
     }
 
     /** In-process half of {@link claim}: TTL-pruned check-and-record. */
     private claimInProcess(key: string): boolean {
-        const now = Date.now();
-        this.pruneInProcessDispatchClaims(now);
-        if (this.inProcessDispatchClaims.has(key)) return false;
-        this.inProcessDispatchClaims.set(key, { at: now, outcome: null });
-        return true;
+        // The body lives in ./dispatch-claims.ts (#25222).
+        const host: ThisParameterType<typeof claimInProcess> = {
+            pruneInProcessDispatchClaims: (...a) => this.pruneInProcessDispatchClaims(...a),
+            inProcessDispatchClaims: this.inProcessDispatchClaims,
+        };
+        return claimInProcess.call(host, key);
     }
 
     private pruneInProcessDispatchClaims(now: number): void {
@@ -2858,29 +2910,15 @@ export class AutomationEngine implements IAutomationService {
      * refuses by not writing, never by throwing — a refusal is the invariant
      * working, not a failure to report.
      */
-    async settleDispatch(key: string, outcome: FlowDispatchOutcome): Promise<void> {
-        const store = this.flowDispatchStore;
-        if (store && typeof store.settle === 'function') {
-            try {
-                await store.settle(key, outcome);
-                return;
-            } catch (err) {
-                this.logger.warn(
-                    `[automation] flow-dispatch settle '${key}' → '${outcome}' failed against the persisted ledger — ` +
-                        `the claim stays UNSETTLED, which reads as 'not delivered': a later replay of this window is ` +
-                        `allowed through rather than refused. The store failure is in this record's meta.`,
-                    describeThrownForLog(err),
-                );
-            }
-        }
-        const existing = this.inProcessDispatchClaims.get(key);
-        // Same write rule as the persisted ledger: `succeeded` is absorbing, so
-        // the fallback cannot reopen a re-delivery door the durable path keeps
-        // shut. Kept here rather than imported so the engine stays free of a
-        // dependency on the store module it merely drives.
-        if (existing && !(existing.outcome === 'succeeded' && outcome === 'failed')) {
-            this.inProcessDispatchClaims.set(key, { ...existing, outcome });
-        }
+    settleDispatch(key: string, outcome: FlowDispatchOutcome): Promise<void> {
+        // The body lives in ./dispatch-claims.ts (#25222).
+        const readFlowDispatchStore = () => this.flowDispatchStore;
+        const host: ThisParameterType<typeof settleDispatch> = {
+            get flowDispatchStore() { return readFlowDispatchStore(); },
+            logger: this.logger,
+            inProcessDispatchClaims: this.inProcessDispatchClaims,
+        };
+        return settleDispatch.call(host, key, outcome);
     }
 
     /**
@@ -2892,42 +2930,20 @@ export class AutomationEngine implements IAutomationService {
      * takes everywhere else: the caller re-runs, it never refuses on a reading
      * it could not make.
      */
-    async readDispatch(key: string): Promise<FlowDispatchClaim | null> {
-        const store = this.flowDispatchStore;
-        if (store && typeof store.read === 'function') {
-            try {
-                return await store.read(key);
-            } catch (err) {
-                this.logger.warn(
-                    `[automation] flow-dispatch read '${key}' failed against the persisted ledger — ` +
-                        `reporting the key as UNCLAIMED (availability over strict-once: a replay proceeds rather ` +
-                        `than being refused on a reading we could not make). The store failure is in this record's meta.`,
-                    describeThrownForLog(err),
-                );
-                return null;
-            }
-        }
-        if (store && !this.dispatchOutcomeDegradationWarned) {
-            this.dispatchOutcomeDegradationWarned = true;
-            // The ledger predates the outcome half of the claim contract.
-            this.logger.warn(
-                '[automation] the attached flow-dispatch ledger has no read() — this message describes the ' +
-                    'ledger that has no read()/settle() AT ALL, where dispatch claims are still deduplicated ' +
-                    'and the in-process fallback still records outcomes and still refuses WITHIN one process ' +
-                    'lifetime, but nothing outlives a restart. A ledger that has settle() but no read() is ' +
-                    'weaker still: outcomes are written durably and never read back, so no replay is ever ' +
-                    'refused, in this lifetime or any other.',
-            );
-        }
-        this.pruneInProcessDispatchClaims(Date.now());
-        const rec = this.inProcessDispatchClaims.get(key);
-        if (!rec) return null;
-        return {
-            key,
-            claimedAt: new Date(rec.at).toISOString(),
-            outcome: rec.outcome,
-            settledAt: null,
+    readDispatch(key: string): Promise<FlowDispatchClaim | null> {
+        // The body lives in ./dispatch-claims.ts (#25222).
+        const readFlowDispatchStore = () => this.flowDispatchStore;
+        const readDispatchOutcomeDegradationWarned = () => this.dispatchOutcomeDegradationWarned;
+        const writeDispatchOutcomeDegradationWarned = (v: AutomationEngine['dispatchOutcomeDegradationWarned']) => { this.dispatchOutcomeDegradationWarned = v; };
+        const host: ThisParameterType<typeof readDispatch> = {
+            get flowDispatchStore() { return readFlowDispatchStore(); },
+            logger: this.logger,
+            get dispatchOutcomeDegradationWarned() { return readDispatchOutcomeDegradationWarned(); },
+            set dispatchOutcomeDegradationWarned(v) { writeDispatchOutcomeDegradationWarned(v); },
+            pruneInProcessDispatchClaims: (...a) => this.pruneInProcessDispatchClaims(...a),
+            inProcessDispatchClaims: this.inProcessDispatchClaims,
         };
+        return readDispatch.call(host, key);
     }
 
     /**
@@ -2937,11 +2953,8 @@ export class AutomationEngine implements IAutomationService {
      * a still-suspended durable run).
      */
     private nextRunId(): string {
-        const g = globalThis as { crypto?: { randomUUID?: () => string } };
-        const rand = g.crypto?.randomUUID
-            ? g.crypto.randomUUID()
-            : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
-        return `run_${rand}`;
+        // The body lives in ./dispatch-claims.ts (#25222).
+        return nextRunId();
     }
 
     /**
@@ -3306,14 +3319,15 @@ export class AutomationEngine implements IAutomationService {
      * `error` here would train everyone to skim `error`.
      */
     private warnAdvanceClaimDegraded(cause: string): void {
-        if (this.advanceClaimDegradationWarned) return;
-        this.advanceClaimDegradationWarned = true;
-        this.logger.warn(
-            `[automation] no cross-replica advance guarantee (${cause}) — resume idempotency is ` +
-                `IN-PROCESS ONLY: two decisions on one run arriving at the same moment on two replicas ` +
-                `can both advance it, running every downstream side effect twice. Attach a suspended-run ` +
-                `store that implements claimSuspension() to close it.`,
-        );
+        // The body lives in ./dispatch-claims.ts (#25222).
+        const readAdvanceClaimDegradationWarned = () => this.advanceClaimDegradationWarned;
+        const writeAdvanceClaimDegradationWarned = (v: AutomationEngine['advanceClaimDegradationWarned']) => { this.advanceClaimDegradationWarned = v; };
+        const host: ThisParameterType<typeof warnAdvanceClaimDegraded> = {
+            get advanceClaimDegradationWarned() { return readAdvanceClaimDegradationWarned(); },
+            set advanceClaimDegradationWarned(v) { writeAdvanceClaimDegradationWarned(v); },
+            logger: this.logger,
+        };
+        warnAdvanceClaimDegraded.call(host, cause);
     }
 
     /**
@@ -3333,37 +3347,14 @@ export class AutomationEngine implements IAutomationService {
      * created the pause is the one that owns tearing it down, and nothing else
      * has to pattern-match correlation strings it does not own.
      */
-    private async releaseSuspension(run: SuspendedRun, reason: SuspensionReleaseReason): Promise<void> {
-        const nodeType = this.resolveSuspendedNodeType(run);
-        const executor = nodeType ? this.nodeExecutors.get(nodeType) : undefined;
-        if (!executor?.onSuspensionReleased) return;
-        try {
-            await executor.onSuspensionReleased({
-                runId: run.runId,
-                flowName: run.flowName,
-                nodeId: run.nodeId,
-                correlation: run.correlation,
-                reason,
-            });
-        } catch (err) {
-            // #6499 — the thrown text is PLUGIN-SUPPLIED (the node executor's
-            // own teardown), so it goes to the structured slot; see
-            // `forgetSuspendedRun`'s catch above for the full mechanism
-            // (#6299). The message keeps the correlation handle — that is the
-            // thing an operator cleans up by hand.
-            //
-            // #4632 verdict: FUNCTIONAL — stays `warn`, per the docblock: the
-            // run continued and nothing claimed-persisted failed to land; the
-            // leftover is whatever the node armed on entry (a misleading
-            // `sys_job` row, not a broken run). `warn(message, meta?)` — meta
-            // is the SECOND argument; `warn` has no `Error` slot.
-            this.logger.warn(
-                `[automation] run '${run.runId}': '${nodeType}' node '${run.nodeId}' failed to release its suspension ` +
-                    `(reason: ${reason}, correlation: ${run.correlation ?? 'none'}) — the run continued; whatever the ` +
-                    `node armed on entry may still be scheduled. The executor's own failure is in this record's meta.`,
-                describeThrownForLog(err),
-            );
-        }
+    private releaseSuspension(run: SuspendedRun, reason: SuspensionReleaseReason): Promise<void> {
+        // The body lives in ./dispatch-claims.ts (#25222).
+        const host: ThisParameterType<typeof releaseSuspension> = {
+            resolveSuspendedNodeType: (...a) => this.resolveSuspendedNodeType(...a),
+            nodeExecutors: this.nodeExecutors,
+            logger: this.logger,
+        };
+        return releaseSuspension.call(host, run, reason);
     }
 
     /**
@@ -4007,10 +3998,12 @@ export class AutomationEngine implements IAutomationService {
      * no-op'ing.
      */
     resolveFunction(name: string): FlowFunctionRegistration | undefined {
-        const resolved = this.functionResolver?.(name);
-        if (!resolved) return undefined;
-        if (typeof resolved === 'function') return { handler: resolved };
-        return typeof resolved.handler === 'function' ? resolved : undefined;
+        // The body lives in ./flow-definitions.ts (#25222).
+        const readFunctionResolver = () => this.functionResolver;
+        const host: ThisParameterType<typeof resolveFunction> = {
+            get functionResolver() { return readFunctionResolver(); },
+        };
+        return resolveFunction.call(host, name);
     }
 
     /** Get all registered connector names. */
@@ -4043,11 +4036,12 @@ export class AutomationEngine implements IAutomationService {
      * key replaces (mirrors {@link registerNodeExecutor}).
      */
     registerConnectorProvider(providerKey: string, factory: ConnectorProviderFactory): void {
-        if (this.connectorProviders.has(providerKey)) {
-            this.logger.warn(`Connector provider '${providerKey}' replaced`);
-        }
-        this.connectorProviders.set(providerKey, factory);
-        this.logger.info(`Connector provider registered: ${providerKey}`);
+        // The body lives in ./flow-definitions.ts (#25222).
+        const host: ThisParameterType<typeof registerConnectorProvider> = {
+            connectorProviders: this.connectorProviders,
+            logger: this.logger,
+        };
+        registerConnectorProvider.call(host, providerKey, factory);
     }
 
     /** Unregister a connector provider factory (hot-unplug). */
@@ -4189,36 +4183,12 @@ export class AutomationEngine implements IAutomationService {
         notices: ConversionNotice[];
         todos: ConversionTodoNotice[];
     } {
-        const { parsed, storable, notices, todos: chainTodos } = this.canonicalizeFlow(name, definition, options);
-        // The registration checks run when `todos` is first READ, once: the
-        // stored pass reads it, and the doors that only want `parsed` or
-        // `storable` (the save door, a package duplication, the sync's
-        // "already held?" comparison) pay nothing for a listing they discard.
-        const listRegistrationRefusals = (): ConversionTodoNotice[] => {
-            const todos = [...chainTodos];
-            // One listing per site: a site a conversion TODO names (the value-slot
-            // refusal the spec lists under its D3 entry) keeps that TODO, which
-            // names the retirement; the registration check's line for it is the
-            // same refusal and is not repeated.
-            const listed = new Set(chainTodos.map((todo) => todo.path));
-            for (const refusal of this.registrationCheckRefusals(name, parsed)) {
-                for (const site of refusal.sites) {
-                    if (listed.has(site.path)) continue;
-                    todos.push(flowRegistrationTodo(name, site));
-                }
-            }
-            return todos;
+        // The body lives in ./flow-definitions.ts (#25222).
+        const host: ThisParameterType<typeof canonicalizeStoredFlow> = {
+            canonicalizeFlow: (...a) => this.canonicalizeFlow(...a),
+            registrationCheckRefusals: (...a) => this.registrationCheckRefusals(...a),
         };
-        let listedTodos: ConversionTodoNotice[] | undefined;
-        return {
-            parsed,
-            storable,
-            notices,
-            get todos(): ConversionTodoNotice[] {
-                listedTodos ??= listRegistrationRefusals();
-                return listedTodos;
-            },
-        };
+        return canonicalizeStoredFlow.call(host, name, definition, options);
     }
 
     /**
@@ -4234,76 +4204,12 @@ export class AutomationEngine implements IAutomationService {
         notices: ConversionNotice[];
         todos: ConversionTodoNotice[];
     } {
-        // ADR-0087 D2 — the runtime load seam. A stored flow authored against an
-        // old shape (a `webhook`/`http_request` callout node, a `delete_record`
-        // with `config.filters`) is canonicalized on rehydration, BEFORE parse +
-        // execution, so the executor only ever sees the canonical shape and a
-        // dropped-alias upgrade never silently changes behavior (e.g. an empty
-        // `filter` deleting a whole table). No live executor registry is handed
-        // to the pass: the one open-namespace rename, the callout rename,
-        // reserves its old names instead (#23543 F5-http), and
-        // `registerNodeExecutor` refuses an executor under one, so (#24001) the
-        // conversion-conflict channel it used to feed is gone.
-        //
-        // `includeRetired` (#3903): this seam rehydrates DATA AT REST — flows
-        // stored in `sys_metadata` outlive any load window, and a row written
-        // under protocol N has no author for a tombstone to teach. When a flow
-        // conversion graduates to `retiredFromLoadPath` (retiring at N+1), the
-        // stored flows that still carry the old shape must keep canonicalizing
-        // here or the retirement would silently change their behavior — the
-        // exact hazard this seam exists to prevent. Authored sources keep
-        // window semantics at their own seam (`normalizeStackInput` applies
-        // live-window entries only; the schema tombstones the retired shape).
-        // [#23775] The one caller that closes the window is the metadata save
-        // door, for a flow with no stored row (an authored body, not one at
-        // rest), through `canonicalizeStoredFlow`'s option; the rehydration
-        // passes none and replays the full chain, as it always has.
-        //
-        // `excludeConversionIds`: the retired window is opened for a CLASS of
-        // caller, and one kind of entry inside it is not a rescue but a
-        // reinterpretation — a DEFAULT FLIP, whose old shape still parses and
-        // now means something else. This seam cannot say a body predates such
-        // a flip, so it refuses those entries by id, each with its reason on
-        // `CONVERSIONS_NOT_REPLAYED_AT_REHYDRATION`.
-        const notices: ConversionNotice[] = [];
-        const todos: ConversionTodoNotice[] = [];
-        const converted = applyConversionsToFlow(definition, {
-            includeRetired: options.includeRetired ?? true,
-            excludeConversionIds: CONVERSIONS_NOT_REPLAYED_AT_REHYDRATION,
-            onNotice: (n) => {
-                notices.push(n);
-                this.logger.warn(`[flow '${name}'] ${n.code}: ${n.message}`);
-            },
-            // Collected, not logged: a site listed here is one `registerFlow`
-            // refuses below with its own located message.
-            onTodo: (t) => {
-                todos.push(t);
-            },
-        });
-        // #4347 / #4415 — one call, canonical at every depth. `FlowNodeSchema`
-        // parses its own ADR-0031 regions (`FlowNodeSchema.transform` →
-        // `parseFlowNodeRegions`), so what comes back here is already normalized
-        // inside `loop.config.body`, `parallel.config.branches[]` and
-        // `try_catch.config.try`/`.catch` — recursively. Until #4415 that needed
-        // a second, separately-remembered call to `normalizeControlFlowRegions`
-        // right here, and every consumer that took a `FlowParsed` without making
-        // it held a half-parsed flow that looked finished.
-        const parsed = FlowSchema.parse(converted);
-
-        // DAG cycle detection
-        this.detectCycles(parsed);
-
-        // ADR-0031 — validate structured control-flow constructs (loop bodies,
-        // parallel branches, try/catch regions) are well-formed (single-entry/
-        // single-exit, acyclic). Reject the malformed before it can run.
-        validateControlFlow(parsed);
-
-        return {
-            parsed,
-            storable: graftConditionEnvelopes(converted, parsed),
-            notices,
-            todos,
+        // The body lives in ./flow-definitions.ts (#25222).
+        const host: ThisParameterType<typeof canonicalizeFlow> = {
+            logger: this.logger,
+            detectCycles: (...a) => this.detectCycles(...a),
         };
+        return canonicalizeFlow.call(host, name, definition, options);
     }
 
     registerFlow(name: string, definition: unknown): FlowParsed {
@@ -4427,12 +4333,15 @@ export class AutomationEngine implements IAutomationService {
      * @throws `DELETE_RESTRICTED` / 409 as above; nothing is removed.
      */
     unregisterFlow(name: string): void {
-        const flow = this.flows.get(name);
-        if (flow && this.isPackagedFlow(name)) {
-            const callers = this.packagedSubflowCallers(name);
-            if (callers.length > 0) this.refuseUnderReachingCallers(name, 'remove', callers, new Map());
-        }
-        this.withdrawFlow(name);
+        // The body lives in ./flow-definitions.ts (#25222).
+        const host: ThisParameterType<typeof unregisterFlow> = {
+            flows: this.flows,
+            isPackagedFlow: (...a) => this.isPackagedFlow(...a),
+            packagedSubflowCallers: (...a) => this.packagedSubflowCallers(...a),
+            refuseUnderReachingCallers: (...a) => this.refuseUnderReachingCallers(...a),
+            withdrawFlow: (...a) => this.withdrawFlow(...a),
+        };
+        unregisterFlow.call(host, name);
     }
 
     /**
@@ -4491,12 +4400,12 @@ export class AutomationEngine implements IAutomationService {
      * before it changes anything), and that flow is registered, not refused.
      */
     recordFlowRefusal(name: string, error: unknown): void {
-        if (this.flows.has(name)) return;
-        const thrown = (error ?? {}) as { code?: unknown; message?: unknown };
-        this.flowRefusals.set(name, {
-            ...(typeof thrown.code === 'string' ? { code: thrown.code } : {}),
-            message: typeof thrown.message === 'string' ? thrown.message : String(error),
-        });
+        // The body lives in ./flow-definitions.ts (#25222).
+        const host: ThisParameterType<typeof recordFlowRefusal> = {
+            flows: this.flows,
+            flowRefusals: this.flowRefusals,
+        };
+        recordFlowRefusal.call(host, name, error);
     }
 
     /**
@@ -4542,33 +4451,16 @@ export class AutomationEngine implements IAutomationService {
         armedFrom?: FlowContender;
         shadowed?: FlowContender[];
     }> {
-        return [...this.flows.keys()].map((name) => {
-            const resolved = this.resolveTriggerBinding(name);
-            // [#11997] Attach the shadowing receipt to the row an admin already
-            // reads. This map holds ONE entry per bare name, so without these
-            // two fields a displaced contender leaves no trace on this surface.
-            const shadowing = this.flowShadowing.get(name);
-            const unbound = this.describeUnboundReason(name, resolved);
-            return {
-                name,
-                enabled: this.isFlowEnabled(name),
-                bound: this.boundFlowTriggers.has(name),
-                status: (this.flows.get(name) as { status?: string } | undefined)?.status,
-                triggerType: resolved?.triggerType,
-                object: resolved?.binding.object,
-                // Absent, not `undefined`-valued: a row that is bound, disabled
-                // or trigger-less has no reason to carry, and `reason: null` on
-                // the wire would read as "we looked and found nothing".
-                // [#23842] `unboundCause` rides the SAME spread, so the pair is
-                // present together or absent together by construction.
-                ...(unbound === undefined
-                    ? {}
-                    : { reason: unbound.reason, unboundCause: unbound.cause }),
-                ...(shadowing
-                    ? { armedFrom: shadowing.armed, shadowed: shadowing.shadowed }
-                    : {}),
-            };
-        });
+        // The body lives in ./flow-definitions.ts (#25222).
+        const host: ThisParameterType<typeof getFlowRuntimeStates> = {
+            flows: this.flows,
+            resolveTriggerBinding: (...a) => this.resolveTriggerBinding(...a),
+            flowShadowing: this.flowShadowing,
+            describeUnboundReason: (...a) => this.describeUnboundReason(...a),
+            isFlowEnabled: (...a) => this.isFlowEnabled(...a),
+            boundFlowTriggers: this.boundFlowTriggers,
+        };
+        return getFlowRuntimeStates.call(host);
     }
 
     /**
@@ -4611,26 +4503,15 @@ export class AutomationEngine implements IAutomationService {
         name: string,
         resolved: { triggerType: string } | undefined,
     ): { reason: string; cause: FlowUnboundCause } | undefined {
-        if (!resolved) return undefined; // manual / screen flow — nothing to bind
-        if (!this.isFlowEnabled(name)) return undefined;
-        if (this.boundFlowTriggers.has(name)) return undefined;
-        const policyReason = this.policyDisabledFlows.get(name);
-        if (policyReason !== undefined) return { reason: policyReason, cause: 'deployment_policy' };
-        // [#20725, ADR-0126 §7.3] The arming gate declined it onto a disabled
-        // packaged subflow — read from the record, for the policy line's
-        // reason, and ahead of the trigger branches for the gate's: with the
-        // child off, the trigger would not arm it either.
-        const declined = this.subflowDeclinedFlows.get(name);
-        if (declined !== undefined) return { reason: declined, cause: 'disabled_subflow' };
-        return this.triggers.has(resolved.triggerType)
-            ? {
-                reason: `trigger '${resolved.triggerType}' is registered but binding failed — see earlier warnings`,
-                cause: 'binding_failure',
-            }
-            : {
-                reason: `no '${resolved.triggerType}' trigger is registered — add requires: ['triggers'] (record_change/schedule/time_relative/api ship in @objectstack/trigger-*)`,
-                cause: 'missing_trigger',
-            };
+        // The body lives in ./flow-definitions.ts (#25222).
+        const host: ThisParameterType<typeof describeUnboundReason> = {
+            isFlowEnabled: (...a) => this.isFlowEnabled(...a),
+            boundFlowTriggers: this.boundFlowTriggers,
+            policyDisabledFlows: this.policyDisabledFlows,
+            subflowDeclinedFlows: this.subflowDeclinedFlows,
+            triggers: this.triggers,
+        };
+        return describeUnboundReason.call(host, name, resolved);
     }
 
     /**
@@ -4643,18 +4524,13 @@ export class AutomationEngine implements IAutomationService {
      * channel in `os dev` / `os start`).
      */
     getTriggerBindingAudit(): Array<{ flowName: string; triggerType: string; reason: string }> {
-        const audit: Array<{ flowName: string; triggerType: string; reason: string }> = [];
-        for (const name of this.flows.keys()) {
-            const resolved = this.resolveTriggerBinding(name);
-            // [#18235] The eligibility rules (enabled, unbound, declares a
-            // trigger) and the three-branch vocabulary both live in
-            // `describeUnboundReason` now, so this audit and the status door
-            // report the SAME sentence for the same flow by construction.
-            const unbound = this.describeUnboundReason(name, resolved);
-            if (unbound === undefined || !resolved) continue;
-            audit.push({ flowName: name, triggerType: resolved.triggerType, reason: unbound.reason });
-        }
-        return audit;
+        // The body lives in ./flow-definitions.ts (#25222).
+        const host: ThisParameterType<typeof getTriggerBindingAudit> = {
+            flows: this.flows,
+            resolveTriggerBinding: (...a) => this.resolveTriggerBinding(...a),
+            describeUnboundReason: (...a) => this.describeUnboundReason(...a),
+        };
+        return getTriggerBindingAudit.call(host);
     }
 
     /**
@@ -4822,23 +4698,13 @@ export class AutomationEngine implements IAutomationService {
      * copy would share it.
      */
     flowCredentialHoldings(name: string): FlowCredentialHolding[] {
-        const flow = this.flows.get(name);
-        if (!flow) return [];
-        const out: FlowCredentialHolding[] = [];
-        const seen = new Set<string>();
-        for (const position of flowCredentialPositions(flow)) {
-            const id = JSON.stringify([position.nodeId, position.key]);
-            if (position.form === 'value') {
-                seen.add(id);
-                out.push({ nodeId: position.nodeId, key: position.key, label: flowCredentialClassLabel(position.key), held: 'literal' });
-            }
-        }
-        for (const { nodeId, key } of this.flowCredentialSource?.held(name) ?? []) {
-            const id = JSON.stringify([nodeId, key]);
-            if (seen.has(id)) continue;
-            out.push({ nodeId, key, label: flowCredentialClassLabel(key), held: 'channel' });
-        }
-        return out;
+        // The body lives in ./flow-definitions.ts (#25222).
+        const readFlowCredentialSource = () => this.flowCredentialSource;
+        const host: ThisParameterType<typeof flowCredentialHoldings> = {
+            flows: this.flows,
+            get flowCredentialSource() { return readFlowCredentialSource(); },
+        };
+        return flowCredentialHoldings.call(host, name);
     }
 
     /**
@@ -4867,18 +4733,12 @@ export class AutomationEngine implements IAutomationService {
         startNodeId: string | undefined,
         config: Record<string, unknown>,
     ): (() => Promise<string | undefined>) | undefined {
-        const source = this.flowCredentialSource;
-        const written = Object.prototype.hasOwnProperty.call(config, FLOW_HOOK_SECRET_KEY);
-        const literal = typeof config.secret === 'string' && config.secret.trim() !== '' ? config.secret : undefined;
-        if (written && literal === undefined) return undefined;
-        if (!source || startNodeId === undefined) {
-            return literal === undefined ? undefined : async () => literal;
-        }
-        if (literal === undefined && !source.holds(flowName, startNodeId, FLOW_HOOK_SECRET_KEY)) return undefined;
-        return async () => {
-            if (literal !== undefined && !source.holds(flowName, startNodeId, FLOW_HOOK_SECRET_KEY)) return literal;
-            return (await source.resolve(flowName, startNodeId, FLOW_HOOK_SECRET_KEY)) ?? literal;
+        // The body lives in ./flow-definitions.ts (#25222).
+        const readFlowCredentialSource = () => this.flowCredentialSource;
+        const host: ThisParameterType<typeof hookSecretResolver> = {
+            get flowCredentialSource() { return readFlowCredentialSource(); },
         };
+        return hookSecretResolver.call(host, flowName, startNodeId, config);
     }
 
     /**
@@ -4942,16 +4802,11 @@ export class AutomationEngine implements IAutomationService {
      * message is the only channel left).
      */
     private describeDisabledFlow(flowName: string): string {
-        if (this.flowLedgerDisabled.has(flowName)) {
-            return (
-                `Flow '${flowName}' is disabled — it is switched off for this installation in the ` +
-                `packaged-metadata activation ledger (sys_metadata_activation, ADR-0126 §7.2). ` +
-                `Re-enable the packaged flow to arm it again, or run a clone of it under a new name.`
-            );
-        }
-        // Unchanged wording for the status dimension: it is what every existing
-        // consumer and test reads, and this leg has no reason to move it.
-        return `Flow '${flowName}' is disabled`;
+        // The body lives in ./subflow-guards.ts (#25222).
+        const host: ThisParameterType<typeof describeDisabledFlow> = {
+            flowLedgerDisabled: this.flowLedgerDisabled,
+        };
+        return describeDisabledFlow.call(host, flowName);
     }
 
     /**
@@ -4980,15 +4835,8 @@ export class AutomationEngine implements IAutomationService {
      * papering over a producer that is already correct.
      */
     private subflowTargets(flow: FlowParsed): string[] {
-        const nodes = (flow as { nodes?: unknown }).nodes;
-        if (!Array.isArray(nodes)) return [];
-        const targets: string[] = [];
-        for (const node of nodes) {
-            const n = node as { type?: unknown; config?: { flowName?: unknown } } | null;
-            if (!n || (n.type !== 'subflow' && n.type !== 'map')) continue;
-            if (typeof n.config?.flowName === 'string') targets.push(n.config.flowName);
-        }
-        return targets;
+        // The body lives in ./subflow-guards.ts (#25222).
+        return subflowTargets(flow);
     }
 
     /**
@@ -5005,13 +4853,13 @@ export class AutomationEngine implements IAutomationService {
      * {@link refuseUnderReachingCallers}'s question, not this scan's.
      */
     private packagedSubflowCallers(name: string): string[] {
-        const callers: string[] = [];
-        for (const [callerName, flow] of this.flows) {
-            if (callerName === name) continue;
-            if (!this.isPackagedFlow(callerName)) continue;
-            if (this.subflowTargets(flow).includes(name)) callers.push(callerName);
-        }
-        return callers;
+        // The body lives in ./subflow-guards.ts (#25222).
+        const host: ThisParameterType<typeof packagedSubflowCallers> = {
+            flows: this.flows,
+            isPackagedFlow: (...a) => this.isPackagedFlow(...a),
+            subflowTargets: (...a) => this.subflowTargets(...a),
+        };
+        return packagedSubflowCallers.call(host, name);
     }
 
     /**
@@ -5041,15 +4889,12 @@ export class AutomationEngine implements IAutomationService {
      * A run that has ENDED — completed, failed, refused, cancelled — is not in
      * either store, so it never counts.
      */
-    private async parkedRunsOf(flowNames: ReadonlySet<string>): Promise<Map<string, string[]>> {
-        const parked = new Map<string, string[]>();
-        if (flowNames.size === 0) return parked;
-        for (const run of await this.readSuspendedRuns('throw', flowNames)) {
-            if (!flowNames.has(run.flowName)) continue;
-            parked.set(run.flowName, [...(parked.get(run.flowName) ?? []), run.runId]);
-        }
-        for (const runIds of parked.values()) runIds.sort();
-        return parked;
+    private parkedRunsOf(flowNames: ReadonlySet<string>): Promise<Map<string, string[]>> {
+        // The body lives in ./subflow-guards.ts (#25222).
+        const host: ThisParameterType<typeof parkedRunsOf> = {
+            readSuspendedRuns: (...a) => this.readSuspendedRuns(...a),
+        };
+        return parkedRunsOf.call(host, flowNames);
     }
 
     /**
@@ -5107,59 +4952,11 @@ export class AutomationEngine implements IAutomationService {
         callers: string[],
         parked: ReadonlyMap<string, string[]>,
     ): void {
-        const armed = callers.filter((c) => this.isFlowEnabled(c));
-        // Removal only: a switched-off caller guards while `name` is enabled,
-        // because whether it still holds a parked run is not readable here.
-        const switchOffFirst = act === 'remove' && this.isFlowEnabled(name);
-        const unread = switchOffFirst ? callers.filter((c) => !armed.includes(c)) : [];
-        const guarding = callers.filter((c) => armed.includes(c) || parked.has(c) || unread.includes(c));
-        if (guarding.length === 0) return;
-
-        const quote = (names: string[]) => names.map((n) => `'${n}'`).join(', ');
-        const one = guarding.length === 1;
-        const steps = [
-            ...(armed.length > 0 ? [`disable the calling flow${armed.length === 1 ? '' : 's'} ${quote(armed)} first`] : []),
-            ...[...parked].map(([caller, runIds]) => {
-                const single = runIds.length === 1;
-                return (
-                    `'${caller}' is disabled but still holds ${single ? 'a parked run' : `${runIds.length} parked runs`} ` +
-                    `that ${single ? 'resumes' : 'resume'} into its subflow node (${quote(runIds)}): cancel ` +
-                    `${single ? 'it' : 'each'} through the operator cancel door, ` +
-                    `POST /automation/${caller}/runs/:runId/cancel (ADR-0044), or let ${single ? 'it' : 'them'} finish`
-                );
-            }),
-            ...(!switchOffFirst
-                ? []
-                : armed.length > 0
-                  ? [
-                        `then switch '${name}' off, which reads whether a switched-off caller still holds a parked ` +
-                            `run and names each one to cancel, and remove it after that`,
-                    ]
-                  : [
-                        `switch '${name}' off first, which reads whether ${quote(unread)} still ` +
-                            `hold${unread.length === 1 ? 's' : ''} a parked run and names each one to cancel, then remove it`,
-                    ]),
-        ].join('; ');
-        const [verb, gerund, keep] = act === 'disable'
-            ? ['disabled', 'Disabling', 'leave this one armed']
-            : ['removed', 'Removing', 'leave this one registered'];
-        throw Object.assign(
-            new Error(
-                `Flow '${name}' cannot be ${verb} while ${guarding.length} packaged flow${one ? '' : 's'} ` +
-                    `still call${one ? 's' : ''} it as a subflow: ${quote(guarding)}. ${gerund} it would break ` +
-                    `${one ? 'that caller' : 'those callers'} mid-run at ${one ? 'its' : 'their'} subflow node with a ` +
-                    `late, inexplicable failure (ADR-0126 §7.3). ` +
-                    `${steps.charAt(0).toUpperCase()}${steps.slice(1)} — or ${keep}.`,
-            ),
-            // ADR-0112 envelope: code AND status. `DELETE_RESTRICTED` is the
-            // standard catalog's "cannot do this due to dependencies" member
-            // (409) — ⛔ no new ledger entry is minted here. Its `DELETE_`
-            // prefix fits because the toggle ruling (commit 266436a7f,
-            // recorded at `isFlowAuthoringWrite` in the runtime's automation
-            // domain) holds that "disabling a shipped flow is functionally
-            // equivalent to deleting it for as long as it stays off".
-            { code: 'DELETE_RESTRICTED', status: 409, subflowCallers: guarding },
-        );
+        // The body lives in ./subflow-guards.ts (#25222).
+        const host: ThisParameterType<typeof refuseUnderReachingCallers> = {
+            isFlowEnabled: (...a) => this.isFlowEnabled(...a),
+        };
+        refuseUnderReachingCallers.call(host, name, act, callers, parked);
     }
 
     /**
@@ -5200,21 +4997,17 @@ export class AutomationEngine implements IAutomationService {
      * returns before asking otherwise), so what that door answers is unchanged.
      */
     private disabledPackagedSubflows(name: string): Array<{ name: string; ledger: boolean; status?: string }> {
-        const flow = this.flows.get(name);
-        if (!flow) return [];
-        const loopCanClose = this.flowLedgerDisabled.has(name);
-        const disabled: Array<{ name: string; ledger: boolean; status?: string }> = [];
-        for (const target of new Set(this.subflowTargets(flow))) {
-            const child = this.flows.get(target);
-            if (!child || !this.isPackagedFlow(target)) continue;
-            if (this.isFlowEnabled(target)) continue;
-            const ledger = this.flowLedgerDisabled.has(target);
-            const statusDisabled = this.flowStatusDisabled.get(target) === true;
-            if (loopCanClose && ledger && !statusDisabled && this.ledgerDisabledChainReaches(target, name)) continue;
-            const status = statusDisabled ? String((child as { status?: unknown }).status) : undefined;
-            disabled.push({ name: target, ledger, ...(status !== undefined ? { status } : {}) });
-        }
-        return disabled;
+        // The body lives in ./subflow-guards.ts (#25222).
+        const host: ThisParameterType<typeof disabledPackagedSubflows> = {
+            flows: this.flows,
+            flowLedgerDisabled: this.flowLedgerDisabled,
+            subflowTargets: (...a) => this.subflowTargets(...a),
+            isPackagedFlow: (...a) => this.isPackagedFlow(...a),
+            isFlowEnabled: (...a) => this.isFlowEnabled(...a),
+            flowStatusDisabled: this.flowStatusDisabled,
+            ledgerDisabledChainReaches: (...a) => this.ledgerDisabledChainReaches(...a),
+        };
+        return disabledPackagedSubflows.call(host, name);
     }
 
     /**
@@ -5223,21 +5016,14 @@ export class AutomationEngine implements IAutomationService {
      * {@link disabledPackagedSubflows} must not guard on.
      */
     private ledgerDisabledChainReaches(from: string, to: string): boolean {
-        const seen = new Set<string>([from]);
-        const pending = [from];
-        while (pending.length > 0) {
-            const flow = this.flows.get(pending.pop()!);
-            if (!flow) continue;
-            for (const target of this.subflowTargets(flow)) {
-                if (target === to) return true;
-                if (seen.has(target) || !this.flowLedgerDisabled.has(target)) continue;
-                const next = this.flows.get(target);
-                if (!next || !this.isPackagedFlow(target)) continue;
-                seen.add(target);
-                pending.push(target);
-            }
-        }
-        return false;
+        // The body lives in ./subflow-guards.ts (#25222).
+        const host: ThisParameterType<typeof ledgerDisabledChainReaches> = {
+            flows: this.flows,
+            subflowTargets: (...a) => this.subflowTargets(...a),
+            flowLedgerDisabled: this.flowLedgerDisabled,
+            isPackagedFlow: (...a) => this.isPackagedFlow(...a),
+        };
+        return ledgerDisabledChainReaches.call(host, from, to);
     }
 
     /**
@@ -5259,22 +5045,14 @@ export class AutomationEngine implements IAutomationService {
      * is the opposite act.
      */
     private refuseEnableOntoDisabledSubflow(name: string): void {
-        if (!this.flowLedgerDisabled.has(name)) return;
-        if (!this.isPackagedFlow(name)) return;
-        const disabled = this.disabledPackagedSubflows(name);
-        if (disabled.length === 0) return;
-
-        const { reasons, remedy } = this.describeDisabledSubflows(disabled, 'this switch');
-        const many = disabled.length !== 1;
-        throw Object.assign(
-            new Error(
-                `Flow '${name}' cannot be enabled while ${disabled.length} packaged subflow${many ? 's' : ''} it calls ` +
-                    `${many ? 'are' : 'is'} disabled: ${reasons.join(', ')}. Enabled, it would fail at its subflow node ` +
-                    `on a disabled child — the late, inexplicable failure ADR-0126 §7.3 refuses to cause. ` +
-                    `${remedy.charAt(0).toUpperCase()}${remedy.slice(1)} first, then enable this flow — or leave it disabled.`,
-            ),
-            { code: 'RESOURCE_CONFLICT', status: 409 },
-        );
+        // The body lives in ./subflow-guards.ts (#25222).
+        const host: ThisParameterType<typeof refuseEnableOntoDisabledSubflow> = {
+            flowLedgerDisabled: this.flowLedgerDisabled,
+            isPackagedFlow: (...a) => this.isPackagedFlow(...a),
+            disabledPackagedSubflows: (...a) => this.disabledPackagedSubflows(...a),
+            describeDisabledSubflows: (...a) => this.describeDisabledSubflows(...a),
+        };
+        refuseEnableOntoDisabledSubflow.call(host, name);
     }
 
     /**
@@ -5292,32 +5070,8 @@ export class AutomationEngine implements IAutomationService {
         disabled: Array<{ name: string; ledger: boolean; status?: string }>,
         switchPhrase: 'this switch' | 'the activation switch',
     ): { reasons: string[]; remedy: string } {
-        const quote = (names: string[]) =>
-            names.length === 1
-                ? `'${names[0]}'`
-                : `${names.slice(0, -1).map((n) => `'${n}'`).join(', ')} and '${names[names.length - 1]}'`;
-        const reasons = disabled.map((d) => {
-            const why = [
-                ...(d.ledger ? ['switched off in the activation ledger'] : []),
-                ...(d.status !== undefined ? [`its definition's status is '${d.status}'`] : []),
-            ].join(', and ');
-            return `'${d.name}' (${why})`;
-        });
-        // The remedy follows each child's REAL state: the switch re-arms the
-        // ledger bit, and only the definition moves a status.
-        const byStatus = disabled.filter((d) => d.status !== undefined).map((d) => d.name);
-        const byLedger = disabled.filter((d) => d.ledger).map((d) => d.name);
-        const remedy = [
-            ...(byStatus.length > 0
-                ? [
-                      `publish ${quote(byStatus)} with status 'active' (${switchPhrase} never changes a definition's ` +
-                          `status; for a package that is read-only here, that takes a package version that ships ` +
-                          `${byStatus.length === 1 ? 'it' : 'them'} active)`,
-                  ]
-                : []),
-            ...(byLedger.length > 0 ? [`enable ${quote(byLedger)}`] : []),
-        ].join(' and ');
-        return { reasons, remedy };
+        // The body lives in ./subflow-guards.ts (#25222).
+        return describeDisabledSubflows(disabled, switchPhrase);
     }
 
     /**
@@ -5387,15 +5141,16 @@ export class AutomationEngine implements IAutomationService {
      * unbound for a reason of its own is not re-offered here.
      */
     private rejudgeSubflowCallers(subflow: string): void {
-        if (this.boundFlowTriggers.size === 0 && this.subflowDeclinedFlows.size === 0) return;
-        for (const caller of this.packagedSubflowCallers(subflow)) {
-            const settled = this.boundFlowTriggers.has(caller)
-                ? this.disabledPackagedSubflows(caller).length === 0
-                : !this.subflowDeclinedFlows.has(caller);
-            if (settled) continue;
-            this.deactivateFlowTrigger(caller);
-            this.activateFlowTrigger(caller);
-        }
+        // The body lives in ./subflow-guards.ts (#25222).
+        const host: ThisParameterType<typeof rejudgeSubflowCallers> = {
+            boundFlowTriggers: this.boundFlowTriggers,
+            subflowDeclinedFlows: this.subflowDeclinedFlows,
+            packagedSubflowCallers: (...a) => this.packagedSubflowCallers(...a),
+            disabledPackagedSubflows: (...a) => this.disabledPackagedSubflows(...a),
+            deactivateFlowTrigger: (...a) => this.deactivateFlowTrigger(...a),
+            activateFlowTrigger: (...a) => this.activateFlowTrigger(...a),
+        };
+        rejudgeSubflowCallers.call(host, subflow);
     }
 
     /**
@@ -5457,25 +5212,12 @@ export class AutomationEngine implements IAutomationService {
      * rows this door should clear is not this refusal's to decide.
      */
     private refuseCustomerAuthoredToggle(name: string, enabled: boolean): void {
-        if (this.isPackagedFlow(name)) return;
-        const updateDoor = `its update door, PUT /automation/${name}, which takes the complete definition`;
-        const ownSwitch = this.flowLedgerDisabled.has(name)
-            ? `This flow's own switch is its definition's status, published through ${updateDoor} — but it is ` +
-              `ALSO held off by an activation-ledger row recorded under the name '${name}' (for a packaged flow of ` +
-              `that name, or by this switch before it refused customer-authored flows), and no status clears that ` +
-              `row. To run this flow, clone it under a new name through POST /automation/${name}/clone, which ` +
-              `arms the copy, and remove this one.`
-            : `This flow's switch is its own definition's status: publish it through ${updateDoor}, with status ` +
-              `'obsolete' to switch it off or 'active' to arm it.`;
-        throw Object.assign(
-            new Error(
-                `Flow '${name}' cannot be ${enabled ? 'enabled' : 'disabled'} through this switch: the switch turns ` +
-                    `packaged flows on and off, and '${name}' was authored in this deployment, not shipped by a ` +
-                    `package. The switch records an installation's choice about a packaged flow in the activation ` +
-                    `ledger (sys_metadata_activation, ADR-0126 §7.2). ${ownSwitch} Nothing was changed.`,
-            ),
-            { code: 'RESOURCE_CONFLICT', status: 409 },
-        );
+        // The body lives in ./subflow-guards.ts (#25222).
+        const host: ThisParameterType<typeof refuseCustomerAuthoredToggle> = {
+            isPackagedFlow: (...a) => this.isPackagedFlow(...a),
+            flowLedgerDisabled: this.flowLedgerDisabled,
+        };
+        refuseCustomerAuthoredToggle.call(host, name, enabled);
     }
 
     /**
@@ -5608,16 +5350,13 @@ export class AutomationEngine implements IAutomationService {
 
     /** Rollback flow to a specific version */
     rollbackFlow(name: string, version: number): void {
-        const history = this.flowVersionHistory.get(name);
-        if (!history) {
-            throw new Error(`Flow '${name}' has no version history`);
-        }
-        const entry = history.find(h => h.version === version);
-        if (!entry) {
-            throw new Error(`Version ${version} not found for flow '${name}'`);
-        }
-        this.flows.set(name, entry.definition);
-        this.logger.info(`Flow '${name}' rolled back to version ${version}`);
+        // The body lives in ./flow-definitions.ts (#25222).
+        const host: ThisParameterType<typeof rollbackFlow> = {
+            flowVersionHistory: this.flowVersionHistory,
+            flows: this.flows,
+            logger: this.logger,
+        };
+        rollbackFlow.call(host, name, version);
     }
 
     listRuns(
@@ -8423,11 +8162,8 @@ export class AutomationEngine implements IAutomationService {
         hot: ConsumedSuspension,
         rowPause: { nodeId?: string; correlation?: string },
     ): boolean {
-        const samePause =
-            hot.run.nodeId === rowPause.nodeId &&
-            (hot.run.correlation ?? undefined) === (rowPause.correlation ?? undefined);
-        if (samePause) return false;
-        return hot.persisted === 'landed';
+        // The body lives in ./consumed-suspension-restore.ts (#25222).
+        return rowSupersedesJournal(hot, rowPause);
     }
 
     /**
@@ -8492,38 +8228,12 @@ export class AutomationEngine implements IAutomationService {
         /** The hot copy describes a pause the run has since LEFT. */
         staleHot: boolean;
     } {
-        const hot = this.consumedSuspensions.get(runId);
-        if (!terminal) {
-            return hot ? { consumed: hot, witness: 'journal', staleHot: false } : { staleHot: false };
-        }
-        if (terminal.consumedSuspension) {
-            const durable: ConsumedSuspension = {
-                run: terminal.consumedSuspension,
-                consumedAt: terminal.finishedAt ?? terminal.startedAt,
-                error: terminal.error ?? '',
-            };
-            if (hot && !this.rowSupersedesJournal(hot, durable.run)) {
-                return { consumed: hot, witness: 'journal', staleHot: false };
-            }
-            return { consumed: durable, witness: 'durable', staleHot: hot !== undefined };
-        }
-        if (terminal.consumedSuspensionDropped) {
-            const dropped = terminal.consumedSuspensionDropped;
-            if (hot && !this.rowSupersedesJournal(hot, dropped)) {
-                return { consumed: hot, witness: 'journal', dropped, staleHot: false };
-            }
-            return { dropped, staleHot: hot !== undefined };
-        }
-        if (hot && hot.persisted !== 'landed') {
-            // The row predates this strand — this process's own write for it
-            // never reached the store (in flight, or failed and reported at
-            // `error`). The store's silence says nothing.
-            return { consumed: hot, witness: 'journal', staleHot: false };
-        }
-        // A later terminal record with no snapshot and no drop notice:
-        // completed, cancelled or cascade-failed after any hot copy was
-        // taken. Stale by definition.
-        return { staleHot: hot !== undefined };
+        // The body lives in ./consumed-suspension-restore.ts (#25222).
+        const host: ThisParameterType<typeof resolveConsumedSuspensionWitnesses> = {
+            consumedSuspensions: this.consumedSuspensions,
+            rowSupersedesJournal: (...a) => this.rowSupersedesJournal(...a),
+        };
+        return resolveConsumedSuspensionWitnesses.call(host, runId, terminal);
     }
 
     /** Build a refusal from {@link restoreConsumedSuspension}. */
@@ -8634,50 +8344,16 @@ export class AutomationEngine implements IAutomationService {
      * @returns Never throws: every outcome — including an unreadable store — is
      *   a {@link SuspensionRestoreResult} naming what was observed.
      */
-    async restoreConsumedSuspension(
+    restoreConsumedSuspension(
         runId: string,
         options?: { requestedBy?: string; reason?: string },
     ): Promise<SuspensionRestoreResult> {
-        // [#15222] Resolve the nested chain FIRST, read-only. A flat run finds
-        // nothing here and takes the per-run call below unchanged — same
-        // guards, same answer, and a result with no `chain` key at all.
-        //
-        // A nested one is the whole of this card: the ancestors' pauses were
-        // consumed by the same cascade and journalled by
-        // {@link failSuspendedRun}, and re-arming only the run the operator
-        // named would put the deployment back in the condition the verb exists
-        // to leave — a leaf that completes into an ancestor which never
-        // continues. So the chain is one unit of repair, and this is the call
-        // that makes it one.
-        const { below, above } = await this.resolveRestoreChain(runId);
-        if (below.length === 0 && above.length === 0) {
-            return this.restoreOneConsumedSuspension(runId, options);
-        }
-        // DEEPEST FIRST, and the order IS the guarantee: an ancestor becomes
-        // resumable only after the run it is parked awaiting is parked again,
-        // so a resume arriving mid-repair delegates into a live child instead
-        // of continuing past a nested node whose child is terminal.
-        //
-        // Every member goes through the SAME per-run call — its own
-        // `restoring` claim, its own strict live-suspension read, its own
-        // two-witness read, its own durable park. So the verb's idempotence
-        // and the #14333 advance claim hold PER RUN in the chain rather than
-        // once for the chain, and a second chain restore finds every member
-        // parked and answers `RUN_SUSPENDED` without minting a second pause
-        // anywhere.
-        const chain: ChainRestoreEntry[] = [];
-        for (const memberId of below) {
-            chain.push(chainEntryOf(memberId, await this.restoreOneConsumedSuspension(memberId, options, runId)));
-        }
-        const own = await this.restoreOneConsumedSuspension(runId, options);
-        chain.push(chainEntryOf(runId, own));
-        for (const memberId of above) {
-            chain.push(chainEntryOf(memberId, await this.restoreOneConsumedSuspension(memberId, options, runId)));
-        }
-        // The six fields above `chain` keep describing the run the caller
-        // NAMED, wherever in the chain it sits — a consumer that never heard
-        // of nesting reads exactly what it always read.
-        return { ...own, chain };
+        // The body lives in ./consumed-suspension-restore.ts (#25222).
+        const host: ThisParameterType<typeof restoreConsumedSuspension> = {
+            resolveRestoreChain: (...a) => this.resolveRestoreChain(...a),
+            restoreOneConsumedSuspension: (...a) => this.restoreOneConsumedSuspension(...a),
+        };
+        return restoreConsumedSuspension.call(host, runId, options);
     }
 
     /**
@@ -8700,33 +8376,12 @@ export class AutomationEngine implements IAutomationService {
      * has to repair it after a restart, which is the one place this has to
      * work.
      */
-    private async resolveRestoreChain(runId: string): Promise<{ below: string[]; above: string[] }> {
-        const below: string[] = [];
-        const above: string[] = [];
-        const self = await this.peekConsumedSuspension(runId);
-        if (!self) return { below, above };
-
-        let cursor = self;
-        for (let hops = 0; hops < MAX_RESTORE_CHAIN_HOPS; hops++) {
-            const childRunId = nestedChildRunId(cursor.run.correlation);
-            if (childRunId === undefined || childRunId === runId || below.includes(childRunId)) break;
-            const child = await this.peekConsumedSuspension(childRunId, runId);
-            if (!child) break;
-            below.unshift(childRunId);
-            cursor = child;
-        }
-
-        cursor = self;
-        for (let hops = 0; hops < MAX_RESTORE_CHAIN_HOPS; hops++) {
-            const parentRunId = (cursor.run.context as Record<string, unknown> | undefined)?.$parentRunId;
-            if (typeof parentRunId !== 'string' || !parentRunId) break;
-            if (parentRunId === runId || above.includes(parentRunId)) break;
-            const parent = await this.peekConsumedSuspension(parentRunId, runId);
-            if (!parent) break;
-            above.push(parentRunId);
-            cursor = parent;
-        }
-        return { below, above };
+    private resolveRestoreChain(runId: string): Promise<{ below: string[]; above: string[] }> {
+        // The body lives in ./consumed-suspension-restore.ts (#25222).
+        const host: ThisParameterType<typeof resolveRestoreChain> = {
+            peekConsumedSuspension: (...a) => this.peekConsumedSuspension(...a),
+        };
+        return resolveRestoreChain.call(host, runId);
     }
 
     /**
@@ -8748,28 +8403,16 @@ export class AutomationEngine implements IAutomationService {
      *   identical read immediately afterwards and refuses `STORE_UNAVAILABLE`
      *   on it — one degradation, said once.
      */
-    private async peekConsumedSuspension(runId: string, chainOf?: string): Promise<ConsumedSuspension | undefined> {
-        try {
-            if (await this.loadSuspendedRunStrict(runId)) return undefined;
-            const terminal = this.store?.loadTerminal ? await this.store.loadTerminal(runId) : null;
-            return this.resolveConsumedSuspensionWitnesses(runId, terminal).consumed;
-        } catch (err) {
-            if (chainOf !== undefined) {
-                // #6299 — the driver's own text rides the structured slot.
-                // #4632 verdict: FUNCTIONAL — the repair is visibly short (the
-                // `chain` this call returns names only what it reached) and the
-                // remedy is to re-issue, which is safe per run.
-                this.logger.warn(
-                    `[automation] restoreConsumedSuspension('${chainOf}') could not read run '${runId}' while ` +
-                        `walking its nested chain, so the walk STOPPED there and nothing beyond it was re-armed ` +
-                        `— the repair this call reports is partial. Nothing was written for that run. Fix the ` +
-                        `store failure in this record's meta, then re-issue the restore: it is idempotent per ` +
-                        `run and puts back only what is still missing.`,
-                    describeThrownForLog(err),
-                );
-            }
-            return undefined;
-        }
+    private peekConsumedSuspension(runId: string, chainOf?: string): Promise<ConsumedSuspension | undefined> {
+        // The body lives in ./consumed-suspension-restore.ts (#25222).
+        const readStore = () => this.store;
+        const host: ThisParameterType<typeof peekConsumedSuspension> = {
+            loadSuspendedRunStrict: (...a) => this.loadSuspendedRunStrict(...a),
+            get store() { return readStore(); },
+            resolveConsumedSuspensionWitnesses: (...a) => this.resolveConsumedSuspensionWitnesses(...a),
+            logger: this.logger,
+        };
+        return peekConsumedSuspension.call(host, runId, chainOf);
     }
 
     /**
@@ -9068,28 +8711,15 @@ export class AutomationEngine implements IAutomationService {
      *   {@link hasSuspendedRun}; the restore verb answers `STORE_UNAVAILABLE`
      *   for the same observation.
      */
-    async inspectConsumedSuspension(runId: string): Promise<ConsumedSuspensionInspection> {
-        // Already resumable? STRICT read — a store outage throws through.
-        const live = await this.loadSuspendedRunStrict(runId);
-        if (live) return { repairable: false, runId, reason: 'RUN_SUSPENDED', nodeId: live.nodeId };
-
-        let terminal: RunRecord | null = null;
-        if (this.store?.loadTerminal) terminal = await this.store.loadTerminal(runId);
-
-        const { consumed, witness, dropped } = this.resolveConsumedSuspensionWitnesses(runId, terminal);
-        if (consumed && witness) {
-            return {
-                repairable: true,
-                runId,
-                flowName: consumed.run.flowName,
-                nodeId: consumed.run.nodeId,
-                ...(consumed.run.correlation !== undefined ? { correlation: consumed.run.correlation } : {}),
-                witness,
-                consumedAt: consumed.consumedAt,
-            };
-        }
-        if (dropped) return { repairable: false, runId, reason: 'SNAPSHOT_DROPPED', dropped };
-        return { repairable: false, runId, reason: 'NO_CONSUMED_SUSPENSION' };
+    inspectConsumedSuspension(runId: string): Promise<ConsumedSuspensionInspection> {
+        // The body lives in ./consumed-suspension-restore.ts (#25222).
+        const readStore = () => this.store;
+        const host: ThisParameterType<typeof inspectConsumedSuspension> = {
+            loadSuspendedRunStrict: (...a) => this.loadSuspendedRunStrict(...a),
+            get store() { return readStore(); },
+            resolveConsumedSuspensionWitnesses: (...a) => this.resolveConsumedSuspensionWitnesses(...a),
+        };
+        return inspectConsumedSuspension.call(host, runId);
     }
 
     /**
@@ -9358,11 +8988,8 @@ export class AutomationEngine implements IAutomationService {
      * failure is hardest to place at run time.
      */
     private unknownNodeTypes(flow: FlowParsed, known: Set<string>): string[] {
-        return [...new Set(
-            collectFlowGraphs(flow)
-                .flatMap(g => g.nodes.map(n => n.type))
-                .filter(t => !known.has(t)),
-        )];
+        // The body lives in ./node-text-rendering.ts (#25222).
+        return unknownNodeTypes(flow, known);
     }
 
     /**
@@ -9477,18 +9104,17 @@ export class AutomationEngine implements IAutomationService {
      * not be counted as one.
      */
     private warnIfNodeTypeVocabularyNeverSealed(): void {
-        if (this.nodeTypeVocabularySealed || this.nodeTypeSealOmissionWarned) return;
-        this.nodeTypeSealOmissionWarned = true;
-        this.logger.warn(
-            `[automation] flow executed on an engine whose node-type vocabulary was never sealed — ` +
-            `sealNodeTypeVocabulary() has not been called, so the ADR-0018 node-type check never ran and this ` +
-            `engine has never reported a flow whose node types nothing has registered; such nodes now fail ` +
-            `mid-run with NO_EXECUTOR instead of being named at startup. ` +
-            `A host that constructs AutomationEngine directly must call engine.sealNodeTypeVocabulary() once every ` +
-            `plugin has contributed its executors (AutomationServicePlugin does this at 'kernel:bootstrapped'); ` +
-            `engine.getUnknownNodeTypeAudit() returns the same finding without closing the vocabulary. ` +
-            `Reported once per engine instance.`,
-        );
+        // The body lives in ./node-text-rendering.ts (#25222).
+        const readNodeTypeVocabularySealed = () => this.nodeTypeVocabularySealed;
+        const readNodeTypeSealOmissionWarned = () => this.nodeTypeSealOmissionWarned;
+        const writeNodeTypeSealOmissionWarned = (v: AutomationEngine['nodeTypeSealOmissionWarned']) => { this.nodeTypeSealOmissionWarned = v; };
+        const host: ThisParameterType<typeof warnIfNodeTypeVocabularyNeverSealed> = {
+            get nodeTypeVocabularySealed() { return readNodeTypeVocabularySealed(); },
+            get nodeTypeSealOmissionWarned() { return readNodeTypeSealOmissionWarned(); },
+            set nodeTypeSealOmissionWarned(v) { writeNodeTypeSealOmissionWarned(v); },
+            logger: this.logger,
+        };
+        warnIfNodeTypeVocabularyNeverSealed.call(host);
     }
 
     /** One warning per flow, shared by the boot audit and the post-seal path. */
@@ -9868,11 +9494,8 @@ export class AutomationEngine implements IAutomationService {
      * Merges into an existing entry so a node's earlier `output` survives.
      */
     private setNodeError(variables: Map<string, unknown>, nodeId: string, message: string): void {
-        const prior = variables.get(nodeId);
-        const base = prior && typeof prior === 'object' && !Array.isArray(prior)
-            ? (prior as Record<string, unknown>)
-            : {};
-        variables.set(nodeId, { ...base, error: message });
+        // The body lives in ./node-text-rendering.ts (#25222).
+        setNodeError(variables, nodeId, message);
     }
 
     /**
@@ -9893,16 +9516,11 @@ export class AutomationEngine implements IAutomationService {
         variables: Map<string, unknown>,
         context: AutomationContext,
     ): string | undefined {
-        return this.renderFlowTextSlot(
-            {
-                key: flowRefusalMessageKey(flowName, nodeId),
-                authored,
-                subject: `flow '${flowName}' refused at node '${nodeId}'`,
-                shownAs: 'the refusal',
-            },
-            variables,
-            context,
-        );
+        // The body lives in ./node-text-rendering.ts (#25222).
+        const host: ThisParameterType<typeof renderRefusalMessage> = {
+            renderFlowTextSlot: (...a) => this.renderFlowTextSlot(...a),
+        };
+        return renderRefusalMessage.call(host, flowName, nodeId, authored, variables, context);
     }
 
     /**
@@ -9947,20 +9565,12 @@ export class AutomationEngine implements IAutomationService {
         variables: Map<string, unknown>,
         context: AutomationContext,
     ): string | undefined {
-        const translated = this.translatedFlowTemplate(slot, context.locale);
-        if (translated !== undefined) {
-            try {
-                return renderTextSlot(translated.template, variables);
-            } catch (err: unknown) {
-                if (!(err instanceof FlowTextTemplateError)) throw err;
-                this.logger.warn(
-                    `[automation] ${slot.subject}: the '${translated.locale}' translation at '${slot.key}' does not ` +
-                    `compile (${err.message}), so ${slot.shownAs} shows its authored text instead. Fix the ` +
-                    `translation's holes to match the authored text.`,
-                );
-            }
-        }
-        return renderTextSlot(slot.authored, variables);
+        // The body lives in ./node-text-rendering.ts (#25222).
+        const host: ThisParameterType<typeof renderFlowTextSlot> = {
+            translatedFlowTemplate: (...a) => this.translatedFlowTemplate(...a),
+            logger: this.logger,
+        };
+        return renderFlowTextSlot.call(host, slot, variables, context);
     }
 
     /**
@@ -9972,29 +9582,13 @@ export class AutomationEngine implements IAutomationService {
         slot: FlowTextSlotTranslation,
         requested: string | undefined,
     ): { template: string; locale: string } | undefined {
-        if (typeof requested !== 'string' || requested.length === 0) return undefined;
-        let service: RefusalI18nService | undefined;
-        try {
-            service = this.i18nServiceSource?.();
-        } catch {
-            return undefined;
-        }
-        if (!service || typeof service.t !== 'function') return undefined;
-        const locale = negotiatedServiceLocale(service, requested);
-        const { key } = slot;
-        try {
-            const template = service.t(key, locale);
-            // II18nService echoes the key back on a miss.
-            if (typeof template === 'string' && template.length > 0 && template !== key) {
-                return { template, locale };
-            }
-        } catch (err: unknown) {
-            this.logger.warn(
-                `[automation] ${slot.subject}: the i18n service threw reading '${key}' ` +
-                `(${err instanceof Error ? err.message : String(err)}), so ${slot.shownAs} shows its authored text.`,
-            );
-        }
-        return undefined;
+        // The body lives in ./node-text-rendering.ts (#25222).
+        const readI18nServiceSource = () => this.i18nServiceSource;
+        const host: ThisParameterType<typeof translatedFlowTemplate> = {
+            get i18nServiceSource() { return readI18nServiceSource(); },
+            logger: this.logger,
+        };
+        return translatedFlowTemplate.call(host, slot, requested);
     }
 
     /**

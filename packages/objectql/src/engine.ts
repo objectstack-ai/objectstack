@@ -97,10 +97,11 @@ import {
   isDataMigrationFlagVerified,
   hasMovedFileColumns,
   renderOperationMessage,
-  objectLabelKey,
-  resolveBundleLocale,
   SystemFieldName,
 } from '@objectstack/spec/system';
+// [#25522 cut 1] The validation-message localisation helpers; the methods of the
+// same names below hand each body the members it reads (`ValidationMessageHost`).
+import { negotiatedMessageLocale, objectDisplayLabel, validationMessageContext } from './engine-validation-messages.js';
 import { ExecutionContext, ExecutionContextSchema, type InstalledPackageSource } from '@objectstack/spec/kernel';
 // [#21120] The family-wide stored-metadata-body seam. A `data.record.*` event
 // carries the written row in `after` (and the input patch in `changes`), so a
@@ -10294,12 +10295,13 @@ export class ObjectQL implements IObjectQLEngine {
     // resolved and the input-shaped envelope satisfy it.
     context?: { locale?: string },
   ): { locale?: string; translate?: (key: string, locale: string, params?: Record<string, unknown>) => string; objectName: string } {
-    const t = this.i18nService?.t;
-    return {
-      objectName,
-      locale: this.negotiatedMessageLocale(context?.locale),
-      translate: t ? (key, locale, params) => t.call(this.i18nService, key, locale, params) : undefined,
+    // [#25522 cut 1] The body moved to `engine-validation-messages.ts` (see `ValidationMessageHost`).
+    const readI18nService = () => this.i18nService;
+    const host: ThisParameterType<typeof validationMessageContext> = {
+      get i18nService() { return readI18nService(); },
+      negotiatedMessageLocale: (...a) => this.negotiatedMessageLocale(...a),
     };
+    return validationMessageContext.call(host, objectName, context);
   }
 
   /**
@@ -10333,24 +10335,12 @@ export class ObjectQL implements IObjectQLEngine {
    * EXISTS; inventing one is how a second rule gets born.
    */
   private negotiatedMessageLocale(requested: string | undefined): string | undefined {
-    if (!requested) return requested;
-    const getLocales = this.i18nService?.getLocales;
-    if (typeof getLocales !== 'function') return requested;
-    let available: unknown;
-    try {
-      available = getLocales.call(this.i18nService);
-    } catch {
-      // A misbehaving i18n service must not turn a write into a 500.
-      return requested;
-    }
-    if (!Array.isArray(available) || available.length === 0) return requested;
-    // `resolveBundleLocale` matches against a bundle's KEYS; the offered
-    // locales are exactly that key set, with no data behind them.
-    const offered: Record<string, true> = {};
-    for (const code of available) {
-      if (typeof code === 'string' && code.length > 0) offered[code] = true;
-    }
-    return resolveBundleLocale(offered, requested) ?? requested;
+    // [#25522 cut 1] The body moved to `engine-validation-messages.ts` (see `ValidationMessageHost`).
+    const readI18nService = () => this.i18nService;
+    const host: ThisParameterType<typeof negotiatedMessageLocale> = {
+      get i18nService() { return readI18nService(); },
+    };
+    return negotiatedMessageLocale.call(host, requested);
   }
 
   /**
@@ -10368,20 +10358,8 @@ export class ObjectQL implements IObjectQLEngine {
     declaredLabel: unknown,
     ctx: { locale?: string; translate?: (key: string, locale: string, params?: Record<string, unknown>) => string },
   ): string {
-    if (ctx.translate && ctx.locale) {
-      const key = objectLabelKey(objectName);
-      try {
-        const translated = ctx.translate(key, ctx.locale);
-        // II18nService echoes the key back on a miss.
-        if (typeof translated === 'string' && translated.length > 0 && translated !== key) {
-          return translated;
-        }
-      } catch {
-        // A misbehaving i18n service must not turn a 409 into a 500.
-      }
-    }
-    const declared = typeof declaredLabel === 'string' ? declaredLabel.trim() : '';
-    return declared.length > 0 ? declared : objectName;
+    // [#25522 cut 1] The body moved to `engine-validation-messages.ts`; it reads no member.
+    return objectDisplayLabel(objectName, declaredLabel, ctx);
   }
 
   /**
