@@ -282,8 +282,8 @@ describe('#25634 a failing reconcile is logged, not swallowed', () => {
       registerHook: () => {},
       unregisterHooksByPackage: () => 0,
       registry: { getObject: () => undefined, getAllObjects: () => { throw new Error('registry exploded'); } },
+      // No `update`: the pass throws before it could write anything.
       find: async () => [],
-      update: async () => ({}),
     };
     const ctx: any = {
       logger: { warn, debug: () => {}, info: () => {}, error: () => {} },
