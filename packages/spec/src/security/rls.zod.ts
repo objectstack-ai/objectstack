@@ -61,8 +61,9 @@ import { strictObject } from '../shared/strict-object';
  * - a **registered membership resolver** (ADR-0105 D11, the
  *   `rls-membership-resolver` service), code an installed plugin runs; or
  * - a **declared membership key**: `ObjectSchema.membershipKeys` on the roster
- *   object whose rows define the set. Not applied yet: the security plugin
- *   does not read the declaration in this release.
+ *   object whose rows define the set, which the security plugin stages
+ *   per request beside the resolver's keys. A key both sources claim
+ *   resolves from neither.
  *
  * The platform stages no other key. A policy reading a key neither source
  * supplies drops out and matches no rows (fail closed).
@@ -784,8 +785,9 @@ export const DefaultRowScopeSchema = lazySchema(() => {
  * lowers and reads no `current_user.*`, a key a registered resolver also owns,
  * and how a policy compares the key.
  *
- * Not read yet: the security plugin's request staging is the reader (the
- * liveness row is `planned`).
+ * Read by the security plugin's request staging (`stageRlsMembership`): per
+ * key, once per request, as the platform's own Layer 0 system read of the
+ * roster object (the liveness row is `live`).
  */
 
 /**

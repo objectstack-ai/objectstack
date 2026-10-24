@@ -1351,7 +1351,9 @@ const RLS_PREDICATE_UNENFORCEABLE_EXPLANATION: RuleExplanation = {
       '`==` / `!=` or the bare `current_user` root used as a value is outside it, and the compiler refuses it. ' +
       'The finding quotes the verdict half of the compiler\'s own refusal. It judges both places a row policy ' +
       'is declared, which the runtime compiles alike: a permission set\'s `rowLevelSecurity` entry and an ' +
-      'object\'s `defaultRowScope`, whose `path` starts at `objects[N].defaultRowScope`.',
+      'object\'s `defaultRowScope`, whose `path` starts at `objects[N].defaultRowScope`. It judges a ' +
+      'membership key\'s `filter` the same way (`objects[N].membershipKeys.KEY.filter`), with the declaring ' +
+      'object as its target: see `os explain rls-predicate-membership-key-target` for what a membership key is.',
     'The lowerable subset is: `==` `!=` `>` `<` `>=` `<=`, `in`, `&&` `||` `!`, `== null` / `!= null`, and the ' +
       'string methods `startsWith` / `endsWith` / `contains` — over SINGLE-column field paths (ADR-0058 D2), ' +
       'compared against a literal or a `current_user.*` value. Three traps in particular: (1) a function call — ' +
@@ -1470,10 +1472,12 @@ const RLS_PREDICATE_UNKNOWN_USER_VARIABLE_EXPLANATION: RuleExplanation = {
       'outside that list in a scalar position — compared with `==` / `!=` / `<` / `>` or handed to a string ' +
       'method — can therefore never be supplied by any request.',
     'Of the kernel keys, `current_user.organization_id` is the tenant, `current_user.id` the acting user ' +
-      'and `current_user.email` their unique address. A key meant as an app-resolved set must be staged ' +
-      'into `ExecutionContext.rlsMembership` by an `IRlsMembershipResolver` that DECLARES it, and can then ' +
-      'only be tested with `in` (`FIELD in current_user.KEY`), never compared with `==`: the runtime stages ' +
-      'membership sets as arrays and never as scalars.',
+      'and `current_user.email` their unique address. A key meant as an app-resolved set is either declared ' +
+      'on its roster object (`membershipKeys`) or staged into `ExecutionContext.rlsMembership` by an ' +
+      '`IRlsMembershipResolver` that DECLARES it in its `keys`, and can then only be tested with `in` ' +
+      '(`FIELD in current_user.KEY`), never compared with `==`: the runtime stages membership sets as arrays ' +
+      'and never as scalars. A declared key compared with `==` is `rls-predicate-unenforceable`, as a kernel ' +
+      'list key is: the rule knows it holds a list.',
     'The compiler answers `unresolved-variable` for it in EVERY position — including under `!` and in a ' +
       'trailing `||` arm — so `RLSCompiler` DROPS the policy at request time, and one WARN line is the only ' +
       'signal.',
@@ -1481,8 +1485,99 @@ const RLS_PREDICATE_UNKNOWN_USER_VARIABLE_EXPLANATION: RuleExplanation = {
     'The object then disappears not because its readers were denied, but because the narrowing they were ' +
       'granted resolves to nothing.',
     RLS_DROPPED_CHECK,
-    'An unknown key in a membership position (`field in current_user.KEY`) is never reported: there it is ' +
-      'indistinguishable from a correct §7.3.1 reference an app stages.',
+    'An unknown key in a membership position (`field in current_user.KEY`) is not reported by `os validate`, ' +
+      '`os build` or `os lint`: there it is indistinguishable from a key a self-hosted resolver the CLI cannot ' +
+      'see owns. The runtime publish gate (the Studio, REST and MCP save door) knows the deployment\'s ' +
+      'registered resolver and every object\'s `membershipKeys`, so there such a key is reported when no ' +
+      'kernel key, declaration or resolver owns it: nothing can stage it, and every policy reading it drops.',
+    'A membership key\'s `filter` may not read any `current_user` value at all. The security plugin resolves ' +
+      'the key with no caller values bound, so a filter reading one never compiles, the key never resolves, ' +
+      'and every policy reading the key matches no rows. Keeping the filter to the roster object\'s own ' +
+      'columns is also what keeps one key from being built from another.',
+  ],
+};
+
+/** What a declared membership key is and how it resolves — the opening of every membership-key entry. */
+const MEMBERSHIP_KEY_RESOLUTION =
+  'A membership key (`ObjectSchema.membershipKeys`) is declared on a roster object X: `current_user.KEY` is ' +
+  'the distinct values of its `valueField` (F) on the rows of X whose `userField` (U) is the signed-in user ' +
+  'and on which its optional `filter` holds, read once per request by the platform itself, inside the ' +
+  'caller\'s organization wall. A policy then tests a record against the set: `supplier in ' +
+  'current_user.portal_supplier_ids`. Every miss fails closed: the key stays unresolved, every policy ' +
+  'reading it is dropped, and the records it was meant to grant are not readable.';
+
+const MEMBERSHIP_KEY_USER_FIELD_INVALID_EXPLANATION: RuleExplanation = {
+  rule: 'membership-key-user-field-invalid',
+  covers: 'which column a membership key matches the user on',
+  paragraphs: [
+    MEMBERSHIP_KEY_RESOLUTION,
+    'The read matches U against ONE user id, the caller\'s. So U must be a column of X that holds one user: ' +
+      'a `user` field, or a `lookup` or `master_detail` field to `sys_user`, not flagged `multiple: true`. A ' +
+      'column X does not have makes the read fail; a text column, or a reference to another object, holds ' +
+      'values that are not user ids, so the key resolves to the wrong rows or none; a multi-user column ' +
+      'cannot equal one id. A column the platform injects (`owner_id`, `created_by`) is a column of X and is ' +
+      'judged by its injected definition.',
+    'U is judged on the object as it runs: an `objectExtensions` entry that replaces the column is folded in ' +
+      'first, by the registry\'s own merge order. A column two packages write at the same deciding priority is ' +
+      'not judged, because registration order picks the winner.',
+  ],
+};
+
+const MEMBERSHIP_KEY_VALUE_FIELD_INVALID_EXPLANATION: RuleExplanation = {
+  rule: 'membership-key-value-field-invalid',
+  covers: 'which column a membership key collects',
+  paragraphs: [
+    MEMBERSHIP_KEY_RESOLUTION,
+    'The set holds F\'s values, and a policy compares it with a column that references the same object, or ' +
+      'with `id` on that object. So F must be a reference column of X: `lookup`, `master_detail` or `user`. A ' +
+      'multi-valued one is allowed, and its values are flattened. A column X does not have makes the read ' +
+      'fail; any other type holds values no policy can compare with a record. F may not be U\'s column: the ' +
+      'schema refuses that, because the set would hold only the caller\'s own id.',
+    'F is judged on the object as it runs, an `objectExtensions` entry that replaces it folded in first.',
+  ],
+};
+
+const MEMBERSHIP_KEY_DECLARED_TWICE_EXPLANATION: RuleExplanation = {
+  rule: 'membership-key-declared-twice',
+  covers: 'why one membership key has one roster object',
+  paragraphs: [
+    MEMBERSHIP_KEY_RESOLUTION,
+    'Key names share one namespace across the deployment. When two objects declare the same key, the ' +
+      'platform cannot tell which roster defines it, so neither declaration resolves and the request that ' +
+      'meets it logs an error. `defineStack` and `composeStacks` refuse the pair inside one stack; the ' +
+      'runtime save door also sees the objects already deployed, so it refuses a declaration of a key a live ' +
+      'object declares. Rename one of the keys, or remove one declaration.',
+  ],
+};
+
+const MEMBERSHIP_KEY_RESOLVER_COLLISION_EXPLANATION: RuleExplanation = {
+  rule: 'membership-key-resolver-collision',
+  covers: 'why a declared key may not be a resolver key',
+  paragraphs: [
+    MEMBERSHIP_KEY_RESOLUTION,
+    'A deployment can also register a code resolver (`IRlsMembershipResolver`, ADR-0105 D11) that stages ' +
+      'the keys it lists in `keys`. One key has one owner: when a declaration and the resolver both claim it, ' +
+      'the platform takes neither value, every policy reading the key matches no rows, and the boot logs an ' +
+      'error naming both owners. Only the runtime save door knows the registered resolver, so `os validate`, ' +
+      '`os build` and `os lint` do not judge this. Rename the declared key, or drop it from the resolver.',
+  ],
+};
+
+const RLS_PREDICATE_MEMBERSHIP_KEY_TARGET_EXPLANATION: RuleExplanation = {
+  rule: 'rls-predicate-membership-key-target',
+  covers: 'what a membership key can be compared with',
+  paragraphs: [
+    MEMBERSHIP_KEY_RESOLUTION,
+    'The set holds ids of the object F references; call it T (`sys_user` for a `user` field). A policy can ' +
+      'only find those ids in a column that references T, or in the `id` of T itself. Tested against a ' +
+      'reference to another object, against a column that is not a reference, or against the `id` of another ' +
+      'object, the set never matches: `x in KEY` matches no row, and `!(x in KEY)` matches every row. Neither ' +
+      'is the policy that was written. The compiler accepts the comparison, because it knows the predicate ' +
+      'and not what the declaration collects; the rule reads the declaration.',
+    'So test the key against the column that references T — on a purchase order whose `supplier` is a lookup ' +
+      'to the supplier object, `supplier in current_user.portal_supplier_ids` — or against `id` when the ' +
+      'policy is on T itself. A key whose declaring object is not in the stack, or that two objects declare, ' +
+      'is not judged here.',
   ],
 };
 
@@ -4810,6 +4905,11 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [RLS_PREDICATE_UNENFORCEABLE_EXPLANATION.rule]: RLS_PREDICATE_UNENFORCEABLE_EXPLANATION,
   [RLS_PREDICATE_UNKNOWN_FIELD_EXPLANATION.rule]: RLS_PREDICATE_UNKNOWN_FIELD_EXPLANATION,
   [RLS_PREDICATE_UNKNOWN_USER_VARIABLE_EXPLANATION.rule]: RLS_PREDICATE_UNKNOWN_USER_VARIABLE_EXPLANATION,
+  [RLS_PREDICATE_MEMBERSHIP_KEY_TARGET_EXPLANATION.rule]: RLS_PREDICATE_MEMBERSHIP_KEY_TARGET_EXPLANATION,
+  [MEMBERSHIP_KEY_USER_FIELD_INVALID_EXPLANATION.rule]: MEMBERSHIP_KEY_USER_FIELD_INVALID_EXPLANATION,
+  [MEMBERSHIP_KEY_VALUE_FIELD_INVALID_EXPLANATION.rule]: MEMBERSHIP_KEY_VALUE_FIELD_INVALID_EXPLANATION,
+  [MEMBERSHIP_KEY_DECLARED_TWICE_EXPLANATION.rule]: MEMBERSHIP_KEY_DECLARED_TWICE_EXPLANATION,
+  [MEMBERSHIP_KEY_RESOLVER_COLLISION_EXPLANATION.rule]: MEMBERSHIP_KEY_RESOLVER_COLLISION_EXPLANATION,
   [SHARING_RULE_UNLOWERABLE_CONDITION_EXPLANATION.rule]: SHARING_RULE_UNLOWERABLE_CONDITION_EXPLANATION,
   [SHARING_RULE_RUNTIME_VARIABLE_CONDITION_EXPLANATION.rule]: SHARING_RULE_RUNTIME_VARIABLE_CONDITION_EXPLANATION,
   [SHARING_RULE_OBJECT_NOT_SHAREABLE_EXPLANATION.rule]: SHARING_RULE_OBJECT_NOT_SHAREABLE_EXPLANATION,

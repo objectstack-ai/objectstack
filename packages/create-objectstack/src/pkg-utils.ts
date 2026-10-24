@@ -5,11 +5,16 @@
 // test needs must be importable without running the CLI.
 
 /**
- * Rewrite every `@objectstack/*` range in dependencies/devDependencies to
- * `^<version>`. All @objectstack packages version in lockstep, so the
- * scaffolder's own version always resolves and always matches the framework
- * the docs describe. No-op when the version is unknown (`0.0.0` fallback) so
- * a broken version read never corrupts the template's committed baseline.
+ * Rewrite every `@objectstack/*` range in dependencies/devDependencies to the
+ * EXACT `<version>` — no `^`, no `~`, prereleases kept verbatim. On the v18
+ * line a breaking change may ship in a minor or a patch, so the docs tell a
+ * project to pin exact versions; a caret here would let the next re-resolve
+ * (`npm update`, a deleted lockfile, an install without the lock) move a new
+ * project across such a release without anyone deciding to upgrade. All
+ * @objectstack packages version in lockstep (the changesets `fixed` group),
+ * so the scaffolder's own version is published for every one of them. No-op
+ * when the version is unknown (`0.0.0` fallback) so a broken version read
+ * never corrupts the template's committed baseline.
  */
 export function syncObjectStackDeps(
   pkg: { dependencies?: Record<string, string>; devDependencies?: Record<string, string> },
@@ -20,7 +25,7 @@ export function syncObjectStackDeps(
     if (!deps) continue;
     for (const dep of Object.keys(deps)) {
       if (dep.startsWith('@objectstack/')) {
-        deps[dep] = `^${version}`;
+        deps[dep] = version;
       }
     }
   }

@@ -10,13 +10,14 @@
  * engine-owned write guard and the ADR-0090 D12 delegated-administration gate,
  * resolves the operation's principals and the object's posture, and runs the
  * numbered steps in the order they stand: the `requiredPermissions` AND-gate
- * (1.5), the CRUD check (2), the access depth (2.6), the row-level write
- * pre-image check (2.7), the controlled-by-parent write (2.8), field-level
- * write enforcement with the masked-echo and aggregate-input refusals (2.5,
- * 2.5a, 2.5b), the `owner_id` anchor (3.5), the RLS write `check` (3.6), the
- * Layer 0 tenant post-image check (3.7), the predicate guard (2.9) and the RLS
- * filter injection (3). After `next()` it fails closed on a write-check seam
- * the engine never ran, and it masks the result (4).
+ * (1.5), the CRUD check (2), the access depth and an external principal's
+ * grant stamp (2.6), the row-level write pre-image check (2.7), the
+ * controlled-by-parent write (2.8), field-level write enforcement with the
+ * masked-echo and aggregate-input refusals (2.5, 2.5a, 2.5b), the `owner_id`
+ * anchor (3.5), the RLS write `check` (3.6), the Layer 0 tenant post-image
+ * check (3.7), the predicate guard (2.9) and the RLS filter injection (3).
+ * After `next()` it fails closed on a write-check seam the engine never ran,
+ * and it masks the result (4).
  *
  * A MOVE, not a redesign. The function below is that one statement of
  * `start()` as it stood, re-indented one level and otherwise unedited. It
@@ -70,7 +71,11 @@
  *
  * Nothing re-exports this module, so the published surface does not move.
  */
-import { type PluginContext, recordNotFoundError } from '@objectstack/core';
+import {
+  type PluginContext,
+  recordNotFoundError,
+  isExternalAudienceContext,
+} from '@objectstack/core';
 import { type PermissionSet, PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 // [#8220] The read-scope provenance mark: this middleware is one of the two
 // merge boundaries that stamp it (see the RLS injection below).
@@ -102,6 +107,7 @@ import {
 import { assertReadableQueryFields } from './predicate-guard.js';
 import { PermissionDeniedError, MaskedValueWriteError } from './errors.js';
 import { assertEngineOwnedWriteAllowed } from './system-write-guard.js';
+import { grantRowPolicySpeaks, stampExternalGrant } from './external-owd-grant-stamp.js';
 
 /**
  * The layered computation's options, as the class declares them: the
@@ -222,6 +228,7 @@ export interface AuthzMiddlewareHost {
   addressedPredicateWrite: SecurityPlugin['addressedPredicateWrite'];
   assertControlledByParentWrite: SecurityPlugin['assertControlledByParentWrite'];
   callerCannotReadAddressedRow: SecurityPlugin['callerCannotReadAddressedRow'];
+  collectRLSPolicies: SecurityPlugin['collectRLSPolicies'];
   composeWriteTenantWall: SecurityPlugin['composeWriteTenantWall'];
   computeControlledByParentFilter: SecurityPlugin['computeControlledByParentFilter'];
   computeForbiddenFieldWrites: SecurityPlugin['computeForbiddenFieldWrites'];
@@ -246,7 +253,7 @@ export interface AuthzMiddlewareHost {
 
 /** The authorization middleware registration `SecurityPlugin#start` runs; the comment above its call there is its contract. */
 export function registerAuthzMiddleware(
-  this: Pick<AuthzMiddlewareHost, 'addressedByIdWriteId' | 'addressedPredicateWrite' | 'assertControlledByParentWrite' | 'callerCannotReadAddressedRow' | 'composeWriteTenantWall' | 'computeControlledByParentFilter' | 'computeForbiddenFieldWrites' | 'computeLayeredRlsFilter' | 'computePartialMaskRules' | 'computeQueryGuardFieldPerms' | 'computeRlsFilter' | 'computeWriteCheckFilter' | 'delegatedAdminGate' | 'delegatorOwnWriteFloorOptions' | 'engineOperationScope' | 'epoch' | 'extractSingleId' | 'fieldMasker' | 'getCallerPreImage' | 'getObjectFieldNames' | 'logger' | 'maskOperationResult' | 'permissionEvaluator' | 'ql' | 'raiseWriteWallRefusal' | 'readableRowsScopeForPredicateWrite' | 'resolveCallerPosture' | 'resolveOperationPrincipals' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'writeCheckFieldOptions'>,
+  this: Pick<AuthzMiddlewareHost, 'addressedByIdWriteId' | 'addressedPredicateWrite' | 'assertControlledByParentWrite' | 'callerCannotReadAddressedRow' | 'collectRLSPolicies' | 'composeWriteTenantWall' | 'computeControlledByParentFilter' | 'computeForbiddenFieldWrites' | 'computeLayeredRlsFilter' | 'computePartialMaskRules' | 'computeQueryGuardFieldPerms' | 'computeRlsFilter' | 'computeWriteCheckFilter' | 'delegatedAdminGate' | 'delegatorOwnWriteFloorOptions' | 'engineOperationScope' | 'epoch' | 'extractSingleId' | 'fieldMasker' | 'getCallerPreImage' | 'getObjectFieldNames' | 'logger' | 'maskOperationResult' | 'permissionEvaluator' | 'ql' | 'raiseWriteWallRefusal' | 'readableRowsScopeForPredicateWrite' | 'resolveCallerPosture' | 'resolveOperationPrincipals' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'writeCheckFieldOptions'>,
   ctx: PluginContext,
   ql: IObjectQLEngine,
   metadata: IMetadataService,
@@ -840,6 +847,22 @@ export function registerAuthzMiddleware(
           ? delegated.agentLegScope
           : this.permissionEvaluator.getEffectiveScope('write', opCtx.object, permissionSets, { isPrivate: secMeta.isPrivate });
         if (delegated) sc.__delegatorWriteScope = delegated.delegatorScope;
+      }
+      // [Ruling of record 6355206139, letter B] The EXTERNAL rung's OWD seam.
+      // plugin-sharing floors an external principal's org-wide default at
+      // owner_only unless a held grant's RLS speaks for this object; whether
+      // one does is a question about the grants, answered here where they are
+      // resolved, and handed over beside the depth above
+      // (`external-owd-grant-stamp.ts`, `@objectstack/core`
+      // `external-owd-floor.ts`). An internal principal is never stamped.
+      if (isExternalAudienceContext(sc)) {
+        const collect = (rlsOperation: string) =>
+          this.collectRLSPolicies(permissionSets, opCtx.object, rlsOperation, (sc.positions ?? []) as string[], sc);
+        if (['find', 'findOne', 'count', 'aggregate'].includes(opCtx.operation)) {
+          stampExternalGrant(sc, opCtx.object, 'read', grantRowPolicySpeaks(collect, 'read'));
+        } else if (['update', 'delete', 'transfer', 'restore', 'purge'].includes(opCtx.operation)) {
+          stampExternalGrant(sc, opCtx.object, 'write', grantRowPolicySpeaks(collect, 'write', rlsOperationForVerb(opCtx.operation)));
+        }
       }
     }
 

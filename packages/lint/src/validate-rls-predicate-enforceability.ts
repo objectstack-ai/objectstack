@@ -294,6 +294,7 @@ import {
 } from '@objectstack/spec/data';
 import { ExecutionContextSchema } from '@objectstack/spec/kernel';
 import {
+  RELATIONSHIP_FIELD_TYPES,
   describeFieldPathVerdict,
   indexObjectGraph,
   isUnjudgeable,
@@ -304,6 +305,12 @@ import {
   type GraphField,
   type ObjectGraph,
 } from './object-graph.js';
+import {
+  declaredMembershipKeysOf,
+  objectsDeclaringKey,
+  stackObjectNamesOf,
+  type MembershipKeyOwners,
+} from './validate-membership-key-declarations.js';
 
 /** A predicate outside the pushdown subset — the policy enforces nothing. */
 export const RLS_PREDICATE_UNENFORCEABLE = 'rls-predicate-unenforceable';
@@ -321,6 +328,12 @@ export const RLS_PREDICATE_UNKNOWN_FIELD = 'rls-predicate-unknown-field';
  * variable half of the same failure (#16119).
  */
 export const RLS_PREDICATE_UNKNOWN_USER_VARIABLE = 'rls-predicate-unknown-user-variable';
+/**
+ * [#25234 refusal 11] A policy testing a declared membership key against a
+ * column whose values can never be the key's: a column that references another
+ * object, a column that is no reference, or the `id` of another object.
+ */
+export const RLS_PREDICATE_MEMBERSHIP_KEY_TARGET = 'rls-predicate-membership-key-target';
 
 export type RlsPredicateSeverity = 'error' | 'warning';
 
@@ -421,19 +434,42 @@ function boundsOverrunOf(bridged: string): CelBoundsOverrun | null {
  * names the clause, and the predicate is author text of any length.
  * ──────────────────────────────────────────────────────────────────────────── */
 
+/**
+ * A judged predicate: a row policy's `using` or `check`, or [#25234] a
+ * membership key's `filter`, which the security plugin compiles the same way
+ * and AND-s into the roster read that resolves the key.
+ */
+type Clause = 'using' | 'check' | 'filter';
+
+/** How a finding names the judged predicate. */
+const CLAUSE_LABEL: Readonly<Record<Clause, string>> = {
+  using: 'RLS using',
+  check: 'RLS check',
+  filter: 'membership key filter',
+};
+
 /** What a dropped policy no longer does, per clause. */
 const DROPPED_OUTCOME: Readonly<Record<'using' | 'check', string>> = {
   using: 'grants no access',
   check: 'admits no write',
 };
 
+/**
+ * What a refused membership key filter costs: the security plugin compiles it
+ * before the roster read, and a filter that does not compile leaves the key
+ * unresolved, so every policy reading the key fails closed.
+ */
+const FILTER_DROPPED = 'the key never resolves and every policy reading it matches no rows';
+
 /** The clause that closes every verdict whose policy the runtime drops. */
-function droppedClause(clause: 'using' | 'check'): string {
+function droppedClause(clause: Clause): string {
+  if (clause === 'filter') return `so ${FILTER_DROPPED}`;
   return `so the policy is dropped and ${DROPPED_OUTCOME[clause]}`;
 }
 
 /** The same outcome as a sentence, after a verdict that ends one of its own. */
-function droppedSentence(clause: 'using' | 'check'): string {
+function droppedSentence(clause: Clause): string {
+  if (clause === 'filter') return `So ${FILTER_DROPPED}.`;
   return `The policy is dropped and ${DROPPED_OUTCOME[clause]}.`;
 }
 
@@ -574,9 +610,64 @@ function unresolvedVariablePath(detail: string): string | null {
 
 type UserProbe = Record<string, unknown>;
 
-function baseUserProbe(): UserProbe {
+/**
+ * [#25234] What the stack, and at the runtime publish gate the deployment,
+ * says about `current_user.*` keys beyond the kernel's: the membership keys
+ * objects declare (`ObjectSchema.membershipKeys`) and the keys the registered
+ * code resolver owns.
+ *
+ * A declared key is no longer an unknown: the security plugin stages it as a
+ * LIST on every request it resolves (`stageDeclaredMembershipKeys`), so the
+ * probe binds it as one ({@link membershipKeyProbe}). Under `==` it then earns
+ * the type fault a kernel list key earns (refusal 13), and under `in` its sites
+ * can be traced back to it (refusal 11).
+ */
+interface MembershipKeyContext {
+  /** Every key an object declares — the stack's, plus the deployment's at the runtime gate. */
+  declared: ReadonlySet<string>;
+  /**
+   * Key → the object its values reference: the target of the declaring
+   * object's `valueField`. Present only when one object the stack carries
+   * declares the key and that column is a judgeable reference.
+   */
+  targetOf: ReadonlyMap<string, string>;
+  /**
+   * The registered resolver's keys, stated by the runtime publish gate.
+   * Absent on the CLI, where a self-hosted resolver may own any key, so a key
+   * nothing here owns stays `unknowable` in a membership position.
+   */
+  resolverKeys?: ReadonlySet<string>;
+}
+
+const NO_MEMBERSHIP_KEYS: MembershipKeyContext = { declared: new Set(), targetOf: new Map() };
+
+/** The prefix of a declared key's probe member — see {@link membershipKeyProbe}. */
+const MEMBERSHIP_PROBE_PREFIX = `${PROBE_SCALAR}membership:`;
+
+/**
+ * A declared membership key's probe: a one-member list whose member names the
+ * key, so a lowered `in` site can be traced back to the key it tests. A list
+ * because that is what the key holds on every request.
+ */
+function membershipKeyProbe(key: string): readonly string[] {
+  return [`${MEMBERSHIP_PROBE_PREFIX}${key}`];
+}
+
+/** The declared key a lowered operand is the probe of, or `null`. */
+function membershipKeyOfOperand(operand: unknown): string | null {
+  if (!Array.isArray(operand) || operand.length !== 1 || typeof operand[0] !== 'string') return null;
+  return operand[0].startsWith(MEMBERSHIP_PROBE_PREFIX) ? operand[0].slice(MEMBERSHIP_PROBE_PREFIX.length) : null;
+}
+
+/** Is this a declared key the kernel does not already own? */
+function isDeclaredKey(membership: MembershipKeyContext, key: string): boolean {
+  return membership.declared.has(key) && !PRERESOLVED_USER_KEYS.has(key);
+}
+
+function baseUserProbe(membership: MembershipKeyContext = NO_MEMBERSHIP_KEYS): UserProbe {
   const probe: UserProbe = {};
   for (const key of PRERESOLVED_USER_KEYS) probe[key] = kernelKeyProbe(key);
+  for (const key of membership.declared) if (isDeclaredKey(membership, key)) probe[key] = membershipKeyProbe(key);
   return probe;
 }
 
@@ -653,20 +744,35 @@ function isPreresolvedPath(path: string): boolean {
  * rather than `while (true)`: a linter must terminate on input it did not
  * anticipate, and stopping early only costs a finding.
  */
-function resolveReferences(bridged: string): {
+function resolveReferences(bridged: string, membership: MembershipKeyContext = NO_MEMBERSHIP_KEYS): {
   filter: Record<string, unknown> | null;
   unresolvedScalars: string[];
+  /**
+   * [#25234] The `current_user.KEY` references in a membership position that
+   * no kernel key or declaration owns — `unknowable` on the CLI, judged
+   * against the registered resolver's keys at the runtime gate (refusal 12).
+   */
+  unresolvedMemberships: string[];
   /** The probe as the last compile saw it — every discovered key bound. */
   probe: UserProbe;
   /** The compiler's `detail` when that compile was refused `unsupported`. */
   refusal: string | null;
 } {
-  const probe = baseUserProbe();
+  const probe = baseUserProbe(membership);
   const unresolvedScalars: string[] = [];
-  const stop = (refusal: string | null = null) => ({ filter: null, unresolvedScalars, probe, refusal });
+  const unresolvedMemberships: string[] = [];
+  const stop = (refusal: string | null = null) => ({
+    filter: null,
+    unresolvedScalars,
+    unresolvedMemberships,
+    probe,
+    refusal,
+  });
   for (let pass = 0; pass < 32; pass++) {
     const res = compileWithProbe(bridged, probe);
-    if (res.ok) return { filter: res.filter as Record<string, unknown>, unresolvedScalars, probe, refusal: null };
+    if (res.ok) {
+      return { filter: res.filter as Record<string, unknown>, unresolvedScalars, unresolvedMemberships, probe, refusal: null };
+    }
     if (res.reason !== 'unresolved-variable') {
       // [#19951] The predicate passed `isSupportedRlsExpression`, so a shape
       // refusal here was produced by a VALUE — a membership set under `==` /
@@ -686,7 +792,9 @@ function resolveReferences(bridged: string): {
       setProbePath(probe, path, PROBE_SCALAR);
     } else {
       // A membership position — an app-staged §7.3.1 key is indistinguishable
-      // from a typo here, so this is `unknowable`, never a finding.
+      // from a typo here, so this is `unknowable`, never a finding — unless
+      // the runtime gate states who owns every key ({@link MembershipKeyContext}).
+      unresolvedMemberships.push(path);
       setProbePath(probe, path, PROBE_ARRAY);
     }
   }
@@ -838,9 +946,16 @@ interface TypeFault {
  * The cure must also LAND: the swapped value is found in a lowered field
  * position, which is what the prescription names.
  */
-function attributeTypeFault(bridged: string, probe: UserProbe): TypeFault | null {
+function attributeTypeFault(
+  bridged: string,
+  probe: UserProbe,
+  membership: MembershipKeyContext = NO_MEMBERSHIP_KEYS,
+): TypeFault | null {
   const swaps: Array<{ variable: string; holds: RuntimeHolding; context: unknown; marker: unknown }> = [];
-  for (const key of PRERESOLVED_USER_KEYS) {
+  // [#25234] A declared key holds a list on every request it resolves, as a
+  // kernel list key does, so it is swapped the same way (refusal 13).
+  const owned = [...PRERESOLVED_USER_KEYS, ...[...membership.declared].filter((k) => isDeclaredKey(membership, k))];
+  for (const key of owned) {
     const isList = Array.isArray(probe[key]);
     const marker = isList ? SWAP_SCALAR : [SWAP_SCALAR];
     swaps.push({
@@ -1093,9 +1208,10 @@ export function listHoldingVerdict(comparisons: readonly ListHoldingComparison[]
  * driver-sql, every clause and operation (this file's header); the full account
  * is the `os explain` entry's.
  */
-const REFUSED_COMPARISON: Readonly<Record<'using' | 'check', string>> = {
+const REFUSED_COMPARISON: Readonly<Record<Clause, string>> = {
   using: 'so the SQL drivers refuse every read it scopes (INVALID_FILTER / 400)',
   check: 'so the write check refuses the writes it judges (INVALID_FILTER / 400)',
+  filter: 'so the roster read is refused (INVALID_FILTER / 400) and the key never resolves',
 };
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -1313,6 +1429,57 @@ function engineRefusalHint(code: string): string {
   );
 }
 
+/** [#25234] One lowered `in` site that tests a declared key against the wrong column (refusal 11). */
+interface MembershipTargetFault {
+  key: string;
+  /** The key's values' object. */
+  target: string;
+  /** What the compared column holds, as a phrase. */
+  holds: string;
+}
+
+/**
+ * The `in` / not-`in` sites of a lowered predicate that test a declared key
+ * against a column whose values can never be the key's (refusal 11).
+ *
+ * The key holds ids of its `valueField`'s target T. So the compared column must
+ * reference T, or be the `id` of T itself. A reference to another object, a
+ * column that is no reference, and the `id` of another object hold values that
+ * never equal a T id: `x in KEY` then matches no row, and `!(x in KEY)` every
+ * row. Exact, because the declaration names T. A key whose target is not known
+ * here, and a column the graph cannot answer for, are not judged.
+ */
+function membershipTargetFaults(
+  graph: ObjectGraph,
+  object: string,
+  filter: Record<string, unknown>,
+  membership: MembershipKeyContext,
+): MembershipTargetFault[] {
+  const faults: MembershipTargetFault[] = [];
+  const sites = loweredSites(
+    filter,
+    (op, operand) => (op === '$in' || op === '$nin') && membershipKeyOfOperand(operand) !== null,
+  );
+  for (const site of sites) {
+    const key = membershipKeyOfOperand(site.operand) as string;
+    const target = membership.targetOf.get(key);
+    if (!target || !object) continue;
+    if (site.field === 'id') {
+      if (object !== target) faults.push({ key, target, holds: `\`id\` of '${object}'` });
+      continue;
+    }
+    const verdict = resolveFieldPath(graph, object, site.field);
+    if (!verdict || verdict.kind !== 'ok' || !verdict.meta?.type) continue;
+    const meta = verdict.meta;
+    if (!RELATIONSHIP_FIELD_TYPES.has(meta.type as string)) {
+      faults.push({ key, target, holds: `'${site.field}', a \`${meta.type}\` field` });
+    } else if (meta.reference && meta.reference !== target) {
+      faults.push({ key, target, holds: `'${site.field}', which references '${meta.reference}'` });
+    }
+  }
+  return faults;
+}
+
 /**
  * The reference pass: every finding a SHAPE-VALID predicate earns.
  *
@@ -1323,7 +1490,7 @@ function engineRefusalHint(code: string): string {
 function referenceFindings(
   graph: ObjectGraph,
   source: string,
-  clause: 'using' | 'check',
+  clause: Clause,
   where: string,
   path: string,
   object: string,
@@ -1333,15 +1500,21 @@ function referenceFindings(
    * policy outside the read scope, or no object named).
    */
   judge?: FilterJudge,
+  /** [#25234] The membership keys the stack and the deployment declare. */
+  membership: MembershipKeyContext = NO_MEMBERSHIP_KEYS,
 ): RlsPredicateFinding[] {
   const findings: RlsPredicateFinding[] = [];
   const bridged = sqlPredicateToCel(source);
-  const { filter, unresolvedScalars, probe, refusal } = resolveReferences(bridged);
+  const { filter, unresolvedScalars, unresolvedMemberships, probe, refusal } = resolveReferences(bridged, membership);
 
   for (const fieldPath of filterFieldPaths(filter)) {
     const verdict = resolveFieldPath(graph, object, fieldPath);
     if (isUnjudgeable(verdict) || !verdict) continue;
-    const account = describeFieldPathVerdict(verdict, fieldPath, `RLS ${clause} predicate field`);
+    const account = describeFieldPathVerdict(
+      verdict,
+      fieldPath,
+      clause === 'filter' ? 'membership key filter field' : `${CLAUSE_LABEL[clause]} predicate field`,
+    );
     if (!account) continue;
     findings.push({
       severity: 'error',
@@ -1364,7 +1537,7 @@ function referenceFindings(
       where,
       path,
       message:
-        `RLS ${clause} reads \`${variablePath}\`, which nothing pre-resolves, in a scalar position no request ` +
+        `${CLAUSE_LABEL[clause]} reads \`${variablePath}\`, which nothing pre-resolves, in a scalar position no request ` +
         `can ever fill, ${droppedClause(clause)}`,
       // [#22161] One remedy line, naming only the fixed key set and the
       // nearest key, so no author text can lengthen it. What each key holds,
@@ -1375,17 +1548,42 @@ function referenceFindings(
     });
   }
 
+  // [#25234 refusal 12] A key in a membership position that no kernel key,
+  // declaration or registered resolver owns. Judged only where the runtime
+  // gate states the resolver's keys: on the CLI a self-hosted resolver may own
+  // any key, so there it stays `unknowable`. A nested path is not a key.
+  const resolverKeys = membership.resolverKeys;
+  if (resolverKeys) {
+    for (const variablePath of unresolvedMemberships) {
+      const key = variablePath.slice('current_user.'.length);
+      if (key.includes('.') || resolverKeys.has(key) || membership.declared.has(key)) continue;
+      const known = [...membership.declared, ...resolverKeys];
+      findings.push({
+        severity: 'error',
+        rule: RLS_PREDICATE_UNKNOWN_USER_VARIABLE,
+        where,
+        path,
+        message:
+          `${CLAUSE_LABEL[clause]} reads \`${variablePath}\` as a membership set, which no kernel key, membership ` +
+          `key declaration or registered resolver owns, ${droppedClause(clause)}`,
+        hint:
+          `Declare \`${key}\` in its roster object's \`membershipKeys\`, or test a key that is declared.` +
+          suggestName(key, known),
+      });
+    }
+  }
+
   // [#19951] The refusals the shape check cannot see (the block above
   // {@link attributeTypeFault}). A refusal no single type swap cures — the
   // probe-artefact class — reports nothing.
-  const fault = refusal !== null ? attributeTypeFault(bridged, probe) : null;
+  const fault = refusal !== null ? attributeTypeFault(bridged, probe, membership) : null;
   if (refusal !== null && fault) {
     findings.push({
       severity: 'error',
       rule: RLS_PREDICATE_UNENFORCEABLE,
       where,
       path,
-      message: `RLS ${clause}: ${HOLDING_VERDICT[fault.holds](fault.variable)}, ${droppedClause(clause)}`,
+      message: `${CLAUSE_LABEL[clause]}: ${HOLDING_VERDICT[fault.holds](fault.variable)}, ${droppedClause(clause)}`,
       hint: firstAndCount(fault.sites.map((site) => typeFaultRewrite(fault, site))),
     });
   }
@@ -1401,7 +1599,7 @@ function referenceFindings(
       // [#20212] `RLSCompiler.compileFilter` runs the same two faces on every
       // compiled policy filter, `using` and `check` alike, so the policy is
       // dropped on every request, exactly as a TYPE fault is.
-      message: `RLS ${clause} lowers to a refused comparand (${firstSentence(faced)}), ${droppedClause(clause)}`,
+      message: `${CLAUSE_LABEL[clause]} lowers to a refused comparand (${firstSentence(faced)}), ${droppedClause(clause)}`,
       hint: rewrites.length > 0 ? firstAndCount(rewrites) : COMPARAND_REWRITE,
     });
   }
@@ -1416,7 +1614,7 @@ function referenceFindings(
       rule: RLS_PREDICATE_UNENFORCEABLE,
       where,
       path,
-      message: `RLS ${clause} ${listHoldingVerdict(listComparisons)}, ${REFUSED_COMPARISON[clause]}`,
+      message: `${CLAUSE_LABEL[clause]} ${listHoldingVerdict(listComparisons)}, ${REFUSED_COMPARISON[clause]}`,
       hint:
         'Compare with a single-valued column, a literal or a `current_user` value ' +
         '(`record.owner in current_user.org_user_ids`), or move the condition into a validation rule or a hook',
@@ -1434,10 +1632,27 @@ function referenceFindings(
       rule: RLS_PREDICATE_UNENFORCEABLE,
       where,
       path,
-      message: `RLS ${clause} ${crossClassVerdict(crossClass)}, ${REFUSED_COMPARISON[clause]}`,
+      message: `${CLAUSE_LABEL[clause]} ${crossClassVerdict(crossClass)}, ${REFUSED_COMPARISON[clause]}`,
       hint:
         'Compare a field only with a field of its comparison class, or with a literal or a `current_user` value; ' +
         'if both columns do hold comparable values, fix the declaration',
+    });
+  }
+
+  // [#25234 refusal 11] A declared key tested against a column whose values
+  // can never be the key's. Every clause; ahead of the engine's pass.
+  const targetFaults = filter ? membershipTargetFaults(graph, object, filter, membership) : [];
+  if (targetFaults.length > 0) {
+    const first = targetFaults[0];
+    findings.push({
+      severity: 'error',
+      rule: RLS_PREDICATE_MEMBERSHIP_KEY_TARGET,
+      where,
+      path,
+      message:
+        `${CLAUSE_LABEL[clause]} tests ${first.holds} against \`current_user.${first.key}\`, which holds ` +
+        `'${first.target}' ids, so the two never match${targetFaults.length > 1 ? ` (and ${targetFaults.length - 1} more)` : ''}`,
+      hint: `Test the key against a column that references '${first.target}', or against \`id\` on '${first.target}'`,
     });
   }
 
@@ -1456,7 +1671,7 @@ function referenceFindings(
       where,
       path,
       message:
-        `RLS ${clause} (${refused.code} / ${refused.status}): ${refusalVerdict(firstSentence(refused.message))}`,
+        `${CLAUSE_LABEL[clause]} (${refused.code} / ${refused.status}): ${refusalVerdict(firstSentence(refused.message))}`,
       hint: engineRefusalHint(refused.code),
     });
   }
@@ -1474,6 +1689,13 @@ interface PolicySite {
   path: string;
 }
 
+/** The rule's inputs beyond the stack. */
+interface JudgeOptions {
+  judgeFilter?: IObjectQLEngine['judgeFilter'];
+  /** [#25234] The deployment's membership-key owners, stated by the runtime publish gate. */
+  membershipKeyOwners?: MembershipKeyOwners;
+}
+
 /**
  * Every finding one policy's `using` and `check` earn — the whole judgement,
  * shape pass and reference pass, for a policy wherever it is declared. The
@@ -1484,7 +1706,8 @@ function judgePolicy(
   graph: ObjectGraph,
   policy: AnyRec,
   site: PolicySite,
-  options: { judgeFilter?: IObjectQLEngine['judgeFilter'] },
+  options: JudgeOptions,
+  membership: MembershipKeyContext,
 ): RlsPredicateFinding[] {
   const findings: RlsPredicateFinding[] = [];
   for (const clause of ['using', 'check'] as const) {
@@ -1493,89 +1716,152 @@ function judgePolicy(
     // inventing a second complaint about the shape here would be the
     // double-report this rule avoids for everything else.
     if (!source.trim()) continue;
-
-    // ── The verdict. This is the consumer's own function, not a model of
-    // it: `RLSCompiler.compileFilter` calls the SAME `isSupportedRlsExpression`
-    // to decide whether a dropped policy warrants its WARN. There is no
-    // heuristic here to drift.
-    const object = site.object;
-    const where = site.where;
-    const path = `${site.path}.${clause}`;
-
-    if (isSupportedRlsExpression(source)) {
-      // [#16119] The shape is fine, so the REFERENCE pass owns this predicate.
-      // Disjoint from everything below by construction: the three shape ids
-      // only ever run on predicates this branch has already returned from.
-      // [#20158] The engine judges the READ SCOPE only: a `using` on a
-      // `select` / `all` policy that names its object.
-      const judge =
-        clause === 'using' && object && READ_SCOPE_OPERATIONS.has(str(policy.operation))
-          ? options.judgeFilter
-          : undefined;
-      findings.push(
-        ...referenceFindings(graph, source, clause, where, path, object, judge),
-      );
-      continue;
-    }
-
-    // ── The explanation. Re-derived only to tell the author WHICH fix they
-    // need; the red/green boundary above never consults it. (Both agree by
-    // construction — pinned in both directions in this rule's tests.)
-    const bridged = sqlPredicateToCel(source);
-    const why = isPushdownableCel(bridged);
-    const detail = why.ok ? '' : why.detail;
-    const parseError = !why.ok && why.reason === 'parse-error';
-    // A bounds overrun and a syntax fault both arrive as `parse-error` (the
-    // runtime deliberately collapses them — see this file's docblock), so
-    // the two are separated here, and only here.
-    const overrun = parseError ? boundsOverrunOf(bridged) : null;
-
-    if (overrun) {
-      // `limit` is null only for a bounds fault this package cannot NAME
-      // (unreachable on cel-js 8.0.0). Degrade honestly rather than guess a
-      // key, which would send the author to shorten the wrong axis.
-      const bound = overrun.limit ?? 'an unnamed platform CEL bound';
-      const budget = overrun.limitValue !== null ? ` (platform limit ${overrun.limitValue})` : '';
-      const measured = overrun.measured !== null ? `, this predicate measures ${overrun.measured}` : '';
-      findings.push({
-        severity: 'error',
-        rule: RLS_PREDICATE_OVER_BUDGET,
-        where,
-        path,
-        message:
-          `RLS ${clause} is valid CEL but overruns the parse bound ${bound}${budget}${measured} ` +
-          `(${overrun.summary}), ${droppedClause(clause)}`,
-        // [#22161] One line; the four options in full, and why a top-level
-        // `&&` must never be split, are the explanation's.
-        hint: OVER_BUDGET_FIX,
-      });
-      continue;
-    }
-
-    if (parseError) {
-      findings.push({
-        severity: 'error',
-        rule: RLS_PREDICATE_UNPARSEABLE,
-        where,
-        path,
-        message:
-          `RLS ${clause} does not parse as CEL, even after the legacy SQL bridge (${detail}), ` +
-          droppedClause(clause),
-        hint: UNPARSEABLE_FIX,
-      });
-      continue;
-    }
-
-    findings.push({
-      severity: 'error',
-      rule: RLS_PREDICATE_UNENFORCEABLE,
-      where,
-      path,
-      message: `RLS ${clause} is not lowerable (${refusalVerdict(detail)}), ${droppedClause(clause)}`,
-      hint: LOWERABLE_REWRITE,
-    });
+    // [#20158] The engine judges the READ SCOPE only: a `using` on a
+    // `select` / `all` policy that names its object.
+    const judge =
+      clause === 'using' && site.object && READ_SCOPE_OPERATIONS.has(str(policy.operation))
+        ? options.judgeFilter
+        : undefined;
+    findings.push(...judgeClause(graph, source, clause, site, judge, membership));
   }
   return findings;
+}
+
+/**
+ * Every finding one predicate earns: the shape pass, then the reference pass.
+ * One function for a policy's two clauses and a membership key's `filter`
+ * (#25234), which the security plugin compiles by the same compiler.
+ */
+function judgeClause(
+  graph: ObjectGraph,
+  source: string,
+  clause: Clause,
+  site: PolicySite,
+  judge: FilterJudge | undefined,
+  membership: MembershipKeyContext,
+): RlsPredicateFinding[] {
+  const findings: RlsPredicateFinding[] = [];
+  // ── The verdict. This is the consumer's own function, not a model of
+  // it: `RLSCompiler.compileFilter` calls the SAME `isSupportedRlsExpression`
+  // to decide whether a dropped policy warrants its WARN. There is no
+  // heuristic here to drift.
+  const object = site.object;
+  const where = site.where;
+  const path = `${site.path}.${clause}`;
+
+  if (isSupportedRlsExpression(source)) {
+    // [#16119] The shape is fine, so the REFERENCE pass owns this predicate.
+    // Disjoint from everything below by construction: the three shape ids
+    // only ever run on predicates this branch has already returned from.
+    findings.push(
+      ...referenceFindings(graph, source, clause, where, path, object, judge, membership),
+    );
+    return findings;
+  }
+
+  // ── The explanation. Re-derived only to tell the author WHICH fix they
+  // need; the red/green boundary above never consults it. (Both agree by
+  // construction — pinned in both directions in this rule's tests.)
+  const bridged = sqlPredicateToCel(source);
+  const why = isPushdownableCel(bridged);
+  const detail = why.ok ? '' : why.detail;
+  const parseError = !why.ok && why.reason === 'parse-error';
+  // A bounds overrun and a syntax fault both arrive as `parse-error` (the
+  // runtime deliberately collapses them — see this file's docblock), so
+  // the two are separated here, and only here.
+  const overrun = parseError ? boundsOverrunOf(bridged) : null;
+
+  if (overrun) {
+    // `limit` is null only for a bounds fault this package cannot NAME
+    // (unreachable on cel-js 8.0.0). Degrade honestly rather than guess a
+    // key, which would send the author to shorten the wrong axis.
+    const bound = overrun.limit ?? 'an unnamed platform CEL bound';
+    const budget = overrun.limitValue !== null ? ` (platform limit ${overrun.limitValue})` : '';
+    const measured = overrun.measured !== null ? `, this predicate measures ${overrun.measured}` : '';
+    findings.push({
+      severity: 'error',
+      rule: RLS_PREDICATE_OVER_BUDGET,
+      where,
+      path,
+      message:
+        `${CLAUSE_LABEL[clause]} is valid CEL but overruns the parse bound ${bound}${budget}${measured} ` +
+        `(${overrun.summary}), ${droppedClause(clause)}`,
+      // [#22161] One line; the four options in full, and why a top-level
+      // `&&` must never be split, are the explanation's.
+      hint: OVER_BUDGET_FIX,
+    });
+    return findings;
+  }
+
+  if (parseError) {
+    findings.push({
+      severity: 'error',
+      rule: RLS_PREDICATE_UNPARSEABLE,
+      where,
+      path,
+      message:
+        `${CLAUSE_LABEL[clause]} does not parse as CEL, even after the legacy SQL bridge (${detail}), ` +
+        droppedClause(clause),
+      hint: UNPARSEABLE_FIX,
+    });
+    return findings;
+  }
+
+  findings.push({
+    severity: 'error',
+    rule: RLS_PREDICATE_UNENFORCEABLE,
+    where,
+    path,
+    message: `${CLAUSE_LABEL[clause]} is not lowerable (${refusalVerdict(detail)}), ${droppedClause(clause)}`,
+    hint: LOWERABLE_REWRITE,
+  });
+  return findings;
+}
+
+/**
+ * [#25234] The membership keys a predicate is judged against: every key the
+ * stack's objects declare, plus — at the runtime gate — every key the live
+ * objects declare and the registered resolver's keys. A key's target is read
+ * off the one declaring object the stack carries; a key two objects declare,
+ * or whose declaring object the stack does not carry, has none here.
+ */
+function membershipKeyContextOf(
+  cfg: AnyRec,
+  graph: ObjectGraph,
+  owners: MembershipKeyOwners | undefined,
+): MembershipKeyContext {
+  const declaredHere = declaredMembershipKeysOf(cfg);
+  if (declaredHere.length === 0 && !owners) return NO_MEMBERSHIP_KEYS;
+  const declared = new Set<string>(declaredHere.map((d) => d.key));
+  const stackNames = stackObjectNamesOf(cfg);
+  // A stored declaration counts only while the stack does not carry (and so
+  // override) every object that declares it.
+  for (const key of owners?.declaredBy.keys() ?? []) {
+    if (objectsDeclaringKey(key, declaredHere, stackNames, owners).length > 0) declared.add(key);
+  }
+  const targetOf = new Map<string, string>();
+  for (const decl of declaredHere) {
+    if (objectsDeclaringKey(decl.key, declaredHere, stackNames, owners).length !== 1) continue;
+    const verdict = resolveFieldPath(graph, decl.object, decl.valueField);
+    if (!verdict || verdict.kind !== 'ok') continue;
+    const meta: GraphField = verdict.meta ?? {};
+    if (meta.type && RELATIONSHIP_FIELD_TYPES.has(meta.type) && meta.reference) targetOf.set(decl.key, meta.reference);
+  }
+  return { declared, targetOf, ...(owners ? { resolverKeys: owners.resolverKeys } : {}) };
+}
+
+/**
+ * The first `current_user` value a membership key's `filter` reads, or `null`.
+ *
+ * Asked of the compiler, with the caller context the security plugin hands
+ * it for a filter: an empty one. Any `current_user.*` is then unresolved, as it
+ * is at runtime, whatever the key.
+ */
+function callerValueRead(source: string): string | null {
+  const res = compileCelToFilter(sqlPredicateToCel(source), { variables: { current_user: {} } });
+  if (res.ok || res.reason !== 'unresolved-variable') return null;
+  const path = unresolvedVariablePath(res.detail);
+  return path && (path === 'current_user' || path.startsWith('current_user.')) ? path : null;
 }
 
 /**
@@ -1589,10 +1875,15 @@ function judgePolicy(
  *   (`IObjectQLEngine.judgeFilter`, bound to its engine). Present, every
  *   read-scope `using` that the passes above leave clean is judged by it — see
  *   this file's header. Absent, that pass is skipped and nothing else changes.
+ * @param options.membershipKeyOwners [#25234] The deployment's membership-key
+ *   owners — the registered resolver's keys and every key the live objects
+ *   declare — stated by the runtime publish gate. Present, a key in a
+ *   membership position that nobody owns is refused (refusal 12). Absent (the
+ *   CLI), such a key stays `unknowable`, as before.
  */
 export function validateRlsPredicateEnforceability(
   stack: unknown,
-  options: { judgeFilter?: IObjectQLEngine['judgeFilter'] } = {},
+  options: JudgeOptions = {},
 ): RlsPredicateFinding[] {
   const findings: RlsPredicateFinding[] = [];
   const cfg = (stack ?? {}) as AnyRec;
@@ -1605,6 +1896,9 @@ export function validateRlsPredicateEnforceability(
   // readable field map, registry-injected system columns) are the graph's and not
   // re-derived here.
   const graph: ObjectGraph = indexObjectGraph(cfg);
+  // [#25234] The declared membership keys every predicate below is judged
+  // against: bound as lists, traced to their targets — see `## Membership keys`.
+  const membership = membershipKeyContextOf(cfg, graph, options.membershipKeyOwners);
 
   // The permission sets' policies (`permissions[].rowLevelSecurity[]`).
   recordsOf(cfg.permissions).forEach((ps, psIndex) => {
@@ -1618,7 +1912,7 @@ export function validateRlsPredicateEnforceability(
             `permission set "${psName}" policy "${str(policy.name) || String(pIndex)}"` +
             (object ? ` on object "${object}"` : ''),
           path: `permissions[${psIndex}].rowLevelSecurity[${pIndex}]`,
-        }, options),
+        }, options, membership),
       );
     });
   });
@@ -1639,9 +1933,40 @@ export function validateRlsPredicateEnforceability(
         object,
         where: `default row scope${scopeName ? ` "${scopeName}"` : ''} of object "${object || String(oIndex)}"`,
         path: `objects[${oIndex}].defaultRowScope`,
-      }, options),
+      }, options, membership),
     );
   });
+
+  // [#25234 refusal 7] Each declared membership key's `filter`. The security
+  // plugin compiles it by the same compiler, against the declaring object's
+  // columns and with NO caller, before the roster read; a filter that does not
+  // compile leaves the key unresolved. So it is judged by the same passes, with
+  // the declaring object as its target, after one check of its own: it reads no
+  // `current_user` value — see `## Membership keys`.
+  for (const decl of declaredMembershipKeysOf(cfg)) {
+    const source = decl.filter ?? '';
+    if (!source.trim()) continue;
+    const site: PolicySite = {
+      object: decl.object,
+      where: `membership key "${decl.key}" of object "${decl.object}"`,
+      path: `objects[${decl.objectIndex}].membershipKeys.${decl.key}`,
+    };
+    const callerRead = callerValueRead(source);
+    if (callerRead) {
+      findings.push({
+        severity: 'error',
+        rule: RLS_PREDICATE_UNKNOWN_USER_VARIABLE,
+        where: site.where,
+        path: `${site.path}.filter`,
+        message:
+          `${CLAUSE_LABEL.filter} reads \`${callerRead}\`, but a key's filter is resolved with no caller, ` +
+          `so ${FILTER_DROPPED}`,
+        hint: "Narrow the roster with this object's own columns only (`active == true`): a key is never built from a caller value",
+      });
+      continue;
+    }
+    findings.push(...judgeClause(graph, source, 'filter', site, options.judgeFilter, membership));
+  }
 
   return findings;
 }

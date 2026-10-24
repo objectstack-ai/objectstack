@@ -1654,11 +1654,15 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                         ...(body?.actor ? { actor: body.actor } : {}),
                         // [#24253] Passed through as sent: the protocol judges
                         // its shape and what it names, and refuses the whole
-                        // request before anything is published. The writes run
-                        // as THIS caller, so the request's own execution
-                        // context rides with it, never a system one.
-                        ...(body?.backfill !== undefined
-                            ? { backfill: body.backfill, context: _context?.executionContext }
+                        // request before anything is published.
+                        ...(body?.backfill !== undefined ? { backfill: body.backfill } : {}),
+                        // THIS caller's execution context, never a system one:
+                        // the backfill writes run as it, and [#25484] so do the
+                        // build probes' dashboard-widget reads — the renderer's
+                        // path, so a widget the caller can read is not reported
+                        // broken and one the caller cannot read still is.
+                        ...(_context?.executionContext !== undefined
+                            ? { context: _context.executionContext }
                             : {}),
                     });
                     // Publishing a `seed` draft is what actually loads its

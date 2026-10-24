@@ -123,12 +123,21 @@ export interface ResolvedAuthzContext {
    * `PLATFORM_ADMIN` (the anchoring `admin_full_access` grant, or — since #11663
    * L2 — a VERIFIED `sys_user.email` on the deployment's declared
    * administrator list) > `TENANT_ADMIN`
-   * (`organization_admin`) > `MEMBER` (the authenticated floor). `EXTERNAL` is
-   * defined/test-locked but never resolved yet (no external principal type —
+   * (`organization_admin`) > `MEMBER` (the authenticated floor), and
+   * `EXTERNAL` for a holder of `org_external` ([ruling of record 6355206139],
    * see `posture-ladder.ts`). Present only for an authenticated principal;
    * anonymous requests carry no rung.
    */
   posture?: AuthzPosture;
+  /**
+   * [Ruling of record 6355206139, letter B] `'external'` when the principal
+   * holds `org_external` — the organization's external population — and absent
+   * otherwise (absent reads as `'internal'`, `ExecutionContext.audience`).
+   * Carried beside {@link posture}, which is `EXTERNAL` for the same holders,
+   * so the seams that key on the population (the OWD floor in
+   * `plugin-sharing`) read it off the envelope instead of re-deriving it.
+   */
+  audience?: 'external';
   /**
    * [#23287, ruling C′ item 3] The credential that admitted {@link userId}:
    * `'api_key'` when an API key did (step 1 below), `'session'` when the
@@ -756,6 +765,7 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
   ctx.accessible_org_ids = grants.accessible_org_ids;
   if (grants.tabPermissions) ctx.tabPermissions = grants.tabPermissions;
   if (grants.posture) ctx.posture = grants.posture;
+  if (grants.audience) ctx.audience = grants.audience;
   if (grants.email && !ctx.email) ctx.email = grants.email;
 
   return ctx;
@@ -804,6 +814,8 @@ export interface UserAuthzGrants {
   accessible_org_ids: string[];
   tabPermissions?: Record<string, 'visible' | 'hidden' | 'default_on' | 'default_off'>;
   posture?: AuthzPosture;
+  /** [Ruling of record 6355206139] `'external'` for a holder of `org_external`. */
+  audience?: 'external';
   /** The user's unique email (`sys_user`), for `current_user.email` owner RLS. */
   email?: string;
 }
@@ -2021,13 +2033,21 @@ export async function resolveUserAuthzGrants(
   //     enforcement input, closing the #2836 dual-track class). Enforcement
   //     behavior is unchanged: the per-object Layer 0 exemption + per-side
   //     superuser bypass still gate access; posture is the carried, explainable
-  //     tier. `EXTERNAL` is never derived (no external principal type yet).
+  //     tier.
+  //
+  //     [Ruling of record 6355206139, letter B] `EXTERNAL` for a holder of
+  //     `org_external` (§3's projection of `sys_member.role = external`, the
+  //     same fact that withheld the `everyone` anchor at §5b), and the
+  //     population stamped as `audience: 'external'` beside it.
+  const external = holdsExternalIdentity(grants.positions);
   grants.posture = derivePosture({
     isPlatformAdmin: hasPlatformAdminGrant,
     // [ADR-0105 D4] Either org-admin capability set resolves the rung — the
     // wall-less variant differs only by withholding the superuser bits.
     isTenantAdmin: ORGANIZATION_ADMIN_GRANTS.some((n: string) => grants.permissions.includes(n)),
+    isExternal: external,
   });
+  if (external) grants.audience = 'external';
 
   // 7. [cloud ADR-0024 §7] Env-side AI seat: synthesize the `ai_seat` capability from the
   //    boolean sys_user.ai_access (sqlite returns 1/0; memory returns boolean).

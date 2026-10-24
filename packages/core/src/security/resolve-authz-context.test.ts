@@ -990,8 +990,9 @@ describe('audience anchors in the resolver (ADR-0090 D5)', () => {
  * matrix asserting the rung is DERIVED from held capability grants
  * (`admin_full_access` → PLATFORM_ADMIN; `organization_admin` → TENANT_ADMIN;
  * otherwise MEMBER), never from a better-auth role, plus the strict-nesting
- * ordering (PLATFORM_ADMIN > TENANT_ADMIN > MEMBER). `EXTERNAL` is never
- * resolved — no external principal type exists yet.
+ * ordering (PLATFORM_ADMIN > TENANT_ADMIN > MEMBER). `EXTERNAL` resolves only
+ * for a holder of `org_external` (ruling of record 6355206139), pinned in
+ * `resolve-authz-context.external-population.test.ts`; no fixture here holds it.
  */
 describe('resolveAuthzContext — posture ladder (ADR-0095 D2/D3)', () => {
   // Each fixture returns the ql tables + the session getter for one principal.

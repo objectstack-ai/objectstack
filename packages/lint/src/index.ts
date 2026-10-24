@@ -383,11 +383,28 @@ export {
   RLS_PREDICATE_OVER_BUDGET,
   RLS_PREDICATE_UNKNOWN_FIELD,
   RLS_PREDICATE_UNKNOWN_USER_VARIABLE,
+  RLS_PREDICATE_MEMBERSHIP_KEY_TARGET,
 } from './validate-rls-predicate-enforceability.js';
 export type {
   RlsPredicateFinding,
   RlsPredicateSeverity,
 } from './validate-rls-predicate-enforceability.js';
+
+// [#25234 ruling A] A membership key's DECLARATION (`ObjectSchema.membershipKeys`):
+// its `userField` and `valueField` on the merged object, one key on two objects,
+// and a key the registered resolver also owns. Each one is a key the security
+// plugin cannot resolve, so every policy reading it matches no rows.
+export {
+  validateMembershipKeyDeclarations,
+  MEMBERSHIP_KEY_USER_FIELD_INVALID,
+  MEMBERSHIP_KEY_VALUE_FIELD_INVALID,
+  MEMBERSHIP_KEY_DECLARED_TWICE,
+  MEMBERSHIP_KEY_RESOLVER_COLLISION,
+} from './validate-membership-key-declarations.js';
+export type {
+  MembershipKeyFinding,
+  MembershipKeyOwners,
+} from './validate-membership-key-declarations.js';
 
 export {
   validateDashboardActionRefs,

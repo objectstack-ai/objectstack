@@ -49,9 +49,13 @@ export function getCliVersion(): string {
   return cachedCliVersion;
 }
 
-/** Caret-pinned to the CLI's own version (e.g. `^6.5.0`). */
+/**
+ * The CLI's own version, EXACT (e.g. `18.0.0`, or `18.1.0-rc.2` in an RC
+ * window) — never a `^`/`~` range. A breaking change may ship in a minor or a
+ * patch on the v18 line, and the docs tell a project to pin exact versions.
+ */
 function pkgVersion(): string {
-  return `^${getCliVersion()}`;
+  return getCliVersion();
 }
 
 /**

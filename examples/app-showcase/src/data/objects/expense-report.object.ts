@@ -69,15 +69,22 @@ export const ExpenseReport = ObjectSchema.create({
     // ── Filtered roll-ups (the point of this object) ─────────────────────────
     // Child FK is auto-detected (showcase_expense_line.expense_report), so none
     // of these need `relationshipField`.
+    //
+    // The three money roll-ups declare `scale: 2`. A summary has no currency
+    // of its own, and with no `scale` a sum renders at the natural precision of
+    // its value, so one column read `225.75`, `917` and `1,500.5`. Two
+    // decimals match the line `amount` they add up.
 
     /** Baseline: unfiltered — the grand total of every line. */
     total_amount: Field.summary({
       label: 'Total',
+      scale: 2,
       summaryOperations: { object: 'showcase_expense_line', field: 'amount', function: 'sum' },
     }),
     /** Filtered SUM (equality) — only lines a manager has approved. */
     approved_amount: Field.summary({
       label: 'Approved',
+      scale: 2,
       summaryOperations: {
         object: 'showcase_expense_line',
         field: 'amount',
@@ -88,6 +95,7 @@ export const ExpenseReport = ObjectSchema.create({
     /** Filtered SUM (boolean) — only lines billable back to a client. */
     reimbursable_amount: Field.summary({
       label: 'Reimbursable',
+      scale: 2,
       summaryOperations: {
         object: 'showcase_expense_line',
         field: 'amount',

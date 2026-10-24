@@ -136,6 +136,10 @@ import { validateSecurityPosture, validateSecurityRoleWord } from './validate-se
 import { validateOrgAxisRedLines } from './validate-org-axis-red-lines.js';
 import { validateSharingRuleEnforceability } from './validate-sharing-rule-enforceability.js';
 import { validateRlsPredicateEnforceability } from './validate-rls-predicate-enforceability.js';
+import {
+  validateMembershipKeyDeclarations,
+  type MembershipKeyOwners,
+} from './validate-membership-key-declarations.js';
 import { validateRuleCompilability } from './validate-rule-compilability.js';
 import { validateRuleSchemaFormats } from './validate-rule-schema-formats.js';
 import { validateActionLocations } from './validate-action-locations.js';
@@ -399,6 +403,21 @@ export interface AuthoringRuleContext {
    * flow whose trigger object is outside it instead of advising.
    */
   packageScope?: { readonly packageId: string; readonly dependencies: readonly string[] };
+  /**
+   * [#25234] The deployment's membership-key owners: the keys the registered
+   * `rls-membership-resolver` declares (`IRlsMembershipResolver.keys`, empty
+   * when none is registered), and every key the WHOLE live object collection
+   * declares (`ObjectSchema.membershipKeys`), read before the package-closure
+   * narrowing because a key's namespace is the deployment's.
+   *
+   * Set only by the runtime publish gate, and only when its host states the
+   * resolver's keys; ABSENT on the three CLI commands, where a self-hosted
+   * resolver may own any key. Read by `validateMembershipKeyDeclarations`
+   * (a key both sources own; a key two live objects declare) and
+   * `validateRlsPredicateEnforceability` (a key in a membership position that
+   * nobody owns).
+   */
+  membershipKeyOwners?: MembershipKeyOwners;
 }
 
 export interface AuthoringRule {
@@ -2263,8 +2282,36 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     commands: ALL,
     source: 'packages/lint/src/validate-rls-predicate-enforceability.ts',
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['permission'],
-    run: (stack, ctx) => validateRlsPredicateEnforceability(stack, { judgeFilter: ctx.judgeFilter }),
+    // [#25234] `object` too: an object carries two predicates this rule judges,
+    // its `defaultRowScope` (#24452) and its membership keys' `filter`, and a
+    // hosted author has no other door for either. The differential charges an
+    // object write only with what it adds: a permission set's finding that
+    // the write's own declaration resolves, or a filter it writes.
+    runtimeTypes: ['permission', 'object'],
+    run: (stack, ctx) =>
+      validateRlsPredicateEnforceability(stack, {
+        judgeFilter: ctx.judgeFilter,
+        membershipKeyOwners: ctx.membershipKeyOwners,
+      }),
+  },
+  // [#25234 ruling A, refusals 3 to 6] A membership key's declaration
+  // (`ObjectSchema.membershipKeys`): its `userField` and `valueField` judged on
+  // the merged object, one key on two objects, and a key the registered
+  // resolver also owns. The security plugin resolves each declaration per
+  // request and fails closed on every one of these, so each is a key that reads
+  // as a grant and matches no rows. Across the runtime publish gate for
+  // `object` writes, the one door a hosted author has; the two deployment
+  // facts arrive as `ctx.membershipKeyOwners`, which the CLI does not have.
+  {
+    name: 'validateMembershipKeyDeclarations',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-membership-key-declarations.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['object'],
+    run: (stack, ctx) =>
+      validateMembershipKeyDeclarations(stack, { membershipKeyOwners: ctx.membershipKeyOwners }),
   },
   // #4762 — the same "declared but enforces nothing" question, for the two
   // STATIC artifacts an object validation rule carries. A `format` rule's
