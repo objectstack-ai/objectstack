@@ -2984,7 +2984,7 @@
     {
       "file": "packages/plugins/plugin-auth/src/admin-user-endpoints.test.ts",
       "verb": "update",
-      "pinned": 1
+      "pinned": 3
     },
     {
       "file": "packages/plugins/plugin-auth/src/anonymous-session-refusal.test.ts",

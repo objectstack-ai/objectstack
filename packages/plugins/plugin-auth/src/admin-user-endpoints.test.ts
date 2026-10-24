@@ -1254,3 +1254,275 @@ describe('create-user: an optional permission set, granted under the caller\'s o
     expect(param).not.toHaveProperty('objectOverride');
   });
 });
+
+// ── create-user's optional organization ────────────────────────────────────
+//
+// The organization's Add Member action folded into the creation: better-auth's
+// own `addMember` joins the new user as a `member`, inside the same unit of
+// work as the account, so a refused join leaves no user behind. In multi-org
+// mode this is the only way the new user gets a membership at creation — the
+// reconciler never guesses a target org there (ADR-0093 D3).
+describe('create-user: an optional organization the new user joins as a member', () => {
+  function makeJoinDeps(opts: {
+    members?: Array<{ organization_id: string; user_id: string }>;
+    addMember?: (...args: any[]) => Promise<unknown>;
+    withSeam?: boolean;
+    policy?: 'auto' | 'invite-only';
+    /** The organization wall in force — `features.multiOrgEnabled`. */
+    isolationActive?: boolean;
+    /** The calling administrator's current organization (`undefined` ⇒ the dep is not wired). */
+    callerActiveOrg?: string | null;
+  } = {}) {
+    const outcomes: string[] = [];
+    const runAtomically = vi.fn(async <T,>(work: () => Promise<T>): Promise<T> => {
+      try {
+        const result = await work();
+        outcomes.push('committed');
+        return result;
+      } catch (error) {
+        outcomes.push('rolled back');
+        throw error;
+      }
+    });
+    const resolveActorContext = vi.fn(async () => undefined);
+    const addMember = vi.fn(opts.addMember ?? (async ({ body }: any) => ({ id: 'mem-1', ...body })));
+    const createUser = vi.fn(async ({ body }: any) => ({
+      user: { id: 'user-9', email: body.email, name: body.name },
+    }));
+    const members = opts.members ?? [];
+    const find = vi.fn(async (object: string, query: any) => {
+      const where = query?.where ?? {};
+      if (object === 'sys_member') {
+        return members.filter((m) => m.organization_id === where.organization_id && m.user_id === where.user_id);
+      }
+      // Multi-org: the reconciler must never be what binds here.
+      if (object === 'sys_organization') return [{ id: 'org_a' }, { id: 'org_b' }];
+      return [];
+    });
+    const engineInsert = vi.fn(async () => ({}));
+    const callerActiveOrganizationId = vi.fn(async () => opts.callerActiveOrg ?? null);
+    const m = makeDeps({
+      getAuthApi: async () => ({ createUser, addMember }) as any,
+      getDataEngine: () => ({
+        update: vi.fn(async (_obj: string, data: any, options?: any) => {
+        assertEngineUpdateDispatch(data, options);
+        return {};
+      }),
+        insert: engineInsert,
+        find,
+      }),
+      getTenancy: () => ({ defaultOrgId: async () => null, isolationActive: opts.isolationActive ?? true }),
+      ...(opts.policy ? { getMembershipPolicy: () => opts.policy } : {}),
+      ...(opts.callerActiveOrg !== undefined ? { getCallerActiveOrganizationId: callerActiveOrganizationId } : {}),
+      ...(opts.withSeam === false ? {} : { createGrant: { resolveActorContext, runAtomically } }),
+    });
+    return { ...m, createUser, addMember, engineInsert, outcomes, runAtomically, resolveActorContext, callerActiveOrganizationId };
+  }
+
+  it('none chosen and no default wired: addMember is never called and the unit of work is not opened', async () => {
+    const j = makeJoinDeps();
+    const res = await runAdminCreateUser(j.deps, makeRequest({ email: 'n@b.co', password: 'Explicit1!' }), ACTOR);
+    expect(res.status).toBe(200);
+    expect(j.addMember).not.toHaveBeenCalled();
+    expect(j.runAtomically).not.toHaveBeenCalled();
+    expect((res.body.data as any).membershipCreated).toBe(false);
+  });
+
+  it('chosen: joins it as a member through addMember inside the unit of work, and reports it', async () => {
+    const j = makeJoinDeps();
+    const res = await runAdminCreateUser(
+      j.deps,
+      makeRequest({ email: 'o@b.co', password: 'Explicit1!', organizationId: ' org_b ' }),
+      ACTOR,
+    );
+    expect(res.status).toBe(200);
+    expect(j.outcomes).toEqual(['committed']);
+    expect(j.addMember).toHaveBeenCalledTimes(1);
+    expect(j.addMember.mock.calls[0][0]).toEqual({ body: { userId: 'user-9', role: 'member', organizationId: 'org_b' } });
+    // The caller's context is not needed for the join: it is the vendor's own act.
+    expect(j.resolveActorContext).not.toHaveBeenCalled();
+    // The reconciler's own insert never ran: one membership, the chosen one.
+    expect(callsOf(j.engineInsert).filter(([object]) => object === 'sys_member')).toHaveLength(0);
+    const data = res.body.data as any;
+    expect(data.organizationId).toBe('org_b');
+    expect(data.membershipCreated).toBe(true);
+    const audit = callsOf(j.engineInsert).find(([object]) => object === 'sys_audit_log')![1];
+    expect(JSON.parse(audit.metadata)).toMatchObject({ organizationId: 'org_b', membershipCreated: true });
+  });
+
+  it('chosen under invite-only: still joined — an organization the administrator named is an explicit flow', async () => {
+    const j = makeJoinDeps({ policy: 'invite-only' });
+    const res = await runAdminCreateUser(
+      j.deps,
+      makeRequest({ email: 'i@b.co', password: 'Explicit1!', organizationId: 'org_a' }),
+      ACTOR,
+    );
+    expect(res.status).toBe(200);
+    expect(j.addMember).toHaveBeenCalledTimes(1);
+    expect((res.body.data as any).membershipCreated).toBe(true);
+  });
+
+  it('a membership already there is respected: no second addMember, membershipCreated false', async () => {
+    const j = makeJoinDeps({ members: [{ organization_id: 'org_a', user_id: 'user-9' }] });
+    const res = await runAdminCreateUser(
+      j.deps,
+      makeRequest({ email: 'e@b.co', password: 'Explicit1!', organizationId: 'org_a' }),
+      ACTOR,
+    );
+    expect(res.status).toBe(200);
+    expect(j.addMember).not.toHaveBeenCalled();
+    expect(res.body.data).toMatchObject({ organizationId: 'org_a', membershipCreated: false });
+  });
+
+  it('refused by the vendor: its status and code, the account rolls back, nothing is audited', async () => {
+    const j = makeJoinDeps({
+      addMember: async () => {
+        throw { statusCode: 400, body: { code: 'ORGANIZATION_NOT_FOUND', message: 'Organization not found' } };
+      },
+    });
+    const res = await runAdminCreateUser(
+      j.deps,
+      makeRequest({ email: 'r@b.co', password: 'Explicit1!', organizationId: 'org_gone' }),
+      ACTOR,
+    );
+    expect(res.status).toBe(400);
+    expect(res.body.error?.code).toBe('ORGANIZATION_NOT_FOUND');
+    expect(res.body.error?.message).toContain('no user was created');
+    expect(j.outcomes).toEqual(['rolled back']);
+    expect(res.body.data).toBeUndefined();
+    expect(callsOf(j.engineInsert).filter(([object]) => object === 'sys_audit_log')).toHaveLength(0);
+  });
+
+  it('a host with no unit of work refuses 501 before any account exists', async () => {
+    const j = makeJoinDeps({ withSeam: false });
+    const res = await runAdminCreateUser(
+      j.deps,
+      makeRequest({ email: 'w@b.co', password: 'Explicit1!', organizationId: 'org_a' }),
+      ACTOR,
+    );
+    expect(res.status).toBe(501);
+    expect(j.createUser).not.toHaveBeenCalled();
+  });
+
+  it('a server without the organization plugin refuses 501 before any account exists', async () => {
+    const j = makeJoinDeps();
+    const createUser = vi.fn();
+    j.deps.getAuthApi = async () => ({ createUser }) as any;
+    const res = await runAdminCreateUser(
+      j.deps,
+      makeRequest({ email: 'p@b.co', password: 'Explicit1!', organizationId: 'org_a' }),
+      ACTOR,
+    );
+    expect(res.status).toBe(501);
+    expect(createUser).not.toHaveBeenCalled();
+  });
+
+  it('an organizationId that is not a string is refused 400 before any account exists', async () => {
+    const j = makeJoinDeps();
+    const res = await runAdminCreateUser(
+      j.deps,
+      makeRequest({ email: 'x@b.co', password: 'Explicit1!', organizationId: { id: 'org_a' } }),
+      ACTOR,
+    );
+    expect(res.status).toBe(400);
+    expect(j.createUser).not.toHaveBeenCalled();
+  });
+
+  // ── left empty: the administrator's current organization, multi-org only ──
+
+  it('multi-org, left empty: the user joins the administrator\'s current organization', async () => {
+    const j = makeJoinDeps({ callerActiveOrg: 'org_current' });
+    const res = await runAdminCreateUser(j.deps, makeRequest({ email: 'd@b.co', password: 'Explicit1!' }), ACTOR);
+    expect(res.status).toBe(200);
+    expect(j.outcomes).toEqual(['committed']);
+    expect(j.addMember.mock.calls[0][0]).toEqual({
+      body: { userId: 'user-9', role: 'member', organizationId: 'org_current' },
+    });
+    expect(res.body.data).toMatchObject({ organizationId: 'org_current', membershipCreated: true });
+  });
+
+  it('multi-org, left empty, an administrator with no current organization: member-less, as before', async () => {
+    const j = makeJoinDeps({ callerActiveOrg: null });
+    const res = await runAdminCreateUser(j.deps, makeRequest({ email: 'z@b.co', password: 'Explicit1!' }), ACTOR);
+    expect(res.status).toBe(200);
+    expect(j.callerActiveOrganizationId).toHaveBeenCalledTimes(1);
+    expect(j.addMember).not.toHaveBeenCalled();
+    expect(j.runAtomically).not.toHaveBeenCalled();
+    expect((res.body.data as any).membershipCreated).toBe(false);
+  });
+
+  it('multi-org, left empty, under invite-only: no default — a default is not an explicit choice', async () => {
+    const j = makeJoinDeps({ callerActiveOrg: 'org_current', policy: 'invite-only' });
+    const res = await runAdminCreateUser(j.deps, makeRequest({ email: 'q@b.co', password: 'Explicit1!' }), ACTOR);
+    expect(res.status).toBe(200);
+    expect(j.callerActiveOrganizationId).not.toHaveBeenCalled();
+    expect(j.addMember).not.toHaveBeenCalled();
+    expect((res.body.data as any).membershipCreated).toBe(false);
+  });
+
+  it('multi-org, left empty, a host that cannot join: the user is still created, member-less — never a 501', async () => {
+    const j = makeJoinDeps({ callerActiveOrg: 'org_current', withSeam: false });
+    const res = await runAdminCreateUser(j.deps, makeRequest({ email: 'k@b.co', password: 'Explicit1!' }), ACTOR);
+    expect(res.status).toBe(200);
+    expect(j.addMember).not.toHaveBeenCalled();
+    expect((res.body.data as any).membershipCreated).toBe(false);
+  });
+
+  it('multi-org, left empty, the current organization refuses the join: no user, and the message says so', async () => {
+    const j = makeJoinDeps({
+      callerActiveOrg: 'org_current',
+      addMember: async () => {
+        throw { statusCode: 403, body: { code: 'ORGANIZATION_MEMBERSHIP_LIMIT_REACHED', message: 'Membership limit reached' } };
+      },
+    });
+    const res = await runAdminCreateUser(j.deps, makeRequest({ email: 'l@b.co', password: 'Explicit1!' }), ACTOR);
+    expect(res.status).toBe(403);
+    expect(res.body.error?.code).toBe('ORGANIZATION_MEMBERSHIP_LIMIT_REACHED');
+    expect(res.body.error?.message).toContain('no user was created');
+    expect(j.outcomes).toEqual(['rolled back']);
+  });
+
+  it('single-org (or a degraded wall): the default is never read and creation is unchanged', async () => {
+    const j = makeJoinDeps({ callerActiveOrg: 'org_current', isolationActive: false });
+    const res = await runAdminCreateUser(j.deps, makeRequest({ email: 's@b.co', password: 'Explicit1!' }), ACTOR);
+    expect(res.status).toBe(200);
+    expect(j.callerActiveOrganizationId).not.toHaveBeenCalled();
+    expect(j.addMember).not.toHaveBeenCalled();
+    expect(j.runAtomically).not.toHaveBeenCalled();
+  });
+
+  it('single-org: the reconciler still binds the default organization, with the default dep wired', async () => {
+    const insert = vi.fn(async () => ({}));
+    const callerActive = vi.fn(async () => 'org_elsewhere');
+    const m = makeDeps({
+      getDataEngine: () => ({
+        update: vi.fn(async (_obj: string, data: any, options?: any) => {
+          assertEngineUpdateDispatch(data, options);
+          return {};
+        }),
+        insert,
+        find: vi.fn(async (object: string) => (object === 'sys_organization' ? [{ id: 'org_default', slug: 'default' }] : [])),
+      }),
+      getTenancy: () => ({ defaultOrgId: async () => 'org_default', isolationActive: false }),
+      getCallerActiveOrganizationId: callerActive,
+    });
+    const res = await runAdminCreateUser(m.deps, makeRequest({ email: 'so@b.co', password: 'Explicit1!' }), ACTOR);
+    expect(res.status).toBe(200);
+    expect(callerActive).not.toHaveBeenCalled();
+    expect(res.body.data).toMatchObject({ organizationId: 'org_default', membershipCreated: true });
+    const member = callsOf(insert).find(([object]) => object === 'sys_member');
+    expect(member?.[1]).toMatchObject({ organization_id: 'org_default', user_id: 'user-9', role: 'member' });
+  });
+
+  it('the Create User dialog offers it as an optional organization picker, only in multi-org mode', () => {
+    const action = (SysUser.actions ?? []).find((a) => a.name === 'create_user');
+    const param = (action?.params ?? []).find((p) => p.name === 'organizationId');
+    expect(param).toMatchObject({
+      type: 'lookup',
+      reference: 'sys_organization',
+      required: false,
+    });
+    // `requiresFeature` is lowered into `visible` at parse time.
+    expect(JSON.stringify((param as { visible?: unknown }).visible)).toContain('features.multiOrgEnabled');
+  });
+});
