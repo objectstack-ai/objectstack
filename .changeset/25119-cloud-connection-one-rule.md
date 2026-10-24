@@ -1,0 +1,22 @@
+---
+'@objectstack/cloud-connection': patch
+---
+
+fix(cloud-connection)!: one rule for the Cloud Connection capability — the page's record and its three connection-changing requests require `manage_platform_settings`, like its Setup entry; a server holding the environment service key also refuses `bind/start` and `bind/poll`
+
+Clause-②: no (narrowing)
+Metadata-protocol: none
+
+<!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is which signed-in callers the Cloud Connection routes serve: the capability they read moves from `setup.access` to `manage_platform_settings`, and a server holding the environment service key refuses two more of them. The navigation entry's added `requiredPermissions` is a value inside an exported constant whose type is unchanged. -->
+
+**BREAKING** (a signed-in user who holds Setup Access, `setup.access`, without Manage Platform Settings, `manage_platform_settings`, such as an organization administrator under the default permission sets, can no longer connect or disconnect the server, and is no longer served the connection's details), shipped as `patch`: the change is to which callers the routes serve, not to the metadata protocol.
+
+The Cloud Connection page's Setup entry sits in the Integrations group, which requires `manage_platform_settings`. The page's routes still took `setup.access` alone, so an organization administrator, whose default permission set carries Setup Access but not Manage Platform Settings, was not shown the entry but could open the page by its address and connect or disconnect the server. One rule now covers the entry, the page and the routes:
+
+- **Refused now:** `POST /api/v1/cloud-connection/bind/start`, `POST /api/v1/cloud-connection/bind/poll` and `POST /api/v1/cloud-connection/unbind` answer a signed-in user who does not hold `manage_platform_settings` with `403` and the standard `PERMISSION_DENIED` code, and the message names that capability. Holding `setup.access` is no longer enough. The refusal still comes before any call to the cloud and before the stored credential is touched.
+- **Narrowed now:** `GET /api/v1/cloud-connection/status` serves `environmentId` and `connection` only to a user who holds `manage_platform_settings`. Every other caller, an organization administrator included, is served `bound`, `runtimeId` and `provider`, as an anonymous caller is.
+- **Declared on the entry:** the Cloud Connection navigation entry now declares `requiredPermissions: ['manage_platform_settings']` itself, the capability its group already required, so the entry and the routes read one rule from this package. The page carries no permission key of its own (a page has none); what it shows is served by these routes.
+- **Refused on a platform-managed server:** a server holding the environment service key (`controlPlaneApiKey`, or `OS_CLOUD_API_KEY`) already refused `unbind` with `409` and `RESOURCE_CONFLICT`. It now refuses `bind/start` and `bind/poll` the same way, after the sign-in and capability checks and before any call to the cloud or any write to the stored credential. A device connection completed there used to store a credential the service key always overrode, while presenting that key to the cloud, which could move the environment's cloud-side connection record. The message now says the connection cannot be connected or disconnected here, and that nothing was sent to the cloud and nothing was stored or cleared.
+- **Unchanged:** a user who holds `manage_platform_settings`, which the default platform-administrator permission set carries, is served exactly as before on a server without the service key. Anonymous callers still get `401`, and a session the authentication policy is holding still gets its `403`. The device-code flow's steps, the status answer for a permitted caller, and the four other session routes (`install`, `installation`, `installed`, `org-packages`) are unchanged.
+
+**Who acts:** a deployment that relies on organization administrators, or another set holding only Setup Access, to connect its server grants `manage_platform_settings` to those users, through a permission set or a position, and they are served as before.

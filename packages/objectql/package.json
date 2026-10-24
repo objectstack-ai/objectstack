@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/objectql",
-  "version": "18.1.0",
+  "version": "18.0.0",
   "license": "Apache-2.0",
   "description": "Isomorphic ObjectQL Engine for ObjectStack",
   "main": "dist/index.js",
