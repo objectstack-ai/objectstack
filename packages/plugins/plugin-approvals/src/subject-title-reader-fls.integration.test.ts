@@ -31,7 +31,7 @@
  *  (b) the same reader, with the subject record deleted and the snapshot
  *      carrying the title, still gets none;
  *  (c) the decision result row — what the success toast's
- *      `${result.request.record_title}` token reads — carries none for that
+ *      `{{ result.request.record_title }}` hole reads — carries none for that
  *      reader;
  *  (d) the action-link page, reached by a token and read under the system
  *      context, names the record by its id for EVERY bearer;
@@ -239,7 +239,7 @@ describe('[#23594] the subject title is served from what its reader may read', (
     const { requestId } = await openDeal();
     const out: any = await svc.decide(requestId, { decision: 'approve', actorId: RESTRICTED }, asUser(RESTRICTED));
     expect(out.request.status).toBe('approved');
-    // `Approved "${result.request.record_title}"` reads nothing here.
+    // `Approved "{{ result.request.record_title }}"` reads nothing here.
     expect(out.request).not.toHaveProperty('record_title');
     expect(JSON.stringify(out.request)).not.toContain(LIVE_TITLE);
   });

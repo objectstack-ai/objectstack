@@ -530,14 +530,20 @@ export function flowNodeTextSlotSources(nodeType: string, config: unknown): Flow
  * a closed slot binds a handful of names its contract declares, so any other
  * root renders a blank fragment and is judged by name.
  *
- * Today one slot reads a closed scope: a bulk action's `confirmText`
- * (`ui/bulk-action.zod.ts`, ADR-0032 Decisions 2–3), whose roots are
- * `bulkConfirmTemplateRoots(def)` — `count` and the def's params by name.
+ * Two families read a closed scope (ADR-0032 Decisions 2–3): a bulk
+ * action's `confirmText` (`ui/bulk-action.zod.ts`), whose roots are
+ * `bulkConfirmTemplateRoots(def)` — `count` and the def's params by name —
+ * and (#24814) the action copy slots, an action's `confirmText`,
+ * `successMessage` and `errorMessage` (`ui/action-copy-template.ts`),
+ * whose roots are what the console's action runner binds for each.
  */
 export interface ClosedTemplateScope {
   /** The slot as a sentence names it, capitalised: ``A bulk action's `confirmText` ``. */
   readonly slot: string;
-  /** Every root a hole may name, in the order a refusal lists them. */
+  /**
+   * Every root a hole may name, in the order a refusal lists them. Empty for a
+   * slot whose renderer fills no hole and shows its text as written.
+   */
   readonly roots: readonly string[];
 }
 
@@ -546,24 +552,82 @@ function rootList(roots: readonly string[]): string {
   return roots.map((root) => `\`${root}\``).join(', ');
 }
 
+/**
+ * Whether `token` is written `${…}` — a `$` directly before its brace (#24814).
+ * The action copy slots carried that spelling before they were typed: the
+ * console's runner filled it in a sentence with no `{{ }}` hole (through its
+ * `${…}` evaluator for `confirmText`, over `result` for `successMessage`), and
+ * the platform's own sentences were written in it. Read as a bare single-brace
+ * token, its prescription kept the `$` (`Delete ${{ record.name }}?`), a
+ * spelling that renders a stray `$`; so a closed scope reads the `$` as part
+ * of the token, and the token's hole replaces both.
+ */
+function isDollarToken(text: string, token: TemplateToken): boolean {
+  return token.index > 0 && text[token.index - 1] === '$';
+}
+
+/** `token` as the author wrote it — its `$` included when it is a `${…}` token. */
+function writtenToken(text: string, token: TemplateToken): string {
+  return isDollarToken(text, token) ? `$${token.text}` : token.text;
+}
+
+/**
+ * `text` with each single-brace token `spellable` admits written as a hole, a
+ * `${…}` token's `$` replaced with it — {@link doubled} for a closed scope.
+ */
+function closedDoubled(text: string, tokens: readonly TemplateToken[], spellable: (token: TemplateToken) => boolean): string {
+  let out = '';
+  let at = 0;
+  for (const token of tokens) {
+    const dollar = isDollarToken(text, token);
+    const from = dollar ? token.index - 1 : token.index;
+    out += text.slice(at, from) + (spellable(token) ? `{{ ${token.inner} }}` : writtenToken(text, token));
+    at = token.index + token.text.length;
+  }
+  return out + text.slice(at);
+}
+
 /** The remedy for one single-brace token a closed scope cannot spell as a hole. */
-function closedUnspellableRemedy(token: TemplateToken, scope: ClosedTemplateScope): string {
+function closedUnspellableRemedy(written: string, token: TemplateToken, scope: ClosedTemplateScope): string {
+  if (scope.roots.length === 0) return `\`${written}\` is not filled here: reword the sentence without it.`;
   if (token.kind === 'path') {
     return (
-      `\`${token.text}\` names \`${pathRoot(token.inner) ?? token.inner}\`, which this slot does not bind, so no hole `
+      `\`${written}\` names \`${pathRoot(token.inner) ?? token.inner}\`, which this slot does not bind, so no hole `
       + `spells it: name one of ${rootList(scope.roots)}, or reword the sentence.`
     );
   }
   if (token.kind === 'expression') {
     return (
-      `\`${token.text}\` is logic, and a hole is a bound path with an optional whitelisted formatter `
-      + '(`{{ count | number }}`), never logic (ADR-0032 §3): reword the sentence around a bound hole.'
+      `\`${written}\` is logic, and a hole is a bound path with an optional whitelisted formatter `
+      + '(`{{ path | formatter }}`), never logic (ADR-0032 §3): reword the sentence around a bound hole.'
     );
   }
   return (
-    `\`${token.text}\` is not one of the roots this slot binds (${rootList(scope.roots)}), so no hole spells it: `
+    `\`${written}\` is not one of the roots this slot binds (${rootList(scope.roots)}), so no hole spells it: `
     + 'delete it or reword the sentence (a text slot has no escape for literal braces).'
   );
+}
+
+/**
+ * The sentence a closed scope's refusal of its single-brace and `${…}` tokens
+ * leads with. A scope with no root fills no hole at all — the slot's text is
+ * shown as written — so for it every token is literal text, whatever its
+ * spelling.
+ */
+function closedTokenLead(scope: ClosedTemplateScope, dollar: boolean, plain: boolean): string {
+  const spelled = dollar && plain ? '`${…}` or `{…}`' : dollar ? '`${…}`' : '`{…}`';
+  if (scope.roots.length === 0) {
+    return `${scope.slot} binds no root, so it fills no hole: its text is shown as written, and a ${spelled} token `
+      + 'there is shown as literal text.';
+  }
+  const dialect = dollar && plain
+    ? 'the `${…}` spelling or the single-brace `{…}` dialect'
+    : dollar ? 'the `${…}` spelling' : 'the single-brace `{…}` dialect';
+  const clauses = [
+    ...(dollar ? ['write each `${…}` token as the `{{ }}` hole it names'] : []),
+    ...(plain ? ['a `{…}` token there is no placeholder and is shown as literal text'] : []),
+  ];
+  return `${scope.slot} reads \`{{ }}\` template holes (ADR-0032 §3), not ${dialect}: ${clauses.join(', and ')}.`;
 }
 
 /**
@@ -577,9 +641,14 @@ function closedUnspellableRemedy(token: TemplateToken, scope: ClosedTemplateScop
  * its path's first segment, a formatter not included. What differs is the
  * scope: a path token over a bound root is prescribed its `{{ }}` spelling,
  * any other token its own remedy, and every hole whose root is not in
- * `scope.roots` is named. A hole that does not compile as a path (logic, an
- * unknown formatter) is left to `validateExpression('template', …)`, which
- * every door runs next.
+ * `scope.roots` is named. A token written `${…}` is read with its `$`
+ * ({@link isDollarToken}): its prescription is the hole alone. A hole that
+ * does not compile as a path (logic, an unknown formatter) is left to
+ * `validateExpression('template', …)`, which every door runs next.
+ *
+ * A scope with no root (`roots: []`) is a slot whose renderer shows its text
+ * as written: every token and every hole is named as literal text there, and
+ * none is prescribed a hole.
  */
 export function closedScopeTemplateRefusal(text: string, scope: ClosedTemplateScope): string | undefined {
   const bound = new Set(scope.roots);
@@ -592,16 +661,16 @@ export function closedScopeTemplateRefusal(text: string, scope: ClosedTemplateSc
 
   const tokens = singleBraceTokens(text);
   if (tokens.length > 0) {
-    const parts = [
-      `${scope.slot} reads \`{{ }}\` template holes (ADR-0032 §3), not the single-brace \`{…}\` dialect: a \`{…}\` `
-      + 'token there is no placeholder and is shown as literal text.',
-    ];
-    if (tokens.some(spellable)) parts.push(`Write \`${text}\` as \`${doubled(text, tokens, spellable)}\`.`);
+    const dollar = tokens.some((token) => isDollarToken(text, token));
+    const plain = tokens.some((token) => !isDollarToken(text, token));
+    const parts = [closedTokenLead(scope, dollar, plain)];
+    if (tokens.some(spellable)) parts.push(`Write \`${text}\` as \`${closedDoubled(text, tokens, spellable)}\`.`);
     const seen = new Set<string>();
     for (const token of tokens) {
-      if (spellable(token) || seen.has(token.text)) continue;
-      seen.add(token.text);
-      parts.push(closedUnspellableRemedy(token, scope));
+      const written = writtenToken(text, token);
+      if (spellable(token) || seen.has(written)) continue;
+      seen.add(written);
+      parts.push(closedUnspellableRemedy(written, token, scope));
     }
     refusals.push(parts.join(' '));
   }
@@ -613,9 +682,13 @@ export function closedScopeTemplateRefusal(text: string, scope: ClosedTemplateSc
     unbound.push(hole.text);
   }
   if (unbound.length > 0) {
+    const holes = unbound.map((hole) => `\`${hole}\``).join(', ');
     refusals.push(
-      `${scope.slot} binds only ${rootList(scope.roots)}, so a hole over any other root renders a blank fragment: `
-      + `${unbound.map((hole) => `\`${hole}\``).join(', ')} — name one of those roots, or reword the sentence.`,
+      scope.roots.length === 0
+        ? `${scope.slot} binds no root, so it fills no hole and a hole is shown as literal text: ${holes} — reword `
+          + 'the sentence without it.'
+        : `${scope.slot} binds only ${rootList(scope.roots)}, so a hole over any other root renders a blank fragment: `
+          + `${holes} — name one of those roots, or reword the sentence.`,
     );
   }
   return refusals.length === 0 ? undefined : refusals.join(' ');

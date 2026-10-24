@@ -139,7 +139,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "Invitar usuario",
         description: "Invita a alguien por su dirección de correo electrónico. Se une a esta organización con el rol elegido cuando acepta la invitación.",
-        successMessage: "Invitación enviada a ${result.email}",
+        successMessage: "Invitación enviada a {{ result.email }}",
         params: {
           role: {
             options: {
@@ -576,7 +576,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "Invitar usuario",
         description: "Invita a alguien por su dirección de correo electrónico. Se une a esta organización con el rol elegido cuando acepta la invitación.",
-        successMessage: "Invitación enviada a ${result.email}",
+        successMessage: "Invitación enviada a {{ result.email }}",
         params: {
           role: {
             options: {
@@ -663,7 +663,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "Invitar usuario",
         description: "Invita a alguien por su dirección de correo electrónico. Se une a esta organización con el rol elegido cuando acepta la invitación.",
-        successMessage: "Invitación enviada a ${result.email}",
+        successMessage: "Invitación enviada a {{ result.email }}",
         params: {
           role: {
             options: {
@@ -793,7 +793,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "Invitar usuario",
         description: "Invita a alguien por su dirección de correo electrónico. Se une a esta organización con el rol elegido cuando acepta la invitación.",
-        successMessage: "Invitación enviada a ${result.email}",
+        successMessage: "Invitación enviada a {{ result.email }}",
         params: {
           role: {
             options: {

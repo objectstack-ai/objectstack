@@ -3,13 +3,14 @@
 // Every request action's success toast names the request it acted on
 // (#23157), and every shipped locale says so too.
 //
-// The copy is an `I18nLabel` the console resolves from these bundles BEFORE it
-// fills the `${result.*}` tokens, so a locale whose value drops the token
+// The copy is a `template` slot (#24814) the console resolves from these
+// bundles BEFORE it fills the `{{ result.* }}` holes, so a locale whose value drops the hole
 // toasts the bare verb in that language while English names the record. No
 // drift gate sees that: `check:i18n` reads a translated-locale value as
 // hand-written text and never compares its tokens with the source's.
 
 import { describe, it, expect } from 'vitest';
+import { templateSlotSource } from '@objectstack/spec/automation';
 import { SysApprovalRequest } from '../sys-approval-request.object.js';
 import { enObjects } from './en.objects.generated.js';
 import { zhCNObjects } from './zh-CN.objects.generated.js';
@@ -24,10 +25,12 @@ const LOCALES = [
 ] as const;
 
 /** Every action declared on the request object, with its source copy. */
-const ACTIONS = ((SysApprovalRequest as any).actions as Array<{ name: string; successMessage?: string }>)
-  .map((a) => [a.name, a.successMessage ?? ''] as const);
+// [#24814] `successMessage` is a `template` slot: the parsed object carries the
+// envelope, read through the template judge's one reader.
+const ACTIONS = ((SysApprovalRequest as any).actions as Array<{ name: string; successMessage?: unknown }>)
+  .map((a) => [a.name, templateSlotSource(a.successMessage) ?? ''] as const);
 
-const tokensOf = (copy: string): string[] => [...copy.matchAll(/\$\{result\.[\w.]+\}/g)].map((m) => m[0]).sort();
+const tokensOf = (copy: string): string[] => [...copy.matchAll(/\{\{ result\.[\w.]+ \}\}/g)].map((m) => m[0]).sort();
 
 const bundleCopy = (bundle: unknown, action: string): string | undefined =>
   (bundle as any)?.sys_approval_request?._actions?.[action]?.successMessage;
@@ -42,7 +45,7 @@ describe('each sys_approval_request action\'s success copy names the request, in
 
   it('every source copy reads the request title from its route\'s answer', () => {
     for (const [name, copy] of ACTIONS) {
-      expect(tokensOf(copy), `${name}.successMessage`).toEqual(['${result.request.record_title}']);
+      expect(tokensOf(copy), `${name}.successMessage`).toEqual(['{{ result.request.record_title }}']);
     }
   });
 

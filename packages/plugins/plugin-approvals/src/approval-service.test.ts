@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { APPROVAL_REVISE_NODE_TYPE } from '@objectstack/spec/automation';
+import { APPROVAL_REVISE_NODE_TYPE, templateSlotSource } from '@objectstack/spec/automation';
 import { ApprovalService, REMIND_COOLDOWN_MS, ESCALATION_ENABLED_FLIP_CUTOFF_MS, SLA_ACTOR_ID } from './approval-service.js';
 import { bindApprovalLockHook, bindDelegationWriteGuard, unbindAllHooks } from './lifecycle-hooks.js';
 import { celEngine } from '@objectstack/formula';
@@ -1338,16 +1338,18 @@ describe('ApprovalService (node era)', () => {
   // [#23157] Every request action is `type: 'api'` against a route that
   // answers its service method's result verbatim, and each of those results
   // carries `request`, the read-back row with its display enrichment. Each
-  // action's success copy interpolates `${result.*}` over that answer (the
-  // scope `ActionSchema.successMessage` declares), so the toast names the
-  // request only while the answer carries the title the copy reads.
+  // action's success copy fills `{{ result.* }}` holes over that answer (the
+  // scope `ActionSchema.successMessage` declares, a `template` slot since
+  // #24814), so the toast names the request only while the answer carries the
+  // title the copy reads.
   describe('each request action\'s success copy, filled from its route\'s answer', () => {
+    // [#24814] The parsed object carries the `template` envelope; the copy is its `source`.
     const copyOf = (name: string): string =>
-      ((SysApprovalRequest as any).actions as any[]).find((a) => a.name === name).successMessage;
-    /** The copy's `${result.<path>}` tokens, each filled from the answer; an unresolved path reads as ''. */
+      templateSlotSource(((SysApprovalRequest as any).actions as any[]).find((a) => a.name === name).successMessage)!;
+    /** The copy's `{{ result.<path> }}` holes, each filled from the answer; an unresolved path reads as ''. */
     const fill = (copy: string, result: unknown): { text: string; unresolved: string[] } => {
       const unresolved: string[] = [];
-      const text = copy.replace(/\$\{result\.([\w.]+)\}/g, (_m, path: string) => {
+      const text = copy.replace(/\{\{\s*result\.([\w.]+)\s*\}\}/g, (_m, path: string) => {
         const v = path.split('.').reduce<any>((acc, k) => (acc == null ? undefined : acc[k]), result);
         if (v == null || String(v) === '') unresolved.push(path);
         return v == null ? '' : String(v);
@@ -1381,9 +1383,9 @@ describe('ApprovalService (node era)', () => {
       } as any);
     });
 
-    it('reads the answer: every action\'s copy carries a `${result.*}` token', () => {
+    it('reads the answer: every action\'s copy carries a `{{ result.* }}` hole', () => {
       for (const a of (SysApprovalRequest as any).actions as any[]) {
-        expect(a.successMessage, `${a.name}.successMessage`).toMatch(/\$\{result\.[\w.]+\}/);
+        expect(templateSlotSource(a.successMessage), `${a.name}.successMessage`).toMatch(/\{\{ result\.[\w.]+ \}\}/);
       }
     });
 

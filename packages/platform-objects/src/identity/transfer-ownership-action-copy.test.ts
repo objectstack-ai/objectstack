@@ -16,6 +16,7 @@
 // translated value, so a revised English source leaves the old promise served
 // in zh-CN / ja-JP / es-ES while `check:i18n` reads "in sync".
 import { describe, expect, it } from 'vitest';
+import { templateSlotSource } from '@objectstack/spec/automation';
 import { enObjects } from '../apps/translations/en.objects.generated.js';
 import { zhCNObjects } from '../apps/translations/zh-CN.objects.generated.js';
 import { jaJPObjects } from '../apps/translations/ja-JP.objects.generated.js';
@@ -34,10 +35,17 @@ interface CopyAction {
   visible?: unknown;
 }
 
+// [#24814] `confirmText` / `successMessage` are `template` slots: the parsed
+// object carries the `{ dialect: 'template', source }` envelope, so the copy is
+// read through the template judge's one reader, `templateSlotSource`.
 function declared(name: string): CopyAction {
   const found = ((SysMember as { actions?: CopyAction[] }).actions ?? []).find((a) => a.name === name);
   expect(found, `${name} is declared`).toBeDefined();
-  return found as CopyAction;
+  return {
+    ...found,
+    confirmText: templateSlotSource(found?.confirmText),
+    successMessage: templateSlotSource(found?.successMessage),
+  } as CopyAction;
 }
 
 const bundled = (bundle: unknown, name: string): CopyAction | undefined =>

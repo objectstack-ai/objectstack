@@ -210,11 +210,17 @@ describe('§1 each member accepts every shape a measured writer authors', () => 
     }],
     // objectui `types/src/__tests__/held-public-block-arms-10872.test.ts:188` / `:189`.
     ['a member acting on another object', 'action:menu', { actions: [{ name: 'log', objectName: 'task' }] }],
+    // [#24814] The three copy keys are `template` slots, so the parsed member
+    // carries the envelope: written as the envelope here, it parses
+    // byte-identical (the bare-string form is pinned to normalize below).
     ['a member with every forwarded scalar', 'action:menu', {
       actions: [{
         name: 'close_case', label: 'Close', icon: 'check', type: 'api', description: 'Close this case',
-        target: '/api/close', openIn: 'self', method: 'POST', confirmText: 'Close it?', successMessage: 'Closed',
-        errorMessage: 'Could not close', refreshAfter: true, locations: ['record_header'], objectName: 'case',
+        target: '/api/close', openIn: 'self', method: 'POST',
+        confirmText: { dialect: 'template', source: 'Close it?' },
+        successMessage: { dialect: 'template', source: 'Closed' },
+        errorMessage: { dialect: 'template', source: 'Could not close' },
+        refreshAfter: true, locations: ['record_header'], objectName: 'case',
         params: [{ name: 'reason', label: 'Reason', type: 'text' }],
       }],
     }],
@@ -229,6 +235,17 @@ describe('§1 each member accepts every shape a measured writer authors', () => 
       }
     });
   }
+
+  it('a member\'s bare-string copy normalizes to the `template` envelope, as on the rows (#24814)', () => {
+    const r = parse('action:menu', { actions: [{ name: 'a', confirmText: 'Close it?', successMessage: 'Closed', errorMessage: 'Could not close' }] });
+    expect(issues(r)).toEqual([]);
+    const member = r.success ? (r.data as { actions: Array<Record<string, unknown>> }).actions[0]! : {};
+    expect([member.confirmText, member.successMessage, member.errorMessage]).toEqual([
+      { dialect: 'template', source: 'Close it?' },
+      { dialect: 'template', source: 'Closed' },
+      { dialect: 'template', source: 'Could not close' },
+    ]);
+  });
 
   it('a member\'s bare CEL `visible` normalizes to the canonical envelope, as on the rows', () => {
     const r = parse('action:group', { actions: [{ name: 'a', visible: "record.status == 'open'" }] });

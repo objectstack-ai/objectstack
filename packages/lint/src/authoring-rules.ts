@@ -750,8 +750,19 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // `project.view.ts`), none with a brace → 0 findings, against an error for
     // each of an unbound hole, a single-brace token, a hole holding logic and
     // a blank sentence in `validate-expressions.bulk-confirm-text.test.ts`.
+    //
+    // [#24814, ruling A] `page` joins, for ONE pass: an action's copy —
+    // `confirmText`, `successMessage`, `errorMessage` — is an ADR-0032
+    // `template` slot over the roots the console's runner binds
+    // (`validate-action-copy-templates.ts`). On a page write
+    // `runStackExpressionPasses` runs that pass alone, over the written page's
+    // action rows and inline actions; an action or object write judges the
+    // written action's own `confirmText` / `successMessage` in the same pass.
+    // Every finding is a `warning` (an advisory, never a refusal), because
+    // every such sentence parsed while the keys were plain strings; the
+    // refusal is its own card.
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['flow', 'action', 'hook', 'object', 'view'],
+    runtimeTypes: ['flow', 'action', 'hook', 'object', 'view', 'page'],
     run: (stack, ctx) =>
       runStackExpressionPasses(stack, { runtimeWriteType: ctx.runtimeWriteType }).map((i) => ({
         severity: i.severity ?? 'error',

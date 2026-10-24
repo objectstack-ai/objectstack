@@ -127,6 +127,9 @@ const dump = (r: unknown) => JSON.stringify(r, null, 2);
 describe('#24491 — the page door gives the build\'s visibility-predicate verdict', () => {
   it('dispatches `page` writes to both family rules, after the component rules', () => {
     expect(runtimeAuthoringRulesFor('page').map((r) => r.name)).toEqual([
+      // #24814 — the expression rule's one page pass, the action copy template
+      // slots (warnings only); first because it is the registry's first rule.
+      'validateStackExpressions',
       'validatePresetComparands',
       'validateComponentProps',
       'validateComponentTypes',

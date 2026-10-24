@@ -294,6 +294,50 @@ describe('closedScopeTemplateRefusal — the same judge over a CLOSED scope (#24
   });
 });
 
+describe('closedScopeTemplateRefusal — a `${…}` token and a scope with no root (#24814)', () => {
+  const confirm = { slot: "An action's `confirmText`", roots: ['record'] };
+  const success = { slot: "An action's `successMessage`", roots: ['result', 'record'] };
+  const error = { slot: "An action's `errorMessage`", roots: [] as string[] };
+
+  it('reads a `${…}` token with its `$`: the prescription is the hole alone, never `${{ … }}`', () => {
+    const message = closedScopeTemplateRefusal('Delete ${record.name}?', confirm)!;
+    expect(message).toContain('Write `Delete ${record.name}?` as `Delete {{ record.name }}?`.');
+    expect(message).not.toContain('${{');
+    expect(message.startsWith("An action's `confirmText` reads `{{ }}` template holes (ADR-0032 §3), not the `${…}` spelling")).toBe(true);
+    expect(closedScopeTemplateRefusal('Invitation sent to ${result.email}', success))
+      .toContain('as `Invitation sent to {{ result.email }}`');
+  });
+
+  it('names a `${…}` token over an unbound root, or holding logic, with its `$` and no rewrite', () => {
+    const message = closedScopeTemplateRefusal('${owner.name} ${record.amount * 2}', confirm)!;
+    expect(message).not.toContain('Write `');
+    expect(message).toContain('`${owner.name}` names `owner`, which this slot does not bind');
+    expect(message).toContain('`${record.amount * 2}` is logic');
+  });
+
+  it('a text carrying both spellings leads with both and rewrites each', () => {
+    const message = closedScopeTemplateRefusal('${record.name} or {record.id}', confirm)!;
+    expect(message).toContain('not the `${…}` spelling or the single-brace `{…}` dialect');
+    expect(message).toContain('as `{{ record.name }} or {{ record.id }}`');
+  });
+
+  it('a scope with no root names every token and every hole as literal text, prescribing no hole', () => {
+    const tokens = closedScopeTemplateRefusal('Failed for ${record.name}', error)!;
+    expect(tokens).toMatch(/^An action's `errorMessage` binds no root, so it fills no hole/);
+    expect(tokens).not.toContain('Write `');
+    expect(tokens).toContain('`${record.name}` is not filled here');
+    const holes = closedScopeTemplateRefusal('Failed for {{ record.name }}', error)!;
+    expect(holes).toContain('fills no hole and a hole is shown as literal text: `{{ record.name }}`');
+    expect(closedScopeTemplateRefusal('The invitation could not be sent.', error)).toBeUndefined();
+  });
+
+  it('control: the bulk sentence over its own roots keeps its single-brace reading', () => {
+    const message = closedScopeTemplateRefusal('Update {count}', { slot: "A bulk action's `confirmText`", roots: ['count'] })!;
+    expect(message).toContain('not the single-brace `{…}` dialect: a `{…}` token there is no placeholder and is shown as literal text.');
+    expect(message).toContain('as `Update {{ count }}`');
+  });
+});
+
 describe('templateSlotSource — one reading of a template slot value', () => {
   it('reads a string, the source of a template envelope, and nothing else', () => {
     expect(templateSlotSource('a {{ b }}')).toBe('a {{ b }}');
