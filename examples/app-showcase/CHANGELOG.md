@@ -1,5 +1,25 @@
 # @objectstack/example-showcase
 
+## 0.3.24
+
+### Patch Changes
+
+- Updated dependencies [42d9fe8]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+  - @objectstack/spec@18.2.0
+  - @objectstack/cloud-connection@18.2.0
+  - @objectstack/connector-mcp@18.2.0
+  - @objectstack/connector-openapi@18.2.0
+  - @objectstack/connector-rest@18.2.0
+  - @objectstack/connector-slack@18.2.0
+  - @objectstack/driver-sql@18.2.0
+  - @objectstack/organizations@18.2.0
+  - @objectstack/runtime@18.2.0
+  - @objectstack/service-datasource@18.2.0
+  - @objectstack/service-i18n@18.2.0
+  - @objectstack/service-print@18.2.0
+
 ## 0.3.23
 
 ### Patch Changes

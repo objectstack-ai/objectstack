@@ -1,5 +1,35 @@
 # @objectstack/runtime
 
+## 18.2.0
+
+### Patch Changes
+
+- Updated dependencies [42d9fe8]
+- Updated dependencies [50af6fa]
+- Updated dependencies [e8de8a7]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+- Updated dependencies [f1d6be0]
+  - @objectstack/spec@18.2.0
+  - @objectstack/rest@18.2.0
+  - @objectstack/plugin-auth@18.2.0
+  - @objectstack/metadata-protocol@18.2.0
+  - @objectstack/core@18.2.0
+  - @objectstack/driver-memory@18.2.0
+  - @objectstack/driver-sql@18.2.0
+  - @objectstack/driver-sqlite-wasm@18.2.0
+  - @objectstack/driver-turso@18.2.0
+  - @objectstack/formula@18.2.0
+  - @objectstack/metadata@18.2.0
+  - @objectstack/metadata-core@18.2.0
+  - @objectstack/objectql@18.2.0
+  - @objectstack/observability@18.2.0
+  - @objectstack/plugin-security@18.2.0
+  - @objectstack/service-cluster@18.2.0
+  - @objectstack/service-datasource@18.2.0
+  - @objectstack/service-i18n@18.2.0
+  - @objectstack/types@18.2.0
+
 ## 18.1.0
 
 ### Minor Changes

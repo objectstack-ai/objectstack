@@ -1,5 +1,22 @@
 # @objectstack/service-external-datasource
 
+## 18.2.0
+
+### Patch Changes
+
+- Updated dependencies [42d9fe8]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+  - @objectstack/spec@18.2.0
+  - @objectstack/core@18.2.0
+  - @objectstack/driver-memory@18.2.0
+  - @objectstack/driver-mongodb@18.2.0
+  - @objectstack/driver-sql@18.2.0
+  - @objectstack/driver-sqlite-wasm@18.2.0
+  - @objectstack/driver-turso@18.2.0
+  - @objectstack/metadata-core@18.2.0
+  - @objectstack/types@18.2.0
+
 ## 18.1.0
 
 ### Minor Changes

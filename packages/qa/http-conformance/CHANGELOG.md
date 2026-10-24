@@ -1,5 +1,11 @@
 # @objectstack/http-conformance
 
+## 0.1.10
+
+### Patch Changes
+
+- @objectstack/core@18.2.0
+
 ## 0.1.9
 
 ### Patch Changes

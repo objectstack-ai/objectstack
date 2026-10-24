@@ -1,5 +1,62 @@
 # @objectstack/spec
 
+## 18.2.0
+
+### Minor Changes
+
+- 42d9fe8: feat(spec,cli,lint): a form section entry's `label`, `placeholder` and `helpText` are translatable at `objects.<object>._sections.<section>.fields.<field>`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A form section entry (`{ field, label, placeholder, helpText }` in a form view's `sections[].fields`) can override the object field's copy for that form. Before this change a translation pack had no key for those three strings, so a form's entry overrides stayed in the authoring language for every reader, the anonymous `GET /forms/:slug` visitor included.
+  
+  - **`@objectstack/spec`:** the `_sections.<section>` node of an object translation gains `fields`, keyed by the entry's `field`, each carrying `label`, `placeholder` and `helpText` (strict; `help`, `hint` and `tooltip` are refused with the rename to `helpText`). `translateView` overlays them onto a served form view's `config.sections[].fields[]` under the section rules: the key is the section's `name` and the entry's `field`, only copy the entry authors is translated, a missing key keeps the authored string, and a string edited on top of the packaged view keeps the edit (ADR-0029 D9.2a). An entry in a section with no `name`, and a bare field-name entry, have no key.
+  - **`@objectstack/cli`:** `os i18n extract` scaffolds the key for every entry string a form view's named section authors, and `os i18n check` / `os lint` coverage report a locale that leaves one untranslated, in the `section` bucket.
+  - **`@objectstack/lint`:** `translation-target-unknown` reports a `_sections.<section>.fields.<field>` key that no form view section of that name declares as an entry object.
+  
+  Example (`zh-CN` bundle):
+  
+  ```ts
+  objects: {
+    crm_case: {
+      _sections: {
+        submitter: {
+          label: '关于您',
+          fields: { contact_name: { label: '您的姓名', placeholder: '张三', helpText: '与证件一致' } },
+        },
+      },
+    },
+  }
+  ```
+- 2af790f: spec(ui): `record:details` section `hideEmpty: false` — in read-only mode an all-empty section renders its heading plus one fold row, and the `describe()` text says so
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  The meaning of `hideEmpty: false` on a `record:details` section changes for a section whose fields are ALL empty (for example on a brand-new record):
+  
+  - **Read-only mode:** the section renders its heading plus one fold row that counts the empty fields and reveals them on request — the same fold a partly-filled section already uses. It no longer renders a column of empty rows.
+  - **Edit mode:** unchanged. Every field renders as an editable row.
+  
+  Nothing else changes. No key is added, removed or renamed; the shape and the default are the same. Leaving `hideEmpty` out (or writing `true`) still means an all-empty section renders nothing at all: no heading, no skeleton. A partly-filled section's empty rows are not governed by this key, in either value. Authored metadata needs no change: a section that writes `hideEmpty: false` to keep its heading on an empty record keeps it.
+  
+  The `describe()` text, which the reference docs and the JSON Schema read, now states this. Its lead changes from "Hide this section's empty fields" to "Whether this section disappears when ALL its fields are empty", because under the new reading both values hide an all-empty section's empty rows in read-only mode and the old lead no longer told them apart. The renderer change is in objectui's record detail section.
+- cc10e74: feat: a package's action can launch a flow, and its dashboard widget can bind a dataset, that another package of the same release artifact ships
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  One release artifact carries several packages (ADR-0130 D4). Two per-package checks judged a reference against one package and refused a target a sibling package provides. The artifact carries the target, and the runtime serves it.
+  
+  - **`@objectstack/spec`: `defineStack(config, { artifactFlows })`.** This new `DefineStackOptions` key lists flow names that the other packages of the artifact provide. A `type: 'flow'` action's `target` resolves against the stack's own `flows` plus these names. That covers a top-level action, an action authored on an object, and an inline page action. It works the way `artifactObjects` already does for permission grants and seed rows.
+    - The option widens a check that already runs. A stack that declares no flows of its own still leaves its flow targets unresolved (a plugin may serve them).
+    - `defineStack` records every target that resolved only through the list, as a non-enumerable mark on the stack it returns. `composeStacks` refuses the composition when no input defines that flow. The refusal uses the same `STACK_CROSS_REFERENCE_INVALID` envelope and the same per-finding message as the per-stack pass. An input that did not opt in cannot newly fail at composition.
+    - A flow that no package of the artifact defines is refused, as before.
+  - **`@objectstack/lint`: `widget-dataset-unknown`.** The rule resolves a widget's `dataset` against the datasets that every `packages[]` body declares, as well as the stack's own. This is the resolution context that `os build`, `os validate` and `os lint` already pass to each package's run. Dataset-level checks still judge only the package's own datasets. A dataset that no package declares is refused, as before. The runtime publish gate passes no `packages[]`, so its behaviour is unchanged.
+  
+  Fix for a module split such as HotCRM's: in the app package, write `defineStack(appConfig, { artifactFlows: revenue.flows?.map((f) => f.name) })` and compose both packages with `composeStacks([...], { manifest: 'preserve' })`. A cross-package dataset binding needs no change.
+
 ## 18.1.0
 
 ### Minor Changes

@@ -1,5 +1,96 @@
 # @objectstack/cli
 
+## 18.2.0
+
+### Minor Changes
+
+- 42d9fe8: feat(spec,cli,lint): a form section entry's `label`, `placeholder` and `helpText` are translatable at `objects.<object>._sections.<section>.fields.<field>`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A form section entry (`{ field, label, placeholder, helpText }` in a form view's `sections[].fields`) can override the object field's copy for that form. Before this change a translation pack had no key for those three strings, so a form's entry overrides stayed in the authoring language for every reader, the anonymous `GET /forms/:slug` visitor included.
+  
+  - **`@objectstack/spec`:** the `_sections.<section>` node of an object translation gains `fields`, keyed by the entry's `field`, each carrying `label`, `placeholder` and `helpText` (strict; `help`, `hint` and `tooltip` are refused with the rename to `helpText`). `translateView` overlays them onto a served form view's `config.sections[].fields[]` under the section rules: the key is the section's `name` and the entry's `field`, only copy the entry authors is translated, a missing key keeps the authored string, and a string edited on top of the packaged view keeps the edit (ADR-0029 D9.2a). An entry in a section with no `name`, and a bare field-name entry, have no key.
+  - **`@objectstack/cli`:** `os i18n extract` scaffolds the key for every entry string a form view's named section authors, and `os i18n check` / `os lint` coverage report a locale that leaves one untranslated, in the `section` bucket.
+  - **`@objectstack/lint`:** `translation-target-unknown` reports a `_sections.<section>.fields.<field>` key that no form view section of that name declares as an entry object.
+  
+  Example (`zh-CN` bundle):
+  
+  ```ts
+  objects: {
+    crm_case: {
+      _sections: {
+        submitter: {
+          label: '关于您',
+          fields: { contact_name: { label: '您的姓名', placeholder: '张三', helpText: '与证件一致' } },
+        },
+      },
+    },
+  }
+  ```
+
+### Patch Changes
+
+- Updated dependencies [42d9fe8]
+- Updated dependencies [50af6fa]
+- Updated dependencies [e8de8a7]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+- Updated dependencies [f1d6be0]
+- Updated dependencies [2351c8d]
+  - @objectstack/spec@18.2.0
+  - @objectstack/lint@18.2.0
+  - @objectstack/rest@18.2.0
+  - @objectstack/plugin-auth@18.2.0
+  - @objectstack/service-analytics@18.2.0
+  - @objectstack/metadata-protocol@18.2.0
+  - @objectstack/plugin-approvals@18.2.0
+  - @objectstack/account@18.2.0
+  - @objectstack/setup@18.2.0
+  - @objectstack/client@18.2.0
+  - @objectstack/cloud-connection@18.2.0
+  - @objectstack/core@18.2.0
+  - create-objectstack@18.2.0
+  - @objectstack/driver-memory@18.2.0
+  - @objectstack/driver-mongodb@18.2.0
+  - @objectstack/driver-sql@18.2.0
+  - @objectstack/driver-sqlite-wasm@18.2.0
+  - @objectstack/driver-turso@18.2.0
+  - @objectstack/formula@18.2.0
+  - @objectstack/mcp@18.2.0
+  - @objectstack/metadata@18.2.0
+  - @objectstack/metadata-core@18.2.0
+  - @objectstack/objectql@18.2.0
+  - @objectstack/observability@18.2.0
+  - @objectstack/platform-objects@18.2.0
+  - @objectstack/plugin-audit@18.2.0
+  - @objectstack/plugin-email@18.2.0
+  - @objectstack/plugin-hono-server@18.2.0
+  - @objectstack/plugin-security@18.2.0
+  - @objectstack/plugin-sharing@18.2.0
+  - @objectstack/plugin-webhooks@18.2.0
+  - @objectstack/runtime@18.2.0
+  - @objectstack/service-automation@18.2.0
+  - @objectstack/service-cache@18.2.0
+  - @objectstack/service-datasource@18.2.0
+  - @objectstack/service-job@18.2.0
+  - @objectstack/service-mailbox@18.2.0
+  - @objectstack/service-messaging@18.2.0
+  - @objectstack/service-package@18.2.0
+  - @objectstack/service-queue@18.2.0
+  - @objectstack/service-realtime@18.2.0
+  - @objectstack/service-settings@18.2.0
+  - @objectstack/service-sms@18.2.0
+  - @objectstack/service-storage@18.2.0
+  - @objectstack/trigger-api@18.2.0
+  - @objectstack/trigger-record-change@18.2.0
+  - @objectstack/trigger-schedule@18.2.0
+  - @objectstack/types@18.2.0
+  - @objectstack/verify@18.2.0
+  - @objectstack/plugin-pinyin-search@18.2.0
+  - @objectstack/console@18.2.0
+
 ## 18.1.0
 
 ### Minor Changes

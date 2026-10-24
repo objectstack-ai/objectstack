@@ -1,5 +1,13 @@
 # @objectstack/hono
 
+## 18.2.0
+
+### Patch Changes
+
+- @objectstack/plugin-hono-server@18.2.0
+  - @objectstack/runtime@18.2.0
+  - @objectstack/types@18.2.0
+
 ## 18.1.0
 
 ### Minor Changes

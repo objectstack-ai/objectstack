@@ -1,5 +1,15 @@
 # @objectstack/service-cluster-redis
 
+## 18.2.0
+
+### Patch Changes
+
+- Updated dependencies [42d9fe8]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+  - @objectstack/spec@18.2.0
+  - @objectstack/service-cluster@18.2.0
+
 ## 18.1.0
 
 ### Patch Changes
