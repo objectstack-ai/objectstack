@@ -214,8 +214,14 @@ export interface ActionLike {
    * a resolver answers with ONE locale's string.
    */
   description?: string;
-  confirmText?: string;
-  successMessage?: string;
+  /**
+   * `template` slots (#24814): the bare string, or the parsed
+   * `{ dialect: 'template', source }` envelope a served action carries. A
+   * translation replaces either with the bundle's sentence, a string; with no
+   * translation the authored value is answered as it is.
+   */
+  confirmText?: string | { dialect: 'template'; source: string };
+  successMessage?: string | { dialect: 'template'; source: string };
   /**
    * `ActionSchema.outcomeMessages` — success copy per handler `outcome`,
    * narrowed to `string` values for the same reason `successMessage` is.
@@ -671,13 +677,15 @@ export function resolveActionLabel(
 
 /**
  * Resolve a translated confirmation prompt for an action, returning
- * `undefined` if neither the bundle nor the action defines one.
+ * `undefined` if neither the bundle nor the action defines one. With no
+ * translation the authored value is answered as written — on a parsed action
+ * the `template` envelope (#24814), which the console's runner reads.
  */
 export function resolveActionConfirm(
   bundle: TranslationBundle | undefined,
   action: ActionLike,
   opts?: ResolveOptions,
-): string | undefined {
+): ActionLike['confirmText'] {
   return lookupActionField(bundle, action, 'confirmText', opts) ?? action.confirmText;
 }
 
@@ -749,13 +757,14 @@ export function resolveActionResultDialog<T extends ResultDialogLike>(
 
 /**
  * Resolve a translated success message for an action, returning `undefined`
- * if neither the bundle nor the action defines one.
+ * if neither the bundle nor the action defines one. With no translation the
+ * authored value is answered as written, as {@link resolveActionConfirm} does.
  */
 export function resolveActionSuccess(
   bundle: TranslationBundle | undefined,
   action: ActionLike,
   opts?: ResolveOptions,
-): string | undefined {
+): ActionLike['successMessage'] {
   return (
     lookupActionField(bundle, action, 'successMessage', opts) ??
     action.successMessage

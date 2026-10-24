@@ -666,6 +666,18 @@ function pushDerived(
 }
 
 /**
+ * [#24814] An action's `confirmText` / `successMessage` is a `template` slot
+ * that also takes an inline locale map: a bare string, the parsed
+ * `{ dialect: 'template', source }` envelope, or the map. The envelope and the
+ * string are the same authored sentence, so the envelope is read through the
+ * template judge's one reader and seeded like the string; anything else (the
+ * map) is handed on as written, for {@link authoredEvidence} to file.
+ */
+function actionCopy(value: unknown): unknown {
+  return templateSlotSource(value) ?? value;
+}
+
+/**
  * Record an optional authored string: seeds the skeleton when present, and
  * still records the key when absent so the coverage gate notices a bundle that
  * authors it without an inline counterpart.
@@ -1420,8 +1432,8 @@ export function collectExpectedEntries(
         const aroot = ['objects', objectName, '_actions', aname];
         pushDerived(out, [...aroot, 'label'], inlineText(action.label) ?? aname, action.label, 'action', { objectName });
         pushOptional(out, [...aroot, 'description'], action.description, 'action', { objectName });
-        pushOptional(out, [...aroot, 'confirmText'], action.confirmText, 'action', { objectName });
-        pushOptional(out, [...aroot, 'successMessage'], action.successMessage, 'action', { objectName });
+        pushOptional(out, [...aroot, 'confirmText'], actionCopy(action.confirmText), 'action', { objectName });
+        pushOptional(out, [...aroot, 'successMessage'], actionCopy(action.successMessage), 'action', { objectName });
         pushActionOutcomeMessages(out, aroot, action, 'action', objectName);
         pushActionParams(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
         pushActionResultDialog(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
@@ -1513,8 +1525,8 @@ export function collectExpectedEntries(
     // not an i18n gap to seed (`pushDerived` would invent an English source
     // string nothing authored). #7367.
     pushOptional(out, [...root, 'description'], action.description, kind, { objectName });
-    pushOptional(out, [...root, 'confirmText'], action.confirmText, kind, { objectName });
-    pushOptional(out, [...root, 'successMessage'], action.successMessage, kind, { objectName });
+    pushOptional(out, [...root, 'confirmText'], actionCopy(action.confirmText), kind, { objectName });
+    pushOptional(out, [...root, 'successMessage'], actionCopy(action.successMessage), kind, { objectName });
     pushActionOutcomeMessages(out, root, action, kind, objectName);
     pushActionParams(out, root, action, kind, objectName);
     pushActionResultDialog(out, root, action, kind, objectName);

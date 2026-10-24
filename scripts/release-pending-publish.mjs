@@ -149,6 +149,18 @@
  * all the history the step reads; the changesets come from that commit's tree.
  * `--no-deepen` turns the fetch off.
  *
+ * `createChangelogAttribution` -- not a mode: the commit each CHANGELOG entry
+ * names, for `scripts/changeset-changelog.mjs`, the generator
+ * `.changeset/config.json` loads (#25638). The stock generator names the
+ * newest commit that added a changeset file, and a revert of a version commit
+ * re-adds every changeset the cut consumed, so 260 of 18.1.0's 265 entries
+ * named #25605's revert. An add whose bytes are exactly what the previous
+ * delete removed is a restoration; the entry names the add before it. A
+ * shallow clone is deepened as above, to the last version commit (every
+ * delete that matters lies after it) and on while a restoration's first add
+ * is still beyond the boundary. ⛔ Like `annotate-shipped` it never stops the
+ * version pass: what it cannot decide keeps the stock commit, with a warning.
+ *
  * `npm-state` -- present / absent / unknown for one version, from `npm view`'s
  * exit status and its `E404`. The caller decides what `unknown` means: the
  * audit keeps its old reading (not on npm), the publish guard proceeds with a
@@ -241,7 +253,7 @@
 import { spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
 
@@ -656,14 +668,13 @@ export function annotateShipped({ cwd, head = 'HEAD', npmStateOf, deepen = true,
     let at = locateLastVersionCommit({ cwd: root, head });
     for (const by of deepen ? rounds : []) {
       if (at.state !== 'need-history') break;
-      const before = commitCount(root, at.headSha);
-      const fetched = git(root, ['fetch', '--no-tags', '--quiet', `--deepen=${by}`, remote, at.headSha]);
-      if (fetched.status !== 0) {
-        result.reason = `the clone is shallow and \`git fetch --deepen=${by} ${remote}\` failed (${fetched.stderr.trim().split('\n').pop() || `exit ${fetched.status}`})`;
+      const step = deepenBy({ root, rev: at.headSha, by, remote });
+      if (step.failed) {
+        result.reason = `the clone is shallow and ${step.failed}`;
         return result;
       }
       result.deepenedBy += by;
-      if (commitCount(root, at.headSha) === before) {
+      if (!step.gained) {
         result.reason = `the clone is shallow and deepening it from ${remote} gained no history`;
         return result;
       }
@@ -753,6 +764,178 @@ export function describeAnnotate(result) {
       commandData(`::warning::annotate-shipped: ${p} shipped in ${result.version} with no CHANGELOG entry, but it has no frontmatter fence this step can read, so it was not annotated.`),
     ),
   ];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// changelog attribution
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * One bounded `git fetch --deepen` of a shallow clone. `failed` is the reason
+ * the fetch failed, or null; `gained` says whether it brought any history.
+ */
+function deepenBy({ root, rev, by, remote }) {
+  const before = commitCount(root, rev);
+  const fetched = git(root, ['fetch', '--no-tags', '--quiet', `--deepen=${by}`, remote, rev]);
+  if (fetched.status !== 0) {
+    return { failed: `\`git fetch --deepen=${by} ${remote}\` failed (${fetched.stderr.trim().split('\n').pop() || `exit ${fetched.status}`})`, gained: false };
+  }
+  return { failed: null, gained: commitCount(root, rev) !== before };
+}
+
+/**
+ * Every add and delete of a `.changeset/` file on `head`'s history, newest
+ * first, per path: `{ status: 'A' | 'D', sha, parent, boundary }`, `parent`
+ * being the first parent. Renames are off, as in `unconsumedChangesets`. Merge
+ * commits list no paths, so an add is the commit that wrote the file, as
+ * `@changesets/git` reads it. `boundary` marks a shallow clone's graft
+ * commit: git diffs it against nothing, so it reads as adding every file it
+ * carries, and its adds prove nothing.
+ */
+export function changesetFileEvents({ cwd, head = 'HEAD' }) {
+  const out = gitOk(cwd, [
+    '-c', 'core.quotePath=false',
+    'log', '--no-renames', '--diff-filter=AD', '--name-status', '--format=%x00%H %P', head, '--', `${CHANGESET_DIR}/`,
+  ]);
+  const shallowFile = resolve(cwd, gitOk(cwd, ['rev-parse', '--git-path', 'shallow']).trim());
+  const grafts = new Set(existsSync(shallowFile) ? readFileSync(shallowFile, 'utf8').split('\n').filter(Boolean) : []);
+  const events = new Map();
+  for (const chunk of out.split('\0')) {
+    const [header, ...lines] = chunk.split('\n');
+    const [sha, parent] = header.trim().split(' ');
+    if (!sha) continue;
+    for (const line of lines) {
+      const m = /^([AD])\t(.+)$/.exec(line);
+      if (!m) continue;
+      if (!events.has(m[2])) events.set(m[2], []);
+      events.get(m[2]).push({ status: m[1], sha, parent: parent || null, boundary: grafts.has(sha) });
+    }
+  }
+  return events;
+}
+
+/** The blob a path has at a commit; null when the commit or the path is not there. */
+function blobAt(cwd, rev, path) {
+  const r = git(cwd, ['rev-parse', '--verify', '--quiet', `${rev}:${path}`]);
+  return r.status === 0 ? r.stdout.trim() : null;
+}
+
+/**
+ * The commit a changeset's CHANGELOG entry names. `stock` is what
+ * `changeset version` hands the changelog generator: `@changesets/git`'s
+ * newest commit that added the file. That is right until a commit RESTORES a
+ * changeset an earlier commit deleted -- a `git revert` of a version commit
+ * re-adds every changeset the cut consumed, byte for byte -- and then every
+ * one of them names the restoring commit. 18.1.0 shipped that way: #25605
+ * reverted the first cut, and 260 of the re-cut's 265 entries named the
+ * revert.
+ *
+ * So an add whose blob is exactly the blob the previous delete removed is a
+ * restoration, and the walk passes over it, and over that delete, to the add
+ * before. A changeset written afresh under a consumed one's name has other
+ * bytes and keeps its own add. Anything the walk cannot match to an add in
+ * this history keeps `stock`.
+ *
+ * `kept` / `passed-over` carry `commit`; `need-history` = a restoration whose
+ * earlier add lies beyond a shallow clone's boundary, or on it.
+ */
+export function attributeChangeset({ cwd, events, path, stock }) {
+  const list = events.get(path) ?? [];
+  let i = typeof stock === 'string' && stock !== '' ? list.findIndex((e) => e.status === 'A' && e.sha.startsWith(stock)) : -1;
+  if (i === -1) return { state: 'kept', commit: stock ?? null, passedOver: [] };
+  const passedOver = [];
+  for (;;) {
+    const del = list[i + 1];
+    if (!del || del.status !== 'D') break;
+    if (del.parent === null) return { state: 'need-history', commit: list[i].sha, passedOver };
+    const restored = blobAt(cwd, list[i].sha, path);
+    const removed = blobAt(cwd, del.parent, path);
+    if (removed === null) return { state: 'need-history', commit: list[i].sha, passedOver };
+    if (restored !== removed) break;
+    const earlier = list[i + 2];
+    if (!earlier || earlier.boundary) return { state: 'need-history', commit: list[i].sha, passedOver };
+    if (earlier.status !== 'A') break;
+    passedOver.push(list[i].sha);
+    i += 2;
+  }
+  return { state: passedOver.length > 0 ? 'passed-over' : 'kept', commit: list[i].sha, passedOver };
+}
+
+/**
+ * The attribution `scripts/changeset-changelog.mjs` puts in front of the stock
+ * changelog generator: `attribute(changeset)` answers the commit its entry
+ * names, memoised per changeset id. ⛔ It never throws and never stops the
+ * version pass: whatever it cannot decide keeps `changeset.commit`, with one
+ * `::warning::`.
+ *
+ * The history it reads: every delete that matters lies after the last version
+ * commit, because a changeset a published cut consumed is never pending again
+ * (a revert restores only an UNPUBLISHED cut, as #25607 reads it). So a
+ * shallow clone is first deepened to that commit, as `annotate-shipped` does,
+ * and again, in the same bounded rounds, while a restoration's earlier add is
+ * still beyond the boundary.
+ */
+export function createChangelogAttribution({ cwd, head = 'HEAD', deepen = true, remote = 'origin', rounds = DEEPEN_ROUNDS, log = console.log } = {}) {
+  const memo = new Map();
+  const announced = new Set();
+  let ctx = null;
+  let broken = null;
+  const warn = (text) => log(commandData(`::warning::changeset-changelog: ${text}`));
+  const roundsLeft = [...(deepen ? rounds : [])];
+  const isShallow = (root) => gitOk(root, ['rev-parse', '--is-shallow-repository']).trim() !== 'false';
+  const deepenOnce = () => {
+    const by = roundsLeft.shift();
+    if (by === undefined || !ctx.shallow) return false;
+    const step = deepenBy({ root: ctx.root, rev: ctx.headSha, by, remote });
+    if (step.failed || !step.gained) {
+      roundsLeft.length = 0;
+      return false;
+    }
+    ctx.shallow = isShallow(ctx.root);
+    ctx.events = changesetFileEvents({ cwd: ctx.root, head: ctx.headSha });
+    return true;
+  };
+  const prepare = () => {
+    const root = gitOk(cwd, ['rev-parse', '--show-toplevel']).trim();
+    const headSha = gitOk(root, ['rev-parse', '--verify', `${head}^{commit}`]).trim();
+    ctx = { root, headSha, shallow: isShallow(root), events: null };
+    ctx.events = changesetFileEvents({ cwd: root, head: headSha });
+    while (ctx.shallow && locateLastVersionCommit({ cwd: root, head: headSha }).state === 'need-history') {
+      if (!deepenOnce()) {
+        // A boundary commit's deletes are invisible, so inside an unread span
+        // a restoration cannot be told from a first add.
+        throw new Error(`the last version commit is beyond this shallow clone's history${deepen ? ` after the bounded deepening` : ' and deepening is off'}, so a changeset a revert restored cannot be told from one added afresh`);
+      }
+    }
+  };
+  return (changeset) => {
+    const stock = changeset && changeset.commit;
+    const id = changeset && changeset.id;
+    if (typeof stock !== 'string' || stock === '' || typeof id !== 'string' || broken) return stock;
+    if (memo.has(id)) return memo.get(id);
+    let answer = stock;
+    try {
+      if (ctx === null) prepare();
+      const path = `${CHANGESET_DIR}/${id}.md`;
+      let r = attributeChangeset({ cwd: ctx.root, events: ctx.events, path, stock });
+      while (r.state === 'need-history' && deepenOnce()) r = attributeChangeset({ cwd: ctx.root, events: ctx.events, path, stock });
+      if (r.state === 'need-history') {
+        warn(`${path} was restored by ${r.commit.slice(0, 10)}, and the commit that first added it is beyond this clone's history; its entry names ${stock.slice(0, 7)}.`);
+      } else {
+        answer = r.commit;
+        for (const sha of r.passedOver) {
+          if (announced.has(sha)) continue;
+          announced.add(sha);
+          log(`changeset-changelog: ${sha.slice(0, 10)} restores changesets an earlier commit deleted; each of their entries names the commit that first added it.`);
+        }
+      }
+    } catch (err) {
+      broken = err instanceof Error ? err.message : String(err);
+      warn(`${broken}. Every entry from here on names the commit @changesets/git found.`);
+    }
+    memo.set(id, answer);
+    return answer;
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1304,8 +1487,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'annotate-shipped -> a reverted cut is not a version commit: the walk reads the forward cut before it': 3,
   'annotate-shipped -> a depth-1 clone deepens itself to the version commit; with no reachable history it warns, annotates nothing and exits 0': 4,
   'annotate-shipped -> no version commit, an unpublished or unreadable version, an error anywhere: a warning or a plain line, nothing written, exit 0': 5,
+  'changelog attribution -> a revert of a version commit restores its changesets: each entry names the commit that first added it, through the generator changeset version loads': 5,
+  'changelog attribution -> a shallow clone deepens itself to the first add; with no history to fetch, or nothing to decide, the stock commit stays and the version pass goes on': 4,
 });
-const SELF_TEST_BATTERY_FLOOR = 28;
+const SELF_TEST_BATTERY_FLOOR = 31;
 
 async function selfTest() {
   let failed = 0;
@@ -1732,6 +1917,110 @@ async function selfTest() {
     check(
       !readFileSync(join(rv.dir, '.changeset/z.md'), 'utf8').includes(SHIPPED_MARK),
       'and z.md, which the revert restored but 17.7.0 never carried, is not stamped as shipped in 17.7.0',
+    );
+
+    battery('changelog attribution -> a revert of a version commit restores its changesets: each entry names the commit that first added it, through the generator changeset version loads');
+    // add -> version -> revert -> re-cut, the 18.1.0 shape (#25638), with a
+    // changeset name a published cut consumed and a later changeset reused.
+    const ca = fixture();
+    const cPut = (id, body) => {
+      mkdirSync(join(ca.dir, CHANGESET_DIR), { recursive: true });
+      writeFileSync(join(ca.dir, CHANGESET_DIR, `${id}.md`), `---\n'${CLI_PACKAGE}': minor\n---\n\n${body}\n`);
+    };
+    ca.writeCli('0.9.0');
+    cPut('n', 'feat: n, first written');
+    const cN1 = ca.commit('feat: n, first written');
+    // l is the 1.0.0 cut's leak (annotate-shipped's case): added before it,
+    // left pending by it, so its first add is older than the version commit.
+    cPut('l', 'fix: l, left unconsumed by 1.0.0');
+    const cL = ca.commit('fix: l');
+    ca.commit('a landing between', 'between.txt');
+    ca.g('rm', '-q', `${CHANGESET_DIR}/n.md`);
+    ca.writeCli('1.0.0');
+    ca.commit('chore: version packages (1.0.0, published)');
+    cPut('n', 'feat: n, written afresh under a consumed name');
+    const cN2 = ca.commit('feat: n again');
+    cPut('a', 'feat: a\n\nwith a body');
+    const cA = ca.commit('feat: a');
+    cPut('b', 'fix: b');
+    const cB = ca.commit('fix: b');
+    ca.g('rm', '-q', `${CHANGESET_DIR}/n.md`, `${CHANGESET_DIR}/a.md`, `${CHANGESET_DIR}/b.md`, `${CHANGESET_DIR}/l.md`);
+    ca.writeCli('1.1.0');
+    const cCut = ca.commit('chore: version packages (1.1.0, never published)');
+    ca.g('revert', '--no-edit', cCut);
+    const cRevert = gitOk(ca.dir, ['rev-parse', 'HEAD']).trim();
+    cPut('c', 'fix: c, landed after the revert');
+    const cC = ca.commit('fix: c');
+    // `@changesets/git`'s getCommitsThatAddFiles: the newest add of each path.
+    const stockOf = (dir, id) => gitOk(dir, ['log', '--diff-filter=AC', '--follow', '--max-count=1', '--format=%H', '--', `${CHANGESET_DIR}/${id}.md`]).trim();
+    check(
+      ['n', 'a', 'b', 'l'].every((id) => stockOf(ca.dir, id) === cRevert) && stockOf(ca.dir, 'c') === cC,
+      'the fixture reproduces the defect: the stock lookup names the revert for every changeset it restored',
+    );
+    const caEvents = changesetFileEvents({ cwd: ca.dir });
+    const caOf = (id) => attributeChangeset({ cwd: ca.dir, events: caEvents, path: `${CHANGESET_DIR}/${id}.md`, stock: stockOf(ca.dir, id) });
+    check(
+      caOf('a').state === 'passed-over' && caOf('a').commit === cA && caOf('a').passedOver.join() === cRevert && caOf('b').commit === cB &&
+        caOf('l').commit === cL,
+      'a restored changeset names the commit that first added it, passing over the revert and the cut it undid',
+    );
+    check(
+      caOf('n').commit === cN2 && caOf('n').commit !== cN1 && caOf('c').state === 'kept' && caOf('c').commit === cC,
+      'a changeset written afresh under a name a published cut consumed keeps its own add; one landed after the revert is untouched',
+    );
+    const caLog = [];
+    const { changelogFunctions } = await import('./changeset-changelog.mjs');
+    const recut = changelogFunctions({ cwd: ca.dir, log: (line) => caLog.push(line) });
+    const releaseLine = await recut.getReleaseLine({ id: 'a', summary: 'feat: a\n\nwith a body', releases: [], commit: cRevert }, 'minor', null);
+    const depLine = await recut.getDependencyReleaseLine(
+      [{ id: 'b', summary: 'fix: b', releases: [], commit: cRevert }, { id: 'c', summary: 'fix: c', releases: [], commit: cC }],
+      [{ name: '@objectstack/spec', newVersion: '1.1.0' }],
+      null,
+    );
+    check(
+      releaseLine === `- ${cA.slice(0, 7)}: feat: a\n  \n  with a body` &&
+        depLine === `- Updated dependencies [${cB.slice(0, 7)}]\n- Updated dependencies [${cC.slice(0, 7)}]\n  - @objectstack/spec@1.1.0`,
+      'the re-cut through scripts/changeset-changelog.mjs: the stock line format, each line naming its own commit, dependency lines included',
+    );
+    check(
+      caLog.length === 1 && caLog[0].includes(cRevert.slice(0, 10)) && !caLog[0].startsWith('::'),
+      'the restoring commit is named once, as a plain line',
+    );
+
+    battery('changelog attribution -> a shallow clone deepens itself to the first add; with no history to fetch, or nothing to decide, the stock commit stays and the version pass goes on');
+    ca.g('config', 'uploadpack.allowReachableSHA1InWant', 'true');
+    // Depth 3 = c's landing, the revert and the cut: the history `@changesets/git`
+    // deepens to before it answers, the revert and its parent present.
+    const caClone = () => {
+      const d = mkdtempSync(join(tmpdir(), 'release-pending-publish-shallow-'));
+      dirs.push(d);
+      gitOk(tmpdir(), ['clone', '-q', '--depth', '3', '--branch', 'main', `file://${ca.dir}`, d]);
+      return d;
+    };
+    const aOf = (attribute) => attribute({ id: 'a', commit: cRevert });
+    const caDeepened = createChangelogAttribution({ cwd: caClone(), rounds: [1, 1, 3, 1, 1, 1], log: () => {} });
+    check(
+      aOf(caDeepened) === cA && caDeepened({ id: 'l', commit: cRevert }) === cL,
+      'a shallow clone fetches history in bounded rounds to the version commit, and on past a graft commit that only seems to add the leak, then names each first add',
+    );
+    const stuckLog = [];
+    check(
+      aOf(createChangelogAttribution({ cwd: caClone(), deepen: false, log: (line) => stuckLog.push(line) })) === cRevert &&
+        stuckLog.length === 1 && stuckLog[0].startsWith('::warning::changeset-changelog:'),
+      'with no history to fetch, the stock commit stays, with one warning',
+    );
+    const notRepo = mkdtempSync(join(tmpdir(), 'release-pending-publish-not-git-'));
+    dirs.push(notRepo);
+    const brokenLog = [];
+    const broken = createChangelogAttribution({ cwd: notRepo, log: (line) => brokenLog.push(line) });
+    check(
+      aOf(broken) === cRevert && broken({ id: 'b', commit: cRevert }) === cRevert && brokenLog.length === 1 && /^::warning::/.test(brokenLog[0]),
+      'outside any git repository: never a throw, every entry keeps its stock commit, one warning',
+    );
+    const plain = createChangelogAttribution({ cwd: ca.dir, log: () => {} });
+    check(
+      plain({ id: 'a' }) === undefined && plain({ id: 'gone', commit: cC }) === cC && plain({ id: 'c', commit: cC }) === cC,
+      'no stock commit, a changeset this history never added, a changeset nothing restored: the stock answer, unchanged',
     );
 
     battery('annotate-shipped -> a depth-1 clone deepens itself to the version commit; with no reachable history it warns, annotates nothing and exits 0');

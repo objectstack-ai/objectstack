@@ -33,9 +33,10 @@
  * validate` already omits the description line entirely when the field is
  * absent, so this is a clean landing rather than a placeholder.
  *
- * Then we run `<pm> install` — and only afterwards can the Dockerfile's runtime
- * image tag be pinned, because the template carries a caret range and the tag
- * has to name the @objectstack/cli version npm actually resolved (#9017). With
+ * Then we run `<pm> install` — and only afterwards is the Dockerfile's runtime
+ * image tag pinned, to the @objectstack/cli version npm actually resolved
+ * (#9017). The generated package.json pins that version exactly, but the
+ * installed copy is what builds the artifact, so it is the one read. With
  * `--skip-install` there is no resolved version, so the template keeps `latest`
  * and its comment keeps telling the reader to pin by hand — true in that path.
  *
@@ -173,10 +174,10 @@ function rewriteProjectIdentity(
   const templateNamespace = readTemplateNamespace(targetDir);
 
   // package.json — set .name and pin @objectstack/* deps to this scaffolder's
-  // own release line. All @objectstack packages (including create-objectstack)
-  // version in lockstep, so `^<own version>` always resolves and always matches
+  // own exact version. All @objectstack packages (including create-objectstack)
+  // version in lockstep, so `<own version>` always resolves and always matches
   // the framework the docs describe. Without this, a template whose literal
-  // ranges have gone stale scaffolds a project several majors behind the
+  // pins have gone stale scaffolds a project several majors behind the
   // published framework (the `^6.0.0`-era templates installed 6.x while the
   // registry was at 14.x).
   const pkgPath = path.join(targetDir, 'package.json');
@@ -582,8 +583,9 @@ const program = new Command()
         }
 
         // Pin the Dockerfile's runtime image to the CLI that will build this
-        // project's artifact — knowable only now, because the template pins a
-        // caret RANGE and npm has just resolved it (#9017). Skipped without an
+        // project's artifact — the copy npm has just installed (#9017). The
+        // generated package.json pins it exactly, but the install is what
+        // builds the artifact, so the tag follows it. Skipped without an
         // install: with no node_modules there is no resolved version, and the
         // template's own comment then correctly tells the user to pin by hand.
         if (installed) {

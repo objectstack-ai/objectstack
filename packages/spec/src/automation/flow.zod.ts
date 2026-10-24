@@ -1192,6 +1192,44 @@ export const FlowSchema = lazySchema(() => strictObject(
     ),
 
   /**
+   * Who may START this flow — the flow-level twin of an action's
+   * `requiredPermissions` (ADR-0066 D4), same value shape, same check
+   * (ruling record 6377848497, letter A).
+   *
+   * Checked by every door that starts a flow by name — the trigger route
+   * (`POST /automation/:name/trigger`), an action of `type: 'flow'` (REST
+   * `/actions` and the MCP `run_action` bridge) and a declared endpoint of
+   * `type: 'flow'` — in the one shared start check
+   * (`packages/runtime/src/flow-start-admission.ts`). A caller that is not the
+   * system principal must hold EVERY named capability, or the door answers
+   * `403 PERMISSION_DENIED` (ADR-0112) and nothing runs.
+   *
+   * The action door INHERITS it: an action that starts this flow is gated by
+   * this list even when the action declares none, so the app states it once,
+   * on the thing it protects. An action that declares its own list keeps it,
+   * and a caller at that door needs both.
+   *
+   * A parent flow's `subflow` node is not a door: it starts this flow through
+   * the engine and is not checked again — the parent's own start was.
+   *
+   * This is the platform's answer to "who may start an elevated `screen` /
+   * `api` flow" — gate on it rather than on `current_user.positions` inside
+   * the flow, which is not an authorization input.
+   */
+  requiredPermissions: z
+    .array(z.string())
+    .optional()
+    .describe(
+      '[ADR-0066 D4] Capabilities required to START this flow, the flow-level twin of an action\'s ' +
+        'requiredPermissions. Checked at every door that starts a flow by name (the trigger route, an action of ' +
+        'type flow over REST and MCP run_action, a declared endpoint of type flow): a caller that is not the system ' +
+        'principal must hold every named capability, or the door answers 403 PERMISSION_DENIED and nothing runs. ' +
+        'An action that starts this flow inherits the list even when it declares none; one that declares its own ' +
+        "needs both. A parent flow's subflow node is not a door and is not checked again. Use this, not " +
+        'current_user.positions inside the flow, to say who may start an elevated (runAs: system) screen or api flow.',
+    ),
+
+  /**
    * Error Handling Strategy.
    *
    * The retry knobs are the converged `RetryPolicySchema` contract, shared with

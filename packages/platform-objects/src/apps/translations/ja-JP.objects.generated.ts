@@ -139,7 +139,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "ユーザーを招待",
         description: "メールアドレスを指定して招待します。招待が承諾されると、選択したロールでこの組織に参加します。",
-        successMessage: "${result.email} に招待を送信しました",
+        successMessage: "{{ result.email }} に招待を送信しました",
         params: {
           role: {
             options: {
@@ -528,7 +528,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       name: {
         label: "名前",
-        help: "組織自体の名前。コンソールに表示される製品名は別の設定で、設定 → ブランディング で設定します。"
+        help: "組織自体の名前。このレコード上部の「組織名を変更」で変更できます。コンソールに表示される製品名は別の設定で、設定 → ブランディング で設定します。"
       },
       slug: {
         label: "スラッグ",
@@ -576,7 +576,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "ユーザーを招待",
         description: "メールアドレスを指定して招待します。招待が承諾されると、選択したロールでこの組織に参加します。",
-        successMessage: "${result.email} に招待を送信しました",
+        successMessage: "{{ result.email }} に招待を送信しました",
         params: {
           role: {
             options: {
@@ -663,7 +663,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "ユーザーを招待",
         description: "メールアドレスを指定して招待します。招待が承諾されると、選択したロールでこの組織に参加します。",
-        successMessage: "${result.email} に招待を送信しました",
+        successMessage: "{{ result.email }} に招待を送信しました",
         params: {
           role: {
             options: {
@@ -793,7 +793,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "ユーザーを招待",
         description: "メールアドレスを指定して招待します。招待が承諾されると、選択したロールでこの組織に参加します。",
-        successMessage: "${result.email} に招待を送信しました",
+        successMessage: "{{ result.email }} に招待を送信しました",
         params: {
           role: {
             options: {
@@ -868,6 +868,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       update_team: {
         label: "チームを編集",
         successMessage: "チームを更新しました"
+      },
+      add_team_member: {
+        label: "メンバーを追加",
+        successMessage: "チームメンバーを追加しました"
       },
       remove_team: {
         label: "チームを削除",

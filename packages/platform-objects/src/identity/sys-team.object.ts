@@ -79,6 +79,31 @@ export const SysTeam = ObjectSchema.create({
       ],
     },
     {
+      // Better-auth: `organization/add-team-member { teamId, userId }` — the
+      // team-side mirror of `sys_team_member.add_team_member`. That one sits on
+      // the membership list's toolbar, where no team is in hand, so it asks for
+      // one. Opened from a team, the record IS the team: its id rides as
+      // `teamId` (the `sys_organization.invite_user` shape), and the dialog
+      // asks only for the user.
+      name: 'add_team_member',
+      label: 'Add Member',
+      icon: 'user-plus',
+      locations: ['list_item', 'record_header'],
+      type: 'api',
+      target: '/api/v1/auth/organization/add-team-member',
+      recordIdParam: 'teamId',
+      // Same gates as the membership-list copy.
+      requiresFeature: 'organization',
+      requiresMembershipReach: 'add_team_member',
+      successMessage: 'Team member added',
+      refreshAfter: true,
+      params: [
+        // `user_id` is not a field of sys_team, so the param names its owner
+        // through `objectOverride` — the sys_user lookup on the membership row.
+        { name: 'userId', field: 'user_id', objectOverride: 'sys_team_member', required: true },
+      ],
+    },
+    {
       // Better-auth: `organization/remove-team { teamId, organizationId? }`.
       // organizationId defaults to the caller's active org when omitted.
       name: 'remove_team',

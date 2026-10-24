@@ -3533,6 +3533,11 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // this file is a local named `scope`; `graph.scope` is a KEY read off the
       // tabled `graph` receiver, so the metadata guard loses no coverage here.
       'scope',
+      // [#24814] NOT a receiver either — the tail of the
+      // `'./validate-action-copy-templates.js'` import specifier, the same
+      // artefact as `scope` above. The action copy pass reads its metadata in
+      // that module, not here.
+      'templates',
       // [#19939] The spec's value-slot template judge, one refusal at a time.
       // Its keys are that helper's own `{ path, label, message, source }` —
       // never metadata keys — and it is named to stay clear of the `message` /

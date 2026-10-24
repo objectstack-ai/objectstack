@@ -13,8 +13,9 @@
 //  - the new action's declaration: its params are exactly `name` and `logo`,
 //    it sits at `record_header` and `list_item`, it targets better-auth's
 //    `organization/update` exactly as `update_organization` does, and it is
-//    gated like it: on `multiOrgEnabled` and on the grades that reach
-//    `organization/update` (owner, admin);
+//    gated on the grades that reach `organization/update` (owner, admin) like
+//    it, but on the organization capability rather than `multiOrgEnabled`, so
+//    a `single` deployment can rename its one organization (#25347);
 //  - one door per field on the record header: no `record_header` action that
 //    targets `organization/update` carries a `slug` param;
 //  - the header order: the rename takes an inline slot and leave folds into
@@ -102,10 +103,11 @@ describe('sys_organization.rename_organization: the declaration', () => {
       .toEqual({ type: update.type, target: update.target, method: update.method, recordIdParam: update.recordIdParam, bodyShape: update.bodyShape });
   });
 
-  it('is gated on the update reach and multiOrgEnabled, the same lowered predicate as update_organization', () => {
-    const gate = `(${membershipReachPredicate('update_organization')}) && ${featureGatePredicate('multiOrgEnabled')}`;
-    expect(action('rename_organization').visible?.source).toBe(gate);
-    expect(action('update_organization').visible?.source).toBe(gate);
+  it('is gated on the update reach like update_organization, but on the organization capability, not multiOrgEnabled', () => {
+    const reach = `(${membershipReachPredicate('update_organization')})`;
+    expect(action('rename_organization').visible?.source).toBe(`${reach} && ${featureGatePredicate('organization')}`);
+    // CONTROL: the slug door stays multi-organization only.
+    expect(action('update_organization').visible?.source).toBe(`${reach} && ${featureGatePredicate('multiOrgEnabled')}`);
   });
 });
 

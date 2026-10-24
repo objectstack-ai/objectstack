@@ -29,7 +29,7 @@
     "@objectstack/platform-objects": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
-    "postal-mime": "^4.0.5"
+    "postal-mime": "^4.0.8"
   },
   "devDependencies": {
     "@objectstack/driver-sql": "workspace:*",
