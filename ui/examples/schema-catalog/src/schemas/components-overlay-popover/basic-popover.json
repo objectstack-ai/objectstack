@@ -1,0 +1,13 @@
+{
+  "type": "popover",
+  "trigger": {
+    "type": "button",
+    "label": "Open Popover"
+  },
+  "content": [
+    {
+      "type": "text",
+      "content": "Popover content"
+    }
+  ]
+}

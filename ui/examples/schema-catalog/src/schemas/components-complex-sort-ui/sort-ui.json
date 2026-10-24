@@ -1,0 +1,25 @@
+{
+  "type": "sort-ui",
+  "variant": "dropdown",
+  "multiple": true,
+  "fields": [
+    {
+      "field": "name",
+      "label": "Name"
+    },
+    {
+      "field": "created_at",
+      "label": "Created At"
+    },
+    {
+      "field": "status",
+      "label": "Status"
+    }
+  ],
+  "sort": [
+    {
+      "field": "name",
+      "direction": "asc"
+    }
+  ]
+}

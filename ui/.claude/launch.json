@@ -1,0 +1,54 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "console",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@object-ui/console",
+        "dev"
+      ],
+      "port": 5180
+    },
+    {
+      "name": "console-build-test",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-lc",
+        "cd /Users/zhuangjianguo/Documents/GitHub/objectui/.wt-aipicker/apps/console && VITE_SERVER_URL= DEV_PROXY_TARGET=http://localhost:4000 exec pnpm dev --port 5181 --strictPort"
+      ],
+      "port": 5181
+    },
+    {
+      "name": "grid-bulk-demo",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--dir",
+        "packages/plugin-grid",
+        "exec",
+        "vite",
+        "demo",
+        "--port",
+        "5198",
+        "--strictPort"
+      ],
+      "port": 5198,
+      "url": "http://localhost:5198"
+    },
+    {
+      "name": "gantt-demo",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--dir",
+        "packages/plugin-gantt",
+        "exec",
+        "vite",
+        "demo",
+        "--port",
+        "5199"
+      ],
+      "port": 5199
+    }
+  ]
+}

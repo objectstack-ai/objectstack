@@ -1,0 +1,6 @@
+{
+  "type": "toast",
+  "variant": "default",
+  "title": "Notification",
+  "description": "This is a default toast message."
+}

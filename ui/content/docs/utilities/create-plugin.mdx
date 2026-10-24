@@ -1,0 +1,190 @@
+---
+title: "Create Plugin"
+description: "Interactive CLI tool for creating ObjectUI plugins"
+---
+
+# Create Plugin
+
+The `@object-ui/create-plugin` package is a small interactive CLI that scaffolds a new
+ObjectUI plugin package. It asks a couple of questions, writes a ready-to-build package,
+and prints the commands to run next. Writing those files is the whole of what it does: it
+installs no dependencies and initialises no git repository.
+
+## Installation
+
+```bash
+npm install -g @object-ui/create-plugin
+```
+
+Or use with npx (recommended — nothing to install, and you always get the published
+version):
+
+```bash
+npx @object-ui/create-plugin my-plugin
+```
+
+## Quick Start
+
+**Run it from the root of a pnpm workspace.** The new package is written to
+`packages/plugin-<name>` **relative to the current directory**, and what it writes is
+built for a workspace: it depends on the `@object-ui` packages through `workspace:*`
+links, and its `tsconfig.json` extends the one two directories above it. Run the
+generator anywhere else and you get a package whose dependencies and TypeScript config
+resolve to nothing.
+
+```bash
+cd my-workspace
+npx @object-ui/create-plugin awesome
+```
+
+The CLI validates the name you gave it — lowercase letters, digits and hyphens only, no
+scopes and no path separators — and then cleans it up: a leading `plugin-` is stripped, so
+`awesome` and `plugin-awesome` mean the same thing. From the cleaned name it derives,
+without asking:
+
+- the directory it writes into, `packages/plugin-<name>`;
+- the package name, `@object-ui/plugin-<name>`;
+- the `type` key the plugin registers itself under in the
+  [Component Registry](/docs/guide/component-registry) — the cleaned name itself, so
+  `awesome` in the example above;
+- the PascalCase component name, and the name of the file implementing it.
+
+One name decides all four, so pick it with all four in mind. Everything else — a
+description and an author — is asked interactively with a default filled in. The
+`--description` and `--author` options **pre-fill those prompts rather than skip them**;
+run `npx @object-ui/create-plugin --help` for the options it accepts today.
+
+**A run that cannot ask still scaffolds.** With no TTY — a pipe, a CI step, stdin taken
+from `/dev/null` — nothing is asked and every prompt takes its default, and the same
+happens to the questions after a Ctrl-C. Either way the complete file set is written,
+licence text included. The plugin name is the sole exception, being the one answer with
+no default: without it such a run prints `Plugin name is required` and exits `1` having
+created nothing, which is why the name belongs on the command line whenever the run is
+not interactive. The package README states the rule in full.
+
+## What It Generates
+
+This page deliberately does **not** reproduce the generated tree or the generated files.
+Run the generator and read what it wrote — and when you need the answer without running
+it, read the one function that decides it:
+[`buildPluginFiles()` in `packages/create-plugin/src/templates.ts`](https://github.com/objectstack-ai/objectui/blob/main/packages/create-plugin/src/templates.ts).
+That map of *path to file contents* is the single source of truth for what a scaffolded
+plugin contains; the CLI in `src/index.ts` is the loop that writes it to disk.
+
+Two things are worth knowing before you look:
+
+- **It scaffolds a library, not an app.** The generated Vite config is a `build.lib`
+  config emitting an ES and a UMD bundle into `dist/`. There is no application to serve,
+  so there is no dev server to start — see [Development Workflow](#development-workflow).
+- **Its dependency ranges are not listed here on purpose.** They live in that one
+  template literal, and `packages/create-plugin/src/__tests__/templates.test.ts` anchors
+  the generated `devDependencies` to this repository's own declarations, so the scaffold
+  cannot drift away from the toolchain it is part of. Reading the literal is the only way
+  to see what your scaffold will actually contain; a range copied onto this page would be
+  the first thing to go stale.
+
+## Development Workflow
+
+When the generator finishes it prints the next steps for the package it just wrote —
+follow those. Inside the new package, `pnpm run` lists the scripts it actually has. Two
+notes on what to expect from them:
+
+- **There is no dev server, and no `dev` script to run one.** A library build has no app
+  to serve. Iterate either by building the plugin and reloading the app that consumes it,
+  or — the way this repository develops its own plugins — by pointing the consuming app's
+  Vite `resolve.alias` at your plugin's `src`, so your sources become part of that app's
+  dev server. The [Runner](/docs/utilities/runner) documents that alias table, including
+  the transitive-closure rule that makes it work.
+- **Tests are green on a fresh scaffold, and are meant to stay that way.** The generator
+  writes an example test together with the Vitest setup file its config points at, and
+  `templates.test.ts` pins those pieces to each other: the test stack is declared, the
+  environment is a DOM, the setup file exists. If the first test run in a freshly
+  scaffolded plugin is red, that is a bug in the generator rather than in your machine —
+  please file it.
+
+To use the plugin from an app in the same workspace, add it as a `workspace:*` dependency
+and import the package for its side effect: importing it is what registers the component,
+which is what makes its `type` key usable in a schema. See
+[Plugin Concepts](/docs/guide/plugins).
+
+To publish it, use `pnpm publish`. pnpm rewrites the `workspace:*` links into real ranges
+as it packs; a plain `npm publish` would ship the literal `workspace:*` and the resulting
+tarball is uninstallable.
+
+## Configuration
+
+There is none beyond the command line. The generator reads no configuration file — there
+is no `.create-plugin.config.js` and no template directory to point it at. Everything it
+can be told, it is told through the plugin-name argument and the options `--help` lists.
+
+## Plugin Naming Conventions
+
+- **Package name:** `@object-ui/plugin-<name>` — the CLI composes it, you only choose
+  `<name>`.
+- **Schema `type` key:** `kebab-case`, the cleaned plugin name.
+- **Component name:** `PascalCase`, derived from the same name.
+
+## Best Practices
+
+Advice for the plugin you are about to write, beyond whatever the scaffold hands you:
+
+- **Lazy-load heavy dependencies.** `@object-ui/plugin-*` is the layer where heavy
+  third-party libraries are allowed to live, which makes it the layer that most needs a
+  `React.lazy` boundary, so an app that never renders your component never pays for it:
+
+  {/* doc-snippet: fragment — the lazy boundary points at `./HeavyImpl`, a module in the READER's own plugin that cannot exist beside this page, and `React` is the UMD global a one-line excerpt does not import (measured: TS2307 x1, TS2686 x1). Adding an import would make the snippet about this repository rather than about the plugin the reader is scaffolding. */}
+  ```tsx
+  const HeavyImpl = React.lazy(() => import('./HeavyImpl'));
+  ```
+
+- **Give that boundary a real fallback.** A `Skeleton` shaped like the component beats a
+  bare spinner: the layout does not jump when the chunk arrives.
+- **Export your schema types.** The schema interface is the contract between a metadata
+  author and your renderer, so make it importable rather than internal.
+- **Treat the registry key as public.** The `type` you register appears in every schema
+  that uses your plugin, so renaming it is a breaking change for metadata already stored.
+
+## Example Plugins
+
+See these official plugins for reference:
+
+- **[@object-ui/plugin-charts](https://github.com/objectstack-ai/objectui/tree/main/packages/plugin-charts)** - Data visualization
+- **[@object-ui/plugin-kanban](https://github.com/objectstack-ai/objectui/tree/main/packages/plugin-kanban)** - Kanban boards
+- **[@object-ui/plugin-editor](https://github.com/objectstack-ai/objectui/tree/main/packages/plugin-editor)** - Code editor
+
+## Package Information
+
+**Package Name:** `@object-ui/create-plugin` — published on npm, see the
+[npm page](https://www.npmjs.com/package/@object-ui/create-plugin) for the current version  
+**Binary:** `create-plugin`  
+**License:** MIT
+
+## Troubleshooting
+
+**It stopped because the directory already exists.** The generator never writes into an
+existing directory. Pick another name, or remove the old package first.
+
+**The name was rejected.** Only lowercase letters, digits and hyphens are accepted; a
+scope, a slash or a `..` is refused. The validation is at the top of
+[`src/index.ts`](https://github.com/objectstack-ai/objectui/blob/main/packages/create-plugin/src/index.ts).
+
+**The new package's imports and `tsconfig.json` resolve to nothing.** The generator was
+almost certainly run outside a workspace root — see [Quick Start](#quick-start). Move the
+package into a real workspace's `packages/` directory, or re-run the generator from
+there.
+
+**Permission denied installing globally.** Use npx instead of `npm install -g`; it needs
+no write access outside the npm cache.
+
+## Next Steps
+
+- **[Plugin Concepts](/docs/guide/plugins)** - Learn how plugins work
+- **[Plugin Development Guide](/docs/guide/plugin-development)** - The full authoring guide
+- **[Component Registry](/docs/guide/component-registry)** - Register components
+- **[CLI](/docs/utilities/cli)** - Test your plugin with the CLI
+
+## Need Help?
+
+- [GitHub Issues](https://github.com/objectstack-ai/objectui/issues)
+- [Plugin Development Guide](/docs/guide/plugin-development)
+- [Examples](https://github.com/objectstack-ai/objectui/tree/main/packages)

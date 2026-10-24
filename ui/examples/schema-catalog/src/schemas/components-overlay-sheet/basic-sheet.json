@@ -1,0 +1,13 @@
+{
+  "type": "sheet",
+  "trigger": {
+    "type": "button",
+    "label": "Open Sheet"
+  },
+  "title": "Sheet Title",
+  "description": "Sheet description goes here.",
+  "content": {
+    "type": "text",
+    "content": "Sheet content"
+  }
+}

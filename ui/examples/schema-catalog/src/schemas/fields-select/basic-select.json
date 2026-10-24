@@ -1,0 +1,27 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "fields": [
+    {
+      "name": "status",
+      "label": "Status",
+      "type": "select",
+      "placeholder": "Select status...",
+      "options": [
+        {
+          "label": "Draft",
+          "value": "draft"
+        },
+        {
+          "label": "In Progress",
+          "value": "in_progress"
+        },
+        {
+          "label": "Completed",
+          "value": "completed"
+        }
+      ]
+    }
+  ]
+}

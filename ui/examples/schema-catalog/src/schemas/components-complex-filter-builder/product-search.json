@@ -1,0 +1,56 @@
+{
+  "type": "filter-builder",
+  "name": "productFilters",
+  "label": "Product Search Filters",
+  "fields": [
+    {
+      "value": "name",
+      "label": "Product Name",
+      "type": "text"
+    },
+    {
+      "value": "category",
+      "label": "Category",
+      "type": "text"
+    },
+    {
+      "value": "price",
+      "label": "Price",
+      "type": "number"
+    },
+    {
+      "value": "stock",
+      "label": "Stock Quantity",
+      "type": "number"
+    },
+    {
+      "value": "rating",
+      "label": "Rating",
+      "type": "number"
+    }
+  ],
+  "value": {
+    "id": "root",
+    "logic": "and",
+    "conditions": [
+      {
+        "id": "1",
+        "field": "category",
+        "operator": "equals",
+        "value": "Electronics"
+      },
+      {
+        "id": "2",
+        "field": "price",
+        "operator": "less_than",
+        "value": "1000"
+      },
+      {
+        "id": "3",
+        "field": "stock",
+        "operator": "greater_than",
+        "value": "0"
+      }
+    ]
+  }
+}

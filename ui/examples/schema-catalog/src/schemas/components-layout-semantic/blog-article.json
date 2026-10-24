@@ -1,0 +1,49 @@
+{
+  "type": "article",
+  "className": "max-w-2xl p-6 border rounded-lg",
+  "children": [
+    {
+      "type": "header",
+      "className": "mb-6",
+      "children": [
+        {
+          "type": "text",
+          "content": "Understanding Semantic HTML",
+          "className": "text-3xl font-bold mb-2"
+        },
+        {
+          "type": "text",
+          "content": "Published on January 15, 2024",
+          "className": "text-sm text-muted-foreground"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "className": "mb-6",
+      "children": [
+        {
+          "type": "text",
+          "content": "Introduction",
+          "className": "text-xl font-semibold mb-2"
+        },
+        {
+          "type": "text",
+          "content": "Semantic HTML provides meaning to the structure of web content...",
+          "className": "leading-relaxed"
+        }
+      ]
+    },
+    {
+      "type": "footer",
+      "className": "pt-6 border-t",
+      "children": [
+        {
+          "type": "text",
+          "content": "Written by John Doe",
+          "className": "text-sm text-muted-foreground"
+        }
+      ]
+    }
+  ]
+}

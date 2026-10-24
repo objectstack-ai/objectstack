@@ -1,0 +1,281 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Data Display Components - Protocol Compliance Examples",
+  "description": "Examples demonstrating compliance with @objectstack/spec (v0.1.1)",
+  "examples": {
+    "alert": {
+      "type": "alert",
+      "id": "welcome-alert",
+      "title": "Welcome!",
+      "description": "Thank you for using ObjectUI",
+      "variant": "default",
+      "icon": "info",
+      "dismissible": true
+    },
+    "statistic": {
+      "type": "statistic",
+      "id": "revenue-metric",
+      "label": "Total Revenue",
+      "value": "$45,231.89",
+      "trend": "up",
+      "description": "+20.1% from last month",
+      "icon": "dollar-sign"
+    },
+    "badge": {
+      "type": "badge",
+      "id": "status-badge",
+      "label": "New",
+      "variant": "default",
+      "icon": "star"
+    },
+    "avatar": {
+      "type": "avatar",
+      "id": "user-avatar",
+      "src": "https://github.com/shadcn.png",
+      "alt": "User profile picture",
+      "fallback": "CN",
+      "size": "default",
+      "shape": "circle"
+    },
+    "list": {
+      "type": "list",
+      "id": "user-list",
+      "items": [
+        {
+          "id": "item-1",
+          "label": "User Profile",
+          "description": "View and edit your profile",
+          "icon": "user"
+        },
+        {
+          "id": "item-2",
+          "label": "Settings",
+          "description": "Manage your preferences",
+          "icon": "settings"
+        },
+        {
+          "id": "item-3",
+          "label": "Logout",
+          "description": "Sign out of your account",
+          "icon": "log-out"
+        }
+      ],
+      "ordered": false,
+      "dividers": true
+    },
+    "table": {
+      "type": "table",
+      "id": "users-table",
+      "caption": "User Management",
+      "columns": [
+        {
+          "header": "Name",
+          "accessorKey": "name"
+        },
+        {
+          "header": "Email",
+          "accessorKey": "email"
+        },
+        {
+          "header": "Role",
+          "accessorKey": "role"
+        }
+      ],
+      "data": [
+        { "id": 1, "name": "John Doe", "email": "john@example.com", "role": "Admin" },
+        { "id": 2, "name": "Jane Smith", "email": "jane@example.com", "role": "User" }
+      ]
+    },
+    "data-table": {
+      "type": "data-table",
+      "id": "enterprise-table",
+      "caption": "Customer Database",
+      "columns": [
+        {
+          "header": "ID",
+          "accessorKey": "id",
+          "type": "number",
+          "width": 80
+        },
+        {
+          "header": "Company",
+          "accessorKey": "company",
+          "sortable": true,
+          "filterable": true
+        },
+        {
+          "header": "Status",
+          "accessorKey": "status",
+          "type": "text"
+        },
+        {
+          "header": "Revenue",
+          "accessorKey": "revenue",
+          "type": "currency",
+          "align": "right"
+        }
+      ],
+      "data": [],
+      "pagination": true,
+      "pageSize": 10,
+      "searchable": true,
+      "selectable": true,
+      "sortable": true,
+      "exportable": true,
+      "rowActions": true
+    },
+    "chart": {
+      "type": "chart",
+      "id": "sales-chart",
+      "chartType": "bar",
+      "title": "Monthly Sales",
+      "description": "Revenue breakdown by month",
+      "data": [
+        { "month": "Jan", "Revenue": 12000, "Expenses": 8000 },
+        { "month": "Feb", "Revenue": 15000, "Expenses": 9000 },
+        { "month": "Mar", "Revenue": 18000, "Expenses": 11000 },
+        { "month": "Apr", "Revenue": 14000, "Expenses": 10000 },
+        { "month": "May", "Revenue": 22000, "Expenses": 13000 },
+        { "month": "Jun", "Revenue": 25000, "Expenses": 14000 }
+      ],
+      "xAxisKey": "month",
+      "series": [
+        {
+          "name": "Revenue",
+          "color": "#3b82f6"
+        },
+        {
+          "name": "Expenses",
+          "color": "#ef4444"
+        }
+      ],
+      "showLegend": true,
+      "showGrid": true,
+      "animate": true,
+      "height": 400
+    },
+    "timeline": {
+      "type": "timeline",
+      "id": "project-timeline",
+      "variant": "vertical",
+      "items": [
+        {
+          "time": "2024-01-15",
+          "title": "Project Started",
+          "description": "Initial project kickoff meeting",
+          "variant": "info"
+        },
+        {
+          "time": "2024-02-20",
+          "title": "First Milestone",
+          "description": "Completed Phase 1 deliverables",
+          "variant": "success"
+        },
+        {
+          "time": "2024-03-10",
+          "title": "Beta Release",
+          "description": "Released beta version to testers",
+          "variant": "default"
+        }
+      ]
+    },
+    "tree-view": {
+      "type": "tree-view",
+      "id": "file-explorer",
+      "nodes": [
+        {
+          "id": "root",
+          "label": "Project",
+          "icon": "folder",
+          "defaultExpanded": true,
+          "children": [
+            {
+              "id": "src",
+              "label": "src",
+              "icon": "folder",
+              "children": [
+                {
+                  "id": "index",
+                  "label": "index.ts",
+                  "icon": "file"
+                },
+                {
+                  "id": "app",
+                  "label": "app.tsx",
+                  "icon": "file"
+                }
+              ]
+            },
+            {
+              "id": "public",
+              "label": "public",
+              "icon": "folder",
+              "children": [
+                {
+                  "id": "index-html",
+                  "label": "index.html",
+                  "icon": "file"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "multiSelect": false,
+      "showLines": true
+    },
+    "markdown": {
+      "type": "markdown",
+      "id": "readme",
+      "content": "# Welcome\n\nThis is a **markdown** component.\n\n- Feature 1\n- Feature 2\n- Feature 3"
+    },
+    "html": {
+      "type": "html",
+      "id": "custom-html",
+      "html": "<div class=\"custom-content\"><h2>Custom HTML</h2><p>This is raw HTML content.</p></div>"
+    }
+  },
+  "compositeExample": {
+    "type": "flex",
+    "id": "user-profile-card",
+    "properties": {
+      "direction": "col",
+      "gap": 4,
+      "children": [
+        {
+          "type": "avatar",
+          "src": "https://github.com/shadcn.png",
+          "alt": "User Avatar",
+          "fallback": "JD",
+          "size": "lg"
+        },
+        {
+          "type": "statistic",
+          "label": "Followers",
+          "value": "1,234",
+          "trend": "up",
+          "icon": "users"
+        },
+        {
+          "type": "badge",
+          "label": "Pro Member",
+          "variant": "default"
+        },
+        {
+          "type": "list",
+          "items": [
+            {
+              "label": "Posts",
+              "description": "42 articles"
+            },
+            {
+              "label": "Achievements",
+              "description": "15 badges earned"
+            }
+          ],
+          "dividers": true
+        }
+      ]
+    }
+  }
+}

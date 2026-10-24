@@ -1,0 +1,50 @@
+{
+  "type": "filter-builder",
+  "name": "userFilters",
+  "label": "User Filters",
+  "fields": [
+    {
+      "value": "name",
+      "label": "Name",
+      "type": "text"
+    },
+    {
+      "value": "email",
+      "label": "Email",
+      "type": "text"
+    },
+    {
+      "value": "age",
+      "label": "Age",
+      "type": "number"
+    },
+    {
+      "value": "department",
+      "label": "Department",
+      "type": "text"
+    },
+    {
+      "value": "salary",
+      "label": "Salary",
+      "type": "number"
+    }
+  ],
+  "value": {
+    "id": "root",
+    "logic": "and",
+    "conditions": [
+      {
+        "id": "1",
+        "field": "age",
+        "operator": "greater_than",
+        "value": "25"
+      },
+      {
+        "id": "2",
+        "field": "department",
+        "operator": "equals",
+        "value": "Engineering"
+      }
+    ]
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "name": "@object-ui/create-plugin",
+  "version": "18.1.0",
+  "description": "CLI tool to scaffold ObjectUI plugins",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "create-plugin": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "type-check": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "dev": "tsup --watch",
+    "test": "vitest run --root ../.. packages/create-plugin/",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "chalk": "^6.0.0",
+    "commander": "^15.0.0",
+    "fs-extra": "^11.4.0",
+    "prompts": "^2.4.2"
+  },
+  "devDependencies": {
+    "@types/fs-extra": "^11.0.4",
+    "@types/node": "^26.2.0",
+    "@types/prompts": "^2.4.9",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  },
+  "keywords": [
+    "objectui",
+    "sdui",
+    "schema-driven-ui",
+    "react",
+    "tailwind",
+    "shadcn",
+    "objectstack",
+    "cli",
+    "scaffold",
+    "generator",
+    "plugin"
+  ],
+  "author": "ObjectStack Team <team@objectstack.ai>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/objectstack-ai/objectui.git",
+    "directory": "packages/create-plugin"
+  },
+  "bugs": {
+    "url": "https://github.com/objectstack-ai/objectui/issues"
+  },
+  "homepage": "https://www.objectui.org/docs/guide/plugin-development",
+  "publishConfig": {
+    "access": "public"
+  }
+}

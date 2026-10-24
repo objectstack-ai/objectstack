@@ -1,0 +1,22 @@
+{
+  "type": "dropdown-menu",
+  "trigger": {
+    "type": "button",
+    "label": "Actions",
+    "icon": "ellipsis"
+  },
+  "items": [
+    {
+      "label": "Edit",
+      "icon": "square-pen"
+    },
+    {
+      "label": "Copy",
+      "icon": "copy"
+    },
+    {
+      "label": "Delete",
+      "icon": "trash"
+    }
+  ]
+}

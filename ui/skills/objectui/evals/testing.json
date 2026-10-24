@@ -1,0 +1,53 @@
+{
+  "skill_name": "objectui",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Write unit tests for my custom ObjectUI plugin that registers a 'weather-card' component. I need to test the registration, the rendering with mock data, and expression evaluation.",
+      "expected_output": "Provides Vitest tests: registration test checking ComponentRegistry, rendering test with SchemaRendererProvider and mock dataSource, and expression-based visibility test.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "vitest",
+          "ComponentRegistry",
+          "SchemaRendererProvider",
+          "render",
+          "expect"
+        ],
+        "must_not_contain": [
+          "jest.fn()"
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "prompt": "Write RTL component tests for an ObjectUI form plugin that has create, edit, and view modes.",
+      "expected_output": "Provides Vitest + React Testing Library tests with SchemaRendererProvider wrapping, mock dataSource, and a test case per form mode asserting fields render and submit behavior matches the mode.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "React Testing Library",
+          "SchemaRendererProvider"
+        ],
+        "must_not_contain": []
+      }
+    },
+    {
+      "id": 3,
+      "prompt": "I need to write a Playwright E2E test that verifies our console app loads, navigates to the dashboard, and renders the KPI cards.",
+      "expected_output": "Provides Playwright spec with page load, React mount wait, navigation, content verification, and error monitoring.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "Playwright",
+          "page.goto",
+          "page.locator",
+          "await expect"
+        ],
+        "must_not_contain": [
+          "cy.visit("
+        ]
+      }
+    }
+  ]
+}

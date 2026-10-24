@@ -1,0 +1,42 @@
+{
+  "type": "filter-builder",
+  "name": "userQuery",
+  "label": "Find Users",
+  "fields": [
+    {
+      "value": "firstName",
+      "label": "First Name",
+      "type": "text"
+    },
+    {
+      "value": "lastName",
+      "label": "Last Name",
+      "type": "text"
+    },
+    {
+      "value": "email",
+      "label": "Email",
+      "type": "text"
+    },
+    {
+      "value": "role",
+      "label": "Role",
+      "type": "text"
+    },
+    {
+      "value": "active",
+      "label": "Active",
+      "type": "boolean"
+    },
+    {
+      "value": "createdAt",
+      "label": "Created Date",
+      "type": "date"
+    }
+  ],
+  "value": {
+    "id": "root",
+    "logic": "and",
+    "conditions": []
+  }
+}

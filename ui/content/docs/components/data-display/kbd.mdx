@@ -1,0 +1,36 @@
+---
+title: "Kbd"
+description: "Display keyboard shortcuts and hotkeys"
+---
+
+import { DemoGrid } from '@/app/components/ComponentDemo';
+
+The Kbd component displays keyboard shortcuts in a styled format.
+
+## Basic Usage
+
+<SchemaExample id="components-data-display-kbd/copy-shortcut" />
+
+## Multiple Key Combinations
+
+<DemoGrid>
+  <SchemaExample id="components-data-display-kbd/command-palette" />
+  <SchemaExample id="components-data-display-kbd/search" />
+  <SchemaExample id="components-data-display-kbd/submit" />
+</DemoGrid>
+
+## Schema
+
+```ts
+interface KbdSchema {
+  type: 'kbd';
+  keys: string[];                 // Keyboard keys
+  className?: string;
+}
+```
+
+## Examples
+
+### In Documentation
+
+<SchemaExample id="components-data-display-kbd/inline-usage" />

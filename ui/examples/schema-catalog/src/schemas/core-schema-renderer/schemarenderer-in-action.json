@@ -1,0 +1,11 @@
+{
+  "type": "card",
+  "title": "Dynamic Card",
+  "children": [
+    {
+      "type": "text",
+      "content": "This entire UI is defined in JSON and rendered by SchemaRenderer",
+      "className": "text-sm text-muted-foreground"
+    }
+  ]
+}

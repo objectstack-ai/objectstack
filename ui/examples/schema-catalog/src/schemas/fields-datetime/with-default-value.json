@@ -1,0 +1,15 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "defaultValues": {
+    "scheduled_at": "2024-03-15T14:30"
+  },
+  "fields": [
+    {
+      "name": "scheduled_at",
+      "label": "Scheduled At",
+      "type": "datetime"
+    }
+  ]
+}

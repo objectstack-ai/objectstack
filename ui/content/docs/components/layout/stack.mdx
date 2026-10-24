@@ -1,0 +1,27 @@
+---
+title: "Stack"
+description: "Vertical stack layout for organizing content"
+---
+
+## Examples
+
+  <SchemaExample id="components-layout-stack/basic-stack" />
+
+## Schema
+
+```ts
+import type { SchemaNode } from '@object-ui/types';
+
+interface StackSchema {
+  type: 'stack';
+  gap?: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 8 | 10;  // default: 2
+  children: SchemaNode[];
+  className?: string;
+}
+```
+
+`gap` is a step on the stack's spacing scale, and `0` means none. The nine steps are the
+ones the renderer maps to a gap class, so they are the only values validation accepts:
+`"gap": 7` or `"gap": 9` is refused with the set named (objectui#11474). Such a number used
+to pass validation and then render with no gap at all, not even the default. A `flex` maps a
+different set: it has `7` and no `10`.

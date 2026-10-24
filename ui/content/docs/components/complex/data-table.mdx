@@ -1,0 +1,309 @@
+---
+title: "Data Table"
+description: "Enterprise-grade data table with sorting, filtering, pagination, and row actions"
+---
+
+The Data Table component provides comprehensive table functionality inspired by Airtable, including multi-column sorting, search, pagination, row selection, and export capabilities.
+
+## Basic Usage
+
+<SchemaExample id="components-complex-data-table/simple-table" />
+
+## With All Features
+
+<SchemaExample id="components-complex-data-table/full-featured-table" />
+
+## Schema
+
+```ts
+interface TableColumn {
+  header: string;                        // Column header text
+  accessorKey: string;                   // Data property key
+  width?: string;                        // Column width (e.g., '100px', '20%')
+  sortable?: boolean;                    // Enable sorting for this column
+  masked?: boolean;                      // Withhold the raw value (see Masked columns)
+  chips?: boolean;                       // Cells draw chips: never narrower than the widest one (see Chip columns)
+  foreignKey?: boolean;                  // Raw value is a referenced record's id: the cell draws no title tooltip
+}
+
+interface DataTableSchema {
+  type: 'data-table';
+  
+  // Structure
+  columns: TableColumn[];                // Column definitions
+  data: Record<string, any>[];          // Table data
+  caption?: string;                      // Table caption
+  
+  // Features
+  pagination?: boolean;                  // Enable pagination (default: true)
+  pageSize?: number;                     // Items per page (default: 10)
+  searchable?: boolean;                  // Enable search (default: true)
+  selectable?: boolean;                  // Enable row selection (default: false)
+  sortable?: boolean;                    // Enable sorting (default: true)
+  exportable?: boolean;                  // Enable CSV export (default: false)
+  rowActions?: boolean;                  // Show edit/delete buttons (default: false)
+  
+  // Advanced features
+  resizableColumns?: boolean;            // Allow column resizing (default: true)
+  reorderableColumns?: boolean;          // Allow column reordering (default: true)
+
+  // Styling
+  className?: string;                    // Tailwind CSS classes on the table wrapper
+  cellClassName?: string;                // Tailwind CSS classes on the utility cells only
+                                         // (select / row number / row actions)
+  
+  // Base properties
+  id?: string;
+  visible?: boolean | string | { dialect?: string; source: string };
+  testId?: string;
+}
+```
+
+## Cell styling
+
+`className` styles the table wrapper. Body cells have **two** class slots, and they
+reach **disjoint** cells — neither is a superset of the other, and no cell gets both:
+
+- `TableColumn.cellClassName` — the **data** cells of that one column.
+- `DataTableSchema.cellClassName` — the table's **utility** cells only: the leading
+  selection-checkbox cell (`selectable`), the row-number cell (`showRowNumbers` without
+  `selectable`), and the trailing row-actions cell (`rowActions`). It never reaches a
+  data cell.
+
+With `selectable` and `showRowNumbers` both on, the number and the checkbox share one
+leading cell: the number by default, the checkbox on row hover, on keyboard focus, on a
+touch screen and on every row while any row is selected. The header keeps its
+select-all box. With row numbers off the leading cell is empty until hover. The
+row-actions button shows on hover, on focus and on a selected row, and is hidden by
+opacity only, so it stays reachable by keyboard.
+
+(The empty-state cell and the add-record row take neither.)
+
+Row density is therefore a **pair** of settings, not one. Per-cell padding is where
+row height has to be expressed — height is a property of the cells, not of the row
+element, so `rowClassName` cannot express it — so a compact table sets the same
+density class on every column *and* on the schema, the second so the checkbox and
+row-number cells stay the same height as the data beside them. That is exactly what
+`object-grid` does for its `rowHeight` modes:
+
+```json
+{
+  "type": "data-table",
+  "selectable": true,
+  "showRowNumbers": true,
+  "cellClassName": "px-2 py-1 text-sm",
+  "columns": [
+    { "header": "Name", "accessorKey": "name", "cellClassName": "px-2 py-1 text-sm" },
+    { "header": "Amount", "accessorKey": "amount", "cellClassName": "px-2 py-1 text-sm text-right" }
+  ],
+  "data": [
+    { "name": "Ada Lovelace", "amount": 120 },
+    { "name": "Grace Hopper", "amount": 340 }
+  ]
+}
+```
+
+Drop the per-column half and the data cells stay at the table primitive's default
+`p-4` — the schema-level key alone does not compact a row.
+
+## Inline editing
+
+Inline editing is a **host-paired** capability of this table, not a flag a document
+sets. The table only *stages* an edit; saving it is the job of callbacks that a host
+supplies in code (`onRowSave`, `onCellChange`, `onBatchSave`), and a JSON document
+cannot supply a function. So the keys that switch editing on — `editable`, and
+`singleClickEdit` for entering edit mode on the first click instead of a
+double-click — are set by the host on the `data-table` node it builds, together with
+that save path. `object-grid` is that host: it sets both keys on its table and
+passes its own save path, which writes through the data source.
+
+**Do not author `editable` or `singleClickEdit` on a `data-table` node.** Without a
+host save path the edits are staged in the table and nothing persists them. To edit
+records inline from a document, author an `object-grid` instead — see
+[Inline Editing](/docs/plugins/plugin-grid#inline-editing) in the grid plugin.
+
+When a host has switched editing on, a cell enters edit mode on double-click (or on
+a single click) and the table renders one of its built-in editors — text, number,
+date — chosen from the column's `type`.
+
+"Save All" hands every pending row to `onBatchSave` at once, and reads the outcome
+per row. A batch is several writes, and some can land while others are refused. A
+host that knows which rows did not persist resolves with `{ failed }`, naming each
+by the `rowIndex` it was handed: the table keeps and flags exactly those rows, and
+clears the rest. Resolving with nothing means every row persisted. A rejection
+says nothing about which rows landed, so the table keeps and flags every row.
+
+A pending edit belongs to its **record**, not to the position its row had: the
+table keeps it under the row's `id` (or, for a row with no `id`, under the row
+object itself). When the host hands the table a new read of its rows, in any
+order, every edit is drawn, saved and flagged on its own record. An edit whose
+record the new rows no longer include (a re-read dropped it, or it sits on
+another server page) stays pending and is counted in the toolbar. "Save All"
+hands it over with the row it was staged against and a negative `rowIndex`
+(`-1`, `-2`, …, unique within the batch), since no position in the rows the
+table holds is that record's. Every other entry's `rowIndex` is the row's index
+when "Save All" is pressed.
+
+Cells stay editable while a row save or "Save All" is in flight. When the save
+settles, it clears only what it sent: each cell whose pending value is still the
+value it sent. An edit made during the save stays pending and drawn, whether it is
+on another row, on another cell of the row being saved, or a new value for a cell
+being saved (even the value the row loaded with, since the save writes the old
+edit). The settle closes only the editor that was open when the save was pressed.
+
+The host can also supply `renderCellEditor`, a function the table calls first for
+every cell it is about to edit; it returns a node to use, or `null` to fall through
+to the built-in editor for that column. This is how `object-grid` gives a `select`
+or `lookup` cell the same dedicated control the form uses, without the component
+layer having to re-implement it. Its context is:
+
+```plaintext
+renderCellEditor?: (ctx: {
+  column: any;
+  row: any;                            // the persisted record
+  pendingRow: any;                     // row + this row's staged, unsaved edits (#7188)
+  value: any;
+  stage: (v: any) => void;
+  commit: (v?: any) => void;
+  cancel: () => void;
+}) => ReactNode;
+```
+
+The returned node is wrapped by the table so it inherits the exit-edit
+affordances the built-in editors have: Enter commits from a single-line input,
+Escape cancels, and a click outside commits. Use `stage` to record a value while
+staying in edit mode, `commit` to save, and `cancel` to discard.
+
+The context carries the row twice, on purpose: `row` is the persisted record, and
+`pendingRow` is that record with the row's staged, unsaved edits merged over it
+(the same object as `row` when nothing is staged). A widget that scopes itself by
+a sibling field — a `dependsOn` lookup — should read `pendingRow`, so a parent
+edited in the same row re-scopes the child before anything is saved; `row` stays
+the place to read what the data source last returned.
+
+## Keyboard navigation
+
+`keyboardNavigation` is set by the host in code too, beside `editable`, and is off
+unless a host turns it on. `object-grid` is that host: it resolves its own
+`keyboardNavigation` key (on by default when the grid renders editable) and sets
+the answer on its table — see
+[Keyboard navigation](/docs/plugins/plugin-grid#keyboard-navigation) in the grid
+plugin (objectui#11068).
+
+On, the table follows the WAI-ARIA grid pattern: it is exposed as a `grid`, its
+data cells take one place in the Tab order instead of one each (the cell that last
+held focus), the arrow keys move focus one cell, Home / End go to the ends of the
+row and Ctrl+Home / Ctrl+End to the ends of the page, and an edit ended with Enter
+or Escape hands focus back to its cell. A widget a cell renders keeps its own Tab
+stop. Off, every data cell is its own Tab stop, as before.
+
+## Chip columns
+
+A column with `chips: true` draws chips in its cells (a select or status field's
+badges). Its minimum width is its widest drawn chip among the rows on screen,
+measured once each time the data, the page or the page size changes, so a
+single-word value such as "Published" is never cut to an ellipsis. The floor
+raises a declared `width` and a user's resize alike; a wider `width` is kept.
+Text columns have no floor: they keep their width and truncate first.
+`ObjectGrid` sets the flag on select-typed columns.
+
+## Wide tables
+
+A table wider than its box shows a shadow at the right edge while columns remain
+to the right, and none once it is scrolled to the end. With a right-pinned column
+(the grid's Actions column) the shadow sits at that column's left edge, where the
+content slides under it. The scrollbar shows while the pointer is over the table
+or focus is inside it. The same affordance is exported for a page's own table as
+`HorizontalOverflowBox`:
+
+```tsx
+import { HorizontalOverflowBox, Table } from '@object-ui/components';
+<HorizontalOverflowBox>
+  <Table containerClassName="overflow-visible">…</Table>
+</HorizontalOverflowBox>
+```
+
+## Masked columns
+
+A column with `masked: true` holds a credential. The table withholds its raw value on
+every path of its own that reads it:
+
+- Ctrl+C / Cmd+C on one of its cells writes nothing to the clipboard.
+- The cell carries no `title` tooltip.
+- The table's CSV export leaves the column out.
+- The column never enters inline edit, on any trigger, because every editor would
+  start from the raw value.
+- The client-side search leaves the column out, so a term only its raw value contains
+  matches no row.
+- Its sort is disabled: the header does not sort and the header menu offers no sort,
+  with client and manual sorting alike, and a client sort already set on the column
+  stops ordering the rows. An order by the raw value would show how it compares with
+  every other row's.
+- Its automatic width is sized from its header, never from its values, so it does not
+  grow with the credential.
+
+Every other column copies, shows, exports, edits, searches, sorts and sizes exactly as
+before. With `manualSearch` the table searches nothing itself: what the host's search
+matches is up to the host.
+
+What the flag does **not** cover: the CSV export of a lookup column whose value is an
+expanded record writes that record whole, so a credential field of the related object
+is not pruned.
+
+The flag withholds; it does not draw. What a reader sees in the cell comes from the
+producer's `cell` renderer, and the table draws a column with no `cell` as its value.
+You rarely set the flag by hand. Three producers set it for every column whose field
+type is drawn as a mask (`password`, `secret`, or a type registered with the mask),
+from `isMaskedFieldType()` in `@object-ui/fields`: `object-grid`, the related list and
+`object-data-table`. Each reads both the column's `type` and the object's field type,
+so a column that shows a `secret` field as `text` keeps the flag once the object's
+types are known.
+
+The related list and `object-data-table` fail closed: while the object definition is
+still loading, or after its read failed, they set the flag on every column.
+
+A column whose type is not known yet is **withheld** (objectui#10657, which folded
+objectui#10706). While the object's field types are loading, or after their read
+failed, `object-grid`, the related list and `object-data-table` draw such a column as
+the mask, never as text, and set the flag on it; it stays withheld when the read
+failed. In `object-grid` and `object-data-table` that is a column with no `type` of its
+own. The related list draws its cells from the object's types only, so there it is
+every column without a `cell` of its own. A host that already holds the object's fields
+hands them to `object-grid` as its `objectFields` prop, as the list view does, and then
+there is nothing to withhold.
+
+`object-grid` also leaves every masked or withheld field of the grid's object out of its
+own client export (CSV and JSON), draws those fields through their `cell` on its mobile
+card, and refuses them as grouping keys (a masked entry is ignored with a console
+warning; a withheld one groups again once the types are known). What `object-grid` does
+not cover: the server-streamed export (`exportDownload`) sends the masked columns as
+before and relies on the server's masking, and the client JSON export writes an
+expanded lookup record whole, so a credential field of the related object is not
+pruned.
+
+## Examples
+
+### Product Inventory
+
+<SchemaExample id="components-complex-data-table/inventory-management" />
+
+### User Management
+
+<SchemaExample id="components-complex-data-table/user-table" />
+
+### Sales Report
+
+<SchemaExample id="components-complex-data-table/sales-data" />
+
+## Features
+
+The Data Table component provides:
+
+- **Sorting**: Click column headers to sort (ascending/descending/none)
+- **Search**: Real-time search across all columns
+- **Pagination**: Navigate through large datasets
+- **Selection**: Select multiple rows with checkboxes
+- **Export**: Download table data as CSV
+- **Row Actions**: Built-in edit and delete buttons
+- **Resizable Columns**: Drag column borders to resize
+- **Column Reordering**: Drag columns to reorder

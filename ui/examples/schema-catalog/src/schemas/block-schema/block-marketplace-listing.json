@@ -1,0 +1,109 @@
+{
+  "type": "card",
+  "className": "max-w-md mx-auto",
+  "children": [
+    {
+      "type": "flex",
+      "properties": {
+        "justify": "center",
+        "align": "center",
+        "gap": 0,
+        "children": [
+          {
+            "type": "icon",
+            "icon": "layout-template",
+            "className": "h-12 w-12 text-primary/60"
+          }
+        ]
+      },
+      "className": "h-32 bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-t-lg"
+    },
+    {
+      "type": "stack",
+      "gap": 3,
+      "className": "p-4",
+      "children": [
+        {
+          "type": "flex",
+          "properties": {
+            "align": "start",
+            "justify": "between",
+            "children": [
+              {
+                "type": "stack",
+                "gap": 1,
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "Pricing Table Pro",
+                    "className": "font-semibold"
+                  },
+                  {
+                    "type": "text",
+                    "content": "by ObjectUI Team",
+                    "className": "text-xs text-muted-foreground"
+                  }
+                ]
+              },
+              {
+                "type": "badge",
+                "label": "v2.1.0",
+                "variant": "secondary"
+              }
+            ]
+          }
+        },
+        {
+          "type": "text",
+          "content": "Professional pricing comparison table with toggle for monthly/yearly billing.",
+          "className": "text-sm text-muted-foreground"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "gap": 2,
+            "wrap": true,
+            "children": [
+              {
+                "type": "badge",
+                "label": "Marketing",
+                "variant": "outline"
+              },
+              {
+                "type": "badge",
+                "label": "SaaS",
+                "variant": "outline"
+              },
+              {
+                "type": "badge",
+                "label": "Pricing",
+                "variant": "outline"
+              }
+            ]
+          }
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "justify": "between",
+            "children": [
+              {
+                "type": "text",
+                "content": "★ 4.9 (234 ratings) · 5.4k installs",
+                "className": "text-xs text-muted-foreground"
+              },
+              {
+                "type": "button",
+                "label": "Install",
+                "variant": "default",
+                "size": "sm"
+              }
+            ]
+          },
+          "className": "pt-2 border-t"
+        }
+      ]
+    }
+  ]
+}

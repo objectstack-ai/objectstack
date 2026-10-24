@@ -1,0 +1,10 @@
+{
+  "type": "box",
+  "children": [
+    {
+      "type": "toaster",
+      "position": "top-right",
+      "limit": 3
+    }
+  ]
+}

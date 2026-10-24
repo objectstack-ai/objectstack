@@ -1,0 +1,24 @@
+{
+  "title": "Plugins",
+  "pages": [
+    "plugin-ai",
+    "plugin-calendar",
+    "plugin-calendar-view",
+    "plugin-charts",
+    "plugin-chatbot",
+    "plugin-dashboard",
+    "plugin-designer",
+    "plugin-detail",
+    "plugin-editor",
+    "plugin-form",
+    "plugin-gantt",
+    "plugin-grid",
+    "plugin-kanban",
+    "plugin-list",
+    "plugin-map",
+    "plugin-markdown",
+    "plugin-report",
+    "plugin-timeline",
+    "plugin-view"
+  ]
+}

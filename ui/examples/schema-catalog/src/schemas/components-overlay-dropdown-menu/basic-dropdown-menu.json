@@ -1,0 +1,21 @@
+{
+  "type": "dropdown-menu",
+  "trigger": {
+    "type": "button",
+    "label": "Open Menu"
+  },
+  "items": [
+    {
+      "label": "Profile"
+    },
+    {
+      "label": "Settings"
+    },
+    {
+      "separator": true
+    },
+    {
+      "label": "Logout"
+    }
+  ]
+}

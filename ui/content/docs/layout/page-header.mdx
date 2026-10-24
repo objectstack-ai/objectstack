@@ -1,0 +1,319 @@
+---
+title: "Page Header"
+description: "The page:header block: a page's title bar, with a subtitle, the record chip and the record's header actions"
+---
+
+`page:header` is a page's title bar: a heading, an optional subtitle and, on a record page,
+the record chip and the record's header actions. It is rendered by `PageHeaderRenderer` in
+`@object-ui/components`, and its props contract is `PageHeaderProps` from
+`@objectstack/spec/ui`, the row `ComponentPropsMap['page:header']` binds.
+
+## Basic Usage
+
+```json
+{
+  "type": "page:header",
+  "properties": {
+    "title": "Users",
+    "subtitle": "Manage your team members and permissions"
+  }
+}
+```
+
+<SchemaExample id="layout-page-header/basic-page-header" />
+
+The header's props go in `properties`, the page-component spelling of the contract, and that
+is where they are judged. `PageHeaderProps` is a closed shape, so a misspelled or removed key
+there is refused by name: `subTitle` comes back as an unrecognized key with `subtitle`
+suggested, and `icon` as a removed property.
+
+The renderer reads the same keys written directly on the node, beside `type`, but nothing
+judges them there: the spec's page-component shape refuses `title` or `subtitle` in that
+position as unrecognized keys, and objectui's schema mirror (`safeValidateSchema` from
+`@object-ui/types/zod`) passes them through without checking them. `className` is the one
+exception, and it goes the other way: it belongs on the node, beside `type`, and the contract
+refuses it inside `properties`.
+
+## Properties
+
+Every key below sits in `properties`. Defaults marked *spec* are applied by
+`PageHeaderProps`; defaults marked *renderer* are what the renderer uses when the key is
+absent.
+
+| Key | Type | Default | What it does |
+|---|---|---|---|
+| `title` | string, or an inline locale map | derived from the record on a record page | The heading. `{field.path}` tokens are interpolated against the record in scope. |
+| `subtitle` | string, or an inline locale map | — | The secondary line under the title. Same interpolation as `title`. |
+| `actions` | array of action ids | — | Names of actions declared on the object's own metadata, drawn as the header's button row. |
+| `recordChrome` | boolean | `true` (*spec*) | On a record page, renders the title as the record chip. `false` keeps the bare heading. |
+| `showCopyId` | boolean | `true` (*spec*) | The copy-record-id button beside the record title. Part of the record chip. |
+| `maxVisible` | positive integer | `3` (*renderer*) | How many header actions render as inline buttons before the rest fold into the `⋯` menu. |
+| `mobileMaxVisible` | positive integer | `1` (*renderer*) | The same budget on a mobile viewport. |
+| `aria` | `{ ariaLabel?, ariaDescribedBy?, role? }` | — | Accessibility attributes for the `<header>` element (see [Accessibility](#accessibility)). |
+
+**`title` and `subtitle`** take a plain string or an inline locale map such as
+`{ "en": "Orders" }`, resolved for the display locale. A `{field.path}` token that resolves
+to nothing collapses to an empty string rather than leaking the raw template: with no record
+in scope, `"Hello {name}"` renders `Hello`. Without a record, a header with no `title` draws
+no `<h1>` at all. On a record page, omit `title` and the heading is derived from the record.
+
+When the heading is the object's declared `nameField` and that field declares a widget whose
+read face is a component of its own, as `recipient-picker` and `object-ref` are, the heading
+draws the value through that face, the one the field's list column draws. A record share
+(`nameField: 'recipient_id'`, which declares `widget: 'recipient-picker'`) heads its page with
+the recipient's name, not the user id it stores. The face comes from the
+[field registry](/docs/guide/fields#a-widgets-face-on-the-record-heading); where no face is
+registered for the widget, the heading prints the stored value.
+
+There is no `description` key on this node: the contract refuses it and names `subtitle`.
+
+The favorites star beside the record title draws where the host wires a favorites toggle, and metadata does not control it.
+
+**`actions`** holds action ids, not nodes and not inline definitions. Each id is resolved
+against the object bound to the page, the same lookup `record:quick_actions` performs, so the
+definition lives once on the object. A header that is bound to no object resolves no ids: it
+renders none of them and says so once per id in the console. That is why the demo above
+carries no actions. Placement (`locations: ['record_header']` or `record_more`), ordering and
+the overflow menu are covered in [Slotted pages](/docs/guide/slotted-pages).
+
+**`breadcrumb` is not a key of this node.** The contract retired it (objectstack#20758) and
+refuses it by name. It never drew anything: the renderer
+ignores it, so a stored `true` or `false` renders the same header as an absent key.
+
+**`maxVisible` / `mobileMaxVisible`** must be positive integers: the contract rejects `0`
+and fractional values, and the renderer falls back to its default for a value the contract
+rejects.
+
+**`icon` is not a key of this node.** The contract refuses it by name, because no renderer
+ever read it. The header's identity comes from the record chip (`recordChrome`) and each
+action carries its own `icon`.
+
+On the node itself, beside `type`, `className` is merged onto the `<header>` element, so
+`"className": "mb-6"` adds space below the header.
+
+## Children
+
+`page:header` draws no children. Buttons written in `children` do not render, and objectui's
+schema mirror refuses `children` on this node by name. Header buttons are `actions` ids;
+anything else that belongs next to the header goes in a sibling node.
+
+## Gating a header action on a relation field
+
+Each header action's `visible` (and `hidden` / `disabled`) is a CEL predicate evaluated
+against the current record. The most common thing it is asked to express — "only the
+record's manager sees this button" — is written against a `lookup` / `master_detail` /
+`user` / `tree` field, and there is exactly one supported spelling for it:
+
+```yaml
+actions:
+  - name: escalate
+    label: Escalate
+    locations: [record_header]
+    visible: os.user.id == record.manager   # ✅ the relation IS its foreign key
+```
+
+**A relation field binds as the id the server stores, never as the record it points at.**
+That is true here regardless of whether this surface expanded the relation for display —
+the record page expands the relations it renders, and the predicate scope collapses them
+back before evaluating, so one predicate reaches one verdict on every surface and matches
+what the same expression means in a server-side rule.
+
+The consequence is that `record.manager.id` is **not** a second spelling of the same
+thing — it faults, because `record.manager` is a string:
+
+```yaml
+    visible: os.user.id == record.manager.id   # ❌ faults: no such key `id`
+```
+
+A predicate that faults is resolved **fail-closed** — the action is not rendered, because
+a precondition that could not be checked is not a precondition that passed. It is never
+resolved silently: the console carries one warning per broken predicate, naming the action
+and quoting the expression, for example:
+
+```plaintext
+[object-ui] A conditional predicate failed to evaluate (page:header action "escalate"
+visible) and was treated as its safe default: "os.user.id == record.manager.id".
+Reason: [runtime] No such key: id. Check the field names and CEL syntax.
+```
+
+An **empty** relation is not a fault: `record.manager` is `null`, the comparison is a
+clean `false`, and the action is simply hidden with nothing logged.
+
+The identity side of the comparison is `os.user` — the spec's canonical CEL identity
+scope, and the same one the server binds — with `current_user`, `user` and `ctx.user`
+available as aliases of it.
+
+## Gating an action on the caller's object permissions
+
+`current_user.can(object, verb)` answers "may the signed-in user do *verb* on *object*"
+from the caller's effective object permissions — the `/auth/me/permissions` payload the
+console already holds, the one its built-in Edit and Delete buttons are gated by. It is
+the gate to write when a custom action replaces a built-in one, for example a logical
+delete that archives the record instead of removing it:
+
+```yaml
+actions:
+  - name: account_void
+    label: Void
+    locations: [record_header, list_item]
+    visible: current_user.can('account', 'delete')
+```
+
+The row menu (`list_item`) evaluates the same predicate against the same scope, so one
+declaration gates both places.
+
+- `object` is the object's API name. `verb` must come from the closed verb table
+  `OBJECT_PERMISSION_VERBS` in `@objectstack/spec/security`; a verb outside it is a fault,
+  not a `false`.
+- Call it on the signed-in user. `user.can(…)`, `ctx.user.can(…)` and `os.user.can(…)`
+  are the same call wherever an action is drawn; a bare `can(…)`, or `record.can(…)`, is
+  a fault.
+- The action runner evaluates some gates against its own context: `record:quick_actions`
+  filters its `visible` there, and the runner checks `disabled` again when the action is
+  clicked. That context answers `current_user.can(…)`, but `user`, `ctx.user` and
+  `os.user` there are the host's own user object, so `user.can(…)`, `ctx.user.can(…)` and
+  `os.user.can(…)` fault on those gates. Write `current_user.can(…)`.
+- Until the permissions payload has loaded there is no answer: the call faults, and the
+  gate stays closed. A header action whose `visible` faults is not rendered (see above),
+  and one whose `disabled` faults is rendered disabled, so
+  `disabled: "!current_user.can('account', 'delete')"` shows a greyed-out button until the
+  answer arrives. The row menu's items do the same for the same `disabled`, in a grid
+  and in a related list's table. The action renderers that draw actions elsewhere
+  (`action:button`, `action:group`, `action:icon`, a related list's toolbar,
+  `record:quick_actions`) hide a faulting `visible` the same way. The built-in Edit and
+  Delete are different: their `disabledWhen` is left enabled when it faults.
+- `requiredPermissions` is a different gate: it names system capabilities, which the
+  platform action route enforces as well as the UI. `current_user.can` asks about
+  object permissions and does nothing on the server.
+- `current_user.hasCapability('manage_org_users')` asks the capability question itself, from the same payload's `systemPermissions` list (so a page node and an action gated on one name agree); like `can`, it faults until that payload has loaded, and an empty list answers `false`.
+
+**Client-side UI gating only.** This first phase is client-side: `current_user.can` decides
+whether the button is shown, nothing more. It is not an authorization boundary — the
+server still enforces the caller's object permissions on the request the action sends,
+and answers 403 when they are not held. Server-side evaluation of the same call (formula
+fields, validation rules, row-level security) is tracked separately in objectstack#18783;
+until it lands, do not rely on `can` in an expression the server evaluates.
+
+## Layout
+
+The renderer picks one of two layouts when it renders:
+
+- **Bare heading** — no record in scope, or `recordChrome: false`. The title and subtitle
+  stack on the left, the action row sits on the right.
+
+When the header's title is the page's heading, the page's own `description` is drawn as a
+third line, under the title and subtitle.
+- **Record chip** — a record page (a record context with its object schema) with the record
+  chrome on. The title renders as the record chip: the heading, the object's label, the
+  copy-id button and the follow star, with the record's picture beside the heading when the
+  object names an `imageField` and the record's value for that field is not empty.
+
+```plaintext
+┌──────────────────────────────────────────────┐
+│ Title                         [Actions] [⋯]  │
+│ Subtitle                                     │
+└──────────────────────────────────────────────┘
+```
+
+## Styling
+
+### Bare heading
+
+- Root: a `<header>` with `flex flex-col gap-2 pb-4 border-b`, the same at every breakpoint
+- Title row: `flex items-center justify-between gap-4`
+- Title: an `<h1>` with `text-2xl font-semibold tracking-tight`, the same at every breakpoint
+- Subtitle: a `<p>` with `text-sm text-muted-foreground`
+
+The demo's test (`examples/schema-catalog/test/pageheader-with-actions.test.tsx`) renders the
+demo above and re-derives the root and title classes on every run.
+
+### Record chip
+
+- Root: a `<header>` with `flex flex-col sm:flex-row sm:flex-wrap items-start sm:items-center
+  justify-between gap-3 sm:gap-4 pb-4 border-b` — a column below the `sm` breakpoint, a
+  wrapping row from `sm` up
+- Title column: `flex flex-col min-w-0 sm:min-w-48 flex-1`
+- Title: an `<h1>` with `text-xl sm:text-2xl font-bold truncate`
+- Subtitle: a `<p>` with `text-sm text-muted-foreground mt-1`
+
+No docs test re-derives the record-chip classes; they are read from the renderer.
+
+## Usage in a Page
+
+Put the header in the page's `header` region (or first in its `children`):
+
+```json
+{
+  "type": "page",
+  "pageType": "app",
+  "title": "Users",
+  "regions": [
+    {
+      "name": "header",
+      "components": [
+        {
+          "type": "page:header",
+          "properties": {
+            "title": "Users",
+            "subtitle": "Manage your team members and permissions"
+          }
+        }
+      ]
+    },
+    {
+      "name": "main",
+      "components": [
+        { "type": "text", "content": "Page content" }
+      ]
+    }
+  ]
+}
+```
+
+A page has exactly one `<h1>`. On a record page (`pageType` defaults to `record`) the header
+always owns it. On any other page type, a `page:header` with a literal title in the page's
+regions or children makes the `page` renderer drop its own heading, so the header's `<h1>` is
+the page heading; without one, the page draws its `title` itself.
+
+## Accessibility
+
+- The title is the page's `<h1>`: the bare heading's own `<h1>`, or the record chip's.
+- The action row is a `role="toolbar"` labelled "Page header actions", and the overflow
+  trigger is labelled "More actions".
+
+The spec's `aria` bag lands on the `<header>` element in both layouts: `ariaLabel` (a plain
+string, or an inline locale map such as `{ "en": "Orders", "zh-CN": "订单" }`, resolved for
+the display locale) renders `aria-label`, `ariaDescribedBy` renders `aria-describedby`, and
+`role` renders `role`. The header adds no role of its own. `page:tabs`, `page:card` and
+`page:accordion` put the same bag on their root element (objectui#11083).
+
+## Responsive Behavior
+
+- **Bare heading**: no breakpoint variant — the same row, spacing and title size at every
+  width.
+- **Record chip**: a column on narrow screens and a wrapping row from `sm` up; the title
+  steps from `text-xl` to `text-2xl`, and its column keeps a `sm:min-w-48` floor, so a long
+  action row wraps onto its own line instead of squeezing the title.
+- **Actions**: up to `maxVisible` inline buttons on desktop and `mobileMaxVisible` on a
+  mobile viewport; the rest fold into the `⋯` menu.
+
+## The retired `page-header` key
+
+`page-header` (and its namespaced form `layout:page-header`) is no longer registered
+(objectui#10859). A node written that way renders the "Unknown component type" panel, and
+`objectui validate` refuses it at `type`. Write the same header as `page:header`, with its
+secondary line as `subtitle`:
+
+```json
+{ "type": "page:header", "properties": { "title": "Accounts", "subtitle": "All active accounts" } }
+```
+
+The `PageHeader` React component in `@object-ui/layout` is still exported for hosts that
+compose it in JSX.
+
+## Related
+
+- [Slotted pages](/docs/guide/slotted-pages) - Header actions, overflow and the refresh button on record pages
+- [Page](/docs/components/layout/page) - Complete page layout
+- [AppShell](/docs/layout/app-shell) - Application shell
+- [SidebarNav](/docs/layout/sidebar-nav) - Sidebar navigation

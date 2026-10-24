@@ -1,0 +1,60 @@
+{
+  "$schema": "https://unpkg.com/@changesets/config@4.0.0/schema.json",
+  "changelog": "@changesets/cli/changelog",
+  "commit": false,
+  "fixed": [
+    [
+      "@object-ui/types",
+      "@object-ui/core",
+      "@object-ui/i18n",
+      "@object-ui/react",
+      "@object-ui/components", "@object-ui/react-runtime", "@object-ui/sdui-parser",
+      "@object-ui/fields",
+      "@object-ui/layout",
+      "@object-ui/data-objectstack",
+      "@object-ui/cli",
+      "@object-ui/create-plugin",
+      "@object-ui/runner",
+      "@object-ui/auth",
+      "@object-ui/permissions",
+      "@object-ui/mobile",
+      "@object-ui/plugin-ai",
+      "@object-ui/plugin-calendar",
+      "@object-ui/plugin-charts",
+      "@object-ui/plugin-chatbot",
+      "@object-ui/plugin-dashboard",
+      "@object-ui/plugin-designer",
+      "@object-ui/plugin-detail",
+      "@object-ui/plugin-editor",
+      "@object-ui/plugin-form",
+      "@object-ui/plugin-gantt",
+      "@object-ui/plugin-grid",
+      "@object-ui/plugin-kanban",
+      "@object-ui/plugin-list",
+      "@object-ui/plugin-map",
+      "@object-ui/plugin-markdown",
+      "@object-ui/plugin-report",
+      "@object-ui/plugin-timeline",
+      "@object-ui/plugin-tree",
+      "@object-ui/plugin-view",
+      "@object-ui/collaboration",
+      "@object-ui/app-shell",
+      "@object-ui/providers",
+      "@object-ui/console",
+      "object-ui"
+    ]
+  ],
+  "linked": [],
+  "access": "public",
+  "baseBranch": "main",
+  "updateInternalDependencies": "patch",
+  "ignore": [
+    "@object-ui/example-*",
+    "@object-ui/site",
+    "@object-ui/test-support"
+  ],
+  "privatePackages": {
+    "version": true,
+    "tag": false
+  }
+}

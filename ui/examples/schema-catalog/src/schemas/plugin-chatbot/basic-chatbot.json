@@ -1,0 +1,16 @@
+{
+  "type": "chatbot",
+  "messages": [
+    {
+      "id": "1",
+      "role": "assistant",
+      "content": "Hello! How can I help you today?"
+    }
+  ],
+  "placeholder": "Type your message...",
+  "showTimestamp": false,
+  "autoResponse": true,
+  "autoResponseText": "Thank you for your message! This is an automated response.",
+  "autoResponseDelay": 1000,
+  "maxHeight": "400px"
+}

@@ -1,0 +1,41 @@
+{
+  "type": "object-gantt",
+  "properties": {
+    "staticData": [
+      {
+        "id": 1,
+        "taskName": "Design Phase",
+        "startDate": "2024-01-01",
+        "endDate": "2024-01-15",
+        "completion": 100
+      },
+      {
+        "id": 2,
+        "taskName": "Development",
+        "startDate": "2024-01-16",
+        "endDate": "2024-02-28",
+        "completion": 60,
+        "dependencies": [
+          1
+        ]
+      },
+      {
+        "id": 3,
+        "taskName": "Testing",
+        "startDate": "2024-03-01",
+        "endDate": "2024-03-15",
+        "completion": 0,
+        "dependencies": [
+          2
+        ]
+      }
+    ],
+    "gantt": {
+      "startDateField": "startDate",
+      "endDateField": "endDate",
+      "titleField": "taskName",
+      "progressField": "completion",
+      "dependenciesField": "dependencies"
+    }
+  }
+}

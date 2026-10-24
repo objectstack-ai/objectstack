@@ -1,0 +1,12 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "fields": [
+    {
+      "name": "is_active",
+      "label": "Active",
+      "type": "boolean"
+    }
+  ]
+}

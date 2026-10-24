@@ -1,0 +1,10 @@
+{
+  "type": "container",
+  "children": [
+    {
+      "type": "text",
+      "content": "Content inside container",
+      "variant": "h3"
+    }
+  ]
+}

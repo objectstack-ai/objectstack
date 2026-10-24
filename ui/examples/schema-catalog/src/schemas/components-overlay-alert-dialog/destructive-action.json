@@ -1,0 +1,13 @@
+{
+  "type": "alert-dialog",
+  "title": "Confirm Deletion",
+  "description": "This will permanently delete your account and all associated data.",
+  "trigger": {
+    "type": "button",
+    "label": "Delete",
+    "variant": "destructive"
+  },
+  "cancelText": "Cancel",
+  "actionText": "Delete",
+  "actionVariant": "destructive"
+}

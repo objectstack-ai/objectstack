@@ -1,0 +1,85 @@
+{
+  "type": "card",
+  "className": "w-full max-w-md mx-auto",
+  "children": [
+    {
+      "type": "stack",
+      "gap": 4,
+      "children": [
+        {
+          "type": "stack",
+          "gap": 2,
+          "className": "text-center",
+          "children": [
+            {
+              "type": "icon",
+              "icon": "mail",
+              "className": "h-12 w-12 mx-auto text-primary"
+            },
+            {
+              "type": "text",
+              "content": "Subscribe to our Newsletter",
+              "className": "text-xl font-bold"
+            },
+            {
+              "type": "text",
+              "content": "Get the latest updates and exclusive content delivered to your inbox.",
+              "className": "text-sm text-muted-foreground"
+            }
+          ]
+        },
+        {
+          "type": "stack",
+          "gap": 2,
+          "children": [
+            {
+              "type": "label",
+              "htmlFor": "email",
+              "label": "Email Address"
+            },
+            {
+              "type": "input",
+              "id": "email",
+              "name": "email",
+              "inputType": "email",
+              "placeholder": "you@example.com",
+              "required": true
+            }
+          ]
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "start",
+            "gap": 2,
+            "children": [
+              {
+                "type": "checkbox",
+                "id": "terms",
+                "name": "terms",
+                "required": true
+              },
+              {
+                "type": "label",
+                "htmlFor": "terms",
+                "label": "I agree to receive marketing emails and accept the Privacy Policy",
+                "className": "text-sm font-normal leading-none"
+              }
+            ]
+          }
+        },
+        {
+          "type": "button",
+          "label": "Subscribe",
+          "variant": "default",
+          "className": "w-full"
+        },
+        {
+          "type": "text",
+          "content": "We respect your privacy. Unsubscribe at any time.",
+          "className": "text-xs text-center text-muted-foreground"
+        }
+      ]
+    }
+  ]
+}

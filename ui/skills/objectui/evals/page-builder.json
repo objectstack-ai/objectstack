@@ -1,0 +1,56 @@
+{
+  "skill_name": "objectui",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "We have a React + Vite internal app for inventory. Please create a schema-driven list page for products with search, status filter, row actions, and a create-product action. Use ObjectUI patterns and include integration snippets.",
+      "expected_output": "Produces a complete page schema JSON for list/grid behavior, includes integration wiring steps for SchemaRenderer and component registration, and provides a validation checklist.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "type",
+          "schema",
+          "SchemaRenderer",
+          "registerComponent",
+          "action"
+        ],
+        "must_not_contain": [
+          "function ProductListPage()",
+          "return <div"
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "prompt": "Please convert our existing customer detail page to Schema-Driven UI. It needs three sections — Basic Info, Contacts, and Recent Orders — and the 'Edit Customer' button must be visible only to admins. Stack: React + TypeScript.",
+      "expected_output": "Provides a structured detail-page schema with expression-based visibility for admin-only actions, keeps sections modular, and explains how to integrate into an app project.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "hidden",
+          "admin",
+          "card"
+        ],
+        "must_not_contain": [
+          "role === 'admin' ? <Button",
+          "\"props\": {"
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "prompt": "Build a console-like analytics dashboard page in an existing ObjectUI project: KPI cards on top, trend chart in the middle, and recent activity list at the bottom. Also include action definitions for refresh and navigate-to-report.",
+      "expected_output": "Generates dashboard schema with layout composition, plugin-oriented chart usage, action definitions as data, and testing guidance for responsiveness and interaction.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "dashboard",
+          "chart",
+          "action",
+          "navigate"
+        ],
+        "must_not_contain": []
+      }
+    }
+  ]
+}

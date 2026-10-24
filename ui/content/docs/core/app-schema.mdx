@@ -1,0 +1,317 @@
+---
+title: "Application Schema (AppComponentSchema)"
+description: "Configure your entire application with navigation, branding, and global settings"
+---
+
+import { SchemaExample } from '@/app/components/ComponentDemo';
+
+# Application Schema
+
+The `AppComponentSchema` defines the top-level configuration for your entire ObjectUI application, including navigation menus, branding, layout strategies, and app-level actions.
+
+## Overview
+
+AppComponentSchema provides a declarative way to configure:
+- **Navigation menus** - Hierarchical menu structures with icons and badges
+- **Branding** - Logo, title, favicon
+- **Layout strategies** - Sidebar, header, or empty layout
+- **App-level actions** - `navigation` items of type `action` that run a declared action
+
+## Interactive Examples
+
+### Navigation Menu Preview
+
+<SchemaExample id="app/sidebar-navigation" />
+
+### Application Header Bar
+
+<SchemaExample id="app/application-header" />
+
+## Basic Usage
+
+```ts
+import type { AppComponentSchema } from '@object-ui/types';
+
+const app: AppComponentSchema = {
+  type: 'app',
+  name: 'my-crm',
+  title: 'My CRM Application',
+  branding: { logo: '/logo.svg', favicon: '/favicon.ico' },
+  layout: 'sidebar',
+  
+  menu: [
+    {
+      type: 'item',
+      label: 'Dashboard',
+      icon: 'layout-dashboard',
+      path: '/dashboard'
+    }
+  ]
+};
+```
+
+## Properties
+
+The tables in this section describe `AppComponentSchema`, declared by
+`@object-ui/types` (`packages/types/src/app.ts`). They group its properties by
+topic; the declaration remains the complete list.
+
+### Basic Configuration
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `type` | `'app'` | Component type identifier (required) |
+| `name` | `string` | Application system identifier |
+| `title` | `string` | Display title shown in browser |
+| `description` | `string` | Application description |
+| `icon` | `string` | Lucide icon name |
+| `branding.logo` | `string` | Logo image URL (or a `data:` URI) |
+| `branding.favicon` | `string` | Favicon URL |
+
+The logo has one spelling, `branding.logo`. A top-level `logo` is refused by the validator and
+names `branding` as the fix (objectui#10827): it was a second spelling that `@objectstack/spec`
+never declared. For an icon name, use `icon`. The favicon follows the same rule: it is
+`branding.favicon`, and a top-level `favicon` is refused the same way (objectui#10842).
+
+### Layout Configuration
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `layout` | `'sidebar' \| 'header' \| 'empty'` | `'sidebar'` | Global layout strategy |
+
+**Layout Options:**
+- **`sidebar`** - Standard admin layout with left sidebar navigation
+- **`header`** - Top navigation bar only
+- **`empty`** - No layout, pages handle their own structure
+
+### Navigation Menu
+
+The `menu` property accepts an array of `AppMenuItem` objects:
+
+```ts
+interface AppMenuItem {
+  type?: 'item' | 'group' | 'separator';
+  label?: string;
+  icon?: string;          // Lucide icon name
+  path?: string;          // Route path
+  href?: string;          // External link
+  children?: AppMenuItem[];  // Submenu items
+  badge?: string | number;
+  hidden?: boolean | string; // Visibility condition
+}
+```
+
+#### Menu Types
+
+**Item** - Single navigation link
+```json
+{
+  "type": "item",
+  "label": "Dashboard",
+  "icon": "layout-dashboard",
+  "path": "/dashboard",
+  "badge": "New"
+}
+```
+
+**Group** - Collapsible menu group
+```json
+{
+  "type": "group",
+  "label": "Sales",
+  "icon": "dollar-sign",
+  "children": [
+    { "type": "item", "label": "Leads", "path": "/leads" },
+    { "type": "item", "label": "Deals", "path": "/deals" }
+  ]
+}
+```
+
+**Separator** - Visual separator
+```json
+{
+  "type": "separator"
+}
+```
+
+### Global Actions
+
+App-level actions — a "Quick Create" or "Log a Call" entry that is not tied to
+one record — are `navigation` items of type `action`. The item names an action
+declared in your metadata by `actionDef.actionName`; it does not carry the
+action's definition. This is the same item shape `@objectstack/spec` accepts in
+an app's `navigation`, so the document validates on both sides:
+
+```ts
+import type { AppComponentSchema } from '@object-ui/types';
+
+const app: AppComponentSchema = {
+  type: 'app',
+  name: 'acme_crm',
+  title: 'Acme CRM',
+  navigation: [
+    {
+      id: 'quick_create',
+      type: 'action',
+      label: 'Quick Create',
+      icon: 'zap',
+      actionDef: { actionName: 'quick_create' }
+    }
+  ]
+};
+```
+
+The console renders the item in the app's sidebar. On click it looks up the
+action named in `actionDef.actionName` among the declared `action` metadata and
+runs it through the same action runner as a toolbar button, so confirmations,
+parameter dialogs and permission checks apply. `actionDef.params` passes
+arguments to that action. An item that names no declared action shows an error
+when clicked instead of doing nothing. The standalone runner renders only the
+legacy `menu` and does not render `navigation` items.
+
+<Callout type="warn">
+The free-form `actions` array (`AppAction`: header buttons and a user avatar
+menu) is retired, and an app that authors `actions` fails validation with a
+message pointing here (objectui#7469). `@objectstack/spec`'s `AppSchema` never
+declared the key, so the platform rejected those apps too. The signed-in user's
+menu belongs to the host shell, not to app metadata.
+</Callout>
+
+## Complete Example
+
+```ts
+import type { AppComponentSchema } from '@object-ui/types';
+
+const crm: AppComponentSchema = {
+  type: 'app',
+  name: 'acme-crm',
+  title: 'Acme CRM',
+  description: 'Customer Relationship Management System',
+  branding: { logo: '/acme-logo.svg', favicon: '/favicon.ico' },
+  layout: 'sidebar',
+  
+  menu: [
+    {
+      type: 'item',
+      label: 'Dashboard',
+      icon: 'layout-dashboard',
+      path: '/dashboard'
+    },
+    {
+      type: 'separator'
+    },
+    {
+      type: 'group',
+      label: 'Sales',
+      icon: 'dollar-sign',
+      children: [
+        {
+          type: 'item',
+          label: 'Leads',
+          icon: 'users',
+          path: '/leads',
+          badge: 12
+        },
+        {
+          type: 'item',
+          label: 'Opportunities',
+          icon: 'target',
+          path: '/opportunities'
+        },
+        {
+          type: 'item',
+          label: 'Quotes',
+          icon: 'file-text',
+          path: '/quotes'
+        }
+      ]
+    },
+    {
+      type: 'group',
+      label: 'Marketing',
+      icon: 'megaphone',
+      children: [
+        {
+          type: 'item',
+          label: 'Campaigns',
+          path: '/campaigns'
+        },
+        {
+          type: 'item',
+          label: 'Email Templates',
+          path: '/templates'
+        }
+      ]
+    },
+    {
+      type: 'separator'
+    },
+    {
+      type: 'item',
+      label: 'Settings',
+      icon: 'settings',
+      path: '/settings',
+      hidden: '${user.role !== "admin"}'
+    }
+  ]
+};
+```
+
+## Runtime Validation
+
+Use Zod validation to ensure your app configuration is correct:
+
+```ts
+import { AppComponentSchema } from '@object-ui/types/zod';
+
+const myAppConfig = {
+  type: 'app',
+  name: 'my-crm',
+  title: 'My CRM Application',
+};
+
+const result = AppComponentSchema.safeParse(myAppConfig);
+
+if (result.success) {
+  console.log('Valid app configuration');
+} else {
+  console.error('Validation errors:', result.error);
+}
+```
+
+## Conditional Navigation
+
+Use expression syntax to show/hide menu items based on user permissions:
+
+```json
+{
+  "type": "item",
+  "label": "Admin Panel",
+  "path": "/admin",
+  "hidden": "${user.role !== 'admin'}"
+}
+```
+
+## Use Cases
+
+AppComponentSchema is ideal for:
+
+- **Multi-page applications** - Configure complex application structures with multiple routes
+- **Admin dashboards** - Create comprehensive admin panels with role-based navigation
+- **CRM systems** - Build customer relationship management interfaces
+- **Internal tools** - Develop enterprise internal tools with centralized navigation
+- **SaaS products** - Configure multi-tenant applications with customizable layouts
+
+## Best Practices
+
+1. **Use semantic icons** - Choose Lucide icons that clearly represent the section
+2. **Group related items** - Use menu groups to organize navigation
+3. **Limit top-level items** - Keep the main menu concise (5-7 items)
+4. **Add badges for notifications** - Show counts or status indicators
+5. **Hide admin features** - Use conditional visibility for role-based access
+
+## Related
+
+- [Layout Schema](/docs/guide/layout) - Page layout configuration
+- [Navigation Components](/docs/components/basic/navigation-menu) - Navigation UI components
+- [Theme Schema](/docs/core/theme-schema) - Application theming

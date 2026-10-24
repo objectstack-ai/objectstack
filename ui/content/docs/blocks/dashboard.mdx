@@ -1,0 +1,79 @@
+---
+title: "Dashboard Blocks"
+description: "Stats cards, metrics, and dashboard layouts"
+---
+
+import { SchemaExample } from '@/app/components/ComponentDemo';
+
+# Dashboard Blocks
+
+Professional dashboard components for displaying metrics, statistics, and data visualizations.
+
+## Stats Card
+
+Display key metrics with trend indicators.
+
+<SchemaExample id="dashboard/stats-cards-grid" />
+
+## Recent Activity
+
+Display recent user activities or transactions.
+
+<SchemaExample id="dashboard/recent-activity-card" />
+
+## Overview Dashboard
+
+Complete dashboard layout with multiple sections.
+
+<SchemaExample id="dashboard/dashboard-overview" />
+
+## Usage
+
+Customize dashboard blocks for your needs:
+
+### Add Real Data
+
+A `card` fetches nothing. A live figure comes from a data-bound block: an
+`element:number` takes its object from the per-element `dataSource` binding and
+its aggregate from its `properties` bag (see the
+[Data Source guide](/docs/guide/data-source)):
+
+```json
+{
+  "type": "element:number",
+  "dataSource": { "object": "order" },
+  "properties": { "aggregate": "count" }
+}
+```
+
+### Customize Colors
+
+```json
+{
+  "type": "text",
+  "content": "+20.1%",
+  "className": "text-emerald-500"
+}
+```
+
+### Add Actions
+
+A control that runs something is its own node type, `action:button`, and its
+props go in the `properties` bag; `actionType: "url"` navigates to `target`:
+
+```json
+{
+  "type": "action:button",
+  "properties": {
+    "label": "View Details",
+    "actionType": "url",
+    "target": "/dashboard/details"
+  }
+}
+```
+
+## Next Steps
+
+- Explore [Form Blocks](/docs/blocks/forms)
+- View [Marketing Blocks](/docs/blocks/marketing)
+- Learn about [Data Sources](/docs/guide/data-source)

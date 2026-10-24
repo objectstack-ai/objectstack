@@ -1,0 +1,22 @@
+{
+  "type": "form",
+  "fields": [
+    {
+      "name": "email",
+      "label": "Email",
+      "type": "input",
+      "inputType": "email",
+      "placeholder": "Enter your email",
+      "required": true
+    },
+    {
+      "name": "password",
+      "label": "Password",
+      "type": "input",
+      "inputType": "password",
+      "placeholder": "Enter your password",
+      "required": true
+    }
+  ],
+  "submitLabel": "Sign In"
+}

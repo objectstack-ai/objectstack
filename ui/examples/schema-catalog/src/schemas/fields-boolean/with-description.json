@@ -1,0 +1,13 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "fields": [
+    {
+      "name": "notifications",
+      "label": "Email Notifications",
+      "type": "boolean",
+      "description": "Receive email updates about your account"
+    }
+  ]
+}

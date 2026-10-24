@@ -1,0 +1,370 @@
+---
+title: "Grid Field"
+description: "Sub-table field for inline tabular data"
+---
+
+The Grid Field component provides an inline table for managing related records or tabular data within a parent record. It displays data in rows and columns with optional editing capabilities.
+
+## Basic Usage
+
+<SchemaExample id="fields-grid/basic-grid" />
+
+## With Data
+
+<SchemaExample id="fields-grid/grid-with-data" />
+
+## Read-Only
+
+<SchemaExample id="fields-grid/read-only-grid" />
+
+## Field-Level Keys
+
+<SchemaExample id="fields-grid/line-items-grid" />
+
+## Field Schema
+
+A grid field is authored as `GridFieldMetadata` (`@object-ui/types`), which is the
+source of truth for the key set: it extends `BaseFieldMetadata` with the column list,
+the row-count and row-action limits, the footer total, the Add button's label and the
+row field that keeps the rows' order.
+Each column is `@objectstack/spec`'s inline grid column (`InlineGridColumn`, the
+element of the spec's `inlineColumns` list on a `master_detail` field), typed by
+reference, so the columns are checked by the same compiler that checks the field,
+and `objectui validate` refuses a column key the spec does not declare.
+
+```ts
+import type { GridFieldMetadata } from '@object-ui/types';
+
+const lineItems: GridFieldMetadata = {
+  type: 'grid',
+  name: 'line_items',
+  label: 'Line Items',
+  columns: [
+    { name: 'product', label: 'Product', type: 'lookup', required: true, width: 240 },
+    { name: 'quantity', label: 'Qty', type: 'number', width: 80 },
+    { name: 'unit_price', label: 'Unit Price', type: 'currency', width: 120 },
+    { name: 'amount', label: 'Amount', type: 'currency', computed: true, expr: 'quantity * unit_price' },
+  ],
+  minRows: 1,
+  maxRows: 50,
+  allowAdd: true,
+  allowDelete: true,
+  allowReorder: false,
+  totalField: 'amount',
+  addLabel: 'Add line',
+  sortField: 'position',
+};
+```
+
+The field-level keys, each read under exactly this one spelling:
+
+- `minRows` / `maxRows` — the row-count limits.
+- `allowAdd` / `allowDelete` — whether rows can be added or removed. Each row's
+  duplicate action follows `allowAdd`, since a duplicate is an add.
+- `allowReorder` — set `false` to remove the drag handles; rows can be reordered
+  by dragging otherwise.
+- `totalField` — the `name` of the **child** column summed into the footer total.
+  It carries the spec's `amountField`. The spec's own `totalField` on a
+  master-detail subform is a different thing with the same name: the parent field
+  the save writes the sum to. No total shows when it is unset.
+- `addLabel` — the Add button's label.
+- `sortField` — the name of a field on each **row** that the grid stamps with the
+  row's index (0, 1, 2, …) whenever a row is added, removed, duplicated or moved,
+  so the order a drag-reorder leaves is saved with the rows. Editing a cell moves
+  no row and leaves every row's position as it was. It is not one of the columns:
+  a column of that name would have its typed value overwritten. Rows carry no
+  position when it is unset. When
+  a master-detail form derives a detail's grid from the child object (it does
+  unless the detail names its relationship field and types every column), it sets
+  this to the child's first field named `position`, `sort_order`, `sequence`,
+  `line_no`, `line_number` or `sort`; there is no master-detail key to override
+  that pick.
+
+The same keys are accepted on a `form` field entry of `type: 'grid'`, as the
+Field-Level Keys example above writes them. `FormField` declares each one by
+reference to `GridFieldMetadata`, and its zod mirror judges each one by that type,
+so the strict authoring face accepts them there and refuses a value of the wrong
+type. Only the `grid` widget reads them.
+
+A read-only or disabled grid offers no add, delete, duplicate or reorder, whatever
+these keys say. The line-number column always shows. There is no `reorderable`,
+`amount_field`, `amountField`, `allow_duplicate` or `show_line_numbers` key: none
+is read, and `GridFieldMetadata` refuses each.
+
+A column's `width` is a **number** of pixels. There is no per-column `editable`
+key (whether cells can be edited follows the field's own read-only state) and no
+per-column `defaultValue`: a new row starts with every cell empty.
+
+The value being edited, and the `className` / `disabled` a host supplies, are **not**
+metadata keys — they are runtime widget props. See [Field Widget Props](/docs/fields/widget-props).
+
+### Retired snake_case keys
+
+Until objectui#11610 these eight keys were spelled in snake_case: `min_rows`,
+`max_rows`, `allow_add`, `allow_delete`, `allow_reorder`, `total_field`,
+`add_label` and `sort_field`. Each is now refused by name, with the camelCase key
+to write instead, and its value carries over unchanged:
+
+- `GridFieldMetadata` and `FormField` declare each as a `never` member, so
+  TypeScript refuses it at the authoring site.
+- `objectui validate` refuses it on a `form` field entry with
+  ``Did you mean `min_rows` → `minRows`?`` (and so on for each key).
+- The `grid` widget draws an alert naming the retired keys and their replacements
+  instead of the grid, and logs the same text with `console.error`. It does not
+  quietly draw a grid that ignores them.
+
+## Column Types
+
+A column's `type` is one of the spec's nine cell controls: `text`, `number`,
+`currency`, `date`, `datetime`, `time`, `select`, `lookup` and `file`. Any other
+value is refused.
+
+```plaintext
+columns: [
+  { name: 'name', label: 'Name', type: 'text', required: true },
+  { name: 'quantity', label: 'Qty', type: 'number' },
+  { name: 'price', label: 'Price', type: 'currency' },
+  { name: 'date', label: 'Date', type: 'date' },
+  { name: 'status', label: 'Status', type: 'select', options: [...] },
+  { name: 'receipt', label: 'Receipt', type: 'file', accept: ['image/*', '.pdf'] }
+]
+```
+
+A `currency` column has no currency key of its own: its cells are shown in the
+tenant's default currency.
+
+### File / image columns
+
+A `file` column renders a real upload control inside the cell — a compact
+"Upload" button that opens the native file picker, with uploaded files shown
+as removable chips (image files show a thumbnail). This covers the common
+"attach a receipt per expense line" pattern without opening the per-row form.
+
+- `accept?: string[]` — restrict the picker (e.g. `['image/*', '.pdf']`).
+- `multiple?: boolean` — allow several files per cell.
+- Uploads go through the configured `UploadProvider` adapter, exactly like the
+  full-size file field.
+
+When grid columns are auto-derived from a child object's schema (master-detail
+subforms), `file` / `image` / `avatar` fields map to `file` columns
+automatically — image-flavoured fields default to `accept: ['image/*']`.
+
+Shown as text (read-only, or in the per-row form's list), a file cell reads the
+file's name, or a count of its files when it holds several. The count and the
+word used for a file with no name come from the session language's pack
+(`detail.fileCount`, `fields.file.fileFallback`): an English session reads
+`2 files` and `File`, and every other language reads its own pack's words, in
+the plural form that language takes for the count.
+
+### Boolean columns from a child object
+
+When columns are auto-derived, a `boolean` or `toggle` child field becomes a
+`select` column whose options store `'true'` and `'false'`. Their labels are the
+session language's words for yes and no (`common.yes` / `common.no`), `Yes` /
+`No` in an English session. Only the label is translated; the stored value is
+the same in every language.
+
+Because file/image/avatar now render in-grid, a child object with a *single*
+such field keeps the inline **grid** form factor by default (the smart
+`inlineEdit` heuristic no longer forces a per-row form for one attachment
+column). Only a truly form-only field (textarea / rich text / JSON / location)
+or **several** rich fields tips the default to the per-row form; an explicit
+`inlineEdit: 'grid' | 'form'` always wins.
+
+## Data Format
+
+Grid data is stored as an array of objects:
+
+```plaintext
+const gridValue = [
+  { product: 'Item 1', quantity: 2, price: 29.99 },
+  { product: 'Item 2', quantity: 1, price: 49.99 },
+  { product: 'Item 3', quantity: 5, price: 9.99 }
+];
+```
+
+## Common Patterns
+
+### Invoice Line Items
+
+```plaintext
+{
+  type: 'grid',
+  name: 'line_items',
+  label: 'Line Items',
+  columns: [
+    { name: 'description', label: 'Description', type: 'text', required: true },
+    { name: 'quantity', label: 'Quantity', type: 'number', required: true },
+    { name: 'unit_price', label: 'Unit Price', type: 'currency', required: true },
+    { name: 'amount', label: 'Amount', type: 'currency', computed: true, expr: 'quantity * unit_price' }
+  ]
+}
+```
+
+### Order Details
+
+```plaintext
+{
+  type: 'grid',
+  name: 'order_details',
+  label: 'Order Details',
+  columns: [
+    { name: 'sku', label: 'SKU', type: 'text' },
+    { name: 'product', label: 'Product', type: 'lookup', reference: 'products' },
+    { name: 'quantity', label: 'Qty', type: 'number' },
+    { name: 'price', label: 'Price', type: 'currency' },
+    { name: 'discount', label: 'Discount', type: 'number' },
+    { name: 'total', label: 'Total', type: 'currency' }
+  ]
+}
+```
+
+### Task Checklist
+
+```plaintext
+{
+  type: 'grid',
+  name: 'tasks',
+  label: 'Tasks',
+  columns: [
+    { name: 'task', label: 'Task', type: 'text', required: true },
+    { name: 'assigned_to', label: 'Assigned To', type: 'lookup', reference: 'sys_user' },
+    { name: 'due_date', label: 'Due Date', type: 'date' },
+    { name: 'completed', label: 'Done', type: 'select', options: [{ label: 'Yes', value: 'true' }, { label: 'No', value: 'false' }] }
+  ]
+}
+```
+
+## Features
+
+- **Table Display**: Clean tabular layout, every row shown
+- **Type-Specific Cells**: Each editable cell is the control its column's `type` names;
+  read-only mode formats `date`, `datetime`, `time`, `file` and `lookup` cells for display
+- **Read-Only Mode**: Full table view without editing
+- **Responsive**: Scrollable for many columns
+
+## Cell Renderer
+
+In tables/grids, a `grid` value is shown as a compact placeholder, not as a
+nested table. It has no named renderer export of its own — the component is
+resolved by field type, which is the supported path for every type:
+
+```ts
+import { getCellRenderer } from '@object-ui/fields';
+
+const GridCell = getCellRenderer('grid');
+
+// <GridCell value={rows} field={field} /> renders: [Grid]
+```
+
+An empty value (`null`, `undefined`, `''` or `[]`) renders the shared "No value"
+affordance instead, so an empty cell is distinguishable from a populated one.
+
+## Full Grid Functionality
+
+For advanced grid features, use the grid plugin (`@object-ui/plugin-grid`):
+
+```plaintext
+// Basic inline grid (simple display)
+{ type: 'grid', name: 'items', columns: [...] }
+
+// Advanced grid with full features (requires plugin)
+// The block's props go in its `properties` bag (the spec's
+// `ComponentPropsMap['object-grid']` row) — a `props` envelope is never read
+{
+  type: 'object-grid',   // the registered type name — there is no `plugin:grid`
+  bind: 'items',         // node-level: resolves the array from the surrounding data scope
+  properties: {
+    columns: [           // spec `ListColumn[]` — each entry is keyed by `field`
+      { field: 'product', label: 'Product' },
+      { field: 'quantity', label: 'Quantity', sortable: false }
+    ],
+    editable: true,               // Plugin feature: inline cell editing
+    pagination: { pageSize: 20 }  // Plugin feature: pagination
+  }
+}
+```
+
+**Note**: `editable` and `pagination` are read by `@object-ui/plugin-grid` (after `SchemaRenderer` hoists the bag onto the node), not by the basic grid field. Sorting and search are **not** node keys: column sorting is on by default and is turned off per column (`{ field, sortable: false }`), and there is no node-level `filterable` — a grid that fetches its own rows declares its query with `objectName` plus `filter` / `sort`.
+
+## Use Cases
+
+- **Invoice/Order Line Items**: Product lines, services
+- **Expense Reports**: Expense entries, receipts
+- **Time Tracking**: Time entries, work logs
+- **Inventory**: Stock items, materials
+- **Checklists**: Task lists, requirements
+- **Schedules**: Appointments, bookings
+- **Configurations**: Settings lists, parameters
+
+## Backend Storage
+
+Grid data is typically stored as JSON:
+
+```plaintext
+// Database column type: JSONB (PostgreSQL)
+interface OrderRecord {
+  id: string;
+  customer_id: string;
+  line_items: Array<{
+    product: string;
+    quantity: number;
+    price: number;
+  }>;
+}
+
+// Store in database
+const order = {
+  customer_id: 'CUST-123',
+  line_items: [
+    { product: 'Widget A', quantity: 2, price: 29.99 },
+    { product: 'Widget B', quantity: 1, price: 49.99 }
+  ]
+};
+
+await db.insert('orders', order);
+```
+
+## Validation
+
+Example validation for grid data:
+
+```plaintext
+// InlineGridColumn: the spec's grid column type (@objectstack/spec/data)
+const validateGridData = (data: any[], columns: InlineGridColumn[]) => {
+  const errors: string[] = [];
+  
+  data.forEach((row, index) => {
+    columns.forEach(col => {
+      // Check required columns
+      if (col.required && !row[col.name]) {
+        errors.push(`Row ${index + 1}: ${col.label} is required`);
+      }
+      
+      // Validate by type
+      if (col.type === 'number' && isNaN(row[col.name])) {
+        errors.push(`Row ${index + 1}: ${col.label} must be a number`);
+      }
+    });
+  });
+  
+  return errors;
+};
+```
+
+## Integration with Advanced Grid
+
+The `grid` field and `@object-ui/plugin-grid`'s `object-grid` node do different jobs.
+The `grid` field edits an array stored on the parent record, through the field-level
+keys above. `object-grid` lists records (fetched for its `objectName`, or handed to
+it) and acts on them as records. What each one reads:
+
+| Feature | `grid` field (`@object-ui/fields`) | `object-grid` (`@object-ui/plugin-grid`) |
+| --- | --- | --- |
+| Inline editing | Every cell but a computed one is its column's control, unless the field is read-only or disabled | `editable: true` (off by default), only where the current user may edit the object |
+| Add and remove rows | `allowAdd` and `allowDelete`, each on unless `false` | An add-record row with `operations.create`, and a row's Delete with `operations.delete` and the host's `onDelete`, each only where the current user may create or delete the object's records |
+| Sorting and filtering | None | Column-header sorting (a column opts out with `sortable: false`), the query's `filter` and `sort`, and search over `searchableFields` |
+| Drag-and-drop reordering | Rows, with `allowReorder` (on unless `false`); `sortField` keeps the order on save | Columns only, with `reorderableColumns: true`; rows are not reordered |
+| Export | None | `exportOptions` |
+| Computed columns | A column with `computed: true` and an arithmetic `expr` over the row's other cells | None: a formula field's value is shown as the server computed it |
+| Totals | One footer total, the sum of the `totalField` column | A footer summary per column (`columns[].summary`), and aggregates on group headers (`aggregations`) |

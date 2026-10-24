@@ -1,0 +1,37 @@
+{
+  "name": "@object-ui/example-byo-backend-console",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Minimal console example demonstrating third-party ObjectUI integration",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "lint": "eslint .",
+    "type-check": "tsc --noEmit",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@object-ui/app-shell": "workspace:*",
+    "@object-ui/components": "workspace:*",
+    "@object-ui/plugin-form": "workspace:*",
+    "@object-ui/plugin-view": "workspace:*",
+    "@object-ui/providers": "workspace:*",
+    "@object-ui/react": "workspace:*",
+    "@object-ui/types": "workspace:*",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-router-dom": "^7.18.2"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "^6.0.5",
+    "autoprefixer": "^10.5.4",
+    "postcss": "^8.5.26",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^6.0.3",
+    "vite": "^8.2.1"
+  }
+}

@@ -1,0 +1,88 @@
+{
+  "name": "@object-ui/plugin-detail",
+  "version": "18.1.0",
+  "type": "module",
+  "license": "MIT",
+  "description": "DetailView plugin for Object UI - comprehensive detail page with sections, tabs, and related lists",
+  "homepage": "https://www.objectui.org/docs/plugins/plugin-detail",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/objectstack-ai/objectui.git",
+    "directory": "packages/plugin-detail"
+  },
+  "bugs": {
+    "url": "https://github.com/objectstack-ai/objectui/issues"
+  },
+  "main": "dist/index.umd.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.umd.cjs"
+    }
+  },
+  "scripts": {
+    "build": "vite build",
+    "test": "vitest run --root ../.. packages/plugin-detail/",
+    "test:watch": "vitest --root ../.. packages/plugin-detail/",
+    "type-check": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@object-ui/i18n": "workspace:*",
+    "@objectstack/spec": "^18.0.0-next.5",
+    "lucide-react": "^1.43.0"
+  },
+  "peerDependencies": {
+    "@object-ui/components": "workspace:^",
+    "@object-ui/core": "workspace:^",
+    "@object-ui/fields": "workspace:^",
+    "@object-ui/permissions": "workspace:^",
+    "@object-ui/react": "workspace:^",
+    "@object-ui/types": "workspace:^",
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0",
+    "react-router-dom": "^6.0.0 || ^7.0.0"
+  },
+  "devDependencies": {
+    "@object-ui/components": "workspace:*",
+    "@object-ui/core": "workspace:*",
+    "@object-ui/fields": "workspace:*",
+    "@object-ui/permissions": "workspace:*",
+    "@object-ui/test-support": "workspace:*",
+    "@object-ui/react": "workspace:*",
+    "@object-ui/sdui-parser": "workspace:*",
+    "@object-ui/types": "workspace:*",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "^6.0.5",
+    "typescript": "^6.0.3",
+    "vite": "^8.2.1",
+    "vite-plugin-dts": "^5.0.3",
+    "vitest": "^4.1.10"
+  },
+  "keywords": [
+    "objectui",
+    "sdui",
+    "schema-driven-ui",
+    "react",
+    "tailwind",
+    "shadcn",
+    "objectstack",
+    "plugin",
+    "detail-view",
+    "record-view"
+  ],
+  "author": "ObjectStack Team <team@objectstack.ai>",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ]
+}

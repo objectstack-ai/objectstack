@@ -1,0 +1,21 @@
+{
+  "type": "object-view",
+  "objectName": "users",
+  "title": "User Directory",
+  "description": "Create and edit open on the record surface",
+  "layout": "drawer",
+  "navigation": { "mode": "drawer" },
+  "showSearch": false,
+  "showFilters": false,
+  "showCreate": true,
+  "operations": { "create": true, "read": true, "update": true, "delete": true },
+  "table": {
+    "columns": ["name", "email", "role", "status"]
+  },
+  "form": {
+    "fields": ["name", "email", "role", "department", "status"],
+    "showSubmit": true,
+    "submitText": "Save user",
+    "showCancel": true
+  }
+}

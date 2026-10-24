@@ -1,0 +1,250 @@
+name: Dependabot Auto-merge
+
+on:
+  pull_request:
+    branches: [main, develop]
+
+# ── Why this workflow no longer enables auto-merge unconditionally (#4973) ────
+#
+# It used to run, for every semver-patch/minor bump and with nothing else asked:
+#
+#     gh pr merge --auto --squash "$PR_URL"
+#
+# `--auto` lands the merge as soon as GitHub thinks the pull request is
+# mergeable, i.e. as soon as the BRANCH-PROTECTION required set is satisfied —
+# not when the checks this repository runs are green. Those are different sets,
+# and on 2026-08-17 the difference put a red commit on `main`:
+#
+#   08:13:07Z  #4959's four `Test (shard N/4)` jobs start
+#   08:13:36Z  github-actions[bot] merges #4959 into `main`
+#   08:21:01Z  shard 3/4 -> failure   (5m25s AFTER the merge)
+#   08:21:56Z  shard 1/4 -> failure   (8m20s AFTER the merge)
+#   08:22:33Z  Type Check reports     (8m57s AFTER the merge)
+#
+# Nine of the nineteen check runs on that head SHA were still in flight at the
+# moment of the merge. The shard matrix is the slowest job in the repo by
+# construction (it exists to cut a ~9 minute wall clock — see `ci.yml`), so it
+# is the check `--auto` systematically outruns; #4968 then had to repair `main`
+# for every parallel agent. The failure mode is not specific to lockfile ranges:
+# any red on a slow job could ride the same channel. Same family as #3523 (an
+# empty merge-queue required set let #3503/#3510/#3516 land with `Type Check` at
+# conclusion=failure) and #3243.
+#
+# So the wait is now EXPLICIT and this workflow owns it: `scripts/dependabot-
+# merge-gate.mjs` polls the Checks API for this exact head SHA until every
+# context it declares has reported `success`, and only then are the two
+# mutations — approve, enqueue — allowed to run. A context that is missing,
+# still running at the deadline, or non-`success` is not green; nothing merges,
+# the job goes red and a comment says which context refused. The declared set,
+# the reasons behind each bucket and the partition test that keeps it honest all
+# live in that script and in `scripts/__tests__/dependabot-merge-gate.test.ts`,
+# which replays the real #4959 timeline and asserts this gate would have stopped
+# it.
+#
+# Two things this deliberately does NOT do:
+#
+#   * It does not ask GitHub which checks are required. That set is a
+#     repository-SETTINGS surface nothing here can CHANGE
+#     (`content/docs/guide/ci-cd-pipeline.md`, "Merge Queue", step 3) — the
+#     protection endpoint answers 403 to this job's token and only a maintainer
+#     edits the ruleset. Its membership can be READ, and the repository reads it
+#     elsewhere on a schedule: `scripts/check-required-check-set.mjs`, wired as
+#     `pnpm check:required-check-set` and run by
+#     `.github/workflows/required-check-set-patrol.yml`. This gate still must not
+#     delegate to that set — it is narrower than the wait below and a maintainer
+#     can shrink it without any diff — so the wait is declared in the script and
+#     tested there. ⛔ Do not restate the membership in this comment: the
+#     sentence replaced here did, and went stale when the ruleset changed under
+#     it (objectui#9502).
+#   * It does not replace `--auto` with a direct merge. `main` is behind an
+#     enforced merge queue: a direct merge is rejected with 405 `Changes must be
+#     made through the merge queue` (measured in #3243, recorded in AGENTS.md
+#     §9). Enabling auto-merge IS the enqueue action here. What changes is that
+#     it happens only after the full check set is green on this SHA, instead of
+#     29 seconds after the shards started.
+permissions:
+  contents: write
+  pull-requests: write
+  # The gate reads check runs for the pull request's head SHA. With an explicit
+  # `permissions:` block every scope not named is `none`, so without this the
+  # gate would 403 — and it fails closed: a throw exits non-zero, the job is red
+  # and nothing is merged.
+  checks: read
+
+# A second push to a Dependabot branch supersedes the first gate run. Without
+# this, two runs would sit in their poll loops for the same pull request and the
+# older one could enqueue a SHA that is no longer the head. Cancellation is the
+# safe direction: a cancelled gate merges nothing.
+concurrency:
+  group: dependabot-auto-merge-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dependabot:
+    runs-on: ubuntu-latest
+    if: ${{ github.actor == 'dependabot[bot]' }}
+    # The gate waits for the slowest check in the repository. Measured on #4959
+    # the last required context reported 9m26s after the jobs started, so the
+    # script's own deadline is 40 minutes (`GATE_TIMEOUT_SECONDS`) and the job is
+    # given a little more, so the deadline is always reached by the script — it
+    # renders a report and comments — rather than by the runner killing the job
+    # with nothing to read.
+    timeout-minutes: 50
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      # No pnpm setup here, deliberately (objectui#6392).
+      #
+      # This job ran `corepack enable` + `pnpm --version` until 2026-08-25,
+      # as a leftover of the lockfile merge driver removed in objectui#6389
+      # (see the "No lockfile merge driver here" note below) -- that driver
+      # step was the only thing in this job that ever needed pnpm. Once it
+      # was gone, enabling corepack and printing a pnpm version was a package
+      # manager set up for zero consumers: the Setup Node.js step right below
+      # already explains that this job never runs `pnpm install`, and nothing
+      # else here shells out to `pnpm`.
+      #
+      # Considered and rejected: keeping `pnpm --version` alone as a "proves
+      # corepack activated" fail-fast, so a future pnpm dependency would fail
+      # clearly instead of confusingly. Rejected because that failure mode
+      # has no occasion to matter until something in this job actually calls
+      # pnpm, and nothing does today -- an unexplained two-line "just in
+      # case" setup with no consumer is exactly the residue this issue is
+      # about, and keeping half of it recreates the same shape. If a future
+      # step here grows a real pnpm dependency, add `corepack enable` back
+      # next to that step, where a reader can see what it's for.
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22.x'
+          # No `cache: 'pnpm'` here: this job doesn't set up pnpm at all (see
+          # the note above) and never runs `pnpm install`, so the pnpm store
+          # doesn't exist and setup-node's post-job cache save would fail
+          # with "Path Validation Error", marking the whole job as failed.
+
+      # No lockfile merge driver here, deliberately (objectui#6369).
+      #
+      # This job configured one until 2026-08-25. A merge driver is invoked by
+      # git only when git itself has to MERGE the attributed path, on the
+      # runner. The only merge this job performs is the last step's `gh pr
+      # merge --auto --squash`, and GitHub executes that SERVER-SIDE: the merge
+      # commit is produced by GitHub's own machinery in the merge queue, so the
+      # runner's local git config is never consulted and cannot participate.
+      # The driver therefore had no occasion to fire.
+      #
+      # Swept before removing: this file contains no `git merge`, `rebase`,
+      # `pull`, `cherry-pick`, `am`, `apply` or `revert` -- the `git config`
+      # pair this comment replaces was the only `git` in it. `actions/checkout`
+      # fetches a ref and checks it out; on a `pull_request` event that ref is
+      # the merge commit GitHub has ALREADY computed, so checking it out merges
+      # nothing locally (and `submodules: true` finds no `.gitmodules` here).
+      # `scripts/dependabot-merge-gate.mjs` imports `node:fs` and one local
+      # helper -- it shells out to nothing.
+      #
+      # Same no-occasion property as `changelog.yml` (objectui#6358), reached by
+      # a different route: that job never merged at all, this one merges only
+      # where local config cannot reach.
+      #
+      # Restoring it needs a real LOCAL merge in this job first. A server-side
+      # merge is not one, and missing that distinction is what put the step here.
+
+      - name: Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+        with:
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+
+      # Unchanged (#4973 does not touch the semver policy): patch and minor may
+      # be merged automatically, major may not.
+      - name: Check if auto-mergeable
+        id: check-update
+        run: |
+          UPDATE_TYPE="${{ steps.metadata.outputs.update-type }}"
+          if [[ "$UPDATE_TYPE" == "version-update:semver-patch" ]] || [[ "$UPDATE_TYPE" == "version-update:semver-minor" ]]; then
+            echo "auto_merge=true" >> $GITHUB_OUTPUT
+          else
+            echo "auto_merge=false" >> $GITHUB_OUTPUT
+          fi
+
+      # The wait. Polls the Checks API for THIS head SHA; writes `gate=green|red`
+      # plus a rendered report. It never mutates anything — the two steps below
+      # are the only things that can write, and both are behind `gate == green`.
+      #
+      # Mechanism note (#4973 left the choice open): a poll loop in this job was
+      # chosen over re-triggering on `check_suite: completed`. The `check_suite`
+      # route wakes ~8 times per pull request instead of holding a runner, but it
+      # arrives without the pull-request context `dependabot/fetch-metadata`
+      # needs and without `github.actor == 'dependabot[bot]'`, so the semver
+      # policy above would have to be re-derived on a different event — more
+      # moving parts around the decision that just went wrong. The cost of this
+      # shape is one mostly-idle runner for the ~10 minutes the shards take, per
+      # Dependabot pull request; that is the price of not corrupting `main`.
+      - name: Wait for the full check set on this head SHA
+        id: gate
+        if: steps.check-update.outputs.auto_merge == 'true'
+        run: node scripts/dependabot-merge-gate.mjs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GATE_TIMEOUT_SECONDS: '2400'
+          GATE_INTERVAL_SECONDS: '20'
+          GATE_REPORT_FILE: dependabot-merge-gate.md
+
+      # Requirement: a refusal must be visible on the pull request, not only in
+      # a log nobody opens. The step summary is written by the script; this puts
+      # the same text where a reviewer of the PR will see it.
+      - name: Report the refusal on the pull request
+        if: steps.gate.outputs.gate == 'red'
+        run: gh pr comment "$PR_URL" --body-file dependabot-merge-gate.md
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Approval moved behind the gate too. An approval on a pull request whose
+      # tests are red is a false signal to every human reading the PR list, and
+      # where a ruleset counts approvals it is also half of the merge decision.
+      - name: Approve PR
+        if: steps.gate.outputs.gate == 'green'
+        run: gh pr review --approve "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # `--match-head-commit` pins the merge to the SHA the gate actually
+      # judged: if Dependabot pushed a new commit while the gate was waiting,
+      # this refuses instead of enqueueing an unverified head. If a future `gh`
+      # ever drops the flag the step exits non-zero, so the failure direction is
+      # "nothing merged, job red", not "merged unverified".
+      - name: Enqueue for merge (auto-merge = enter the merge queue)
+        if: steps.gate.outputs.gate == 'green'
+        run: gh pr merge --auto --squash --match-head-commit "$GATED_SHA" "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GATED_SHA: ${{ steps.gate.outputs.gated_sha }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Make the refusal red. The gate script exits 0 on a DECIDED red so that
+      # the comment above can run (a crash inside it exits non-zero on its own
+      # and fails the job here regardless), so the job's own conclusion has to be
+      # set explicitly — otherwise a refused merge would report as a green
+      # `dependabot` check, which is the shape of silence this issue is about.
+      - name: Fail the job when the gate refused
+        if: steps.check-update.outputs.auto_merge == 'true' && steps.gate.outputs.gate != 'green'
+        run: |
+          echo "::error::Dependabot merge gate did not go green — see the job summary and the PR comment."
+          exit 1
+
+      - name: Comment on major updates
+        if: steps.metadata.outputs.update-type == 'version-update:semver-major'
+        uses: actions/github-script@v9
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '⚠️ This is a **major version update**. Please review carefully before merging.'
+            });

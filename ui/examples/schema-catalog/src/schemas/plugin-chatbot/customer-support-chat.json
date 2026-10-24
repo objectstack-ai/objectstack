@@ -1,0 +1,36 @@
+{
+  "type": "chatbot",
+  "messages": [
+    {
+      "id": "system-1",
+      "role": "system",
+      "content": "Support chat session started"
+    },
+    {
+      "id": "1",
+      "role": "assistant",
+      "content": "Hi! I'm Sarah from customer support. How may I assist you today?",
+      "avatarFallback": "SA"
+    },
+    {
+      "id": "2",
+      "role": "user",
+      "content": "I'm having trouble accessing my dashboard",
+      "avatarFallback": "JD"
+    },
+    {
+      "id": "3",
+      "role": "assistant",
+      "content": "I understand. Let me help you with that. Could you tell me if you're seeing any error messages?",
+      "avatarFallback": "SA"
+    }
+  ],
+  "placeholder": "Type your message here...",
+  "userAvatarFallback": "JD",
+  "assistantAvatarFallback": "SA",
+  "showTimestamp": true,
+  "autoResponse": true,
+  "autoResponseDelay": 1500,
+  "autoResponseText": "Let me check that for you...",
+  "maxHeight": "500px"
+}

@@ -1,0 +1,19 @@
+{
+  "type": "breadcrumb",
+  "items": [
+    {
+      "label": "Home",
+      "href": "/",
+      "icon": "home"
+    },
+    {
+      "label": "Docs",
+      "href": "/docs",
+      "icon": "book"
+    },
+    {
+      "label": "Components",
+      "icon": "panels-top-left"
+    }
+  ]
+}

@@ -1,0 +1,148 @@
+name: Spec Range Floors
+
+# objectui#5793: a package's declared `@objectstack/spec` floor must carry every
+# symbol that package's own published artifact references. The gate, and the two
+# ways of building it that return a confident green, are documented at length in
+# scripts/check-spec-range-floors.mjs.
+#
+# ── Why this is scheduled and NOT a pull-request job ─────────────────────────
+#
+# The criterion is over the BUILT artifact, because `src/` answers a different
+# question: an `import type` used only inside a function body is erased and
+# never reaches `dist/`, so a source-level gate demands floor bumps nothing
+# published justifies. That makes this the second artifact-level gate in the
+# repository, and the 2026-08-16 ruling on objectui#4846 (comment 5307574139)
+# already settled where those go: `published-dist-gate.yml` carries the long
+# version of the argument, and the short version is that this repository
+# deliberately has no per-PR full-repo build. `ci.yml`'s `Build & E2E` builds
+# `@object-ui/console` alone and its `Type Check` gets only turbo's dependency
+# closure, so leaf packages are never built there.
+#
+# ⛔ Do not add `pull_request` here. `scripts/__tests__/check-spec-range-floors.test.ts`
+# fails if this gate is ever wired into a workflow carrying that trigger — the
+# same guard `check-published-dist-tooling.test.ts` holds over its own gate.
+#
+# The BLOCKING copy is on the publish path: `pnpm changeset:publish` runs this
+# gate before a single tarball reaches npm, so a floor that lies cancels the
+# release. This workflow is an ALARM in addition, so a regression surfaces the
+# night it lands rather than at the next release. It cannot make anyone's pull
+# request red.
+#
+# ── Why it needs the network ─────────────────────────────────────────────────
+#
+# The gate fetches each declared FLOOR version from the registry and reads that
+# tarball's own `exports` map. It deliberately resolves nothing through
+# `node_modules`: the root `package.json` declares `@objectstack/spec`, so pnpm
+# hoists it to the workspace root and every resolution succeeds from every
+# package regardless of that package's own manifest — the trap
+# `check-phantom-dependencies.mjs` records for `react`, in a place where it
+# would produce a green verdict about a version nobody installed.
+
+on:
+  workflow_dispatch:
+
+  # Nightly at 04:11 UTC — off the top of the hour, where GitHub's scheduled
+  # queue is most congested, and off `published-dist-gate.yml`'s 03:41 so the
+  # two full-repo builds do not contend for the same runner minute.
+  schedule:
+    - cron: '11 4 * * *'
+
+  # Changes to the gate or its wiring get a real run. Its verdict logic is
+  # exercised per-PR by the ordinary vitest suite over synthetic inputs, which
+  # cannot exercise a real build or a real registry fetch.
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/check-spec-range-floors.mjs'
+      - 'scripts/objectstack-floor.mjs'
+      - '.github/workflows/spec-range-floors.yml'
+
+concurrency:
+  group: spec-range-floors-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  spec-range-floors:
+    name: Spec Range Floor Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - name: Enable Corepack and download the pinned pnpm
+        run: bash scripts/ci-setup-pnpm.sh
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22.x'
+          cache: 'pnpm'
+
+      # objectui#12957: every @objectstack/* package resolves to the build of the
+      # commit `.objectstack-sha` pins, read from node_modules/.cache/objectstack, so
+      # it must be there before pnpm resolves anything. Restored by the pin and built
+      # only on a miss (scripts/objectstack-pin.mjs); the save is this job's last step.
+      - name: Restore the pinned @objectstack build
+        id: objectstack-pin
+        uses: actions/cache/restore@v6
+        with:
+          path: node_modules/.cache/objectstack
+          key: objectstack-pin-${{ runner.os }}-${{ hashFiles('.objectstack-sha', 'scripts/objectstack-pin.mjs') }}
+
+      - name: Build @objectstack at the pin (skips a restored build)
+        id: objectstack-build
+        run: node scripts/objectstack-pin.mjs build
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The gate READS artifacts and refuses to guess when they are absent (a
+      # package that declares the spec and produced no build output is a
+      # `no-artifact` finding, not a skip). Building here rather than inside the
+      # gate keeps the build visible in the log as its own step, and keeps the
+      # gate a pure reader that the unit tests can drive with synthetic inputs.
+      #
+      # `--filter=!@object-ui/site` matches `pnpm build`: the docs site is not a
+      # published package and building it here buys nothing.
+      - name: Build every published package
+        run: pnpm exec turbo run build --filter='!@object-ui/site'
+
+      # objectui#12958: the scan judges the floors a publish ships, so the floor
+      # step first computes them from the pin, as `pnpm changeset:publish` does.
+      # Exit 2 = no published objectstack release contains the pin yet, the normal
+      # state between a pin bump and objectstack's next release: nothing to judge.
+      - name: Compute the @objectstack floors from the pin
+        id: floor
+        run: |
+          code=0
+          node scripts/objectstack-floor.mjs || code=$?
+          if [ "${code}" -eq 2 ]; then
+            echo "::notice::No published @objectstack release contains .objectstack-sha yet, so the scan is skipped."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif [ "${code}" -ne 0 ]; then
+            exit "${code}"
+          fi
+
+      - name: Verify every declared spec floor carries the symbols its artifact uses
+        if: steps.floor.outputs.skip != 'true'
+        run: pnpm check:spec-floors -- --cross-check
+
+      # The pinned @objectstack build, saved only when this job built it (a cache
+      # miss) and whatever the verdict above was -- it does not depend on it.
+      # Bookkeeping: bounded and non-fatal (objectui#6577, objectui#7048). The bound
+      # is not yet derived from a measured save; re-derive it from this step's runs.
+      - name: Save the pinned @objectstack build
+        if: ${{ !cancelled() && steps.objectstack-build.outcome == 'success' && steps.objectstack-pin.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: actions/cache/save@v6
+        with:
+          path: node_modules/.cache/objectstack
+          key: objectstack-pin-${{ runner.os }}-${{ hashFiles('.objectstack-sha', 'scripts/objectstack-pin.mjs') }}

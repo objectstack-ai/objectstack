@@ -1,0 +1,144 @@
+// Type-checks the `.ts` files under `e2e/` — the Playwright specs, their shared
+// helpers, and `e2e/live/global-setup.ts`, which runs before every live-suite run
+// — plus, since objectui#4477, the four root `playwright*.config.ts` files that
+// decide which of those specs run, where they run, and what `webServer` command
+// builds the app under test.
+//
+// objectui#4471: nothing compiled them. `e2e/` is not a workspace package, so
+// `turbo run type-check` — which is driven by package.json `scripts` — cannot
+// structurally reach it, the same reason given verbatim in
+// `tsconfig.scripts.json`'s header for `scripts/`. And no tsconfig in the repo
+// included it either: the root `tsconfig.json` includes only
+// `packages`/`examples`/`apps`, `tsconfig.scripts.json` only `scripts/**`,
+// `tsconfig.vitest-setup.json` only the root `vitest.setup*` files. Playwright
+// TRANSPILES specs rather than type-checking them, so the 30 `.ts` files here
+// had been read by no `tsc` invocation, ever.
+//
+// That is objectui#3494's shape one directory over, and for a test suite it is
+// the expensive half: a spec the compiler never reads can call a method that
+// does not exist and still print green, because the call sits in a branch the
+// run does not take — which is exactly what the first compile found. See
+// `e2e/live/master-detail.spec.ts`: a `waitForRequest` predicate ending
+// `r.request?.().method?.() !== 'GET'` had been `undefined !== 'GET'`, always
+// true, for its whole life. Playwright would never have told anyone.
+//
+// This project is standalone and cheap: it imports no workspace package — every
+// import in it is `@playwright/test`, `./helpers`, or a `node:` builtin — so unlike
+// `tsconfig.vitest-setup.json` it needs no built declarations and can run before,
+// or independently of, any build. `scripts/__tests__/e2e-type-check.test.ts` pins
+// that premise, so if a spec ever imports `@object-ui/*` the wiring has to be
+// reconsidered rather than silently starting to depend on `dist`.
+//
+// Comments here are `//`, not `/* */`, for the reason recorded in
+// `tsconfig.scripts.json`: a glob containing `**` immediately followed by `/`
+// closes a block comment early, and a tsconfig that silently fails to parse does
+// not fail loudly — it falls back to compiling the entire repository.
+//
+// Run it with `pnpm type-check:e2e`. It is also a turbo ROOT task
+// (`//#type-check:e2e`) that the `type-check` task `dependsOn`, so plain
+// `pnpm type-check` — and therefore ci.yml's existing `Run type-check` step —
+// covers `e2e/` with no new workflow step. That is the shape objectui#4456 used
+// for `//#lint:root`, and it is why this file needs no ci.yml entry of its own
+// the way `type-check:scripts` and `type-check:vitest-setup` do. Because every
+// package's `type-check` inherits that root task's hash, its turbo `inputs`
+// name this program (the two `include` globs below and this file) rather than
+// turbo's root default of every tracked file, which re-ran every package on
+// every commit (objectui#12222); `scripts/__tests__/e2e-type-check.test.ts`
+// pins both halves.
+//
+// The four root `playwright*.config.ts` files were the deliberate remainder of
+// objectui#4471 — they sit beside this file rather than under `e2e/`, so the
+// `e2e/**` glob did not reach them and no other tsc program did either.
+// objectui#4477 closed that: the second `include` pattern below brings them in.
+// It cost zero errors, which was the point rather than a disappointment — they
+// compiled clean against this exact option set when #4477 was filed and again
+// when it landed (measured both times, `tsc -p tsconfig.e2e.json`, exit 0). What
+// was missing was never a fix, it was the gate: `webServer.command`, `testIgnore`
+// and `projects` are read by no compiler, so a `defineConfig` option that stops
+// existing — or is misspelled into `undefined` — surfaces only as a confusing
+// Playwright runtime failure in the `e2e` CI job.
+{
+  "compilerOptions": {
+    // Node 22 (`engines.node: ">=22"`) runs the Playwright worker that executes
+    // these files. ES2022 is load-bearing rather than tidy: PR #4470 added
+    // `new Error(msg, { cause: e })` to `e2e/live/global-setup.ts` to satisfy
+    // `preserve-caught-error`, and `ErrorOptions` does not exist before ES2022.
+    // Measured, at the root tsconfig's ES2020:
+    //   e2e/live/global-setup.ts(28,7): error TS2554: Expected 0-1 arguments, but got 2.
+    // So this project must NOT inherit the root `tsconfig.json`'s ES2020, and
+    // `tsconfig.scripts.json` settled the same question the same way for the
+    // same reason.
+    "target": "ES2022",
+
+    // DOM is load-bearing too. `page.evaluate(...)` callbacks are compiled in
+    // THIS program while executing in the browser, so their globals must
+    // resolve. Measured, dropping DOM from `lib`: 3 errors —
+    //   e2e/helpers/index.ts(12,12): error TS2584: Cannot find name 'document'.
+    //   e2e/live/cascading-options.spec.ts(45,28): error TS2304: Cannot find name 'HTMLElement'.
+    //   e2e/smoke.spec.ts(45,14): error TS2584: Cannot find name 'document'.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+
+    // `process.env` in 11 files, `Buffer` in three, `node:fs`/`node:path` in two.
+    // Measured, with `types: []`: 26 errors, every one TS2591 for `process`,
+    // `Buffer` or a `node:` builtin, across 12 files.
+    "types": ["node"],
+
+    "strict": true,
+
+    // Stricter than `tsconfig.scripts.json`, and it can afford to be: no other
+    // project compiles `e2e/**`, so there is no "green in one project, red in
+    // the other" hazard to match an option set against (the constraint that
+    // pinned `tsconfig.scripts.json` to apps/console's set). Measured cost of
+    // the four flags on first run: exactly one error, and a real one —
+    //   e2e/live/master-detail.spec.ts(2,36): error TS6133: 'addLineItem' is declared but its value is never read.
+    // a helper import left behind when that spec stopped using it. Nothing else
+    // catches that: the root lint task's `no-unused-vars` did not report it when
+    // objectui#4456 first linted this directory.
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+
+    // Playwright transpiles each spec on its own with no cross-file type
+    // information, so a construct `isolatedModules` rejects breaks at RUNTIME
+    // here rather than being caught. Costs nothing today; it states a constraint
+    // the loader genuinely imposes.
+    "isolatedModules": true,
+
+    // No `allowJs`, unlike `tsconfig.scripts.json`: nothing under `e2e/` imports
+    // a `.js`/`.mjs` module and nothing carries a `@ts-expect-error`, so it would
+    // buy nothing while walking into the TS2578 interaction documented in
+    // `apps/console/tsconfig.node.json` (objectui#3513).
+    "allowJs": false,
+
+    // Legal only because this project is standalone — TS6310 forbids `noEmit` on
+    // a project that is `composite` or referenced by another. Standalone is also
+    // what keeps stray `.js`/`.d.ts` from landing next to the specs, where
+    // `playwright.config.ts`'s `testDir: './e2e'` would pick them up as tests.
+    "noEmit": true
+  },
+
+  // The whole directory, by glob. Not a file list: a list is a thing to forget,
+  // and the point of objectui#4471 is that a NEW spec under `e2e/` must not be
+  // able to land outside every program again.
+  //
+  // The second pattern is the same doctrine for the root configs (objectui#4477)
+  // rather than the four names that exist today, so a FIFTH root config cannot
+  // land outside every program either. It carries no `**`, so `*` stops at the
+  // path separator and it matches root-level files only — which is where all
+  // four live.
+  //
+  // `scripts/__tests__/e2e-type-check.test.ts` pins that both patterns really do
+  // reach every matching file on disk, and that the second one would pick up a
+  // root config that does not exist yet.
+  "include": ["e2e/**/*.ts", "playwright*.config.ts"]
+}

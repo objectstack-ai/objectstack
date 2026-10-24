@@ -1,0 +1,21 @@
+{
+  "type": "stack",
+  "gap": 2,
+  "children": [
+    {
+      "type": "skeleton",
+      "width": "100%",
+      "height": 20
+    },
+    {
+      "type": "skeleton",
+      "width": "80%",
+      "height": 20
+    },
+    {
+      "type": "skeleton",
+      "width": "90%",
+      "height": 20
+    }
+  ]
+}

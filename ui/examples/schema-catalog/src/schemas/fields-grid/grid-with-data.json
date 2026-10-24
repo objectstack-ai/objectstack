@@ -1,0 +1,48 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "defaultValues": {
+    "order_items": [
+      {
+        "item": "Widget A",
+        "qty": 2,
+        "price": 29.99
+      },
+      {
+        "item": "Widget B",
+        "qty": 1,
+        "price": 49.99
+      },
+      {
+        "item": "Widget C",
+        "qty": 5,
+        "price": 9.99
+      }
+    ]
+  },
+  "fields": [
+    {
+      "name": "order_items",
+      "label": "Order Items",
+      "type": "grid",
+      "columns": [
+        {
+          "name": "item",
+          "label": "Item",
+          "type": "text"
+        },
+        {
+          "name": "qty",
+          "label": "Qty",
+          "type": "number"
+        },
+        {
+          "name": "price",
+          "label": "Price",
+          "type": "currency"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "type": "empty",
+  "icon": "users",
+  "title": "No team members",
+  "description": "Invite people to join your team",
+  "action": {
+    "type": "button",
+    "label": "Invite Team Members",
+    "variant": "default",
+    "icon": "user-plus"
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "jsx": "react-jsx",
+    "lib": ["ES2020", "DOM"],
+    "types": ["node", "vite/client"],
+    "noEmit": false,
+    "declaration": true,
+    // The incremental build RECORD, pinned OUTSIDE the published build output.
+    // Left unpinned, TypeScript derives it from `outDir`/`rootDir`: a package with
+    // no `rootDir` gets `dist/tsconfig.tsbuildinfo` -- inside what `files: ["dist",
+    // ...]` publishes -- and `pnpm check:published-dist` then reds on a byte-identical
+    // tree as soon as anything runs `tsc` (objectui#9189). Pinned in every composite
+    // package so the location is a decision, not a side effect of an unrelated option.
+    "tsBuildInfoFile": "./tsconfig.tsbuildinfo",
+    "composite": true,
+
+    // See `packages/react/tsconfig.json` for the full argument: under
+    // `nodenext` a missing relative extension is TS2835 and a bare directory
+    // import is TS2834, so the extension property this package's `dist` needs
+    // is enforced by the compiler instead of by review. It is load-bearing
+    // HERE in particular: this package builds with a bare `tsc`
+    // (`"build": "tsc"`), and `tsc` never rewrites specifiers, so what the
+    // source writes is exactly what `dist` ships — objectui#4538's failure.
+    //
+    // Landed last of the consumer pins because it was the largest, and each
+    // number below was a different card's work, measured with this pin used as
+    // an instrument before it was used as enforcement (objectui#5440):
+    // 1097 errors before objectui#5365 taught `@object-ui/components` to emit
+    // resolvable typings, 23 after it, 2 after objectui#5439 cleared the
+    // extensionless typings `@object-ui/plugin-chatbot` re-exported through.
+    // Re-measured on this branch at f8c70f4f3: unpinned 0, pinned 2, both of
+    // them the `@monaco-editor/react` interop site fixed in this same commit.
+    "module": "nodenext",
+    "moduleResolution": "nodenext"
+  },
+  "include": ["src"],
+  // Tooling is excluded by DIRECTORY, not just by file NAME. A helper under
+  // `__tests__/` that is not itself called `*.test.ts` is otherwise a program
+  // input, and an EMITTING program writes it into the published `dist`
+  // (objectui#4006 / #4836 / #6943 -- the same defect three times, each found
+  // by hand). Enforced repo-wide by `pnpm check:published-tsconfig-exclude`
+  // (objectui#7212), which derives these directory names from `TOOLING_FILE`
+  // in scripts/check-phantom-dependencies.mjs.
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/__tests__/**",
+    "**/__mocks__/**",
+    "**/__benchmarks__/**",
+    "**/*.test.ts",
+    "**/*.test.tsx"
+  ],
+  "references": [
+    { "path": "../types" },
+    { "path": "../core" },
+    { "path": "../react" },
+    { "path": "../components" },
+    { "path": "../auth" },
+    { "path": "../data-objectstack" }
+  ]
+}

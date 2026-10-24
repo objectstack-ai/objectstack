@@ -1,0 +1,55 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "noEmit": false,
+    "declaration": true,
+    // The incremental build RECORD, pinned OUTSIDE the published build output.
+    // Left unpinned, TypeScript derives it from `outDir`/`rootDir`: a package with
+    // no `rootDir` gets `dist/tsconfig.tsbuildinfo` -- inside what `files: ["dist",
+    // ...]` publishes -- and `pnpm check:published-dist` then reds on a byte-identical
+    // tree as soon as anything runs `tsc` (objectui#9189). Pinned in every composite
+    // package so the location is a decision, not a side effect of an unrelated option.
+    "tsBuildInfoFile": "./tsconfig.tsbuildinfo",
+    "composite": true
+  },
+  "include": ["src"],
+  // This is the BUILD program — `build` is a bare `tsc` and the options above
+  // make it EMIT (`noEmit: false`, `declaration`, `outDir: dist`), so whatever
+  // this program reads is written into `dist`, and `files: ["dist"]` publishes
+  // all of it. The exclusions therefore have to cover every TOOLING directory,
+  // not just the `*.test.ts` name (objectui#4836).
+  //
+  // The old list named only `src/**/*.test.ts`, so `src/__benchmarks__/` was in
+  // the emit program and `dist/__benchmarks__/core.bench.{js,d.ts}` shipped in
+  // the tarball. `core.bench.js` is a REAL emitted module, not just a
+  // declaration: its first import is `import { bench, describe } from 'vitest'`
+  // — a runtime import of a package a consumer never installs, since `vitest`
+  // is a devDependency here and devDependencies are not installed
+  // transitively. That is the same shape objectui#4006 fixed for
+  // `@object-ui/fields` / `@object-ui/plugin-editor`, whose exclusion table was
+  // likewise written as `*.test.*` and so did not cover `__benchmarks__/`.
+  //
+  // The directory names are the repo's tooling convention, and they are
+  // deliberately spelled the same way `TOOLING_FILE` in
+  // scripts/check-phantom-dependencies.mjs spells it — that gate classifies
+  // these three directories as tooling and lets them resolve against the root
+  // devDependencies, so a build program that emits them publishes exactly the
+  // material the gate assumes never ships. `__tests__` and `__mocks__` are
+  // no-ops for this package today (every file under `src/**/__tests__/` here is
+  // a `*.test.ts`, already covered by the glob below); they are named so the
+  // criterion is the convention rather than one file's name.
+  //
+  // `core.bench.ts` did not lose its type coverage with the emit: it moved to
+  // the chained `tsconfig.test.json`, which `type-check` runs.
+  "exclude": [
+    "src/**/__tests__/**",
+    "src/**/__mocks__/**",
+    "src/**/__benchmarks__/**",
+    "src/**/*.test.ts"
+  ],
+  "references": [
+    { "path": "../types" }
+  ]
+}

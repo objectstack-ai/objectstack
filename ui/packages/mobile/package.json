@@ -1,0 +1,70 @@
+{
+  "name": "@object-ui/mobile",
+  "version": "18.1.0",
+  "type": "module",
+  "license": "MIT",
+  "description": "Mobile optimization for Object UI with responsive components, PWA support, and touch gesture handling.",
+  "homepage": "https://www.objectui.org/docs/packages/mobile",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/objectstack-ai/objectui.git",
+    "directory": "packages/mobile"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc && node ../../scripts/check-dist-completeness.mjs",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "test": "vitest run --root ../.. packages/mobile/",
+    "type-check": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "lint": "eslint ."
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0"
+  },
+  "dependencies": {
+    "@object-ui/types": "workspace:*"
+  },
+  "devDependencies": {
+    "@objectstack/spec": "^18.0.0-next.1",
+    "@types/react": "19.3.0",
+    "react": "19.3.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  },
+  "keywords": [
+    "objectui",
+    "sdui",
+    "schema-driven-ui",
+    "react",
+    "tailwind",
+    "shadcn",
+    "objectstack",
+    "mobile",
+    "pwa",
+    "responsive",
+    "touch",
+    "offline"
+  ],
+  "author": "ObjectStack Team <team@objectstack.ai>",
+  "bugs": {
+    "url": "https://github.com/objectstack-ai/objectui/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
