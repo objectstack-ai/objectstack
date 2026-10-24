@@ -77,7 +77,7 @@ export type ApprovalSentenceRender = (
 function reasonClauses(abandoned: readonly string[], fallback: AdminRescueFallback | undefined): Clause[] {
   const clauses: Clause[] = abandoned
     .filter((slot) => !!slot && slot.includes(':'))
-    .map((slot) => {
+    .map((slot): Clause => {
       const at = slot.indexOf(':');
       const type = slot.slice(0, at);
       const value = slot.slice(at + 1);
