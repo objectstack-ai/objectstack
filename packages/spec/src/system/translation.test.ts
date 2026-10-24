@@ -2024,3 +2024,34 @@ describe('`objects.<object>._views.<view>.title`, the key a form view\'s title i
     expect(result.error?.issues.some((i) => i.code === 'unrecognized_keys')).toBe(true);
   });
 });
+
+// ============================================================================
+// `objects.<object>._sections.<section>.fields.<field>` — a form section
+// entry's override copy
+// ============================================================================
+
+describe('form section entry copy, addressable under its section by the entry\'s `field`', () => {
+  const parse = (fields: unknown) =>
+    ObjectTranslationDataSchema.safeParse({ _sections: { submitter: { label: '关于您', fields } } });
+
+  it('accepts `label`, `placeholder` and `helpText` keyed by the entry\'s `field`', () => {
+    const result = parse({ contact_name: { label: '您的姓名', placeholder: '张三', helpText: '与证件一致' } });
+    expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+    expect(result.success && result.data._sections?.submitter.fields?.contact_name).toEqual({
+      label: '您的姓名', placeholder: '张三', helpText: '与证件一致',
+    });
+  });
+
+  it('stays `.strict()` — an invented key is refused', () => {
+    const result = parse({ contact_name: { lable: 'x' } });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message).toContain('→ `label`');
+  });
+
+  it('sends `help` to `helpText`, the spelling a section entry declares', () => {
+    const result = parse({ contact_name: { help: 'x' } });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message)
+      .toContain('`help` → `helpText`');
+  });
+});
