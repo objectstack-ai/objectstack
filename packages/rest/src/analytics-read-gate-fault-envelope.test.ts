@@ -29,7 +29,7 @@
  * red on the twin.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import type { Logger } from '@objectstack/spec/contracts';
 import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { AnalyticsService, type AnalyticsServiceConfig } from '@objectstack/service-analytics';
@@ -69,14 +69,25 @@ function buildRoute(analyticsProvider: () => Promise<AnalyticsService>) {
   return rest.getRoutes().find((r) => r.method === 'POST' && r.path.endsWith('/analytics/dataset/query'))!;
 }
 
-const silent: Logger = { debug() {}, info() {}, warn() {}, error() {} };
+// The route's fault line is asserted below, so the level this file reads is the loud one.
+beforeAll(() => { vi.stubEnv('OS_REST_LOG', 'info'); });
+afterAll(() => { vi.unstubAllEnvs(); });
+
+/** The service's log sink, recording every line it is handed — where the cause must land. */
+function recordingLogger(): { logger: Logger; lines: string[] } {
+  const lines: string[] = [];
+  const record = (message: string, err?: unknown) => {
+    lines.push(`${message} ${err instanceof Error ? err.message : ''}`);
+  };
+  return { lines, logger: { debug() {}, info() {}, warn: record, error: record } as Logger };
+}
 
 type Gates = Pick<AnalyticsServiceConfig, 'admitObjectRead' | 'getReadableFields' | 'getObjectDeclaration'>;
 
 /** A real `AnalyticsService` on the ObjectQL aggregate path, with the gates under test. */
-function analytics(gates: Gates, executed: string[]): AnalyticsService {
+function analytics(gates: Gates, executed: string[], logger: Logger): AnalyticsService {
   return new AnalyticsService({
-    logger: silent,
+    logger,
     queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
     executeAggregate: async (object: string) => {
       executed.push(object);
@@ -101,16 +112,20 @@ const body = {
 
 async function post(gates: Gates) {
   const executed: string[] = [];
-  const service = analytics(gates, executed);
+  const { logger, lines } = recordingLogger();
+  const service = analytics(gates, executed, logger);
   const route = buildRoute(async () => service);
   const res = mockRes();
   const logSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  let routeLog: string;
   try {
     await route.handler({ method: 'POST', params: {}, headers: {}, body } as any, res);
+    // Read the calls BEFORE restoring: `mockRestore` clears them.
+    routeLog = logSpy.mock.calls.map((args) => args.map(String).join(' ')).join('\n');
   } finally {
     logSpy.mockRestore();
   }
-  return { status: res.statusCode as number, body: res.body, executed };
+  return { status: res.statusCode as number, body: res.body, executed, serviceLog: lines.join('\n'), routeLog };
 }
 
 const exploded = () => {
@@ -164,6 +179,9 @@ describe('[#25561] a read gate that could not decide answers 503 SERVICE_UNAVAIL
       expect(res.body.error).toBe(INTERNAL_ERROR_MESSAGE);
       expect(JSON.stringify(res.body)).not.toContain('exploded');
       expect(res.executed).toEqual([]);
+      // …and the operator keeps it: the cause at the site, the fault at the route.
+      expect(res.serviceLog).toContain('exploded');
+      expect(res.routeLog).toContain('Analytics dataset query error');
     });
 
     it(`its verdict twin — the same gate answering "no" — still answers ${verdictStatus} ${verdictCode}`, async () => {
