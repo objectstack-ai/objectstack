@@ -2460,7 +2460,9 @@ export async function classifyResumeResult(
  *                                  ignored rather than validated). `hasMore` is
  *                                  computed from the engine's own truncation
  *                                  report, never a constant. A service without
- *                                  `listRunsPage` → 501, ⛔ never a 200
+ *                                  `listRunsPage` → 501, ⛔ never a 200. An
+ *                                  unknown flow → 404 `RESOURCE_NOT_FOUND`,
+ *                                  the trigger door's answer, ⛔ never `[]`
  *                                  ⚑ run-state read — `sys_automation_run` grant (#7900)
  *   GET    /:name/runs/:runId    → getRun
  *                                  ⚑ run-state read — `sys_automation_run` grant (#7900)
@@ -3547,6 +3549,21 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         // GET /:name/runs → listRunsPage
         if (parts[1] === 'runs' && !parts[2] && m === 'GET') {
             if (typeof automationService.listRunsPage === 'function') {
+                // An unknown flow is `404`, never `200 { runs: [] }`: an empty
+                // page is the answer for a flow that exists and has not run, and
+                // a caller cannot tell the two apart from the body. The SAME
+                // registry probe and message the trigger doors answer through
+                // (`../flow-dispatch-status.js`), so this door and
+                // `POST /:name/trigger` cannot disagree about which flows exist.
+                // Asked first, as the trigger door asks it: a query-parameter
+                // refusal about a flow that is not there would be the less
+                // useful of the two true answers.
+                if (await flowIsUnknown(automationService, name)) {
+                    return {
+                        handled: true,
+                        response: deps.error(flowNotFoundMessage(name), FLOW_NOT_FOUND_STATUS),
+                    };
+                }
                 // [#7300] Both options are CHECKED at the point they are read,
                 // in the shared query-parameter refusal this route now consumes
                 // with `/notifications` (#6928 / PR #7299 — the same defect, one

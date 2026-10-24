@@ -332,6 +332,24 @@ function withRemaining(remaining: string[]): { remaining?: string[] } {
  * The loader messages ride on `cause` rather than in `message`: they name
  * internal datasources and tables, and the message is served to an API caller.
  */
+/**
+ * The refusal every by-name lifecycle door answers when `name` resolves no
+ * stored datasource — `updateDatasource`, `removeDatasource` and
+ * `migrateCredential`.
+ *
+ * It carries the ADR-0112 envelope (`404` / `RESOURCE_NOT_FOUND`) so the admin
+ * routes answer it exactly as `GET /datasources/:name` answers the same name.
+ * A plain `Error` here was rendered `400 DATASOURCE_ADMIN_ERROR`, which tells an
+ * SDK or AI caller its request was malformed rather than that the datasource
+ * does not exist — and the read sibling already said the latter.
+ */
+function datasourceNotFoundError(name: string): Error {
+  const err = new Error(`Datasource '${name}' not found.`) as Error & { code?: string; status?: number };
+  err.code = 'RESOURCE_NOT_FOUND';
+  err.status = 404;
+  return err;
+}
+
 function metadataIncompleteError(message: string, errors: string[]): Error {
   const err = new Error(message) as Error & { code?: string; status?: number; cause?: unknown };
   err.code = 'SERVICE_UNAVAILABLE';
@@ -678,7 +696,7 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     secret?: SecretInput,
   ): Promise<DatasourceSummary> {
     const existing = await this.config.getDatasourceRecord(name);
-    if (!existing) throw new Error(`Datasource '${name}' not found.`);
+    if (!existing) throw datasourceNotFoundError(name);
     if (existing.origin !== 'runtime') {
       throw new Error(`Datasource '${name}' is code-defined and cannot be edited at runtime.`);
     }
@@ -849,7 +867,7 @@ export class DatasourceAdminService implements IDatasourceAdminService {
    */
   async removeDatasource(name: string): Promise<void> {
     const existing = await this.config.getDatasourceRecord(name);
-    if (!existing) throw new Error(`Datasource '${name}' not found.`);
+    if (!existing) throw datasourceNotFoundError(name);
     if (existing.origin !== 'runtime') {
       throw new Error(`Datasource '${name}' is code-defined and cannot be removed at runtime.`);
     }
@@ -931,7 +949,7 @@ export class DatasourceAdminService implements IDatasourceAdminService {
    */
   async migrateCredential(name: string): Promise<CredentialMigrationResult> {
     const existing = await this.config.getDatasourceRecord(name);
-    if (!existing) throw new Error(`Datasource '${name}' not found.`);
+    if (!existing) throw datasourceNotFoundError(name);
 
     const plan = planCredentialMigration(existing);
     if (plan.action === 'refuse') {

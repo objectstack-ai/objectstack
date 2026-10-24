@@ -505,6 +505,30 @@ async function refuseWalledCatalogPackageWrite(
 }
 
 /**
+ * Whether `registry` can be asked about `id` and answers that it holds no such
+ * package — the same `getPackage` lookup `GET /packages/:id`, enable and
+ * disable answer their `404` from, so the draft doors cannot disagree with
+ * them about which packages exist. An authored package is installed into this
+ * registry too (`POST /packages`, and `service-package` at boot), so a Studio
+ * app is never "unknown" here.
+ *
+ * Read by `publish-drafts` and `discard-drafts` only AFTER the protocol has
+ * answered, and only when that answer is empty: drafts the protocol does hold
+ * for an id the registry lacks are still published or discarded exactly as
+ * before. What changes is the one answer that lied — `200` "nothing to
+ * publish" / "nothing discarded" for a package that is not there, which an SDK
+ * or AI caller cannot tell apart from a real, empty package.
+ *
+ * A registry without `getPackage` cannot be asked, so this answers `false`
+ * ("no evidence of absence") rather than invent a 404.
+ */
+function packageIsUnknown(registry: unknown, id: string): boolean {
+    const reg = registry as { getPackage?: (id: string) => unknown } | null | undefined;
+    if (typeof reg?.getPackage !== 'function') return false;
+    return !reg.getPackage(id);
+}
+
+/**
  * [ADR-0131 D6] The customisation remedy both read-only refusals below name
  * ({@link requireWritablePackage}, {@link requireDuplicableSource}), in one
  * spelling. A managed package's items are sealed, and what a customer changes
@@ -1902,6 +1926,16 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     // something did not, which is the honest report. It must
                     // stay ABOVE the announce block, which reads this field.
                     if (flipped.length > 0) (result as any).unhiddenApps = flipped;
+                    // A request that touched nothing about a package this
+                    // registry does not hold is `404`, never `200
+                    // nothing_to_publish` — see `packageIsUnknown`.
+                    if (
+                        (result as any)?.outcome === 'nothing_to_publish'
+                        && flipped.length === 0
+                        && packageIsUnknown(registry, id)
+                    ) {
+                        return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
+                    }
                     // A publish promoted drafts to active (or published an additive
                     // app) at RUNTIME — but boot-cached consumers still hold the
                     // pre-publish view. The load-bearing one is the automation
@@ -2000,6 +2034,15 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                         packageId: id,
                         ...(body?.actor ? { actor: body.actor } : {}),
                     });
+                    // The twin of `publish-drafts`' 404: an empty discard is the
+                    // answer for a package that exists — see `packageIsUnknown`.
+                    if (
+                        (result as any)?.discardedCount === 0
+                        && (result as any)?.failedCount === 0
+                        && packageIsUnknown(registry, id)
+                    ) {
+                        return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
+                    }
                     return { handled: true, response: deps.success(result) };
                 } catch (e: any) {
                     return { handled: true, response: deps.errorFromThrown(e, 500) };
