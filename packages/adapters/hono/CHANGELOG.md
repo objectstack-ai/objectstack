@@ -1,5 +1,47 @@
 # @objectstack/hono
 
+## 18.1.0
+
+### Minor Changes
+
+- 02e6d73: fix(cors)!: every CORS door reads one admission rule; a loopback origin beside a list is admitted on a development boot only; an all-host pattern is refused with credentials, as `'*'` is
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a narrowing of CORS admission at three doors plus a boot refusal of one more configuration class: no authorable metadata key, spelling, type or stored shape moves, so `objectstack migrate meta` has nothing to rewrite. The remedy is a deployment variable or the door's own origin option, which no ledger entry can derive. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id covers these doors (not already-registered); and the change is an admission verdict, not an interface, a type or an export retirement (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** — an admission narrowing at three doors, shipped as `minor` under the launch-window convention for accept-set narrowings. The governing text is `docs/HARDENING.md` § CORS: never `'*'` with credentials, and an explicit origin list. It finishes what the `HonoServerPlugin` default change that `18.0.0` shipped (#24738) began.
+  
+  - **One rule.** `@objectstack/plugin-hono-server` exports `resolveCorsAdmission`, and both transport doors read it: `HonoServerPlugin` (the server `os serve`, `os dev` and `os start` mount) and `@objectstack/hono`'s `createHonoApp`. One configuration now gets one answer at both. That one rule shared by two published doors is why the public surface grows: `resolveCorsAdmission` with its types `CorsAdmission`, `CorsAdmissionInput` and `CorsAdmissionDoor`, `isAllHostOriginPattern`, `OriginMatcherOptions`, and an optional second parameter on `createOriginMatcher`.
+  - **`createHonoApp`, before.** With no origin list (no `cors.origin` option and no `OS_CORS_ORIGIN`), every origin was admitted for credentialed cross-origin requests, and a configured `'*'` with credentials on was accepted the same way. **Now** it answers as `HonoServerPlugin` does: no list admits no cross-origin caller (a loopback origin excepted, on a development boot), and `'*'` with credentials on is refused when the app is created.
+  - **`createHonoApp`'s `cors.origin` as one comma-separated string, before.** A `cors.origin` written as one comma-separated string of exact origins (`'https://a.example.com,https://b.example.com'`) admitted no origin. **Now** each listed origin is admitted, as `OS_CORS_ORIGIN` written the same way already was: a widening only toward what the operator listed, which the option's TSDoc already promised ("Comma-separated string or array").
+  - **Loopback beside a list, before.** A configured list also admitted every loopback origin (`localhost`, `127.0.0.1`, `[::1]`, any port), in every mode, at both doors that used the pattern matcher. **Now** that happens on a development boot only (`NODE_ENV` exactly `development`, read through `isDevelopmentBoot` from `@objectstack/core`). Elsewhere a list admits what it names; a list that names `http://localhost:*` still admits it. One door gains on a development boot: `createHonoApp` with a list of exact origins never admitted a loopback origin, and now does there, as `HonoServerPlugin` already did. `matchOriginPattern` now matches the pattern and nothing else, and `createOriginMatcher` takes an optional `{ developmentBoot }`, read from `NODE_ENV` when the matcher is created if it is not passed, so a consumer that applies the matcher outside the Hono pipeline answers as the doors do on the same boot.
+  - **All-host patterns, before.** Only a literal `'*'` was refused with credentials. **Now** a pattern whose host part is the bare `*` (`https://*`, `*://*`, `http://*:*`; `isAllHostOriginPattern`) is refused with credentials at both transport doors exactly as `'*'` is, and the message names the entry.
+  - **Auth's trusted origins, before.** `@objectstack/plugin-auth` tested the whole `OS_CORS_ORIGIN` value against `'*'` and then split it, so a `'*'` entry among real origins, or an all-host pattern, entered better-auth's trusted origins. **Now** each entry is judged on its own, and an entry that admits every host never enters the trusted set.
+  - **Unchanged.** Same-origin requests need no CORS answer. An exact origin or a pattern that names part of the host (`https://*.example.com`) is admitted as before, credentials included; the one exception is the comma-separated `cors.origin` string above, which now admits what it lists. `'*'` with credentials off is still served. `cors: false` and `OS_CORS_ENABLED=false` still disable the middleware. Headers, methods and max-age are unchanged. `OS_TRUSTED_ORIGINS` still admits nothing to CORS.
+  
+  **What an operator does.** A host composing `createHonoApp` for a cross-origin front-end names its origins, in `OS_CORS_ORIGIN` or the `cors.origin` option. A deployment that reached the server from a loopback origin outside development names that origin in its list. A list holding `'*'` or an all-host pattern while credentials are on either names its origins or sets `OS_CORS_CREDENTIALS=false`.
+
+### Patch Changes
+
+- Updated dependencies [94842ba]
+- Updated dependencies [0091d84]
+- Updated dependencies [02e6d73]
+- Updated dependencies [4cef6e2]
+- Updated dependencies [9cfc575]
+- Updated dependencies [a1e51d6]
+- Updated dependencies [fb7501b]
+- Updated dependencies [258f4e6]
+- Updated dependencies [882372d]
+- Updated dependencies [eee2f0d]
+- Updated dependencies [c898bd8]
+- Updated dependencies [2b7c331]
+- Updated dependencies [915e940]
+- Updated dependencies [35d942e]
+  - @objectstack/runtime@18.1.0
+  - @objectstack/plugin-hono-server@18.1.0
+  - @objectstack/types@18.1.0
+
 ## 18.0.0
 
 ### Minor Changes

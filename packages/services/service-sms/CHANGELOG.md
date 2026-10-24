@@ -1,5 +1,134 @@
 # @objectstack/service-sms
 
+## 18.1.0
+
+### Patch Changes
+
+- abd5acd: **Shipped in 18.0.0**, whose CHANGELOG missed this entry; listed here one release late.
+  
+  fix(plugin-email, service-sms): Setup's "Send test email" and "Send test SMS" send to the signed-in admin when the request names no recipient (#24767)
+  
+  Clause-②: no
+  
+  The Mail and SMS settings pages offer a Send test button and no recipient input, so the console's request carries no `to`. "Send test email" fell back to the From address — often a no-reply mailbox nobody reads — and with From empty it refused, asking for a "to" address the page has no field for. "Send test SMS" refused every press the same way.
+  
+  With no `to` in the request, the test now goes to the person who pressed the button: `mail/test` sends to the caller's own account email and `sms/test` to the caller's own phone number, each read from the caller's own `sys_user` row. A `to` in the request body still wins, as before. When the caller's account has no address or number, or the account cannot be read, the action refuses and says that nothing was sent. A phone number is on an account only where phone sign-in is enabled, so on other deployments "Send test SMS" still needs a `to` in the request body.
+  
+  `sms/test` no longer reports a send through the log-only transport (the namespace's default `None (log only)` provider) as a success. It answers `ok: false` with severity `warning`, as `mail/test` already does for its log transport. When the form names no delivering provider and the transport the deployment configured at boot carries the test, the success message names that transport instead of saying the message went "via log".
+  
+  **Unchanged.**
+  
+  - The request and result shapes of `POST /api/settings/mail/test` and `POST /api/settings/sms/test`: no key, route or setting is added.
+  - Which provider and credentials a test uses: the saved values overlaid with the form's unsaved edits, as before.
+  - Saving the Mail form still judges a required field only when the save writes it, or writes a key its visibility depends on.
+- 2b7c331: fix(service-sms, runtime): the Send test SMS refusals and the flow clone notice name the admin's controls instead of a REST recipe (#25345)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Two pieces of copy the console shows an admin told them to call the REST API.
+  
+  - **Send test SMS** (`sms/test`): when the test could not go to the signed-in admin's own number, the refusal said to pass "to" in the request body. The settings page has no recipient field, so that advice could not be followed from it. Each refusal now says that nothing was sent and what the admin can do on the page: press Send test SMS signed in as an admin whose account has a phone number, or retry once the account can be read. A `to` in the request still wins, as before. It is now documented only in the handler's TSDoc, for API callers.
+  - **Flow clone notice** (`FLOW_CLONE_NOTICE`, returned by `POST /api/v1/automation/:name/clone`): the notice told the admin to `PUT` the clone's complete definition with `status: 'obsolete'`, and named the toggle endpoint. It now names the two switches the console has. A packaged original is switched off with its Switch "…" off action on the Packaged automation page, and that switch does not reach the clone. The clone is switched off in Studio, with its Enabled switch and a publish. The REST recipe stays in the client SDK's `automation.toggle` TSDoc.
+  
+  No route, response shape, status or code changes: only the message text does. A caller that compared either string verbatim must update its copy.
+- Updated dependencies [448374d]
+- Updated dependencies [94842ba]
+- Updated dependencies [7cacad5]
+- Updated dependencies [df8bb40]
+- Updated dependencies [0091d84]
+- Updated dependencies [5e9b100]
+- Updated dependencies [7532ea3]
+- Updated dependencies [fde7456]
+- Updated dependencies [de9cd1f]
+- Updated dependencies [c2d4072]
+- Updated dependencies [78ab647]
+- Updated dependencies [fbb42d9]
+- Updated dependencies [950f949]
+- Updated dependencies [5872450]
+- Updated dependencies [925fd07]
+- Updated dependencies [ad8cf92]
+- Updated dependencies [e7befa7]
+- Updated dependencies [02e6d73]
+- Updated dependencies [55d7aab]
+- Updated dependencies [865d2c8]
+- Updated dependencies [2941a19]
+- Updated dependencies [abc25a3]
+- Updated dependencies [644e4b2]
+- Updated dependencies [0715fac]
+- Updated dependencies [60b42cd]
+- Updated dependencies [b9a79ef]
+- Updated dependencies [63085c3]
+- Updated dependencies [0b8bce4]
+- Updated dependencies [688052e]
+- Updated dependencies [2069b81]
+- Updated dependencies [1862d8d]
+- Updated dependencies [30d21f6]
+- Updated dependencies [eddffc3]
+- Updated dependencies [69712d5]
+- Updated dependencies [dfe60e3]
+- Updated dependencies [e939357]
+- Updated dependencies [045858f]
+- Updated dependencies [baedcec]
+- Updated dependencies [03c12a5]
+- Updated dependencies [386f60f]
+- Updated dependencies [28c9a2c]
+- Updated dependencies [4bf079c]
+- Updated dependencies [2354058]
+- Updated dependencies [edcc8ce]
+- Updated dependencies [e5f194b]
+- Updated dependencies [2aaee3b]
+- Updated dependencies [fccbd9d]
+- Updated dependencies [c8f4c43]
+- Updated dependencies [c6bdcac]
+- Updated dependencies [02ad31a]
+- Updated dependencies [03966ce]
+- Updated dependencies [425c743]
+- Updated dependencies [d609f60]
+- Updated dependencies [6b44efa]
+- Updated dependencies [e3aa111]
+- Updated dependencies [863c580]
+- Updated dependencies [7f5b19d]
+- Updated dependencies [14e7239]
+- Updated dependencies [fe0ec2b]
+- Updated dependencies [dfab597]
+- Updated dependencies [9127f23]
+- Updated dependencies [24360dc]
+- Updated dependencies [ecb4e69]
+- Updated dependencies [8dfd126]
+- Updated dependencies [bda53bb]
+- Updated dependencies [b964ea1]
+- Updated dependencies [9019af9]
+- Updated dependencies [45f9962]
+- Updated dependencies [e5eab06]
+- Updated dependencies [dc532e8]
+- Updated dependencies [d196748]
+- Updated dependencies [829cb77]
+- Updated dependencies [5f30f00]
+- Updated dependencies [09e07c2]
+- Updated dependencies [7db1697]
+- Updated dependencies [f5b6b3f]
+- Updated dependencies [f4112a7]
+- Updated dependencies [f4112a7]
+- Updated dependencies [db1c7cc]
+- Updated dependencies [303aef0]
+- Updated dependencies [b3034ee]
+- Updated dependencies [d12e650]
+- Updated dependencies [b3f3298]
+- Updated dependencies [830a63a]
+- Updated dependencies [1000cc7]
+- Updated dependencies [bdf762c]
+- Updated dependencies [27b3f1f]
+- Updated dependencies [3306cad]
+- Updated dependencies [431327b]
+- Updated dependencies [8a49e37]
+- Updated dependencies [7c68b10]
+- Updated dependencies [025f6de]
+- Updated dependencies [6abee03]
+  - @objectstack/spec@18.1.0
+  - @objectstack/core@18.1.0
+  - @objectstack/plugin-auth@18.1.0
+
 ## 18.0.0
 
 ### Minor Changes

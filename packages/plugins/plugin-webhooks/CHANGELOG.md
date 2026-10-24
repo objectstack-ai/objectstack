@@ -1,5 +1,148 @@
 # @objectstack/plugin-webhooks
 
+## 18.1.0
+
+### Patch Changes
+
+- 0091d84: fix: no shipped text says the SQL driver reads organization-less rows, and the in-memory HTTP outbox no longer does
+  
+  Clause-②: no (one fix and texts: the in-memory HTTP outbox's `redeliver()` now answers as `SqlHttpOutbox` already did; no accept set, served body or error code of a shipped composition moves)
+  
+  ADR-0131 D8 retired the driver's `OR organization_id IS NULL` arm. Several shipped texts still described it as the live tenant predicate. They now state the current rule: the tenant term is `organization_id = :tenant`, or `IN (:tenants)` under the `group` posture, and nothing else. No tenant-scoped read reaches an organization-less row on a tenant table.
+  
+  - **`@objectstack/service-messaging` — fix.** `MemoryHttpOutbox.redeliver()` no longer lets a tenant-scoped caller replay a row with no organization. It answers `RESOURCE_NOT_FOUND`, as `SqlHttpOutbox` does through the driver's tenant scope (ADR-0131 D8: no layer has a NULL arm). A caller with no tenant is still unscoped. No shipped composition constructs the in-memory outbox; the messaging plugin always builds `SqlHttpOutbox`. Code that embeds `MemoryHttpOutbox` directly sees the change.
+  - **`@objectstack/service-automation`.** The `[http]` node's warning for a durable callout with no organization no longer says the `sys_http_delivery` row is "a global row every organization's redeliver door can reach". It now says no organization's redeliver door reaches that row.
+  - **`@objectstack/objectql`.** The `sys_record_share` entry of the platform-object tenancy inventory carries an updated `evidence` text.
+  - **`@objectstack/lint`.** `os explain unique/legacy-organization-composite` now says that a new row carries its organization wherever the organization object is registered. A composition that registers no organization object still writes rows whose organization column is NULL.
+  - **`@objectstack/spec`.** The TSDoc of `SharingRuleRow` no longer calls it a 1-to-1 stored shape: `deploymentWide` has no `sys_sharing_rule` column. The TSDoc of `DriverOptions.tenantIds` and of the events `organizationId` member describe the predicate without a NULL arm.
+  - **The other packages.** Code comments only.
+- 3fbef41: fix(plugin-webhooks): a webhook delivery the outbox could not record is now reported at `error`, once per webhook, with what was lost and how to fix it
+  
+  Clause-②: no
+  
+  - **What was wrong.** When the `sys_http_delivery` write for a webhook event failed, the auto-enqueuer logged one bare `WARN [webhook-auto-enqueuer] enqueue failed` line per event. The event was lost: it is never sent, retried or redeliverable, because no row exists. The record write that produced the event had already answered 200, and the webhook still read active in Setup, so nothing else looked wrong. On PostgreSQL every record-update delivery was lost this way.
+  - **What changed.** The first lost delivery for a webhook is logged at `error`. The line names the webhook, says the event is lost and why nothing else shows it, and says where the cause is (the record's meta) and what to restore. Later lost events for the same webhook are logged at `debug`, each with its `eventId`. The `error` is said again only after a delivery for that webhook was recorded in between. A logger without `error` still receives the line at `warn`. Bulk (`data.records.*`) deliveries are reported the same way.
+  - **Unchanged.** Successful deliveries, the delivery rows, the parked-subscription path and every export. This change does not fix the PostgreSQL loss itself: that cause is upstream of the webhook plugin and is fixed separately.
+- 19e5338: fix(plugin-webhooks): a declared webhook that the deployment can never deliver is reported once at boot, at `error`, with the consequence and the fix
+  
+  Clause-②: no
+  
+  The webhook auto-enqueuer reads record events only from the realtime service. A stack with `requires: ['webhooks']` and no `'realtime'` therefore never delivers a declared webhook.
+  
+  - **Before.**
+    - The boot logged one `WARN [webhook-auto-enqueuer] disabled — ObjectQL, Realtime, or Messaging service not available`. The line named no webhook, gave no consequence and gave no fix.
+    - Every record write still answered 200, the declaration still read active, and no delivery row was ever written.
+  - **After.** When the stack declares at least one webhook, the boot logs one `error` line instead of the warning. The line names each declared webhook and says none of them will be delivered while record writes keep succeeding. It names the missing service and the fix, for example "add 'realtime' to `requires`". A stack that declares no webhook gets the same `warn` as before.
+  - **Unchanged.**
+    - Every deployment whose auto-enqueuer runs.
+    - A host that constructs `WebhookOutboxPlugin` with `autoEnqueue: false` gets no new log line. It turned the enqueuer off itself.
+    - `os validate` and `os build`: they still accept a stack that declares webhooks without these tokens.
+    - The activation door (`POST /api/v1/security/_activation/webhook/NAME`): it answers exactly as before.
+  - **What to do.** A stack that declares webhooks needs `requires` to include both `'webhooks'` and `'realtime'`.
+- Updated dependencies [448374d]
+- Updated dependencies [94842ba]
+- Updated dependencies [7cacad5]
+- Updated dependencies [df8bb40]
+- Updated dependencies [0091d84]
+- Updated dependencies [5e9b100]
+- Updated dependencies [7532ea3]
+- Updated dependencies [fde7456]
+- Updated dependencies [de9cd1f]
+- Updated dependencies [7035682]
+- Updated dependencies [d606fc1]
+- Updated dependencies [a8b44d4]
+- Updated dependencies [78ab647]
+- Updated dependencies [73a2b52]
+- Updated dependencies [5872450]
+- Updated dependencies [9ea5afe]
+- Updated dependencies [925fd07]
+- Updated dependencies [e7befa7]
+- Updated dependencies [55d7aab]
+- Updated dependencies [865d2c8]
+- Updated dependencies [e282f32]
+- Updated dependencies [644e4b2]
+- Updated dependencies [0715fac]
+- Updated dependencies [60b42cd]
+- Updated dependencies [b9a79ef]
+- Updated dependencies [63085c3]
+- Updated dependencies [0603bfa]
+- Updated dependencies [0b8bce4]
+- Updated dependencies [5d2c5a1]
+- Updated dependencies [066dabc]
+- Updated dependencies [4b8f597]
+- Updated dependencies [2069b81]
+- Updated dependencies [1862d8d]
+- Updated dependencies [30d21f6]
+- Updated dependencies [eddffc3]
+- Updated dependencies [58cd58f]
+- Updated dependencies [69712d5]
+- Updated dependencies [dfe60e3]
+- Updated dependencies [d68aab6]
+- Updated dependencies [e939357]
+- Updated dependencies [045858f]
+- Updated dependencies [baedcec]
+- Updated dependencies [03c12a5]
+- Updated dependencies [386f60f]
+- Updated dependencies [c24203f]
+- Updated dependencies [28c9a2c]
+- Updated dependencies [2354058]
+- Updated dependencies [ba244f1]
+- Updated dependencies [edcc8ce]
+- Updated dependencies [a39389e]
+- Updated dependencies [fccbd9d]
+- Updated dependencies [c8f4c43]
+- Updated dependencies [284e048]
+- Updated dependencies [02ad31a]
+- Updated dependencies [03966ce]
+- Updated dependencies [e3aa111]
+- Updated dependencies [863c580]
+- Updated dependencies [7f5b19d]
+- Updated dependencies [14e7239]
+- Updated dependencies [fe0ec2b]
+- Updated dependencies [dfab597]
+- Updated dependencies [9127f23]
+- Updated dependencies [1f78b64]
+- Updated dependencies [bc5daf0]
+- Updated dependencies [24360dc]
+- Updated dependencies [ecb4e69]
+- Updated dependencies [8dfd126]
+- Updated dependencies [bda53bb]
+- Updated dependencies [b964ea1]
+- Updated dependencies [9019af9]
+- Updated dependencies [45f9962]
+- Updated dependencies [e5eab06]
+- Updated dependencies [dc532e8]
+- Updated dependencies [d196748]
+- Updated dependencies [5f30f00]
+- Updated dependencies [7db1697]
+- Updated dependencies [f5b6b3f]
+- Updated dependencies [c109bfc]
+- Updated dependencies [f4112a7]
+- Updated dependencies [f4112a7]
+- Updated dependencies [db1c7cc]
+- Updated dependencies [303aef0]
+- Updated dependencies [b3034ee]
+- Updated dependencies [d12e650]
+- Updated dependencies [830a63a]
+- Updated dependencies [1000cc7]
+- Updated dependencies [ee63b47]
+- Updated dependencies [bdf762c]
+- Updated dependencies [27b3f1f]
+- Updated dependencies [3306cad]
+- Updated dependencies [c898bd8]
+- Updated dependencies [97aa34e]
+- Updated dependencies [8878c36]
+- Updated dependencies [832a84e]
+- Updated dependencies [7c68b10]
+- Updated dependencies [915e940]
+- Updated dependencies [025f6de]
+- Updated dependencies [f7d7403]
+  - @objectstack/spec@18.1.0
+  - @objectstack/core@18.1.0
+  - @objectstack/service-messaging@18.1.0
+  - @objectstack/platform-objects@18.1.0
+  - @objectstack/types@18.1.0
+
 ## 18.0.0
 
 ### Minor Changes

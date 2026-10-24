@@ -1,5 +1,85 @@
 # @objectstack/types
 
+## 18.1.0
+
+### Patch Changes
+
+- 915e940: feat: under a walled posture, `OS_PLATFORM_OWNER_ORGANIZATION` raises the access upgrade report in-app in the platform operators' own organization, beside the operator log line
+  
+  Clause-②: yes (widening: a new optional environment variable, `PLATFORM_OWNER_ORGANIZATION_ENV` and `resolvePlatformOwnerOrganization()` exported from `@objectstack/types`; unset, every posture behaves as before)
+  Metadata-protocol: none
+  
+  Under `group` and `isolated` the boot access upgrade report reached the operator only as one `error` line in the server log. The notification family is organization-owned, a walled system write that names no organization is refused (ADR-0131 D9), and the operator belongs to no organization by default.
+  
+  - **New setting:** `OS_PLATFORM_OWNER_ORGANIZATION`, the id or slug of the operators' own organization, beside `OS_PLATFORM_OWNER_EMAIL`. It is read only under a walled posture.
+  - **What it does:** with it set, the report emits the same `security.access_upgrade` notification, with the same `dedupKey` per finding set, stamped with that organization and addressed to the `OS_PLATFORM_OWNER_EMAIL` operators. It lands in that organization's Notification Events and the operators' inbox, and in no other organization. The operator line stays beside it.
+  - **Use a dedicated organization that holds the operators only.** Every administrator of it can read the notification in Setup, and the findings can name other organizations' ids and rule names. Boot logs a `warn` for a configured operator who is not a verified member of it. It logs another `warn` for an administrator of it who is not a configured operator: an `owner` or `admin` member, or an `admin_full_access` or organization-admin grant scoped to it.
+  - **A value naming no organization** logs one `error` naming the value and the fix, and raises nothing in-app. It never falls back to another organization.
+  - **Unchanged:** unset, the operator line is the only channel, worded as before. Under `single` the setting is ignored, and the Default Organization's administrators are told as before.
+  
+  The walled and `single` delivery now lives in one helper, `upgrade-report-delivery.ts`, so the non-access upgrade report (#24447) can raise its findings the same way.
+- Updated dependencies [448374d]
+- Updated dependencies [7cacad5]
+- Updated dependencies [df8bb40]
+- Updated dependencies [0091d84]
+- Updated dependencies [5e9b100]
+- Updated dependencies [7532ea3]
+- Updated dependencies [fde7456]
+- Updated dependencies [de9cd1f]
+- Updated dependencies [925fd07]
+- Updated dependencies [e7befa7]
+- Updated dependencies [55d7aab]
+- Updated dependencies [0715fac]
+- Updated dependencies [60b42cd]
+- Updated dependencies [b9a79ef]
+- Updated dependencies [63085c3]
+- Updated dependencies [0b8bce4]
+- Updated dependencies [2069b81]
+- Updated dependencies [1862d8d]
+- Updated dependencies [30d21f6]
+- Updated dependencies [eddffc3]
+- Updated dependencies [69712d5]
+- Updated dependencies [e939357]
+- Updated dependencies [045858f]
+- Updated dependencies [baedcec]
+- Updated dependencies [03c12a5]
+- Updated dependencies [386f60f]
+- Updated dependencies [28c9a2c]
+- Updated dependencies [2354058]
+- Updated dependencies [edcc8ce]
+- Updated dependencies [fccbd9d]
+- Updated dependencies [c8f4c43]
+- Updated dependencies [02ad31a]
+- Updated dependencies [03966ce]
+- Updated dependencies [e3aa111]
+- Updated dependencies [863c580]
+- Updated dependencies [7f5b19d]
+- Updated dependencies [14e7239]
+- Updated dependencies [fe0ec2b]
+- Updated dependencies [dfab597]
+- Updated dependencies [9127f23]
+- Updated dependencies [24360dc]
+- Updated dependencies [ecb4e69]
+- Updated dependencies [bda53bb]
+- Updated dependencies [b964ea1]
+- Updated dependencies [9019af9]
+- Updated dependencies [45f9962]
+- Updated dependencies [e5eab06]
+- Updated dependencies [dc532e8]
+- Updated dependencies [5f30f00]
+- Updated dependencies [7db1697]
+- Updated dependencies [f5b6b3f]
+- Updated dependencies [f4112a7]
+- Updated dependencies [303aef0]
+- Updated dependencies [d12e650]
+- Updated dependencies [830a63a]
+- Updated dependencies [1000cc7]
+- Updated dependencies [bdf762c]
+- Updated dependencies [27b3f1f]
+- Updated dependencies [7c68b10]
+- Updated dependencies [025f6de]
+  - @objectstack/spec@18.1.0
+
 ## 18.0.0
 
 ### Minor Changes

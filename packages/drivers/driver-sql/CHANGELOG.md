@@ -1,5 +1,290 @@
 # @objectstack/driver-sql
 
+## 18.1.0
+
+### Minor Changes
+
+- df8bb40: **Shipped in 18.0.0**, whose CHANGELOG missed this entry; listed here one release late.
+  
+  feat!: an organization-less row on a tenant table no longer draws its autonumber from the `__global__` counter, and a production server boot with no auth secret is refused
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (runtime-export-retired @objectstack/objectql#GLOBAL_TENANT) The one author-reachable removal is a runtime export: the string constant `GLOBAL_TENANT` leaves `@objectstack/objectql`'s published entry. No key of any metadata schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone; the two run-time narrowings (the driver's counter, `os serve`'s boot) carry their own remedy below. -->
+  
+  **BREAKING** accept-set narrowing, shipped as `minor` under the repo's launch-window convention for breaking changes (ADR-0131 D9, stage 8d).
+  
+  - **`os serve`: a production server boot whose auth did not compose for a missing secret is refused.** With the `auth` tier on and no `OS_AUTH_SECRET` (outside `--dev`), `serve` used to skip AuthPlugin with a warning and serve anyway. That boot had no security model: anonymous object data is always denied, so its data API was unusable. It also had no organization object, so its inline seed wrote rows with `organization_id` NULL and drew their autonumbers from the `__global__` counter. Measured on `examples/app-showcase` before this change: health 200, two NULL-organization rows and a `__global__` counter row on a fresh install. The boot now stops before the kernel starts, so nothing is written, and the message names both fixes. A kernel-only boot (`--no-server`) is refused the same way: it runs the same seed, so it would write the same ownerless rows. Unchanged: a development boot still uses its fallback secret, and the cloud host kernel (`ObjectOSEnvironmentPlugin`, where auth is each project's) still only warns. `os start` never reaches the refusal: it always supplies a secret to the `serve` child it spawns.
+  - **`@objectstack/driver-sql` (and `@objectstack/driver-turso`'s remote face, which calls the same rule): the counter refuses an organization-less row on a tenant table.** Wherever the driver registered the organization object (`sys_organization`), a `create` / `bulkCreate` / `upsert` on an object with a tenant column, whose row carries no organization and whose options carry no `tenantId`, is refused with `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` (status 500), the code the engine already answers for the same write. It is refused before any counter row is read or written, and nothing is written. New exports: `OrganizationlessCounterRefusal`, `ORGANIZATIONLESS_COUNTER_REFUSAL_CODE`, `ORGANIZATIONLESS_COUNTER_REFUSAL_STATUS`, `renderOrganizationlessCounterRefusal`. Unchanged: `__global__` stays the counter key of an object with no tenant column, and of a composition that registers no organization object on the driver (a lean `@objectstack/objectql/core` embedding), where no organization can exist. Counter rows a 17.x install filed under `__global__` for a tenant table stay in `_objectstack_sequences`; the counter no longer reads them, and `os migrate duplicates` still reports them.
+  - **`@objectstack/objectql`: `GLOBAL_TENANT` is no longer exported**, and `SystemWriteOrganizationRequiredError`'s message no longer describes the `__global__` counter as where the write would land. The code, status and fields are unchanged.
+  - **Texts.** The lint explanation of `unique/legacy-organization-composite`, the `UniqueScopeSchema` TSDoc and the error-code ledger now say that a NULL-organization row is residue an earlier release wrote, not something a new write produces.
+  
+  **The remedy.**
+  - A production boot refused for the missing secret: set `OS_AUTH_SECRET` (a long random value, identical across restarts and nodes), or compose auth by other means (mount `AuthPlugin` in `plugins`). Running kernel-only with `--no-server` does not avoid the refusal.
+  - A direct driver write refused by the counter: carry the organization — `driver.create(object, { ...row, organization_id: orgId })` or `driver.create(object, row, { tenantId: orgId })` — or write through the engine, which derives it under `single`.
+  
+  The retired export:
+  
+  - FROM `GLOBAL_TENANT` TO `GLOBAL_TENANT` imported from `@objectstack/driver-sql`, where the counter and the index emitters keep it (or the literal `'__global__'`).
+- d5d8146: feat(driver-sql,driver-turso,driver-memory,objectql,metadata-protocol,cli): an organization-scoped unique index keys the plain organization column, and an index an earlier release built with `COALESCE(organization_id, '__global__')` is read as the same index on a certified database
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  18.x step 7b-1 + 7b-2 (ADR-0131 D1: the tenant column is NOT NULL, so the NULL-organization bucket of ADR-0120 D3 has no rows left to hold).
+  
+  - **New DDL is plain.** A field-level `unique: true` / `'organization'` on a tenant-scoped object, and a declared index with `unique: 'organization'`, now build `UNIQUE (organization_id, …)` instead of `UNIQUE (COALESCE(organization_id, '__global__'), …)`. Index names do not change. The same holds for the Turso remote face, the MySQL hash shadow (its generated column now hashes the plain column), the in-memory driver's unique enforcement, `os generate migration` (which now emits the organization composite it used to list as NOT EMITTED), and the `sys_setting` row-identity index (`COALESCE(user_id, '')` stays).
+  - **Existing indexes stay as they are.** Nothing is renamed, and no declared organization composite is dropped or rebuilt by the boot, `os migrate plan` or `os migrate apply`; on SQLite the ownership ceremony's NOT NULL step rebuilds the tables it tightens, and their composites come back plain, enforcing the same constraint. One index is re-keyed: the `sys_setting` row-identity index, which the metadata protocol rebuilds on every boot, keys the plain `organization_id` from the next boot on (probe-first; a pure relaxation, so it cannot fail on existing rows). The schema differ reads `COALESCE(<tenant>, …)` and the plain tenant column as one key part, in both directions, where the column is physically `NOT NULL` or the database is certified (its organization-ownership birth marker, or the ownership ceremony's marker at the current shape generation). So `os migrate plan` and the boot report no `recreate_index` for those indexes. On an uncertified database with a nullable tenant column the two forms stay different constraints: the finding is reported, and it names `os migrate organization-ownership` as its remedy.
+  - **What widens.** Where a tenant column is still nullable (every table of a database 18.0.0 created, an uncertified 17.x / 18.0 database, a rotation shard, a Turso remote table, a table the ceremony reported), a unique index created from now on does not constrain rows whose organization is NULL, exactly like a NULL in any other key part; in the in-memory driver a record with no organization is exempt from an organization-scoped unique. The unique duplicate pre-flight no longer reports groups of rows with a NULL key part, since the index never refuses them.
+  - **Who sees it.** A fresh install and every ceremonied table whose tenant column is NOT NULL see nothing. A database 18.0.0 created from empty is certified by its birth marker yet keeps nullable tenant columns: its existing indexes are kept unchanged, and a new organization unique declared on one of its tables constrains only rows that carry an organization.
+- 74fcec1: fix(driver-sql)!: on PostgreSQL, `introspectSchema` reads each table's columns in the table's own schema, and refuses a `search_path` that reaches one table name in two schemas instead of silently dropping one
+  
+  `introspectSchema` lists the base tables of every schema in `current_schemas(false)` and keys the answer by bare table name. Two things went wrong when a connection's `search_path` named more than one schema (`ALTER DATABASE … SET search_path = public, sales`). First, each table's columns came from knex `columnInfo()` on the bare name, which reads only the first schema on the path, so a table that lives only in a later schema (`sales.orders`) was listed with no columns. `listRemoteTables` answered it `columnCount: 0`, and a draft built from it had no fields. Second, a same-named table in a later schema (`sales.customers` behind `public.customers`) was dropped without a word, because one key cannot hold two tables. The PostgreSQL branch now reads every table's columns in its own schema. When one bare name is reached in more than one schema, it refuses the whole introspection with `RESOURCE_CONFLICT` / `409`, naming each colliding table with its schemas in `search_path` order. A connection that reaches one schema, the default `public` deployment included, answers exactly what it answered before. The SQLite and MySQL branches are unchanged.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is the answer the SQL driver's PostgreSQL introspection gives for a connection whose search_path reaches more than one schema: a table in a later schema now carries its own columns, and a table name reached in two schemas is refused rather than answered with one of the two tables. The remedy is connection configuration (one schema per connection) or a rename on the remote database, never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (introspection's accept set narrows on PostgreSQL), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  - **FROM:** a PostgreSQL connection whose `search_path` reached a table name in two schemas got a successful `introspectSchema()` answer holding one of the two tables (the one in the earliest schema on the path), and so did every caller built on it: `listRemoteTables`, object drafting, catalog refresh and the external datasource's connection test.
+  - **TO:** the same call throws `RESOURCE_CONFLICT` (`status: 409`), naming each colliding table and its schemas, for example `'customers' ('public', 'sales')`. Those callers surface that error.
+  - **Also changed (a wrong answer made right, no accept set moved):** a table that lives only in a later schema on the path now reports its own columns where it reported none.
+  - **Unchanged:** a connection that reaches one schema, the default `public` deployment included. One schema cannot hold two same-named tables, so it is never refused, and its answer is byte-identical to before.
+  - **Fix:** point the connection at one schema (the datasource's `schema` setting sets its `search_path`), or rename one of the two tables on the remote database.
+- 7f99616: fix(driver-sql): a SQLite file whose bytes are not a SQLite database fails `connect()` at once, naming the file, and a development boot no longer moves it aside and replaces it with an empty database (#24960)
+  
+  `SqlDriver.connect()` runs `PRAGMA auto_vacuum` as the connection's first statement. On a file that is not a SQLite database (plain text, another format, a file encrypted by another engine) SQLite answers `SQLITE_NOTADB`, which `connect()` logged as "Failed to set PRAGMA auto_vacuum=INCREMENTAL" and swallowed. It resolved over a file it could not read. In production the first query failed later. On a development boot, `resolveSqliteDriver` (`@objectstack/service-datasource`) answered the failed probe by stepping down to wasm SQLite, whose open renamed the file to `<file>.corrupt-<timestamp>`, wrote an empty database in its place and read `connected`, under a warning that blamed the native addon.
+  
+  `connect()` now refuses such a file with a `SqliteDatabaseFileError` (`code: 'SQLITE_NOTADB'`, `filename`, a message naming the file), as it already did for `SQLITE_CANTOPEN`, in every mode and before anything is written. A declared datasource's boot prints `datasource '<name>': connect failed — <reason>`. `resolveSqliteDriver` classifies `SQLITE_NOTADB` as a file failure and re-throws it instead of stepping down, so the operator's file is left exactly as it was found. A real database file, an empty file and an absent file connect as before, and a native addon that cannot load still steps down to wasm SQLite.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed (`SqliteDatabaseFileError` keeps its shape; only the set of codes it is raised with grows by one), so there is nothing for `objectstack migrate meta` to rewrite. What changes is the answer `SqlDriver.connect()` gives for a SQLite file that is not a database: a rejection where it resolved. The remedy is the datasource's file, never a rewrite of a package source or a stored row. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (`SqlDriver.connect()`'s accept set narrows): a connect that resolved over a SQLite file that is not a database now rejects. It ships as `minor` under the launch-window convention for accept-set narrowings: during the launch window a breaking change does not take `major`, so the level does not say it breaks, and breaking-ness is carried by this banner and the disposition above.
+  
+  - **Before:** `connect()` resolved; in production the first query failed with `DATABASE_ERROR`, and on a development boot the file was renamed to `<file>.corrupt-<timestamp>` and an empty database was written in its place.
+  - **Now:** `connect()` rejects with `SqliteDatabaseFileError`, `code: 'SQLITE_NOTADB'`, naming the file; the file is untouched.
+  - **Fix:** point the datasource at a SQLite database file, or move the file aside yourself (an absent file is created empty on the next connect).
+- 4d99158: fix(driver-sql): a read-only boot refuses a SQLite datasource whose file can be neither opened nor created, instead of opening an empty in-memory database over it and reporting it connected
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is the answer `resolveSqliteAbsentFileTarget` gives under `sqliteAbsentFile: 'empty-in-memory'` for a SQLite path that cannot exist: it throws the driver's `SqliteDatabaseFileError` where it answered `:memory:`. The remedy is the datasource's `filename`, never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  `sqliteAbsentFile: 'empty-in-memory'` is the open mode a read-only boot uses (`os migrate plan`, and the dry runs that boot read-only): an absent SQLite file is opened as an empty in-memory database, so nothing is created on disk. Its judgement of "absent" was `existsSync(path) === false`, which is also the answer for a path that cannot exist: a path under a regular file (`ENOTDIR`), a directory the process may not search (`EACCES`). So `os migrate plan` printed `datasource '<name>': connected` for a declared datasource on such a path and planned `create_table` into it, while the boot that writes refused the same path.
+  
+  **BREAKING** (the read-only boot's accept set narrows), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  - **FROM:** under `'empty-in-memory'`, a SQLite path that can be neither opened nor created read as absent. The driver opened `:memory:`, and the datasource's connect succeeded.
+  - **TO:** `resolveSqliteAbsentFileTarget`, and so the `SqlDriver` constructor, throws `SqliteDatabaseFileError` naming the file and the operating system's answer: `ENOTDIR` (a path under a regular file), `EACCES` (a directory the process may not write or search), `EROFS` (a read-only mount), or `ENOENT` (a directory whose name a dangling symbolic link holds). The datasource's connect fails with it, as the boot that writes already failed, so `os migrate plan` reports the datasource failed instead of planning into it. The judgement still writes nothing: no directory and no file is created to find out.
+  - **Unchanged:** an absent file in a directory that exists, or that could be made, still opens as an empty in-memory database and leaves the disk untouched. An existing file opens as before. The default mode (`'create'`) is untouched, and so is every server dialect: the option is now applied to SQLite clients only, as documented (a `pg` driver given it with a connection string used to have that string rewritten to `:memory:`).
+  - **Fix:** if a read-only boot now refuses a SQLite datasource, correct its `filename`: the refusal names the path and the reason.
+- d6a5fa3: fix(driver-sql): a SQLite database whose header SQLite cannot read fails `connect()` at once, naming the file, and a dangling symbolic link as the database's directory is refused on the boot that writes, as the read-only boot already refused it (#25019)
+  
+  Three more SQLite files a declared datasource cannot use, each now classified by the file's own driver at connect:
+  
+  - **A database whose header or schema SQLite cannot read** (a file truncated inside its 100-byte header, or short of the pages its schema names). The connection's first statement, `PRAGMA auto_vacuum`, answers `SQLITE_CORRUPT`; `SqlDriver.connect()` logged it as "Failed to set PRAGMA auto_vacuum=INCREMENTAL" and resolved over a file no statement could read. On a development boot, `resolveSqliteDriver` (`@objectstack/service-datasource`) then stepped down to wasm SQLite, whose open renamed the file to `<file>.corrupt-<timestamp>` and wrote an empty database in its place, under a warning that blamed the native addon. `connect()` now refuses it with a `SqliteDatabaseFileError` (`code: 'SQLITE_CORRUPT'`, `filename`, a message naming the file) in every mode, before anything is written, and `resolveSqliteDriver` re-throws it instead of stepping down. A database damaged deeper inside still connects: its first statement answers, and the damage surfaces on the read that reaches it, as before.
+  - **A dangling symbolic link as the database's directory, on the boot that writes.** `connect()` took `mkdir`'s `EEXIST` on the link for a concurrent creator and resolved; the first statement then failed with a code-less "directory does not exist", and a development boot stepped down to wasm SQLite under the same false native-addon warning. `connect()` now refuses it with `SqliteDatabaseFileError` (`code: 'ENOENT'`), naming the file and the link, which is the error the read-only boot (`sqliteAbsentFile: 'empty-in-memory'`) gives for the same path.
+  - **A dangling symbolic link as the database file itself, on the read-only boot.** When the directory its chain of links ends in does not exist, the read-only boot read the file absent and reported the datasource connected, while the boot that writes refuses the same path with `SQLITE_CANTOPEN`. The read-only boot now refuses it too (`code: 'ENOENT'`), naming the link's target. When that directory exists, both boots behave as before: the read-only boot opens an empty in-memory database, and the boot that writes creates the file through the link.
+  
+  A real database file, an absent file in a directory that exists or can be made, and a native addon that cannot load over a real database keep today's behaviour.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed (`SqliteDatabaseFileError` keeps its shape; only the set of codes and paths it is raised for grows), so there is nothing for `objectstack migrate meta` to rewrite. What changes is the answer `SqlDriver.connect()` and the read-only judgement give for three SQLite files a datasource cannot use: a rejection where each resolved. The remedy is the datasource's file or its path, never a rewrite of a package source or a stored row. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (`SqlDriver.connect()`'s accept set and the read-only boot's narrow): a connect that resolved over a SQLite database whose header SQLite cannot read, or over a path whose directory is a dangling symbolic link, now rejects; a read-only boot that read a dangling file link absent although its target's directory does not exist now rejects. It ships as `minor` under the launch-window convention for accept-set narrowings: during the launch window a breaking change does not take `major`, so the level does not say it breaks, and breaking-ness is carried by this banner and the disposition above.
+  
+  - **Before:** `connect()` resolved; in production the first query failed with `DATABASE_ERROR`, and on a development boot a damaged file was renamed to `<file>.corrupt-<timestamp>` and replaced with an empty database, and a dangling-link directory stepped down to wasm SQLite under a warning that blamed the native addon. The read-only boot reported a dangling file link connected.
+  - **Now:** `connect()` rejects with `SqliteDatabaseFileError`, `code: 'SQLITE_CORRUPT'` for the damaged file and `code: 'ENOENT'` for the dangling-link directory, naming the file (and the link); the read-only boot rejects the dangling file link with `code: 'ENOENT'`, naming its target. The file is untouched.
+  - **Fix:** restore the database from a backup, or move the damaged file aside yourself (an absent file is created empty on the next connect); point the dangling link at a directory that exists, or point the datasource at a real path.
+
+### Patch Changes
+
+- 5e9b100: feat(driver-sql,driver-turso)!: a table the driver creates carries its tenant column NOT NULL, so a write that names no organization is refused at the database
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A storage constraint at CREATE TABLE: no key of any metadata schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. No export, type or error code is removed or renamed; `TENANT_SCOPE_FIELD_DEF` keeps its shape and only its description text is corrected. The remedy is a run-time one, stated below. -->
+  
+  **BREAKING** accept-set narrowing at the database (ADR-0131 D1: "There is no nullable tenant column anywhere"). It changes what a data writer can store, not what a metadata author can write, so it ships as `patch` with this banner.
+  
+  - **Before.** The SQL driver created a table's tenant column (`organization_id`, or a declared `tenancy.tenantField`) nullable, as the injected field's declaration says (`required: false`, no `storage`). A write that reached the driver without an organization landed a row no organization owns.
+  - **Now.** Every table the driver CREATES takes its tenant column `NOT NULL`, with no metadata change: the plain managed table (`initObjects`), every newly rotated shard (asked of the base table's declaration), and a table the Turso remote face creates (`syncSchema`, `syncSchemasBatch`, `initObjects`). A write with no organization on such a table is refused by the database (`NOT NULL constraint failed: <table>.organization_id`, `violates not-null constraint`, or `cannot be null`). That includes an `upsert` whose payload omits the organization: the database checks the proposed row before it resolves the conflict.
+  - **Unchanged.** A tenant column ADDED to a table that already exists stays nullable, and so does an existing shard or an existing remote table: a table that already holds rows is the organization-ownership ceremony's to tighten (`os migrate organization-ownership`), which reports a shard and the Turso remote face as unable to. The schema differ reports no drift over the tenant column's nullability either way. On a database that has not taken the ceremony, a table this release creates (a newly rotated shard, or a cold table a newly configured lifecycle tier creates) is NOT NULL beside nullable siblings: an organization-less row the lifecycle mover would carry into it is refused there, and stays where it is until the ceremony attributes it. An object with no tenant column (`tenancy: { enabled: false }`, `systemFields: { tenant: false }`) is untouched, even when it carries a field named `organization_id`.
+  - **Who sees it.** A composed `os serve` / `os dev` / `os start` with auth stamps every write with its organization, so nothing changes there. A production `os serve` whose `AuthPlugin` did not compose (no `OS_AUTH_SECRET`) and a lean embedding (`@objectstack/objectql/core` or `createStandaloneStack` over a SQL driver, with no organization object) used to write those rows with a NULL organization; now each such write fails, loudly.
+  
+  **The remedy.** Carry the organization on the write: `ql.insert(object, { ...row, organization_id: orgId })`, or `{ context: { tenantId: orgId } }`. Compose authentication (set `OS_AUTH_SECRET`) so the platform derives it. If the object's rows legitimately belong to no organization, declare it so and it has no tenant column: `systemFields: { tenant: false }` or `tenancy: { enabled: false }`.
+- eee65af: fix(driver-sql): `update()` no longer writes its `updated_at` stamp into the caller's `data`, so webhook deliveries for record updates are stored again on PostgreSQL and MySQL
+  
+  Clause-②: no
+  
+  - **What was lost.** On PostgreSQL and MySQL, every webhook delivery for a record update was lost. `SqlDriver.update()` assigned its `updated_at` stamp onto the patch object the caller passed in. ObjectQL publishes that same object as the update event's `changes`. On those two dialects the stamp is a knex `Raw` (`CURRENT_TIMESTAMP`) that holds the database client, its pool and a timer. The webhook outbox could not serialise the event (`Converting circular structure to JSON`), so no `sys_http_delivery` row was written. The record write still answered 200, and the webhook still read active. Every other reader of the update event's `changes`, and of the patch after the driver call, saw the same `Raw`. On SQLite the stamp is an ISO string, so the delivery was stored, but the caller's patch and the event's `changes` still carried an `updated_at` the caller never wrote.
+  - **What changed.** `update()`, including its rotated-table path, stamps `updated_at` into a fresh object, as `updateMany()` already did. The caller's `data` is left exactly as it was passed.
+  - **Unchanged.** The stored `updated_at` value on every dialect, `preserveAudit` imports, tables without an `updated_at` column, `upsert()` (it already stamps a copy of its input), and every export and option.
+- 5d66021: fix(driver-sql): on a database the organization-ownership ceremony has not certified, the boot's drift line for an orphaned `organization_id` column names the ceremony instead of `os migrate apply --allow-destructive`
+  
+  Clause-②: no (operator log line text only)
+  Metadata-protocol: none
+  
+  A 17.x database booted on 18.x printed one `[schema-drift]` line per `organization_id` column ending `— "os migrate apply --allow-destructive" to drop it.`, during `os serve` and `os migrate apply --yes`. That command is refused on such a database: the drop is the ceremony's (ADR-0131 D10 item 5). The boot now asks the driver's own reader, `isTenantKeyCertified()`, once per table that has such a drop. When the answer is "not certified", the line keeps the finding and replaces that sentence with `— a drop the organization-ownership ceremony owns, and it has not verified on this database: run "os migrate organization-ownership", which drops it itself.` These are the words `os migrate plan` shows under the same entry.
+  
+  A certified database prints the same line as before. So does every other column and every other drift kind. Nothing the boot applies or skips changes.
+- 8c73398: fix(driver-sql,cli): `os migrate plan` / `apply` no longer offer `--allow-destructive` for a unique index the existing rows already violate
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The duplicate pre-flight that blocks such a `create_index` (ADR-0120 D4) said so only in the entry's message, and the apply-limit seam the two commands read asked the driver by op type. So `os migrate plan` closed with `(add --allow-destructive for drops / tightenings)`, `os migrate apply --yes` said `re-run with --allow-destructive to include them`, and that re-run refused the entry and ended PARTIAL.
+  
+  - **`ManagedDriftEntry.applyLimit` (`@objectstack/driver-sql`, new and optional).** Why the reporting driver's apply door will not perform this entry on this database, read from its data. The duplicate pre-flight sets it on a blocked unique index, naming the conflicting groups. It is absent on every other entry, so a reader that ignores it sees the report as before. On `--json`, a blocked entry now carries this key.
+  - **`os migrate plan` / `os migrate apply` (`@objectstack/cli`).** The apply-limit seam reads the entry's own limit first, then the driver's per-op one. A blocked unique index is listed with the conflicting groups as the reason it cannot be applied, the footer and the skip lines stop offering `--allow-destructive` for it, and it is counted among the changes that remain drift. A database with no blocked index prints as before.
+  
+  Unchanged: `os migrate apply --allow-destructive` still names such an entry as not applied and reports the run PARTIAL with exit 1, because the database still differs from its metadata. To clear it, deduplicate the listed rows and run `os migrate plan` again.
+- c8f4c43: fix(objectql, driver-sql, spec): a stored field whose `expression` reads an `autonumber` stores the value computed with the number
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A stored (non-`formula`) field whose `expression` reads a record number, such as `record.case_number + " - " + record.subject`, was computed before the number existed. On insert it stored `null` (or the `has()` fallback) until a later update by id computed it again. Now the insert computes it again right after the number is issued, and writes the row once, carrying both.
+  
+  - **`IDataDriver.issueAutonumbers` (new, optional).** A driver that owns its record-number counter can issue a row's numbers ahead of the write, in place, and answer after a unique violation whether the collision was on a number it issued (re-seeding the counter and emptying those slots). `SqlDriver` implements it over its existing counter, so `driver-sqlite-wasm` and `driver-turso` (both faces) inherit it. A driver without it is unchanged.
+  - **The engine.** For an object whose stored expression reads a record number (directly or through another stored field), the engine asks the driver for the number after validation, where it already issued numbers itself, so a rejected row still burns none. It computes the readers again and hands `create()` / `bulkCreate()` the row with the number filled: one INSERT, no transaction. A collision on a single row is re-issued through the member by the engine's existing retry loop, which computes the readers again. A batch collision re-seeds the counter and is not re-issued (the batch policy the engine already had). Objects with no such field keep the driver's own issue-at-write path. Where the engine issues the number itself (driver-memory, driver-mongodb), the readers are computed again after it does.
+  - **A driver that owns its counter without the member** stores the readers computed without the number, as before, and the engine now says so once per object at `error` level, with the remedy.
+  - **`ObjectQL.registerInsertRecomputeListener(id, fn)` (new).** Called per row after that second computation, on the row the driver is handed. `plugin-pinyin-search` registers on it, so a `__search` companion whose name field reads the record number is stamped from the value that carries the number, and `$search` finds the record by pinyin and by its number.
+  - **One change in what a refused insert reports.** On an object whose stored expression reads the number, a SQL driver's collision that survives every retry now leaves as `ERR_AUTONUMBER_COLLISION` (the engine's three attempts) instead of `DUPLICATE_RECORD` (the driver's own retries). Every other object is unchanged.
+- 4e2c42f: fix(driver-sql): a SQLite `connect()` that refuses its file closes the connection it opened before it rejects
+  
+  Clause-②: no (resource release only: no response, status, error, outcome or export moves)
+  Metadata-protocol: none
+  
+  - **What it was.** `SqlDriver.connect()` refuses a declared SQLite file its first statement cannot use (`SqliteDatabaseFileError`: `SQLITE_CANTOPEN`, `SQLITE_NOTADB`, `SQLITE_CORRUPT`). The file was opened to give that answer, and the pool kept the better-sqlite3 connection after the rejection. For a damaged file whose header says WAL, SQLite kept its `-shm` and an empty `-wal` beside the file until something called `disconnect()`. A datasource left unconnected on the degraded path is never disconnected, so it kept them for the life of the process.
+  - **What changed.** When a SQLite `connect()` rejects, it destroys its pool and puts a fresh, empty one in its place, then rethrows the same error: same class, code, message and `cause`. Nothing is left open, and the `-shm` / `-wal` siblings are gone when the rejection arrives. A later `connect()` on the same instance opens the file again: it gives the same refusal while the file is bad, and connects once the file is repaired. A release that itself fails is logged at `warn`, and the original refusal is still the error thrown.
+  - **Unchanged.** Which files are refused, the codes and the messages. Server dialects (`pg`, `mysql`) are untouched: their `connect()` rejects only when no connection could be made, so there is nothing to release. `SqliteWasmDriver` and the local mode of `TursoDriver` inherit the release through `super.connect()`.
+  - **What to do.** Nothing.
+- 3a440b0: refactor(objectql)!: the per-table platform-object tenancy ledger is retired, and the tenant-audit mute is decided by the object's schema (ADR-0131 D13)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @objectstack/objectql#PLATFORM_OBJECT_TENANCY, @objectstack/objectql#classifyPlatformObjectTenancy, @objectstack/objectql#isPlatformObjectOutOfTenantAuditScope, @objectstack/objectql#tenantScopedPlatformObjects, @objectstack/objectql#PlatformObjectTenancy, @objectstack/objectql#PlatformObjectTenancyEntry) The only author-reachable removals are runtime exports of `@objectstack/objectql`'s published entry: the ledger table, its three predicates and its two types. No key of any metadata schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. -->
+  
+  **BREAKING** for code that imports the ledger from `@objectstack/objectql`. It ships as `patch` because the metadata protocol is unchanged.
+  
+  - **`@objectstack/objectql`: the ledger and its exports are gone.** No write ever depended on them: since ADR-0131 C8 stage 8b, every object with a tenant column takes the system-write rule's derived organization or is refused, whatever its name. The ledger's last reader was the engine's tenant-audit mute, which is now read off the schema.
+  - **The tenant-audit mute (`bypassTenantAudit` on an elevated write) is decided by the object's schema alone.** An elevated write is muted only when the object has no tenant column (`tenancy.enabled: false`, `systemFields.tenant: false`, or no tenant field) or is federated. A platform-namespace object that has a tenant column is now audited like any other. On a walled posture (`isolated` / `group`), an elevated write on such an object that reaches the SQL driver with no `tenantId` therefore prints the `[tenant-audit]` warning, once per object and operation. Nothing a write touches changes: the mute only decides whether that line is printed.
+  - **`@objectstack/driver-sql`: the `[tenant-audit]` warning names both readings.** It no longer tells every unscoped write to "pass tenantId". A write that belongs to one organization should run in that organization's context. A write that crosses organizations on purpose, such as a platform admin the organization wall exempts or a system job over every organization, needs no fix, and the caller declares it with `bypassTenantAudit: true`. The line still starts `[tenant-audit] <op> on tenant-scoped object "<object>"`, and its metadata is unchanged.
+  
+  **Migration** for code that imported the ledger:
+  
+  - FROM `PLATFORM_OBJECT_TENANCY` TO the object's schema: an object is in tenant scope when `resolveTenantFieldName(schema)` (still exported) answers non-null. `scripts/platform-object-tenancy-census.json` in the repository lists, per platform object, the schema declaration that puts it outside.
+  - FROM `classifyPlatformObjectTenancy(name)` TO `resolveTenantFieldName(schema) !== null` on the registered schema.
+  - FROM `isPlatformObjectOutOfTenantAuditScope(name)` TO `resolveTenantFieldName(schema) === null`.
+  - FROM `tenantScopedPlatformObjects()` TO the census's `reach: "in"` rows.
+  - FROM `PlatformObjectTenancy` TO delete it: no classification exists any more.
+  - FROM `PlatformObjectTenancyEntry` TO delete it: no classification exists any more.
+- b62f959: fix(driver-sql): the `[tenant-audit]` warning no longer fires for an insert whose rows carry their organization
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A `create` or `bulkCreate` that reaches the SQL driver with no `options.tenantId` used to print `[tenant-audit] … without options.tenantId` even when every row already named its organization in its tenant column (`organization_id`). Such an insert is confined to the organizations its rows name, so the line had nothing to report. A walled boot (`OS_TENANCY_POSTURE=isolated`) printed one for every elevated seed insert: 32 of its 55 lines.
+  
+  The line is now skipped when every inserted row carries a non-empty tenant column. It still fires for an insert where any row lacks the column, and for every `update`, `delete`, `updateMany`, `deleteMany`, `bulkDelete` and `upsert` with no `tenantId`, whatever the payload says: there the column is a value being written, not the statement's scope. The line's text and prefix are unchanged.
+  
+  Diagnostics only: no write changes. Turso's local face and the SQLite WASM driver inherit the change; the in-memory and MongoDB drivers have no such warning.
+- 6abee03: fix(driver-sql)!: `findWithWindowFunctions()` compiles the function name and sort direction from closed sets and quotes every column it names
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. No export, type, flag or error code is added, removed or renamed: the refusal is the existing `INVALID_QUERY`. What narrows is the set of `windowFunctions[]` entries one driver method accepts, and the remedy is the caller using a supported function name and `asc` / `desc`. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this method (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (the window-function door's accept set narrows), shipped as `patch`: it changes which calls one driver method serves, not what a metadata author can write.
+  
+  `SqlDriver.findWithWindowFunctions()` (and the drivers that inherit it: `driver-sqlite-wasm`, and `driver-turso` on its local and replica transports) assembled its `OVER (…)` clause as text. It now builds it from closed tables and quoted identifiers:
+  
+  - **Function:** one of `row_number`, `rank`, `dense_rank`, `percent_rank`, `cume_dist`, in any case. These are the argument-less functions the door's flat shape can express. Any other name answers `400 INVALID_QUERY` before a statement is sent.
+  - **Direction:** `asc` or `desc`, in any case, defaulting to `asc`. Anything else answers `400 INVALID_QUERY`.
+  - **Fields:** each `partitionBy` and `orderBy` field is emitted as a quoted column reference, so a field names a column and nothing else.
+  - **Unchanged:** every call that names a supported function, a column and `asc` / `desc` compiles to the same window and returns the same rows.
+  - **Fix:** use one of the five functions above and `asc` / `desc`. A window that needs an argument (`lag`, `lead`, `ntile`, `first_value`) was never expressible through this door; send it through the driver's `execute()` with bound parameters.
+- Updated dependencies [448374d]
+- Updated dependencies [94842ba]
+- Updated dependencies [7cacad5]
+- Updated dependencies [df8bb40]
+- Updated dependencies [0091d84]
+- Updated dependencies [5e9b100]
+- Updated dependencies [7532ea3]
+- Updated dependencies [fde7456]
+- Updated dependencies [de9cd1f]
+- Updated dependencies [925fd07]
+- Updated dependencies [e7befa7]
+- Updated dependencies [55d7aab]
+- Updated dependencies [644e4b2]
+- Updated dependencies [0715fac]
+- Updated dependencies [60b42cd]
+- Updated dependencies [b9a79ef]
+- Updated dependencies [63085c3]
+- Updated dependencies [0b8bce4]
+- Updated dependencies [2069b81]
+- Updated dependencies [1862d8d]
+- Updated dependencies [30d21f6]
+- Updated dependencies [eddffc3]
+- Updated dependencies [69712d5]
+- Updated dependencies [dfe60e3]
+- Updated dependencies [e939357]
+- Updated dependencies [045858f]
+- Updated dependencies [baedcec]
+- Updated dependencies [03c12a5]
+- Updated dependencies [386f60f]
+- Updated dependencies [28c9a2c]
+- Updated dependencies [2354058]
+- Updated dependencies [edcc8ce]
+- Updated dependencies [fccbd9d]
+- Updated dependencies [c8f4c43]
+- Updated dependencies [02ad31a]
+- Updated dependencies [03966ce]
+- Updated dependencies [e3aa111]
+- Updated dependencies [863c580]
+- Updated dependencies [7f5b19d]
+- Updated dependencies [14e7239]
+- Updated dependencies [fe0ec2b]
+- Updated dependencies [dfab597]
+- Updated dependencies [9127f23]
+- Updated dependencies [24360dc]
+- Updated dependencies [ecb4e69]
+- Updated dependencies [8dfd126]
+- Updated dependencies [bda53bb]
+- Updated dependencies [b964ea1]
+- Updated dependencies [9019af9]
+- Updated dependencies [45f9962]
+- Updated dependencies [e5eab06]
+- Updated dependencies [dc532e8]
+- Updated dependencies [d196748]
+- Updated dependencies [5f30f00]
+- Updated dependencies [7db1697]
+- Updated dependencies [f5b6b3f]
+- Updated dependencies [f4112a7]
+- Updated dependencies [db1c7cc]
+- Updated dependencies [303aef0]
+- Updated dependencies [b3034ee]
+- Updated dependencies [d12e650]
+- Updated dependencies [830a63a]
+- Updated dependencies [1000cc7]
+- Updated dependencies [bdf762c]
+- Updated dependencies [27b3f1f]
+- Updated dependencies [7c68b10]
+- Updated dependencies [915e940]
+- Updated dependencies [025f6de]
+  - @objectstack/spec@18.1.0
+  - @objectstack/core@18.1.0
+  - @objectstack/types@18.1.0
+  - @objectstack/observability@18.1.0
+
 ## 18.0.0
 
 ### Minor Changes

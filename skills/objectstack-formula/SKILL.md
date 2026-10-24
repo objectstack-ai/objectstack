@@ -13,7 +13,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x and @objectstack/formula 18.x (CEL)
 metadata:
   author: objectstack-ai
-  version: "18.0.0"
+  version: "18.1.0"
   domain: expression
   tags: cel, formula, predicate, condition, validation, visibility, seed-dynamic
 ---

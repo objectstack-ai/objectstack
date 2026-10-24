@@ -1,5 +1,152 @@
 # @objectstack/plugin-audit
 
+## 18.1.0
+
+### Minor Changes
+
+- 3d8960c: feat(cli,plugin-audit): `os migrate audit-mail-bodies` also masks the mail bodies in the audit copies already moved to the `archive` datasource
+  
+  Clause-②: yes (widening)
+  
+  **Re-run `os migrate audit-mail-bodies --apply` on a deployment with an archive datasource.** The 18.0.0 command masked the hot audit tables only.
+  
+  - **What was left in clear.** `sys_audit_log` declares `lifecycle.archive: { after: '90d', to: 'archive', keep: '7y' }`. Past the hot window, the lifecycle Archiver copies its rows to the datasource named `archive` as they are, then deletes them hot. A `sys_email` / `sys_identity_email` copy archived before the audit writer masked the mail body still holds `body_text` / `body_html` in clear there, password-reset, verification, magic-link and invitation links included, for as long as the archive keeps it. The engine never routes `sys_audit_log` to the archive, so the hot run could not reach those rows.
+  - **What changed.** After the hot run, the command reads the archive target each copy table declares (`sys_audit_log` only; `sys_activity` declares none) and runs the same mask, in the same dry-run or `--apply` mode, through that datasource's driver. Each archived row keeps every other column, `updated_at` included. The run is idempotent and its report is counts only. A hot copy masked first is archived masked, so one run covers both the copies already archived and the ones still to be.
+  - **Which archives it reaches.** The command now connects the managed datasources the stack config declares, through the same connect service `os serve` uses. An archive datasource is declared with `autoConnect: true`, since nothing routes objects to it. It is NOT examined, and the run reports `not-connected` and exits `1` rather than reporting a clean archive, in two cases. In the first, the archive is declared but this boot did not connect it; the entry carries the connect status and reason. In the second, the archive is a runtime datasource created in Setup → Datasources, which `os serve` connects and this command does not; declare it in the config's `datasources` and re-run.
+  - **What `none` means.** No datasource of that name is declared and connected on this boot, none was attempted, and no active runtime datasource row names one. That is all it checks. An archive a host registers in code outside the stack config is not reached and reads `none`. To mask it, declare it in the stack config's `datasources` with `autoConnect: true`.
+  - **The command's boot can now fail on a declared datasource.** A bound, mapped or boot-critical declared datasource that cannot connect now fails the command's boot with exit `1`, as it fails `os serve`'s. `OS_ALLOW_DRIVER_CONNECT_FAILURE` is the same escape.
+  - **Run it with the server stopped**, or re-run it once and read 0 to mask in both halves. A live server's Archiver can move a row between the hot run and the archive run.
+  - **New in the `--json` document:** an `archive` array, one entry per declared target: `{ datasource, objects, status, report?, connection? }`, with `status` one of `examined`, `none`, `not-connected` or `unknown`. The `report` key and its shape are unchanged.
+  - **New exports from `@objectstack/plugin-audit`:** `migrateArchivedMailLogBodyCopies(driver, logger, options)`, the runner over a datasource's driver, and an `objects` option on both runners, which limits a run to the named copy tables. Types `MailLogBodyArchiveDriver`, `MailLogBodyCopyObject` and `MailLogBodyMigrationOptions`.
+
+### Patch Changes
+
+- e5b3de0: **Shipped in 18.0.0**, whose CHANGELOG missed this entry; listed here one release late.
+  
+  fix(plugin-audit): an @mention notification reaches only mentioned users who can read the comment's record
+  
+  Clause-②: no (narrows who a notification reaches; no key, route or payload shape is added)
+  
+  - **Recipients are judged by read access to the record.** The `sys_comment` mention writer now resolves each `mentions` entry to a user and asks, in that user's own envelope, whether they can read the record named by the comment's `thread_id`. The envelope comes from the resolver every request uses (`resolveUserAuthzGrants`). The user's organization claim is vetted under the tenancy posture in force (`vetOrganizationClaim`). The read goes through the evaluator every parent-derived read gate uses (`resolveReadableParentIds`). So the tenant wall, sharing, RLS and object permissions decide, as they do when that user opens the deep link. A user who cannot read the record gets no notification, and a `warn` line records their id and the reason (never the comment text).
+  - **Email entries resolve to a user first.** An email-shaped mention is looked up to its user and then checked like an id. An email that matches no user notifies nobody. Entries that expand an audience (`role:`, `team:`, `owner_of:`) name no single person and are no longer mentions.
+  - **Fail closed.** A comment whose thread names no record, a record that cannot be found, and a grant resolution that fails all withhold the notification. `installAuditWriters` takes the gate as `admitMentionRecipients`, and `AuditPlugin` wires it. A host that calls `installAuditWriters` without one emits no mention notifications and is told so once at `warn`.
+- 0f1eeee: fix(plugin-audit,service-storage): a delegated (on-behalf-of) caller reads the parent-record gates through the ReadableIds leaf, no longer through the bounded 2000-row probe (ADR-0139 D5.1, as amended)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The activity, ledger and comment-thread read gates (`@objectstack/plugin-audit`) and the attachment read gate (`@objectstack/service-storage`) routed every read by a delegated caller to the whole-read probe: a SYSTEM pre-scan of at most 2000 rows, then one caller-scoped read per parent object. Past 2000 candidate rows, a delegated caller was served a truncated list (fail-closed, never a leak) with a matching `total`.
+  
+  Since the engine composes a `ReadableIds` leaf for a delegated caller from the delegator intersection (ADR-0090 D10, #25009), the gates now write such a caller the same leaves as any caller. It is served every row its delegator intersection admits, with a true `total`. This is the same set the probe's own readability answer admits, without the window. ADR-0139 D5's two remaining classes are unchanged: a parent narrowed by an object-scoped read middleware, and a parent bound to another datasource. Both still take the bounded probe, read with the caller's delegated context. The gates no longer read the delegation link themselves, and the `delegated-caller` value is gone from the gates' internal whole-read probe reasons. Neither is exported.
+- Updated dependencies [448374d]
+- Updated dependencies [94842ba]
+- Updated dependencies [7cacad5]
+- Updated dependencies [df8bb40]
+- Updated dependencies [0091d84]
+- Updated dependencies [d5d8146]
+- Updated dependencies [5e9b100]
+- Updated dependencies [7532ea3]
+- Updated dependencies [fde7456]
+- Updated dependencies [b42c621]
+- Updated dependencies [de9cd1f]
+- Updated dependencies [7035682]
+- Updated dependencies [d606fc1]
+- Updated dependencies [a8b44d4]
+- Updated dependencies [78ab647]
+- Updated dependencies [73a2b52]
+- Updated dependencies [5872450]
+- Updated dependencies [9ea5afe]
+- Updated dependencies [72518d2]
+- Updated dependencies [925fd07]
+- Updated dependencies [e7befa7]
+- Updated dependencies [55d7aab]
+- Updated dependencies [5050442]
+- Updated dependencies [2b1382a]
+- Updated dependencies [644e4b2]
+- Updated dependencies [0715fac]
+- Updated dependencies [60b42cd]
+- Updated dependencies [b9a79ef]
+- Updated dependencies [63085c3]
+- Updated dependencies [0b8bce4]
+- Updated dependencies [5d2c5a1]
+- Updated dependencies [066dabc]
+- Updated dependencies [4b8f597]
+- Updated dependencies [688052e]
+- Updated dependencies [6b656bf]
+- Updated dependencies [2069b81]
+- Updated dependencies [157ebd0]
+- Updated dependencies [1862d8d]
+- Updated dependencies [30d21f6]
+- Updated dependencies [eddffc3]
+- Updated dependencies [69712d5]
+- Updated dependencies [dfe60e3]
+- Updated dependencies [e939357]
+- Updated dependencies [045858f]
+- Updated dependencies [baedcec]
+- Updated dependencies [03c12a5]
+- Updated dependencies [f8c5fb3]
+- Updated dependencies [d96f618]
+- Updated dependencies [386f60f]
+- Updated dependencies [28c9a2c]
+- Updated dependencies [2354058]
+- Updated dependencies [ba244f1]
+- Updated dependencies [edcc8ce]
+- Updated dependencies [9340181]
+- Updated dependencies [fccbd9d]
+- Updated dependencies [c8f4c43]
+- Updated dependencies [db9c02a]
+- Updated dependencies [02ad31a]
+- Updated dependencies [03966ce]
+- Updated dependencies [e3aa111]
+- Updated dependencies [863c580]
+- Updated dependencies [7f5b19d]
+- Updated dependencies [504d8b3]
+- Updated dependencies [14e7239]
+- Updated dependencies [fe0ec2b]
+- Updated dependencies [dfab597]
+- Updated dependencies [9127f23]
+- Updated dependencies [3a440b0]
+- Updated dependencies [24360dc]
+- Updated dependencies [ecb4e69]
+- Updated dependencies [8dfd126]
+- Updated dependencies [bda53bb]
+- Updated dependencies [b62f959]
+- Updated dependencies [b964ea1]
+- Updated dependencies [9019af9]
+- Updated dependencies [45f9962]
+- Updated dependencies [e5eab06]
+- Updated dependencies [dc532e8]
+- Updated dependencies [d196748]
+- Updated dependencies [5f30f00]
+- Updated dependencies [7db1697]
+- Updated dependencies [f5b6b3f]
+- Updated dependencies [c109bfc]
+- Updated dependencies [f4112a7]
+- Updated dependencies [f4112a7]
+- Updated dependencies [db1c7cc]
+- Updated dependencies [303aef0]
+- Updated dependencies [b3034ee]
+- Updated dependencies [d12e650]
+- Updated dependencies [830a63a]
+- Updated dependencies [1000cc7]
+- Updated dependencies [ee63b47]
+- Updated dependencies [bdf762c]
+- Updated dependencies [27b3f1f]
+- Updated dependencies [3306cad]
+- Updated dependencies [c898bd8]
+- Updated dependencies [97aa34e]
+- Updated dependencies [832a84e]
+- Updated dependencies [7c68b10]
+- Updated dependencies [915e940]
+- Updated dependencies [025f6de]
+- Updated dependencies [f7d7403]
+  - @objectstack/spec@18.1.0
+  - @objectstack/core@18.1.0
+  - @objectstack/objectql@18.1.0
+  - @objectstack/metadata-core@18.1.0
+  - @objectstack/platform-objects@18.1.0
+  - @objectstack/types@18.1.0
+
 ## 18.0.0
 
 ### Minor Changes

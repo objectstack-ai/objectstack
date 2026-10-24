@@ -1,5 +1,322 @@
 # @objectstack/service-external-datasource
 
+## 18.1.0
+
+### Minor Changes
+
+- 6b9e6df: **Shipped in 18.0.0**, whose CHANGELOG missed this entry; listed here one release late.
+  
+  fix(service-datasource): Setup → Datasources: Test answers truthfully for the platform's primary datasource and for drivers that cannot introspect, and Sync on the primary datasource refuses with the true reason
+  
+  Clause-②: yes (widening: the published `ExternalDatasourceServiceConfig`, exported from the package entry, gains one optional member, the `liveDriver` callback; no status code, error code or accepted value moves on any route, and Test's answer keeps its existing keys)
+  
+  - **What was wrong.** The Datasources page listed the primary datasource (`default`) as connected, which is true. Its Test then answered `200 { ok: false }` and Sync answered `400`, both saying the datasource "has no registered driver to introspect". The primary datasource's driver is registered under the driver's own name, not under `default`, and both doors looked it up by `default`. A connected `memory` datasource also got `ok: false` from Test, because Test was an introspection round trip and that driver cannot introspect.
+  - **Test, `POST /api/v1/datasources/:name/test`.** For the primary datasource, Test now finds the live driver the way the connection service's own teardown does and answers its health check: `{ ok: true, latencyMs }`. It does not list the platform database's tables. For a driver with no schema introspection (`memory`, `mongodb`), Test answers the health check too, `{ ok: true, latencyMs }` with no `tableCount`, instead of `ok: false`. A driver that fails its health check answers `ok: false`. Every other datasource is tested exactly as before (an introspection round trip with `tableCount`), and so is a datasource with no live driver.
+  - **Sync on the primary datasource.** `GET …/remote-tables`, `POST …/object-draft`, the import (`POST …/external/tables/:remote/import`) and the catalog refresh still refuse `default`, with the same status and code as before (`400 EXTERNAL_DATASOURCE_ERROR`, or `EXTERNAL_IMPORT_ERROR` on the import). The message now gives the true reason: the primary datasource is the platform's managed storage, not a federation source, so there are no remote tables to list, draft or import from it. Its tables are never introspected.
+  - **Unchanged.** Sync on every other datasource, including a managed runtime one, answers exactly as before.
+  - **New, optional: `ExternalDatasourceServiceConfig.liveDriver`.** `(datasource) => driver | undefined` returns the live driver registered for a datasource, resolved by the primary datasource's naming rule. `ExternalDatasourceServicePlugin` wires it. Test reads it to reach the primary datasource and drivers without schema introspection.
+  
+  What to do: nothing, if the plugin builds the service. If you build `ExternalDatasourceService` yourself, pass `liveDriver` to get the new Test answers; without it, Test stays the introspection round trip, as before.
+- 7f99616: fix(driver-sql): a SQLite file whose bytes are not a SQLite database fails `connect()` at once, naming the file, and a development boot no longer moves it aside and replaces it with an empty database (#24960)
+  
+  `SqlDriver.connect()` runs `PRAGMA auto_vacuum` as the connection's first statement. On a file that is not a SQLite database (plain text, another format, a file encrypted by another engine) SQLite answers `SQLITE_NOTADB`, which `connect()` logged as "Failed to set PRAGMA auto_vacuum=INCREMENTAL" and swallowed. It resolved over a file it could not read. In production the first query failed later. On a development boot, `resolveSqliteDriver` (`@objectstack/service-datasource`) answered the failed probe by stepping down to wasm SQLite, whose open renamed the file to `<file>.corrupt-<timestamp>`, wrote an empty database in its place and read `connected`, under a warning that blamed the native addon.
+  
+  `connect()` now refuses such a file with a `SqliteDatabaseFileError` (`code: 'SQLITE_NOTADB'`, `filename`, a message naming the file), as it already did for `SQLITE_CANTOPEN`, in every mode and before anything is written. A declared datasource's boot prints `datasource '<name>': connect failed — <reason>`. `resolveSqliteDriver` classifies `SQLITE_NOTADB` as a file failure and re-throws it instead of stepping down, so the operator's file is left exactly as it was found. A real database file, an empty file and an absent file connect as before, and a native addon that cannot load still steps down to wasm SQLite.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed (`SqliteDatabaseFileError` keeps its shape; only the set of codes it is raised with grows by one), so there is nothing for `objectstack migrate meta` to rewrite. What changes is the answer `SqlDriver.connect()` gives for a SQLite file that is not a database: a rejection where it resolved. The remedy is the datasource's file, never a rewrite of a package source or a stored row. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (`SqlDriver.connect()`'s accept set narrows): a connect that resolved over a SQLite file that is not a database now rejects. It ships as `minor` under the launch-window convention for accept-set narrowings: during the launch window a breaking change does not take `major`, so the level does not say it breaks, and breaking-ness is carried by this banner and the disposition above.
+  
+  - **Before:** `connect()` resolved; in production the first query failed with `DATABASE_ERROR`, and on a development boot the file was renamed to `<file>.corrupt-<timestamp>` and an empty database was written in its place.
+  - **Now:** `connect()` rejects with `SqliteDatabaseFileError`, `code: 'SQLITE_NOTADB'`, naming the file; the file is untouched.
+  - **Fix:** point the datasource at a SQLite database file, or move the file aside yourself (an absent file is created empty on the next connect).
+- d6a5fa3: fix(driver-sql): a SQLite database whose header SQLite cannot read fails `connect()` at once, naming the file, and a dangling symbolic link as the database's directory is refused on the boot that writes, as the read-only boot already refused it (#25019)
+  
+  Three more SQLite files a declared datasource cannot use, each now classified by the file's own driver at connect:
+  
+  - **A database whose header or schema SQLite cannot read** (a file truncated inside its 100-byte header, or short of the pages its schema names). The connection's first statement, `PRAGMA auto_vacuum`, answers `SQLITE_CORRUPT`; `SqlDriver.connect()` logged it as "Failed to set PRAGMA auto_vacuum=INCREMENTAL" and resolved over a file no statement could read. On a development boot, `resolveSqliteDriver` (`@objectstack/service-datasource`) then stepped down to wasm SQLite, whose open renamed the file to `<file>.corrupt-<timestamp>` and wrote an empty database in its place, under a warning that blamed the native addon. `connect()` now refuses it with a `SqliteDatabaseFileError` (`code: 'SQLITE_CORRUPT'`, `filename`, a message naming the file) in every mode, before anything is written, and `resolveSqliteDriver` re-throws it instead of stepping down. A database damaged deeper inside still connects: its first statement answers, and the damage surfaces on the read that reaches it, as before.
+  - **A dangling symbolic link as the database's directory, on the boot that writes.** `connect()` took `mkdir`'s `EEXIST` on the link for a concurrent creator and resolved; the first statement then failed with a code-less "directory does not exist", and a development boot stepped down to wasm SQLite under the same false native-addon warning. `connect()` now refuses it with `SqliteDatabaseFileError` (`code: 'ENOENT'`), naming the file and the link, which is the error the read-only boot (`sqliteAbsentFile: 'empty-in-memory'`) gives for the same path.
+  - **A dangling symbolic link as the database file itself, on the read-only boot.** When the directory its chain of links ends in does not exist, the read-only boot read the file absent and reported the datasource connected, while the boot that writes refuses the same path with `SQLITE_CANTOPEN`. The read-only boot now refuses it too (`code: 'ENOENT'`), naming the link's target. When that directory exists, both boots behave as before: the read-only boot opens an empty in-memory database, and the boot that writes creates the file through the link.
+  
+  A real database file, an absent file in a directory that exists or can be made, and a native addon that cannot load over a real database keep today's behaviour.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed (`SqliteDatabaseFileError` keeps its shape; only the set of codes and paths it is raised for grows), so there is nothing for `objectstack migrate meta` to rewrite. What changes is the answer `SqlDriver.connect()` and the read-only judgement give for three SQLite files a datasource cannot use: a rejection where each resolved. The remedy is the datasource's file or its path, never a rewrite of a package source or a stored row. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (`SqlDriver.connect()`'s accept set and the read-only boot's narrow): a connect that resolved over a SQLite database whose header SQLite cannot read, or over a path whose directory is a dangling symbolic link, now rejects; a read-only boot that read a dangling file link absent although its target's directory does not exist now rejects. It ships as `minor` under the launch-window convention for accept-set narrowings: during the launch window a breaking change does not take `major`, so the level does not say it breaks, and breaking-ness is carried by this banner and the disposition above.
+  
+  - **Before:** `connect()` resolved; in production the first query failed with `DATABASE_ERROR`, and on a development boot a damaged file was renamed to `<file>.corrupt-<timestamp>` and replaced with an empty database, and a dangling-link directory stepped down to wasm SQLite under a warning that blamed the native addon. The read-only boot reported a dangling file link connected.
+  - **Now:** `connect()` rejects with `SqliteDatabaseFileError`, `code: 'SQLITE_CORRUPT'` for the damaged file and `code: 'ENOENT'` for the dangling-link directory, naming the file (and the link); the read-only boot rejects the dangling file link with `code: 'ENOENT'`, naming its target. The file is untouched.
+  - **Fix:** restore the database from a backup, or move the damaged file aside yourself (an absent file is created empty on the next connect); point the dangling link at a directory that exists, or point the datasource at a real path.
+- 2354058: feat(spec,driver-turso)!: turso `config.encryptionKey` is removed — it never encrypted anything, in any mode, and is now refused everywhere it is written instead of accepted on a remote datasource
+  
+  Clause-②: no (narrowing)
+  
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered turso-config-encryption-key-removed, turso-config-encryption-key-retired -->
+  
+  `encryptionKey` was declared as an AES-256 key for the database file. Nothing ever applied it. A local or embedded-replica file is read and written through better-sqlite3, which has no encryption codec, so #25020 already refused the key there. A remote database was never handed the key either: its storage encryption is configured on the server. That left a key that parsed on a remote datasource and did nothing. It was also the one credential-shaped key a datasource could still write in plain text (`STILL_WRITABLE_CREDENTIAL_KEYS`). Under ADR-0049 (enforce-or-remove) it is removed.
+  
+  **BREAKING** accept-set narrowing on a published schema, a published constructor and an exported type. It ships as `minor` under the repo's launch-window convention for breaking changes (`scripts/check-changeset-no-major.mjs`).
+  
+  - **`@objectstack/spec`**: `TursoConfigSchema.encryptionKey` is a `retiredKey()` tombstone. Authoring it is a `tsc` error and a parse error at `config.encryptionKey`, in every mode and with any value, the empty string included. The error carries the removal prescription. It is the only issue reported on that config, whatever else is wrong. The misspellings `encryption_key` and `encryptionkey` get the same prescription. The #25020 local and replica refusal arms are gone, since the tombstone subsumes them.
+  - **`@objectstack/driver-turso`**: the published mirror `TursoConfigSchema` refuses the key the same way, as `z.never()`. `TursoDriverConfig.encryptionKey` is typed `never`. `new TursoDriver()` and `createTursoDriver()` refuse a defined `encryptionKey` with `VALIDATION_ERROR` / 400 in every mode, before anything else is checked, in the schema's words.
+  - **`@objectstack/service-datasource`**: the exported `TursoDriverConfigInput.encryptionKey` is typed `never`. The shared loader still forwards a declared value, so a legacy stored row reaches the constructor's refusal instead of being dropped in silence.
+  
+  ### Migration: FROM → TO
+  
+  | You wrote | Write instead |
+  | --- | --- |
+  | `url: 'libsql://my-db.turso.io', encryptionKey: '…'` (also `https://`, `ws(s)://`) | delete `encryptionKey`. Storage encryption for a remote database is configured on the Turso server |
+  | `encryptionKey: ''` (or any unset value) | delete `encryptionKey` |
+  | `url: 'file:./data/app.db', encryptionKey: '…'` (also `:memory:`, or a replica beside `syncUrl`) | delete `encryptionKey` (already refused since #25020). Put the file on an encrypted disk or volume if it must be encrypted at rest |
+  
+  The fix in one line: delete `encryptionKey` from every turso datasource.
+  
+  ### The ADR-0087 disposition
+  
+  - **D2 `turso-config-encryption-key-removed`** deletes the key from a turso datasource's `config` when its value is unset (any non-string, or `''`) or when it sits beside a remote url (`libsql://`, `https://`, `http://`, `ws://`, `wss://`, in any case). It emits one notice per key. Nothing is lost: the driver never read the value.
+  - A non-empty key beside a local url is **not** deleted. Removing it would let a datasource whose operator believed the file was encrypted boot in silence. It keeps the #25020 posture instead: the row fails at driver construction with the prescription, and the author deletes the key by hand.
+  - The conversion is retired from the load path. A live author is refused at parse and taught. Stored rows (the datasource loaders), built artifacts inside their declared-floor window and `os migrate meta --from 17` replay it.
+  - `RETIRED_KEYS_BY_MAJOR[18]` gains `data/TursoConfig:encryptionKey`. The D3 entry is `turso-config-encryption-key-retired`.
+  
+  ### Stored rows stay redacted
+  
+  A tombstone is excluded from the schema-derived credential list, by its `[REMOVED]` prefix. Measured: after the retirement, no existing path would have withheld a stored `encryptionKey` on read. The derived turso list (`authToken`) is non-empty, so the canonical fallback never applies. `STILL_WRITABLE_CREDENTIAL_KEYS` is therefore renamed `RETIRED_CREDENTIAL_KEYS` and keeps `turso: ['encryptionKey']`. A legacy row's value is still withheld and still named in `redactedConfigKeys`, on the admin door and the metadata door alike.
+  
+  ### Blast radius
+  
+  Measured on this tree: no example, template, CLI scaffold, published skill, host default or environment variable authors the key. A tree-scoped absence pin now holds that. Whether any out-of-repo deployment declares it is not measured, and is not claimed to be zero.
+- b9c7a8f: fix(service-datasource)!: the datasource admin API refuses to make a datasource managed while objects bind it with `external`, as the metadata save door does
+  
+  Clause-②: no (narrowing)
+  
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (already-registered object-external-binding-managed-datasource-refused) no rule is added or changed: the admin door now asks the save door's existing ADR-0015 §4.2 predicate, and that ledger entry already describes the refused shape and its fix -->
+  
+  **BREAKING** (what the datasource admin API stores narrows), shipped as `minor` under the 18.x convention for breaking changes.
+  
+  `POST /api/v1/datasources` (`createDatasource`) and `PATCH /api/v1/datasources/:name` (`updateDatasource`) write the datasource without entering the metadata save door. So they stored a datasource that is managed (`schemaMode: 'managed'`, or no `schemaMode`, the spec default) while objects bind it with `external`: the pair `PUT /api/v1/meta/datasource/:name` refuses (ADR-0015 §4.2). The runtime then skips those objects' DDL as federated while the boot validation and the write gate judge them as managed.
+  
+  - **FROM:** the admin API created a managed datasource under objects that already name it with `external`, and a `PATCH` that set `schemaMode: 'managed'` (or edited another bound field of a datasource that is already managed) was stored.
+  - **TO:** both refuse with `400 DATASOURCE_ADMIN_ERROR`, one line per bound object, each the spec predicate's own message (`externalBindingDatasourceRefusal`, `@objectstack/spec/data`). Nothing is stored or registered, no secret is minted and the live pool is untouched.
+  - **Unchanged:** a federated datasource (`schemaMode: 'external'` or `'validate-only'`) and a datasource no object binds with `external` keep their answers. A `PATCH` that changes only `label` or `active` is not judged, so a datasource can still be renamed or taken out of service.
+  - **For a host that builds `DatasourceAdminService` itself:** `DatasourceAdminServiceConfig` gains a required member, `listObjectsBoundTo(datasource)`, returning the objects that name the datasource with their `external` binding. `DatasourceAdminServicePlugin` answers it from the engine's object registry (the `objectql` service's `registry`, the one the save door writes through to), so an object saved or imported at runtime counts at once.
+  - **The fix for an author:** declare the datasource `schemaMode: 'external'` (or `'validate-only'`) with its `external` settings, or remove `external` from the bound objects first, then make it managed.
+
+### Patch Changes
+
+- 72a302a: fix(service-datasource)!: Sync (remote tables, object draft, import, catalog refresh) refuses a managed datasource with the existing `400`, because ADR-0015 §4.2 reserves federation for a datasource whose `schemaMode` is not `managed`
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is the answer four runtime REST doors give a caller who asks them to list, draft, import or catalog the tables of a datasource the platform owns; the remedy is to sync from a datasource declared `external` or `validate-only`, never a rewrite of a package source or a stored row. Objects an earlier import already bound to a managed datasource are not touched. -->
+  
+  **BREAKING** (four REST doors' accept set narrows). ADR-0015 §1 puts a federated object on a datasource whose `schemaMode` is not `managed`, and §4.2 allows `object.external` only there; `managed` is the spec's default. The Sync doors refused only the platform's primary datasource (`default`). Every other managed datasource answered, including the runtime datasources an administrator creates in Setup → Datasources, which are saved with no `schemaMode` and so are managed: their tables were listed, drafted and imported as federated objects. The engine's write gate (ADR-0015 §5.3) gates only non-managed datasources, so nothing stood behind such an import. One guard in the federation service now refuses before anything is introspected, and every door that reaches the service inherits it.
+  
+  - **FROM:** on a datasource other than `default` whose `schemaMode` is `managed`, declared or by default, `GET /api/v1/datasources/:name/remote-tables` and `GET /api/v1/datasources/:name/external/tables` answered `200` with its tables; `POST /api/v1/datasources/:name/object-draft` and `POST /api/v1/datasources/:name/external/tables/:remote/draft` answered `200` with a federated object draft bound to it; `POST /api/v1/datasources/:name/external/tables/:remote/import` answered `201` and saved that object; `POST /api/v1/datasources/:name/external/refresh-catalog` answered `200` and stored an `external_catalog` for it. A name with no datasource definition was introspected whenever a driver was registered under it.
+  - **TO:** each of those requests answers `400` with the code its door already serves for a refusal, `EXTERNAL_DATASOURCE_ERROR` (the import: `EXTERNAL_IMPORT_ERROR`), and a message naming the rule and the remedy. Nothing is introspected, drafted, saved or stored. A name with no datasource definition gets the same refusal: nothing declares it a federation source.
+  - **Unchanged:** `default` keeps its own refusal and message. A datasource declared `schemaMode: 'external'` or `'validate-only'` lists, drafts, imports and refreshes as before. Test (`POST /api/v1/datasources/:name/test`) and validation (`POST /api/v1/datasources/:name/external/validate`) answer as before; validation already skipped a managed datasource, and it now asks the same predicate the guard asks. No status code or error code is added.
+  - **The fix for an integrator:** sync from a datasource the platform does not own. Declare it with `schemaMode: 'external'` (or `'validate-only'`) and its `external` settings; for a runtime datasource, send both in `PATCH /api/v1/datasources/:name`. A managed datasource's tables are the platform's own objects: define objects on it directly instead of importing them.
+- ea08ce5: fix(service-datasource): a datasource whose database client is not installed (`pg`, `mysql2`, `better-sqlite3`) is refused with the install of that client, not with "Run `pnpm install && pnpm build`"
+  
+  Clause-②: no
+  
+  - **What was wrong.** When a boot-critical datasource could not connect because a module could not be resolved, the refusal always ended on the unbuilt-workspace remedy: "The driver package could not be LOADED at all … That is a build precondition … Run `pnpm install && pnpm build`, then start again." That is right for a monorepo checkout whose driver build output is missing. It is wrong for a project that points at PostgreSQL or MySQL without installing the database client: `pg` and `mysql2` are optional peers of `@objectstack/driver-sql` (and `better-sqlite3` an optional dependency) that the project installs itself, so neither command adds them, and a reader who followed the advice was refused again with the same text.
+  - **Now.** When the module that could not be resolved is one of those three clients (knex reports it as `Cannot find module 'pg'`), the refusal ends on the install of that client instead: `npm install pg` (with the `pnpm add` and `yarn add` spellings beside it), and no build step. It names no environment variable.
+  - **Unchanged.** A driver package whose build output is missing, or a required `@objectstack/…` driver package that is not installed (any but the optional `@objectstack/driver-turso`, `@objectstack/driver-mongodb` and `@objectstack/driver-sqlite-wasm`), still ends on `pnpm install && pnpm build`. A refused connection, a wrong DSN or a rejected password still ends on the same sentence as before. When the boot is refused, the error type, the retained connection state and the `OS_ALLOW_DRIVER_CONNECT_FAILURE` degraded boot do not change: only the closing sentence of the refusal is different.
+  
+  What to do: install the client the refusal names next to the server that opens the datasource, then start again.
+- b811c73: fix(service-datasource): a datasource whose optional driver package is not installed (`@objectstack/driver-turso`, `@objectstack/driver-mongodb`, `@objectstack/driver-sqlite-wasm`) is refused with that package's install alone, no longer followed by "Run `pnpm install && pnpm build`"
+  
+  Clause-②: no
+  
+  - **What was wrong.** A `turso`, `mongodb` or `sqlite-wasm` datasource whose driver package is not installed is refused at boot, and the refusal already says so and names the install (`npm install @objectstack/driver-turso`, with the `pnpm add` and `yarn add` spellings beside it). It then went on to end on the unbuilt-workspace remedy anyway: "… That is a build precondition … Run `pnpm install && pnpm build`, then start again." Those are two fixes that contradict each other, and the second does nothing for a project, which adds these optional packages itself. Measured on the published release with a declared `turso` datasource and no `@objectstack/driver-turso` installed.
+  - **Now.** When the module that could not be resolved is one of those three packages, by its bare name (`Cannot find package '@objectstack/driver-turso'` under ESM, `Cannot find module '@objectstack/driver-turso'` under CJS), the refusal ends on one sentence that defers to the install named above it. It names no second command, no build step and no environment variable.
+  - **Unchanged.** A driver package whose build output is missing (the error names a path into its `dist/`, which is what a monorepo checkout that has been installed but not built reports), or a required `@objectstack/…` package that is not installed, still ends on `pnpm install && pnpm build`. A missing `pg`, `mysql2` or `better-sqlite3` client still ends on the install of that client. A refused connection, a wrong DSN or a rejected password still ends on the same sentence as before. When the boot is refused, the error type, the retained connection state and the `OS_ALLOW_DRIVER_CONNECT_FAILURE` degraded boot do not change, and the driver factory's own messages are unchanged: only the closing sentence of the refusal is different.
+  
+  What to do: install the driver package the refusal names next to the server that opens the datasource, then start again.
+- 5d27d32: fix(service-datasource): in development, a SQLite datasource whose file cannot be opened or created fails its connect, as in production, instead of stepping down to an in-memory engine
+  
+  Clause-②: no
+  
+  `resolveSqliteDriver` probes a native `better-sqlite3` connection in development and steps down to wasm SQLite, then to an in-memory engine, when the probe fails. It used to step down on any probe failure. So a declared SQLite datasource whose file could not be opened read `connected` on a development boot (`NODE_ENV=development`, which the source-tree `bin/run-dev.js` sets). Examples: a path under a regular file, a parent directory the process cannot make, a permission refusal, a directory where the file should be. Every query on it then went to an empty in-memory store, so a maintenance command could report a store it never opened as examined and clean.
+  
+  - **Now:** a probe failure that is the database file failing to open or be created is re-thrown in development, as in production. The datasource's connect fails with the driver's `SqliteDatabaseFileError`, which names the file and the operating system's answer (`EEXIST`, `ENOTDIR`, `ENOENT`, `EACCES`, … or `SQLITE_CANTOPEN`). `listConnectionStates()` reports it as `failed`. This holds for every SQLite datasource, the primary included, so a development boot whose primary database file cannot be opened now stops and names the file.
+  - **Unchanged:** a native addon that cannot load (an ABI mismatch, an addon that was never built, a missing `better-sqlite3`) still steps down to wasm SQLite, with the same warning. An absent file in a directory that exists, or that the driver can make, still opens natively and is created. Production behaviour is unchanged.
+  
+  What to do: if a development boot now refuses a SQLite datasource, fix its `filename`. The boot names the path it could not open.
+- 27dc53b: fix(driver-sqlite-wasm)!: a file wasm SQLite cannot read is refused at connect, naming the file, and left as it was found, instead of being renamed and replaced with an empty database (#25019)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed (`WasmSqliteConnection` and `SqliteWasmDriver` keep their shapes; the private quarantine method is gone), so there is nothing for `objectstack migrate meta` to rewrite. What changes is the answer wasm SQLite's connect gives for a database file it cannot read: a rejection naming the file where it renamed the file and resolved over an empty database. The remedy is the datasource's file, never a rewrite of a package source or a stored row. -->
+  
+  **BREAKING** (wasm SQLite's connect accept set narrows). `WasmSqliteConnection.open()` used to answer a file sql.js could not read by renaming it to `<file>.corrupt-<timestamp>` and starting an empty database in its place, with one warning. That self-heal was written for wasm SQLite's own torn writes, which the atomic flush has since closed; what still reached it was an operator's file on a declared datasource. A datasource declared `driver: 'sqlite-wasm'` over such a file read `available` over the empty replacement, in development and production alike, and a declared `sqlite` datasource on a development boot whose native addon cannot load stepped down to wasm SQLite and met the same rename. The native driver already refuses the same files at connect.
+  
+  - **FROM:** a file sql.js cannot read (plain text, another format, a database truncated inside its header or short of the pages its schema names) was moved to `<file>.corrupt-<timestamp>`; `connect()` resolved over an empty database, and the datasource read `available`. On a development boot whose native addon cannot load, `resolveSqliteDriver` (`@objectstack/service-datasource`) returned that wasm driver, and when wasm SQLite failed for any reason it went on to the in-memory driver.
+  - **TO:** `SqliteWasmDriver.connect()` rejects with the native driver's `SqliteDatabaseFileError`: `code: 'SQLITE_NOTADB'` for bytes that are not a database, `code: 'SQLITE_CORRUPT'` for a database it cannot read, `filename`, and a message naming the file and how to move it aside. Nothing is renamed, nothing is written beside it, and a stale write-ahead log beside a refused file stays where it is. `WasmSqliteConnection.open()` rejects with the same code and `filename`. `resolveSqliteDriver` re-throws that refusal at the wasm rung instead of trying the in-memory driver, so the datasource's connect fails and its connection state says so. Any other wasm failure, sql.js itself not loading first among them, still goes on to the in-memory driver.
+  - **Unchanged:** a real database opens and answers; an absent file is created; an empty file opens as an empty database; a native addon that cannot load over a real or absent file still steps down to wasm SQLite.
+  - **The fix for an operator:** restore the database from a backup, or move the unreadable file aside yourself (`mv '<file>' '<file>.unreadable'`) and start again: an absent file is created empty on the next connect. A development server whose own wasm image is damaged no longer starts itself clean; this is that step, done by hand.
+- 28c9a2c: fix(spec,driver-turso)!: a turso datasource that declares `encryptionKey` on a local file or an embedded replica is refused where it is written and when the driver is built, instead of being accepted and written in plaintext
+  
+  Clause-②: no (narrowing) — the accept set of the `turso` `datasource.config` contract, of the published `TursoConfigSchema` mirror and of `new TursoDriver()` narrows by one key beside a `file:` url or `:memory:`, in every mode. No key is added, removed or renamed, and no exported symbol moves. `@objectstack/service-datasource` is graded `patch`: the TSDoc of its exported `TursoDriverConfigInput.encryptionKey` no longer promises an encrypted file, and nothing else in it changes.
+  
+  `encryptionKey` was declared as an "AES-256 encryption key for the local database file", and nothing applied it. The turso driver reads and writes a local or replica file through better-sqlite3, which has no encryption codec (`PRAGMA key` is a silent no-op there). Measured on the driver source with a test key: a local datasource with `encryptionKey` constructed, connected and wrote its rows, and plain better-sqlite3, opening the file read-only with no key, read them back. An embedded replica fared no better: only its sync client was handed the key, after the local engine had already written the file in plaintext, and a file that client encrypted is one the local engine cannot open. An operator who declared the key got an unencrypted file and no signal.
+  
+  **BREAKING** accept-set narrowing on a published schema and a published constructor, shipped as `minor` under the repo's launch-window convention for breaking changes (`scripts/check-changeset-no-major.mjs`). A non-empty `encryptionKey` on a local datasource (a `file:` url or `:memory:`) or an embedded replica (a `file:` url beside `syncUrl`), detected or forced with `mode`, is refused now, at both doors together, with one message per mode that names the mode and what does encrypt. The key is judged by where the database lives, not by the mode: the same `file:` url or `:memory:` under a forced `mode: 'remote'` is refused too, in its own words, because the driver hands that url to the libSQL client it builds, which is handed no key, so the file was written in plaintext all the same:
+  
+  - **at authoring**, as one `custom` issue on `encryptionKey` (`config.encryptionKey` on a datasource): `DatasourceSchema`, `validateDriverConfig`, `defineStack` / `os validate`, and a save or test connection through the datasource admin service;
+  - **at construction**, `VALIDATION_ERROR` / 400 from `new TursoDriver()` (and `createTursoDriver()`), before any database file is opened.
+  
+  For a local or replica datasource the message is the same text at all three places; for a `file:` url or `:memory:` under a forced `mode: 'remote'`, the schema and the constructor give the forced-remote text, while the driver mirror, which declares no `mode` and strips it, refuses the same config in the local text. A test holds the constructor's copy equal to the schema's issue byte for byte in every mode, and the mirror's verdict and words equal to the schema's wherever no `mode` is forced. It comes last among the local-engine refusals: a url the engine cannot open, a lone `sync` and a forced `mode` the driver would ignore each keep their own message. An empty `encryptionKey` is unset and is still accepted. A remote url (`libsql://`, `https://`, `ws(s)://`) is not judged by this refusal. The `encryptionKey` describe texts no longer promise an encrypted file.
+  
+  ### Migration: FROM → TO
+  
+  | You wrote | Write instead |
+  | --- | --- |
+  | `url: 'file:./data/app.db', encryptionKey: '…'` | drop `encryptionKey`; put the file on an encrypted disk or volume if it must be encrypted at rest |
+  | `url: 'file:./data/replica.db', syncUrl: 'libsql://my-db.turso.io', encryptionKey: '…'` | drop `encryptionKey`, the same way |
+  | `url: 'file:./data/app.db', mode: 'remote', encryptionKey: '…'` (or `url: ':memory:'`) | drop `encryptionKey`, the same way |
+  | either, where the data must be encrypted at rest and no encrypted volume is available | a remote Turso database (`url: 'libsql://my-db.turso.io'`), whose storage encryption is the server's to configure, not this key's |
+  
+  The fix in one line: delete `encryptionKey` from every turso datasource whose `url` is a `file:` url or `:memory:`.
+  
+  A datasource row stored in this shape is not re-parsed when it loads, so it now fails when the driver is built. `factory.create` throws the refusal. The connection service records the datasource as `failed-degraded` with the message, and a test connection answers `ok: false` ("Failed to build driver: …"). Under ADR-0062 D5, the boot fails fast when objects bind to that datasource or are routed to it, or when it is boot-critical. Otherwise it is left unconnected with a warning. Before this change the same row booted and wrote its file in plaintext.
+  
+  Blast radius, measured on this tree: no example, template, CLI scaffold or published skill authors the key, and no host default or environment variable sets it (a turso `encryptionKey` reaches the driver only from an authored `datasource.config`). Whether any out-of-repo deployment declares such a config is NOT measured and is not claimed to be zero.
+  
+  <!-- adr-0087: registered turso-config-local-encryption-key-refused -->
+- 03966ce: fix(plugin-auth)!: lift the better-auth family from 1.7.3 to 1.7.12 for the security fixes published since
+  
+  `@objectstack/plugin-auth` declares the better-auth family exactly, so a fresh install resolves what this package tested. All five declared ranges (`better-auth`, `@better-auth/core`, `@better-auth/oauth-provider`, `@better-auth/scim`, `@better-auth/sso`) move from `1.7.3` to `1.7.12`, still exact. The lift takes the fixes published in 1.7.4 to 1.7.12 for packages this plugin mounts: GHSA-965c-763c-88jm and GHSA-r4xp-prcw-77qf (1.7.7), and the oauth-provider, SSO, SCIM, JWT and password-reset fixes up to 1.7.12. Every symbol this package imports from the family is still exported. It also pulls in `better-call` 1.4.4, `@better-auth/utils` 0.5.0 and `@better-fetch/fetch` 1.3.2, the versions 1.7.12 declares.
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, and no exported declaration of this package is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is the vendor library under the auth endpoints: some requests it accepted are now refused, and some refusals change status. The remedies are operational (restart an in-flight sign-in, correct an SSO provider's issuer), never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (the auth endpoints refuse some requests 1.7.3 accepted, and some refusals change status), shipped as `patch` under ruling A: it changes nothing a metadata author can write, and a non-protocol breaking change ships `patch` while keeping this BREAKING banner and its ADR-0087 disposition.
+  
+  - **FROM:** a Magic Link, OAuth or social sign-in, SAML or account-linking flow started before the upgrade could complete after it.
+    **TO:** it fails, and the user starts it again. 1.7.7 stores Magic Link and OAuth-state verification rows under new identifier prefixes and keys the OAuth state cookie per purpose, so a link or a pending identity-provider round-trip minted by 1.7.3 is not found: a Magic Link answers `?error=INVALID_TOKEN`, an OAuth callback answers a state mismatch.
+  - **FROM:** an OIDC SSO provider whose configured issuer differed from its discovery document's `issuer`, for example only by a trailing slash, signed users in.
+    **TO:** the provider is refused with `issuer_mismatch`. 1.7.12 also refuses an OIDC ID token that carries no `exp` or `iat`.
+  - **FROM:** `POST /api/v1/auth/oauth2/token` with a PKCE `code_verifier` that does not match the challenge answered `401`.
+    **TO:** it answers `400` with `error: 'invalid_grant'`.
+  - **FROM:** `GET /api/v1/auth/get-session` answered `401 UNAUTHENTICATED` ("Sign in first") when the session store could not be read, the same answer a signed-out browser gets, and an in-process `api.getSession` resolved `null`.
+    **TO:** it answers `500` with `code: 'FAILED_TO_GET_SESSION'` and keeps the session cookie, and the in-process read rejects. Callers that treat a failed read as anonymous on purpose (the request-context resolution in `@objectstack/core` and `@objectstack/runtime`) still do.
+  - **FROM:** `POST /api/v1/auth/sign-in/email` with a password longer than the configured maximum answered as an ordinary failed sign-in.
+    **TO:** it answers `400` with `code: 'PASSWORD_TOO_LONG'` before any account is looked up. It still counts as a failed attempt for the account lockout.
+  - **FROM:** a DPoP proof sent to the token endpoint was checked against the URL of the request as it reached the server.
+    **TO:** it is checked against the configured public base URL plus the request path. Behind a proxy that rewrites the host, a proof bound to the public URL is now accepted and a proof bound to the internal URL is refused with `invalid_dpop_proof`.
+  - **FROM:** `GET /api/v1/auth/get-session` with a cookie for a session that no longer exists answered `401` and left the cookie in place.
+    **TO:** the same `401` also clears the stale session cookies.
+  - **New route:** `POST /api/v1/auth/oauth2/client/rotate-keys` (`private_key_jwt` key rotation) is now published, and refused with `403 access_denied` because this package does not enable client key rotation.
+  - **Unchanged:** the package's exports and configuration; sign-up, sign-in and session cookies (`HttpOnly; SameSite=Lax; Path=/`, no `Secure` on plain HTTP); the active organization stamped on a new session; implicit account linking and its unlink records; single-use reservations (a replayed DPoP proof or client assertion is still refused); and where sessions and verification values are stored with or without a host `secondaryStorage`.
+  - **`@objectstack/spec` and `@objectstack/cli` (patch, text only, not breaking):** the TSDoc on the organization schema's optional `updatedAt` now records that its better-auth measurement still holds on 1.7.12, and the `os migrate account-issuer` description no longer names a better-auth version. No schema, type, flag or behaviour changes in either package.
+  - **`@objectstack/service-datasource` (patch, text only, not breaking):** the `resolveSqliteDriver` docs now describe the error better-sqlite3 13 actually throws for an addon that was never built: its loader's `require()` of the absent `build/Release/better_sqlite3.node`, which Node answers with `MODULE_NOT_FOUND`. The docs used to name a helper package's message that 13.x no longer produces. Development still steps down to wasm SQLite on that error, as before. No code changes.
+  - **What to do as an operator:** tell users that a Magic Link, social, SSO or account-linking sign-in begun before the upgrade must be started again after it. Check each OIDC SSO provider's configured issuer against its discovery document and set it to the exact `issuer` string the document publishes. An OAuth client that branched on `401` for a PKCE failure should branch on `400 invalid_grant`. A browser client that read every non-`200` `/get-session` answer as "signed out" should treat a `500` as "try again".
+- Updated dependencies [448374d]
+- Updated dependencies [94842ba]
+- Updated dependencies [7cacad5]
+- Updated dependencies [df8bb40]
+- Updated dependencies [0091d84]
+- Updated dependencies [d5d8146]
+- Updated dependencies [5e9b100]
+- Updated dependencies [7532ea3]
+- Updated dependencies [fde7456]
+- Updated dependencies [74fcec1]
+- Updated dependencies [b42c621]
+- Updated dependencies [de9cd1f]
+- Updated dependencies [925fd07]
+- Updated dependencies [e7befa7]
+- Updated dependencies [55d7aab]
+- Updated dependencies [eee65af]
+- Updated dependencies [644e4b2]
+- Updated dependencies [0715fac]
+- Updated dependencies [60b42cd]
+- Updated dependencies [b9a79ef]
+- Updated dependencies [63085c3]
+- Updated dependencies [0b8bce4]
+- Updated dependencies [2069b81]
+- Updated dependencies [5d66021]
+- Updated dependencies [7f99616]
+- Updated dependencies [4d99158]
+- Updated dependencies [1862d8d]
+- Updated dependencies [30d21f6]
+- Updated dependencies [eddffc3]
+- Updated dependencies [69712d5]
+- Updated dependencies [dfe60e3]
+- Updated dependencies [e939357]
+- Updated dependencies [045858f]
+- Updated dependencies [baedcec]
+- Updated dependencies [03c12a5]
+- Updated dependencies [386f60f]
+- Updated dependencies [d6a5fa3]
+- Updated dependencies [27dc53b]
+- Updated dependencies [28c9a2c]
+- Updated dependencies [8c73398]
+- Updated dependencies [2354058]
+- Updated dependencies [edcc8ce]
+- Updated dependencies [fccbd9d]
+- Updated dependencies [c8f4c43]
+- Updated dependencies [4e2c42f]
+- Updated dependencies [02ad31a]
+- Updated dependencies [03966ce]
+- Updated dependencies [e3aa111]
+- Updated dependencies [863c580]
+- Updated dependencies [7f5b19d]
+- Updated dependencies [14e7239]
+- Updated dependencies [fe0ec2b]
+- Updated dependencies [dfab597]
+- Updated dependencies [9127f23]
+- Updated dependencies [3a440b0]
+- Updated dependencies [24360dc]
+- Updated dependencies [ecb4e69]
+- Updated dependencies [8dfd126]
+- Updated dependencies [bda53bb]
+- Updated dependencies [b62f959]
+- Updated dependencies [b964ea1]
+- Updated dependencies [9019af9]
+- Updated dependencies [45f9962]
+- Updated dependencies [e5eab06]
+- Updated dependencies [dc532e8]
+- Updated dependencies [d196748]
+- Updated dependencies [5f30f00]
+- Updated dependencies [7db1697]
+- Updated dependencies [f5b6b3f]
+- Updated dependencies [f4112a7]
+- Updated dependencies [db1c7cc]
+- Updated dependencies [303aef0]
+- Updated dependencies [b3034ee]
+- Updated dependencies [d12e650]
+- Updated dependencies [830a63a]
+- Updated dependencies [1000cc7]
+- Updated dependencies [ee63b47]
+- Updated dependencies [bdf762c]
+- Updated dependencies [27b3f1f]
+- Updated dependencies [7c68b10]
+- Updated dependencies [915e940]
+- Updated dependencies [025f6de]
+- Updated dependencies [6abee03]
+  - @objectstack/spec@18.1.0
+  - @objectstack/core@18.1.0
+  - @objectstack/driver-sql@18.1.0
+  - @objectstack/driver-turso@18.1.0
+  - @objectstack/driver-memory@18.1.0
+  - @objectstack/metadata-core@18.1.0
+  - @objectstack/driver-sqlite-wasm@18.1.0
+  - @objectstack/types@18.1.0
+  - @objectstack/driver-mongodb@18.1.0
+
 ## 18.0.0
 
 ### Minor Changes

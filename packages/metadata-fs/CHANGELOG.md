@@ -1,5 +1,15 @@
 # @objectstack/metadata-fs
 
+## 18.1.0
+
+### Patch Changes
+
+- Updated dependencies [b42c621]
+- Updated dependencies [386f60f]
+- Updated dependencies [dc532e8]
+- Updated dependencies [ee63b47]
+  - @objectstack/metadata-core@18.1.0
+
 ## 18.0.0
 
 ### Patch Changes

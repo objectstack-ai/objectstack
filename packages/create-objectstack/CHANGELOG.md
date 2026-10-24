@@ -1,5 +1,46 @@
 # create-objectstack
 
+## 18.1.0
+
+### Patch Changes
+
+- 80ec71d: fix(cli): retire the scaffold's five stale `peerDependencyRules` entries on the better-auth 1.7.12 pin
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A project scaffolded by `objectstack init` or `npx create-objectstack` no longer carries a `peerDependencyRules.allowedVersions` block in its `pnpm-workspace.yaml`. All five entries suppressed peer mismatches that better-auth 1.7.12 no longer has: `better-auth` declares no `better-sqlite3` peer, and `@better-auth/core`, `@better-auth/oauth-provider`, `@better-auth/scim` and `@better-auth/sso` each peer `@better-auth/utils` as `^0.4.2 || ^0.5.0`, which the resolved 0.5.0 satisfies. `allowedVersions` only silences a report, so a scaffold resolves the same lockfile as before and its first `pnpm install` stays free of unmet-peer warnings. Projects scaffolded earlier can keep or delete the block; either way nothing changes.
+- b6e8707: fix(cli,create-objectstack): new projects declare vitest `~4.1.12`, outside GHSA-qxg6-89mg-rqv8, and still install on npm 10
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The vitest range every scaffold declares moves from `~4.0.0` to `~4.1.12`: the `create-objectstack` blank template, `os init -t plugin` and `os create plugin` (in `devDependencies`), and the npm `overrides` block that every standalone scaffold emits, `os init -t app` and `-t empty` included. `~4.0.0` resolved to vitest and `@vitest/mocker` 4.0.18, inside GHSA-qxg6-89mg-rqv8 (`@vitest/mocker` from 2.1.0-beta.7 up to the fix in 4.1.12), which has no 4.0.x fix. A new project now resolves vitest and `@vitest/mocker` 4.1.12 or a later 4.1.x patch, and `npm audit` of a fresh scaffold lists no vitest or `@vitest/*` advisory.
+  
+  npm 10, the npm Node 22 bundles, still installs every scaffold. The `overrides.vitest` entry, which equals `devDependencies.vitest`, is what makes that hold: it settles vitest 4.1.12's contradictory optional peer (`@vitest/browser-webdriverio`), which npm 10 otherwise crashes on with `Cannot read properties of null (reading 'edgesOut')`. Measured on npm 10.9.4, 10.9.9 and 11.21.1. pnpm ignores npm's `overrides` field.
+  
+  **An existing project made by an earlier `create-objectstack`, `os init` or `os create plugin`** keeps its own `~4.0.0`. To move it, set `overrides.vitest` to `~4.1.12` in `package.json`, and `devDependencies.vitest` too where the project declares it, then run `npm install`. npm refuses an override that differs from the direct dependency (`EOVERRIDE`), so the two move together.
+- d0c56a2: fix(cli,create-objectstack): new projects override `uuid` below 12.0.0 to `^11.1.1`, so `npm audit` lists no GHSA-w5hq-g745-h8pq entry
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `@objectstack/rest` depends on `exceljs ^4.4.0`, and exceljs 4.4.0, its newest release, depends on `uuid ^8.3.0`. GHSA-w5hq-g745-h8pq affects `uuid` below 11.1.1, so `npm audit` in a fresh npm-installed scaffold reported 9 moderate entries, all from that one advisory. The npm `overrides` block every standalone scaffold emits now carries `"uuid@<12.0.0": "^11.1.1"`: the `create-objectstack` blank template, `os init` (`-t app`, `-t plugin`, `-t empty`) and `os create plugin`. A new project resolves `uuid` 11.1.1 and `npm audit` lists no `uuid` entry, measured on npm 10.9.9 and 11.21.1. exceljs calls only `uuid`'s `v4()`, which `uuid` 11 keeps; exceljs's buffered and streaming writers, its loader and `@objectstack/rest`'s `parseXlsxToRows` were run on the installed tree. pnpm ignores npm's `overrides` field.
+  
+  The selector stops at `<12.0.0`, so a project can still add a newer `uuid` of its own: `npm install uuid@14` installs. A spec-less `npm install uuid` is refused with `EOVERRIDE` (npm reads it as `uuid@*`, which meets the selector); name the major instead.
+  
+  **An existing project made by an earlier `create-objectstack`, `os init` or `os create plugin`**, or any other npm project that installs `@objectstack/rest`, directly or through `@objectstack/runtime`, `@objectstack/cli`, `@objectstack/plugin-auth` or `@objectstack/verify`: add `"uuid@<12.0.0": "^11.1.1"` to the `overrides` block of its root `package.json` and run `npm install`. npm reads `overrides` only from the root manifest, so no `@objectstack/*` release can apply it for you.
+- 975d5b3: fix(create-objectstack, cli): a scaffolded project pins every `@objectstack/*` dependency to the exact version of the tool that wrote it, not a `^` range
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On the v18 line a breaking change may ship in a minor or a patch, and the release notes say "Pin exact versions". The scaffolders wrote `^<version>` instead, so the next re-resolve (`npm update`, a deleted lockfile, an install without the lock) could move a new project onto a release that breaks it without anyone deciding to upgrade.
+  
+  - **`npm create objectstack`** (`create-objectstack`), **`os init`** and **`os create`** (the default standalone placement) now write the scaffolder's own version, exactly, for every `@objectstack/*` entry in the emitted `package.json`: `18.0.0`, not `^18.0.0`. A prerelease is written verbatim (`18.1.0-rc.2`).
+  - **Unchanged.** `os create --in-repo` still writes `workspace:*`. Third-party ranges (`typescript`, `vitest`, `zod`, `@types/node`) are not touched. Every `@objectstack/*` package is released on one version, so the exact version is published for each of them.
+  - **An existing project** keeps whatever its `package.json` says. To follow the docs, replace each `^18.x.y` on an `@objectstack/*` entry with the exact version you run (for example `"@objectstack/runtime": "18.0.0"`), then reinstall.
+
 ## 18.0.0
 
 ### Minor Changes

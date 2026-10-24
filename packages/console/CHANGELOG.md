@@ -1,5 +1,224 @@
 # @objectstack/console
 
+## 18.1.0
+
+### Minor Changes
+
+- 7adfaec: Console (objectui) refreshed to `cf153eb2e535`. Frontend changes in this range:
+  
+  Derived from the changesets objectui declared over the range — 65 releasing of 66 changesets added across 69 non-merge commits; omitted: 1 release-nothing changeset, 3 commits carrying no changeset (they ship no package code).
+  
+  - **minor** — `NavigationItemSchema` now refuses a navigation entry whose `visible` reads `data` but which declares no `dataSource`, as `@objectstack/spec`'s `NavigationItemSchema` already does… (objectui `8556295f0`)
+  - **patch** — The permission-set editor no longer keeps the clone notice once the copy is held or saved (objectui#13272). (objectui `cf153eb2e`)
+  - **patch** — Setup › Packaged automation: the clone result now offers the next steps (objectui#13270). (objectui `5235d6d57`)
+  - **patch** — The README's "Setup half of an item" now says what objectstack's shipped organization administrator set does on the assignment objects: it creates and removes rows on `sys_user_po… (objectui `b001d211d`)
+  - **patch** — The package edit dialog (Studio / Setup) now edits a package's `dependencies`. The row is no longer locked once the package exists, and saving sends it to `PATCH /api/v1/packages/… (objectui `36b70c055`)
+  - **patch** — A row action's `defaultFromRow` param backed by a relation is seeded with the related record's id again, not the whole record (objectui#13271). (objectui `8e649da7d`)
+  - **patch** — A `kind:'react'` page keeps its own state when its host re-renders (objectui#13268). The page was recompiled whenever it received a new schema object, and the console hands it a f… (objectui `8cd4db497`)
+  - **patch** — A record drawer stays open on its first open (objectui#13238). On the first open in a page session, the drawer's body is drawn for the first time once the record is read, and its… (objectui `a29f61576`)
+  - **patch** — Settings pages refuse to save while a visible required setting is empty (objectui#13239). (objectui `1ca759a16`)
+  - **patch** — The command palette, the inbox and the AI entry ask before they drop a page's unsaved edits (objectui#13253). (objectui `c8833c5b8`)
+  - **patch** — A category x axis rotates its labels, and cuts them at 12 characters, only when the measured band cannot hold them (objectui#13241). A full-width bar chart now draws a name such a… (objectui `9a4ddb2a9`)
+  - **patch** — The language menu asks before a switch drops a page's unsaved edits (objectui#13254). The console shell remounts every page on a language change, so switching the language on a pa… (objectui `588d11d2b`)
+  - **patch** — A settings page loads its namespace when the namespace changes, and no longer when the translation function does (objectui#13254). The load used to re-run on every new translation… (objectui `9a3bcfc7f`)
+  - **patch** — Opening a collapsed form section keeps keyboard focus on its header the first time too (objectui#13246). (objectui `ff128e366`)
+  - **patch** — A grid grouped by a `date` or `datetime` field heads each group with the value drawn the way the field's cell draws it, not with the stored string (objectui#13234). (objectui `84b43263f`)
+  - **patch** — The record's approval history names each step by the label the flow author wrote (objectui#13248). A history row used to draw the step's node id, prettified: "Manager Review" for… (objectui `12cde0492`)
+  - **patch** — The Audit Log's Action, Actor, From and To filters are named by their visible labels (objectui#13224). (objectui `039e0b972`)
+  - **patch** — The console's own menus ask before they drop a page's unsaved edits (objectui#13231). (objectui `e077b8a4e`)
+  - **patch** — `Combobox` finds an option by its visible label, not only by its value (objectui#13229). (objectui `3650d9455`)
+  - **patch** — The console's remediation overlay offers "Stop impersonating" on an impersonation session (objectui#13208). The overlay covers the whole console, the impersonation banner included… (objectui `e70c21d43`)
+  - **patch** — A collapsible form section header can be opened from the keyboard (objectui#13220). (objectui `4b92c5a91`)
+  - **patch** — Flow designer: the cycle, repeated-connection and missing-boundary-host Problems, the canvas edge hover titles, the simulator's node list, edge rows and steps, and the nested insp… (objectui `80843d05c`)
+  - **patch** — A list view fetches a shown column's declared `dependsOn` siblings, so a faced column can read them off the row (objectui#13214). (objectui `f22b980cb`)
+  - **patch** — Setup → Datasources draws a refusal as a refusal (objectui#13207). (objectui `878a4af38`)
+  - **patch** — Import wizard: the result screen now says what happened. An import that imported every row still shows the green check and "Import Complete"; one that imported some rows but skipp… (objectui `7c05f210d`)
+  - **patch** — The approvals Recall button no longer calls a submitter's own recall an override, and an admin recalling someone else's request is told what a recall does (objectui#13225). `appro… (objectui `06be3969e`)
+  - **patch** — Each per-type group heading in the Studio's Pending changes sheet names its type the way the summary line does, in the user's locale: two flow drafts head their group "2 flows" in… (objectui `24001c181`)
+  - **patch** — Record drawers open on their first field (objectui#13219), as record dialogs do since objectui#13130. (objectui `ab4e4d7d2`)
+  - **patch** — The flow designer names a node by its label in three more places (objectui#13200), through the same rule as objectui#13143: the author's label, else the palette label of the node'… (objectui `599a8a54b`)
+  - **patch** — fix(app-shell): the save warning has a sentence of its own for a value a stored expression replaced (objectui `8803ca54a`)
+  - **patch** — An empty `object-grid` no longer tells the user to adjust filters they never set (objectui#13142). (objectui `f0300beff`)
+  - **patch** — Settings pages: when the server refuses a save field by field, the toast now names the refused settings by the labels their rows show, for example "1 setting needs attention: Defa… (objectui `52907d7d4`)
+  - **patch** — Studio's list-view panel names the view by its display name, not its machine name (objectui#13151). (objectui `d4d9ddbec`)
+  - **patch** — The draft preview bar promises sample data on publish only when publishing will load some (objectui#13140). (objectui `42bd92650`)
+  - **patch** — An admin overriding an approval REASSIGN is now told what a reassign does (objectui#13164). The approvals action bar gave every override lever the decision sentence — "it finalise… (objectui `58798eca8`)
+  - **patch** — Keyboard access to the console: a "Skip to content" link, and record dialogs that open on their first field (objectui#13130). (objectui `9eb14790a`)
+  - **patch** — The Audit Log's Action filter offers the actions the server declares for `sys_audit_log.action` (objectui#13175). (objectui `da307ef4a`)
+  - **patch** — The Studio's Pending changes summary agrees each type with its count: "2 items · 2 flows", "4 items · 1 flow · 3 views". Known metadata types read through a new `preview.changes.t… (objectui `f466b0ac7`)
+  - **patch** — Studio form designer: each field card's type tag now names the type the way the type picker and the field inspector do (objectui#13148). A Picklist field read "Status SELECT" on t… (objectui `d72204599`)
+  - **patch** — Create View dialog: a view type the object cannot support now says why on its card ("This object has no field that can serve as …" or "This object exposes no dataset to chart."),… (objectui `5c12dcd16`)
+  - **patch** — fix(app-shell): Setup › Packages draws its Actions column only over rows that carry an action, and the package sheet wraps its values at words (objectui#13166) (objectui `8d4e45376`)
+  - **patch** — zh-CN: Studio home "新建软件包(可写 base)" now reads "新建软件包(可写基座)", and the duplicate-package tooltip no longer quotes "duplicate base" in English — both reuse the table's existing term… (objectui `2af42d9e5`)
+  - **patch** — The draft preview bar's count follows a runtime view-config Save or Publish without a reload (objectui#13139). (objectui `7d497de38`)
+  - **patch** — Home's pending-drafts row names the package its drafts share by the name Studio shows for it, not by its id (objectui#13136). (objectui `2782e6d24`)
+  - **patch** — A settings page asks before it lets unsaved edits go (objectui#13163). (objectui `7a5f26715`)
+  - **patch** — The flow designer names a node by the name its author gave it, not by its id, in three places that used to print the id (objectui#13143): (objectui `19b4f6490`)
+  - **patch** — Studio's field pickers no longer offer the columns the platform injects and hides (objectui#13152). (objectui `5666e1934`)
+  - **patch** — Lookup quick-picker: the preview line under each option no longer cuts a badge to its first letter (objectui#13123). A column drawn as a badge (a `select`, `status`, `radio`, `mul… (objectui `5129caad9`)
+  - **patch** — The calendar header's date title no longer clips at phone widths (objectui#13149). At 390px the day view's title was cut by the container edge ("Tuesday, October 20, 2") with no e… (objectui `3cec0901f`)
+  - **patch** — Studio's flow header no longer clips its meta mid-word (objectui#13135). With the Properties panel open, "Trigger: … · Status: … · Run as: …" was cut off at the edge of the header… (objectui `05e3f34b4`)
+  - **patch** — The Pending changes sheet's field rows lead with the field's label, and no longer list a column the platform injected and hides as a change the author made (objectui#13125). (objectui `e81a37cfd`)
+  - **patch** — Studio's Data rail points at its own "+" when a package has no objects (objectui#13127). The rail's empty sentence read "No objects yet — create one below to start", but the rail… (objectui `c9cb89662`)
+  - **patch** — Advanced chart axis tick labels now use the theme's muted foreground instead of recharts' default `#666`, so they stay readable on dark cards (objectui#13129). Every axis the adva… (objectui `5115c1f08`)
+  - **patch** — Flow canvas: a connection that skips a node is drawn around it (objectui#13144). (objectui `768960e38`)
+  - **patch** — Studio's New package dialog no longer calls the package "project-scoped" (objectui#13126). ObjectStack renamed project to environment (ObjectStack ADR-0006), and the dialog is not… (objectui `7e6282225`)
+  - **patch** — The Audit Log's Object filter is picked from the served objects instead of typed (objectui#13165). (objectui `c209c933d`)
+  - **patch** — At phone width the console's floating create button no longer covers the last card of a list (objectui#13134). (objectui `aaa1296f9`)
+  - **patch** — A finished import no longer says "Review data before importing." under its result (objectui#13124). (objectui `9840695f6`)
+  - **patch** — The Packages sheet offers no write action on a read-only package (objectui#13157). It gated its actions on the package's `scope` being `system` or `cloud`, so a project-scoped or… (objectui `f7aac4ce7`)
+  - **patch** — The inbox header's breakdown line agrees in number: "1 notification" and "1 pending approval", no longer "1 notifications" and "1 pending approvals" (objectui#13133). (objectui `74e37aa2c`)
+  - **patch** — Setup › Packaged automation no longer shows "On" for a packaged flow that does not run (objectui#13159). When the engine reports a flow as enabled but not armed — the automation s… (objectui `673a71c39`)
+  - **patch** — On phone-width screens, each record card in a grid is now titled by the object's declared `nameField`, not by the view's first column (objectui#13150). (objectui `5a8d40f53`)
+  - **patch** — A settings value can go back to unset, and an override back to the inherited value (objectui#13145). (objectui `961b69f97`)
+  - **patch** — A lookup's quick-picker takes the choice after a search, and a single-select lookup's trigger shows the picked record (objectui#13162). (objectui `f48a4d554`)
+  - **patch** — Flow designer: adding a branch to a Decision no longer overwrites the condition of its existing connection (objectui#13138). (objectui `186b78d8f`)
+  
+  **In this console build, declared nowhere** — objectui merged 3 commits in this range with no `.changeset/*.md`. The code is inside the pin above and ships here, but nothing upstream declared them, so they appear in no objectui CHANGELOG and in no entry above. Listed by subject rather than counted, because a count cannot tell a dependency bump from a form-behaviour change (objectstack#6174); the upstream gate that would prevent this is objectui#3387.
+  
+  - _(no changeset)_ docs(console): teach a navigation visible that both validators accept (#13281) (objectui `7f6a2dd95`)
+  - _(no changeset)_ chore(release): exit Changesets pre mode (`next`), so the next version pass renders objectui's 18.0.0 GA (#13111) (objectui `cbc312d78`)
+  - _(no changeset)_ perf(scripts): the body-dialect census skips the pinned @objectstack build and parses only what can hold a counted node (objectui#13210) (#13250) (objectui `e53763630`)
+  
+  objectui range: `616df6598b42...cf153eb2e535`
+
+### Patch Changes
+
+- cc8d886: Console (objectui) refreshed to `0d12e95361b2`. Frontend changes in this range:
+  
+  Derived from the changesets objectui declared over the range — 2 releasing of 3 changesets added across 5 non-merge commits; omitted: 1 release-nothing changeset, 2 commits carrying no changeset (they ship no package code).
+  
+  - **minor** — An approver who is not an administrator sees the whole approval request page again: its fields, its decision panel with the decisions they may take, and its Timeline (objectui#133… (objectui `0d12e9536`)
+  - **patch** — Setup → Datasources offers "Sync objects" only on a datasource that can be synced (objectui#13318). (objectui `b8fa2237d`)
+  
+  **In this console build, declared nowhere** — objectui merged 2 commits in this range with no `.changeset/*.md`. The code is inside the pin above and ships here, but nothing upstream declared them, so they appear in no objectui CHANGELOG and in no entry above. Listed by subject rather than counted, because a count cannot tell a dependency bump from a form-behaviour change (objectstack#6174); the upstream gate that would prevent this is objectui#3387.
+  
+  - _(no changeset)_ fix(pin): the missing-entry remedy builds with declarations whatever OS_SKIP_DTS is exported (#13325) (objectui `74ebad095`)
+  - _(no changeset)_ fix(hooks): port subst_end() into guard-main-checkout-bash (objectstack 7e40e8a03 and 338297e46) (#13320) (objectui `1aa88519a`)
+  
+  Metadata-protocol: none (the console refresh changes no key, value or type a metadata author writes)
+  
+  objectui range: `cd14d8eeffe1...0d12e95361b2`
+- 1000cc7: Console (objectui) refreshed to `1d178e06ac5e`. Frontend changes in this range:
+  
+  Derived from the changesets objectui declared over the range — 6 releasing of 6 changesets added across 5 non-merge commits.
+  
+  - **minor** — Setup → Positions now says who holds each position and which permission sets it grants, and a click anywhere on a row opens the item (objectstack#25333). (objectui `a14737b14`)
+  - **patch** — types: a node derived from an `@objectstack/spec` schema keeps the spec's `credential` registry key (`'value' | 'map'`, objectstack#25036, which marks the webhook's `secret` and `… (objectui `1d178e06a`)
+  - **patch** — dashboard: a dataset chart draws its null bucket under the name the dataset declares for it (`fields[].nullLabel`, the dimension's `nullLabel` resolved by the server), over the gl… (objectui `1d178e06a`)
+  - **patch** — Setup's Permission Sets and Positions lists ask before the Active switch turns an item off, and a toast confirms the change either way (objectui#13338). (objectui `fcbf1b280`)
+  - **patch** — A member who may read none of the objects an app names now lands on one page that says they need access and whom to ask, instead of the app's dashboard drawn as a grid of "You don… (objectui `2c4e5f5af`)
+  - **patch** — A single-series bar chart draws every bar in its series colour (objectstack#25330). (objectui `56b65c0ce`)
+  
+  Metadata-protocol: none (the console refresh changes no key, value or type a metadata author writes)
+  
+  objectui range: `5fef032b1ada...1d178e06ac5e`
+- 51e804c: Console (objectui) refreshed to `2958f17e9c6a`. Frontend changes in this range:
+  
+  Derived from the changesets objectui declared over the range — 32 releasing of 33 changesets added across 34 non-merge commits; omitted: 1 release-nothing changeset, 1 commit carrying no changeset (they ship no package code).
+  
+  - **minor** — The console knows the `external` organization role that objectstack#25515 added to `@objectstack/spec`'s membership vocabulary (objectui#13427). Without it `ORG_ROLE_LABELS` no lo… (objectui `2958f17e9`)
+  - **minor** — A record page inside the Setup app no longer draws the floating managed-by badge (the amber "Identity" chip at the top-right of an organization, team, business unit or user record… (objectui `d9aff15b3`)
+  - **minor** — An action's `confirmText`, `successMessage` and `errorMessage` read the `template` envelope and fill `{{ }}` holes (objectui#13367). (objectui `8e90779dc`)
+  - **minor** — Grids: hovering a `lookup` or `master_detail` cell no longer shows the referenced record's raw id (objectui#13377). (objectui `f1a4b0895`)
+  - **minor** — On a cloud-managed environment (`features.cloudManaged: true` from `/auth/config`), the console says what the server already enforces. Setup → Users shows one line saying where pe… (objectui `ff77cfc22`)
+  - **patch** — A record-scoped flow action launched from a list toolbar with 0 or several rows selected is refused before its param dialog opens, and its refusal is translated (objectui#13397). (objectui `4eeb1740e`)
+  - **patch** — A page-level `object-chart` bound to a `dataset` now draws a select dimension in the order its field declares its options, the order the dashboard's dataset widget already uses fo… (objectui `b317942cf`)
+  - **patch** — charts: a sankey now names every node and colours its flows, and a funnel labels every stage. Sankey nodes were bare bars with no text and every link was one grey, so the chart co… (objectui `2c3dc7281`)
+  - **patch** — A single-record action launched with 0 or several rows selected is refused before any dialog opens, and the refusal is translated (objectui#13384). (objectui `7f60e9d05`)
+  - **patch** — fix(plugin-list): the synthetic "All records" tab of a tabs-mode user-filter bar (`showAllRecords`) now reads its label from the new `list.userFilters.allRecords` i18n key, filled… (objectui `ad74e9821`)
+  - **patch** — Setup → Permission Sets → Assigned Users: Remove asks first, and the add picker offers organization members only (objectui#13408), the same shape as the positions page (objectui#1… (objectui `130c77d59`)
+  - **patch** — charts: a line or area chart no longer cuts its first or last x-axis label at the chart's edge. recharts draws their categorical x axis as a point scale, which puts the edge categ… (objectui `eadceabb1`)
+  - **patch** — A boolean renders the same whatever its name (objectui#13412). `BooleanCellRenderer` drew a red destructive "LABEL — Off" badge for `false` when the field was named `active`, `is_… (objectui `cee3bc5cf`)
+  - **patch** — Integrations → Connect an AI agent no longer mints an API key in one click (objectui#13383). "Generate key" stays disabled while the name box is blank or whitespace-only, and the… (objectui `3a8a11758`)
+  - **patch** — zh-CN: the admin-override approval copy no longer calls the override 越权 ("exceeding one's authority", the word for a violation). The override levers now read 管理员代为通过 / 管理员代为拒绝 / 管… (objectui `afcf6544d`)
+  - **patch** — A Setup settings page reads its namespace again after a successful save or action, and takes the whole answer, manifest included (objectui#13382). The server computes parts of a n… (objectui `d17f67081`)
+  - **patch** — An action run from a record page's action bar with an `onSuccess.navigate` to a path with no app segment opens that page in the record page's app (objectui#13396). (objectui `4b1ddf3e0`)
+  - **patch** — Studio says when a display name yields no identifier, and Add field no longer names a field `field_<N>` behind the author's back (objectui#13389). (objectui `78e00db7f`)
+  - **patch** — Changing the ⌘K query no longer blanks the console (objectui#13387). (objectui `01b85d8f8`)
+  - **patch** — After a save, delete or action, the record page and the list ask the platform's explain engine each record's edit and delete question once (objectui#13341). (objectui `b93c9f695`)
+  - **patch** — Setup → Positions: a new position is created together with its permission sets, Save is labelled, Remove holder asks first, and the holder picker offers organization members only… (objectui `3ec84bee5`)
+  - **patch** — An action's `onSuccess.navigate` to a path with no app segment opens that page in the current app (objectui#13379). (objectui `6183aa90f`)
+  - **patch** — A form field entry whose `label`, `placeholder` or `helpText` is an inline locale map (`{ en, 'zh-CN' }`) now renders in the visitor's language, on the public form `/f/:slug` and… (objectui `4824ad743`)
+  - **patch** — Setup → Packages: in a package's sheet, *Adopt loose items* asks in the in-app confirmation, reports how many items it adopted, and each action clears the previous action's messag… (objectui `8d305ab56`)
+  - **patch** — Setup → Installed Apps is titled "Installed Apps" and says when no app is installed from the marketplace yet (objectui#13356). (objectui `3a73c07b3`)
+  - **patch** — A metadata form row now shows the field's label only (objectui#13352). `SchemaForm`'s default row used to draw the field's machine key in a code chip beside the label whenever the… (objectui `5b40cea5c`)
+  - **patch** — Connect an Agent no longer mints an unnamed API key in one click (objectui#13355). "Create key" stays disabled until the administrator types a name, and the name is sent as typed:… (objectui `fa31856db`)
+  - **patch** — A lookup / master-detail / tree value whose referenced record the viewer's own read answers "not found" for (a 404, which is what the server answers for a record this viewer may n… (objectui `ec627aba1`)
+  - **patch** — A screen flow that ends refused shows its message and Close alone (objectui#13342). (objectui `05049f87c`)
+  - **patch** — Setup refusals lead with one plain sentence. The Packages sheet, the metadata editor's error banner (Positions and every other metadata type) and the action parameter dialog (OAut… (objectui `241cb78bd`)
+  - **patch** — Setup › Packaged automation: the Clone dialog now opens with a name and label filled in (objectui#13344). (objectui `0f4adc38b`)
+  - **patch** — The record header's highlights write the year on every date (objectui#13331). (objectui `49a536dd0`)
+  
+  **In this console build, declared nowhere** — objectui merged 1 commit in this range with no `.changeset/*.md`. The code is inside the pin above and ships here, but nothing upstream declared it, so it appears in no objectui CHANGELOG and in no entry above. Listed by subject rather than counted, because a count cannot tell a dependency bump from a form-behaviour change (objectstack#6174); the upstream gate that would prevent this is objectui#3387.
+  
+  - _(no changeset)_ chore(deps): lock vite 8.3.5 and pin next 16.3.8, with no manifest range moved (takes over #13288, #11845) (#13399) (objectui `889d02894`)
+  
+  Metadata-protocol: none (the console refresh changes no key, value or type a metadata author writes)
+  
+  objectui range: `6fb31dcc9954...2958f17e9c6a`
+- 06900c9: Console (objectui) refreshed to `56cf4d8e89b7`. Frontend changes in this range:
+  
+  Derived from the changesets objectui declared over the range — 16 releasing of 18 changesets added across 19 non-merge commits; omitted: 2 release-nothing changesets, 1 commit carrying no changeset (they ship no package code).
+  
+  - **minor** — The record page heading draws a `nameField` that declares a widget with a read face of its own through that face, the one the field's list column draws (objectui#13216). A record… (objectui `8701f1e76`)
+  - **patch** — The Import Wizard sends a CSV file to the import door as CSV text (objectui#13315). When you import a `.csv`, `.tsv` or `.txt` file, the request is now `format: 'csv'` with the ro… (objectui `56cf4d8e8`)
+  - **patch** — The console home blocks `hero`, `stat`, `usage-bar`, `checklist` and `tile-grid` register under the `app-shell` namespace, so the console no longer logs a "without a namespace is… (objectui `7e9708e63`)
+  - **patch** — The `/data` page's generated filter bar now offers single-value relation fields (`lookup`, `master_detail` and `user`) beside the picklist fields (objectui#13310). A relation chip… (objectui `78bd6d732`)
+  - **patch** — The Position preview lists the permission sets a position declares in `permissionSets` (ADR-0131 D4), by machine name in declared order. The "positions don't grant data access on… (objectui `279425409`)
+  - **patch** — The console line for a visibility predicate that cannot be evaluated, on a gate that withholds what it gates, no longer says "a navigation entry" was withheld. The same line is pr… (objectui `601c406dd`)
+  - **patch** — A page node whose declared `visibleWhen` / `visible` / `visibleOn` predicate cannot be evaluated (over the CEL bounds, a type error, an unbound root, a missing function) is no lon… (objectui `3aafc0d53`)
+  - **patch** — A password or secret input now tells the browser what it is for (objectui#13295). (objectui `813c3d973`)
+  - **patch** — Settings pages: a `url`, `email`, `phone` or `color` value that misses the format its type declares now blocks Save (objectui#13287). No request goes out, the row is marked inline… (objectui `0093b2c82`)
+  - **patch** — A `page:tabs` item whose `visibleWhen` faults on evaluation is no longer drawn (objectui#13286). (objectui `7c405b73a`)
+  - **patch** — The inline-edit save bar shows an object-level rule's refusal as the rule's own message, without a field label (objectui#13292). (objectui `f66973232`)
+  - **patch** — data-table: with row numbers on, the header's select-all checkbox, each row's checkbox and the row number now share one centre line in the leading column (objectui#13293). (objectui `c8f8b10ad`)
+  - **patch** — data-table / VirtualGrid: selecting a cell's text no longer opens the record or starts an inline edit, and Ctrl/Cmd+C copies the selected text instead of the whole cell value. A p… (objectui `fbb4b23bf`)
+  - **patch** — The Approvals Inbox opens a request on the page the platform serves for it, and its side sheet is gone (objectui#12484). (objectui `a91f6bbb1`)
+  - **patch** — The package dialog's Dependencies row is now an author-facing editor (objectui#13278). It used to be the spec form's raw JSON box under the developer hint "widget object-fields —… (objectui `53dea27af`)
+  - **patch** — The app's report index (`/apps/APP/reports`) and the ⌘K palette's report list now include the reports a module contributes to the app's navigation (`navigationContributions`), not… (objectui `9e1bff63a`)
+  
+  **In this console build, declared nowhere** — objectui merged 1 commit in this range with no `.changeset/*.md`. The code is inside the pin above and ships here, but nothing upstream declared it, so it appears in no objectui CHANGELOG and in no entry above. Listed by subject rather than counted, because a count cannot tell a dependency bump from a form-behaviour change (objectstack#6174); the upstream gate that would prevent this is objectui#3387.
+  
+  - _(no changeset)_ chore: release packages (#11600) (objectui `3aa2f5261`)
+  
+  Metadata-protocol: none (the console refresh changes no key, value or type a metadata author writes)
+  
+  objectui range: `cf153eb2e535...56cf4d8e89b7`
+- 9a48ae8: Console (objectui) refreshed to `5fef032b1ada`. Frontend changes in this range:
+  
+  Derived from the changesets objectui declared over the range — 1 releasing of 2 changesets added across 2 non-merge commits; omitted: 1 release-nothing changeset (they ship no package code).
+  
+  - **minor** — A navigation entry's API `dataSource` and a page element bound to the same read now make one request per console open (objectui#13323). Before, `readElementApi` shared a request o… (objectui `b911ebb4e`)
+  
+  Metadata-protocol: none (the console refresh changes no key, value or type a metadata author writes)
+  
+  objectui range: `0d12e95361b2...5fef032b1ada`
+- d44c893: Console (objectui) refreshed to `6fb31dcc9954`. Frontend changes in this range:
+  
+  Derived from the changesets objectui declared over the range — 7 releasing of 7 changesets added across 7 non-merge commits.
+  
+  - **patch** — `BulkActionDef.confirmText`'s template envelope types `source` as optional, as `@objectstack/spec`'s `Expression` does, and so does its zod twin (objectstack#25438). (objectui `6fb31dcc9`)
+  - **patch** — The import wizard now opens its mapping step with the object's saved mapping applied when the object ships exactly one that the target accepts (objectui#13343). Before, the step a… (objectui `d019aaae3`)
+  - **patch** — `AppShell` now draws one `main` landmark. `SidebarInset` already renders a `<main>`, and the content element inside it was a second `<main>`, so every console page (Setup record p… (objectui `8cf3a86eb`)
+  - **patch** — Setup's metadata deletes and the related list's row delete now ask in the console's in-app confirm dialog and name what goes (objectui#13333). (objectui `404ccae0d`)
+  - **patch** — A sidebar navigation group now opens on first view unless it declares `expanded: false` (or the legacy `defaultOpen: false`), however many entries it holds (objectui#13336). (objectui `fb25620e3`)
+  - **patch** — Console toasts no longer cover the page header's actions (objectui#13340). With no drawer open the toaster now sits top-centre, just below the console's top bar, instead of in the… (objectui `4603b8c4e`)
+  - **patch** — Publish from Home no longer reports a `defineCapability` declaration as a capability that resolves nowhere (objectui#7611). (objectui `f2f4b7dc3`)
+  
+  Metadata-protocol: none (the console refresh changes no key, value or type a metadata author writes)
+  
+  objectui range: `1d178e06ac5e...6fb31dcc9954`
+- 9057fd4: Console (objectui) refreshed to `cd14d8eeffe1`. Frontend changes in this range:
+  
+  Derived from the changesets objectui declared over the range — 1 releasing of 1 changeset added across 1 non-merge commit.
+  
+  - **patch** — The bulk action confirm step reads `confirmText` as a string or as a `{ dialect: 'template', source }` envelope (objectui#13183). (objectui `cd14d8eef`)
+  
+  Metadata-protocol: none (the console refresh changes no key, value or type a metadata author writes)
+  
+  objectui range: `56cf4d8e89b7...cd14d8eeffe1`
+
 ## 18.0.0
 
 ### Major Changes

@@ -1,5 +1,293 @@
 # @objectstack/service-messaging
 
+## 18.1.0
+
+### Minor Changes
+
+- 865d2c8: fix(service-messaging): a notification template is resolved in the recipient's organization
+  
+  Clause-②: yes (widening) — `NotificationTemplateStore.load` (exported from the package's `.` entry) gains an optional fourth parameter, `organizationId`.
+  
+  `sys_notification_template` is organization-owned (ADR-0131: organization ownership is total). The email and SMS channels now render the template row of the delivery's own organization: `NotificationTemplateStore.load(topic, channel, locale, organizationId)` keys its read by the organization the delivery names (`Notification.organizationId`, the organization the notification event row carries), the same way the preference resolver scopes its rows.
+  
+  - **An organization with no row of its own** for a `(topic, channel, locale)` renders the notification's own title and body, the documented no-template fallback.
+  - **The new parameter:** `NotificationTemplateStore.load(topic, channel, locale, organizationId?)`. A call that names no organization reads no row and answers `null`, so the channel renders that same fallback. Every delivery the messaging service fans out names its organization (the event row takes it from the producer or from the engine's system-write rule, and an emit with neither is refused), so this changes nothing a composed deployment renders. A direct caller of `NotificationTemplateStore.load` passes the recipient's organization as the fourth argument.
+  - **Unchanged:** the locale ladder (the recipient's locale, its language, then `en`), the `is_active` filter, how a row renders, and the best-effort answer on a failed lookup.
+- 63085c3: feat(service-messaging,spec,cli)!: `sys_notification_subscription` retires — no reader ever expanded a subscription into recipients (ADR-0030 L3, amended)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered sys-notification-subscription-retired -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes. It goes into 18.x because its ADR-0087 semantic entry, `sys-notification-subscription-retired`, carries the narrowing.
+  
+  ADR-0030 described `sys_notification_subscription` as Layer-3 audience expansion: "who is subscribed to a topic". That expansion was never wired. Every producer names its recipients explicitly (`EmitInput.audience` is required: a flow notification node's recipients, an approval's approvers, a mention's users), no audience member asks for subscribers, and nothing reads the table's rows. So an administrator could author subscriptions in Setup that made nobody receive anything. The maintainer ruled to retire the object rather than build the expansion. The ruling supersedes the earlier decision to keep it with a code comment saying it was not wired, and ADR-0030 is amended to match.
+  
+  **What moves for consumers, FROM → TO.**
+  
+  - **The object.** FROM `import { NotificationSubscription } from '@objectstack/service-messaging'` TO nothing: delete the import. `MessagingServicePlugin` neither registers nor provisions the object any more, so the generic data door no longer serves it.
+  - **Setup navigation.** FROM a Notification Subscriptions item (`nav_notification_subscriptions`) in the Setup app's Configuration group TO no item. Notification Preferences and Notification Templates stay. The item's labels leave the platform app translations, and the object's keys leave service-messaging's generated object bundles.
+  - **The name.** `PLATFORM_OBJECTS_BY_PACKAGE['service-messaging']` (`@objectstack/spec/system`) lists six objects, and `isPlatformProvidedObjectName` answers `false` for `sys_notification_subscription`. A stack that names it (a lookup target, a flow trigger, a permission entry, a navigation item) is now flagged as naming an unknown object. Fix: remove the reference. To control who gets a notification, name the audience on the producer. To mute a topic for a user, write a `sys_notification_preference` row, which is unchanged.
+  - **`os migrate organization-ownership` (`@objectstack/cli`).** The inventory row for `sys_notification_subscription` moves FROM fate 3 (`attribution`: organization-less rows went to the Default Organization under `single`) TO fate 4 (`report`: rows listed by id, never attributed, never deleted). The table is exempt from NOT NULL, because no declaration anchors tenancy on its column any more. The row stays, so a database that still holds the table plans instead of being refused as carrying an uninventoried platform table. The plan's `inventoryDigest` changes: a plan file written by an earlier CLI no longer matches, and `--apply --plan-file` refuses it with `plan-digest-mismatch`. Re-run `os migrate organization-ownership --out PLAN`, review it, and apply that.
+  
+  **Existing databases.** The table is left in place untouched: no backfill, no reaper, no migrate command. Schema sync is additive and never drops a table, so a database an earlier release provisioned keeps `sys_notification_subscription` and any rows an administrator wrote, and nothing reads them. Export any row worth keeping. Dropping the table is the operator's call, by hand: `DROP TABLE sys_notification_subscription`.
+- 58cd58f: feat(service-messaging): a notification's text can be catalog keys, rendered per recipient at delivery in that recipient's language
+  
+  Clause-②: yes (widening): `EmitInput` gains an optional `keyedText` member, and the package's `.` entry gains `NotificationTextRenderer`, `assertNotificationTextKeys` and their types. An emit without `keyedText` is accepted and delivered exactly as before.
+  
+  - **What was wrong.** `emit()` took the text a recipient reads only as `payload.title` and `payload.body`, literals the producer builds before any recipient exists. So every recipient of a notification read the producer's language. The approvals plugin's notifications reached zh-CN, ja-JP and es-ES approvers in English.
+  - **The new member.** `EmitInput.keyedText` is `{ titleKey?, bodyKey?, params? }`. `titleKey` and `bodyKey` are `II18nService` keys made of a face and an id, such as `messages.approvalRequestedTitle`. A producer contributes their entries through its own translation bundle (`i18n.loadTranslations`, ADR-0029 D8). `params` fills the entries' `{{name}}` holes. A param is a string, or `{ key, fallback }`: the recipient-language text of `key` (such as `objects.<object>.label`), else `fallback`.
+  - **Where it renders.** At delivery, per recipient, before the channel is called: on the inline fan-out, on each row the dispatcher sends, and on each row of a digest group. The language is the recipient's own `sys_user.locale`, else the deployment default (the recipient-locale chain, `resolveRecipientLocale`), negotiated against the locales the `i18n` service holds. Every channel, a third party's included, receives the rendered `title` and `body` it already reads.
+  - **The fallback.** The literal `payload.title` and `payload.body` stay what a recipient reads whenever a key cannot be rendered: no `i18n` service, no renderer composed, or a key with no entry in the recipient's locale or in the catalog's declared fallback locale. A member the producer left unkeyed is also delivered as the literal. A key with no entry is said once per key and locale at `warn`.
+  - **Refused at emit.** A malformed `keyedText` throws a `TypeError` before anything is written: an undeclared member, a key without a face, a param name no `{{hole}}` can spell, or a keyed param without its `fallback`.
+  - **The delivery snapshot reserves `keyedText`,** the way it already reserves `title`, `body`, `severity`, `actionUrl` and `actorId`. The snapshot stores `EmitInput.keyedText` under that name only when the emit keyed its text. A producer's own payload member of that name (a flow `notify` node's free-form payload, say) is dropped from the snapshot and is never rendered. No producer in this repository writes one.
+  - **Cost.** One `sys_user` read per keyed delivery (one per digest group). A delivery without keys, or a deployment with no `i18n` service, makes no read.
+  - **Unchanged.** Every emit that passes no `keyedText` (and whose payload has no member of that name): the event row, the snapshot, and what the inbox, email and SMS channels deliver. The notify `template` path, `sys_notification_template` rendering (which now falls back to the rendered text), recipients, preferences and channel availability are also unchanged.
+  - **Composing it.** `MessagingServicePlugin` wires one `NotificationTextRenderer` into the service and the dispatcher. A hand-built `MessagingService` passes `textRenderer` in its context and a `NotificationDispatcher` passes it in its options. Without one, keyed text is delivered as its literal, and the service says so once.
+- d68aab6: fix(service-messaging)!: `sys_notification_template` refuses a write that leaves a row naming a channel other than `email` or `sms`, because no channel ever sends such a row
+  
+  A notification template row is read by exactly two channels: the email channel (when the notification names no email template) and the SMS channel, which also renders the phone OTP and invitation texts. The in-app inbox reads no row on any path. `channel` is free text, so a row for `inbox`, `push` or any other value was stored and then rendered nowhere; the `channel_renders_template` rule only warned about it. That rule now refuses. It is an invariant judged over the stored row overlaid with the write, so it answers rows already stored with another channel as well as new ones: such a row is refused on any edit that leaves its channel out of the set, until an edit moves it to `email` or `sms`, and it is still read, listed and deleted. No stored row is rewritten or deleted by this change.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. The one definition that changes is a validation rule on `sys_notification_template`, a platform object this package ships and owns, and what narrows is the write accept set of that object's rows, which are admin-authored data rather than metadata: no ADR-0087 conversion reaches a stored data row. The remedy is an operator's edit or delete of the row, never a rewrite of a metadata source, and this change rewrites or deletes no stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (a platform object's write accept set narrows, stored rows included), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  - **FROM:** a create, update, import row or bulk-update row that left a `sys_notification_template` row naming a channel other than `email` or `sms` was accepted and stored, with at most a `channel_renders_template` advisory in the write answer's `warnings`. A row already stored with such a channel took every edit.
+  - **TO:** that write is refused. The REST data door answers `400` with `code: 'VALIDATION_FAILED'` and one finding on `channel` (`code: 'rule_violation'`); an import commit fails that row with `field: 'channel'` and `code: 'rule_violation'`; a bulk update fails that row with `code: 'VALIDATION_FAILED'` and `httpStatus: 400`, and a predicate update over a set holding such a row writes no row. Every refusal carries the prescription: set the channel to `email` or `sms`, or delete the template; in-app content is an email template (`email_template`) named in a notify step's `template`.
+  - **Unchanged:** `email` and `sms` rows and every write to them; reading, listing and deleting any row; how every channel renders, so a row for another channel is still sent by none; and the `channel` column and its width.
+  - **The fix for an operator:** a row for another channel was never sent. Delete it, or set its channel to `email` or `sms` if its text belongs there. For in-app content, write an email template and name it in the notify step's `template`; the inbox and email both render it.
+- a39389e: fix(service-messaging)!: an html or mjml `sys_notification_template` body escapes every hole's value for markup
+  
+  The email channel renders a notification template row whose `format` is `html` or `mjml` into the mail's html part. Its `{{ payload.x }}` holes placed each value into that markup as stored, so a text field carrying markup characters — a person's display name, a record title, a comment — was read as markup by the recipient's mail client. Each hole's value in an html or mjml body is now HTML-escaped, in element text and quoted attributes alike, and the template's own markup renders as written. Stored text is never stripped or refused: a display name may contain any character, and the mail client shows it as typed.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. An authored template body's own markup renders exactly as before; what changes is how the renderer encodes a hole's VALUE in the html and mjml faces. The remedy is an author's choice — put the markup in the template body instead of a payload value — never a rewrite of a stored row or a package source, and stored `sys_notification_template` rows are not touched. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (what an html or mjml notification template renders for a markup-bearing value narrows), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  - **FROM:** in an html or mjml `sys_notification_template` body, a `{{ payload.x }}` hole rendered its value verbatim, so a value carrying markup became markup in the sent html part.
+  - **TO:** the same hole renders the value HTML-escaped: an ampersand, an angle bracket or a quote arrives as the matching HTML entity, which a mail client displays as the original character.
+  - **Unchanged:** the subject and a `markdown` or `text` body are plain text and keep rendering values verbatim. A value without markup characters renders byte-identically. The email-template path (`sys_email_template`, named in a notify step's `template`) already escaped its html body by default and is unchanged, and no stored row is rewritten.
+  - **What to do:** a template that relied on a payload value rendering as markup moves that markup into the template body, or into an email template, whose triple-braced hole is the one unescaped form.
+
+### Patch Changes
+
+- 0091d84: fix: no shipped text says the SQL driver reads organization-less rows, and the in-memory HTTP outbox no longer does
+  
+  Clause-②: no (one fix and texts: the in-memory HTTP outbox's `redeliver()` now answers as `SqlHttpOutbox` already did; no accept set, served body or error code of a shipped composition moves)
+  
+  ADR-0131 D8 retired the driver's `OR organization_id IS NULL` arm. Several shipped texts still described it as the live tenant predicate. They now state the current rule: the tenant term is `organization_id = :tenant`, or `IN (:tenants)` under the `group` posture, and nothing else. No tenant-scoped read reaches an organization-less row on a tenant table.
+  
+  - **`@objectstack/service-messaging` — fix.** `MemoryHttpOutbox.redeliver()` no longer lets a tenant-scoped caller replay a row with no organization. It answers `RESOURCE_NOT_FOUND`, as `SqlHttpOutbox` does through the driver's tenant scope (ADR-0131 D8: no layer has a NULL arm). A caller with no tenant is still unscoped. No shipped composition constructs the in-memory outbox; the messaging plugin always builds `SqlHttpOutbox`. Code that embeds `MemoryHttpOutbox` directly sees the change.
+  - **`@objectstack/service-automation`.** The `[http]` node's warning for a durable callout with no organization no longer says the `sys_http_delivery` row is "a global row every organization's redeliver door can reach". It now says no organization's redeliver door reaches that row.
+  - **`@objectstack/objectql`.** The `sys_record_share` entry of the platform-object tenancy inventory carries an updated `evidence` text.
+  - **`@objectstack/lint`.** `os explain unique/legacy-organization-composite` now says that a new row carries its organization wherever the organization object is registered. A composition that registers no organization object still writes rows whose organization column is NULL.
+  - **`@objectstack/spec`.** The TSDoc of `SharingRuleRow` no longer calls it a 1-to-1 stored shape: `deploymentWide` has no `sys_sharing_rule` column. The TSDoc of `DriverOptions.tenantIds` and of the events `organizationId` member describe the predicate without a NULL arm.
+  - **The other packages.** Code comments only.
+- e282f32: fix(service-messaging,metadata-protocol)!: a notification preference's User is a `sys_user` reference, so the record title names the person and the write door refuses an id no user holds; the default for every user is an empty User instead of `'*'`
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling or exported declaration is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What changes is a platform object this package ships and owns, `sys_notification_preference`: its `user_id` column becomes a `sys_user` lookup, and what narrows is the write accept set of that object's rows, which are admin-authored data rather than metadata. No ADR-0087 conversion reaches a stored data row; the stored rows that spelled the retired `'*'` are rewritten by this package itself at boot, and the one-default-per-key index is a runtime migration in `@objectstack/metadata-protocol`. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (a platform object's write accept set narrows, and one stored value is rewritten). It changes what a data writer can store in `sys_notification_preference`, not what a metadata author can write, so it ships as `patch` with this banner.
+  
+  - **FROM:** `sys_notification_preference.user_id` was a required text column holding a user id or the literal `'*'`, which meant "the default for every user". Any string was stored: a mistyped id matched nobody, silently. The record title (Setup → Notification Preferences) read the raw id, for example `ISu3jHPIrdgD45L1rrC2FuE7DIcsk2ap · urgent_task · inbox`. Two defaults for every user could be stored for one topic and channel in one organization, and which one applied was unspecified.
+  - **TO:** `user_id` is an optional `sys_user` lookup (ADR-0118 D1: no sentinel in a user column). An empty User is the default for every user, and a user's own row still overrides it.
+    - A write that names an id no user holds, `'*'` included, is refused: the REST data door answers `400` with `code: 'VALIDATION_FAILED'` and a finding on `user_id` with `code: 'reference_not_found'`.
+    - The title names the person: their name, or their email where the name is blank, then the topic and the channel. A row with an empty User reads `All users · TOPIC · CHANNEL`. A row whose User this reader cannot read, or that no longer exists, has no title rather than a misleading one.
+    - Deleting a user deletes that user's preference rows (`deleteBehavior: 'cascade'`). Under the lookup default (`set_null`) the person's own mute would have become the default for every user.
+    - At every boot (`kernel:ready`), the messaging service rewrites each stored `user_id = '*'` to an empty User, in every organization. A second run changes nothing. A `'*'` row whose topic and channel already have a default with an empty User is left as stored and reported once at `error`, naming the row; it is never deleted for you.
+    - On SQLite and PostgreSQL, `@objectstack/metadata-protocol` rebuilds the index `uniq_sys_notification_preference_a22d7d27` at `kernel:ready` as `(organization_id, COALESCE(user_id, ''), topic, channel)`, so a second default for one topic and channel in one organization is refused (`409`). If existing rows already break that rule, it refuses to migrate: the previous index stays, no row is touched, and the boot log and `os migrate duplicates` list the rows. MySQL/MariaDB and driver-memory keep the declared index, which does not constrain empty Users, and the boot log says so on MySQL.
+  - **Unchanged:** `topic = '*'` and `channel = '*'` are still the topic and channel wildcards. Most-specific-wins resolution, mandatory topics, quiet hours and digests behave as before. A row for a real user is read, matched and titled as before, except for the title text. The physical column is still a `varchar(255)`, so no DDL change is needed for it.
+  - **The fix for an operator:** nothing, normally; the boot rewrites the old `'*'` rows. If the boot log reports a `'*'` row that shares its topic and channel with a default whose User is already empty, delete the one that should not apply and restart. If it reports that the one-default-per-key index could not be built because two such defaults exist, list them with `os migrate duplicates`, delete one, and restart. A script or import that wrote `user_id: '*'` writes an empty `user_id` (omit it, or send `null`) for the default for every user.
+- 0603bfa: fix(service-messaging): the `sys_notification_template` copy now says that only the email and SMS channels use a template row, and that the in-app inbox never does
+  
+  A notification template row is read by exactly two channels: the email channel (when the notification names no email template) and the SMS channel, which also renders the phone OTP and invitation texts. The in-app inbox reads no row on any path. `channel` is free text, so a row saved for `inbox`, `push` or any other value was stored and then rendered nowhere, with nothing to say so.
+  
+  This entry first added a `channel_renders_template` warning for such a write; in the same release #24983's refusal superseded it, so a write naming another channel is refused rather than warned about, as that entry describes. The object's description, its empty state and the `channel` / `subject` help now say which channels use a row and that the inbox never does.
+  
+  Clause-②: no — this entry now describes copy only (the object's description, its empty state and the field help); the narrowing of what a write may send is #24983's, declared in its own entry.
+  
+  - **Unchanged.** Nothing this entry describes changes which writes are accepted. `email` and `sms` rows, how every channel renders, and the column and its width are unchanged.
+  - **What to do.** For in-app content, write an email template and name it in the notify step's `template`; the inbox and email both render it. A row for another channel was never sent, so delete it if you no longer want it listed.
+- c24203f: fix(service-messaging): the heading of a notification digest of two or more items is rendered in its recipient's language, not as the English "You have N notifications" for everyone
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** A recipient whose notification preference digests `daily` or `weekly` received each window's digest headed "You have N notifications" in English, whatever their language, even when every item under it was rendered in their language.
+  - **Now.** The heading is keyed (`messages.notificationDigestTitle`, with a `{{count}}` hole) in `@objectstack/service-messaging`'s own translation bundle, in en, zh-CN, ja-JP and es-ES. It is rendered at delivery by the same keyed-text renderer as the digest's items (`EmitInput.keyedText`), in the same locale read: the recipient's `sys_user.locale`, then the deployment default. A zh-CN recipient reads "您有 3 条通知".
+  - **Unchanged.** The English sentence stays the literal fallback, byte for byte: with no `i18n` service, with no renderer composed, or when neither the recipient's language nor the deployment default has a pack. A one-item digest is still titled by its item. No export, option or type changes.
+  - **Cost.** With an `i18n` service registered, each digest of two or more items now reads its recipient's locale once, even when none of its items is keyed, because its heading always is.
+- 284e048: fix(service-messaging)!: `sys_notification_template` refuses an html or mjml body that places a hole where the renderer's encoding is not right for it
+  
+  An html or mjml notification template body HTML-escapes every hole's value. That encoding is right in two placements only: element text, and a quoted plain-text attribute value. A hole anywhere else (an attribute read as a URL, an event handler, a style, an attribute holding markup, a meta element attribute, an unquoted attribute value, inside a tag, a raw-text element, a comment, or SVG / MathML content) received an encoding that does not fit where it lands. Such a body is now refused when it is saved. A hole counts as supported only when every way an HTML parser can read the body places it in element text or a quoted plain-text attribute value. The check is the template object's own save hooks, judged over the stored row overlaid with the write, so a row stored before this change that breaks the rule is refused on any edit that leaves it breaking it: frozen, not bricked. It is still read, listed and deleted, and it keeps rendering and delivering as before. No stored row is rewritten.
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the write accept set of `sys_notification_template` rows, a platform object this package ships and owns, whose rows are admin-authored data rather than metadata: no ADR-0087 conversion reaches a stored data row. The remedy is an author's edit of the row, moving a hole or changing the format, never a rewrite of a metadata source, and this change rewrites or deletes no stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (a platform object's write accept set narrows, stored rows included). It ships as `patch` because the metadata protocol does not move.
+  
+  - **FROM:** a create, update, import row or bulk-update row that left a `sys_notification_template` row with format `html` or `mjml` and a hole outside element text and quoted plain-text attribute values was accepted and stored. A row already stored that way took every edit.
+  - **TO:** that write is refused. The REST data door answers `400` with `code: 'VALIDATION_FAILED'` and one finding at `body` (`code: 'invalid_value'`) that names each refused hole and its placement. An import commit fails that row with `field: 'body'` and `code: 'invalid_value'`. A bulk update fails that row with `code: 'VALIDATION_FAILED'` and `httpStatus: 400`, and a predicate update over a set holding such a row writes no row. Every writer is judged, system context included.
+  - **Unchanged:** `markdown` and `text` bodies, whose holes render verbatim; html and mjml bodies whose every hole sits in element text or a quoted plain-text attribute value; reading, listing and deleting any row; and how every row renders and is delivered. No error code is added.
+  - **The fix for an author:** move each refused hole into element text or a quoted plain-text attribute value, or set the format to `text` or `markdown`. A link whose address comes from a value belongs in an email template (`email_template`), which declares that variable as a URL; name it in the notify step's `template`.
+- 1f78b64: fix(service-messaging)!: retire `renderNotification`, the render export that takes a notification template body with no save moment
+  
+  The hole-placement rule for notification templates is judged where a template is saved: the `sys_notification_template` save hooks. `renderNotification` took a template body inline and rendered it at once, with no save moment, so the rule could not see it. It leaves the published entry of `@objectstack/service-messaging`. Nothing in this repository imported it from that entry. The renderer stays inside the package: the email and sms channels still render every stored template through it, unchanged.
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @objectstack/service-messaging#renderNotification) One runtime function leaves a published package entry; no key of any metadata schema, no object definition and no stored shape is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. A TypeScript consumer meets the break at its own import, and the line below names the door to use instead. -->
+  
+  **BREAKING** (a runtime export is removed). It ships as `patch` because the metadata protocol does not move. There is no staged window.
+  
+  - FROM `renderNotification` TO a `sys_notification_template` row for the topic, channel and locale, which the delivering channel renders when the notification is emitted.
+  
+  Unchanged: `interpolate` (the plain-text face, which the placement rule judges at no door), `NotificationTemplateStore`, `TEMPLATE_OBJECT`, `DEFAULT_LOCALE` and the template types; and how every stored template renders.
+- bc5daf0: fix(service-messaging): a notification delivery's title names the person it is for, not their raw user id (#25194)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The record title of a `sys_notification_delivery` row (Setup → Notification Deliveries) read `channel → recipient_id`, so a delivery to a user showed their raw user id. It now reads `channel → Person`: the user's name, or their email where the name is blank. A delivery to an address no user holds — an email kept as given, a phone number — is titled by that address, as before.
+  
+  The delivery object gains one optional field, `recipient_user_id` (Recipient User), a `sys_user` reference the title reads through. `emit()` sets it when the recipient is a user's id, from one `sys_user` read per emit, and leaves it empty for an address. Deleting the user empties it; the delivery stays, titled by the raw recipient. `recipient_id` keeps its type and meaning (the address: a user id, an email or a phone number), and is now labelled **Recipient**.
+  
+  Rows written before this change carry no `recipient_user_id` and keep their old title until the 90-day window ages them out. Nothing is migrated, and no delivery is routed by the new field.
+- ee63b47: fix: Setup field help is written for administrators, and the two access-review fields nothing uses yet are hidden from the Setup forms
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A Setup pass met field help written for the platform's developers: "Foreign key to sys_user.id", "NULL only on a grant written before the column existed", "via isGrantActive", "(P3 digest middleware)", "Owned by objectql (better-auth is oblivious to this column)", "LifecycleService (Reaper / Rotator / Archiver)" and ADR numbers. Each now says what the field means and what to do with it, in every shipped locale (`en` regenerated from the source; `zh-CN`, `ja-JP` and `es-ES` translated):
+  
+  - the user, OAuth application, session and refresh-token fields of the permission-set and position assignments and of the OAuth token, consent and client-resource objects, and the package-version field of stored metadata;
+  - the permission set picked on an assignment;
+  - the start time of an approval delegation;
+  - the digest cadence and quiet hours of a notification preference, which now say how each value behaves;
+  - the AI Access and Locale fields of a user;
+  - the Data Lifecycle settings page and its retention overrides.
+  
+  `Last Certified At` and `Certified By` on `sys_user_permission_set` and `sys_user_position` are reserved for a future access-review feature and nothing writes or reads them. They are now `hidden: true`, so the Setup forms and detail pages no longer show them. The columns and any stored values stay.
+- 8878c36: fix(service-messaging): Setup's Notification Preferences form says which topics and channels can be entered
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Topic and Channel boxes on a notification preference only said "Notification topic" and "Channel id (inbox/email/push/…)", so an administrator had to know the machine names. One of the channels it named, `push`, does not exist. Both fields stay free text, because neither has a fixed list to pick from:
+  
+  - **Topics.** A topic is whatever name the sender uses, and nothing registers topics. A flow's notify step names its own topic, and platform features send fixed ones such as `approval.requested`.
+  - **Channels.** Channels are registered while the server runs, and any plugin can add one. A dropdown would accept only the values in its list, and it cannot store the `*` wildcard that means "all channels".
+  
+  The help now names the values:
+  
+  - **Channel:** `inbox` (always available), `email` (once an email service is configured), `sms` (once an SMS service is configured), or the id of a channel an installed plugin adds.
+  - **Topic:** where topics come from, with examples.
+  
+  Both helps also say `*` means all, and that a value nothing uses matches nothing.
+  
+  No stored row, accepted value, default or column changes. The translation bundles carry the new help.
+- Updated dependencies [448374d]
+- Updated dependencies [94842ba]
+- Updated dependencies [7cacad5]
+- Updated dependencies [df8bb40]
+- Updated dependencies [0091d84]
+- Updated dependencies [5e9b100]
+- Updated dependencies [7532ea3]
+- Updated dependencies [fde7456]
+- Updated dependencies [de9cd1f]
+- Updated dependencies [7035682]
+- Updated dependencies [d606fc1]
+- Updated dependencies [a8b44d4]
+- Updated dependencies [78ab647]
+- Updated dependencies [73a2b52]
+- Updated dependencies [5872450]
+- Updated dependencies [9ea5afe]
+- Updated dependencies [925fd07]
+- Updated dependencies [e7befa7]
+- Updated dependencies [55d7aab]
+- Updated dependencies [644e4b2]
+- Updated dependencies [0715fac]
+- Updated dependencies [60b42cd]
+- Updated dependencies [b9a79ef]
+- Updated dependencies [63085c3]
+- Updated dependencies [0b8bce4]
+- Updated dependencies [5d2c5a1]
+- Updated dependencies [066dabc]
+- Updated dependencies [4b8f597]
+- Updated dependencies [2069b81]
+- Updated dependencies [1862d8d]
+- Updated dependencies [30d21f6]
+- Updated dependencies [eddffc3]
+- Updated dependencies [69712d5]
+- Updated dependencies [dfe60e3]
+- Updated dependencies [e939357]
+- Updated dependencies [045858f]
+- Updated dependencies [baedcec]
+- Updated dependencies [03c12a5]
+- Updated dependencies [386f60f]
+- Updated dependencies [28c9a2c]
+- Updated dependencies [2354058]
+- Updated dependencies [ba244f1]
+- Updated dependencies [edcc8ce]
+- Updated dependencies [fccbd9d]
+- Updated dependencies [c8f4c43]
+- Updated dependencies [02ad31a]
+- Updated dependencies [03966ce]
+- Updated dependencies [e3aa111]
+- Updated dependencies [863c580]
+- Updated dependencies [7f5b19d]
+- Updated dependencies [14e7239]
+- Updated dependencies [fe0ec2b]
+- Updated dependencies [dfab597]
+- Updated dependencies [9127f23]
+- Updated dependencies [24360dc]
+- Updated dependencies [ecb4e69]
+- Updated dependencies [8dfd126]
+- Updated dependencies [bda53bb]
+- Updated dependencies [b964ea1]
+- Updated dependencies [9019af9]
+- Updated dependencies [45f9962]
+- Updated dependencies [e5eab06]
+- Updated dependencies [dc532e8]
+- Updated dependencies [d196748]
+- Updated dependencies [5f30f00]
+- Updated dependencies [7db1697]
+- Updated dependencies [f5b6b3f]
+- Updated dependencies [c109bfc]
+- Updated dependencies [f4112a7]
+- Updated dependencies [f4112a7]
+- Updated dependencies [db1c7cc]
+- Updated dependencies [303aef0]
+- Updated dependencies [b3034ee]
+- Updated dependencies [d12e650]
+- Updated dependencies [830a63a]
+- Updated dependencies [1000cc7]
+- Updated dependencies [ee63b47]
+- Updated dependencies [bdf762c]
+- Updated dependencies [27b3f1f]
+- Updated dependencies [3306cad]
+- Updated dependencies [c898bd8]
+- Updated dependencies [97aa34e]
+- Updated dependencies [832a84e]
+- Updated dependencies [7c68b10]
+- Updated dependencies [915e940]
+- Updated dependencies [025f6de]
+- Updated dependencies [f7d7403]
+  - @objectstack/spec@18.1.0
+  - @objectstack/core@18.1.0
+  - @objectstack/platform-objects@18.1.0
+  - @objectstack/types@18.1.0
+
 ## 18.0.0
 
 ### Minor Changes
