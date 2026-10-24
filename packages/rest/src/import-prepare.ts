@@ -18,6 +18,7 @@ import {
 } from './import-mapping.js';
 import { asXlsxLoadInput, loadExcelJs } from './xlsx-module.js';
 import { isBlank } from '@objectstack/core';
+import { isMatchKeySets } from '@objectstack/spec/api';
 
 /**
  * Minimal RFC-4180-style CSV parser used by the bulk-import endpoint
@@ -301,12 +302,37 @@ function applyInlineEntryRules(
     };
 }
 
+/**
+ * [#25578] Read a request's `matchFields`. One key set (`string[]`) is read
+ * as it always was, non-string and empty names dropped. Ordered key sets
+ * (`string[][]`) are read strictly: every set non-empty and every name a
+ * non-empty string, and an array mixing names with sets is refused, because
+ * a dropped set or name would silently change which record a row matches.
+ */
+function readMatchFieldsBody(raw: unknown): { ok: true; matchFields: string[] | string[][] } | ImportRefusal {
+    if (!Array.isArray(raw)) return { ok: true, matchFields: [] };
+    if (!raw.some((x) => Array.isArray(x))) {
+        return { ok: true, matchFields: raw.filter((f: any) => typeof f === 'string' && f.length > 0) };
+    }
+    const malformed = !isMatchKeySets(raw)
+        || raw.some((set) => set.length === 0 || set.some((f: unknown) => typeof f !== 'string' || f.length === 0));
+    if (malformed) {
+        return {
+            ok: false, status: 400, code: 'INVALID_REQUEST',
+            error: 'matchFields is one key set of field names (["email"]) or ordered key sets, each a non-empty list of field names '
+                + '([["credit_code"], ["country", "registration_no"]]); it cannot mix names with sets or carry an empty set or name.',
+        };
+    }
+    return { ok: true, matchFields: raw as string[][] };
+}
+
 /** Everything the import runner needs, parsed & validated from a request body. */
 export interface PreparedImport {
     rows: Array<Record<string, any>>;
     metaMap: Map<string, ExportFieldMeta>;
     writeMode: 'insert' | 'update' | 'upsert';
-    matchFields: string[];
+    /** One key set, or ordered key sets (first all-non-blank set per row). */
+    matchFields: string[] | string[][];
     dryRun: boolean;
     runAutomations: boolean;
     /** #3479 — import established historical facts: skip the state_machine rule
@@ -503,9 +529,12 @@ export async function prepareImportRequest(
 
     let writeMode: 'insert' | 'update' | 'upsert' =
         body?.writeMode === 'update' || body?.writeMode === 'upsert' ? body.writeMode : 'insert';
-    let matchFields: string[] = Array.isArray(body?.matchFields)
-        ? body.matchFields.filter((f: any) => typeof f === 'string' && f.length > 0)
-        : [];
+    // `matchFields` is one key set (`string[]`, read as it always was) or
+    // ordered key sets (`string[][]`), which are read strictly: a malformed
+    // set would change which rows match, so it refuses the request.
+    const readMatchFields = readMatchFieldsBody(body?.matchFields);
+    if (!readMatchFields.ok) return readMatchFields;
+    let matchFields: string[] | string[][] = readMatchFields.matchFields;
     // The two control flags, read where the door's gate reads them (#24348):
     // the import doors refuse either opt-out from any caller but the system
     // principal BEFORE this parse (`importControlOptOutRefusal`), so a value
@@ -557,6 +586,13 @@ export async function prepareImportRequest(
 
     if (writeMode !== 'insert' && matchFields.length === 0) {
         return { ok: false, status: 400, code: 'INVALID_REQUEST', error: `writeMode "${writeMode}" requires a non-empty matchFields[]` };
+    }
+    if (skipBlankMatchKey && isMatchKeySets(matchFields)) {
+        return {
+            ok: false, status: 400, code: 'INVALID_REQUEST',
+            error: 'skipBlankMatchKey applies to one key set only. With ordered key sets in matchFields, a row blank on every set '
+                + 'is reported as a row error (BLANK_MATCH_KEY) rather than skipped: drop skipBlankMatchKey, or give matchFields one key set.',
+        };
     }
 
     // Normalize `mapping` to a `{ sourceColumn: targetField }` record. Accepts

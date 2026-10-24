@@ -10,6 +10,7 @@ import {
 } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { CreateDataRequest, FindDataRequest, GetMetaItemRequest, UpdateDataRequest, ValidateDataIssue, ValidateDataRequest, ValidateDataResponse } from '@objectstack/spec/api';
+import { isMatchKeySets } from '@objectstack/spec/api';
 import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult } from './bulk-write.js';
 import { isUniqueViolationError, uniqueViolationColumn, isEngineDuplicateRecordEnvelope, mapDataError, sandboxBusinessMessage, isSandboxOrigin, isSandboxOwnFault } from '@objectstack/types';
 
@@ -234,7 +235,13 @@ export interface RunImportOptions {
   /** Field metadata for value coercion (name→id lookups, select codes, …). */
   metaMap: Map<string, ExportFieldMeta>;
   writeMode: 'insert' | 'update' | 'upsert';
-  matchFields: string[];
+  /**
+   * One key set (`string[]`), or ordered key sets (`string[][]`): each row is
+   * matched by the first set whose fields are all non-blank on it, and a row
+   * blank on every set fails with `BLANK_MATCH_KEY` (`skipBlankMatchKey` is
+   * not consulted for that form). One key set keeps its own blank handling.
+   */
+  matchFields: string[] | string[][];
   dryRun: boolean;
   runAutomations: boolean;
   /** #3479 / #3493 — treat rows as established historical facts. The write
@@ -667,6 +674,11 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
     trimWhitespace, nullValues, createMissingOptions, skipBlankMatchKey,
     onProgress, shouldCancel, captureUndo,
   } = opts;
+  // One key set is the one-element case of ordered key sets, except for a row
+  // blank on it: only the ordered form reports that row as an error.
+  const blankKeyIsRowError = isMatchKeySets(matchFields);
+  const keySets: string[][] = blankKeyIsRowError ? matchFields : [matchFields as string[]];
+
   const collectUndo = !!captureUndo && !dryRun;
   const undoLog: ImportUndoLog = { created: [], updated: [] };
   // Snapshot only the fields the import touched, so undo restores exactly what
@@ -778,26 +790,30 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
     return match;
   };
 
-  // Locate an existing record for update/upsert by matchFields. Returns the
-  // record, or a sentinel: 'blank' (a match field was empty), 'none' (no
-  // match), 'ambiguous' (>1 match — too risky to update).
+  // Locate an existing record for update/upsert by matchFields, using the
+  // first key set whose fields are all non-blank on the row (and only that
+  // set: a miss on it is 'none', not a reason to try the next). Returns the
+  // record, or a sentinel: 'blank' (every key set has an empty field), 'none'
+  // (no match), 'ambiguous' (>1 match — too risky to update); and the key set
+  // the row was matched by.
   const findExisting = async (
     data: Record<string, any>,
-  ): Promise<Record<string, any> | 'blank' | 'none' | 'ambiguous'> => {
-    const filter: Record<string, any> = {};
-    for (const f of matchFields) {
+  ): Promise<{ match: Record<string, any> | 'blank' | 'none' | 'ambiguous'; keySet: string[] }> => {
+    const keySet = keySets.find((set) => set.every((f) => {
       const v = data[f];
-      if (v === undefined || v === null || v === '') return 'blank';
-      filter[f] = v;
-    }
+      return !(v === undefined || v === null || v === '');
+    }));
+    if (!keySet) return { match: 'blank', keySet: [] };
+    const filter: Record<string, any> = {};
+    for (const f of keySet) filter[f] = data[f];
     const r = await p.findData(findArgsBase({
       object: objectName,
       query: { object: objectName, where: filter, limit: 2 },
     }));
     const recs = findRows(r);
-    if (recs.length === 0) return 'none';
-    if (recs.length > 1) return 'ambiguous';
-    return recs[0];
+    if (recs.length === 0) return { match: 'none', keySet };
+    if (recs.length > 1) return { match: 'ambiguous', keySet };
+    return { match: recs[0], keySet };
   };
 
   const writeCtx = {
@@ -1139,10 +1155,19 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
           let existing: Record<string, any> | 'blank' | 'none' | 'ambiguous' = 'none';
           let handled = false;
           if (writeMode !== 'insert') {
-            existing = await findExisting(data);
+            ({ match: existing } = await findExisting(data));
             if (existing === 'ambiguous') {
               errCount++;
               results[i] = { row: rowNo, ok: false, action: 'failed', code: 'AMBIGUOUS_MATCH', error: `matchFields matched more than one ${objectName} record` };
+              handled = true;
+            } else if (existing === 'blank' && blankKeyIsRowError) {
+              // Ordered key sets: a row no set can identify is an error, never
+              // a silent create or skip.
+              errCount++;
+              results[i] = {
+                row: rowNo, ok: false, action: 'failed', code: 'BLANK_MATCH_KEY',
+                error: `The row has no match key: every key set in matchFields (${keySets.map((set) => set.join(' + ')).join('; ')}) has a blank field on it`,
+              };
               handled = true;
             } else if (existing === 'blank' && (skipBlankMatchKey || writeMode === 'update')) {
               // Blank match key: skip when asked, else fall through to create.

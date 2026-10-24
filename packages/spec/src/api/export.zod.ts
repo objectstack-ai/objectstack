@@ -282,8 +282,19 @@ export const ImportRequestSchema = lazySchema(() => z.object({
     ),
   writeMode: ImportWriteMode.default('insert')
     .describe('insert / update / upsert semantics'),
-  matchFields: z.array(z.string()).optional()
-    .describe('Fields that identify an existing record (required for update/upsert)'),
+  matchFields: z.union([
+    z.array(z.string()),
+    z.array(z.array(z.string()).min(1)).min(1),
+  ]).optional()
+    .describe(
+      'Fields that identify an existing record (required for update/upsert). Either one key set ' +
+      '(`[\'email\']`), or an ordered list of key sets (`[[\'credit_code\'], [\'country\', ' +
+      '\'registration_no\']]`) for a sheet whose rows are identified in different ways: each row ' +
+      'is matched by the first set whose fields are all non-blank on that row, and only by that ' +
+      'set. A row blank on every set fails with `BLANK_MATCH_KEY` instead of being created or ' +
+      'skipped, so `skipBlankMatchKey` cannot be combined with key sets. A set that matches more ' +
+      'than one record fails the row with `AMBIGUOUS_MATCH`, as one key set does.',
+    ),
   runAutomations: z.boolean().default(true)
     .describe(
       'Fire triggers/hooks for each imported row. ON by default, and opting out must be ' +
@@ -312,7 +323,7 @@ export const ImportRequestSchema = lazySchema(() => z.object({
       'to a shared picklist that did not resolve is still refused.',
     ),
   skipBlankMatchKey: z.boolean().default(false)
-    .describe('Skip rows whose matchFields are blank (default: upsert creates them, update skips them)'),
+    .describe('Skip rows whose matchFields are blank (default: upsert creates them, update skips them). One key set only: with ordered key sets a row blank on every set is a row error.'),
 }).refine((body) => !(body.mappingName && body.mapping), {
   // Same exclusion the route enforces (400 CONFLICTING_MAPPING in
   // `packages/rest/src/import-prepare.ts`) — surfaced at authoring time for
@@ -321,7 +332,22 @@ export const ImportRequestSchema = lazySchema(() => z.object({
   // callers having used this schema.
   message: 'Provide either mappingName or an inline mapping, not both',
   path: ['mappingName'],
+}).refine((body) => !(body.skipBlankMatchKey && isMatchKeySets(body.matchFields)), {
+  // Same refusal the route answers (400 INVALID_REQUEST in
+  // `packages/rest/src/import-prepare.ts`): ordered key sets report a row
+  // blank on every set as a row error, so a request asking to skip such rows
+  // silently contradicts the form it chose.
+  message: 'skipBlankMatchKey applies to one key set only; with ordered key sets a row blank on every set is reported as a row error',
+  path: ['skipBlankMatchKey'],
 }));
+
+/**
+ * Whether an import's `matchFields` uses the ordered key-set form
+ * (`string[][]`) rather than one key set (`string[]`).
+ */
+export function isMatchKeySets(matchFields: unknown): matchFields is string[][] {
+  return Array.isArray(matchFields) && matchFields.length > 0 && matchFields.every((set) => Array.isArray(set));
+}
 export type ImportRequest = z.input<typeof ImportRequestSchema>;
 /** Post-parse shape of {@link ImportRequest} — defaults applied, transforms run (ADR-0122). */
 export type ImportRequestParsed = z.infer<typeof ImportRequestSchema>;

@@ -12,6 +12,7 @@ import {
   CreateImportJobRequestSchema,
   ImportRowResultSchema,
   ImportJobResultsSchema,
+  isMatchKeySets,
 } from './export.zod';
 import type { ValidateDataIssue } from './protocol.zod';
 import { DroppedFieldsEventSchema } from '../data/data-engine.zod';
@@ -474,5 +475,53 @@ describe('ImportRowResultSchema — droppedFields and warnings', () => {
   it('the typed reader sees both keys, in the engine\'s and the verdict\'s types', () => {
     expectTypeOf<NonNullable<ImportRowResult['droppedFields']>[number]>().toEqualTypeOf<DroppedFieldsEvent>();
     expectTypeOf<NonNullable<ImportRowResult['warnings']>[number]>().toEqualTypeOf<ValidateDataIssue>();
+  });
+});
+
+// ==========================================
+// Ordered match key sets
+// ==========================================
+
+describe('ImportRequestSchema — matchFields as ordered key sets', () => {
+  const base = { format: 'json' as const, rows: [], writeMode: 'upsert' as const };
+
+  it('one key set is unchanged: parsed as written', () => {
+    const r = ImportRequestSchema.safeParse({ ...base, matchFields: ['credit_code'] });
+    expect(r.success).toBe(true);
+    expect(r.data?.matchFields).toEqual(['credit_code']);
+    expect(isMatchKeySets(r.data?.matchFields)).toBe(false);
+  });
+
+  it('ordered key sets parse, in order', () => {
+    const matchFields = [['credit_code'], ['country', 'registration_no']];
+    const r = ImportRequestSchema.safeParse({ ...base, matchFields });
+    expect(r.success).toBe(true);
+    expect(r.data?.matchFields).toEqual(matchFields);
+    expect(isMatchKeySets(r.data?.matchFields)).toBe(true);
+  });
+
+  it.each([
+    ['an empty set', [['credit_code'], []]],
+    ['an empty list of sets', [[]]],
+    ['names mixed with sets', ['credit_code', ['country']]],
+  ])('refuses %s at the matchFields path', (_label, matchFields) => {
+    const r = ImportRequestSchema.safeParse({ ...base, matchFields });
+    expect(r.success).toBe(false);
+    expect(r.error?.issues[0]?.path[0]).toBe('matchFields');
+  });
+
+  it('refuses skipBlankMatchKey with key sets at the skipBlankMatchKey path; one key set keeps it', () => {
+    const sets = ImportRequestSchema.safeParse({ ...base, matchFields: [['credit_code']], skipBlankMatchKey: true });
+    expect(sets.success).toBe(false);
+    expect(sets.error?.issues[0]).toMatchObject({ code: 'custom', path: ['skipBlankMatchKey'] });
+
+    const one = ImportRequestSchema.safeParse({ ...base, matchFields: ['credit_code'], skipBlankMatchKey: true });
+    expect(one.success).toBe(true);
+  });
+
+  it('the typed SDK request can express both spellings', () => {
+    const one: ImportRequest = { matchFields: ['email'] };
+    const sets: ImportRequest = { matchFields: [['credit_code'], ['country', 'registration_no']] };
+    expect([one, sets]).toHaveLength(2);
   });
 });
