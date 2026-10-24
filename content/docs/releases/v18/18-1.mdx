@@ -5,14 +5,14 @@ description: "Release notes and upgrade checklist for 18.1.0, the first minor of
 
 <Callout type="warn">
 **How this page was compiled.** From the 18.1.0 changesets on `main` at
-`19d3720af1` (2026-10-23), before the 18.1.0 cut: a rehearsed
+`03243fc637` (2026-10-24), before the 18.1.0 cut: a rehearsed
 `pnpm run version` in a throwaway clone at `b2c0752900` (73 packages move to
-18.1.0, and their `## 18.1.0` sections held 227 distinct entries), and the 23
-changesets merged after it, graded the same way. That makes **250 distinct
+18.1.0, and their `## 18.1.0` sections held 227 distinct entries), and the 26
+changesets merged after it, graded the same way. That makes **253 distinct
 entries**. The five sections below use the grouping the GitHub Release body
-uses, and the counts are that grouping's: **77** need you to act, **9** are
-converted for you, **47** add capabilities, **1** declares a semantic change,
-and **116** are other fixes. Nothing here was
+uses, and the counts are that grouping's: **78** need you to act, **9** are
+converted for you, **47** add capabilities, **2** declare a semantic change,
+and **117** are other fixes. Nothing here was
 read off a published 18.1.0 package or walked on an upgrade yet: every refusal
 is described as its changeset describes it. Anything that lands on `main` before
 the cut is in the CHANGELOG and not on this page.
@@ -20,7 +20,7 @@ the cut is in the CHANGELOG and not on this page.
 
 ## Highlights — 18.1.0
 
-- ⚠️ **A minor that breaks.** 18.1.0 is a minor version, and 86 of its
+- ⚠️ **A minor that breaks.** 18.1.0 is a minor version, and 87 of its
   changesets are declared breaking. Under the level rule the maintainer ruled
   on 2026-10-21 (#25105, "ruling A"), the v18 line takes no further major: a
   change to the metadata protocol takes `minor`, and every other change takes
@@ -67,7 +67,7 @@ the cut is in the CHANGELOG and not on this page.
 - **An `external` membership grade for portal users** (`9019af9`, #25515). A
   supplier's or customer's portal user is a member of the organization but
   reads only its own identity rows, and reaches data only through grants made
-  to it. A roster object can declare **membership keys** that a row policy reads
+  to it (`45f9962`, #25541). A roster object can declare **membership keys** that a row policy reads
   as `current_user.KEY` (`dc532e8`, #25513; `e5eab06`, #25528).
 
 ---
@@ -89,7 +89,7 @@ else:
 
 So a **patch** release can break a REST client, a boot or a deployment
 script, and 18.1.0 carries 39 changesets graded `patch` that say **BREAKING**,
-beside 47 graded `minor` ones. Pin exact `@objectstack/*` versions, and read the
+beside 48 graded `minor` ones. Pin exact `@objectstack/*` versions, and read the
 release notes for every version you cross. Each entry in a CHANGELOG states its
 kind on its own `Metadata-protocol:` line, and the GitHub Release body groups the
 entries under the same five headings this page uses.
@@ -102,7 +102,7 @@ you change them.
 
 ### Breaking changes you must act on
 
-The 77 entries that are breaking and have no ADR-0087 conversion, and one boot
+The 78 entries that are breaking and have no ADR-0087 conversion, and one boot
 refusal (`db1c7cc`) that its changeset declares as an addition. Each line names
 the one fix; the CHANGELOG entry carries the full FROM → TO.
 
@@ -224,6 +224,18 @@ door (`422 INVALID_METADATA`), where 18.0.0 accepted it.
   a blank `''`. 18.0.0 warned. Fix: write holes over `count` or the params,
   double a literal single brace, and delete a blank `confirmText`. A view
   already stored still loads.
+- **A row policy that reads `x in current_user.KEY` which nothing owns, at the
+  permission save door** (`b531016`, #25550). It answered 200 and matched no
+  rows; it is now `422 INVALID_METADATA`. An object write is now judged by the
+  RLS rule too, so an object whose `defaultRowScope` the CLI refuses, or a
+  write that drops a field or membership key a stored policy reads, is refused.
+  The gate blames a write only for a finding it adds, and drafts are not gated.
+  Fix: declare the key on its roster object's `membershipKeys`, or register the
+  resolver that stages it, before publishing the policy; use `in`, not `==`;
+  change the policy before dropping what it reads. A bad `membershipKeys`
+  declaration (a `userField` that is not a single user reference, a
+  `valueField` that is not a reference, a key declared twice) is refused at
+  `os validate` and `os build` too.
 
 #### Datasources and drivers
 
@@ -409,7 +421,8 @@ rows.
 - **`ObjectSchema.membershipKeys`** (`dc532e8`, #25513): a roster object
   declares the `current_user.KEY` sets it defines (`userField`, `valueField`,
   an optional `filter`), the metadata twin of a registered membership resolver.
-  `defineStack` refuses one key declared on two objects. See
+  `defineStack` refuses one key declared on two objects, and `os lint` judges
+  the declaration and the policies that read it (#25550). See
   [Semantic changes](#semantic-changes-in-1810) for what reads it.
 - **Setup → Email states which mail transport is live** (`ab510f4`, #25448),
   and says so when no mail leaves the machine.
@@ -450,6 +463,15 @@ rows.
   unresolved, and a policy reading it matches nothing. Whoever can write a
   roster row can grant the key, and the object-level explain names each key a
   policy reads.
+- **An `external` holder is its own posture** (`45f9962`, #25541). Its
+  execution context carries `audience: 'external'`, and for it every object's
+  org-wide default is owner-only: it reads and writes the rows it owns and
+  the rows shared to it, by a share or a sharing rule, and a `public_read` or
+  `public_read_write` object is not open to it. A row policy on a permission
+  set or position it holds lifts that floor and bounds the rows instead. A
+  `controlled_by_parent` detail follows its master. Nothing changes for a
+  principal that does not hold the `external` grade, and no earlier release
+  shipped it.
 
 A change of meaning that also breaks is listed with the breaking changes above.
 
