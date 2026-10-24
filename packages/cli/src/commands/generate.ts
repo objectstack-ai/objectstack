@@ -2914,7 +2914,7 @@ function columnDefaultTs(field: unknown, type: string): string {
  *
  * ⛔ NOT "because `packages/cli` does not depend on the driver at runtime" —
  * it does: `@objectstack/driver-sql` is in this package's `dependencies` at
- * `workspace:^`. A missing dependency was never the reason, and stating it as
+ * `workspace:*`. A missing dependency was never the reason, and stating it as
  * one invites the next reader to "simplify" the transcription away.
  *
  * ⛔ NOR "because it is `protected static`, so it reaches no exported surface"
