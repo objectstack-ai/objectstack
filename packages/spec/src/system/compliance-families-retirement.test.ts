@@ -140,9 +140,11 @@ const HISTORY_SEMANTIC_IDS = [
 
 /**
  * The near-namesakes a "finish everything incident / change" sweep would
- * plausibly take, each a DIFFERENT declaration with a live consumer.
+ * plausibly take, each a DIFFERENT declaration that stays published. (It was
+ * `MetadataChangeType` until #25608 retired `kernel/package-upgrade.zod.ts`
+ * whole; its only reader was that module itself.)
  */
-const MUST_SURVIVE_KERNEL = ['MetadataChangeTypeSchema', 'MetadataChangeType'] as const;
+const MUST_SURVIVE_KERNEL = ['BreakingChangeSchema', 'BreakingChange'] as const;
 /** System-entry neighbours that stay — the ones the retired files imported from. */
 const MUST_SURVIVE_SYSTEM = ['DataClassificationSchema', 'ComplianceFrameworkSchema', 'ChangeSetSchema'] as const;
 
@@ -429,7 +431,7 @@ describe('tree-scoped absence: nothing inside the declared radius references a r
     expect(REFERENCE.test('"system/RollbackPlan",')).toBe(true);
     expect(REFERENCE.test('the `IncidentResponsePolicySchema` export was removed')).toBe(false);
     expect(REFERENCE.test("title: 'Incident push failed: {record.name}'")).toBe(false);
-    expect(REFERENCE.test('MetadataChangeTypeSchema')).toBe(false); // the live near-namesake
+    expect(REFERENCE.test('BreakingChangeSchema')).toBe(false); // the surviving near-namesake
   });
 
   it('the build-detritus exclusion is NARROW — it names tsup\'s bundle and nothing authored', () => {
