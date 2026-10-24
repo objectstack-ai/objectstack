@@ -144,7 +144,7 @@ jobs:
         # retry below; it does NOT let a failure through, because the retry
         # step carries no such escape and its failure fails the job.
         continue-on-error: true
-        uses: lycheeverse/lychee-action@v2
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:
           lycheeVersion: ${{ env.LYCHEE_VERSION }}
           args: ${{ env.LYCHEE_ARGS }}
@@ -163,7 +163,7 @@ jobs:
       - name: Check links with lychee (retry)
         id: lychee-retry
         if: steps.lychee.outcome == 'failure'
-        uses: lycheeverse/lychee-action@v2
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:
           lycheeVersion: ${{ env.LYCHEE_VERSION }}
           args: ${{ env.LYCHEE_ARGS }}
