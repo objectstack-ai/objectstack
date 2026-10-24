@@ -344,10 +344,9 @@ function checkScopeAgainstSuperUserBits(
  * Modify All cannot say that.
  */
 const MODIFY_ALL_ALLOW_DELETE_FALSE_MESSAGE =
-  'allowDelete: false is declared beside modifyAllRecords: true, which already grants delete on every ' +
-  'record of the object. Modify All Records is the write bypass for edit, delete and transfer: the ' +
-  'permission evaluator grants delete on the bypass bit before it reads allowDelete, so this false is ' +
-  'never enforced. If the set should delete every record, delete allowDelete (or set it to true). If it ' +
+  'allowDelete: false is refused beside modifyAllRecords: true since @objectstack/spec 18 (ADR-0049): ' +
+  'Modify All Records is the write bypass for edit, delete and transfer, and the permission evaluator ' +
+  'grants delete on the bypass bit before it reads allowDelete, so this false is never enforced. If the set should delete every record, delete allowDelete (or set it to true). If it ' +
   'should edit records it does not own but delete none, remove modifyAllRecords, keep allowEdit: true ' +
   "and allowDelete: false, and grant the edit with a sharing rule: a `criteria` rule with accessLevel: 'edit', " +
   "a condition every row satisfies (record.id != ''), shared with the position that holds this set. An edit " +
