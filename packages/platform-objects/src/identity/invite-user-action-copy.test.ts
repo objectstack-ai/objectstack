@@ -9,11 +9,12 @@
 //  - `description` is the parameter dialog's subtitle. With none declared the
 //    dialog falls back to a generic "Please provide the required information
 //    to continue.", which says nothing about what Confirm will do.
-//  - `successMessage` is the toast after Confirm. On a `type: 'api'` action the
-//    runner fills `${result.*}` from the answer (ActionSchema.successMessage).
-//    `/api/v1/auth/organization/invite-member` answers the bare invitation row,
-//    whose top-level `email` is the invitee's address, so `${result.email}`
-//    names the person invited. A copy without the token names nobody.
+//  - `successMessage` is the toast after Confirm, a `template` slot (#24814):
+//    the runner fills its `{{ result.* }}` holes from the answer
+//    (ActionSchema.successMessage). `/api/v1/auth/organization/invite-member`
+//    answers the bare invitation row, whose top-level `email` is the invitee's
+//    address, so `{{ result.email }}` names the person invited. A copy without
+//    the hole names nobody.
 //
 // The translated bundles are pinned as well, because the extractor cannot keep
 // them honest by itself: `--fill=default` seeds a NEW key (the description)
@@ -22,6 +23,7 @@
 // the old, invitee-less sentence. Both states are "in sync" to `check:i18n`.
 import { describe, expect, it } from 'vitest';
 import { translateMetadataDocument } from '@objectstack/spec/system';
+import { templateSlotSource } from '@objectstack/spec/automation';
 import { SetupAppTranslations } from '../apps/translations/setup.translation.js';
 import { enObjects } from '../apps/translations/en.objects.generated.js';
 import { zhCNObjects } from '../apps/translations/zh-CN.objects.generated.js';
@@ -38,8 +40,8 @@ interface CopyAction {
   successMessage?: unknown;
 }
 
-/** The token the console runner fills from the invite-member answer. */
-const INVITEE = '${result.email}';
+/** The hole the console runner fills from the invite-member answer. */
+const INVITEE = '{{ result.email }}';
 
 const MIRRORS: Array<[string, unknown]> = [
   ['sys_user', SysUser],
@@ -54,12 +56,15 @@ const TRANSLATED = [
   ['es-ES', esESObjects],
 ] as const;
 
+// [#24814] `successMessage` is a `template` slot: the parsed
+// object carries the `{ dialect: 'template', source }` envelope, so the copy is
+// read through the template judge's one reader, `templateSlotSource`.
 function invite(object: unknown): CopyAction {
   const found = ((object as { actions?: CopyAction[] }).actions ?? []).find(
     (a) => a.name === 'invite_user',
   );
   expect(found, 'invite_user is declared').toBeDefined();
-  return found as CopyAction;
+  return { ...found, successMessage: templateSlotSource(found?.successMessage) } as CopyAction;
 }
 
 const bundleNode = (bundle: unknown, object: string): CopyAction | undefined =>
