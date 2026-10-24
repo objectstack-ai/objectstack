@@ -756,6 +756,27 @@ const SECURITY_WILDCARD_VAMA_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const SECURITY_MODIFY_ALL_DELETE_WITHHELD_EXPLANATION: RuleExplanation = {
+  rule: 'security-modify-all-delete-withheld',
+  covers: 'why Modify All cannot withhold delete, and the route that can',
+  paragraphs: [
+    '`modifyAllRecords` (Modify All Records) is the write bypass for edit, delete and transfer, as ' +
+      'Salesforce\'s Modify All is. The permission evaluator grants delete on the bypass bit before it reads ' +
+      '`allowDelete`, so `allowDelete: false` beside it is never enforced: the holder deletes every record ' +
+      'while the stored set says they cannot.',
+    'The schema refuses the pair at `objects.<object>.allowDelete`, so `os validate`, `os build`, ' +
+      '`defineStack` and a metadata save stop before this rule runs. The rule reaches the doors that do not ' +
+      'parse first: `os lint` on a raw object-literal config, and a direct call of `validateSecurityPosture`.',
+    'To fix it, decide what the set means. If it should delete every record, delete `allowDelete` (an entry ' +
+      'that sets `modifyAllRecords: true` and omits it parses to `allowDelete: true`). If it should edit records ' +
+      'it does not own and delete none, remove `modifyAllRecords`, keep `allowEdit: true` and ' +
+      '`allowDelete: false`, and grant the edit with a `criteria` sharing rule with `accessLevel: \'edit\'` ' +
+      'shared with the position that holds the set. An edit share opens update and never delete (ADR-0111 D3). ' +
+      'The object needs an owner field and an owner-write default (`private` or `public_read`), and the ' +
+      'rule\'s `condition` must be a field predicate: a literal `true` is refused as a match-all criteria.',
+  ],
+};
+
 const SECURITY_OWD_ALIAS_EXPLANATION: RuleExplanation = {
   rule: 'security-owd-alias',
   covers: 'which sharing values are retired or misplaced',
@@ -4887,6 +4908,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [SECURITY_FLS_UNKNOWN_FIELD_EXPLANATION.rule]: SECURITY_FLS_UNKNOWN_FIELD_EXPLANATION,
   [SECURITY_MASTER_DETAIL_UNGRANTED_EXPLANATION.rule]: SECURITY_MASTER_DETAIL_UNGRANTED_EXPLANATION,
   [SECURITY_WILDCARD_VAMA_EXPLANATION.rule]: SECURITY_WILDCARD_VAMA_EXPLANATION,
+  [SECURITY_MODIFY_ALL_DELETE_WITHHELD_EXPLANATION.rule]: SECURITY_MODIFY_ALL_DELETE_WITHHELD_EXPLANATION,
   [SECURITY_OWD_ALIAS_EXPLANATION.rule]: SECURITY_OWD_ALIAS_EXPLANATION,
   [SECURITY_DELEGATION_MISSING_REASON_EXPLANATION.rule]: SECURITY_DELEGATION_MISSING_REASON_EXPLANATION,
   [VISIBILITY_ROOT_MISLAYERED_EXPLANATION.rule]: VISIBILITY_ROOT_MISLAYERED_EXPLANATION,

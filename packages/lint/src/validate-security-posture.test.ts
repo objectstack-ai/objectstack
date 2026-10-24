@@ -29,6 +29,7 @@ import {
   SECURITY_DELEGATION_MISSING_REASON,
   SECURITY_CBP_NO_RELATION,
   SECURITY_CBP_AMBIGUOUS_RELATION,
+  SECURITY_MODIFY_ALL_DELETE_WITHHELD,
 } from './validate-security-posture.js';
 import { lintDataModel } from './data-model-rules.js';
 import { explainRule } from './rule-explanations.js';
@@ -192,6 +193,46 @@ describe('validateSecurityPosture (ADR-0090 D7)', () => {
     });
     expect(findings).toHaveLength(1);
     expect(findings[0].rule).toBe(SECURITY_WILDCARD_VAMA);
+  });
+
+  // ── Rule: security-modify-all-delete-withheld (#25575) ───────────────
+  it('errors on allowDelete: false beside modifyAllRecords: true, at the allowDelete path', () => {
+    const findings = validateSecurityPosture({
+      permissions: [
+        {
+          name: 'buyer',
+          objects: { srm_material: { allowRead: true, allowEdit: true, allowDelete: false, modifyAllRecords: true } },
+        },
+      ],
+    });
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+      [SECURITY_MODIFY_ALL_DELETE_WITHHELD, 'error', 'permissions[0].objects.srm_material.allowDelete'],
+    ]);
+  });
+
+  it('does not fire where the false is enforced, or where delete is not withheld', () => {
+    expect(rulesOf({
+      permissions: [{
+        name: 'clerk',
+        objects: {
+          a: { allowEdit: true, allowDelete: false },
+          b: { allowEdit: true, allowDelete: false, viewAllRecords: true },
+          c: { allowEdit: true, allowDelete: true, modifyAllRecords: true },
+          d: { allowEdit: true, modifyAllRecords: true },
+        },
+      }],
+    })).toEqual([]);
+  });
+
+  it('never sees the pair on a parsed door: the schema refuses it first', () => {
+    // The arm exists for the unparsed doors (`os lint` on a raw config, a
+    // direct call); on the parsed ones the schema is the gate.
+    const r = PermissionSetSchema.safeParse({
+      name: 'buyer',
+      objects: { srm_material: { allowEdit: true, allowDelete: false, modifyAllRecords: true } },
+    });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues.map((i) => i.path.join('.'))).toEqual(['objects.srm_material.allowDelete']);
   });
 
   it("tolerates a plain '*' read wildcard without VAMA", () => {
@@ -1581,6 +1622,13 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     declaredBy: 'ObjectPermissionSchema',
     keys: () => shapeKeysOf(ObjectPermissionSchema),
   },
+  // [#25575] One object-permission entry, read by the Modify All delete arm.
+  {
+    receiver: 'grant',
+    expected: ['allowDelete', 'modifyAllRecords'],
+    declaredBy: 'ObjectPermissionSchema',
+    keys: () => shapeKeysOf(ObjectPermissionSchema),
+  },
   {
     receiver: 'action',
     expected: ['label', 'name'],
@@ -1821,6 +1869,7 @@ const RULE_IDS: Record<string, string> = {
   SECURITY_DELEGATION_MISSING_REASON,
   SECURITY_CBP_NO_RELATION,
   SECURITY_CBP_AMBIGUOUS_RELATION,
+  SECURITY_MODIFY_ALL_DELETE_WITHHELD,
 };
 
 const TEXT_FIELD = { a: { type: 'text', label: 'A' } } as const;
@@ -1844,6 +1893,10 @@ const REACHABILITY_CORPUS: Array<{ label: string; stack: Record<string, unknown>
     },
   },
   { label: 'wildcard-vama', stack: { permissions: [{ name: 'ps', label: 'PS', objects: { '*': { viewAllRecords: true } } }] } },
+  {
+    label: 'modify-all-delete-withheld',
+    stack: { permissions: [{ name: 'ps', label: 'PS', objects: { item: { allowEdit: true, allowDelete: false, modifyAllRecords: true } } }] },
+  },
   {
     label: 'anchor-high-privilege',
     stack: { permissions: [{ name: 'ps', label: 'PS', isDefault: true, objects: { '*': { modifyAllRecords: true } } }] },
@@ -1929,7 +1982,8 @@ describe('validateSecurityPosture — every branch is reachable without an undec
 
   it('maps every `findings.push` site in the source', () => {
     // 16 since #23268: the external dial's alias and wider-than-internal sites left with the key.
-    expect(pushedRuleIds()).toHaveLength(16);
+    // 17 since #25575: allowDelete: false beside modifyAllRecords: true.
+    expect(pushedRuleIds()).toHaveLength(17);
   });
 
   it('reaches every `findings.push` site from that corpus', () => {
