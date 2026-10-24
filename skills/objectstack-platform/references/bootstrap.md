@@ -144,17 +144,20 @@ A minimal but complete project from scratch:
     "validate": "objectstack validate"
   },
   "dependencies": {
-    "@objectstack/spec": "^17.0.0",
-    "@objectstack/runtime": "^17.0.0",
-    "@objectstack/driver-memory": "^17.0.0",
-    "@objectstack/plugin-hono-server": "^17.0.0"
+    "@objectstack/spec": "18.1.0",
+    "@objectstack/runtime": "18.1.0",
+    "@objectstack/driver-memory": "18.1.0",
+    "@objectstack/plugin-hono-server": "18.1.0"
   },
   "devDependencies": {
-    "@objectstack/cli": "^17.0.0",
+    "@objectstack/cli": "18.1.0",
     "typescript": "^5.3.0"
   }
 }
 ```
+
+`npx create-objectstack` writes every `@objectstack/*` dependency as its own version, exactly (no
+caret) — keep all `@objectstack/*` packages on that one version.
 
 **`src/objects/task.object.ts`** — one `ObjectSchema.create({ … })` call. Field
 types, `indexes:` and the rest of the object surface are **objectstack-data**'s;
