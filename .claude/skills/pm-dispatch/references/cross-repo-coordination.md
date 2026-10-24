@@ -7,7 +7,7 @@
 - 多车道仓 `objectstack`、`objectui`:中央分诊是 `domain:*`/type/定级的唯一生产者。
 - 单车道仓 `cloud`、`objectos`、`hotcrm`、`www.objectos.ai`;未来新仓默认此类。
 - 单车道仓 `repo:*` 席自理机械三务,⛔ 不产 `domain:*`;决策卡入本仓收件箱,不落 objectstack。
-- 机械三务 = 自扫 sweep、自打 `type`、自做首触(含 `finding` 与业务理由,判据评论同分诊)。
+- 机械三务 = 自扫 sweep、自打 `type`、自做首触(含 `finding`;业务理由归召唤的总监席)。
 - 新仓登记是一张清单:座位贴、标签、类别归属、门禁盘点、写身份锁移植(deny + hooks)。
 - 新仓三件:加入 `GOVERNED_REPOS`、安装车队 App、写 `lanes/<repo>.md` 宪章;应用仓无分诊席。
 - 新仓准入只问一句:真需要常设席位吗;hotcrm 宪章见 `references/lanes/hotcrm.md`。
