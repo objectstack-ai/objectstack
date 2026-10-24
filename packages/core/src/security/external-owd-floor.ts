@@ -10,9 +10,10 @@
  * rules, and position and permission-set grants with their RLS evaluated. It
  * never admits the internal OWD baseline. So, for an external principal, an
  * object's org-wide default is floored at owner_only: where a member reads every
- * row of a `public_read` / `public_read_write` / `controlled_by_parent` object
- * (or of a system object that declares no model), an external reads the rows it
- * owns and the rows shared to it, as on a `private` one.
+ * row of a `public_read` / `public_read_write` object (or of a system object
+ * that declares no model), an external reads the rows it owns and the rows
+ * shared to it, as on a `private` one. A `controlled_by_parent` detail is not
+ * floored here: its rows follow the master, which is (plugin-sharing exempts it).
  *
  * One thing lifts the floor, and it is a grant: when a position or
  * permission-set grant the external holds carries an RLS predicate (`using`)

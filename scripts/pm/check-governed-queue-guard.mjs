@@ -266,15 +266,6 @@
  * record IS one (#18060). Every governed path outside Tier S is Tier H, the
  * rules layer, and keeps the predicate above byte-for-byte.
  *
- * ⚖️ AND, ON A PULL REQUEST BUILT IN A PROJECT THREAD, FROM ANOTHER ACCOUNT
- * (#25415, maintainer 2026-10-23). The relay authors every PR and comment as
- * `objectstack-fleet[bot]`, so the only place a project-thread PR names its
- * account is its body's `claude-projects-attribution` line. When that line is
- * there, the record must also carry `Reviewed-by-account:` naming a DIFFERENT
- * login (`accountIndependence`); same, missing or unreadable refuses, and the
- * refusal and the clear both print the two logins compared. A body without the
- * line (a Routine seat, a human) owes nothing here — today's reading unchanged.
- *
  * ⭐ THE TWO CARRIERS ARE ONE DELIVERY, and the location is the governed text's
  * to decide rather than this file's — quoted, untranslated, because it IS the
  * criterion: 「复核记录 = 一条评论落 PR 或卡」
@@ -569,7 +560,6 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the per-row repository scope (ruling B2, 2026-10-13)': 14,
   '⭐ B′ with C: the record stands at the tier its FACE maps to, read off the committed paths': 8,
   'the CODEOWNERS mirror: every Tier H register row routes to every GOVERNED_APPROVERS account, nothing else is routed, and the file says so': 12,
-  '⭐ #25415: an attributed pull request lands on a review of record from ANOTHER account': 10,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -579,8 +569,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // Raised 23 → 24 with the queued pull-back battery: one battery, one row.
 // Raised 25 → 26 with the B′-with-C face battery (ruling record 6159870311): one battery, one row.
 // Raised 26 → 27 with the CODEOWNERS mirror battery: one battery, one row.
-// Raised 27 → 28 with the #25415 account-independence battery: one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 28;
+const SELF_TEST_BATTERY_FLOOR = 27;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -826,12 +815,11 @@ export async function loadRecordRecognisers(load = (specifier) => import(specifi
       servedTierStands: tier?.servedTierStands,
       isModelIdentifierToken: tier?.isModelIdentifierToken,
       reviewFace: tier?.reviewFace,
-      attributionLogin: tier?.readAttributionLogin,
       threads: tier?.REVIEW_OF_RECORD_THREADS,
       location: tier?.REVIEW_OF_RECORD_LOCATION,
     };
     const missing = [
-      ...['locate', 'deliveredCard', 'servedTierStands', 'isModelIdentifierToken', 'reviewFace', 'attributionLogin'].filter((key) => typeof found[key] !== 'function'),
+      ...['locate', 'deliveredCard', 'servedTierStands', 'isModelIdentifierToken', 'reviewFace'].filter((key) => typeof found[key] !== 'function'),
       ...(Array.isArray(found.threads) && found.threads.length > 0 ? [] : ['threads']),
       ...(typeof found.location === 'string' && found.location.length > 0 ? [] : ['location']),
     ];
@@ -896,7 +884,7 @@ export async function loadRecordRecognisers(load = (specifier) => import(specifi
  * and the rule cannot drift. ⛔ A pair that carries no path list cannot say
  * which face it is on: UNREADABLE, never the cheaper tier.
  */
-export function recordVerdict({ pair, recognisers, cardNote = null, attribution = { state: 'absent' } }) {
+export function recordVerdict({ pair, recognisers, cardNote = null }) {
   if (recognisers?.available !== true) {
     return { state: 'unreadable', reason: recognisers?.reason ?? 'the contract-review recognisers were not loaded', cardNote };
   }
@@ -956,41 +944,7 @@ export function recordVerdict({ pair, recognisers, cardNote = null, attribution 
   };
   if (located.state === 'unsigned') return { state: 'unsigned', ...found };
   if (!recognisers.servedTierStands(located.served, face.tierName)) return { state: 'below-tier', ...found };
-  if (attribution?.state === 'unreadable' && attribution.reason) {
-    return { state: 'unreadable', cardNote, reason: attribution.reason };
-  }
-  const independence = accountIndependence(attribution, located.account);
-  if (independence.state !== 'holds' && independence.state !== 'not-owed') return { state: 'not-independent', ...found, independence };
-  return { state: 'stands', ...found, independence };
-}
-
-/**
- * Was the review of record written from a DIFFERENT ACCOUNT than the one the
- * pull request was built under? (#25415, maintainer 2026-10-23.)
- *
- * A pull request landed from a Claude project thread carries its authoring
- * account in the body's attribution line and nowhere else — the relay authors
- * every PR and comment as `objectstack-fleet[bot]`, so neither `Reviewed-by:`
- * (a session) nor the comment author can tell two accounts apart. So when the
- * body names an account, the record must name its reviewer's account on a
- * `Reviewed-by-account:` line, and the two must differ; a same-account
- * subagent's review is a review, not an independent one.
- *
- * ⭐ A pull request with NO attribution line (a Routine seat, a human) owes
- * nothing here: `not-owed`, today's behaviour byte for byte. ⛔ Everything else
- * that is not a readable, different login is a refusal — an unreadable
- * attribution, a missing or unreadable account line, or the same login (GitHub
- * logins compare case-insensitively).
- */
-export function accountIndependence(attribution, account) {
-  if (!attribution || attribution.state === 'absent') return { state: 'not-owed' };
-  if (attribution.state !== 'read') return { state: 'attribution-unreadable', line: attribution.line ?? null };
-  const author = attribution.login;
-  if (account?.state === 'unreadable') return { state: 'account-unreadable', author, line: account.line };
-  if (account?.state !== 'read') return { state: 'account-missing', author };
-  const reviewer = account.login;
-  if (author.toLowerCase() === reviewer.toLowerCase()) return { state: 'same-account', author, reviewer };
-  return { state: 'holds', author, reviewer };
+  return { state: 'stands', ...found };
 }
 
 /**
@@ -1310,41 +1264,6 @@ export function guardVerdict({ event, repo, governed = [], unattributed = [], ap
 }
 
 /**
- * The refusal for a record that stands on tier but not on account (#25415):
- * it names both logins it compared (or the one it could read) and the rule.
- */
-function independenceRefusalLines(record) {
-  const ind = record.independence ?? {};
-  const at = `comment ${record.id ?? '(no readable id)'}, ${record.at ?? 'undated'}`;
-  const rule = [
-    '           Rule (#25415, maintainer 2026-10-23): a pull request landed from a project thread lands on a review of record',
-    '           from ANOTHER account — add `Reviewed-by-account: LOGIN` to the record, LOGIN being the reviewing session\'s',
-    '           account and different from the PR body\'s `claude-projects-attribution` github_login.',
-  ];
-  if (ind.state === 'same-account') {
-    return [
-      `        ⛔ the review of record on this head (${at}) was written from the SAME account that built the pull request:`,
-      `           attribution \`${ind.author}\` = Reviewed-by-account \`${ind.reviewer}\`. A same-account review is a review, not an independent one.`,
-      ...rule,
-    ];
-  }
-  if (ind.state === 'account-missing' || ind.state === 'account-unreadable') {
-    return [
-      `        ⛔ the review of record on this head (${at}) names no reviewer ACCOUNT the guard can compare against the attribution \`${ind.author}\`:`,
-      ind.state === 'account-missing'
-        ? '           it carries NO `Reviewed-by-account:` line.'
-        : `           its \`Reviewed-by-account:\` line carries no single GitHub login (${ind.line}).`,
-      ...rule,
-    ];
-  }
-  return [
-    `        ⛔ the pull request body carries a \`claude-projects-attribution\` line whose github_login cannot be read (${ind.line ?? 'no line quoted'}),`,
-    '           so the account the record must differ from is unknown.',
-    ...rule,
-  ];
-}
-
-/**
  * The words a reader gets. Requirement (e) of the card lives here: every
  * rendering names the exact paths that matched and states what would satisfy
  * the guard — a refusal a reader cannot act on is a refusal they route around.
@@ -1476,12 +1395,6 @@ export function renderGuardVerdict(verdict) {
           (entry.record.served?.stamps
             ? ` on a stamp control of ${entry.record.served.stamps.atTier}/${entry.record.served.stamps.total}.`
             : ' (no stamp control declared, which the rule permits).'),
-        ...(entry.record.independence?.state === 'holds'
-          ? [
-              `           ⭐ accounts compared (#25415): built under \`${entry.record.independence.author}\` (the PR body's attribution line), ` +
-                `reviewed under \`${entry.record.independence.reviewer}\` (\`Reviewed-by-account:\`) — different accounts, so it is independent.`,
-            ]
-          : []),
         ...(entry.record.carriedFrom
           ? [
               `           ⭐ that record names head \`${String(entry.record.carriedFrom).slice(0, 12)}\`, carried forward over ` +
@@ -1521,8 +1434,6 @@ export function renderGuardVerdict(verdict) {
             ]
           : entry.record.state === 'unreadable'
             ? [`        ⛔ the review of record could NOT be read — ${entry.record.reason}`]
-            : entry.record.state === 'not-independent'
-              ? independenceRefusalLines(entry.record)
             : entry.record.state === 'unsigned'
               ? [
                   `        ⛔ a \`## Contract review\` comment names this head (comment ${entry.record.id ?? '(no readable id)'}, ` +
@@ -1854,12 +1765,7 @@ export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fet
         records.set(entry.pr, { state: 'unreadable', reason: unreadable, cardNote });
         continue;
       }
-      // ⭐ The authoring account, off the body this guard already read (#25415).
-      // A row that could not be read cannot say whether one is owed: unreadable.
-      const attribution = pull
-        ? recognisers.attributionLogin(pull.body)
-        : { state: 'unreadable', reason: `PR #${entry.pr}'s body could not be read, so whether its record owes a second account is unknown` };
-      records.set(entry.pr, recordVerdict({ pair, recognisers, cardNote, attribution }));
+      records.set(entry.pr, recordVerdict({ pair, recognisers, cardNote }));
     }
   }
   return guardVerdict({ event, repo, governed, unattributed, approvals, records, apiCalls, headNotes, lifted });
@@ -4245,6 +4151,24 @@ export async function selfTest() {
     tierPass.exitCode === EXIT_CLEAR && tierPass.conclusion === 'cleared' && tierPass.entries[0].record.state === 'stands',
     JSON.stringify(tierPass.entries[0].record),
   );
+  // ⭐ Maintainer 2026-10-24 (「守卫在合并队列里只认「另一账户复审」，这个没必要，去掉这条规则」):
+  // the record stands on TIER ALONE. A project-thread pull request (its body
+  // carries the `claude-projects-attribution` login) whose record was written
+  // from the SAME account — even one still carrying a `Reviewed-by-account:`
+  // line naming that login — clears, and no account is compared or printed.
+  // This case is what keeps the retired account leg retired.
+  const sameAccountRecord = recordComment();
+  sameAccountRecord.body = sameAccountRecord.body.replace('Reviewed-by: `session_01SEAT`', 'Reviewed-by: `session_01SEAT`\nReviewed-by-account: `lane-account-a`');
+  const sameAccount = await tierRun({
+    prBody: `<!-- claude-projects-attribution: {"github_login":"lane-account-a"} -->\n_Requested by **Elon**_\n\nFixes #${REF_CARD}`,
+    comments: [sameAccountRecord],
+  });
+  assert(
+    'a-project-thread-PR-whose-record-was-written-from-the-SAME-account-PASSES-the-record-stands-on-tier-alone',
+    sameAccount.exitCode === EXIT_CLEAR && sameAccount.conclusion === 'cleared' && sameAccount.entries[0].record.state === 'stands' &&
+      !/Reviewed-by-account|accounts compared|SAME account/.test(renderGuardVerdict(sameAccount)),
+    JSON.stringify(sameAccount.entries[0].record),
+  );
   // ⭐ #19133, end to end: the generalised tier. An agents + settings diff lands
   // on the same record — and its lit control, the same diff with NO record, is
   // refused (the card's own acceptance line).
@@ -4328,85 +4252,6 @@ export async function selfTest() {
   // live leg is pinned at the contract-review tier; `recordVerdict` is pure, so
   // the declaration face — which no governed entry can be on — is driven on it
   // directly, with the real recognisers.
-  battery('⭐ #25415: an attributed pull request lands on a review of record from ANOTHER account');
-  {
-    const ATTRIBUTED = (login) => `<!-- claude-projects-attribution: {"github_login":"${login}"} -->\n_Requested by **Elon**_\n\nFixes #${REF_CARD}`;
-    const withAccount = (login) => {
-      const c = recordComment();
-      return { ...c, body: `${c.body.replace('Reviewed-by: `session_01SEAT`', `Reviewed-by: \`session_01SEAT\`\nReviewed-by-account: \`${login}\``)}` };
-    };
-    const plain = await tierRun({ comments: [recordComment()] });
-    assert(
-      'an-UNATTRIBUTED-PR-keeps-todays-behaviour-the-record-stands-and-no-account-is-owed',
-      plain.exitCode === EXIT_CLEAR && plain.entries[0].record.state === 'stands' && plain.entries[0].record.independence.state === 'not-owed' &&
-        !/accounts compared/.test(renderGuardVerdict(plain)),
-      JSON.stringify(plain.entries[0].record.independence),
-    );
-    const differ = await tierRun({ prBody: ATTRIBUTED('lane-account-a'), comments: [withAccount('lane-account-b')] });
-    const differText = renderGuardVerdict(differ);
-    assert(
-      'an-attributed-PR-whose-record-names-a-DIFFERENT-account-PASSES-and-the-clear-prints-both-logins',
-      differ.exitCode === EXIT_CLEAR && differ.entries[0].record.state === 'stands' && differ.entries[0].record.independence.state === 'holds' &&
-        /accounts compared/.test(differText) && differText.includes('`lane-account-a`') && differText.includes('`lane-account-b`'),
-      JSON.stringify(differ.entries[0].record.independence),
-    );
-    const same = await tierRun({ prBody: ATTRIBUTED('lane-account-a'), comments: [withAccount('@Lane-Account-A')] });
-    const sameText = renderGuardVerdict(same);
-    assert(
-      '⛔ the-SAME-account-is-REFUSED-logins-compare-case-insensitively-and-the-refusal-names-both-and-the-rule',
-      same.exitCode === EXIT_REFUSED_UNAPPROVED && same.entries[0].record.state === 'not-independent' &&
-        same.entries[0].record.independence.state === 'same-account' &&
-        sameText.includes('`lane-account-a`') && sameText.includes('`Lane-Account-A`') && /Reviewed-by-account: LOGIN/.test(sameText),
-      JSON.stringify(same.entries[0].record.independence),
-    );
-    const missing = await tierRun({ prBody: ATTRIBUTED('lane-account-a'), comments: [recordComment()] });
-    assert(
-      '⛔ an-attributed-PR-whose-record-carries-NO-Reviewed-by-account-line-is-REFUSED',
-      missing.exitCode === EXIT_REFUSED_UNAPPROVED && missing.entries[0].record.independence.state === 'account-missing' &&
-        /carries NO `Reviewed-by-account:` line/.test(renderGuardVerdict(missing)),
-      JSON.stringify(missing.entries[0].record.independence),
-    );
-    const prose = await tierRun({ prBody: ATTRIBUTED('lane-account-a'), comments: [withAccount('the other account')] });
-    assert(
-      '⛔ a-Reviewed-by-account-line-that-is-not-ONE-login-is-REFUSED',
-      prose.exitCode === EXIT_REFUSED_UNAPPROVED && prose.entries[0].record.independence.state === 'account-unreadable',
-      JSON.stringify(prose.entries[0].record.independence),
-    );
-    const botAccount = await tierRun({ prBody: ATTRIBUTED('lane-account-a'), comments: [withAccount('objectstack-fleet[bot]')] });
-    assert(
-      '⛔ the-relay-BOT-is-no-reviewer-account-REFUSED',
-      botAccount.exitCode === EXIT_REFUSED_UNAPPROVED && botAccount.entries[0].record.independence.state === 'account-unreadable',
-    );
-    const badAttr = await tierRun({ prBody: `<!-- claude-projects-attribution: {"github_login":""} -->\n\nFixes #${REF_CARD}`, comments: [withAccount('lane-account-b')] });
-    assert(
-      '⛔ an-attribution-line-naming-NO-readable-login-is-REFUSED-never-read-as-unattributed',
-      badAttr.exitCode === EXIT_REFUSED_UNAPPROVED && badAttr.entries[0].record.independence.state === 'attribution-unreadable',
-      JSON.stringify(badAttr.entries[0].record.independence),
-    );
-    const lower = await tierRun({ prBody: `Fixes #${REF_CARD}\n\n${ATTRIBUTED('lane-account-a')}`, comments: [withAccount('lane-account-a')] });
-    assert(
-      '⛔ the-attribution-line-is-read-on-ANY-line-an-edit-above-it-does-not-switch-the-check-off',
-      lower.exitCode === EXIT_REFUSED_UNAPPROVED && lower.entries[0].record.independence.state === 'same-account',
-    );
-    const approvedSame = await tierRun({
-      prBody: ATTRIBUTED('lane-account-a'),
-      reviews: [{ state: 'APPROVED', user: { login: GOVERNED_APPROVERS[0] }, commit_id: REF_HEAD }],
-      comments: [withAccount('lane-account-a')],
-    });
-    assert(
-      'MONOTONE: an-authorized-approval-still-clears-an-attributed-PR-the-account-leg-is-never-consulted',
-      approvedSame.exitCode === EXIT_CLEAR && approvedSame.entries[0].approval.state === 'approved' && tierThreadsRead.length === 0,
-      JSON.stringify({ code: approvedSame.exitCode, threads: tierThreadsRead }),
-    );
-    assert(
-      'the-pure-reading-attribution-absent-is-not-owed-and-nothing-else-is',
-      accountIndependence({ state: 'absent' }, { state: 'missing' }).state === 'not-owed' &&
-        accountIndependence(undefined, { state: 'missing' }).state === 'not-owed' &&
-        accountIndependence({ state: 'read', login: 'a' }, { state: 'read', login: 'b' }).state === 'holds' &&
-        accountIndependence({ state: 'read', login: 'a' }, { state: 'read', login: 'A' }).state === 'same-account',
-    );
-  }
-
   battery('⭐ B′ with C: the record stands at the tier its FACE maps to, read off the committed paths');
   const { TIER_DEFAULT_NAME: DEFAULT_TOKEN, TIER_DEFAULT: DEFAULT_VALUE } = await import('./dispatch-gates.mjs');
   const tierDefaultOnS = await tierRun({ comments: [recordComment({ tierLine: `Served-tier: 75/75 \`${DEFAULT_TOKEN}\`` })] });
