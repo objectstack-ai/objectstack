@@ -175,8 +175,8 @@ describe('[#22161] data-model-rules.ts — one remedy line per fix', () => {
 
   it('field/embedded-sub-fields: one line, whatever the type, the keys or the names', () => {
     const fix =
-      'Make the typed list a child object whose `master_detail` field points back here (an inline ' +
-      'related list), and remove the key.';
+      'Make the typed list a child object whose `master_detail` field points back here ' +
+      "(`inlineEdit: 'grid'` edits it inline), and remove the key.";
     for (const type of ['repeater', 'composite']) {
       const objects = [
         {

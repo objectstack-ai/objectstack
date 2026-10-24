@@ -79,7 +79,8 @@ export interface UnknownAuthoringKeyFinding {
 const EMBEDDED_JSON_TYPED_LIST =
   'An object-level `composite` / `repeater` stores untyped JSON — no per-column labels, types, '
   + 'options or required flags. A list that needs typed columns is a child object whose '
-  + '`master_detail` field points back at this object, shown on the record as an inline related list.';
+  + '`master_detail` field points back at this object; `inlineEdit: \'grid\'` on that field edits '
+  + 'its rows as an inline grid on this object\'s form.';
 
 /**
  * Semantic near-misses on `FieldSchema` — a different **word** for the same

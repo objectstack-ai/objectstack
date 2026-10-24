@@ -465,8 +465,10 @@ sections:
 
   Both examples were doing something the declared shape already does — see the
   replacement below. For a value that is genuinely one composite thing rather
-  than neighbouring fields, the grouping belongs on the **field**: a field of
-  type `address` (or `composite`) carries its own `fields` list.
+  than neighbouring fields, the grouping belongs on the **field**: a form field of
+  type `address` (or `composite`) carries its own `fields` list. That list is the
+  form's; the object field itself declares no sub-fields (see
+  [Embedded Structured Types](/docs/data-modeling/field-types#embedded-structured-types)).
 </Callout>
 
 Fields sit on the same row because the section says how many columns it has, and

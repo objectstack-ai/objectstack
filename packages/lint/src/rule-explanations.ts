@@ -2947,11 +2947,11 @@ const FIELD_EMBEDDED_SUB_FIELDS_EXPLANATION: RuleExplanation = {
       'and nothing — a flow included — can address a single row. Declaring `fields`, `subFields` ' +
       'or `columns` on one promises a typed list the platform does not build.',
     'A list that needs typed columns is a child object: its own fields carry the types, labels, ' +
-      'options and validation, a `master_detail` field on it points back at the parent, and the ' +
-      'parent\'s record page shows the children as an inline related list, editable in place with ' +
-      '`inlineEdit` on that field. Each row then has a record identity that a lookup, a roll-up or a ' +
-      'flow can reach. Keep a `composite` / `repeater` only for JSON whose shape the platform does ' +
-      'not need to know.',
+      'options and validation, and a `master_detail` field on it points back at the parent. The ' +
+      'parent\'s record page lists the children as a related list, and `inlineEdit: \'grid\'` on that ' +
+      'field edits them as an inline grid on the parent\'s form. Each row then has a record identity ' +
+      'that a lookup, a roll-up or a flow can reach. Keep a `composite` / `repeater` only for JSON ' +
+      'whose shape the platform does not need to know.',
     'Not judged: a form view\'s `fields` sub-rows and the metadata forms Studio renders — those are ' +
       'other schemas that do declare sub-rows.',
     'Reach: the strict field schema refuses all three keys at the parse with this same route, so ' +

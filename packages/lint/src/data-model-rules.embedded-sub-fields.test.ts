@@ -107,7 +107,7 @@ describe('field/embedded-sub-fields — one-line verdict, `os explain` carries t
       'untyped JSON',
       'child object',
       '`master_detail`',
-      'inline related list',
+      'inline grid',
       'form view',
       'refuses all three keys at the parse',
       'never parse',

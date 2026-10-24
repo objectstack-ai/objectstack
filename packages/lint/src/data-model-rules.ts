@@ -835,8 +835,8 @@ export function lintDataModel(objects: any[]): LintIssue[] {
               `object-level ${type} is untyped JSON with no sub-fields`,
             path: `${fieldPath}.${declared[0]}`,
             fix:
-              'Make the typed list a child object whose `master_detail` field points back here (an inline ' +
-              'related list), and remove the key.',
+              'Make the typed list a child object whose `master_detail` field points back here ' +
+              "(`inlineEdit: 'grid'` edits it inline), and remove the key.",
           });
         }
       }

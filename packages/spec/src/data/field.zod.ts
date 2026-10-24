@@ -97,7 +97,8 @@ export const FieldType = z.enum([
   // (≈ Strapi component / ACF group / ACF repeater): `FieldSchema` declares no sub-field
   // member, so nothing types, labels, validates or addresses the inner keys or rows.
   // A list that needs typed columns is a CHILD OBJECT whose `master_detail` field points
-  // back at the parent, shown on the record as an inline related list (ruling 6386744473).
+  // back at the parent; `inlineEdit: 'grid'` edits its rows inline on the parent's form
+  // (ruling 6386744473).
   // A form view's `fields` sub-rows (`ui/view.zod.ts`) are a different surface.
   'composite',    // Single embedded JSON object, untyped — no declared sub-fields
   'repeater',     // Array of embedded JSON objects, untyped — no declared sub-fields or columns
