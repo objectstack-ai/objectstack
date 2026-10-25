@@ -3298,7 +3298,7 @@ export class AuthPlugin implements Plugin {
               {
                 ...adminUserDeps(),
                 createGrant: createGrantFor(c),
-                // ADR-0093 D3 amendment — multi-org create-user defaults to the
+                // ADR-0093 D3 amendment — multi-org create-user joins the
                 // administrator's own current organization, read from the
                 // session this request already authenticated.
                 getCallerActiveOrganizationId: async () => {

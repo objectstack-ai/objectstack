@@ -951,9 +951,9 @@ re-adjudicated.
 <Callout type="info" title="On a walled deployment this is the only way to attach an existing user">
 Under a walled tenancy posture the other paths do not reach:
 
-- **Create User** joins only the account it is creating — to the organization
-  the administrator picks, or by default their own current one (see [Create a
-  User Directly](#create-a-user-directly)). It never attaches an account that
+- **Create User** joins only the account it is creating — to the
+  administrator's current organization (see [Create a User
+  Directly](#create-a-user-directly)). It never attaches an account that
   already exists.
 - **Hand-writing the membership row** is not available: `sys_member` is managed
   by better-auth and generic CRUD on it is suppressed under the ADR-0010 lock.
@@ -987,30 +987,27 @@ const response = await fetch('http://localhost:3000/api/v1/auth/admin/create-use
     email: 'new.user@example.com',   // and/or phoneNumber (requires plugins.phoneNumber)
     name: 'New User',
     generatePassword: true,          // or pass an explicit `password`
-    mustChangePassword: true,        // default true
-    organizationId: 'org_123'        // optional — see "Which organization the user joins"
+    mustChangePassword: true         // default true
   })
 });
 // → { success, data: { user, organizationId?, membershipCreated, temporaryPassword? } }
 ```
 
-**Which organization the user joins.** The new user joins as `member`, in the
-same step as the account:
-
-| Request | Joins |
-|:---|:---|
-| `organizationId` given | that organization |
-| omitted, under a walled posture (`group` / `isolated`), policy `auto` | the calling administrator's **current** (active) organization; none when they have none |
-| omitted, `single` posture (a degraded wall included) | the default organization, as for every new user ([Membership](/docs/deployment/tenancy-modes#membership-how-new-users-join-an-organization)) |
-| omitted, policy `invite-only` | none |
+**Which organization the user joins.** Under a walled posture (`group` /
+`isolated`) the new user joins the calling administrator's **current**
+(active) organization as `member`, in the same step as the account — the
+organization the administrator has switched to in the console. There is no
+organization choice: to add someone to another organization, switch to it
+first. An administrator with no current organization is refused with
+`400 NO_ACTIVE_ORGANIZATION` and no user is created. Under the `single` posture
+(a degraded wall included) the user joins the default organization, as every new
+user does ([Membership](/docs/deployment/tenancy-modes#membership-how-new-users-join-an-organization)).
 
 The join is better-auth's `addMember`, the same act as **Add Member**, inside
-the account's transaction: an organization that does not exist or is at its
-membership limit refuses the call with that verdict, and **no user is
-created**. On the Users list the **Create User** dialog shows an optional
-**Organization** picker under a walled posture only; left empty, the default
-above applies. Raising the new member above `member` stays a separate, audited
-step on the organization's Members list.
+the account's transaction: an organization at its membership limit refuses the
+call with that verdict, and **no user is created**. It applies under
+`membershipPolicy: 'invite-only'` too. Raising the new member above `member`
+stays a separate, audited step on the organization's Members list.
 
 A generated temporary password is returned **once** in the response (the
 Users-list action reveals it in a one-shot dialog) and is never persisted or

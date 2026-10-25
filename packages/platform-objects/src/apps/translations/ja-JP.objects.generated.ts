@@ -187,10 +187,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           permissionSet: {
             label: "権限セット",
             helpText: "任意。この権限セットを新しいユーザーに付与し、初回サインインから自分のアプリを開けるようにします。"
-          },
-          organizationId: {
-            label: "組織",
-            helpText: "任意。新しいユーザーはメンバーとしてこの組織に参加します。空欄の場合は、現在の組織に追加されます。"
           }
         },
         resultDialog: {

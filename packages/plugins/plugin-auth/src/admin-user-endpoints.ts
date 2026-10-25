@@ -105,10 +105,9 @@ export interface AdminUserEndpointDeps {
     defaultOrgId(): Promise<string | null>;
     /**
      * True iff an organization wall is in force — the same predicate
-     * `features.multiOrgEnabled` (and so the Create User dialog's organization
-     * picker) is derived from. create-user's multi-org default reads it, so
-     * the default applies exactly where the picker is shown. Optional for lean
-     * mocks: absent ⇒ not multi-org ⇒ no default.
+     * `features.multiOrgEnabled` is derived from. create-user's multi-org join
+     * of the administrator's current organization reads it. Optional for lean
+     * mocks: absent ⇒ not multi-org ⇒ no join.
      */
     readonly isolationActive?: boolean;
   } | undefined;
@@ -138,16 +137,16 @@ export interface AdminUserEndpointDeps {
    * request that names a set is refused 501 and no user is created; a request
    * that names none never reads it. See {@link AdminCreateGrantSeam}.
    *
-   * Its unit of work also carries create-user's optional `organizationId`, so
-   * a refused join rolls the account back as a refused grant does. Absent ⇒ a
-   * request that names an organization is refused 501 the same way.
+   * Its unit of work also carries the multi-org join of the administrator's
+   * current organization, so a refused join rolls the account back as a
+   * refused grant does. Absent ⇒ a multi-org creation is refused 501.
    */
   createGrant?: AdminCreateGrantSeam;
   /**
    * The CALLING administrator's current (active) organization, read from their
-   * session, or `null` when they have none. create-user's default organization
-   * in multi-org mode (ADR-0093 D3 amendment). Absent ⇒ no default: a request
-   * that names no organization joins none, as before.
+   * session, or `null` when they have none. In multi-org mode the new user
+   * joins it, and `null` refuses the creation (ADR-0093 D3 amendment).
+   * Absent ⇒ no join: the creation behaves as before.
    */
   getCallerActiveOrganizationId?(): Promise<string | null>;
   logger?: { warn(msg: string): void };
@@ -689,32 +688,36 @@ export async function runAdminCreateUser(
   const permissionSet =
     typeof rawPermissionSet === 'string' && rawPermissionSet.trim().length > 0 ? rawPermissionSet.trim() : undefined;
 
-  // The optional organization the administrator chose for the new user. Empty
-  // means none chosen: in multi-org mode the administrator's own current
-  // organization is the default (see `resolveDefaultJoinOrganization`), and
-  // otherwise the deployment's own membership reconciliation applies.
-  const rawOrganizationId = body.organizationId ?? body.organization_id;
-  if (rawOrganizationId !== undefined && rawOrganizationId !== null && typeof rawOrganizationId !== 'string') {
-    return badRequest('organizationId must be the id of an organization');
-  }
-  const organizationId =
-    typeof rawOrganizationId === 'string' && rawOrganizationId.trim().length > 0 ? rawOrganizationId.trim() : undefined;
-
   const resolved = await resolvePassword(deps, body, 'password');
   if ('status' in resolved) return resolved;
 
-  // Joining an organization is settled BEFORE the account exists too: it runs
-  // in the same unit of work as the account, so a host that cannot run one, or
-  // has no organization plugin, refuses a CHOSEN organization with nothing
-  // created. A defaulted one is skipped instead — nobody asked for it.
-  let join: { seam: AdminCreateGrantSeam; addMember: AddMemberCapableApi['addMember'] } | undefined;
-  const joinOrganizationId = organizationId ?? (await resolveDefaultJoinOrganization(deps));
-  if (joinOrganizationId !== undefined) {
+  // ADR-0093 D3 amendment — in multi-org mode the new user joins the
+  // administrator's CURRENT organization, settled BEFORE the account exists:
+  // the join runs in the account's own unit of work, so an administrator with
+  // no current organization, or a host that cannot run the join, is refused
+  // with nothing created — never handed a member-less account.
+  let join:
+    | { seam: AdminCreateGrantSeam; addMember: AddMemberCapableApi['addMember']; organizationId: string }
+    | undefined;
+  if (multiOrgCreationJoinsCurrentOrganization(deps)) {
+    const organizationId = await deps.getCallerActiveOrganizationId!();
+    if (typeof organizationId !== 'string' || organizationId.length === 0) {
+      return {
+        status: 400,
+        body: {
+          success: false,
+          error: {
+            code: 'NO_ACTIVE_ORGANIZATION',
+            message:
+              'You are not working in an organization, so no user was created. '
+              + 'Switch to the organization the new user belongs to, then create them there.',
+          },
+        },
+      };
+    }
     const seam = deps.createGrant;
     const authApi = (await deps.getAuthApi()) as Partial<AddMemberCapableApi>;
-    const capable = Boolean(seam) && typeof authApi.addMember === 'function';
-    if (capable) join = { seam: seam!, addMember: authApi.addMember!.bind(authApi) };
-    else if (organizationId !== undefined) {
+    if (!seam || typeof authApi.addMember !== 'function') {
       return {
         status: 501,
         body: {
@@ -722,12 +725,12 @@ export async function runAdminCreateUser(
           error: {
             code: 'NOT_IMPLEMENTED',
             message:
-              'This server cannot add a user to an organization while creating them, so no user was created. '
-              + "Create the user without an organization, then use Add Member on the organization's Members list.",
+              'This server cannot add a new user to your organization while creating them, so no user was created.',
           },
         },
       };
     }
+    join = { seam, addMember: authApi.addMember.bind(authApi), organizationId };
   }
 
   // [#25338] Everything the grant needs is settled BEFORE the account exists,
@@ -800,15 +803,14 @@ export async function runAdminCreateUser(
       ? await stampMustChangePassword(deps, userId, true)
       : false;
 
-    // An organization the administrator chose — or, in multi-org mode, their
-    // current one by default — is joined explicitly (the add-member flow,
-    // ADR-0093 D1, D3 amendment). Otherwise match the invite / add-member
+    // In multi-org mode the administrator's current organization is joined
+    // explicitly (the add-member act, ADR-0093 D1, D3 amendment). Otherwise match the invite / add-member
     // flows: give the new user a membership so a single-org deployment shows
     // them under the Default Organization instead of as a member-less account.
     // No-op in multi-org (≥2 orgs), and no-op under
     // `membershipPolicy: 'invite-only'` (ADR-0093 D1) — see the helper.
-    const membership = join && joinOrganizationId !== undefined
-      ? await joinChosenOrganization(deps, join.addMember, userId, joinOrganizationId)
+    const membership = join
+      ? await joinCurrentOrganization(deps, join.addMember, userId, join.organizationId)
       : await bindUserToSoleOrganization(deps, userId);
 
     // [#25338] The grant, under the administrator's own context (see
@@ -901,7 +903,7 @@ class CreationRefused extends Error {
 }
 
 /**
- * Join the new user to the organization the administrator chose, as a
+ * Join the new user to the administrator's current organization, as a
  * `member` — the same act as the organization's Add Member action, folded into
  * the creation so the administrator does not have to perform it afterwards.
  *
@@ -911,16 +913,16 @@ class CreationRefused extends Error {
  * vendor's. A refusal throws, and the unit of work around the creation rolls
  * the account back with it.
  *
- * ADR-0093: this is NOT the reconciler choosing a target org (D3 — multi mode
- * never guesses); the administrator named it, which makes it an explicit flow
- * that `membershipPolicy: 'invite-only'` admits (D1). The role is `member`, the
- * D1 default: elevation stays the separate, audited `update-member-role`.
+ * ADR-0093 D3 amendment: this is NOT the reconciler guessing a tenant (D3 —
+ * it still binds nothing in multi mode); it is the organization the
+ * administrator is working in, which makes it an explicit flow that
+ * `membershipPolicy: 'invite-only'` admits (D1). The role is `member`, the D1
+ * default: elevation stays the separate, audited `update-member-role`.
  *
- * A membership already there (in single-org mode the `user.create.after`
- * reconciler can bind the default organization first) is respected and
- * reported as `membershipCreated: false`, exactly as the reconciler reports it.
+ * A membership already there is respected and reported as
+ * `membershipCreated: false`, exactly as the reconciler reports it.
  */
-async function joinChosenOrganization(
+async function joinCurrentOrganization(
   deps: AdminUserEndpointDeps,
   addMember: AddMemberCapableApi['addMember'],
   userId: string,
@@ -956,29 +958,15 @@ async function joinChosenOrganization(
 }
 
 /**
- * The organization a new user joins when the administrator chose none: their
- * OWN current organization, in multi-org mode only (ADR-0093 D3 amendment).
- *
- * - Single-org (no organization wall in force, a degraded walled request
- *   included): none — the reconciler already binds the default organization.
- *   Judged by `tenancy.isolationActive`, the predicate behind
- *   `features.multiOrgEnabled`, so the default applies exactly where the
- *   dialog shows the organization picker.
- * - `membershipPolicy: 'invite-only'`: none — a default is not an explicit
- *   choice, so the policy keeps withholding it (D1).
- * - An administrator with no current organization: none — the user is
- *   created member-less, exactly as before.
- *
- * This is not the reconciler guessing a tenant: it is the organization the
- * administrator is working in, shown to them as the dialog's default, the
- * same organization the Add Member action falls back to.
+ * Whether this creation joins the administrator's current organization: multi-org
+ * mode only (ADR-0093 D3 amendment), judged by `tenancy.isolationActive` — the
+ * predicate behind `features.multiOrgEnabled`, so a single-org deployment and a
+ * degraded walled request (which serves single-org-like) keep the reconciler's
+ * default-organization bind, unchanged. A host that wires no way to read the
+ * caller's current organization does not join either.
  */
-async function resolveDefaultJoinOrganization(deps: AdminUserEndpointDeps): Promise<string | undefined> {
-  if (!deps.getCallerActiveOrganizationId) return undefined;
-  if (deps.getTenancy?.()?.isolationActive !== true) return undefined;
-  if ((deps.getMembershipPolicy?.() ?? 'auto') !== 'auto') return undefined;
-  const active = await deps.getCallerActiveOrganizationId();
-  return typeof active === 'string' && active.length > 0 ? active : undefined;
+function multiOrgCreationJoinsCurrentOrganization(deps: AdminUserEndpointDeps): boolean {
+  return deps.getTenancy?.()?.isolationActive === true && typeof deps.getCallerActiveOrganizationId === 'function';
 }
 
 /**

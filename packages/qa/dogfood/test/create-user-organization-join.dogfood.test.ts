@@ -1,22 +1,22 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Create User can join the new user to an organization in the same step —
- * measured on the real route, in a real multi-org posture.
+ * In multi-org mode, Create User adds the new user to the administrator's
+ * CURRENT organization — measured on the real route, in a real walled posture.
  *
- * In multi-org mode the membership reconciler binds no organization by itself
- * (ADR-0093 D3 — it never guesses one), so a user created without one is
- * member-less and the administrator had to follow up with the organization's
- * Add Member action. Naming the organization on create-user folds that second
- * step into the first: better-auth's own `addMember` joins the user as a
- * `member`, inside the account's transaction.
+ * The membership reconciler binds no organization by itself in multi-org mode
+ * (ADR-0093 D3 — it never guesses one), so a user created from Setup used to be
+ * member-less and the administrator had to follow up with Add Member. The D3
+ * amendment folds that step in: the organization the administrator is working
+ * in is the one the new user joins, as `member`, through better-auth's own
+ * `addMember` inside the account's transaction — the way mainstream admin
+ * consoles add people to the workspace you are standing in.
  *
- *   J1  chosen: the user lands with exactly one membership, `member` of the
- *       chosen organization — not the administrator's own.
- *   J2  left empty: the user joins the administrator's CURRENT organization
- *       (ADR-0093 D3 amendment), and only that one.
- *   J3  an organization that does not exist is refused, and the account rolls
- *       back with it — no member-less user is left behind.
+ *   J1  in an organization: the user lands with exactly one membership,
+ *       `member` of the administrator's current organization — not another one
+ *       the request names.
+ *   J2  no current organization: refused, and no user is created — never a
+ *       member-less account.
  *
  * Harness: the admin identity routes 501 unless better-auth's `admin` plugin
  * is on; `OS_SCIM_ENABLED` is the one env knob that reaches it (see
@@ -35,12 +35,13 @@ async function findRows(ql: any, object: string, where: any, limit = 50): Promis
   return Array.isArray(rows) ? rows : (rows?.records ?? []);
 }
 
-describe('Create User joins an organization in multi-org mode — the chosen one, or the administrator\'s current one', () => {
+describe("Create User in multi-org mode joins the administrator's current organization", () => {
   let stack: VerifyStack;
   let ql: any;
   let adminToken: string;
-  let orgId: string;
-  /** The administrator's own current organization — the default. */
+  /** An organization the administrator is NOT working in. */
+  let otherOrgId: string;
+  /** The administrator's own current organization. */
   let adminOrgId: string;
   let priorScim: string | undefined;
 
@@ -52,21 +53,17 @@ describe('Create User joins an organization in multi-org mode — the chosen one
     ql = await stack.kernel.getServiceAsync<any>('objectql');
 
     const ownerToken = await stack.signUp('owner.create-user-org@example.com');
-    const created = await stack.apiAs(ownerToken, 'POST', '/auth/organization/create', {
-      name: 'Join Target', slug: 'join-target-create-user',
+    const other = await stack.apiAs(ownerToken, 'POST', '/auth/organization/create', {
+      name: 'Elsewhere', slug: 'elsewhere-create-user',
     });
-    expect(created.status, `org create: ${await created.clone().text()}`).toBe(200);
-    orgId = ((await created.json()) as { id: string }).id;
+    expect(other.status, `org create: ${await other.clone().text()}`).toBe(200);
+    otherOrgId = ((await other.json()) as { id: string }).id;
 
     const home = await stack.apiAs(adminToken, 'POST', '/auth/organization/create', {
       name: 'Admin Home', slug: 'admin-home-create-user',
     });
     expect(home.status, `admin org create: ${await home.clone().text()}`).toBe(200);
     adminOrgId = ((await home.json()) as { id: string }).id;
-    const active = await stack.apiAs(adminToken, 'POST', '/auth/organization/set-active', {
-      organizationId: adminOrgId,
-    });
-    expect(active.status, `set-active: ${await active.clone().text()}`).toBe(200);
   }, 180_000);
 
   afterAll(async () => {
@@ -75,6 +72,13 @@ describe('Create User joins an organization in multi-org mode — the chosen one
     else process.env.OS_SCIM_ENABLED = priorScim;
   });
 
+  async function setActive(organizationId: string | null): Promise<void> {
+    const res = await stack.apiAs(adminToken, 'POST', '/auth/organization/set-active', { organizationId });
+    expect(res.status, `set-active: ${await res.clone().text()}`).toBe(200);
+    const session = await (await stack.apiAs(adminToken, 'GET', '/auth/get-session')).json();
+    expect(session.session.activeOrganizationId ?? null).toBe(organizationId);
+  }
+
   it('guard the guard: a real multi-org posture', async () => {
     const tenancy = await stack.kernel.getServiceAsync<{
       posture: string; isolationActive: boolean; degraded: boolean; defaultOrgId(): Promise<string | null>;
@@ -82,33 +86,18 @@ describe('Create User joins an organization in multi-org mode — the chosen one
     expect(tenancy.posture).toBe('isolated');
     expect(tenancy.isolationActive).toBe(true);
     expect(tenancy.degraded).toBe(false);
-    // The reconciler's target: none — so J2's membership is the default's doing, not the reconciler's.
+    // The reconciler's target: none — so the membership below is the join's doing, not the reconciler's.
     expect(await tenancy.defaultOrgId()).toBeNull();
+    expect(adminOrgId).not.toBe(otherOrgId);
   });
 
-  it('J1 chosen: the user lands as a member of that organization, and only that one', async () => {
+  it("J1 in an organization: the user joins the administrator's current one, and only that one", async () => {
+    await setActive(adminOrgId);
     const res = await stack.apiAs(adminToken, 'POST', '/auth/admin/create-user', {
       email: 'joined.create-user-org@example.com',
       password: 'Joined!Pass123',
-      organizationId: orgId,
-    });
-    expect(res.status, await res.clone().text()).toBe(200);
-    const body = await res.json();
-    expect(body.data.organizationId).toBe(orgId);
-    expect(body.data.membershipCreated).toBe(true);
-
-    const members = await findRows(ql, 'sys_member', { user_id: String(body.data.user.id) });
-    expect(members.map((m) => [m.organization_id, m.role])).toEqual([[orgId, 'member']]);
-  }, 120_000);
-
-  it("J2 left empty: the user joins the administrator's current organization", async () => {
-    const session = await (await stack.apiAs(adminToken, 'GET', '/auth/get-session')).json();
-    expect(session.session.activeOrganizationId).toBe(adminOrgId);
-    expect(adminOrgId).not.toBe(orgId);
-
-    const res = await stack.apiAs(adminToken, 'POST', '/auth/admin/create-user', {
-      email: 'defaulted.create-user-org@example.com',
-      password: 'Default!Pass123',
+      // Not a choice the route offers: the current organization decides.
+      organizationId: otherOrgId,
     });
     expect(res.status, await res.clone().text()).toBe(200);
     const body = await res.json();
@@ -118,17 +107,16 @@ describe('Create User joins an organization in multi-org mode — the chosen one
     expect(members.map((m) => [m.organization_id, m.role])).toEqual([[adminOrgId, 'member']]);
   }, 120_000);
 
-  it('J3 an organization that does not exist: refused, and no user is created', async () => {
-    const email = 'refused.create-user-org@example.com';
+  it('J2 no current organization: refused, and no user is created', async () => {
+    await setActive(null);
+    const email = 'orphan.create-user-org@example.com';
     const res = await stack.apiAs(adminToken, 'POST', '/auth/admin/create-user', {
       email,
-      password: 'Refused!Pass123',
-      organizationId: 'org_does_not_exist',
+      password: 'Orphan!Pass123',
     });
     const text = await res.clone().text();
-    expect(res.status, text).toBeGreaterThanOrEqual(400);
-    expect(res.status, text).toBeLessThan(500);
-    expect((await res.json()).error.message).toContain('no user was created');
+    expect(res.status, text).toBe(400);
+    expect((await res.json()).error.code).toBe('NO_ACTIVE_ORGANIZATION');
     expect(await findRows(ql, 'sys_user', { email })).toHaveLength(0);
   }, 120_000);
 });

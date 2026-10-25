@@ -147,9 +147,6 @@ export const PUBLIC_AUTH_FEATURES = {
       'sys_organization.actions.delete_organization',
       'sys_organization.actions.set_active_organization',
       'sys_organization.actions.leave_organization',
-      // Create User's organization picker: only multi-org needs it, since
-      // single-org binds every new user to the default organization itself.
-      'sys_user.actions.create_user.params.organizationId',
     ],
     notes:
       'Reflects ACTUAL multi-tenancy capability (the tenancy posture enforces ' +
