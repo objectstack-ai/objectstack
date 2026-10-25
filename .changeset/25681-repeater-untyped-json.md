@@ -5,7 +5,7 @@
 
 feat(spec,lint): object-level `composite` / `repeater` are untyped JSON — a typed list is a child object
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: semantic
 Ruling-ref: 6386744473
 
