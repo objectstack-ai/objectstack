@@ -356,6 +356,51 @@ there — write the value itself (`sourceObject: 'crm_case'`). A `{…}` token
 there is refused, since it would reach the messaging service with its braces,
 and so is an envelope. The node's `actionUrl` is a text slot (below).
 
+**A `notify` node mails a person who is not a user through an email field.**
+An applicant who came in through a public form has no account, so no user id
+reaches them. Write `recipients: { emailField: 'applicant_email' }` — the whole
+value, never a list entry — naming an `email`-typed field of the record that
+triggered the flow, with `channels: 'email'`:
+
+```ts
+{
+  id: 'tell_applicant', type: 'notify', label: 'Tell the applicant',
+  config: {
+    recipients: { emailField: 'applicant_email' },
+    channels: 'email',
+    title: 'We received your application, {{ record.company_name }}',
+    message: 'We will reply within five working days.',
+  },
+}
+```
+
+The address is read from the **stored** record when the node runs, and it
+must be exactly one plain ASCII mailbox (`name@example.com`): a list, a
+display name, a separator or a line break fails the node and nothing is sent,
+and so do an address the `email` field type accepts but this node does not (a
+non-ASCII character, a quoted local part, an IP-literal domain), an empty field
+and a run with no trigger record. The title and message are
+rendered as for any notify, the send goes through the deployment's outbound
+mail, and it is recorded like every notification: a `sys_notification` event
+and a `sys_notification_delivery` row whose recipient is the address. One
+address receives at most 5 such emails per hour, across every flow; a sixth
+fails the node, so a form a visitor fills in cannot mail one inbox without
+end. The limit is best-effort: when its counter in the kernel `cache` service
+faults, the send is admitted and a warning is logged once. `objectstack validate` refuses a field the object does not have, a field
+that is not `email`-typed, another channel, and a flow with no triggering
+record.
+
+In a node whose `channels` include `email`, an address a **value expression
+computes** must belong to a user, written bare or as `user:ADDRESS`: an
+envelope that evaluates to a user's address reaches that user, and one that
+evaluates to an address no user holds
+fails the node, pointing to `{ emailField }` — an expression over record text
+would otherwise let whoever typed that text choose who the flow mails. A node
+that does not name `email` (`inbox` alone, the default) mails nobody, so its
+computed recipients resolve as before. An address **written out** in the flow
+(`recipients: ['ops@example.com']`) is the author's constant and is sent as
+written.
+
 **A CRUD node's filter: each operand computes before the query, and the query
 placeholders stay.** In a `get_record`, `update_record` or `delete_record`
 `filter`, each **operand** — a field's value, an operator's comparand, each
