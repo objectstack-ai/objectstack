@@ -58,20 +58,27 @@ The two tiers also differ in what they give you for layout, in opposite directio
 
 ## The security gate
 
-Because the react tier runs author JavaScript, it is gated by a host capability named
-`react-pages`, which defaults **ON** — the platform's assumption is that page authors
-are reviewed and draft-gated.
+Because the react tier runs author JavaScript in every viewer's session, with no sandbox,
+it is gated by a host capability named `react-pages`, which defaults **OFF**. The tier is
+for deployments whose page authors are trusted and reviewed.
 
-A deployment that does not trust its page authors turns the tier off **server-side**:
+A deployment that trusts its page authors turns the tier on **server-side**:
 
 ```bash
-OS_PAGE_REACT=off objectstack start
+OS_PAGE_REACT_ENABLED=true objectstack start
 ```
 
-The server then injects the console's capability-disable flag, and every `kind:'react'`
-page renders an explanatory notice instead of executing. `off`, `0`, `false`, `no` and
-`disabled` are all accepted spellings. `kind:'html'` pages are unaffected — they were
-never executed in the first place, which is the whole point of the split.
+or with the same line in the project's `.env` file. `true`, `1`, `on`, `yes` and `enabled`
+turn it on; unset, `false`, `0`, `off`, `no` and `disabled` leave it off. Any other value
+leaves it off and is reported once in the server log. The earlier name `OS_PAGE_REACT`
+(`on` / `off`) is still read when `OS_PAGE_REACT_ENABLED` is unset, with a deprecation
+warning.
+
+With the tier off, every `kind:'react'` page renders a notice that names the switch
+instead of executing, and the Console's content-security-policy refuses `eval`. With it
+on, the server tells the Console to run react pages and the policy allows the `Function`
+call the runtime compiles them with. `kind:'html'` pages are unaffected either way — they
+are never executed, which is the whole point of the split.
 
 ## What is in scope
 

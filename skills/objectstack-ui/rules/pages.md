@@ -223,9 +223,9 @@ function Page() {
 ```
 
 **Safety / availability.** `kind:'react'` executes author code in the app, so it is gated
-by the host capability `react-pages` — **ON by default** (the platform trusts reviewed,
-draft-gated authors). A deployment that does not trust its authors turns it off server-side
-with `OS_PAGE_REACT=off`; the page then shows a "disabled" notice instead of executing.
+by the host capability `react-pages` — **OFF by default**: a react page's source is code
+every viewer runs. A deployment that trusts its authors turns it on server-side
+with `OS_PAGE_REACT_ENABLED=true`; while off, the page shows a "disabled" notice instead.
 `os build` does NOT lint react source (it is real JS, not constrained JSX) — errors surface
 at render behind an error boundary, so always test a react page in the browser.
 

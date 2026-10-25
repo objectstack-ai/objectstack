@@ -733,7 +733,7 @@ const DEFAULT_MAP_STYLE_ORIGIN = 'https://demotiles.maplibre.org';
  *   Console keeps its session token where any script on the page can read it,
  *   so only the build's own files and the document's own inline scripts (the
  *   early-branding, process-polyfill, crypto-shim and boot-splash scripts, and
- *   the server's react-pages disable global) may run: a script element that
+ *   the server's react-pages capability global) may run: a script element that
  *   markup injected later carries no nonce, and an inline event handler never
  *   matches one. No public CDN is listed. A CDN host in `script-src` admits
  *   every file that CDN serves, so the Studio's Monaco editor, which loads its
@@ -743,7 +743,8 @@ const DEFAULT_MAP_STYLE_ORIGIN = 'https://demotiles.maplibre.org';
  *   whose grammar engine is WebAssembly compiled in the page. It permits
  *   compiling WebAssembly and nothing else; JavaScript `eval` stays refused.
  * - `'unsafe-eval'` only while the `kind:'react'` page tier is on (ADR-0081;
- *   on unless `OS_PAGE_REACT=off`). That runtime evaluates the author's
+ *   off unless `OS_PAGE_REACT_ENABLED=true`, `readReactPagesTier`). That
+ *   runtime evaluates the author's
  *   transpiled page source with `Function`, which nothing but `'unsafe-eval'`
  *   permits. With the tier off, the policy refuses it.
  * - `style-src 'self' 'unsafe-inline'`: the document's own `<style>` (the boot
@@ -791,6 +792,59 @@ function consoleContentSecurityPolicy(input: {
   ];
   if (!input.embeddable) directives.push(['frame-ancestors', "'self'"]);
   return directives.map((directive) => directive.join(' ')).join('; ');
+}
+
+/** The variable a deployment sets to turn the `kind:'react'` page tier on. */
+const REACT_PAGES_ENV = 'OS_PAGE_REACT_ENABLED';
+/** Its earlier name, read when the new one is unset. */
+const REACT_PAGES_LEGACY_ENV = 'OS_PAGE_REACT';
+const REACT_PAGES_ON = new Set(['true', '1', 'on', 'yes', 'enabled']);
+const REACT_PAGES_OFF = new Set(['', 'false', '0', 'off', 'no', 'disabled']);
+
+interface ReactPagesTierReports {
+  /** The value is neither an on nor an off spelling. */
+  unrecognized?: (name: string, value: string) => void;
+  /** Only the legacy name is set. */
+  legacyName?: (legacy: string, preferred: string) => void;
+}
+
+/**
+ * Whether this deployment serves the `kind:'react'` page tier (ADR-0081, as
+ * amended: off by default). That tier runs the page author's code in every
+ * viewer's Console with no sandbox, so it is on only when the operator says so
+ * with `OS_PAGE_REACT_ENABLED=true` (or the legacy `OS_PAGE_REACT=on`). A value
+ * that is neither an on nor an off spelling leaves the tier off and is reported,
+ * so a typo never reads as a silent refusal.
+ *
+ * The legacy fallback is spelled here rather than through
+ * `readEnvWithDeprecation` (`@objectstack/types`): this module is behind the
+ * published `./console` subpath, which imports Node built-ins only
+ * (`test/published-subpath-console.pin.test.ts` runs it from the packed
+ * tarball with no other package installed).
+ */
+function readReactPagesTier(reports: ReactPagesTierReports = {}): boolean {
+  let name = REACT_PAGES_ENV;
+  let raw = process.env[REACT_PAGES_ENV];
+  if (raw === undefined && process.env[REACT_PAGES_LEGACY_ENV] !== undefined) {
+    name = REACT_PAGES_LEGACY_ENV;
+    raw = process.env[REACT_PAGES_LEGACY_ENV];
+    reports.legacyName?.(REACT_PAGES_LEGACY_ENV, REACT_PAGES_ENV);
+  }
+  const value = String(raw ?? '').trim().toLowerCase();
+  if (REACT_PAGES_ON.has(value)) return true;
+  if (!REACT_PAGES_OFF.has(value)) reports.unrecognized?.(name, String(raw));
+  return false;
+}
+
+/**
+ * The inline script that tells the Console's capability gate (objectui
+ * `@object-ui/core`, `isCapabilityEnabled`) which way this deployment set the
+ * react-pages tier. The server writes it in both directions, so its answer
+ * holds whichever default the Console build carries.
+ */
+function reactPagesCapabilityScript(reactPages: boolean): string {
+  const list = reactPages ? '__OBJECTUI_CAPABILITIES__' : '__OBJECTUI_CAPABILITIES_DISABLED__';
+  return `<script>window.${list}=(window.${list}||[]).concat('react-pages');</script>`;
 }
 
 /**
@@ -863,14 +917,28 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
       }
 
       // The `kind:'react'` page tier (executes author JS in the main React
-      // tree) is ON by default. A deployment that does not trust its page
-      // authors turns it off with `OS_PAGE_REACT=off`; we then inject the
-      // disable global the console's capability gate reads. Read per request
-      // (env can change without a rebuild — index.html is re-read on every
-      // fallback hit too).
-      const reactPagesDisabled = (): boolean => {
-        const v = String(process.env.OS_PAGE_REACT ?? '').trim().toLowerCase();
-        return v === 'off' || v === '0' || v === 'false' || v === 'no' || v === 'disabled';
+      // tree) is OFF unless the operator turns it on (`readReactPagesTier`);
+      // either way the document carries the global the console's capability
+      // gate reads. Read per request (env can change without a rebuild —
+      // index.html is re-read on every fallback hit too).
+      let reportedUnrecognizedReactPages = false;
+      const reportUnrecognizedReactPages = (name: string, value: string) => {
+        if (reportedUnrecognizedReactPages) return;
+        reportedUnrecognizedReactPages = true;
+        ctx.logger?.warn?.(
+          `Console static: ${name}=${JSON.stringify(value)} is not an on or off value, so kind:'react' pages `
+          + `stay off and render a notice instead of running. Set ${REACT_PAGES_ENV}=true to turn them on, or `
+          + 'unset it to keep them off. Reported once.',
+        );
+      };
+      let reportedLegacyReactPagesName = false;
+      const reportLegacyReactPagesName = (legacy: string, preferred: string) => {
+        if (reportedLegacyReactPagesName) return;
+        reportedLegacyReactPagesName = true;
+        ctx.logger?.warn?.(
+          `Console static: env var \`${legacy}\` is deprecated; rename it to \`${preferred}\`. `
+          + 'The legacy name still works for now but will be removed in a future major release.',
+        );
       };
 
       // A runtime-config read that fails leaves the shell's head as the build
@@ -904,11 +972,8 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
           const baseTag = `<base href="${CONSOLE_PATH}/">`;
           html = html.replace(/<head(\s[^>]*)?>/i, (m) => `${m}\n    ${baseTag}`);
         }
-        if (!reactPages) {
-          const capTag =
-            `<script>window.__OBJECTUI_CAPABILITIES_DISABLED__=(window.__OBJECTUI_CAPABILITIES_DISABLED__||[]).concat('react-pages');</script>`;
-          html = html.replace(/<head(\s[^>]*)?>/i, (m) => `${m}\n    ${capTag}`);
-        }
+        const capTag = reactPagesCapabilityScript(reactPages);
+        html = html.replace(/<head(\s[^>]*)?>/i, (m) => `${m}\n    ${capTag}`);
         // Stamped while the document holds only the build's markup and the
         // server's own tags: nothing read at request time is written yet, so
         // no runtime value can ever carry the nonce.
@@ -917,9 +982,12 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
 
       const serveDocument = async (c: any, reqPath: string): Promise<Response> => {
         const nonce = randomBytes(16).toString('base64');
-        // One read per document, so the injected disable global and the
+        // One read per document, so the injected capability global and the
         // policy's `'unsafe-eval'` always agree.
-        const reactPages = !reactPagesDisabled();
+        const reactPages = readReactPagesTier({
+          unrecognized: reportUnrecognizedReactPages,
+          legacyName: reportLegacyReactPagesName,
+        });
         const html = readIndexHtml(reactPages, nonce);
         const shell = await readShellConfig(app, c, reportShellConfigReadFailure);
         const policy = consoleContentSecurityPolicy({

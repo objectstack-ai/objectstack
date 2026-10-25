@@ -4,7 +4,7 @@
 
 ### Minor Changes
 
-- 3937697: fix(lint)!: `os lint` and the react-page props check report the retired list-view `filterableFields` by name, and the readers that still treated it as a field position go
+- b42c621: fix(lint)!: `os lint` and the react-page props check report the retired list-view `filterableFields` by name, and the readers that still treated it as a field position go
   
   Clause-②: yes (narrowing)
   
@@ -41,7 +41,7 @@
   - **`@objectstack/metadata-core`**: the ADR-0106 field-security scrub no longer classifies `filterableFields` as a list-view name list. A body that still carries the key goes the unclassified way and fails closed: a list view whose `filterableFields` names a field the caller may not read is dropped whole, where the scrub used to remove the name.
   
   ⛔ **Untouched:** `userFilters` and `searchableFields` keep their meaning and their checks.
-- 3937697: feat(spec,lint): a bulk action's `confirmText` is a `template` slot over `count` and the action's params
+- 925fd07: feat(spec,lint): a bulk action's `confirmText` is a `template` slot over `count` and the action's params
   
   Clause-②: yes (widening)
   Metadata-protocol: semantic
@@ -54,7 +54,7 @@
   - **`os i18n extract`.** A bulk `confirmText` written as the envelope is seeded exactly as the bare string: the extractor reads the slot's text through `templateSlotSource`, so the envelope form no longer records as an absent key with nothing to translate.
   - **Served translations.** The catalog overlay on a served view or an object's `listViews` compares a bulk `confirmText` with its packaged base by the slot's text, whichever form either side holds: an unchanged envelope still takes the catalog's sentence, and an edited one keeps the authored sentence.
   - **Unchanged.** The `confirm` / `confirmmessage` near-misses still name `confirmText`. Every other bulk-def key, the default confirm sentence and the flow text slots' verdicts are unchanged.
-- 3937697: feat(lint,spec): `os validate`, `os build` and `os lint` warn on a `user` field whose `reference` names an object other than `sys_user`, and `Field.user()` marks `reference` deprecated
+- e7befa7: feat(lint,spec): `os validate`, `os build` and `os lint` warn on a `user` field whose `reference` names an object other than `sys_user`, and `Field.user()` marks `reference` deprecated
   
   Clause-②: yes (widening)
   
@@ -64,7 +64,7 @@
   - **Published.** `USER_FIELD_FOREIGN_REFERENCE` (`user-field-foreign-reference`) is exported from `@objectstack/lint` beside `OBJECT_REFERENCE_UNKNOWN`, and `RULE_EXPLANATIONS` gains its entry, so `os explain user-field-foreign-reference` prints why the field is half a link and half a user, and why the rewrite to a `lookup` is left to the author.
   - **Unchanged.** Parsing, the runtime's resolution of such a field (it still follows the authored `reference`), `Field.user()`'s output, and `user` fields written without `reference` or with `reference: 'sys_user'`.
   - **What to do.** Change a `user` field that points at another object to a `lookup` on that object. No in-repo app or package wrote this shape. Two test fixtures did: one is now a `lookup`, and the other deliberately pins the 18.x resolution.
-- 3937697: feat(spec): the `flows` translation face gains `approvals.<node_id>.label`, the step label of an `approval` node
+- b9a79ef: feat(spec): the `flows` translation face gains `approvals.<node_id>.label`, the step label of an `approval` node
   
   Clause-②: yes (widening)
   
@@ -73,7 +73,7 @@
   - **`objectstack validate`.** `@objectstack/lint`'s translation-reference check accepts the key over an `approval` node and refuses it, as `translation-target-unknown`, over an unknown node or a node of another type (a `screen` node is pointed at its `screens.<node_id>.title`). A `screens` or `refusals` key written over an approval node is now pointed at `approvals.<node_id>.label` instead of being told only that the node is not a screen.
   - **Not yet rendered.** This is the spec half: the key parses and validates, and the approvals service does not read it yet, so an approval request still shows the authored step label. Its liveness row is `planned` until that reader lands.
   - **Unchanged.** Every existing `flows` key, and every verdict on a key over a node that is not an approval node.
-- 3937697: feat(spec)!: a `user` field whose `reference` names an object other than `sys_user` is refused at parse, and every `user` field resolves to `sys_user`
+- 2069b81: feat(spec)!: a `user` field whose `reference` names an object other than `sys_user` is refused at parse, and every `user` field resolves to `sys_user`
   
   Clause-②: no (narrowing)
   Metadata-protocol: narrowed
@@ -92,7 +92,7 @@
   **Supersedes the `user-field-foreign-reference` warning entry in this release.** That entry announced a `@objectstack/lint` advisory `user-field-foreign-reference`, the `USER_FIELD_FOREIGN_REFERENCE` export and its `os explain` entry, and said such a field would still parse. All three are withdrawn before release and never ship: a foreign `reference` on a `user` field is now refused by `FieldSchema` instead, so there is nothing left for the advisory to warn about.
   
   - **For `@objectstack/lint`:** no `user-field-foreign-reference` rule, no `USER_FIELD_FOREIGN_REFERENCE` export and no `RULE_EXPLANATIONS` entry for it. `OBJECT_REFERENCE_UNKNOWN` and every other export are unchanged. The refusal arrives as a `FieldSchema` issue at `reference`, not as a lint advisory.
-- 3937697: feat(lint): a CEL slot inside a page component's `properties` that overruns the platform's parse bounds is reported as a warning at `os validate`, `os build`, `os lint` and the page publish door
+- 0a3ce08: feat(lint): a CEL slot inside a page component's `properties` that overruns the platform's parse bounds is reported as a warning at `os validate`, `os build`, `os lint` and the page publish door
   
   Clause-②: no
   
@@ -101,7 +101,7 @@
   The new rule `page-predicate-over-budget` (`validatePagePredicateBounds`) reads the slots off each component's `ComponentPropsMap` row: every position where the row's parse produces a `{ dialect: 'cel', source }` envelope. It judges each one with `validateExpression`'s bounds verdict and names the key and the bound. It does not echo the source. It is a **warning** in 18.x: the page still saves and builds, and the publish door carries the finding on its `advisories` channel. A future major release refuses it. A within-bounds source draws nothing.
   
   Fix: shrink the expression. Collapse an `||` chain into one `in [...]` test, or precompute the heavy part into a formula or roll-up field and test that field.
-- 3937697: fix(lint)!: `os build` and the object save door refuse a `validations[]` rule whose predicate reads `parent` (#24957)
+- c5915b2: fix(lint)!: `os build` and the object save door refuse a `validations[]` rule whose predicate reads `parent` (#24957)
   
   Clause-②: no (narrowing: `os build` and the object save door refuse a `validations[]` rule whose predicate reads `parent`, which the server's rule evaluator never binds)
   Metadata-protocol: narrowed
@@ -127,7 +127,7 @@
   - No public export or signature moves.
   
   <!-- adr-0087: not-required (no-migration-prescription) a refusal at `os build` and at the object save door of a validations[] rule predicate that reads `parent`, which the server's rule evaluator never binds: no authorable key, spelling, export or stored shape moves, and no stored row is read, rewritten or converted. A stored object carrying such a rule keeps loading until it is next saved, and the repair is the author's rewrite of the predicate (a field rule, a lifecycle hook, or a denormalised column), which no ledger entry can derive. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this verdict (not already-registered); and the change is a build and door verdict, not a declaration (not runtime-interface-only or type-surface-only). -->
-- 3937697: feat(spec): a `page:tabs` item label gains a translation key, `pages.<page>.components.<tabsId>.items.<value>.label`
+- 30d21f6: feat(spec): a `page:tabs` item label gains a translation key, `pages.<page>.components.<tabsId>.items.<value>.label`
   
   Clause-②: yes (widening)
   
@@ -137,7 +137,7 @@
   - **`objectstack validate`.** `@objectstack/lint`'s translation-reference check accepts the key over a declared `page:tabs` item `value`. It refuses it as `translation-target-unknown` over an unknown value (with "Did you mean"), over a component of another type (a `page:accordion` is pointed at the inline locale map, since its panels have no stable key), and under a component id the page does not declare.
   - **`os i18n extract` / coverage.** The extractor writes a slot for every valued tab item, and the coverage check demands it. An inline locale map on the item label is counted as authored, as before.
   - **Unchanged.** Every existing `pages` key, and an inline locale map on a tab label that the bundle does not key.
-- 3937697: feat(spec): a form view's `title` is translated through `objects.<object>._views.<view>.title`, and `GET /forms/:slug` serves it in the visitor's language
+- eddffc3: feat(spec): a form view's `title` is translated through `objects.<object>._views.<view>.title`, and `GET /forms/:slug` serves it in the visitor's language
   
   Clause-②: yes (widening)
   
@@ -147,7 +147,7 @@
   - **`objectstack validate`.** `@objectstack/lint`'s translation-reference check accepts a `title` key over a form view (a `formViews.<key>` entry, the default `form`, or a `viewKind: 'form'` item) and refuses it, as `translation-target-unknown`, over a list view, pointing at the view's `label` key.
   - **`os i18n extract`.** The CLI extractor emits `_views.<view>.title` for each form a view container serves (keyed by the composer's runtime name) and for a `viewKind: 'form'` item, so the skeleton carries the slot and the i18n coverage gate reports an authored title a supported locale leaves untranslated.
   - **Unchanged.** Every other `_views` key, the view `label` and `description` reads, and a form without a title.
-- 3937697: fix(lint)!: `os build`, `os validate`, `os lint` and the page save door refuse a page component whose `properties` is present but not an object, nested components included (#24991)
+- c0ae356: fix(lint)!: `os build`, `os validate`, `os lint` and the page save door refuse a page component whose `properties` is present but not an object, nested components included (#24991)
   
   Clause-②: no (narrowing: `os lint --strict` refuses a nested page component whose `properties` is `null` or an array)
   
@@ -172,7 +172,7 @@
   - Measured before crossing: no page this repository ships authors a non-object `properties` bag.
   
   <!-- adr-0087: not-required (no-migration-prescription) a refusal at the CLI doors and the page save door of a page component whose properties bag is present but not an object: no authorable key, spelling, export or stored shape moves, and no stored row is read, rewritten or converted. A stored page with such a component keeps loading until it is next saved, and the repair is the author restoring the props the component lost, which no ledger entry can derive. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this verdict (not already-registered); and the change is a lint verdict, not a declaration (not runtime-interface-only or type-surface-only). -->
-- 3937697: fix(lint)!: `os build`, `os validate`, `os lint` and the page save door refuse a page component props CEL slot over the platform's parse bounds (#25002)
+- 31f0f27: fix(lint)!: `os build`, `os validate`, `os lint` and the page save door refuse a page component props CEL slot over the platform's parse bounds (#25002)
   
   Clause-②: no (narrowing: a page component props CEL slot over the platform parse bounds is refused at `os build` and the page door; it ships now under the amended 「甲」, #6015 `6303865025`)
   
@@ -195,7 +195,7 @@
   - Measured before crossing, through the built `@objectstack/lint`: 0 in-repo producers carry such a slot. Every page module under `examples/` and `packages/` (30 files, 65 page values) draws 0 findings, and so do the `app-crm`, `app-multi-package` and `app-todo` composed stacks. A literal scan of 9,919 tracked source files (13,840 string literals of 120+ characters) finds 0 sources over the bounds, and HotCRM at `c8a7a70` (611 files) finds 0. A planted 78-term control is found by both instruments.
   
   <!-- adr-0087: not-required (no-migration-prescription) a refusal at `os build`, `os validate`, `os lint` and the page save door of a page component props CEL slot whose source overruns the platform's parse bounds: no authorable key, spelling, export or stored shape moves, and no stored row is read, rewritten or converted. A stored page whose slot is refused keeps loading until it is next saved, and the repair is the author's rewrite of the predicate (shrinking it, or precomputing it into a formula or roll-up field), which no ledger entry can derive. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this verdict (not already-registered); and the change is a build and door verdict, not a declaration (not runtime-interface-only or type-surface-only). -->
-- 3937697: feat(lint)!: `objectstack validate`, `compile` and the publish gate refuse a bulk action's `confirmText` hole over an unbound root, a single-brace token, a hole holding logic and a blank sentence (#25205)
+- ecb4e69: feat(lint)!: `objectstack validate`, `compile` and the publish gate refuse a bulk action's `confirmText` hole over an unbound root, a single-brace token, a hole holding logic and a blank sentence (#25205)
   
   Clause-②: no (narrowing: a bulk action's `confirmText` that names an unbound root, carries a single-brace token, holds logic in a hole or is blank is refused at `objectstack validate`, `compile` and the publish gate; it ships now under the amended 「甲」, #6015 `6303865025`)
   Metadata-protocol: narrowed
@@ -218,7 +218,7 @@
   - Measured before crossing, through the built `@objectstack/lint` at `925fd0772c`: 0 in-repo producers carry such a sentence. The 6 bulk defs with a `confirmText` in `examples/app-showcase` (`project.view.ts`) draw 0 findings, against 1 for a planted unbound hole. HotCRM at `1e71d5e` declares 3 bulk `confirmText` sentences on `account.view.ts` (`{{count}}`, and `{{tier}}` on the def whose param is `tier`), all over bound roots: 0 findings. Its other 9 of the 12 are translations of those 3 in its locale bundles, which this pass does not read.
   
   <!-- adr-0087: not-required (no-migration-prescription) a refusal at `objectstack validate`, `compile` and the publish gate of a bulk action `confirmText` naming an unbound root, carrying a single-brace token, holding logic in a hole, or blank: no authorable key, spelling, export or stored shape moves, the parse is unchanged, and no stored row is read, rewritten or converted. A stored view whose sentence is refused keeps loading until it is next saved, and the repair is the author's rewrite of the sentence (which root a hole should name is the author's intent), which no ledger entry can derive. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id covers this verdict (not already-registered); and the change is a build and door verdict, not a declaration (not runtime-interface-only or type-surface-only). -->
-- 3937697: feat(lint)!: a membership key, and a row policy that reads one, are judged when authored, at the CLI and at the object and permission save doors
+- b531016: feat(lint)!: a membership key, and a row policy that reads one, are judged when authored, at the CLI and at the object and permission save doors
   
   Clause-②: no (narrowing: `os validate`, `os build`, `os lint` and the object and permission save doors refuse a `membershipKeys` declaration that cannot resolve and a row policy that reads a membership key in a way that matches no rows; the RLS rule now also judges object writes)
   Metadata-protocol: narrowed
@@ -249,7 +249,7 @@
   - **Remedy:** declare the key on its roster object's `membershipKeys`, or register the resolver that stages it, before publishing the policy; test a key against the column that references the key's target; use `in`, not `==`; keep a key's `filter` to the roster object's own columns. An object write refused for a stored policy is fixed by keeping the field or key that policy reads, or by changing the policy first.
   
   <!-- adr-0087: not-required (no-migration-prescription) Refusals at the CLI and at the object and permission save doors of membership key declarations that cannot resolve and of row policies that read a membership key in a position that matches no rows, plus the RLS rule's crossing to object writes. No authorable key, spelling, export or stored shape moves, and no stored row is read, rewritten or converted; the repair is the author's choice of declaration, resolver, column or operator, which no ledger entry can derive. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id covers these verdicts (not already-registered); and the change is a build and door verdict, not a declaration (not runtime-interface-only or type-surface-only). -->
-- 3937697: fix(lint)!: a page or view `visibleWhen` that hands `has()` an argument other than a field selection is refused at publish
+- f5b6b3f: fix(lint)!: a page or view `visibleWhen` that hands `has()` an argument other than a field selection is refused at publish
   
   Clause-②: no (narrowing)
   
@@ -278,7 +278,7 @@
 
 ### Patch Changes
 
-- 3937697: **Shipped in 18.0.0**, whose CHANGELOG missed this entry; listed here one release late.
+- df8bb40: **Shipped in 18.0.0**, whose CHANGELOG missed this entry; listed here one release late.
   
   feat!: an organization-less row on a tenant table no longer draws its autonumber from the `__global__` counter, and a production server boot with no auth secret is refused
   
@@ -300,7 +300,7 @@
   The retired export:
   
   - FROM `GLOBAL_TENANT` TO `GLOBAL_TENANT` imported from `@objectstack/driver-sql`, where the counter and the index emitters keep it (or the literal `'__global__'`).
-- 3937697: fix: no shipped text says the SQL driver reads organization-less rows, and the in-memory HTTP outbox no longer does
+- 0091d84: fix: no shipped text says the SQL driver reads organization-less rows, and the in-memory HTTP outbox no longer does
   
   Clause-②: no (one fix and texts: the in-memory HTTP outbox's `redeliver()` now answers as `SqlHttpOutbox` already did; no accept set, served body or error code of a shipped composition moves)
   
@@ -312,7 +312,7 @@
   - **`@objectstack/lint`.** `os explain unique/legacy-organization-composite` now says that a new row carries its organization wherever the organization object is registered. A composition that registers no organization object still writes rows whose organization column is NULL.
   - **`@objectstack/spec`.** The TSDoc of `SharingRuleRow` no longer calls it a 1-to-1 stored shape: `deploymentWide` has no `sys_sharing_rule` column. The TSDoc of `DriverOptions.tenantIds` and of the events `organizationId` member describe the predicate without a NULL arm.
   - **The other packages.** Code comments only.
-- 3937697: feat(spec)!: a list's `addRecord` block says what renders — `enabled` is required, `position` defaults to `top`, and `mode` / `formView` are retired
+- fde7456: feat(spec)!: a list's `addRecord` block says what renders — `enabled` is required, `position` defaults to `top`, and `mode` / `formView` are retired
   
   Clause-②: yes (narrowing)
   
@@ -350,7 +350,7 @@
   - The Studio view form and page form offer exactly `enabled` and `position` for `addRecord`.
   - `@objectstack/lint`: `os explain list-view-field-unknown` no longer names `addRecord.formView` as a position another rule checks.
   - The showcase's two `addRecord` blocks and the docs (`ui/create-vs-edit-form`, `ui/views`) drop `mode` / `formView` and state the create-form convention.
-- 3937697: fix(lint): `os validate`, `os build` and the object save door warn on a `validations[]` rule whose predicate reads `parent` (#24720)
+- 8cfe1f9: fix(lint): `os validate`, `os build` and the object save door warn on a `validations[]` rule whose predicate reads `parent` (#24720)
   
   Clause-②: no
   
@@ -368,7 +368,7 @@
   - `parent` on a field's own `readonlyWhen` / `requiredWhen` is still accepted with no finding, as before, and so is a `record` column spelled like the root (`record.parent_code`).
   - No example or package object in this repository authors `parent` in a `validations[]` rule.
   - No public export or signature moves.
-- 3937697: docs(lint): `os explain` covers `list-view-object-unknown` and `list-view-object-outside-closure`, and the `packageScope` docblock says what a whole-collection miss now means
+- 88cc145: docs(lint): `os explain` covers `list-view-object-unknown` and `list-view-object-outside-closure`, and the `packageScope` docblock says what a whole-collection miss now means
   
   Clause-②: no (no verdict, severity, accept set or served body moves: explanation text and comments only)
   
@@ -376,7 +376,7 @@
   - **`os explain list-view-object-unknown`** explains why a write that names no package can say an object exists nowhere (it is judged against the whole collection the deployment serves), why an empty collection is not judged, and why `os validate` / `os build` / `os lint` still skip the binding.
   - **`os explain list-view-field-unknown`** no longer says an unresolvable binding always skips the list view: it does on the CLI, and the runtime save door refuses it under one of the two ids above.
   - **`AuthoringRuleContext.packageScope`** (in the published `.d.ts`) no longer says an object missing from a whole snapshot "may come from another package": that is true only on the CLI. At the runtime door with no closure in force the snapshot is the whole served collection, and such a binding is refused `list-view-object-unknown`.
-- 3937697: fix(lint): the record-title diagnostics no longer steer a composite title that must be queried into a formula field
+- 459afea: fix(lint): the record-title diagnostics no longer steer a composite title that must be queried into a formula field
   
   Clause-②: no (wording only: no verdict, severity, code, key or export moves)
   Metadata-protocol: none
@@ -384,7 +384,7 @@
   The `title-format-retired` and `title-unresolvable` messages and fix lines, the `object/missing-name-field` fix line, and the `os explain title-format-retired` text now say the same thing: a composite record title that an import, a sort or a search must match is a stored computed field, a non-formula field (such as a `text` field) that declares an `expression`, which the engine computes and stores on every write, designated as `nameField`. A `formula` field with `returnType: 'text'` stays a legal `nameField` for a title shown for display only: its value is computed on read and stored nowhere, so a sort by it is refused, search never reaches it, and an import cannot match a lookup cell against it.
   
   No finding fires on a different object than before, and no severity changes. Only the text an author reads changes.
-- 3937697: feat(spec)!: a `controlled_by_parent` object whose one required `master_detail` is marked `readonly: true` or `system: true` is refused at parse
+- 02ad31a: feat(spec)!: a `controlled_by_parent` object whose one required `master_detail` is marked `readonly: true` or `system: true` is refused at parse
   
   Clause-②: no (narrowing)
   
@@ -406,7 +406,7 @@
   `@objectstack/spec/data`: `controlledByParentMasterRefusal` returns the new shape `master-not-writable` for this object, so a producer that asks it before writing `controlled_by_parent` gets the parse's verdict. `ControlledByParentMasterShape` gains that member. `isControlledByParentMasterField` is unchanged: a flagged required `master_detail` still counts as the master, so beside a second required one the object is still refused as having two.
   
   `@objectstack/lint`: the `relationship/master-detail-required` explanation (`os explain`) now says that the parse refuses every shape that leaves the object without exactly one writable required master, and that a shape on a second, non-required `master_detail` is this rule's report alone.
-- 3937697: fix(lint)!: `os build`, `os validate`, `os lint` and the email template publish door refuse a hole in an HTML body that sits where the mail renderer's encoding does not suit it (#25189)
+- 9127f23: fix(lint)!: `os build`, `os validate`, `os lint` and the email template publish door refuse a hole in an HTML body that sits where the mail renderer's encoding does not suit it (#25189)
   
   Clause-②: no (narrowing: an email template whose `bodyHtml` places a hole outside the supported placements is refused at the three CLI commands and at the publish door, where it passed)
   Metadata-protocol: none
@@ -426,67 +426,67 @@
   - **`@objectstack/formula` (patch):** the classifier the rule reads, `judgeMailHtmlHoles`, is exported with its supported-placement list and labels. `@objectstack/plugin-email`'s built-in template pin reads the same classifier and holds its hole grammar to the renderer's.
   - **`@objectstack/spec` (patch):** one conversion's example templates now declare their link variable with `type: 'url'` and place it in an `href`. No schema, conversion behaviour or export changes.
   - **The fix for an author:** move the hole into element text or a quoted plain-text attribute. For a link, declare the variable with `type: 'url'` and write it triple-braced as the whole double-quoted `href` value.
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
+- Updated dependencies [448374d]
+- Updated dependencies [7cacad5]
+- Updated dependencies [df8bb40]
+- Updated dependencies [0091d84]
+- Updated dependencies [5e9b100]
+- Updated dependencies [7532ea3]
+- Updated dependencies [fde7456]
+- Updated dependencies [de9cd1f]
+- Updated dependencies [925fd07]
+- Updated dependencies [e7befa7]
+- Updated dependencies [55d7aab]
+- Updated dependencies [0715fac]
+- Updated dependencies [60b42cd]
+- Updated dependencies [b9a79ef]
+- Updated dependencies [63085c3]
+- Updated dependencies [0b8bce4]
+- Updated dependencies [2069b81]
+- Updated dependencies [1862d8d]
+- Updated dependencies [30d21f6]
+- Updated dependencies [eddffc3]
+- Updated dependencies [69712d5]
+- Updated dependencies [e939357]
+- Updated dependencies [045858f]
+- Updated dependencies [baedcec]
+- Updated dependencies [03c12a5]
+- Updated dependencies [386f60f]
+- Updated dependencies [28c9a2c]
+- Updated dependencies [2354058]
+- Updated dependencies [edcc8ce]
+- Updated dependencies [fccbd9d]
+- Updated dependencies [c8f4c43]
+- Updated dependencies [02ad31a]
+- Updated dependencies [03966ce]
+- Updated dependencies [e3aa111]
+- Updated dependencies [863c580]
+- Updated dependencies [7f5b19d]
+- Updated dependencies [14e7239]
+- Updated dependencies [fe0ec2b]
+- Updated dependencies [dfab597]
+- Updated dependencies [9127f23]
+- Updated dependencies [24360dc]
+- Updated dependencies [ecb4e69]
+- Updated dependencies [bda53bb]
+- Updated dependencies [b964ea1]
+- Updated dependencies [9019af9]
+- Updated dependencies [45f9962]
+- Updated dependencies [e5eab06]
+- Updated dependencies [dc532e8]
+- Updated dependencies [9d96b2b]
+- Updated dependencies [5f30f00]
+- Updated dependencies [7db1697]
+- Updated dependencies [f5b6b3f]
+- Updated dependencies [f4112a7]
+- Updated dependencies [303aef0]
+- Updated dependencies [d12e650]
+- Updated dependencies [830a63a]
+- Updated dependencies [1000cc7]
+- Updated dependencies [bdf762c]
+- Updated dependencies [27b3f1f]
+- Updated dependencies [7c68b10]
+- Updated dependencies [025f6de]
   - @objectstack/spec@18.1.0
   - @objectstack/formula@18.1.0
   - @objectstack/sdui-parser@18.1.0

@@ -19,8 +19,12 @@ The package publishes one entry per protocol domain (`@objectstack/spec/data`,
 (`@objectstack/spec/meta-spelling` — the `/meta/:type` URL-spelling contract
 and the `defineStack()` manifest-collection vocabulary, two deliberately
 distinct maps per objectstack#8424).
-Each entry is a self-contained bundle: what an entry's module graph reaches is
-what every consumer of that entry pays for.
+The entries share one module graph: a module two entries reach ships once, in
+a shared chunk under `dist/`, and is the same object through either entry.
+Chunks are not entry points — import only through the `exports` map. Chunk
+boundaries follow FILE-level reachability, so an entry links every chunk its
+module graph touches: what an entry's module graph reaches is still what every
+consumer of that entry may pay for.
 
 **Standing principle** (maintainer ruling 2026-08-20, recorded verbatim on
 objectstack#10096):

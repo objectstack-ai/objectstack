@@ -4,7 +4,7 @@
 
 ### Patch Changes
 
-- 3937697: docs(skills): the npm page and the catalog's front page give the install line for the project's own package manager
+- c0cde8b: docs(skills): the npm page and the catalog's front page give the install line for the project's own package manager
   
   Clause-②: no
   
@@ -12,7 +12,7 @@
   
   - **Both pages** now print `pnpm add -D "@objectstack/skills@$(node -p "require('@objectstack/spec/package.json').version")"`, with the npm and yarn spellings on a comment line beside it, and the rule: add the package with the manager that installed the project. The `objectstack-upgrade` skill's re-install step, which an agent follows for this exact move, prints the same line.
   - **The npm page** names pnpm's `ERR_PNPM_NO_MATCHING_VERSION` beside npm's `ETARGET` for a project on `@objectstack/spec` 17.x, and runs `npx skills list` before `npx skills remove --all`, which removes every installed skill without asking.
-- 3937697: docs(spec, skills): the `titleFormat` description and the objectstack-data skill no longer steer a composite record title that must be queried into a formula field
+- 7f5b19d: docs(spec, skills): the `titleFormat` description and the objectstack-data skill no longer steer a composite record title that must be queried into a formula field
   
   Clause-②: no
   Metadata-protocol: none
@@ -27,7 +27,7 @@
   Clause-②: no
   
   The security rules' table of the `current_user.*` placeholders the RLS compiler resolves listed only the kernel's keys. It now has a row for `current_user.KEY`, the set an object's `membershipKeys.KEY` declares (for `IN`), so an author reading the catalog alone learns that a declared key resolves.
-- 3937697: docs(skills): objectstack-data's security rules name the risk of renaming or removing a shipped access item in a later package version
+- 0949fe5: docs(skills): objectstack-data's security rules name the risk of renaming or removing a shipped access item in a later package version
   
   Clause-②: no
   Metadata-protocol: none

@@ -39,6 +39,7 @@ const SHELL = [
 
 /** The environment this suite sets; each test starts with all of it unset and leaves it as it found it. */
 const ENV = [
+  'OS_PAGE_REACT_ENABLED',
   'OS_PAGE_REACT',
   'OS_CONSOLE_CSP_CONNECT_SRC',
   'OS_CLOUD_URL',
@@ -73,10 +74,18 @@ afterEach(() => {
   }
 });
 
-async function mount(opts: { runtimeConfig?: ConstructorParameters<typeof RuntimeConfigPlugin>[0] } = {}) {
+async function mount(opts: {
+  runtimeConfig?: ConstructorParameters<typeof RuntimeConfigPlugin>[0];
+  warnings?: string[];
+} = {}) {
   const server = new HonoHttpServer(0);
   server.installNotFoundSeam();
-  const logger = { warn: () => {}, info: () => {}, debug: () => {}, error: () => {} };
+  const logger = {
+    warn: (message: string) => { opts.warnings?.push(message); },
+    info: () => {},
+    debug: () => {},
+    error: () => {},
+  };
   if (opts.runtimeConfig) {
     const hooks: Array<() => Promise<void>> = [];
     await new RuntimeConfigPlugin(opts.runtimeConfig).start({
@@ -140,10 +149,11 @@ describe('the console document is served with a nonce-based content-security-pol
     const nonce = headerNonce(res.headers.get('content-security-policy'));
     const html = await res.text();
 
+    // The build's three, and the server's react-pages capability global.
     const tags = scriptTags(html);
-    expect(tags).toHaveLength(3);
+    expect(tags).toHaveLength(4);
     for (const tag of tags) expect(tag).toContain(` nonce="${nonce}"`);
-    expect(html.match(/ nonce="/g)).toHaveLength(3);
+    expect(html.match(/ nonce="/g)).toHaveLength(4);
   });
 
   it('draws a fresh nonce for every response', async () => {
@@ -175,26 +185,59 @@ describe('the console document is served with a nonce-based content-security-pol
   });
 });
 
-describe('\'unsafe-eval\' follows the react-pages tier', () => {
-  it('is allowed while the tier is on, which is the default', async () => {
-    const request = await mount();
-    const res = await request('/_console/');
-    expect(directives(res.headers.get('content-security-policy')).get('script-src')).toContain("'unsafe-eval'");
-  });
-
-  it('is refused with OS_PAGE_REACT=off, and the injected disable global carries the nonce', async () => {
-    process.env.OS_PAGE_REACT = 'off';
-    const request = await mount();
+describe('\'unsafe-eval\' follows the react-pages tier, which is off unless the deployment turns it on', () => {
+  /** The served document's policy, its nonce, and its html. */
+  async function serve(warnings?: string[]) {
+    const request = await mount({ warnings });
     const res = await request('/_console/');
     const policy = res.headers.get('content-security-policy');
-    expect(directives(policy).get('script-src')).not.toContain("'unsafe-eval'");
+    return { scriptSrc: directives(policy).get('script-src')!, nonce: headerNonce(policy), html: await res.text() };
+  }
 
-    const nonce = headerNonce(policy);
-    const html = await res.text();
-    const tags = scriptTags(html);
-    expect(tags).toHaveLength(4);
-    for (const tag of tags) expect(tag).toContain(`nonce="${nonce}"`);
-    expect(html).toContain(`<script nonce="${nonce}">window.__OBJECTUI_CAPABILITIES_DISABLED__=`);
+  it('is refused by default, and the document carries the disable global under the nonce', async () => {
+    const { scriptSrc, nonce, html } = await serve();
+    expect(scriptSrc).not.toContain("'unsafe-eval'");
+    expect(html).toContain(
+      `<script nonce="${nonce}">window.__OBJECTUI_CAPABILITIES_DISABLED__=(window.__OBJECTUI_CAPABILITIES_DISABLED__||[]).concat('react-pages');</script>`,
+    );
+    expect(html).not.toContain('window.__OBJECTUI_CAPABILITIES__=');
+  });
+
+  it('is allowed with OS_PAGE_REACT_ENABLED=true, and the document carries the enable global under the nonce', async () => {
+    process.env.OS_PAGE_REACT_ENABLED = 'true';
+    const { scriptSrc, nonce, html } = await serve();
+    expect(scriptSrc).toContain("'unsafe-eval'");
+    expect(html).toContain(
+      `<script nonce="${nonce}">window.__OBJECTUI_CAPABILITIES__=(window.__OBJECTUI_CAPABILITIES__||[]).concat('react-pages');</script>`,
+    );
+    expect(html).not.toContain('__OBJECTUI_CAPABILITIES_DISABLED__');
+  });
+
+  it('reads the legacy OS_PAGE_REACT in both directions while the new name is unset, and names the new one', async () => {
+    process.env.OS_PAGE_REACT = 'on';
+    const warnings: string[] = [];
+    expect((await serve(warnings)).scriptSrc).toContain("'unsafe-eval'");
+    expect(warnings.filter((w) => w.includes('`OS_PAGE_REACT` is deprecated; rename it to `OS_PAGE_REACT_ENABLED`'))).toHaveLength(1);
+    process.env.OS_PAGE_REACT = 'off';
+    expect((await serve()).scriptSrc).not.toContain("'unsafe-eval'");
+  });
+
+  it('lets the new name win over the legacy one', async () => {
+    process.env.OS_PAGE_REACT = 'on';
+    process.env.OS_PAGE_REACT_ENABLED = 'false';
+    expect((await serve()).scriptSrc).not.toContain("'unsafe-eval'");
+  });
+
+  it('keeps the tier off on a value that is neither on nor off, and says so once', async () => {
+    process.env.OS_PAGE_REACT_ENABLED = 'ture';
+    const warnings: string[] = [];
+    const request = await mount({ warnings });
+    for (let i = 0; i < 2; i += 1) {
+      const res = await request('/_console/');
+      expect(directives(res.headers.get('content-security-policy')).get('script-src')).not.toContain("'unsafe-eval'");
+    }
+    const named = warnings.filter((w) => w.includes('OS_PAGE_REACT_ENABLED="ture"'));
+    expect(named).toHaveLength(1);
   });
 });
 
