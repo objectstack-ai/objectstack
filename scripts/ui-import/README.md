@@ -64,12 +64,18 @@ From the monorepo root, on the tree the subtree PR produced:
 
 ```sh
 # 1. Pending objectui changesets join the root ones (changesets reads one directory).
+#    A name the root already uses (react-pages-default-off.md on the cutover tree)
+#    keeps its objectui text under a `ui-` prefix.
 for f in ui/.changeset/*.md; do
-  [ "$(basename "$f")" = README.md ] || git mv "$f" .changeset/
+  b=$(basename "$f"); [ "$b" = README.md ] && continue
+  if [ -e ".changeset/$b" ]; then git mv "$f" ".changeset/ui-$b"; else git mv "$f" .changeset/; fi
 done
 
-# 2. The deletions.
-git rm -r -q -- \
+# 2. The deletions. `--ignore-unmatch`: the cutover tree already dropped
+#    ui/.objectstack-pin. The nested pull_request_template.md never renders (GitHub
+#    reads the root one) and its only markdown-test-inputs reader was the claims test.
+git rm -r -q --ignore-unmatch -- \
+  ui/.github/pull_request_template.md \
   ui/.changeset/config.json \
   ui/.objectstack-sha ui/.objectstack-pin \
   ui/.github/workflows/changeset-release.yml ui/.github/workflows/spec-range-floors.yml \
@@ -119,13 +125,24 @@ Measured on 2026-10-25:
   `type-check:vitest-config`, `lint:root` exit 0, and root and objectui
   `check-changeset-fixed` both pass (112 public packages plus `object-ui` at that base).
   `changeset version` moved all 113 to 18.2.0 together, `object-ui` included;
-- on the cutover head `1c0d02eda4` (objectui frozen at `9e1fe03286`), with steps 1–3 and
+- on the cutover head `1c0d02eda4` (objectui frozen at `9e1fe03286`), with step 3 and
   the root half of 4a: `@object-ui/runner` is private there and in objectui's `ignore`
   (objectui#13506), so the root `fixed` group drops it and the root `ignore` takes it.
   Root and objectui `check-changeset-fixed` exit 0 (111 public packages plus `object-ui`),
   `check:lockstep-package-count` reads 111, and `changeset version` moves all 112 members
   to 18.2.0 together while `@object-ui/runner` stays at 18.1.0;
-- `vitest run scripts/__tests__`: 17 failed / 5,573 passed. Two of them are 15 s
+- on the cutover head `c04b36dcb9` with steps 1–3 and the root half of 4a, against the
+  same head without them (both installed, neither built): `vitest run scripts/__tests__`
+  clears the 12 the cutover leaves to 4a (`check-installed-spec-pin-claims` ×4,
+  `quick-reference-current-release-4143` ×3, `sync-quick-reference-release` ×5) and the
+  rest of the deleted pin class with them. It adds 12 that read objectui's nested
+  `ui/.github/workflows/` (`ci-cd-pipeline-doc` ×9, `workflow-cache-save-bound` ×2,
+  `check-pre-install-import-graph` ×1: they still name the two deleted workflows and
+  `scripts/objectstack-pin.mjs`). 4b PR 2 (objectstack#25712) deletes those workflows with
+  the tests that read them. `markdown-test-inputs`, `check-changeset-fixed` and
+  `check-unused-dependencies` pass. The `optimizeDeps` case fails identically on both
+  sides, because there is no spec build, and only moved to `console-optimize-deps.test.ts`;
+- earlier, on `9e37acd126`: `vitest run scripts/__tests__`: 17 failed / 5,573 passed. Two of them are 15 s
   timeouts under load (`check-vi-mock-inherit`, `dollar-dialect-alias-census`), which
   pass alone (125/125). Two failed the same way on the earlier merged tree without the
   patch: `check-lockfile-integrity`, and `quick-reference-commands-4149` on the root
