@@ -1024,6 +1024,19 @@ const TRIAGE = new Map([
     verdict: 'REFUSE-WIDE',
     why: '162 of 238 (68%), refused with its packages half for the reason above',
   }],
+  ['scripts/check-test-source-alias.mjs ALIAS_HALF_EXCLUDED_DIR ui', {
+    verdict: 'REFUSE-WIDE',
+    why: 'FRESH at the objectui cutover (objectstack#25803), when decision F scoped the gate\'s '
+      + 'vitest-alias half to members outside the objectui tree. The word is where ONE rule stops, '
+      + 'not what the gate reads: every other rule still reads ui/ (the clocked-window rule, both '
+      + 'ENOTDIR alias-table rules, the readability of every config), and the ui members\' tests '
+      + 'pull in the sources, manifests and configs they reach — 7822 of 9239 tracked ui/ files '
+      + '(85%), 5854 of them tests, measured 2026-10-25 by recording every file the gate reads on '
+      + 'the cutover tree. The population is not a part of the root, it IS the root, the same trade '
+      + 'as engine-double-contract at 90%: a true declaration would name this gate on every card '
+      + 'that touches objectui, and CI already schedules the family on every PR. Renaming the '
+      + 'constant to leave this sweep would hide the literal, not judge it',
+  }],
   // ── Refused: the population is a filter the idiom cannot spell ────────────
   ['scripts/check-driver-conformance.mjs CASE_SETS_DIR packages', {
     verdict: 'REFUSE-UNSPELLABLE',
