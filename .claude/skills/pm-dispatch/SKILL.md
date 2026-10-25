@@ -111,7 +111,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | `pm:blocking` | 有 open 下游依赖者(自 `Blocked-by:` 索引推导的缓存,⛔ 不手工挂);进选择全序 |
 | `pm:retriage` | 向分诊提问(改判、跨域 PR 指定车道、改路由、拆卡、裁 dev 报告留下的分叉),定车道与改路由限未派发卡,异议评论写明所求;与现行 `pm:*` 并存、⛔ 不摘原标;带本标签的 `pm:queue` 卡跳过派发 |
 | `finding` | 立卡三类内待首次定级,定级即离标;三类外关 not planned;不占队列不进收件箱 |
-| `tooling` | 修复落在门禁/脚本/workflow/技能/席位协议/PM 工具面而非产品包;分诊首触打,与 `domain:*` 同笔;三具名读者 = 候选查询排除、首触即关、普查半态行 |
+| `tooling` | 修复落在门禁/脚本/workflow/技能/席位协议/PM 工具面而非产品包;分诊首触打,与 `domain:*` 同笔;四具名读者 = 候选查询排除、每轮派发 ≤10%、首触即关、普查半态行 |
 | `target:<major>` | 发版阻塞:每个 backlog 恰好一个生产者 |
 | `pm:epic`(父单或 sub-issue) | 已由 epic PM 保留;其它 PM 永不取;⛔ 永不与 `pm:queue` 同挂 |
 | `pm:seat` | 座位登记贴:协议载体,不是待分诊的工作 |
@@ -195,10 +195,10 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - PR 上的标签 = 待维护者审阅,不入六态;与请审同为等人批清单,随获批或撤回判决离开。
 - 批准判定单源 = 队列守卫常量 `GOVERNED_APPROVERS`:授权账户 APPROVED 即算,⛔ 不卡 `commit_id`。
 - 批准后再推亦不过期;席位落地 = 过落地前检、清标、ready、auto-merge,踢出/变基同法。
-- ③ 请审是中继 op:`pr_create`/`pr_ready` 命中 Tier H 即向 `GOVERNED_APPROVERS` 全员请审。
-- 已请审/已指派/已评审者跳过(零写);PR 作者即其一时请审必 422,op 改为 assign 该账户替代。
-- 席位只核对 run 摘要 governed review 行,缺口才手补(免碰 draft 位 REST 路)并在轮次报告点名。
-- ready/draft 走中继 op;MCP 兜底已拒;端点见 rest-channel。
+- ③ 中继 `pr_create`/`pr_ready` 命中 Tier H 即向 `GOVERNED_APPROVERS` 中未请/派/审者请审。
+- 作者是审批人 ⇒ 指派它、请其余(请它必 422),否则请全员;速读只点非作者审批人去批。
+- 脱中继开的 PR 无 run 行:交速读前席位恒自读 `requested_reviewers`/`assignees`,⛔ 不只看 run 行。
+- 缺口经中继 `pr_request_reviewers`/`assign` 补,⛔ 不碰 draft 位;ACCEPT 与轮报点名脱中继作者。
 - ④ 轮次报告单列 awaiting a human merge。
 - skills 车道自有 PR:纯代码面如 `scripts/pm/` 由本席按达档自审(清单不减)后落地。
 - 受管面两层:Tier S = `.claude/**` 全树,余皆 Tier H 等人批;S 经达档复核 PASS 后 ready → 入队。

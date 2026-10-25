@@ -9,6 +9,13 @@
 ([#14512](https://github.com/objectstack-ai/objectstack/issues/14512)): a multi-package artifact
 carries its metadata **once**, in `packages[]` — the flattened copy is no longer emitted beside
 it. D4's read-both rule and D7 are unchanged, so every artifact already on disk still loads.
+**D8's deferral end point amended by the 2026-10-25 addendum**
+([ADR-0141](./0141-inter-app-dependency-declared-checked-before-install.md) D5,
+[#25403](https://github.com/objectstack-ai/objectstack/issues/25403)): a package that declares
+`dependencies` on an installed package and shares its namespace is that package's co-owner at the
+install gate, across artifacts (and its declared siblings' — ADR-0141 D5), so the owner field is deferred until **marketplace publishing**
+rather than until a module's first standalone artifact. The same addendum records that the
+2026-09-02 addendum's #14488 line is stale. D1–D7 are unchanged.
 **Deciders**: ObjectStack maintainer, 2026-09-01, live PM chat, verbatim and untranslated:
 「立 ADR 起草卡派发」and 「14122 作为epic 任务集中跟踪」— approving the proposal in
 [#14122](https://github.com/objectstack-ai/objectstack/issues/14122) into the ADR-drafting lane
@@ -743,3 +750,62 @@ fallback bolted onto the emitter.
 
   Every one of those shapes stays readable by D4's read-both rule, and none is refused: a
   composition that was legal before this change stays legal.
+
+---
+
+## Addendum (2026-10-25, #25403) — D8's deferral ends at marketplace publishing; the #14488 line is stale
+
+**Provenance.** Two maintainer rulings on
+[#25403](https://github.com/objectstack-ai/objectstack/issues/25403), recorded by
+[ADR-0141](./0141-inter-app-dependency-declared-checked-before-install.md): letter B′
+([`6369704387`](https://github.com/objectstack-ai/objectstack/issues/25403#issuecomment-6369704387),
+「同意」 2026-10-23T16:28:30Z — an app may depend on another installed app; one pre-install check;
+the rest deferred by name) and letter A
+([`6377678758`](https://github.com/objectstack-ai/objectstack/issues/25403#issuecomment-6377678758),
+「同意 #8」 2026-10-24T00:40:55Z — 「声明依赖即命名空间共有，单向，D3 对象名唯一检查跨发布物同行」). ⛔ This
+section edits no text above: D1–D8, §1–§8 and both earlier addenda read as written; the two points
+below say how two of their sentences now resolve.
+
+### D8's deferral now ends at marketplace publishing
+
+D6 and D8 above say the owner field becomes necessary *"the day a module ships as its own
+artifact"*. ADR-0141 D5 answers that day without the field: a package that declares `dependencies`
+on an installed package X and uses X's namespace is X's co-owner at the install gate — one-way (X
+declares nothing and gains nothing), read from either end at registration, direct declarations
+only, plus siblings under one declared parent that holds the namespace, as ADR-0141 D5 defines —
+and D3's per-object-name uniqueness check spans those co-owners across artifacts exactly as
+it spans co-owners inside one artifact, because the registry reads one co-owner set for both halves
+of the pair. Inside one tenant the proof is the declaration plus the administrator's install act;
+no manifest field is added.
+
+So D8's deferral now ends at **marketplace publishing**: when a module is published for other
+tenants and must assert *"I have the same publisher as HotCRM"* across vendors, the owner /
+publisher field lands, aligned to the `publisherOrgId` reservation of ADR-0048's 2026-08-08
+addendum (still Proposed; its A.5 precondition is the opening of third-party publishing), as D8
+already requires. That field is the later superset of ADR-0141 D5 and needs no undo of it. D6's
+cost statement stands for modules inside one artifact; a module that becomes its own artifact
+trades that cost for the separate-version cost ADR-0141's Consequences state, bounded by the
+declared range and judged once, at install.
+
+### The #14488 line is stale
+
+The 2026-09-02 addendum's *What was NOT decided* section lists
+[#14488](https://github.com/objectstack-ai/objectstack/issues/14488) (per-package composition of
+grants) as *"filed, not decided"*. It is decided: #14488 was closed `not_planned` on 2026-09-12 by
+ruling [`5645322259`](https://github.com/objectstack-ai/objectstack/issues/14488#issuecomment-5645322259)
+— an artifact installs whole, the app package's permission sets cover every module's objects,
+nothing composes grants into another package's set, and a module carved out as its own artifact
+ships its own permission sets under ADR-0086 D4; the card is ⛔ not reopened for that case. The three
+inherited inputs listed under that line remain accurate as history; none is open work.
+
+One sentence of that ruling is read beside B′ here, so a reader of both records is not left to
+reconcile them: its premise 「目前的要求是发布物是完整安装的，没有设计单独安装其中 一个模块的需求。」 has
+two halves. The first — an artifact installs whole — is unchanged: D2 above stands, and a module
+shipped on its own under ADR-0141 is another artifact, not a partial install of the first. The
+second — that no requirement to install one module alone existed — names the need the maintainer's
+B′ ruling of 2026-10-23 (「而每个包可以独立安装」) now states, met by another artifact: the path the
+ruling itself named for that case, a module carved out as its own artifact shipping its own
+permission sets under ADR-0086 D4, never a partial install. The ruling's disposition is unchanged:
+a standalone module's permission sets are the module author's work, not a platform blocker
+(ADR-0141 D4, D6). What record-level access across a dependency means is ADR-0141 D4's open
+section, decided with the first consumer.

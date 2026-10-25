@@ -17,7 +17,7 @@
 
 ## 常设承诺
 
-- 构建产物经 `pnpm objectui:refresh` 回流,见 cross-repo-coordination.md。
+- 构建产物经 `pnpm objectui:refresh` 回流,见 AGENTS.md。
 - 回流后的 console pin bump 是 objectstack 的单张卡,⛔ 永不做本仓 PR 的 rider。
 - `scripts/pm/**` 单写手恒在 objectstack 侧 ⇒ 本席的工具需求走上游卡带 `Blocked-by:` 回链。
 - 本仓标签/assignee 写走 objectstack `label-write.mjs --repo`,⛔ 不 MCP `issue_write`;被拒转有通道席。
