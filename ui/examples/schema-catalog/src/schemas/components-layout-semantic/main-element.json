@@ -1,0 +1,10 @@
+{
+  "type": "main",
+  "className": "p-6 border rounded",
+  "children": [
+    {
+      "type": "text",
+      "content": "This is the main content area"
+    }
+  ]
+}

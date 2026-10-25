@@ -1,0 +1,29 @@
+{
+  "type": "flex",
+  "properties": {
+    "gap": 4,
+    "align": "center",
+    "children": [
+      {
+        "type": "icon",
+        "icon": "star",
+        "size": 16
+      },
+      {
+        "type": "icon",
+        "icon": "star",
+        "size": 24
+      },
+      {
+        "type": "icon",
+        "icon": "star",
+        "size": 32
+      },
+      {
+        "type": "icon",
+        "icon": "star",
+        "size": 48
+      }
+    ]
+  }
+}

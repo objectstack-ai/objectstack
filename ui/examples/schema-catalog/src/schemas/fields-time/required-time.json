@@ -1,0 +1,13 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "fields": [
+    {
+      "name": "alarm_time",
+      "label": "Alarm Time",
+      "type": "time",
+      "required": true
+    }
+  ]
+}

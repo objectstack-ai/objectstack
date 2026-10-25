@@ -119,7 +119,7 @@ const REPO_ROOT = resolve(HERE, '..');
  * (`hintCovers`). */
 export const WORKSPACE_FILE = 'pnpm-workspace.yaml';
 export const READER_MODULE = 'scripts/nightly-tiers.mjs';
-export const ROOT_DIR_WATCH_HINTS = ['packages/**', 'apps/**', 'examples/**'];
+export const ROOT_DIR_WATCH_HINTS = ['packages/**', 'apps/**', 'examples/**', 'ui/**'];
 
 /**
  * The exports of the reader module that TOUCH the switch. Importing one of

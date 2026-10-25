@@ -1,0 +1,31 @@
+{
+  "type": "form",
+  "fields": [
+    {
+      "name": "username",
+      "label": "Username",
+      "type": "input",
+      "placeholder": "Choose a username",
+      "required": true,
+      "minLength": 3,
+      "maxLength": 20
+    },
+    {
+      "name": "email",
+      "label": "Email",
+      "type": "input",
+      "inputType": "email",
+      "required": true,
+      "pattern": "^[^@]+@[^@]+\\.[^@]+$"
+    },
+    {
+      "name": "age",
+      "label": "Age",
+      "type": "input",
+      "inputType": "number",
+      "min": 18,
+      "max": 120
+    }
+  ],
+  "submitLabel": "Register"
+}

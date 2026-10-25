@@ -1,0 +1,11 @@
+{
+  "type": "card",
+  "title": "Card Title",
+  "description": "Card description",
+  "children": [
+    {
+      "type": "text",
+      "content": "Card content goes here"
+    }
+  ]
+}

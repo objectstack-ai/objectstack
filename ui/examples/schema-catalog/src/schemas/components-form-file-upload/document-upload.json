@@ -1,0 +1,9 @@
+{
+  "type": "file-upload",
+  "id": "doc-upload",
+  "label": "Upload documents",
+  "accept": ".pdf,.doc,.docx,.txt",
+  "multiple": true,
+  "buttonText": "Select documents",
+  "description": "Accepted formats: PDF, DOC, DOCX, TXT"
+}

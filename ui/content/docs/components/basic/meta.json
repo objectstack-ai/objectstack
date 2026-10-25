@@ -1,0 +1,15 @@
+{
+  "title": "Basic",
+  "pages": [
+    "text",
+    "icon",
+    "image",
+    "separator",
+    "button-group",
+    "pagination",
+    "navigation-menu",
+    "sidebar",
+    "div",
+    "span"
+  ]
+}

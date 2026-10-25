@@ -1,0 +1,29 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "fields": [
+    {
+      "name": "line_items",
+      "label": "Line Items",
+      "type": "grid",
+      "columns": [
+        {
+          "name": "product",
+          "label": "Product",
+          "type": "text"
+        },
+        {
+          "name": "quantity",
+          "label": "Quantity",
+          "type": "number"
+        },
+        {
+          "name": "price",
+          "label": "Price",
+          "type": "currency"
+        }
+      ]
+    }
+  ]
+}

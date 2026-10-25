@@ -1,0 +1,23 @@
+{
+  "type": "flex",
+  "properties": {
+    "gap": 4,
+    "children": [
+      {
+        "type": "icon",
+        "icon": "heart",
+        "color": "text-red-500"
+      },
+      {
+        "type": "icon",
+        "icon": "star",
+        "color": "text-yellow-500"
+      },
+      {
+        "type": "icon",
+        "icon": "check",
+        "color": "text-green-500"
+      }
+    ]
+  }
+}

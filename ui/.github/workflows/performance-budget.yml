@@ -1,0 +1,750 @@
+name: Bundle Analysis
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'packages/**'
+      - 'apps/console/**'
+      - 'pnpm-lock.yaml'
+      # The console bundles @objectstack/* from the build of the commit this file
+      # pins, so a pin bump moves the bundle without touching the lockfile
+      # (objectui#12957); the script that builds it runs in this job.
+      - '.objectstack-sha'
+      - 'scripts/objectstack-pin.mjs'
+      # This file itself (objectui#6245). Without it a change to this gate ships
+      # to `main` having never run once: the PR that edits it touches no
+      # `packages/**` path, so `Bundle Analysis` never appears on it, and a
+      # wiring bug surfaces on the NEXT `packages/**` PR — a red check on
+      # someone else's diff, reading to them as a bundle problem of their own.
+      # ⚠️ This argument does not turn on how the check is CLASSIFIED. It said
+      # otherwise until objectui#9155, and the conclusion survives losing that
+      # premise untouched: a gate that never runs on its own pull request ships
+      # its wiring bugs to the next person either way.
+      # Self-inclusion is this repo's convention for a
+      # path-filtered gate: measured on `origin/main`, 5 of the 7 workflows
+      # carrying a `paths:` filter list their own file, and this was one of the
+      # two that did not. The cost is honest and accepted — every edit of this
+      # file now pays a console build — and it is the same tax the other
+      # self-included gates already pay.
+      - '.github/workflows/performance-budget.yml'
+      # ...and the gate's RUNTIME CLOSURE: the files this job actually executes.
+      # Listing the YAML alone was still not enough — a PR touching only
+      # `check-eager-closure-budget.mjs`, the file that computes the verdict and
+      # the one this card is about, did not trigger this gate. The convention
+      # measured on `origin/main` is the closure, not just the workflow:
+      # `half-state-patrol.yml` lists its script AND `scripts/invoked-as.mjs`,
+      # the dependency of that script.
+      #
+      # `invoked-as.mjs` is here for the same reason it is there, and the reason
+      # is specific rather than tidy: `isEntrypoint` decides whether `main()`
+      # runs at all, so a regression in it makes this checker exit 0 having
+      # measured nothing — the exact silent-green failure the rest of this gate
+      # exists to prevent.
+      #
+      # NOT listed: `scripts/__tests__/*.test.ts`. This job never runs vitest —
+      # it runs two `node scripts/*.mjs` commands — so a test-only edit cannot
+      # change this gate's verdict, and those tests already run on every PR in
+      # the root vitest `unit` project. `published-dist-gate.yml` and
+      # `spec-range-floors.yml` draw the same line.
+      - 'scripts/check-eager-closure-budget.mjs'
+      # The COMPOSITION half (objectui#7479). Same rule as its neighbour: this
+      # job runs it, so an edit to it must be able to red this gate on its own
+      # pull request rather than on somebody else's next `packages/**` change.
+      - 'scripts/check-eager-locale-catalogues.mjs'
+      - 'scripts/render-budget-comment.mjs'
+      - 'scripts/invoked-as.mjs'
+      # The SDUI registration pins (objectui#6683) and their two dependencies.
+      # Same rule as the three above — this job runs them, so an edit to any of
+      # them must be able to turn this gate red on its OWN PR rather than on
+      # somebody else's next `packages/**` change.
+      - 'scripts/check-sdui-registration-pins.mjs'
+      - 'scripts/check-side-effects-array.mjs'
+      - 'scripts/component-registrations.mjs'
+      - 'scripts/js-comment-mask.mjs'
+      # The turbo cache report and prune (objectui#12276). Same rule again:
+      # this job runs it, so an edit to it must run this gate on its own pull
+      # request.
+      - 'scripts/report-turbo-cache.mjs'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'packages/**'
+      - 'apps/console/**'
+      - 'pnpm-lock.yaml'
+      # The console bundles @objectstack/* from the build of the commit this file
+      # pins, so a pin bump moves the bundle without touching the lockfile
+      # (objectui#12957); the script that builds it runs in this job.
+      - '.objectstack-sha'
+      - 'scripts/objectstack-pin.mjs'
+      # This file itself (objectui#6245). Without it a change to this gate ships
+      # to `main` having never run once: the PR that edits it touches no
+      # `packages/**` path, so `Bundle Analysis` never appears on it, and a
+      # wiring bug surfaces on the NEXT `packages/**` PR — a red check on
+      # someone else's diff, reading to them as a bundle problem of their own.
+      # ⚠️ This argument does not turn on how the check is CLASSIFIED. It said
+      # otherwise until objectui#9155, and the conclusion survives losing that
+      # premise untouched: a gate that never runs on its own pull request ships
+      # its wiring bugs to the next person either way.
+      # Self-inclusion is this repo's convention for a
+      # path-filtered gate: measured on `origin/main`, 5 of the 7 workflows
+      # carrying a `paths:` filter list their own file, and this was one of the
+      # two that did not. The cost is honest and accepted — every edit of this
+      # file now pays a console build — and it is the same tax the other
+      # self-included gates already pay.
+      - '.github/workflows/performance-budget.yml'
+      # ...and the gate's RUNTIME CLOSURE: the files this job actually executes.
+      # Listing the YAML alone was still not enough — a PR touching only
+      # `check-eager-closure-budget.mjs`, the file that computes the verdict and
+      # the one this card is about, did not trigger this gate. The convention
+      # measured on `origin/main` is the closure, not just the workflow:
+      # `half-state-patrol.yml` lists its script AND `scripts/invoked-as.mjs`,
+      # the dependency of that script.
+      #
+      # `invoked-as.mjs` is here for the same reason it is there, and the reason
+      # is specific rather than tidy: `isEntrypoint` decides whether `main()`
+      # runs at all, so a regression in it makes this checker exit 0 having
+      # measured nothing — the exact silent-green failure the rest of this gate
+      # exists to prevent.
+      #
+      # NOT listed: `scripts/__tests__/*.test.ts`. This job never runs vitest —
+      # it runs two `node scripts/*.mjs` commands — so a test-only edit cannot
+      # change this gate's verdict, and those tests already run on every PR in
+      # the root vitest `unit` project. `published-dist-gate.yml` and
+      # `spec-range-floors.yml` draw the same line.
+      - 'scripts/check-eager-closure-budget.mjs'
+      # The COMPOSITION half (objectui#7479). Same rule as its neighbour: this
+      # job runs it, so an edit to it must be able to red this gate on its own
+      # pull request rather than on somebody else's next `packages/**` change.
+      - 'scripts/check-eager-locale-catalogues.mjs'
+      - 'scripts/render-budget-comment.mjs'
+      - 'scripts/invoked-as.mjs'
+      # The SDUI registration pins (objectui#6683) and their two dependencies.
+      # Same rule as the three above — this job runs them, so an edit to any of
+      # them must be able to turn this gate red on its OWN PR rather than on
+      # somebody else's next `packages/**` change.
+      - 'scripts/check-sdui-registration-pins.mjs'
+      - 'scripts/check-side-effects-array.mjs'
+      - 'scripts/component-registrations.mjs'
+      - 'scripts/js-comment-mask.mjs'
+      # The turbo cache report and prune (objectui#12276). Same rule again:
+      # this job runs it, so an edit to it must run this gate on its own pull
+      # request.
+      - 'scripts/report-turbo-cache.mjs'
+
+concurrency:
+  group: bundle-analysis-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  bundle-analysis:
+    name: Bundle Analysis
+    runs-on: ubuntu-latest
+
+    # ── The job ceiling, DERIVED FOR THIS JOB (objectui#7270) ────────────
+    # Before this line the only backstop was GitHub's 360-minute default, on a
+    # job that BLOCKS WHENEVER IT RUNS: `scripts/dependabot-merge-gate.mjs`
+    # lists `Bundle Analysis` under `OPTIONAL_CONTEXTS`, whose rule is present
+    # => must be `success`, absent => ignored. The word "optional" there is
+    # about this workflow's trigger-level path filter, NOT about the check being
+    # advisory, and that gate's own docblock says so (objectui#6245,
+    # objectui#9155). Two
+    # incidents put a number on that exposure: objectui#5304 (`apt-get` hang)
+    # and objectui#6577 (cache-save stall), both of which turned a transient
+    # fault into a `cancelled` check — a gate that reports nothing.
+    #
+    # ⚠️ Measured while deriving this, and worth knowing before reusing the
+    # `Lint` argument here: this workflow subscribes only `push` and
+    # `pull_request`, NOT `merge_group`, and 300 sampled runs contain zero
+    # `merge_group` runs. So this job cannot hold the merge queue the way
+    # `Lint` can; what six hours costs here is the pull request and the runner.
+    # The ceiling is still derived, because that exposure is real on its own.
+    #
+    # ⛔ NOT inherited from `ci.yml`'s 10/15/20/30/40 — objectui#7048 fences
+    # exactly that. The arithmetic below is this job's own.
+    #
+    #   - Population: the last 300 successful runs of this workflow, window
+    #     2026-09-03T11:40Z .. 2026-09-06T04:10Z, n=300 `Bundle Analysis` jobs.
+    #     Per-job wall clock from the Actions jobs endpoint (`completed_at`
+    #     minus `started_at`), never the run's total.
+    #   - min 57s / median 3m35s / p95 4m37s / max 5m23s.
+    #   - Broad rather than bimodal: 72 runs under 2m and 228 at or above it,
+    #     spread continuously across the range (Turbo cache hit versus miss),
+    #     with no isolated tail.
+    #   - By event: pull_request n=191 (median 3m37s, max 5m23s), push n=109
+    #     (median 3m31s, max 4m47s). No material difference.
+    #   - max/p95 = 1.17 — no fat tail, so the multiplier is not widened.
+    #
+    # Ceiling = the smallest round number that is both >= 3x max (16.2min) and
+    # >= max + 15min (20.4min) => 25; the second leg is the one that binds.
+    # That is ~4.6x the slowest run ever observed here.
+    #
+    # ⛔ Raising this toward 360 is the ruled-out non-fix (objectui#6577,
+    # objectui#7048): the hang just runs longer and the gate still reports
+    # `cancelled`.
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          submodules: true
+          # Depth 2, not 1: on a `pull_request` run HEAD is the MERGE REF, whose
+          # first parent is the base commit this checkout was computed against.
+          # The ceiling-freshness half (objectui#6245) needs that commit's copy
+          # of the checker to tell a stale checkout from a PR that re-baselines
+          # on purpose, and one extra commit is cheaper than a second fetch.
+          fetch-depth: 2
+
+      - name: Enable Corepack and download the pinned pnpm
+        run: bash scripts/ci-setup-pnpm.sh
+
+      - name: Verify pnpm version
+        run: pnpm --version
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22.x'
+          cache: 'pnpm'
+
+      # ── Cache bookkeeping cannot void a recorded verdict (objectui#7048) ──
+      # THE ORDERING, carried here from the type-check split in `ci.yml`
+      # (objectui#6577, PR #7047) because it is what a future reader needs in
+      # order to judge whether these steps may be touched: the verdict is
+      # recorded by the checking steps; everything after them is bookkeeping,
+      # and bookkeeping must never discard an answer the gate already produced.
+      #
+      # Why the SPLIT rather than a timeout on one step: combined
+      # `actions/cache` declares `main: dist/restore/index.js` plus
+      # `post: dist/save/index.js`, so its save is a step the RUNNER generates
+      # at job end (`Post Turbo Cache`). No workflow syntax attaches
+      # `timeout-minutes` or `continue-on-error` to a generated post step.
+      # Measured once, on `ci.yml`'s type-check cache: a 1-second save took
+      # 789s, ran that job into its ceiling, and the resulting `cancelled` —
+      # which the merge queue cannot tell from `failure` — ejected an all-green
+      # pull request (objectui#6577). `actions/cache`'s own `save-always`
+      # deprecation text points at this same split.
+      #
+      # ⚠️ This job's ceiling is `timeout-minutes: 25`, DERIVED at the job
+      # header above from this job's own run distribution (objectui#7270).
+      # Until that line existed the ceiling was GitHub's 360-minute default on
+      # a check that blocks whenever it runs (objectui#6245; the classification
+      # is cited once, at the job header above — objectui#9155), so a stalled
+      # save would have held that check open for up to six hours before
+      # reporting `cancelled`. The
+      # bound below is still on the bookkeeping step alone, and both numbers
+      # are needed: 25 minutes is the backstop, 5 minutes is what a healthy
+      # save is allowed.
+      #
+      # The restore half is deliberately left UNBOUNDED: a restore stall fails
+      # BEFORE any verdict exists — a gate that did not run, which is honest —
+      # rather than a recorded verdict discarded.
+      #
+      # ONE restore key, this job's own prefix (objectui#12276, the shape
+      # `ci.yml`'s `type-check` job took in objectui#12222). Until then this key
+      # was `turbo-<os>-<sha>` with a bare `turbo-<os>-` fallback, and `Lint`
+      # and the release job saved under that same key, so on a pull request
+      # this job restored whichever cache reached the ref first -- `Lint`'s
+      # logs-only entry as readily as a build -- and saved it again.
+      # Pull-request runs save nothing now (see the prune step below), so on a
+      # pull request's ref this key finds nothing and falls through to `main`.
+      - name: Restore Turbo Cache
+        id: turbo-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-perf-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ runner.os }}-perf-
+
+      # objectui#12957: every @objectstack/* package resolves to the build of the
+      # commit `.objectstack-sha` pins, read from node_modules/.cache/objectstack, so
+      # it must be there before pnpm resolves anything. Restored by the pin and built
+      # only on a miss (scripts/objectstack-pin.mjs); the save is this job's last step.
+      - name: Restore the pinned @objectstack build
+        id: objectstack-pin
+        uses: actions/cache/restore@v6
+        with:
+          path: node_modules/.cache/objectstack
+          key: objectstack-pin-${{ runner.os }}-${{ hashFiles('.objectstack-sha', 'scripts/objectstack-pin.mjs') }}
+
+      - name: Build @objectstack at the pin (skips a restored build)
+        id: objectstack-build
+        run: node scripts/objectstack-pin.mjs build
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # `TURBO_RUN_SUMMARY` makes turbo write its run summary to `.turbo/runs/`;
+      # it changes nothing turbo runs or caches, and `Report what the turbo
+      # cache replayed` below reads it (objectui#12276).
+      - name: Build packages
+        id: build_packages
+        env:
+          TURBO_RUN_SUMMARY: 'true'
+        run: pnpm turbo run build --filter='./packages/*'
+
+      - name: Build Console
+        run: pnpm --filter @object-ui/console build
+
+      # objectui#6245: GitHub does not re-run a PR's checks when the base branch
+      # moves — so a green verdict can be computed against ceiling constants
+      # `main` has since replaced, and what this job publishes is a verdict about
+      # a ceiling that no longer exists. ⛔ Nothing is claimed here about the
+      # branch-protection set (objectui#9155); `evaluateCeilingFreshness`'s
+      # docblock in `scripts/check-eager-closure-budget.mjs` carries the two
+      # readings the tree can re-derive. Observed
+      # live: run 32804357171 started at 03:13:27Z, 6m50s after `0409b766d`
+      # lowered MAX_EAGER_CLOSURE_GZIP_BYTES from 4,086,000 to 3,345,000, and
+      # published `BUDGET_CLOSURE_BUDGET_KB: 3990.2` — the retired ceiling — as a
+      # success.
+      #
+      # This step hands the checker THREE readings of the constants: the two
+      # below plus its own checkout. Two would not do — a re-baseline PR differs
+      # from the base branch deliberately and has to stay landable — so the
+      # verdict fires only when the base branch moved a ceiling AND this checkout
+      # does not carry the move. See `evaluateCeilingFreshness`.
+      #
+      # `continue-on-error` is deliberate and is NOT a fail-open: when this step
+      # cannot produce both files the checker finds the variables unset and
+      # reports a freshness ERROR (exit 2), which fails the job. Letting the step
+      # itself fail the job would kill it before the bundle is measured, and a
+      # run that hides its numbers is how this gate loses its readers
+      # (objectui#3152).
+      #
+      # The paths go out through `$GITHUB_ENV` rather than a step `env:` block:
+      # `render-budget-comment.test.ts` walks every `NAME: ${{ steps.* }}` line
+      # in this file and requires the COMMENT RENDERER to read it, which is the
+      # right rule for the comment's inputs and the wrong one for the checker's.
+      - name: Resolve the base-branch ceiling constants
+        id: base_ceilings
+        if: ${{ github.event_name == 'pull_request' }}
+        continue-on-error: true
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          CHECKER='scripts/check-eager-closure-budget.mjs'
+          OUT="${RUNNER_TEMP}/eager-closure-ceilings"
+          mkdir -p "$OUT"
+
+          # The base commit the merge ref was computed against. `fetch-depth: 2`
+          # normally makes it a local object already; the fetch is the fallback
+          # for a merge ref GitHub recomputed against a different base.
+          if ! git cat-file -e "${PR_BASE_SHA}^{commit}" 2>/dev/null; then
+            git fetch --no-tags --depth=1 origin "$PR_BASE_SHA"
+          fi
+          git cat-file -p "${PR_BASE_SHA}:${CHECKER}" > "$OUT/pr-base.partial"
+          mv "$OUT/pr-base.partial" "$OUT/pr-base.mjs"
+
+          # The base branch as it stands right now — what the merge would land on.
+          git fetch --no-tags --depth=1 origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          BASE_SHA=$(git rev-parse "refs/remotes/origin/${BASE_REF}")
+          git cat-file -p "${BASE_SHA}:${CHECKER}" > "$OUT/base.partial"
+          mv "$OUT/base.partial" "$OUT/base.mjs"
+
+          # Written only after BOTH `mv`s: a half-populated pair would let the
+          # checker compare against a file it thinks is the base branch.
+          {
+            echo "EAGER_CLOSURE_PR_BASE_SOURCE=$OUT/pr-base.mjs"
+            echo "EAGER_CLOSURE_BASE_SOURCE=$OUT/base.mjs"
+            echo "EAGER_CLOSURE_PR_BASE_SHA=$PR_BASE_SHA"
+            echo "EAGER_CLOSURE_BASE_SHA=$BASE_SHA"
+            echo "EAGER_CLOSURE_BASE_REF=$BASE_REF"
+          } >> "$GITHUB_ENV"
+
+          echo "Ceilings resolved: ${PR_BASE_SHA} (this checkout's base) vs ${BASE_SHA} (${BASE_REF} now)"
+
+      - name: Check console performance budget
+        id: budget
+        run: |
+          # TWO measurements, one verdict.
+          #
+          #  1. The `index-*.js` entry chunk against a 350 KB line. This is the
+          #     original budget and it stays: a fat entry chunk is still worth
+          #     its own signal, and replacing a gauge is not licence to weaken
+          #     the one already here.
+          #  2. The EAGER CLOSURE — every chunk the entry reaches through STATIC
+          #     imports, i.e. everything the browser must fetch and parse before
+          #     the app renders.
+          #
+          # Measurement 1 alone was the whole budget until objectui#5324. On
+          # `77f846a8b` the entry chunk gzips to 25.9 KB against the 350 KB line
+          # while the closure it pulls in is 3,881,609 bytes across 58 of 507
+          # chunks — so the gate passed on 0.67% of the payload it claimed to
+          # govern, and the 89 KiB regression of objectui#5266 landed in
+          # `vendor-objectstack-*.js` where nothing here could see it.
+          # `advancedChunks` routes vendor and workspace code into named chunks
+          # on purpose, so MOST regressions land outside `index-*.js`.
+          #
+          # The closure ceiling is NOT set here. It lives in
+          # `scripts/check-eager-closure-budget.mjs` next to the reasoning that
+          # produced it, so a re-baseline is one edit against a documented
+          # argument rather than a number in YAML: today's measured payload plus
+          # half the 89 KiB regression the gate exists to catch, which keeps the
+          # headroom NARROWER than that regression while leaving as much room for
+          # the payload to shrink as to grow. Since objectui#5924 the checker
+          # enforces that itself, against the report it just read rather than
+          # against a frozen constant, for the aggregate ceiling and each
+          # per-chunk one — a ceiling that has drifted out of range of the
+          # regression it must catch is exit 2, a verdict about the gauge. It is
+          # a truthful current-state ceiling, not a statement that the payload it
+          # admits is fine.
+          #
+          # ⛔ That clause names no size, and none may be put back
+          # (objectui#7528). It used to end by naming one, and the size it named
+          # was the ceiling objectui#6683 set and objectui#6776 retired — so the
+          # one sentence written to stop a reader concluding the payload is
+          # acceptable was itself quoting a ceiling the gate had not allowed
+          # since, which is why the repair here is no size rather than a fresher
+          # one. The rule this paragraph
+          # already applies to the ceiling covers the ceiling's VALUE too: the
+          # constant lives beside the reasoning that produced it, and
+          # `pnpm check:eager-closure` prints the measured payload, the ceiling
+          # and the headroom together in one verdict line. Neither number is
+          # copied to here, where nothing would fail when it moved.
+          #
+          # Both measurements run before either may fail the step: a run that
+          # reports one number and hides the other teaches readers to distrust
+          # the comment, which is how objectui#3152 nearly took this gate down.
+          MAX_ENTRY_GZIP_KB=350
+
+          DIST_DIR="apps/console/dist/assets"
+          if [ ! -d "$DIST_DIR" ]; then
+            echo "❌ Build output not found at $DIST_DIR"
+            # Declare the outcome instead of leaving every output empty. An
+            # empty `budget_status` used to render as a ❌ FAIL verdict
+            # downstream (objectui#3152); the comment renderer now needs each
+            # path to say what happened rather than infer it from silence.
+            echo "budget_status=error" >> "$GITHUB_OUTPUT"
+            echo "budget_message=Build output not found at $DIST_DIR" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          # Find the main entry chunk (index-*.js)
+          ENTRY_FILE=$(find "$DIST_DIR" -name 'index-*.js' -not -name '*.gz' -not -name '*.br' | head -1)
+          if [ -z "$ENTRY_FILE" ]; then
+            echo "⚠️ Could not find main entry chunk, checking all JS files..."
+            ENTRY_FILE=$(find "$DIST_DIR" -name '*.js' -not -name '*.gz' -not -name '*.br' | sort | head -1)
+          fi
+
+          if [ -z "$ENTRY_FILE" ]; then
+            echo "❌ No JS files found in $DIST_DIR"
+            echo "budget_status=error" >> "$GITHUB_OUTPUT"
+            echo "budget_message=No JS files found in $DIST_DIR" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          echo "📦 Main entry file: $(basename $ENTRY_FILE)"
+
+          # Calculate gzip size
+          GZIP_BYTES=$(gzip -c "$ENTRY_FILE" | wc -c)
+          GZIP_KB=$(awk "BEGIN {printf \"%.1f\", $GZIP_BYTES / 1024}")
+
+          echo "   Raw size:  $(awk "BEGIN {printf \"%.1f\", $(wc -c < "$ENTRY_FILE") / 1024}") KB"
+          echo "   Gzip size: ${GZIP_KB} KB"
+          echo "   Budget:    ${MAX_ENTRY_GZIP_KB} KB"
+
+          echo "gzip_kb=$GZIP_KB" >> "$GITHUB_OUTPUT"
+          echo "budget_kb=$MAX_ENTRY_GZIP_KB" >> "$GITHUB_OUTPUT"
+          echo "entry_file=$(basename $ENTRY_FILE)" >> "$GITHUB_OUTPUT"
+
+          ENTRY_OVER=$(awk "BEGIN {print ($GZIP_KB > $MAX_ENTRY_GZIP_KB) ? 1 : 0}")
+          if [ "$ENTRY_OVER" -eq 1 ]; then
+            echo "❌ ENTRY BUDGET EXCEEDED: Main entry is ${GZIP_KB} KB gzip (limit: ${MAX_ENTRY_GZIP_KB} KB)"
+          else
+            echo "✅ Entry budget OK: Main entry is ${GZIP_KB} KB gzip (limit: ${MAX_ENTRY_GZIP_KB} KB)"
+          fi
+
+          echo ""
+          echo "📦 Eager closure (what a page load actually pays for):"
+          # Writes closure_status / closure_gzip_kb / closure_budget_kb /
+          # closure_chunks / closure_chunk_status / closure_membership_status /
+          # closure_headroom_status to
+          # $GITHUB_OUTPUT itself. EVERY key it publishes is passed into the
+          # comment step below and rendered there — a verdict published to
+          # $GITHUB_OUTPUT that no consumer reads is a verdict the PR comment
+          # cannot name, which is what objectui#6230 was (the per-chunk and
+          # sensitivity halves both went unread). A fourth half added here must
+          # be wired through too; `render-budget-comment.test.ts` fails if it is
+          # not. The fourth half — ceiling freshness, objectui#6245 — arrived
+          # through exactly that door: it publishes `closure_freshness_status`,
+          # and is wired into the comment step below.
+          #
+          # Exit codes are distinct on
+          # purpose: 1 = over budget (a verdict about the bundle), 2 = no
+          # trustworthy measurement (a verdict about the gauge). Reporting one as
+          # the other is how a broken gauge gets read as a size regression, and a
+          # size regression as a broken gauge.
+          set +e
+          node scripts/check-eager-closure-budget.mjs
+          CLOSURE_CODE=$?
+          set -e
+
+          if [ "$CLOSURE_CODE" -eq 2 ]; then
+            echo "budget_status=error" >> "$GITHUB_OUTPUT"
+            echo "budget_message=The entry chunk measured ${GZIP_KB} KB, but the eager-closure half of this gate returned no trustworthy VERDICT: the report could not be read, a ceiling has drifted out of range of the regression it must catch, or (objectui#6245) a ceiling was replaced on the base branch after this checkout was made. The step log says which. This is not a passing budget — and it is not a size regression either." >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          if [ "$ENTRY_OVER" -eq 1 ] || [ "$CLOSURE_CODE" -ne 0 ]; then
+            echo ""
+            echo "❌ BUDGET EXCEEDED"
+            echo "budget_status=fail" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          # The COMPOSITION half (objectui#7479): WHICH locale catalogues a page
+          # load pulls, which no byte ceiling can answer. The catalogues could
+          # return to the eager closure one at a time, each arrival small enough
+          # to fit inside a ceiling's headroom, and every run above would be
+          # green until the last one — and they could be routed into a roomier
+          # chunk without a single byte leaving the browser's request list,
+          # which objectui#7399 named and refused. Same three exit codes and the
+          # same reading of them: 2 is about the GAUGE, never a softer 1.
+          set +e
+          node scripts/check-eager-locale-catalogues.mjs
+          CATALOGUE_CODE=$?
+          set -e
+
+          if [ "$CATALOGUE_CODE" -eq 2 ]; then
+            echo "budget_status=error" >> "$GITHUB_OUTPUT"
+            echo "budget_message=The byte budgets passed, but the locale-catalogue composition half returned no trustworthy VERDICT: the eager-closure report could not be read, a catalogue was emitted under no chunk of its own, or the resident catalogue is not in the eager closure at all. The step log says which. This is not a passing budget — and it is not a size regression either." >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          if [ "$CATALOGUE_CODE" -ne 0 ]; then
+            echo ""
+            echo "❌ NON-RESIDENT LOCALE CATALOGUES ARE IN THE EAGER CLOSURE"
+            echo "budget_status=fail" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ Budget OK: entry chunk and eager closure are both within budget, and one locale catalogue is eager"
+          echo "budget_status=pass" >> "$GITHUB_OUTPUT"
+
+      # The ARTIFACT half of the `sideEffects` contract (objectui#6683). The
+      # static gate in `ci.yml` proves the array agrees with the module bodies;
+      # it cannot prove that a real bundler reading that array still EMITS the
+      # registrations, and that is the question the hazard turns on —
+      # `"sideEffects": false` is statically coherent and drops three live SDUI
+      # widget registrations out of the build entirely — they reach no chunk at
+      # all — on a green build (objectui#6535).
+      #
+      # The key set is derived from the array itself, so this step needs no
+      # list of its own. It runs after the budget step and never instead of it:
+      # a dropped registration and a size regression are different verdicts, and
+      # a size win bought by deleting a feature must not read as a size win.
+      #
+      # Not `if: always()` — with no `dist/` the checker exits 2 and says so,
+      # which is the honest verdict for a run that measured nothing, but there
+      # is no reason to spend it on a build that already failed.
+      - name: Pin the SDUI registrations the `sideEffects` array promises
+        run: pnpm check:sdui-registration-pins
+
+      - name: Generate package size report
+        id: size-report
+        # NOT `always()`. `always()` also fires on a cancelled run, where
+        # `packages/*/dist` is only partly populated — the report was then
+        # emitted from that partial tree and looked complete while silently
+        # missing 7 packages (objectui#3152). The report is only meaningful
+        # once every package has finished building, so gate it on that.
+        if: ${{ !cancelled() && steps.build_packages.outcome == 'success' }}
+        run: |
+          echo "## 📦 Bundle Size Report" > size-report.md
+          echo "" >> size-report.md
+          echo "| Package | Size | Gzipped |" >> size-report.md
+          echo "|---------|------|---------|" >> size-report.md
+          
+          for pkg in packages/*/dist; do
+            if [ -d "$pkg" ]; then
+              pkg_name=$(basename $(dirname $pkg))
+              
+              # Calculate sizes for main bundle files
+              for file in "$pkg"/*.js; do
+                if [ -f "$file" ] && [ ! -f "${file}.map" ]; then
+                  # Use portable method to get file size
+                  size=$(wc -c < "$file")
+                  size_kb=$(awk "BEGIN {printf \"%.2f\", $size/1024}")
+                  
+                  # Estimate gzipped size
+                  gzip_size=$(gzip -c "$file" | wc -c)
+                  gzip_kb=$(awk "BEGIN {printf \"%.2f\", $gzip_size/1024}")
+                  
+                  echo "| $pkg_name ($(basename $file)) | ${size_kb}KB | ${gzip_kb}KB |" >> size-report.md
+                fi
+              done
+            fi
+          done
+          
+          echo "" >> size-report.md
+          echo "### Size Limits" >> size-report.md
+          echo "- ✅ Core packages should be < 50KB gzipped" >> size-report.md
+          echo "- ✅ Component packages should be < 100KB gzipped" >> size-report.md
+          echo "- ⚠️ Plugin packages should be < 150KB gzipped" >> size-report.md
+
+      # Rendering lives in `scripts/render-budget-comment.mjs` so it can be unit
+      # tested (`scripts/__tests__/render-budget-comment.test.ts`) — the bug this
+      # replaces was purely a rendering bug, and logic inlined in YAML is
+      # untestable. Step outputs are passed through `env` rather than
+      # interpolated into a JS string literal, so an absent output stays an
+      # empty *variable* instead of vanishing into source text.
+      - name: Render performance budget comment
+        id: render_comment
+        # `!cancelled()`, NOT `always()`: a cancelled run measured nothing, and
+        # the superseding run posts the real verdict moments later. Commenting
+        # on cancellation is what produced a ❌ FAIL on every PR that got a
+        # second push (objectui#3152).
+        if: ${{ github.event_name == 'pull_request' && !cancelled() }}
+        env:
+          BUDGET_STATUS: ${{ steps.budget.outputs.budget_status }}
+          BUDGET_MESSAGE: ${{ steps.budget.outputs.budget_message }}
+          BUDGET_GZIP_KB: ${{ steps.budget.outputs.gzip_kb }}
+          BUDGET_LIMIT_KB: ${{ steps.budget.outputs.budget_kb }}
+          BUDGET_ENTRY_FILE: ${{ steps.budget.outputs.entry_file }}
+          BUDGET_CLOSURE_STATUS: ${{ steps.budget.outputs.closure_status }}
+          BUDGET_CLOSURE_GZIP_KB: ${{ steps.budget.outputs.closure_gzip_kb }}
+          BUDGET_CLOSURE_BUDGET_KB: ${{ steps.budget.outputs.closure_budget_kb }}
+          BUDGET_CLOSURE_CHUNKS: ${{ steps.budget.outputs.closure_chunks }}
+          # The per-chunk (objectui#5490) and sensitivity (objectui#5924) halves.
+          # The step's exit code folds all three halves into one `budget_status`,
+          # so without these the comment can say a budget objected but not which
+          # half did — the reader has to open the job log to find out.
+          BUDGET_CLOSURE_CHUNK_STATUS: ${{ steps.budget.outputs.closure_chunk_status }}
+          BUDGET_CLOSURE_MEMBERSHIP_STATUS: ${{ steps.budget.outputs.closure_membership_status }}
+          BUDGET_CLOSURE_HEADROOM_STATUS: ${{ steps.budget.outputs.closure_headroom_status }}
+          # The freshness half (objectui#6245). Empty on a run it does not apply
+          # to; the renderer filters an empty half out rather than rendering it.
+          BUDGET_CLOSURE_FRESHNESS_STATUS: ${{ steps.budget.outputs.closure_freshness_status }}
+          BUDGET_STEP_OUTCOME: ${{ steps.budget.outcome }}
+          BUILD_PACKAGES_OUTCOME: ${{ steps.build_packages.outcome }}
+        run: node scripts/render-budget-comment.mjs > budget-comment.md
+
+      - name: Comment PR with results
+        if: ${{ github.event_name == 'pull_request' && !cancelled() }}
+        continue-on-error: true
+        uses: actions/github-script@v9
+        with:
+          # GitHub's API intermittently rejects valid run tokens with 401
+          # (seen on PR #1627), so 401/403 must stay retryable here.
+          retries: 3
+          retry-exempt-status-codes: 400,404,422
+          script: |
+            const fs = require('fs');
+
+            if (!fs.existsSync('budget-comment.md')) {
+              core.warning('budget-comment.md was not rendered; skipping PR comment.');
+              return;
+            }
+            const body = fs.readFileSync('budget-comment.md', 'utf8');
+
+            try {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body
+              });
+            } catch (error) {
+              core.warning(`Could not comment on PR: ${error.message}`);
+              await core.summary.addRaw(body).write();
+            }
+
+      # ── What the cache replayed, and only `main` writes it (objectui#12276) ──
+      # The `type-check` job's two bookkeeping steps (objectui#12222), for this
+      # job's cache. The report reads the summary `Build packages` asked turbo
+      # for and puts what the restored cache replayed, what re-ran and the
+      # restored key on ONE `::notice` annotation, readable through the
+      # check-runs API by anyone who cannot open this log. The prune deletes
+      # every entry this run did not use, on `push` only -- the runs that save
+      # -- so `main`'s entry is exactly the current build outputs; pull-request
+      # runs restore and never save (see the save step below), because what
+      # they would save is scoped to a ref no other pull request can read, and
+      # every build-sized entry saved is one more a size-limited cache store
+      # can evict `main`'s for.
+      #
+      # `push` alone: this workflow has no `schedule`. Measured on
+      # objectui#12276 before relying on it: the push concurrency group here
+      # is the ref, so a merge can cancel the previous merge's run, and 16 of
+      # the 20 newest `main` push runs succeeded (3 cancelled, 1 still running)
+      # -- the save lands on most merges that reach this workflow's paths.
+      #
+      # Bookkeeping after the last checking step, bounded and
+      # `continue-on-error`. `timeout-minutes: 1` each is DERIVED FOR THIS
+      # SITE: the script reads one run summary and lists one directory, and
+      # measured 87 ms on a lint run's summary (objectui#12276); a minute is
+      # several hundred times that, and with the save's 5 this job's
+      # bookkeeping stays at 7 of its 25.
+      - name: Report what the turbo cache replayed
+        if: ${{ !cancelled() }}
+        timeout-minutes: 1
+        continue-on-error: true
+        env:
+          RESTORED_CACHE_KEY: ${{ steps.turbo-cache.outputs.cache-matched-key }}
+        run: node scripts/report-turbo-cache.mjs
+
+      - name: Prune the turbo cache to what this run used
+        if: github.event_name == 'push'
+        timeout-minutes: 1
+        continue-on-error: true
+        run: node scripts/report-turbo-cache.mjs --prune
+
+      # The bookkeeping half of the split documented at the restore step above,
+      # placed HERE — last in the job, after the budget verdict AND after the
+      # comment that reports it — because that is exactly where the post phase
+      # it replaces already ran. Nothing about which commits this gate accepts
+      # or rejects moves with it.
+      #
+      # `timeout-minutes: 5` is DERIVED FOR THIS SITE, and landing on the same
+      # number PR #7047 chose is a result rather than a copy — objectui#7048
+      # fences inheriting that 5, so here is this site's own arithmetic. This
+      # job's own save of this cache measured 1s on 2026-09-02 (`Post Turbo
+      # Cache`, job 100096569559); the whole job was 4m07s. 5 minutes is 300x
+      # the measured save — the same ratio #7047 sized its bound at, arrived at
+      # from this job's own number.
+      #
+      # `continue-on-error: true` is the other half, and without it the bound
+      # would only trade a `cancelled` gate for a red one. A cache that failed
+      # to upload costs the next run some time; it says nothing whatsoever
+      # about the bundle sizes under test, so it must not speak for them.
+      #
+      # Behaviour preserved, spelled out so the equivalence is checkable:
+      #   - `cache-hit != 'true'` reproduces the combined action's own "exact
+      #     hit on the primary key ⇒ do not save" skip. A `restore-keys` prefix
+      #     match leaves `cache-hit` false and the save still runs, exactly as
+      #     the combined action behaved.
+      #   - the condition names no status function, so the implicit `success()`
+      #     still applies — matching the combined action's `post-if: success()`.
+      #   - same `path` and same `key` as the restore step above.
+      # One deliberate change (objectui#12276): only `push` saves, after the
+      # prune step above; see there for why.
+      - name: Save Turbo Cache
+        if: >-
+          steps.turbo-cache.outputs.cache-hit != 'true'
+          && github.event_name == 'push'
+        uses: actions/cache/save@v6
+        timeout-minutes: 5
+        continue-on-error: true
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-perf-${{ github.sha }}
+
+      # The pinned @objectstack build, saved only when this job built it (a cache
+      # miss) and whatever the verdict above was -- it does not depend on it.
+      # Bookkeeping: bounded and non-fatal (objectui#6577, objectui#7048). The bound
+      # is not yet derived from a measured save; re-derive it from this step's runs.
+      - name: Save the pinned @objectstack build
+        if: ${{ !cancelled() && steps.objectstack-build.outcome == 'success' && steps.objectstack-pin.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: actions/cache/save@v6
+        with:
+          path: node_modules/.cache/objectstack
+          key: objectstack-pin-${{ runner.os }}-${{ hashFiles('.objectstack-sha', 'scripts/objectstack-pin.mjs') }}

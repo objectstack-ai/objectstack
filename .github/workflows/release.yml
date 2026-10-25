@@ -1835,108 +1835,25 @@ jobs:
         run: node scripts/check-changeset-fixed.mjs
 
       # ──────────────────────────────────────────────────────────────────────
-      # ⛔ TOMBSTONE — the #3340 pin-currency gate that used to sit here is gone
-      # (2026-08-20 ruling, #10134). Do not re-add one.
+      # ⛔ TOMBSTONE — no objectui pin is read, built or checked here, and none
+      # is re-added (objectstack#25711, D1 ruling 「同一个版本号组」).
       #
-      # It compared `.objectui-sha` against objectui `main` at publish time and
-      # refused a release whose pin lagged. The ruling removed the question, not
-      # just the job: WHICH objectui revision this repo pins is a decision taken
-      # in an objectstack issue, never derived from another repo's HEAD, so
-      # "the pin is behind main" is not a defect a release lane may diagnose.
-      #
-      # R4's lesson (#6170 — "a gate required on a PR the publishing lane can
-      # skip is not a gate") is untouched and does not resurrect this one:
-      # #3340's actual invariant is "everything published is covered by the
-      # changeset record", and that is carried by `scripts/bump-objectui.sh` +
-      # `scripts/objectui-changeset-digest.mjs` at BUMP time — on the manual pin
-      # PR, which is now the only way the pin ever moves. Publishing an old
-      # console is therefore a published decision, not an unnoticed gap.
+      # The Console is a workspace package now: `ui/apps/console`
+      # (@object-ui/console) builds against this tree's @objectstack/* through
+      # `workspace:^`, and `@objectstack/console#build:dist` (root turbo.json)
+      # copies that dist with the tracked sdui.manifest.json; `pnpm run release`
+      # runs it (`pnpm run console:build`) after the build below. The
+      # pin-currency gate, the vendored-dist cache keyed on `.objectui-sha`,
+      # its SHA stamp check and
+      # its spec-injection check are gone with the pin: each answered "was the
+      # Console built from the objectui commit, and against the spec, this
+      # release names", and both are true by construction when the Console
+      # source and the spec are one tree at one commit. The single-zod canary
+      # survives inside packages/console/build-dist.sh, on the bytes it ships.
       # ──────────────────────────────────────────────────────────────────────
 
       - name: Build
         run: pnpm run build
-
-      - name: Read the spec's declared zod range (Console dist key input)
-        id: spec-zod
-        # Fails rather than keying on an empty or `undefined` range: a key that
-        # silently stopped carrying the range would restore across a zod move.
-        run: |
-          node -e '
-            const range = require("./packages/spec/package.json").dependencies?.zod;
-            if (typeof range !== "string" || range.trim() === "") {
-              console.error("packages/spec/package.json declares no dependencies.zod, so the Console dist key cannot carry it.");
-              process.exit(1);
-            }
-            console.log("range=" + range.trim());
-          ' >> "$GITHUB_OUTPUT"
-
-      # This key hashes the pin and the build script, and carries the spec's
-      # DECLARED zod range (the step above). ci.yml's Console Pin Gate (#4290)
-      # hashes a SUPERSET of the files: those two, the probe scripts and the
-      # spec's entry layout (#20765). So the two workflows no longer share dist
-      # entries, and each one builds its own on a miss. Keeping this key narrower
-      # is deliberate.
-      # Following ci.yml would rebuild the console on every Version Packages
-      # merge, and publishing a cached console whose spec content lags is the
-      # existing cache design.
-      #
-      # The zod range is the one spec input the cached dist is NOT allowed to
-      # lag (#21108). The console bundles a single zod instance, the console's
-      # own copy, and its build refuses a console zod outside the injected spec's
-      # declared `zod` range (objectui#11353). A dist restored after that range
-      # moved would publish a console the build never judged against it. The
-      # range is read out of packages/spec/package.json, not hashed with it: the
-      # file's `version` moves on every Version Packages merge, and hashing the
-      # whole file would turn every publish into a cold console rebuild.
-      #
-      # Split restore/save, matching ci.yml, and not the combined actions/cache
-      # action: the combined form's post-step saves even when the job FAILED,
-      # and build-console.sh writes the SHA stamp BEFORE it asserts the bundle
-      # canary — so a canary failure here would seed this shared, repo-scoped
-      # key with a stamped-but-broken dist that later runs restore and sail
-      # through. See ci.yml's split-restore note for the full rationale.
-      - name: Restore vendored Console dist (keyed on the objectui pin)
-        id: console-dist-cache
-        uses: actions/cache/restore@v6
-        with:
-          path: packages/console/dist
-          key: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh') }}-zod-${{ steps.spec-zod.outputs.range }}
-
-      - name: Build vendored @objectstack/console SPA
-        # Clones objectstack-ai/objectui at the SHA pinned in .objectui-sha,
-        # builds @object-ui/console, and copies dist/ into
-        # packages/console/dist/. Must run before publish so the prepublishOnly
-        # guard in @objectstack/console passes.
-        if: steps.console-dist-cache.outputs.cache-hit != 'true'
-        run: bash scripts/build-console.sh
-
-      - name: Verify Console dist stamp matches pin
-        run: pnpm check:console-sha
-
-      # The spec-injection half of the same question, spelled exactly as
-      # ci.yml's Console Pin Gate spells it — both consumers of one cache key
-      # apply one check. check:console-sha answers only "which objectui SHA",
-      # and scripts/assert-console-spec-injection.mjs runs INSIDE
-      # build-console.sh, which the `if: cache-hit != 'true'` above skips — so
-      # on a cache hit nothing had asked whether the dist this job is about to
-      # PUBLISH bundles this tree's @objectstack/spec rather than the published
-      # tarball. --require-stamp because the vacuity check:console-sha tolerates
-      # (no dist, or a dist no build ever stamped) is wrong on a publish lane.
-      - name: Verify the restored Console dist bundles this tree's spec
-        env:
-          CONSOLE_DIST_CACHE_KEY: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh') }}-zod-${{ steps.spec-zod.outputs.range }}
-        run: pnpm check:console-injection --require-stamp
-
-      # Reached only with every console assertion above green: Actions steps
-      # default to `success()`, and nothing between the restore and here carries
-      # `if: always()` or `continue-on-error`. Saving only on a miss keeps an
-      # immutable entry from being rewritten on every release run.
-      - name: Save vendored Console dist
-        if: steps.console-dist-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
-        with:
-          path: packages/console/dist
-          key: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh') }}-zod-${{ steps.spec-zod.outputs.range }}
 
       - name: Downstream backward-compat smoke (live hotcrm)
         # Pre-publish gate (#2035): the about-to-publish @objectstack/spec must
@@ -2031,9 +1948,10 @@ jobs:
         run: bash scripts/release-spec-changes.sh --verify
 
       # ──────────────────────────────────────────────────────────────────────
-      # The publish itself. `pnpm run release` = build + build-console +
-      # scripts/release-publish.sh, which is `changeset publish` followed by ONE
-      # atomic `git push origin --tags` (#2191: the action's concurrent per-tag
+      # The publish itself. `pnpm run release` = build (both scopes; the turbo
+      # cache makes it the build above) + console:build (the Console dist into
+      # packages/console) + scripts/release-publish.sh, which is `changeset
+      # publish` followed by ONE atomic `git push origin --tags` (#2191: the action's concurrent per-tag
       # pushes raced GitHub's ref backend and lost ~half the tags).
       #
       # changesets/action is NOT used here, and that is deliberate: handed a

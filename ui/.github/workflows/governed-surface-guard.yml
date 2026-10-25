@@ -1,0 +1,127 @@
+# The machine half of the governed-surface no-bypass rule (objectui#6596,
+# maintainer ruling 2026-08-27 accepting Option C on #6325). The rule, the event
+# split, the approval predicate and the exit contract all live in
+# `scripts/check-governed-queue-guard.mjs`; that header is authoritative and this
+# file is the invocation. Only the wiring decisions are argued here.
+#
+# What it is for, in one measurement: PR #6183 touched `AGENTS.md`, was correctly
+# parked as a draft, and a GitHub MCP `update_pull_request` call passing only
+# `reviewers` silently set `draft: false`. The pull request entered the merge
+# queue and landed as `5b3290fd5` with no human approval; converting it back to a
+# draft did NOT dequeue it. Nothing in this repository could have refused that —
+# the whole defence was seat discipline, and the failure contained no seat
+# decision at all.
+name: Governed Surface Guard
+
+on:
+  # BOTH legs are load-bearing and they mean DIFFERENT things — see the script
+  # header. `merge_group` is the leg that REFUSES: the queue build is the last
+  # thing between a speculative merge and `main`, and it is the path #6183 took.
+  # `pull_request` is an EARLY WARNING that deliberately exits 0, because a
+  # governed PR held as a draft for the maintainer to merge by hand is this
+  # regime's healthy end state, and a check that reddens on the healthy case is
+  # a permanently red check nobody reads.
+  pull_request:
+    # `develop` is included for the same reason every other requirable gate here
+    # names both: a context that does not report on a branch it could be
+    # required on leaves the pull request pending rather than failing it.
+    branches: [main, develop]
+    # ⚠️ Naming `types:` REPLACES GitHub's default set rather than extending it,
+    # so all three defaults are restated. `ready_for_review` is the addition and
+    # it is the point: flipping a governed draft to ready is the first move of
+    # the exact sequence this guard exists to interrupt, and it is not in the
+    # default set — without it the warning would not re-fire at the one moment a
+    # seat most needs to read it. `scripts/check-governed-queue-guard.mjs
+    # --self-test` pins this line.
+    types: [opened, synchronize, reopened, ready_for_review]
+  # Merge queue (objectui#3523 — see `ci.yml`'s trigger block for the full note
+  # and the measurements behind it). This is the leg that refuses, and a
+  # requirable context that does not report on a queue build stalls the queue
+  # until the ruleset's 60-minute status-check timeout. `types:` is named
+  # although `checks_requested` is currently the only one GitHub defines.
+  merge_group:
+    types: [checks_requested]
+
+# ⛔ NO `paths:` filter, on either leg, and this is not an oversight. A skipped
+# job counts as SUCCESS in branch protection, so a path filter would hand the
+# queue a green "Governed Surface Queue Guard" for a pull request the filter
+# mis-scoped — on the one check whose entire job is to refuse. The path test
+# belongs INSIDE the script, where "nothing governed" is a verdict that says so
+# and costs zero API calls. (`merge_group` supports no path filter at all, so a
+# filter would also make the two legs disagree about what they cover.) The
+# script's `--self-test` fails if one is ever added; the same conclusion
+# `control-bytes.yml` and `changeset-presence.yml` reached for themselves.
+
+concurrency:
+  group: governed-surface-guard-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# The default read scopes and nothing beyond them. `pull-requests: read` is what
+# the review and head reads need; there is no write scope here, and adding one
+# to let this check "fix" anything would be a widening no ruling covers.
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  governed-surface-guard:
+    # ⚠️ THIS LITERAL IS THE CHECK-RUN NAME branch protection would pin, and it
+    # is duplicated in `CHECK_CONTEXT_NAME` in the script — deliberately, and
+    # pinned in both directions: the script's `--self-test` reads THIS FILE and
+    # fails if the two ever disagree. Renaming a job silently detaches a
+    # required context, and a name that lives in exactly one place is a name
+    # nothing can pin. It is also registered in `REQUIRED_CONTEXTS` in
+    # `scripts/dependabot-merge-gate.mjs`, which is this repository's own
+    # written-down answer to "which checks are blocking".
+    #
+    # ⛔ Making it a REQUIRED context in the live branch-protection ruleset is
+    # not this pull request's step and cannot be: that is a repository-settings
+    # surface only the maintainer can change. Until it is flipped, this job
+    # REPORTS on a queue build without stopping it.
+    name: Governed Surface Queue Guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          # A governed-surface question answered over a truncated history
+          # answers with SILENCE, and silence reads as compliance. A merge
+          # group's base sha can predate a shallow fetch's floor, so the whole
+          # history is the only depth that cannot under-report. The script
+          # refuses outright (exit 1) if either sha is missing, rather than
+          # diffing what it happens to have.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22.x'
+
+      # The self-test runs FIRST and in its own step, because it is the
+      # precondition for trusting the run after it: this guard's predicates
+      # decide whether a merge lands, so a rotted predicate must redden here
+      # rather than quietly wave a governed diff through. It also holds the
+      # wiring pins — the job name above, the triggers, `fetch-depth: 0`, the
+      # absent path filter, and the `REQUIRED_CONTEXTS` registration.
+      #
+      # No install and no build: the script imports node builtins and one local
+      # module (`scripts/invoked-as.mjs`) only, which is also what keeps it
+      # clear of `scripts/check-pre-install-import-graph.mjs`.
+      - name: Guard predicate self-test
+        run: node scripts/check-governed-queue-guard.mjs --self-test
+
+      # The live judgment. Everything it reads arrives through `env:` or the
+      # event payload on disk — no `${{ }}` interpolation into the shell line,
+      # so no pull-request-controlled text ever becomes part of a command.
+      #
+      # GITHUB_TOKEN is the workflow's own default token at the read scopes
+      # declared above; it is what makes the review read possible at all, and an
+      # unreadable review list is a REFUSAL with its own exit code, never a
+      # pass. ⛔ Fail-open is wrong in this file specifically — it exists
+      # because every other layer in this chain failed open.
+      - name: Governed surfaces may not enter the merge queue unreviewed
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/check-governed-queue-guard.mjs

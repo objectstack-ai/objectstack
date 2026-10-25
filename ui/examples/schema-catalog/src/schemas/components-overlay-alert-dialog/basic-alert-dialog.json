@@ -1,0 +1,12 @@
+{
+  "type": "alert-dialog",
+  "title": "Are you sure?",
+  "description": "This action cannot be undone.",
+  "trigger": {
+    "type": "button",
+    "label": "Delete Account"
+  },
+  "cancelText": "Cancel",
+  "actionText": "Continue",
+  "actionVariant": "destructive"
+}

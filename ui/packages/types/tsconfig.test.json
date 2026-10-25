@@ -1,0 +1,70 @@
+{
+  // Type-checks this package's TESTS, which `tsconfig.json` excludes.
+  //
+  // Why they were excluded, and why that was a hole: `tsconfig.json` is the
+  // package BUILD (`tsc` -> dist) with "rootDir": "./src", "composite" and
+  // "declaration", so test files would emit into dist. Excluding them keeps the
+  // build clean — but it also meant no `tsc` invocation ever read them, and
+  // `spec-derived-unions.test.ts` had built its whole contract on `satisfies`
+  // checks that therefore never ran. Its header claimed they were "the real
+  // enforcement"; reverting a derived alias to its old hand-written fork
+  // produced zero errors (objectstack#4074).
+  //
+  // Same reasoning and same shape as `tsconfig.examples.json`: a separate,
+  // emit-free project chained from the package's `type-check` script. Keeping it
+  // separate rather than deleting the exclude also keeps the BUILD honest — the
+  // "types": ["node"] below is needed by the reexport guard's `readFileSync`
+  // source scan, and folding that into `tsconfig.json` would let package SOURCE
+  // reference Node APIs and still compile, in a package that ships to browsers.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "lib": ["ES2022", "DOM"],
+    // `spec-ui-schema-reexports.test.ts` reads sibling sources off disk to prove
+    // no spec/ui zod value hides inside an `export type` block (#2561).
+    "types": ["node"],
+    // Same reason as tsconfig.json: drop the root tsconfig's source-tree paths
+    // so @objectstack/spec resolves through the workspace dependency.
+    "paths": {}
+  },
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+  // The `p1-spec-alignment.test.ts` exclusion that sat here (objectui#3009's
+  // declared debt) is gone: its 14 errors were resolved site-by-site in
+  // framework#4074 — `ListViewInferred` is `z.input` (authoring surface),
+  // `FormField.dependsOn` matches its runtime reader, the normalizer-input
+  // dialects are asserted at core's fold seam instead of on this type, and the
+  // one fixture no surface ever admitted (an ObjectQL triplet as a tab filter)
+  // was corrected.
+  //
+  // DATED READING — "Every test file in this package is compiled; keep it that
+  // way." was TRUE when it was written here on 2026-08-07 (`c35fed098`, PR
+  // objectui#3574): the `.dist.spec.tsx` suffix did not yet exist anywhere in the
+  // tree. It is kept and dated rather than overwritten, because overwriting it
+  // would erase that it was ever true (objectui#9713). It was falsified on
+  // 2026-09-09 by `1ccfc235e` (PR objectui#8646), which added this package's
+  // first `.dist.spec.tsx` pin. The `include` above did not move — the
+  // population under it did.
+  //
+  // What holds today: every `*.test.ts(x)` file here is compiled, and the
+  // `.dist.spec.tsx` built-artifact pins are not. That exclusion is a
+  // CONSTRUCTION, not a hole, and a declared exclusion looks exactly like a hole
+  // in a directory listing — so read this before you close it. Do NOT widen the
+  // `include` above: the suffix keeps those pins out of this program
+  // deliberately, because turbo's `type-check` waits on `^build` (the
+  // DEPENDENCIES' builds) and must never be handed a program that reads this
+  // package's OWN `dist` — objectui#4801 removed a self-referencing `paths`
+  // entry for exactly that reason. The pins are still RUN: by the opt-in `dist`
+  // vitest project, whose population is `DIST_PIN_GLOB` in the root
+  // `vitest.config.mts` (env-gated, reached through `pnpm test:dist`). That
+  // constant's docblock carries the full rationale, and objectui#7183 is the card
+  // that built the carve-out on purpose.
+  //
+  // No count is written here, by design: the population moves under this file
+  // without touching it, which is how the sentence above rotted.
+  // `pnpm type-check:coverage` (`scripts/check-type-check-coverage.mjs`) is what
+  // re-derives the claim — it enumerates `*.test.ts(x)` from the package root
+  // and resolves this config's `include` / `exclude` to ask whether each one is
+  // really read. The pins fall outside that enumerator by the same suffix that
+  // keeps them out of the `include`, so the two definitions agree by
+  // construction.
+}

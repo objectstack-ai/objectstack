@@ -1,0 +1,7 @@
+{
+  "type": "sonner",
+  "variant": "error",
+  "message": "Something went wrong",
+  "buttonLabel": "Error",
+  "buttonVariant": "destructive"
+}

@@ -1,0 +1,163 @@
+{
+  "type": "scroll-area",
+  "height": "300px",
+  "className": "rounded-md border p-4",
+  "children": [
+    {
+      "type": "stack",
+      "gap": 2,
+      "children": [
+        {
+          "type": "text",
+          "content": "Line 1",
+          "className": "block"
+        },
+        {
+          "type": "text",
+          "content": "Line 2",
+          "className": "block"
+        },
+        {
+          "type": "text",
+          "content": "Line 3",
+          "className": "block"
+        },
+        {
+          "type": "text",
+          "content": "Line 4",
+          "className": "block"
+        },
+        {
+          "type": "text",
+          "content": "Line 5",
+          "className": "block"
+        },
+        {
+          "type": "text",
+          "content": "Line 6",
+          "className": "block"
+        },
+        {
+          "type": "text",
+          "content": "Line 7",
+          "className": "block"
+        },
+        {
+          "type": "text",
+          "content": "Line 8",
+          "className": "block"
+        },
+        {
+          "type": "text",
+          "content": "Line 9",
+          "className": "block"
+        },
+        {
+          "type": "text",
+          "content": "Line 10",
+          "className": "block"
+        },
+        {
+          "type": "text",
+          "content": "Line 11",
+          "className": "block"
+        },
+        {
+          "type": "text",
+          "content": "Line 12",
+          "className": "block"
+        },
+        {
+          "type": "text",
+          "content": "Line 13",
+          "className": "block"
+        },
+        {
+          "type": "text",
+          "content": "Line 14",
+          "className": "block"
+        },
+        {
+          "type": "text",
+          "content": "Line 15",
+          "className": "block"
+        },
+        {
+          "type": "text",
+          "content": "Line 16",
+          "className": "block"
+        },
+        {
+          "type": "text",
+          "content": "Line 17",
+          "className": "block"
+        },
+        {
+          "type": "text",
+          "content": "Line 18",
+          "className": "block"
+        },
+        {
+          "type": "text",
+          "content": "Line 19",
+          "className": "block"
+        },
+        {
+          "type": "text",
+          "content": "Line 20",
+          "className": "block"
+        },
+        {
+          "type": "text",
+          "content": "Line 21",
+          "className": "block"
+        },
+        {
+          "type": "text",
+          "content": "Line 22",
+          "className": "block"
+        },
+        {
+          "type": "text",
+          "content": "Line 23",
+          "className": "block"
+        },
+        {
+          "type": "text",
+          "content": "Line 24",
+          "className": "block"
+        },
+        {
+          "type": "text",
+          "content": "Line 25",
+          "className": "block"
+        },
+        {
+          "type": "text",
+          "content": "Line 26",
+          "className": "block"
+        },
+        {
+          "type": "text",
+          "content": "Line 27",
+          "className": "block"
+        },
+        {
+          "type": "text",
+          "content": "Line 28",
+          "className": "block"
+        },
+        {
+          "type": "text",
+          "content": "Line 29",
+          "className": "block"
+        },
+        {
+          "type": "text",
+          "content": "Line 30",
+          "className": "block"
+        }
+      ]
+    }
+  ]
+}

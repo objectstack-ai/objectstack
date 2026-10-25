@@ -1,0 +1,33 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    // Overriding `paths` drops the root config's `@object-ui/* -> packages/*/src`
+    // mappings, so workspace deps resolve through their built `.d.ts` instead of
+    // pulling sibling sources into this program (which would be outside rootDir).
+    // vite.config.ts already does the same for the dts program.
+    "paths": {
+      "@/*": ["src/*"]
+    },
+    "skipLibCheck": true
+  },
+  "include": ["src"],
+  // Tooling is excluded by DIRECTORY, not just by file NAME. A helper under
+  // `__tests__/` that is not itself called `*.test.ts` is otherwise a program
+  // input, and an EMITTING program writes it into the published `dist`
+  // (objectui#4006 / #4836 / #6943 -- the same defect three times, each found
+  // by hand). Enforced repo-wide by `pnpm check:published-tsconfig-exclude`
+  // (objectui#7212), which derives these directory names from `TOOLING_FILE`
+  // in scripts/check-phantom-dependencies.mjs.
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/__tests__/**",
+    "**/__mocks__/**",
+    "**/__benchmarks__/**",
+    "**/*.test.ts",
+    "**/*.test.tsx"
+  ]
+}

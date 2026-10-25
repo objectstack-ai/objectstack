@@ -1,0 +1,35 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "fields": [
+    {
+      "name": "priority",
+      "label": "Priority",
+      "type": "select",
+      "placeholder": "Select priority...",
+      "options": [
+        {
+          "label": "Low",
+          "value": "low",
+          "color": "gray"
+        },
+        {
+          "label": "Medium",
+          "value": "medium",
+          "color": "blue"
+        },
+        {
+          "label": "High",
+          "value": "high",
+          "color": "orange"
+        },
+        {
+          "label": "Urgent",
+          "value": "urgent",
+          "color": "red"
+        }
+      ]
+    }
+  ]
+}

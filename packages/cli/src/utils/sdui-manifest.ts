@@ -54,8 +54,8 @@
  * ## The console leg is reached through `package.json` (#19922)
  *
  * The second place looked is the copy `@objectstack/console` ships in its
- * `dist/` — objectui's public-tier registry at the pinned commit, copied in by
- * `scripts/build-console.sh`. This leg used to ask for that file by its own
+ * `dist/` — the tracked repo-root `sdui.manifest.json`, copied in by
+ * `packages/console/build-dist.sh`. This leg used to ask for that file by its own
  * subpath, which the console's `exports` map does not publish (it publishes
  * `./package.json` alone): the resolve threw `ERR_PACKAGE_PATH_NOT_EXPORTED`, a
  * `catch` swallowed it, and a project with no manifest of its own was checked
@@ -105,7 +105,7 @@ export const CONSOLE_SDUI_MANIFEST = '@objectstack/console/dist/sdui.manifest.js
 /** The one subpath the console's `exports` map publishes. */
 const CONSOLE_PACKAGE_JSON = '@objectstack/console/package.json';
 
-/** Where `scripts/build-console.sh` puts the manifest, relative to the console package root. */
+/** Where `packages/console/build-dist.sh` puts the manifest, relative to the console package root. */
 const CONSOLE_MANIFEST_IN_PACKAGE = 'dist/sdui.manifest.json';
 
 /**

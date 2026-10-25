@@ -1,0 +1,31 @@
+{
+  "type": "card",
+  "title": "Settings",
+  "children": [
+    {
+      "type": "text",
+      "content": "Configure your preferences"
+    }
+  ],
+  "footer": [
+    {
+      "type": "flex",
+      "properties": {
+        "gap": 2,
+        "justify": "end",
+        "children": [
+          {
+            "type": "button",
+            "label": "Cancel",
+            "variant": "outline"
+          },
+          {
+            "type": "button",
+            "label": "Save",
+            "variant": "default"
+          }
+        ]
+      }
+    }
+  ]
+}

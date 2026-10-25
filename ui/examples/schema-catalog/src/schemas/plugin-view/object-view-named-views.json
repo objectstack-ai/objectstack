@@ -1,0 +1,20 @@
+{
+  "type": "object-view",
+  "objectName": "users",
+  "title": "User Directory",
+  "description": "Two saved views over one object",
+  "defaultListView": "directory",
+  "showSearch": true,
+  "showFilters": false,
+  "showCreate": false,
+  "listViews": {
+    "directory": {
+      "label": "Directory",
+      "columns": ["name", "email", "role", "department", "status"]
+    },
+    "contacts": {
+      "label": "Contact Details",
+      "columns": ["name", "email", "department"]
+    }
+  }
+}

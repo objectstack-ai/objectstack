@@ -1,0 +1,53 @@
+{
+  "type": "data-table",
+  "caption": "Q1 Sales Report",
+  "pagination": false,
+  "searchable": false,
+  "sortable": true,
+  "exportable": true,
+  "columns": [
+    {
+      "header": "Month",
+      "accessorKey": "month"
+    },
+    {
+      "header": "Revenue",
+      "accessorKey": "revenue"
+    },
+    {
+      "header": "Orders",
+      "accessorKey": "orders"
+    },
+    {
+      "header": "Avg Order",
+      "accessorKey": "avgOrder"
+    },
+    {
+      "header": "Growth",
+      "accessorKey": "growth"
+    }
+  ],
+  "data": [
+    {
+      "month": "January",
+      "revenue": "$124,500",
+      "orders": "842",
+      "avgOrder": "$148",
+      "growth": "+12%"
+    },
+    {
+      "month": "February",
+      "revenue": "$135,200",
+      "orders": "923",
+      "avgOrder": "$147",
+      "growth": "+8.6%"
+    },
+    {
+      "month": "March",
+      "revenue": "$148,900",
+      "orders": "1,015",
+      "avgOrder": "$147",
+      "growth": "+10.1%"
+    }
+  ]
+}

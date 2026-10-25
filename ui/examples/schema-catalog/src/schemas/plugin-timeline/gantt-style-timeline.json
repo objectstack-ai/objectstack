@@ -1,0 +1,54 @@
+{
+  "type": "timeline",
+  "variant": "gantt",
+  "dateFormat": "short",
+  "scale": "month",
+  "rowLabel": "Projects",
+  "items": [
+    {
+      "label": "Backend Development",
+      "items": [
+        {
+          "title": "API Design",
+          "startDate": "2024-01-01",
+          "endDate": "2024-01-31",
+          "variant": "success"
+        },
+        {
+          "title": "Implementation",
+          "startDate": "2024-02-01",
+          "endDate": "2024-03-31",
+          "variant": "info"
+        }
+      ]
+    },
+    {
+      "label": "Frontend Development",
+      "items": [
+        {
+          "title": "UI Design",
+          "startDate": "2024-01-15",
+          "endDate": "2024-02-15",
+          "variant": "warning"
+        },
+        {
+          "title": "Component Dev",
+          "startDate": "2024-02-15",
+          "endDate": "2024-04-15",
+          "variant": "default"
+        }
+      ]
+    },
+    {
+      "label": "Testing",
+      "items": [
+        {
+          "title": "QA Phase",
+          "startDate": "2024-03-01",
+          "endDate": "2024-04-30",
+          "variant": "danger"
+        }
+      ]
+    }
+  ]
+}

@@ -234,7 +234,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 
 import { ANCHORS_DIR, assembleAnchors, loadAnchors, shardNameFor } from './adr-anchors.mjs';
 
@@ -405,6 +405,43 @@ const UNRESOLVED_ADR_CITATIONS = [
   // decided (it decided how the `metadata` SERVICE is registered) and not a
   // document that ever existed here. The tombstone dissects that; this comment
   // exists so nobody re-derives the discrepancy from the removed entry's text.
+];
+
+/**
+ * ⛔ SHRINK-ONLY. Dangling citations that sit in a RELEASE-OWNED file — a
+ * `CHANGELOG.md`, which AGENTS.md's documentation guardrails forbid any code PR
+ * to edit: it is compiled from changesets at release time and ships in the npm
+ * tarball as the record of what was released. A citation there is history; the
+ * remedy the dangling-citation message offers (cite the right number, spell the
+ * sibling registry) is an edit to that history, which no PR may make.
+ *
+ * Keyed by FILE AND NUMBER, never by number alone: unlike
+ * {@link UNRESOLVED_ADR_CITATIONS} an entry here excuses one number in one file,
+ * so the same id written anywhere else — a new source comment, a test, another
+ * changelog — still reds exactly as before. Every entry must name a file whose
+ * basename is `CHANGELOG.md` (the audit refuses any other path, so this cannot
+ * become a general mute list), and the audit fails an entry in BOTH directions
+ * the way it fails the list above: the number gained a record, or the file no
+ * longer cites it.
+ *
+ * The rows arrived with the objectui import at the cutover (#25752, bill item
+ * 19): objectui's own `CHANGELOG.md` entries cite its decision 0075 with the bare
+ * prefix, which objectui's registry used for itself and which names no record
+ * here. The source and test citations of the same decision were respelled with
+ * the `ObjectUI` qualifier in objectui before the import; only the released
+ * changelog lines stay as written.
+ */
+const RELEASE_OWNED_CITATIONS = [
+  {
+    file: 'ui/apps/console/CHANGELOG.md',
+    number: '0075',
+    why: 'objectui release notes for the root landing redirect (objectui decision 0075), released before the cutover',
+  },
+  {
+    file: 'ui/packages/app-shell/CHANGELOG.md',
+    number: '0075',
+    why: 'objectui release notes for the home path declaration (objectui decision 0075), released before the cutover',
+  },
 ];
 
 /**
@@ -635,19 +672,52 @@ function citationsIn(file, text) {
  * @param {{ file: string, number: string, qualifier: string }[]} citations
  * @param {Set<string>} records  numbers that name a real record
  * @param {{ number: string, why: string }[]} allowlist
+ * @param {{ file: string, number: string, why: string }[]} [releaseOwned]
+ *   {@link RELEASE_OWNED_CITATIONS}: one number excused in one changelog file
  * @returns {string[]} errors
  */
-function auditCitedNumbers(citations, records, allowlist) {
+function auditCitedNumbers(citations, records, allowlist, releaseOwned = []) {
   const errors = [];
   const allowed = new Map(allowlist.map((e) => [e.number, e]));
+  const owned = new Set(releaseOwned.map((e) => `${e.file}\0${e.number}`));
+  /** `file\0number` pairs a release-owned entry actually excused on this run. */
+  const ownedHits = new Set();
   /** number → sorted files citing it, for numbers that resolve to nothing. */
   const danglingFiles = new Map();
 
   for (const { file, number, qualifier } of citations) {
     if (CROSS_REPO_QUALIFIERS.has(qualifier)) continue; // another repo's registry
     if (records.has(number)) continue;
+    if (owned.has(`${file}\0${number}`)) {
+      ownedHits.add(`${file}\0${number}`);
+      continue;
+    }
     if (!danglingFiles.has(number)) danglingFiles.set(number, new Set());
     danglingFiles.get(number).add(file);
+  }
+
+  for (const { file, number, why } of releaseOwned) {
+    if (posix.basename(file) !== 'CHANGELOG.md') {
+      errors.push(
+        `${SELF_PATH}: the RELEASE_OWNED_CITATIONS entry for ADR-${number} names ${file}, which is not a ` +
+          '`CHANGELOG.md` — the list excuses released history only.\n' +
+          '      Delete the entry and fix the citation where it is written: cite the record that exists, ' +
+          'or spell the sibling registry (`ObjectUI ADR-NNNN`).',
+      );
+    } else if (records.has(number)) {
+      errors.push(
+        `${SELF_PATH}: the RELEASE_OWNED_CITATIONS entry for ADR-${number} in ${file} is stale — ${ADR_DIR}/ ` +
+          `now HAS a record for that number (the entry said: ${why}).\n` +
+          '      Delete the entry, and check the released lines still mean what the new record says.',
+      );
+    } else if (!ownedHits.has(`${file}\0${number}`)) {
+      errors.push(
+        `${SELF_PATH}: the RELEASE_OWNED_CITATIONS entry for ADR-${number} in ${file} is stale — that file ` +
+          `no longer cites ADR-${number} (the entry said: ${why}).\n` +
+          '      Delete the entry. The list is shrink-only: an excuse outliving its citation re-licences the ' +
+          'number for whatever that file says next.',
+      );
+    }
   }
 
   const nextFree = String(Math.max(0, ...[...records].map(Number)) + 1).padStart(4, '0');
@@ -1030,7 +1100,7 @@ let checked = 0;
 // #6634 — every `ADR-NNNN` written anywhere in the tracked tree resolves to a
 // record, not just the ~30 ids registered in adr-anchors/.
 const citations = collectCitations();
-errors.push(...auditCitedNumbers(citations, records, UNRESOLVED_ADR_CITATIONS));
+errors.push(...auditCitedNumbers(citations, records, UNRESOLVED_ADR_CITATIONS, RELEASE_OWNED_CITATIONS));
 
 // #9592 — and one layer down: the `Dk` half of every `ADR-NNNN Dk` citation on
 // the ANCHORED surface must name a decision the cited record actually makes.
@@ -1492,6 +1562,62 @@ function selfTest() {
           `a grandfather clause outliving its citations must fail, got:\n${joined(e)}`,
         );
       }
+
+      // RELEASE_OWNED_CITATIONS — one number excused in one changelog, and
+      // nowhere else.
+      const LOG = 'pkg/CHANGELOG.md';
+      const ownedRow = [{ file: LOG, number: '0202', why: 'synthetic' }];
+
+      {
+        const e = cited(rows(`shipped ${id('0202')}`, LOG), RECORDS, [], ownedRow);
+        assert('release-owned-changelog-citation-is-green', e.length === 0, `expected no errors, got:\n${joined(e)}`);
+      }
+
+      {
+        // The excuse is per FILE: the same number in source still reds.
+        const e = cited(
+          [...rows(`shipped ${id('0202')}`, LOG), ...rows(`see ${id('0202')}`, 'pkg/src/a.ts')],
+          RECORDS,
+          [],
+          ownedRow,
+        );
+        assert(
+          'release-owned-row-does-not-excuse-another-file',
+          e.length === 1 && joined(e).includes('pkg/src/a.ts') && !joined(e).includes(LOG),
+          `only the listed changelog may cite the number, got:\n${joined(e)}`,
+        );
+      }
+
+      {
+        const e = cited(rows(`see ${id('0202')}`, 'pkg/src/a.ts'), RECORDS, [], [
+          { file: 'pkg/src/a.ts', number: '0202', why: 'synthetic' },
+        ]);
+        assert(
+          'release-owned-row-naming-a-non-changelog-is-refused',
+          e.some((m) => m.includes('not a `CHANGELOG.md`')),
+          `a row may excuse released history only, got:\n${joined(e)}`,
+        );
+      }
+
+      {
+        const e = cited(rows(`shipped ${id('0107')}`, LOG), RECORDS, [], [
+          { file: LOG, number: '0107', why: 'synthetic' },
+        ]);
+        assert(
+          'release-owned-row-whose-number-gained-a-record-is-red',
+          e.length === 1 && /stale/.test(joined(e)) && joined(e).includes('now HAS a record'),
+          `a changelog excuse for a number that came back must fail, got:\n${joined(e)}`,
+        );
+      }
+
+      {
+        const e = cited(rows(`shipped ${id('0090')}`, LOG), RECORDS, [], ownedRow);
+        assert(
+          'release-owned-row-its-file-no-longer-cites-is-red',
+          e.length === 1 && /stale/.test(joined(e)) && joined(e).includes('no longer cites'),
+          `an excuse outliving its citation must fail, got:\n${joined(e)}`,
+        );
+      }
     }
 
     // ── Cited decision LETTERS resolve (#9592) ───────────────────────────────
@@ -1788,17 +1914,24 @@ function selfTest() {
           `${new Set(liveCitations.map((c) => c.file)).size} file(s) — the collector is not reading the tree`,
       );
 
-      const citeGreen = auditCitedNumbers(liveCitations, liveRecords, UNRESOLVED_ADR_CITATIONS);
+      const citeGreen = auditCitedNumbers(
+        liveCitations,
+        liveRecords,
+        UNRESOLVED_ADR_CITATIONS,
+        RELEASE_OWNED_CITATIONS,
+      );
       assert(
         'live-citations-are-green-today',
         citeGreen.length === 0,
         `every cited ADR number must resolve as shipped, got:\n${joined(citeGreen)}`,
       );
 
-      // Ablation, predicted RED: drop the citation allowlist and each entry's
+      // Ablation, predicted RED: drop both citation lists and each entry's
       // number must surface. Green here means the entries are dead weight.
-      const citeRed = auditCitedNumbers(liveCitations, liveRecords, []);
-      const citeNumbers = UNRESOLVED_ADR_CITATIONS.map((c) => c.number);
+      const citeRed = auditCitedNumbers(liveCitations, liveRecords, [], []);
+      const citeNumbers = [
+        ...new Set([...UNRESOLVED_ADR_CITATIONS, ...RELEASE_OWNED_CITATIONS].map((c) => c.number)),
+      ].sort();
       assert(
         'citation-ablation-without-allowlist-is-red',
         citeRed.length === citeNumbers.length,

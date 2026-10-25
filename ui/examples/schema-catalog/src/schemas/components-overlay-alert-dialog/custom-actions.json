@@ -1,0 +1,12 @@
+{
+  "type": "alert-dialog",
+  "title": "Confirm Action",
+  "description": "Are you sure you want to proceed with this action?",
+  "trigger": {
+    "type": "button",
+    "label": "Proceed",
+    "variant": "default"
+  },
+  "cancelText": "Go Back",
+  "actionText": "Yes, Continue"
+}

@@ -1,0 +1,71 @@
+{
+  // Type-checks this package's TESTS, which `tsconfig.json` does not read.
+  // See `packages/types/tsconfig.test.json` for why that is a hole: the build
+  // config correctly keeps tests out of `dist`, but nothing else compiled them,
+  // so a test could assert a contract the compiler never checked.
+  //
+  // This package is the one that made `scripts/check-type-check-coverage.mjs`
+  // blind (objectui#3968): its tests live in `test/` rather than `src/`, and
+  // `tsconfig.json` keeps them out by naming the DIRECTORY in `exclude` instead
+  // of a `*.test.` glob. Both of those were invisible to the gate, so the four
+  // files here were read by no `tsc` invocation while the gate reported green.
+  //
+  // Not folded into `tsconfig.json`: that file is the package BUILD (`tsc` ->
+  // `dist`, `rootDir: ./src`, `declaration`), so a test compiled by it would
+  // emit into the published output and `test/` would break `rootDir`.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // The package build emits `dist` from `src`; this project emits nothing, so
+    // it must not inherit the emit options — and `rootDir` has to widen past the
+    // package build's `./src` because the tests sit beside `src`, not inside it.
+    // Widened again to the REPO root by objectui#6024: `catalog-gallery-render.
+    // test.tsx` imports `scripts/check-doc-component-types.mjs`, and `rootDir`
+    // is checked against every file in the program, imports included (TS6059),
+    // even though `noEmit` makes it emit nothing. Nothing else reads it here.
+    "rootDir": "../..",
+    "declaration": false,
+    "declarationMap": false,
+    "composite": false,
+    // The tests are `.tsx` (they render catalog examples through the real
+    // `SchemaRenderer`); the build config has no `jsx` because `src/` is JSON
+    // plus plain `.ts`.
+    "jsx": "react-jsx",
+    // `node`, because `plugin-dashboard-gallery-render.test.tsx` reads the
+    // docs-site gallery host's source with `node:fs` to pin that the gallery
+    // still wires what that test mirrors (objectui#4600). Same declaration as
+    // every other package's test project (e.g. `packages/core/tsconfig.test.
+    // json`). Narrowing to a list is safe here: no catalog test uses a
+    // jest-dom matcher, and `react`/`react-dom` types arrive through the
+    // packages that re-export them.
+    "types": ["node"],
+    // `allowJs` with `checkJs` off, the same answer and for the same reason as
+    // `tsconfig.scripts.json` (objectui#3494): `catalog-gallery-render.test.tsx`
+    // imports `deriveRegistryKeys` from `scripts/check-doc-component-types.mjs`
+    // — a plain-JS CI helper — so the pin's category/type map is DERIVED from
+    // the `register()` calls rather than enumerated a second time
+    // (objectui#6024). Without it that import is TS7016 and the module comes in
+    // as a blanket `any`; the alternative, a hand-written `.d.mts` beside the
+    // `.mjs`, is a second source of truth free to drift silently. With it the
+    // types are INFERRED FROM THE HELPER ITSELF, so changing the helper's
+    // exported signature turns this test red instead of nothing.
+    //
+    // `checkJs` stays FALSE on purpose: this project consumes the helper's
+    // inferred types, it does not take ownership of type-cleanliness inside a
+    // 1000-line plain-JS gate.
+    "allowJs": true,
+    "checkJs": false
+  },
+  // `test/`, not `src/`: that is where this package keeps its tests, and it is
+  // the layout the gate could not see.
+  "include": ["test/**/*.test.ts", "test/**/*.test.tsx"],
+  // Load-bearing, and the first draft of this file got it wrong: `exclude` is
+  // INHERITED from `tsconfig.json`, which excludes the whole `test` DIRECTORY.
+  // Leaving it inherited made this project compile zero files — `tsc` said
+  // TS18003 ("No inputs were found"), which is loud, but a project that covered
+  // only SOME of the tests would have been silent. That is why section 5b of
+  // `scripts/check-type-check-coverage.mjs` now checks that this project really
+  // reads every test file the build config misses, rather than only that a
+  // `*.test.` glob appears somewhere in it.
+  "exclude": ["node_modules", "dist"]
+}

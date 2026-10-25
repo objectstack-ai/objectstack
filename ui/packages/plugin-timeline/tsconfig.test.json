@@ -1,0 +1,24 @@
+{
+  // Type-checks this package's TESTS, which `tsconfig.json` excludes.
+  // See `packages/types/tsconfig.test.json` for why that exclusion was a hole:
+  // the build correctly keeps tests out of `dist`, but nothing else compiled
+  // them, so a test could assert a contract the compiler never checked.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // The package build emits `dist`; this project emits nothing, so it must
+    // not inherit `composite` / `declaration` from the build config.
+    "composite": false,
+    // `node` for the date-only zone pins (objectui#10866), which set
+    // `process.env.TZ` inside a forked child and read the driver's flag off
+    // `process.env`; `packages/plugin-calendar/tsconfig.test.json` names it for
+    // the same pins. It stays OUT of `tsconfig.json`: package SOURCE ships to
+    // browsers and must not compile against Node APIs.
+    "types": ["node"],
+    // Drop the root tsconfig's source-tree `paths` so `@object-ui/*` and
+    // `@objectstack/spec` resolve through the workspace dependency's built
+    // `.d.ts` instead of pulling sibling sources in as program inputs (TS6059).
+    "paths": {}
+  },
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+}

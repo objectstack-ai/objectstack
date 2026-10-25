@@ -1,0 +1,48 @@
+{
+  "type": "container",
+  "maxWidth": "4xl",
+  "centered": false,
+  "padding": 0,
+  "children": [
+    {
+      "type": "text",
+      "content": "Sales Overview",
+      "className": "text-2xl font-bold mb-6"
+    },
+    {
+      "type": "grid",
+      "columns": 2,
+      "gap": 4,
+      "children": [
+        {
+          "type": "statistic",
+          "label": "Revenue",
+          "value": "$125,430",
+          "trend": "up",
+          "description": "+15.2% vs last quarter"
+        },
+        {
+          "type": "statistic",
+          "label": "Orders",
+          "value": "3,842",
+          "trend": "up",
+          "description": "+8.7% vs last quarter"
+        },
+        {
+          "type": "statistic",
+          "label": "Average Order",
+          "value": "$32.65",
+          "trend": "down",
+          "description": "-2.1% vs last quarter"
+        },
+        {
+          "type": "statistic",
+          "label": "Refund Rate",
+          "value": "2.4%",
+          "trend": "neutral",
+          "description": "No significant change"
+        }
+      ]
+    }
+  ]
+}

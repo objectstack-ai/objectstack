@@ -1,0 +1,46 @@
+{
+  "type": "card",
+  "className": "max-w-sm",
+  "children": [
+    {
+      "type": "stack",
+      "gap": 3,
+      "align": "center",
+      "className": "text-center p-4",
+      "children": [
+        {
+          "type": "flex",
+          "properties": {
+            "justify": "center",
+            "align": "center",
+            "gap": 0,
+            "children": [
+              {
+                "type": "icon",
+                "icon": "shield",
+                "className": "h-6 w-6 text-green-600"
+              }
+            ]
+          },
+          "className": "w-12 h-12 rounded-lg bg-green-500/10"
+        },
+        {
+          "type": "text",
+          "content": "Enterprise Security",
+          "className": "text-lg font-semibold"
+        },
+        {
+          "type": "text",
+          "content": "Bank-grade encryption and SOC 2 compliance built in.",
+          "className": "text-sm text-muted-foreground"
+        },
+        {
+          "type": "button",
+          "label": "See Certifications",
+          "variant": "outline",
+          "size": "sm"
+        }
+      ]
+    }
+  ]
+}

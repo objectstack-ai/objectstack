@@ -1,0 +1,44 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "defaultValues": {
+    "transaction_history": [
+      {
+        "date": "2024-03-15",
+        "description": "Payment received",
+        "amount": 100
+      },
+      {
+        "date": "2024-03-14",
+        "description": "Service charge",
+        "amount": -5
+      }
+    ]
+  },
+  "fields": [
+    {
+      "name": "transaction_history",
+      "label": "Transaction History",
+      "type": "grid",
+      "columns": [
+        {
+          "name": "date",
+          "label": "Date",
+          "type": "date"
+        },
+        {
+          "name": "description",
+          "label": "Description",
+          "type": "text"
+        },
+        {
+          "name": "amount",
+          "label": "Amount",
+          "type": "currency"
+        }
+      ],
+      "readonly": true
+    }
+  ]
+}

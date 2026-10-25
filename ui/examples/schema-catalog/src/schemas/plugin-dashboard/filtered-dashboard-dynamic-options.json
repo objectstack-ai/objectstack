@@ -1,0 +1,39 @@
+{
+  "type": "dashboard",
+  "columns": 2,
+  "gap": 4,
+  "globalFilters": [
+    {
+      "name": "industry",
+      "field": "industry",
+      "label": "Industry",
+      "type": "select",
+      "optionsFrom": {
+        "object": "accounts",
+        "valueField": "industry",
+        "labelField": "industry"
+      }
+    }
+  ],
+  "widgets": [
+    {
+      "id": "accounts_by_industry",
+      "title": "Accounts by Industry",
+      "type": "bar",
+      "dataset": "accounts",
+      "dimensions": ["industry"],
+      "values": ["count"]
+    },
+    {
+      "id": "invoices_by_status",
+      "title": "Invoices by Status",
+      "type": "donut",
+      "dataset": "invoices",
+      "dimensions": ["status"],
+      "values": ["count"],
+      "filterBindings": {
+        "industry": "account_industry"
+      }
+    }
+  ]
+}

@@ -1,0 +1,98 @@
+{
+  "type": "container",
+  "maxWidth": "4xl",
+  "centered": false,
+  "padding": 0,
+  "className": "border rounded-lg overflow-hidden",
+  "children": [
+    {
+      "type": "header",
+      "className": "p-4 bg-slate-900 text-white",
+      "children": [
+        {
+          "type": "text",
+          "content": "My Website",
+          "className": "text-xl font-bold"
+        }
+      ]
+    },
+    {
+      "type": "nav",
+      "className": "p-3 bg-slate-100 border-b",
+      "children": [
+        {
+          "type": "flex",
+          "properties": {
+            "gap": 4,
+            "children": [
+              {
+                "type": "text",
+                "content": "Home"
+              },
+              {
+                "type": "text",
+                "content": "About"
+              },
+              {
+                "type": "text",
+                "content": "Services"
+              },
+              {
+                "type": "text",
+                "content": "Contact"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "type": "main",
+      "className": "p-6",
+      "children": [
+        {
+          "type": "article",
+          "className": "mb-6 pb-6 border-b",
+          "children": [
+            {
+              "type": "text",
+              "content": "Article Title",
+              "className": "text-2xl font-bold mb-2"
+            },
+            {
+              "type": "text",
+              "content": "Article content goes here...",
+              "className": "text-muted-foreground"
+            }
+          ]
+        },
+        {
+          "type": "section",
+          "children": [
+            {
+              "type": "text",
+              "content": "Related Content",
+              "className": "text-xl font-semibold mb-2"
+            },
+            {
+              "type": "text",
+              "content": "More information...",
+              "className": "text-muted-foreground"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "footer",
+      "className": "p-4 bg-slate-100 text-center",
+      "children": [
+        {
+          "type": "text",
+          "content": "© 2024 All rights reserved",
+          "className": "text-sm text-muted-foreground"
+        }
+      ]
+    }
+  ]
+}

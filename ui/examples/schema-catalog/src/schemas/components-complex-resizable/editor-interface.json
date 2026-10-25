@@ -1,0 +1,69 @@
+{
+  "type": "resizable",
+  "direction": "horizontal",
+  "minHeight": "400px",
+  "className": "rounded-lg border",
+  "panels": [
+    {
+      "defaultSize": 30,
+      "minSize": 20,
+      "content": [
+        {
+          "type": "box",
+          "className": "p-4 h-full bg-slate-900 text-slate-50",
+          "children": [
+            {
+              "type": "text",
+              "content": "File Explorer",
+              "className": "font-semibold mb-4 block"
+            },
+            {
+              "type": "tree-view",
+              "className": "bg-slate-800 text-slate-100",
+              "nodes": [
+                {
+                  "id": "1",
+                  "label": "src",
+                  "icon": "folder",
+                  "children": [
+                    {
+                      "id": "2",
+                      "label": "components",
+                      "icon": "folder"
+                    },
+                    {
+                      "id": "3",
+                      "label": "index.ts",
+                      "icon": "file"
+                    }
+                  ]
+                },
+                {
+                  "id": "4",
+                  "label": "README.md",
+                  "icon": "file"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "defaultSize": 70,
+      "content": [
+        {
+          "type": "box",
+          "className": "p-4 h-full bg-slate-950 text-slate-50 font-mono text-sm",
+          "children": [
+            {
+              "type": "text",
+              "content": "// Code editor\nfunction hello() {\n  console.log(\"Hello World\");\n}",
+              "className": "whitespace-pre"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

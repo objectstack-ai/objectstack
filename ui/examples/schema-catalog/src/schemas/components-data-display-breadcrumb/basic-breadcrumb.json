@@ -1,0 +1,20 @@
+{
+  "type": "breadcrumb",
+  "items": [
+    {
+      "label": "Home",
+      "href": "/"
+    },
+    {
+      "label": "Products",
+      "href": "/products"
+    },
+    {
+      "label": "Category",
+      "href": "/products/category"
+    },
+    {
+      "label": "Item"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "type": "object-grid",
+  "properties": {
+    "objectName": "users",
+    "label": "User Directory",
+    "columns": [
+      { "field": "name", "label": "Full Name", "summary": "count_filled" },
+      { "field": "email", "label": "Email" },
+      { "field": "department", "label": "Department", "summary": { "type": "count_unique" } },
+      { "field": "role", "type": "select" },
+      { "field": "status", "type": "select" }
+    ],
+    "selection": { "type": "multiple" },
+    "rowActions": ["view", "edit"],
+    "bulkActions": ["export"],
+    "pagination": { "pageSize": 5 }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "type": "dashboard",
+  "columns": 2,
+  "gap": 4,
+  "dateRange": {
+    "field": "created_at",
+    "defaultRange": "last_90_days",
+    "allowCustomRange": true
+  },
+  "widgets": [
+    {
+      "id": "invoices_by_month",
+      "title": "Invoices by Month",
+      "type": "line",
+      "dataset": "invoices",
+      "dimensions": ["created_month"],
+      "values": ["count"]
+    },
+    {
+      "id": "accounts_signed_by_month",
+      "title": "Accounts Signed by Month",
+      "type": "area",
+      "dataset": "accounts",
+      "dimensions": ["signed_month"],
+      "values": ["count"],
+      "filterBindings": {
+        "dateRange": "signed_at"
+      }
+    },
+    {
+      "id": "all_time_total",
+      "title": "All-time Invoices",
+      "type": "metric",
+      "dataset": "invoices",
+      "values": ["count"],
+      "filterBindings": {
+        "dateRange": false
+      }
+    }
+  ]
+}

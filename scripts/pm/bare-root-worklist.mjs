@@ -1024,6 +1024,19 @@ const TRIAGE = new Map([
     verdict: 'REFUSE-WIDE',
     why: '162 of 238 (68%), refused with its packages half for the reason above',
   }],
+  ['scripts/check-test-source-alias.mjs ALIAS_HALF_EXCLUDED_DIR ui', {
+    verdict: 'REFUSE-WIDE',
+    why: 'FRESH at the objectui cutover (objectstack#25803), when decision F scoped the gate\'s '
+      + 'vitest-alias half to members outside the objectui tree. The word is where ONE rule stops, '
+      + 'not what the gate reads: every other rule still reads ui/ (the clocked-window rule, both '
+      + 'ENOTDIR alias-table rules, the readability of every config), and the ui members\' tests '
+      + 'pull in the sources, manifests and configs they reach — 7822 of 9239 tracked ui/ files '
+      + '(85%), 5854 of them tests, measured 2026-10-25 by recording every file the gate reads on '
+      + 'the cutover tree. The population is not a part of the root, it IS the root, the same trade '
+      + 'as engine-double-contract at 90%: a true declaration would name this gate on every card '
+      + 'that touches objectui, and CI already schedules the family on every PR. Renaming the '
+      + 'constant to leave this sweep would hide the literal, not judge it',
+  }],
   // ── Refused: the population is a filter the idiom cannot spell ────────────
   ['scripts/check-driver-conformance.mjs CASE_SETS_DIR packages', {
     verdict: 'REFUSE-UNSPELLABLE',
@@ -1545,28 +1558,6 @@ export const UNJUDGED = new Map([
     why: '`path: \'skills\'` at check-doc-security-posture.mjs:164, walked recursively by the `walk` '
       + 'at :189-:193 from the `for (const root of ROOTS)` at :462, for every `.md` file under it '
       + 'minus the entry\'s own `exclude` list',
-  }],
-  ['scripts/check-console-injection.mjs distDir packages', {
-    population: false,
-    base: '91f65c4ea',
-    why: 'the word is a `join()` path COMPONENT at check-console-injection.mjs:940 — the gate '
-      + 'assembles the console dist directory from four bare single-segment words, so the extractor '
-      + 'sees the top-level one and nothing else. It never walks that root: `evaluate` at :247 opens '
-      + 'the index file at :252, the stamp beside it at :268, and every JavaScript asset directly '
-      + 'inside that directory\'s assets child at :269 — `readBundle` in console-spec-probes.mjs, '
-      + 'non-recursive. Surfaced by the #17057 property widening because the component sits inside '
-      + 'the `distDir` property of the argv object, which the recogniser now reads',
-  }],
-  ['scripts/check-console-injection.mjs specDir packages', {
-    population: false,
-    base: '91f65c4ea',
-    why: 'the same shape one line down, at check-console-injection.mjs:941: a `join()` component of '
-      + 'the spec package directory, assembled from bare words. The gate reads that package\'s '
-      + 'manifest and the built JavaScript its `exports` map points at — `readSpecBlob` in '
-      + 'console-spec-probes.mjs, reached at :348 — never an arbitrary file under the top-level '
-      + 'root. ⚠️ Both of this gate\'s real populations are themselves invisible to the derivation, '
-      + 'for the DIFFERENT reason that they are assembled rather than spelled; that is a fact this '
-      + 'note records and not a verdict on what, if anything, should be declared for them',
   }],
   ['scripts/check-doc-frontmatter.mjs ROOTS docs', {
     population: false,

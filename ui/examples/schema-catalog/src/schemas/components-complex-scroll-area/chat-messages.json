@@ -1,0 +1,629 @@
+{
+  "type": "scroll-area",
+  "height": "300px",
+  "className": "rounded-md border",
+  "children": [
+    {
+      "type": "stack",
+      "gap": 3,
+      "className": "p-4",
+      "children": [
+        {
+          "type": "flex",
+          "properties": {
+            "align": "stretch",
+            "gap": 3,
+            "children": [
+              {
+                "type": "flex",
+                "properties": {
+                  "justify": "center",
+                  "align": "center",
+                  "gap": 0,
+                  "children": [
+                    {
+                      "type": "text",
+                      "content": "A"
+                    }
+                  ]
+                },
+                "className": "w-10 h-10 rounded-full bg-blue-500 text-white font-semibold flex-shrink-0"
+              },
+              {
+                "type": "box",
+                "className": "flex-1",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "User 1",
+                    "className": "font-semibold block"
+                  },
+                  {
+                    "type": "text",
+                    "content": "This is a sample message...",
+                    "className": "text-sm text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 rounded-lg bg-slate-50 hover:bg-slate-100"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "stretch",
+            "gap": 3,
+            "children": [
+              {
+                "type": "flex",
+                "properties": {
+                  "justify": "center",
+                  "align": "center",
+                  "gap": 0,
+                  "children": [
+                    {
+                      "type": "text",
+                      "content": "B"
+                    }
+                  ]
+                },
+                "className": "w-10 h-10 rounded-full bg-blue-500 text-white font-semibold flex-shrink-0"
+              },
+              {
+                "type": "box",
+                "className": "flex-1",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "User 2",
+                    "className": "font-semibold block"
+                  },
+                  {
+                    "type": "text",
+                    "content": "This is a sample message...",
+                    "className": "text-sm text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 rounded-lg bg-slate-50 hover:bg-slate-100"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "stretch",
+            "gap": 3,
+            "children": [
+              {
+                "type": "flex",
+                "properties": {
+                  "justify": "center",
+                  "align": "center",
+                  "gap": 0,
+                  "children": [
+                    {
+                      "type": "text",
+                      "content": "C"
+                    }
+                  ]
+                },
+                "className": "w-10 h-10 rounded-full bg-blue-500 text-white font-semibold flex-shrink-0"
+              },
+              {
+                "type": "box",
+                "className": "flex-1",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "User 3",
+                    "className": "font-semibold block"
+                  },
+                  {
+                    "type": "text",
+                    "content": "This is a sample message...",
+                    "className": "text-sm text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 rounded-lg bg-slate-50 hover:bg-slate-100"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "stretch",
+            "gap": 3,
+            "children": [
+              {
+                "type": "flex",
+                "properties": {
+                  "justify": "center",
+                  "align": "center",
+                  "gap": 0,
+                  "children": [
+                    {
+                      "type": "text",
+                      "content": "D"
+                    }
+                  ]
+                },
+                "className": "w-10 h-10 rounded-full bg-blue-500 text-white font-semibold flex-shrink-0"
+              },
+              {
+                "type": "box",
+                "className": "flex-1",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "User 4",
+                    "className": "font-semibold block"
+                  },
+                  {
+                    "type": "text",
+                    "content": "This is a sample message...",
+                    "className": "text-sm text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 rounded-lg bg-slate-50 hover:bg-slate-100"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "stretch",
+            "gap": 3,
+            "children": [
+              {
+                "type": "flex",
+                "properties": {
+                  "justify": "center",
+                  "align": "center",
+                  "gap": 0,
+                  "children": [
+                    {
+                      "type": "text",
+                      "content": "E"
+                    }
+                  ]
+                },
+                "className": "w-10 h-10 rounded-full bg-blue-500 text-white font-semibold flex-shrink-0"
+              },
+              {
+                "type": "box",
+                "className": "flex-1",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "User 5",
+                    "className": "font-semibold block"
+                  },
+                  {
+                    "type": "text",
+                    "content": "This is a sample message...",
+                    "className": "text-sm text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 rounded-lg bg-slate-50 hover:bg-slate-100"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "stretch",
+            "gap": 3,
+            "children": [
+              {
+                "type": "flex",
+                "properties": {
+                  "justify": "center",
+                  "align": "center",
+                  "gap": 0,
+                  "children": [
+                    {
+                      "type": "text",
+                      "content": "F"
+                    }
+                  ]
+                },
+                "className": "w-10 h-10 rounded-full bg-blue-500 text-white font-semibold flex-shrink-0"
+              },
+              {
+                "type": "box",
+                "className": "flex-1",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "User 6",
+                    "className": "font-semibold block"
+                  },
+                  {
+                    "type": "text",
+                    "content": "This is a sample message...",
+                    "className": "text-sm text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 rounded-lg bg-slate-50 hover:bg-slate-100"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "stretch",
+            "gap": 3,
+            "children": [
+              {
+                "type": "flex",
+                "properties": {
+                  "justify": "center",
+                  "align": "center",
+                  "gap": 0,
+                  "children": [
+                    {
+                      "type": "text",
+                      "content": "G"
+                    }
+                  ]
+                },
+                "className": "w-10 h-10 rounded-full bg-blue-500 text-white font-semibold flex-shrink-0"
+              },
+              {
+                "type": "box",
+                "className": "flex-1",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "User 7",
+                    "className": "font-semibold block"
+                  },
+                  {
+                    "type": "text",
+                    "content": "This is a sample message...",
+                    "className": "text-sm text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 rounded-lg bg-slate-50 hover:bg-slate-100"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "stretch",
+            "gap": 3,
+            "children": [
+              {
+                "type": "flex",
+                "properties": {
+                  "justify": "center",
+                  "align": "center",
+                  "gap": 0,
+                  "children": [
+                    {
+                      "type": "text",
+                      "content": "H"
+                    }
+                  ]
+                },
+                "className": "w-10 h-10 rounded-full bg-blue-500 text-white font-semibold flex-shrink-0"
+              },
+              {
+                "type": "box",
+                "className": "flex-1",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "User 8",
+                    "className": "font-semibold block"
+                  },
+                  {
+                    "type": "text",
+                    "content": "This is a sample message...",
+                    "className": "text-sm text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 rounded-lg bg-slate-50 hover:bg-slate-100"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "stretch",
+            "gap": 3,
+            "children": [
+              {
+                "type": "flex",
+                "properties": {
+                  "justify": "center",
+                  "align": "center",
+                  "gap": 0,
+                  "children": [
+                    {
+                      "type": "text",
+                      "content": "I"
+                    }
+                  ]
+                },
+                "className": "w-10 h-10 rounded-full bg-blue-500 text-white font-semibold flex-shrink-0"
+              },
+              {
+                "type": "box",
+                "className": "flex-1",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "User 9",
+                    "className": "font-semibold block"
+                  },
+                  {
+                    "type": "text",
+                    "content": "This is a sample message...",
+                    "className": "text-sm text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 rounded-lg bg-slate-50 hover:bg-slate-100"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "stretch",
+            "gap": 3,
+            "children": [
+              {
+                "type": "flex",
+                "properties": {
+                  "justify": "center",
+                  "align": "center",
+                  "gap": 0,
+                  "children": [
+                    {
+                      "type": "text",
+                      "content": "J"
+                    }
+                  ]
+                },
+                "className": "w-10 h-10 rounded-full bg-blue-500 text-white font-semibold flex-shrink-0"
+              },
+              {
+                "type": "box",
+                "className": "flex-1",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "User 10",
+                    "className": "font-semibold block"
+                  },
+                  {
+                    "type": "text",
+                    "content": "This is a sample message...",
+                    "className": "text-sm text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 rounded-lg bg-slate-50 hover:bg-slate-100"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "stretch",
+            "gap": 3,
+            "children": [
+              {
+                "type": "flex",
+                "properties": {
+                  "justify": "center",
+                  "align": "center",
+                  "gap": 0,
+                  "children": [
+                    {
+                      "type": "text",
+                      "content": "K"
+                    }
+                  ]
+                },
+                "className": "w-10 h-10 rounded-full bg-blue-500 text-white font-semibold flex-shrink-0"
+              },
+              {
+                "type": "box",
+                "className": "flex-1",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "User 11",
+                    "className": "font-semibold block"
+                  },
+                  {
+                    "type": "text",
+                    "content": "This is a sample message...",
+                    "className": "text-sm text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 rounded-lg bg-slate-50 hover:bg-slate-100"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "stretch",
+            "gap": 3,
+            "children": [
+              {
+                "type": "flex",
+                "properties": {
+                  "justify": "center",
+                  "align": "center",
+                  "gap": 0,
+                  "children": [
+                    {
+                      "type": "text",
+                      "content": "L"
+                    }
+                  ]
+                },
+                "className": "w-10 h-10 rounded-full bg-blue-500 text-white font-semibold flex-shrink-0"
+              },
+              {
+                "type": "box",
+                "className": "flex-1",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "User 12",
+                    "className": "font-semibold block"
+                  },
+                  {
+                    "type": "text",
+                    "content": "This is a sample message...",
+                    "className": "text-sm text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 rounded-lg bg-slate-50 hover:bg-slate-100"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "stretch",
+            "gap": 3,
+            "children": [
+              {
+                "type": "flex",
+                "properties": {
+                  "justify": "center",
+                  "align": "center",
+                  "gap": 0,
+                  "children": [
+                    {
+                      "type": "text",
+                      "content": "M"
+                    }
+                  ]
+                },
+                "className": "w-10 h-10 rounded-full bg-blue-500 text-white font-semibold flex-shrink-0"
+              },
+              {
+                "type": "box",
+                "className": "flex-1",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "User 13",
+                    "className": "font-semibold block"
+                  },
+                  {
+                    "type": "text",
+                    "content": "This is a sample message...",
+                    "className": "text-sm text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 rounded-lg bg-slate-50 hover:bg-slate-100"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "stretch",
+            "gap": 3,
+            "children": [
+              {
+                "type": "flex",
+                "properties": {
+                  "justify": "center",
+                  "align": "center",
+                  "gap": 0,
+                  "children": [
+                    {
+                      "type": "text",
+                      "content": "N"
+                    }
+                  ]
+                },
+                "className": "w-10 h-10 rounded-full bg-blue-500 text-white font-semibold flex-shrink-0"
+              },
+              {
+                "type": "box",
+                "className": "flex-1",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "User 14",
+                    "className": "font-semibold block"
+                  },
+                  {
+                    "type": "text",
+                    "content": "This is a sample message...",
+                    "className": "text-sm text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 rounded-lg bg-slate-50 hover:bg-slate-100"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "stretch",
+            "gap": 3,
+            "children": [
+              {
+                "type": "flex",
+                "properties": {
+                  "justify": "center",
+                  "align": "center",
+                  "gap": 0,
+                  "children": [
+                    {
+                      "type": "text",
+                      "content": "O"
+                    }
+                  ]
+                },
+                "className": "w-10 h-10 rounded-full bg-blue-500 text-white font-semibold flex-shrink-0"
+              },
+              {
+                "type": "box",
+                "className": "flex-1",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "User 15",
+                    "className": "font-semibold block"
+                  },
+                  {
+                    "type": "text",
+                    "content": "This is a sample message...",
+                    "className": "text-sm text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 rounded-lg bg-slate-50 hover:bg-slate-100"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  // Type-checks this example's TESTS, which `tsconfig.json` does not read.
+  //
+  // That is correct of `tsconfig.json` — it is the app build config, its
+  // `include` is `["src"]`, and `test/` sits beside `src` rather than inside it.
+  // But it also means no `tsc` invocation would read the closure test at all,
+  // which is exactly the hole `scripts/check-type-check-coverage.mjs` exists to
+  // close (objectstack#4118, objectui#3968): a test the compiler never reads can
+  // assert a contract that was never checked, and then read as evidence that the
+  // contract holds. Chained off the `type-check` script in `package.json`.
+  //
+  // No `exclude` override is needed here, unlike
+  // `examples/schema-catalog/tsconfig.test.json`: this example's
+  // `tsconfig.json` has no `exclude` at all, so there is no inherited
+  // directory-form exclusion to undo.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // The test walks the repository off disk and drives TypeScript's own
+    // preprocessor, so it needs the Node built-in declarations that the app's
+    // `["vite/client"]` alone does not provide.
+    "types": ["node", "vite/client"]
+  },
+  "include": ["test/**/*.test.ts", "test/**/*.test.tsx"]
+}

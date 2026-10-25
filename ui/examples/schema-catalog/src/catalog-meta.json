@@ -1,0 +1,301 @@
+{
+  "auth/forgot-password": {
+    "description": "Request a password reset email.",
+    "tags": [
+      "password",
+      "reset",
+      "form"
+    ]
+  },
+  "auth/login-simple": {
+    "title": "Simple Login Form",
+    "description": "Email + password sign-in with \"remember me\" and a social provider button.",
+    "tags": [
+      "login",
+      "form",
+      "card",
+      "oauth"
+    ]
+  },
+  "auth/signup": {
+    "title": "Sign Up Form",
+    "description": "Two-column registration form with terms acceptance.",
+    "tags": [
+      "signup",
+      "register",
+      "form",
+      "grid"
+    ]
+  },
+  "auth/two-factor": {
+    "title": "Two-Factor Authentication",
+    "description": "6-digit code verification with resend.",
+    "tags": [
+      "2fa",
+      "otp",
+      "verification"
+    ]
+  },
+  "components-feedback-sonner/promise-based-toast": {
+    "title": "Custom Trigger Button",
+    "description": "A success toast whose trigger button is styled through buttonVariant.",
+    "tags": [
+      "toast",
+      "sonner",
+      "button"
+    ]
+  },
+  "components-feedback-sonner/toast-with-action": {
+    "title": "Message With Description",
+    "description": "A sonner toast carrying both a message and a secondary description line.",
+    "tags": [
+      "toast",
+      "sonner",
+      "description"
+    ]
+  },
+  "components-feedback-toast/destructive": {
+    "title": "Error Variant",
+    "description": "The 'error' toast variant. 'destructive' is a button variant, not a toast variant.",
+    "tags": [
+      "toast",
+      "variant",
+      "error"
+    ]
+  },
+  "components-feedback-toast/toast-with-action": {
+    "title": "Info Variant",
+    "description": "The 'info' toast variant, used here for an update notice.",
+    "tags": [
+      "toast",
+      "variant",
+      "info"
+    ]
+  },
+  "components-feedback-toast/toast-with-undo": {
+    "title": "Warning Variant",
+    "description": "The 'warning' toast variant, used here for a deletion notice.",
+    "tags": [
+      "toast",
+      "variant",
+      "warning"
+    ]
+  },
+  "components-form-form/basic-form": {
+    "title": "Basic Form",
+    "description": "A hand-built `form` node from `@object-ui/components`: name, email, country and newsletter fields declared inline, with no object behind them. For a form generated from an object's own metadata, see the `plugin-form` examples.",
+    "tags": [
+      "form",
+      "input",
+      "select",
+      "checkbox"
+    ]
+  },
+  "components-form-form/demo-request-form": {
+    "title": "Demo Request Form",
+    "description": "A longer hand-built `form`: company details, industry and size selects, a message textarea and a terms checkbox, all declared inline. For a form bound to an object, see the `plugin-form` examples.",
+    "tags": [
+      "form",
+      "select",
+      "textarea",
+      "checkbox"
+    ]
+  },
+  "components-layout-card/inventory-table-card": {
+    "title": "Inventory Table Card",
+    "description": "A card that draws a product inventory table by hand — toolbar buttons, header row, stock-status badges. For a table bound to an object, see the `plugin-grid` examples.",
+    "tags": [
+      "card",
+      "table",
+      "badge",
+      "layout"
+    ]
+  },
+  "components-layout-card/profile-detail-card": {
+    "title": "Profile Detail Card",
+    "description": "A card that draws one record by hand — avatar header, label/value rows, edit and delete footer. For a record surface bound to an object, see the `plugin-view` examples.",
+    "tags": [
+      "card",
+      "detail",
+      "profile",
+      "avatar"
+    ]
+  },
+  "components-layout-card/team-roster-card": {
+    "title": "Team Roster Card",
+    "description": "A card that draws a team roster table by hand — invite action, header row, presence badges. For a table bound to an object, see the `plugin-grid` examples.",
+    "tags": [
+      "card",
+      "table",
+      "badge",
+      "roster"
+    ]
+  },
+  "components-layout-card/user-list-card": {
+    "title": "User List Card",
+    "description": "A card that draws a directory table by hand — header row, striped rows, status badges. For a table bound to an object, see the `plugin-view` / `plugin-grid` examples.",
+    "tags": [
+      "card",
+      "list",
+      "badge",
+      "layout"
+    ]
+  },
+  "forms/create-user-form": {
+    "title": "Create User Form",
+    "description": "Two-column name fields, email, role select and a submit/cancel footer.",
+    "tags": [
+      "form",
+      "create",
+      "select",
+      "grid"
+    ]
+  },
+  "plugin-dashboard/filtered-dashboard": {
+    "description": "Dashboard-level date + region filters driving multiple charts over different objects"
+  },
+  "plugin-dashboard/filtered-dashboard-dataset-widgets": {
+    "title": "Filtered Dashboard — Widgets Over Two Datasets",
+    "description": "Dashboard filters scoping widgets bound to two different datasets, each through its own dataset query's runtimeFilter"
+  },
+  "plugin-dashboard/filtered-dashboard-date-presets": {
+    "title": "Filtered Dashboard — Date Presets + Custom Range",
+    "description": "Built-in dateRange with presets and allowCustomRange; per-widget date-field override and a dateRange: false opt-out"
+  },
+  "plugin-dashboard/filtered-dashboard-dynamic-options": {
+    "title": "Filtered Dashboard — Dynamic Options",
+    "description": "Select filter whose options are fetched from object records via optionsFrom (distinct values at runtime)"
+  },
+  "plugin-dashboard/filtered-dashboard-filter-types": {
+    "title": "Filtered Dashboard — Text / Number / Lookup Filters",
+    "description": "Text ($contains), number (equality) and lookup (optionsFrom) filter types, plus a fully opted-out metric"
+  },
+  "plugin-dashboard/filtered-dashboard-target-widgets": {
+    "title": "Filtered Dashboard — Target Widgets Allow-list",
+    "description": "Legacy targetWidgets allow-list: only listed widgets get the default binding; an explicit filterBindings entry still wins"
+  },
+  "plugin-form/object-form-record": {
+    "title": "Object Form — One Record From Object Metadata",
+    "description": "object-form editing one `users` record: the fields come from the object's own metadata through `getObjectSchema`, the values from `findOne`, and `fields` / `columns` decide which of them appear and how wide the grid is.",
+    "tags": [
+      "object-form",
+      "objectql",
+      "edit",
+      "columns"
+    ]
+  },
+  "plugin-form/object-form-tabbed-sections": {
+    "title": "Object Form — Sections as Tabs",
+    "description": "The same record with `formType: 'tabbed'`: the declared `sections` become tab panels of ONE form, so a single submit spans them and a tab the user leaves keeps its values.",
+    "tags": [
+      "object-form",
+      "tabbed",
+      "sections",
+      "objectql"
+    ]
+  },
+  "plugin-grid/object-grid-columns": {
+    "title": "Object Grid — Column Definitions",
+    "description": "object-grid rendering the users object: `ListColumn` objects carrying label, width, align, cell `type` and `link`, with `sort`, `searchableFields` and `pagination` shaping the query the host's data source answers.",
+    "tags": [
+      "object-grid",
+      "columns",
+      "sort",
+      "objectql"
+    ]
+  },
+  "plugin-grid/object-grid-selection-summaries": {
+    "title": "Object Grid — Selection, Row Actions and Summaries",
+    "description": "The same object with multi-row `selection`, named `rowActions` / `bulkActions`, and per-column footer `summary` roll-ups computed over the rows the data source returns.",
+    "tags": [
+      "object-grid",
+      "selection",
+      "rowActions",
+      "summary"
+    ]
+  },
+  "plugin-view/object-view-list": {
+    "title": "Object View — List Surface",
+    "description": "object-view rendering the users object: the columns declared in `table`, with search and sort served by the host's data source.",
+    "tags": [
+      "object-view",
+      "grid",
+      "list",
+      "objectql"
+    ]
+  },
+  "plugin-view/object-view-named-views": {
+    "title": "Object View — Saved Views",
+    "description": "Two `listViews` entries over one object, each with its own label and column set; `defaultListView` picks which opens first.",
+    "tags": [
+      "object-view",
+      "listViews",
+      "tabs",
+      "objectql"
+    ]
+  },
+  "plugin-view/object-view-record-surface": {
+    "title": "Object View — Record Surface",
+    "description": "Create, read and edit as one surface: `layout` decides where it opens, `form` decides what it contains, and a row click chooses the record.",
+    "tags": [
+      "object-view",
+      "form",
+      "drawer",
+      "crud"
+    ]
+  },
+  "components-data-display-breadcrumb/custom-separator": {
+    "title": "Custom Separator",
+    "description": "The declared `separator` key, authored as \">\". Left unauthored, the trail separates with the declared default \"/\".",
+    "tags": [
+      "breadcrumb",
+      "separator",
+      "navigation"
+    ]
+  },
+  "components-data-display-breadcrumb/collapsed-trail": {
+    "title": "Collapsed Trail",
+    "description": "`maxItems: 3` over a five-crumb trail: the root, an elision marker, and the last two crumbs.",
+    "tags": [
+      "breadcrumb",
+      "maxItems",
+      "collapse"
+    ]
+  },
+  "components-navigation-header-bar/crumbs-with-icons": {
+    "title": "Crumbs With Icons",
+    "description": "`crumbs[].icon` — kebab-case Lucide names resolved to glyphs, the same declared key a `ui:breadcrumb` item carries.",
+    "tags": [
+      "header",
+      "breadcrumb",
+      "icon"
+    ]
+  },
+  "components-layout-box/basic-box": {
+    "title": "Basic Box",
+    "description": "A neutral block container: authored classes pass through verbatim, nothing is injected.",
+    "tags": [
+      "box",
+      "container",
+      "layout"
+    ]
+  },
+  "components-layout-box/nested-boxes": {
+    "title": "Nested Boxes",
+    "description": "Boxes nested for pure grouping — each level shows only its own authored classes.",
+    "tags": [
+      "box",
+      "container",
+      "nesting"
+    ]
+  },
+  "components-basic-sidebar/collapsible-sidebar": {
+    "title": "Non-Collapsible Sidebar",
+    "description": "`collapsible: false` draws the sidebar in the page flow at a fixed width, whatever the host's sidebar state.",
+    "tags": [
+      "sidebar",
+      "navigation",
+      "collapsible"
+    ]
+  }
+}

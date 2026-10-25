@@ -331,7 +331,13 @@ const EXIT_PREREQ = 3;
  * manifests -- or one that stops -- reds here rather than leaving the
  * declaration quietly describing a tree that moved.
  */
-const ROOT_DIR_WATCH_HINTS = ['packages/**/package.json', 'apps/**/package.json', 'examples/**/package.json'];
+const ROOT_DIR_WATCH_HINTS = [
+  'packages/**/package.json',
+  'apps/**/package.json',
+  'examples/**/package.json',
+  // The objectui tree under `ui/` (objectstack#25677): the `ui` root member and every member below it.
+  'ui/**/package.json',
+];
 
 /** The repo-root manifest, in the root-FILE spelling the same extractor reads. */
 const ROOT_FILE_WATCH_HINTS = ['package.json/**'];

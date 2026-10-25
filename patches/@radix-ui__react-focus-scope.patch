@@ -1,0 +1,50 @@
+diff --git a/dist/index.js b/dist/index.js
+index e8906db3b1e87bfc568b75d72b7ed3d8d1d3c09a..7a05e0e4cffba466301ba1fb67067c0861af0a4d 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -110,6 +110,10 @@ var FocusScope = /* @__PURE__ */ React.forwardRef(
+     }, [trapped, container, focusScope.paused]);
+     React.useEffect(() => {
+       if (container) {
++        if (focusScope.__pendingStackRemove !== void 0) {
++          clearTimeout(focusScope.__pendingStackRemove);
++          focusScope.__pendingStackRemove = void 0;
++        }
+         focusScopesStack.add(focusScope);
+         const previouslyFocusedElement = document.activeElement;
+         const hasFocusedCandidate = container.contains(previouslyFocusedElement);
+@@ -126,7 +130,8 @@ var FocusScope = /* @__PURE__ */ React.forwardRef(
+         }
+         return () => {
+           container.removeEventListener(AUTOFOCUS_ON_MOUNT, onMountAutoFocus);
+-          setTimeout(() => {
++          focusScope.__pendingStackRemove = setTimeout(() => {
++            focusScope.__pendingStackRemove = void 0;
+             const unmountEvent = new CustomEvent(AUTOFOCUS_ON_UNMOUNT, EVENT_OPTIONS);
+             container.addEventListener(AUTOFOCUS_ON_UNMOUNT, onUnmountAutoFocus);
+             container.dispatchEvent(unmountEvent);
+diff --git a/dist/index.mjs b/dist/index.mjs
+index 030ff1a4d2383c9a0a1ba850aa4591890f028784..3dd39a90db9886bc495014a6e4136773e3548448 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -75,6 +75,10 @@ var FocusScope = /* @__PURE__ */ React.forwardRef(
+     }, [trapped, container, focusScope.paused]);
+     React.useEffect(() => {
+       if (container) {
++        if (focusScope.__pendingStackRemove !== void 0) {
++          clearTimeout(focusScope.__pendingStackRemove);
++          focusScope.__pendingStackRemove = void 0;
++        }
+         focusScopesStack.add(focusScope);
+         const previouslyFocusedElement = document.activeElement;
+         const hasFocusedCandidate = container.contains(previouslyFocusedElement);
+@@ -91,7 +95,8 @@ var FocusScope = /* @__PURE__ */ React.forwardRef(
+         }
+         return () => {
+           container.removeEventListener(AUTOFOCUS_ON_MOUNT, onMountAutoFocus);
+-          setTimeout(() => {
++          focusScope.__pendingStackRemove = setTimeout(() => {
++            focusScope.__pendingStackRemove = void 0;
+             const unmountEvent = new CustomEvent(AUTOFOCUS_ON_UNMOUNT, EVENT_OPTIONS);
+             container.addEventListener(AUTOFOCUS_ON_UNMOUNT, onUnmountAutoFocus);
+             container.dispatchEvent(unmountEvent);

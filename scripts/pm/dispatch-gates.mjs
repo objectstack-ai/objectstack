@@ -12665,9 +12665,10 @@ function discoverFamiliesPass(tree) {
       // is refused for a self-test because a module's population describes the
       // gate's WORK, which a `--self-test` invocation does not perform. A file
       // the self-test OPENS is the opposite case — the self-test is the run, and
-      // that read is the run's own input. The live specimen is this card's:
-      // `scripts/objectui-changeset-digest.mjs` stages its copy inside
-      // `--self-test`, and skipping self-tests here would close nothing.
+      // that read is the run's own input. The card's specimen was
+      // `scripts/objectui-changeset-digest.mjs`, which staged its copy inside
+      // `--self-test` (gone with the objectui pin, objectstack#25711); skipping
+      // self-tests here would have closed nothing.
       for (const target of readProgramTargetsInSource(f, source, (t) => trackedSet.has(t))) {
         if (entry.reads.includes(target)) continue;
         entry.reads.push(target);

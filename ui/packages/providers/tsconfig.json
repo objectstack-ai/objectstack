@@ -1,0 +1,58 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "jsx": "react-jsx",
+    "lib": ["ES2020", "DOM"],
+
+    // Node's ESM resolver does NOT extension-search relative specifiers, so an
+    // extensionless `./Foo` in the emitted dist is unloadable under plain Node
+    // (`ERR_MODULE_NOT_FOUND`) — objectui#5214, same defect and same remedy as
+    // objectui#4538. `tsc` never rewrites specifiers, so what the source writes
+    // is what dist ships; the only way to KEEP the extensions is to have the
+    // compiler reject a missing one (TS2835, and TS2834 for a bare directory
+    // import) instead of leaving it to review.
+    //
+    // These override the ROOT tsconfig's `"module": "ESNext"` /
+    // `"moduleResolution": "bundler"` for THIS package only — the root is
+    // shared by 38 packages and flipping it there is a different, much larger
+    // change. Emit is unchanged: package.json is `"type": "module"`, so
+    // `nodenext` emits the same ESM `ESNext` did.
+    //
+    // Runtime loadability is pinned separately by `pnpm check:node-esm-load`,
+    // which actually imports the built entry under plain Node.
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "noEmit": false,
+    "declaration": true,
+    // The incremental build RECORD, pinned OUTSIDE the published build output.
+    // Left unpinned, TypeScript derives it from `outDir`/`rootDir`: a package with
+    // no `rootDir` gets `dist/tsconfig.tsbuildinfo` -- inside what `files: ["dist",
+    // ...]` publishes -- and `pnpm check:published-dist` then reds on a byte-identical
+    // tree as soon as anything runs `tsc` (objectui#9189). Pinned in every composite
+    // package so the location is a decision, not a side effect of an unrelated option.
+    "tsBuildInfoFile": "./tsconfig.tsbuildinfo",
+    "composite": true
+  },
+  "include": ["src"],
+  // Tooling is excluded by DIRECTORY, not just by file NAME. A helper under
+  // `__tests__/` that is not itself called `*.test.ts` is otherwise a program
+  // input, and an EMITTING program writes it into the published `dist`
+  // (objectui#4006 / #4836 / #6943 -- the same defect three times, each found
+  // by hand). Enforced repo-wide by `pnpm check:published-tsconfig-exclude`
+  // (objectui#7212), which derives these directory names from `TOOLING_FILE`
+  // in scripts/check-phantom-dependencies.mjs.
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/__tests__/**",
+    "**/__mocks__/**",
+    "**/__benchmarks__/**",
+    "**/*.test.ts",
+    "**/*.test.tsx"
+  ],
+  "references": [
+    { "path": "../types" }
+  ]
+}

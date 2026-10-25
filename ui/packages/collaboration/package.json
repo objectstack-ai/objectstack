@@ -1,0 +1,72 @@
+{
+  "name": "@object-ui/collaboration",
+  "version": "18.1.0",
+  "type": "module",
+  "license": "MIT",
+  "description": "Real-time collaboration for Object UI with presence tracking, live cursors, conflict resolution, and comment threads.",
+  "homepage": "https://www.objectui.org/docs/packages/collaboration",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
+    "directory": "ui/packages/collaboration"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc && node ../../scripts/check-dist-completeness.mjs",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "test": "vitest run --root ../.. packages/collaboration/",
+    "type-check": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "lint": "eslint ."
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "dependencies": {
+    "@object-ui/i18n": "workspace:*",
+    "@object-ui/types": "workspace:*"
+  },
+  "devDependencies": {
+    "@objectstack/spec": "workspace:^",
+    "@types/react": "19.3.0",
+    "react": "19.3.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  },
+  "keywords": [
+    "objectui",
+    "sdui",
+    "schema-driven-ui",
+    "react",
+    "tailwind",
+    "shadcn",
+    "objectstack",
+    "collaboration",
+    "presence",
+    "realtime",
+    "webrtc",
+    "yjs"
+  ],
+  "author": "ObjectStack Team <team@objectstack.ai>",
+  "bugs": {
+    "url": "https://github.com/objectstack-ai/objectui/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

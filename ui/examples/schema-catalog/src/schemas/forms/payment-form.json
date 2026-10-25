@@ -1,0 +1,190 @@
+{
+  "type": "card",
+  "className": "w-full max-w-md mx-auto",
+  "children": [
+    {
+      "type": "stack",
+      "gap": 6,
+      "children": [
+        {
+          "type": "stack",
+          "gap": 2,
+          "children": [
+            {
+              "type": "text",
+              "content": "Payment Details",
+              "className": "text-2xl font-bold"
+            },
+            {
+              "type": "text",
+              "content": "Enter your payment information below",
+              "className": "text-sm text-muted-foreground"
+            }
+          ]
+        },
+        {
+          "type": "stack",
+          "gap": 4,
+          "children": [
+            {
+              "type": "stack",
+              "gap": 2,
+              "children": [
+                {
+                  "type": "label",
+                  "htmlFor": "cardName",
+                  "label": "Cardholder Name"
+                },
+                {
+                  "type": "input",
+                  "id": "cardName",
+                  "name": "cardName",
+                  "placeholder": "John Doe",
+                  "required": true
+                }
+              ]
+            },
+            {
+              "type": "stack",
+              "gap": 2,
+              "children": [
+                {
+                  "type": "label",
+                  "htmlFor": "cardNumber",
+                  "label": "Card Number"
+                },
+                {
+                  "type": "input",
+                  "id": "cardNumber",
+                  "name": "cardNumber",
+                  "placeholder": "1234 5678 9012 3456",
+                  "required": true
+                }
+              ]
+            },
+            {
+              "type": "grid",
+              "columns": 3,
+              "gap": 4,
+              "children": [
+                {
+                  "type": "stack",
+                  "gap": 2,
+                  "children": [
+                    {
+                      "type": "label",
+                      "htmlFor": "expiry",
+                      "label": "Expiry Date"
+                    },
+                    {
+                      "type": "input",
+                      "id": "expiry",
+                      "name": "expiry",
+                      "placeholder": "MM/YY",
+                      "required": true
+                    }
+                  ]
+                },
+                {
+                  "type": "stack",
+                  "gap": 2,
+                  "children": [
+                    {
+                      "type": "label",
+                      "htmlFor": "cvc",
+                      "label": "CVC"
+                    },
+                    {
+                      "type": "input",
+                      "id": "cvc",
+                      "name": "cvc",
+                      "placeholder": "123",
+                      "required": true
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "stack",
+              "gap": 2,
+              "children": [
+                {
+                  "type": "text",
+                  "content": "Billing Address",
+                  "className": "text-sm font-semibold"
+                },
+                {
+                  "type": "stack",
+                  "gap": 4,
+                  "children": [
+                    {
+                      "type": "stack",
+                      "gap": 2,
+                      "children": [
+                        {
+                          "type": "label",
+                          "htmlFor": "country",
+                          "label": "Country"
+                        },
+                        {
+                          "type": "select",
+                          "id": "country",
+                          "name": "country",
+                          "options": [
+                            {
+                              "value": "us",
+                              "label": "United States"
+                            },
+                            {
+                              "value": "uk",
+                              "label": "United Kingdom"
+                            },
+                            {
+                              "value": "ca",
+                              "label": "Canada"
+                            },
+                            {
+                              "value": "au",
+                              "label": "Australia"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "stack",
+                      "gap": 2,
+                      "children": [
+                        {
+                          "type": "label",
+                          "htmlFor": "zipCode",
+                          "label": "ZIP / Postal Code"
+                        },
+                        {
+                          "type": "input",
+                          "id": "zipCode",
+                          "name": "zipCode",
+                          "placeholder": "12345"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "button",
+              "label": "Pay Now",
+              "variant": "default",
+              "className": "w-full"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

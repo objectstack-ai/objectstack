@@ -1,0 +1,19 @@
+{
+  "type": "stack",
+  "gap": 3,
+  "children": [
+    {
+      "type": "text",
+      "content": "Item 1",
+      "variant": "h3"
+    },
+    {
+      "type": "text",
+      "content": "Item 2"
+    },
+    {
+      "type": "text",
+      "content": "Item 3"
+    }
+  ]
+}

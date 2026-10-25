@@ -1,0 +1,115 @@
+---
+title: "Percent Field"
+description: "Percentage input with automatic conversion and formatting"
+---
+
+The Percent Field component provides a percentage input that automatically converts between the stored value and the displayed percentage (0-100). How a value is stored is declared by the field: a fraction (0-1) by default, or whole percentage points when the field declares a `max` above 1.
+
+## Basic Usage
+
+<SchemaExample id="fields-percent/basic-percent-field" />
+
+## With Decimal Places
+
+<SchemaExample id="fields-percent/with-decimal-places" />
+
+## Required Field
+
+<SchemaExample id="fields-percent/required-percent" />
+
+## Read-Only
+
+<SchemaExample id="fields-percent/read-only-percent" />
+
+## Field Schema
+
+A percent field is authored as `PercentFieldMetadata` (`@object-ui/types`), which is
+the source of truth for the key set: it extends `BaseFieldMetadata` with the decimal
+places (`scale`), the total-digit `precision` and the two bounds.
+
+```ts
+import type { PercentFieldMetadata } from '@object-ui/types';
+
+const discountRate: PercentFieldMetadata = {
+  type: 'percent',
+  name: 'discount_rate',
+  label: 'Discount Rate',
+  placeholder: '0%',
+  scale: 2,
+  min: 0,
+  max: 1,
+};
+```
+
+**Decimal places come from `scale`, not from `precision`.** `scale` is how many
+decimals the percent shows: the input's step, the read-only display and the table cell
+all follow it, so a stored `0.855` on the field above shows `85.50%`. `precision` is the
+total digit count of the stored decimal, so it never sets how many decimals are shown.
+Leave `scale` out and the field shows the platform's default width for a percent, which
+is whole percents: the same `0.855` shows `86%`.
+
+The value being edited, and the `className` / `disabled` a host supplies, are **not**
+metadata keys — they are runtime widget props. See [Field Widget Props](/docs/fields/widget-props).
+
+## What the browser rewrites before this field sees it
+
+This widget renders a native `type="number"` input, so the browser decides what
+the box accepts. Two things can happen and **only one of them is announced**:
+
+- **Announced.** Text the browser cannot read at all — `1e`, a lone `-`, a lone
+  `.` — leaves the box visibly showing what was typed while its value reads
+  empty. The field is marked `aria-invalid` and draws
+  *"Not saved: the text in this box is not a number."*
+- ⚠️ **Not announced.** Entries the browser silently **truncates**: pasting
+  ``1.2.3`` stores ``0.0123``, and `0x10` stores ``0.1``. No warning is
+  possible here — the browser discards the extra characters as they arrive, so
+  nothing reaches ObjectUI to check.
+
+⛔ **"No warning" therefore does not mean "the value is right."** Full
+explanation and the reasoning: [What a number field silently
+rewrites](/docs/guide/fields#what-a-number-field-silently-rewrites).
+
+## Value Conversion
+
+The percent field handles automatic conversion, at the storage the field
+declares. `@objectstack/spec` states the rule as `percentScaleOf`: a percent
+field stores a **fraction** unless it declares a `max` above 1, in which case
+it stores **whole percentage points**.
+
+- **Fraction (the default, no `max` or `max: 1`)**: the stored value is a
+  decimal between 0 and 1 (e.g., `0.75`), displayed as `75%`. A stored `1` is
+  `100%`.
+- **Whole points (`max: 100`, or any `max` above 1)**: the stored value is
+  already the percentage (e.g., `75`), displayed as `75%`. A stored `1` is
+  `1%`.
+
+Every face reads the same declaration — the input, its read-only text, the
+table cell, the grid footer, the record header chip, the gantt tooltip, the
+gallery card and the dashboard tile — so one stored value shows one percentage
+everywhere. None of them guesses the storage from the value's size.
+
+Example, for a field with no `max`:
+```plaintext
+// Stored in database: 0.85
+// Displayed to user: 85%
+// User enters: 90
+// Stored as: 0.90
+```
+
+## Cell Renderer
+
+In tables/grids, values are formatted with percentage symbol, to the field's `scale`:
+
+```ts
+import { PercentCellRenderer } from '@object-ui/fields';
+
+// A stored 0.855 on a field declaring `scale: 2` renders: 85.50%
+// The same value on a field with no `scale` renders: 86%
+```
+
+## Use Cases
+
+- **Progress Tracking**: Task completion, project progress
+- **Analytics**: Conversion rates, success metrics
+- **Financial Data**: Interest rates, discount percentages
+- **Statistics**: Performance scores, efficiency ratings

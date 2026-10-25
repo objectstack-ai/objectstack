@@ -1,0 +1,125 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Object UI Schema",
+  "description": "JSON Schema for Object UI component schemas",
+  "type": "object",
+  "required": ["type"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "description": "The component type to render",
+      "enum": [
+        "div",
+        "text",
+        "card",
+        "button",
+        "input",
+        "textarea",
+        "select",
+        "checkbox",
+        "radio",
+        "separator",
+        "badge",
+        "alert",
+        "tabs",
+        "accordion",
+        "form"
+      ]
+    },
+    "className": {
+      "type": "string",
+      "description": "Tailwind CSS classes for styling"
+    },
+    "id": {
+      "type": "string",
+      "description": "Unique identifier for the component"
+    },
+    "children": {
+      "description": "Child components or content",
+      "oneOf": [
+        {
+          "$ref": "#"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#"
+          }
+        },
+        {
+          "type": "string"
+        }
+      ]
+    },
+    "label": {
+      "type": "string",
+      "description": "Label text for form inputs and buttons"
+    },
+    "placeholder": {
+      "type": "string",
+      "description": "Placeholder text for input fields"
+    },
+    "content": {
+      "type": "string",
+      "description": "Text content for text components"
+    },
+    "title": {
+      "type": "string",
+      "description": "Title text for components like cards"
+    },
+    "description": {
+      "type": "string",
+      "description": "Description or subtitle text"
+    },
+    "required": {
+      "type": "boolean",
+      "description": "Whether the input field is required"
+    },
+    "disabled": {
+      "type": "boolean",
+      "description": "Whether the component is disabled"
+    },
+    "variant": {
+      "type": "string",
+      "description": "Style variant",
+      "enum": [
+        "default",
+        "destructive",
+        "outline",
+        "secondary",
+        "ghost",
+        "link"
+      ]
+    },
+    "size": {
+      "type": "string",
+      "description": "Component size",
+      "enum": ["sm", "default", "lg"]
+    },
+    "inputType": {
+      "type": "string",
+      "description": "HTML input type",
+      "enum": [
+        "text",
+        "email",
+        "password",
+        "number",
+        "tel",
+        "url",
+        "search",
+        "date",
+        "time",
+        "datetime-local"
+      ]
+    },
+    "rows": {
+      "type": "number",
+      "description": "Number of rows for textarea"
+    },
+    "visible": {
+      "type": ["boolean", "string"],
+      "description": "Visibility condition"
+    }
+  },
+  "additionalProperties": true
+}

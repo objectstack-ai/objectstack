@@ -1,0 +1,42 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "jsx": "react-jsx",
+    // Drop the root tsconfig's source-tree `paths` (keeping only the local `@/*`
+    // alias) so `@object-ui/*` and `@objectstack/spec` resolve through the
+    // workspace dependency's built `.d.ts` instead of pulling sibling package
+    // sources in as program inputs — ~104 TS6059 rootDir errors otherwise (#2915).
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    }
+  },
+  "include": ["src"],
+  // Tests are type-checked by `tsconfig.test.json`, which the `type-check`
+  // script chains: they need `@testing-library/jest-dom`'s global matcher
+  // augmentation, and this project is the build, so they must not reach `dist`.
+  //
+  // The exclusions cover TOOLING DIRECTORIES, not just the `*.test.*` name
+  // (objectui#4836). `vite-plugin-dts` builds its declaration program from this
+  // config, so a tooling file left in it is emitted into `dist` and published:
+  // measured, `src/__tests__/explainDouble.ts` is not a `*.test.ts` by name, so
+  // the old list let `dist/__tests__/explainDouble.d.ts` ship in the tarball.
+  // Same shape as objectui#4006, same cause — an exclusion table written
+  // against a filename pattern while the repo's convention is a directory one
+  // (`__tests__` / `__mocks__` / `__benchmarks__`, exactly as `TOOLING_FILE` in
+  // scripts/check-phantom-dependencies.mjs spells it).
+  //
+  // No type coverage moves with them: `explainDouble.ts` is imported by the
+  // suites in this directory, so the chained `tsconfig.test.json` already reads
+  // it as a program input (measured with `tsc --listFiles`).
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/__tests__/**",
+    "**/__mocks__/**",
+    "**/__benchmarks__/**",
+    "**/*.test.ts",
+    "**/*.test.tsx"
+  ]
+}

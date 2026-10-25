@@ -1,0 +1,166 @@
+name: Docs Deploy
+
+# Builds the docs site (`apps/site`, the Vercel project `objectui`, served at
+# objectui.org) on a GitHub-hosted runner and uploads the prebuilt output to
+# Vercel as a production deployment. Vercel itself builds nothing.
+#
+# ## Why the build moved here (objectui#12178)
+#
+# On the maintainer's Vercel bill almost all of the cost was "Build CPU
+# Minutes". Vercel built this project once for every commit pushed to `main`,
+# plus a preview build for every other branch. The preview builds were
+# cancelled by the Ignored Build Step, and every production build since
+# 2026-09-06 failed (objectui#12178), so all of that spend deployed nothing.
+# This repository is public, so `ubuntu-latest` minutes cost nothing. The
+# maintainer decided the site deploys only from `main`, on free compute.
+# `apps/site/vercel.json` turns Vercel's Git-triggered deployments off
+# (`git.deploymentEnabled: false`), so this workflow is now the ONLY way the
+# site gets deployed.
+#
+# ## When it runs: every 6 hours, or on demand
+#
+# There is no `push` trigger, on purpose. The maintainer chose a fixed clock:
+# at most 4 builds a day, no competition with pull-request CI for runners,
+# and no `paths` list to keep in step with the site's build closure. The docs
+# can therefore be up to 6 hours behind `main`. To publish now, use "Run
+# workflow" on this workflow's Actions page (or
+# `gh workflow run docs-deploy.yml --ref main`).
+#
+# The cron is `43 5,11,17,23 * * *`, chosen against
+# `grep -rn 'cron:' .github/workflows/`. Hours 0/6/12/18, 1/7/13/19 and
+# 2/8/14/20 each already carry another 6-hourly job, while 5/11/17/23 meet
+# only one daily patrol (05:23). Minute 43 is off the top of the hour, where
+# scheduled runs bunch and get delayed, and clear of the 15-minute merge-queue
+# patrol's :37 and :52. That census was read once, when this was written, and
+# nothing re-checks it; re-run the grep before you rely on it.
+#
+# ## Which way it fails
+#
+# Red, never a quiet green. With a missing `VERCEL_TOKEN`, a ref other than
+# `main`, a failed build or a failed upload, the job goes red with an
+# `::error::` saying which. A run that skipped and still went green would stop
+# publishing the docs with nothing to show for it, which is the failure that
+# froze the site for five weeks (objectui#12178).
+#
+# ## How the Vercel CLI is driven
+#
+# - The project's Root Directory is `apps/site`, so all three commands run from
+#   the REPOSITORY ROOT. `vercel pull` writes the project settings, including
+#   that Root Directory, to `./.vercel/`. `vercel build` then builds in
+#   `apps/site`, reads `apps/site/vercel.json` (whose `installCommand` and
+#   `buildCommand` override the dashboard) and writes `./.vercel/output`.
+#   `vercel deploy --prebuilt` uploads that directory. Running the commands
+#   from inside `apps/site` would apply the Root Directory twice.
+# - `VERCEL_ORG_ID` / `VERCEL_PROJECT_ID` identify the team and project. They
+#   are identifiers, not secrets.
+# - `VERCEL_TOKEN` reaches only the two steps that call the Vercel API (`pull`
+#   and `deploy`). `vercel build` needs no token, and it runs `pnpm i` plus the
+#   whole workspace build, which means every dependency's install scripts. So
+#   it is deliberately not given the token.
+# - The CLI is pinned (`VERCEL_CLI_VERSION`) so that a CLI release cannot
+#   change what a scheduled run does. Bump it on purpose.
+#
+# The build itself is the one `ci.yml`'s `Build Docs` job runs
+# (`pnpm turbo run build --filter=@object-ui/site`, via
+# `apps/site/vercel.json`), so a green `Build Docs` on `main` predicts a green
+# build here.
+
+on:
+  schedule:
+    - cron: '43 5,11,17,23 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+# A later run builds the tip of `main`, which contains everything an earlier
+# run would have deployed, so an in-flight run is safe to cancel.
+concurrency:
+  group: docs-deploy-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy docs to Vercel (production)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VERCEL_ORG_ID: team_06nvlGKZCkwhzdXmRdxeCNnB
+      VERCEL_PROJECT_ID: prj_v1rXIczaI7YGmXmseQCLFUFOFxTB
+      VERCEL_CLI_VERSION: 60.1.3
+    steps:
+      # Before anything else, so that a run which cannot deploy fails in
+      # seconds, and fails red.
+      - name: Refuse to run without VERCEL_TOKEN, or from a ref other than main
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          if [ "${GITHUB_REF}" != 'refs/heads/main' ]; then
+            echo "::error title=Docs deploy runs from main only::This run is on ${GITHUB_REF}. The docs site deploys only from main (objectui#12178); dispatch the workflow with --ref main."
+            exit 1
+          fi
+          if [ -z "${VERCEL_TOKEN}" ]; then
+            echo "::error title=VERCEL_TOKEN is missing::The secret VERCEL_TOKEN is not available to this run, so nothing can be deployed and objectui.org stays on its last deployment. Create a Vercel token scoped to the Object Stack team and store it as an Actions secret named VERCEL_TOKEN (repository or organization level)."
+            exit 1
+          fi
+
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Enable Corepack and download the pinned pnpm
+        run: bash scripts/ci-setup-pnpm.sh
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22.x'
+          cache: 'pnpm'
+
+      # objectui#12957: every @objectstack/* package resolves to the build of the
+      # commit `.objectstack-sha` pins, read from node_modules/.cache/objectstack, so
+      # it must be there before pnpm resolves anything. Restored by the pin and built
+      # only on a miss (scripts/objectstack-pin.mjs); the save is this job's last step.
+      - name: Restore the pinned @objectstack build
+        id: objectstack-pin
+        uses: actions/cache/restore@v6
+        with:
+          path: node_modules/.cache/objectstack
+          key: objectstack-pin-${{ runner.os }}-${{ hashFiles('.objectstack-sha', 'scripts/objectstack-pin.mjs') }}
+
+      - name: Build @objectstack at the pin (skips a restored build)
+        id: objectstack-build
+        run: node scripts/objectstack-pin.mjs build
+
+      - name: Install the Vercel CLI
+        run: npm install --global "vercel@${VERCEL_CLI_VERSION}"
+
+      - name: Pull the production project settings
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: vercel pull --yes --environment=production
+
+      - name: Build the site
+        run: vercel build --prod
+
+      - name: Deploy the prebuilt output to production
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          url=$(vercel deploy --prebuilt --prod)
+          echo "Deployed: ${url}"
+          echo "### Docs deployed to production" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "${url} (commit ${GITHUB_SHA})" >> "$GITHUB_STEP_SUMMARY"
+
+      # The pinned @objectstack build, saved only when this job built it (a cache
+      # miss) and whatever the verdict above was -- it does not depend on it.
+      # Bookkeeping: bounded and non-fatal (objectui#6577, objectui#7048). The bound
+      # is not yet derived from a measured save; re-derive it from this step's runs.
+      - name: Save the pinned @objectstack build
+        if: ${{ !cancelled() && steps.objectstack-build.outcome == 'success' && steps.objectstack-pin.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: actions/cache/save@v6
+        with:
+          path: node_modules/.cache/objectstack
+          key: objectstack-pin-${{ runner.os }}-${{ hashFiles('.objectstack-sha', 'scripts/objectstack-pin.mjs') }}

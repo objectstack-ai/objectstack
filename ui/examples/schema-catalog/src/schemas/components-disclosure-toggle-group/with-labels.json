@@ -1,0 +1,19 @@
+{
+  "type": "toggle-group",
+  "selectionType": "single",
+  "items": [
+    {
+      "value": "list",
+      "label": "List"
+    },
+    {
+      "value": "grid",
+      "label": "Grid"
+    },
+    {
+      "value": "table",
+      "label": "Table",
+      "disabled": true
+    }
+  ]
+}

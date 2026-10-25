@@ -1,0 +1,35 @@
+{
+  // Type-checks this package's TESTS, which `tsconfig.json` excludes.
+  // See `packages/types/tsconfig.test.json` for why that exclusion was a hole:
+  // the build correctly keeps tests out of `dist`, but nothing else compiled
+  // them, so a test could assert a contract the compiler never checked.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    // objectui#8691: test programs only. One notch above the package build's
+    // ES2020, mirroring packages/app-shell. The package SOURCE tsconfig is
+    // untouched, so what this package SHIPS still compiles at the ES2020
+    // baseline; nothing here is emitted.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "noEmit": true,
+    // The package build emits `dist`; this project emits nothing, so it must
+    // not inherit `composite` / `declaration` from the build config.
+    "composite": false,
+    // Drop the root tsconfig's source-tree `paths` so `@object-ui/*` and
+    // `@objectstack/spec` resolve through the workspace dependency's built
+    // `.d.ts` instead of pulling sibling sources in as program inputs (TS6059).
+    "paths": {},
+    // Same ambient types as `tsconfig.json`. A test that imports `App.tsx`
+    // pulls `lib/MetadataLoader.ts` into this program, and that file calls
+    // `import.meta.glob` — declared by `vite/client`, which the root config
+    // this extends does not carry (it is not a Vite app).
+    //
+    // `node` joins it for `src/__tests__/published-stylesheet-sources.test.ts`,
+    // which reads and compiles this package's Tailwind entry through
+    // `node:fs` / `node:path` / `node:url`. Naming `types` at all switches off
+    // automatic `@types/*` inclusion, so the entry is required rather than
+    // implied; `@types/node` resolves from the workspace root, which is how
+    // `packages/components/tsconfig.test.json` gets it too.
+    "types": ["node", "vite/client"]
+  },
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+}

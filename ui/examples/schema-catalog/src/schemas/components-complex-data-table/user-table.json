@@ -1,0 +1,59 @@
+{
+  "type": "data-table",
+  "pagination": true,
+  "searchable": true,
+  "selectable": true,
+  "rowActions": true,
+  "pageSize": 4,
+  "columns": [
+    {
+      "header": "User",
+      "accessorKey": "name"
+    },
+    {
+      "header": "Email",
+      "accessorKey": "email"
+    },
+    {
+      "header": "Role",
+      "accessorKey": "role",
+      "width": "120px"
+    },
+    {
+      "header": "Last Login",
+      "accessorKey": "lastLogin"
+    }
+  ],
+  "data": [
+    {
+      "name": "John Doe",
+      "email": "john@company.com",
+      "role": "Admin",
+      "lastLogin": "2024-01-20"
+    },
+    {
+      "name": "Jane Smith",
+      "email": "jane@company.com",
+      "role": "Editor",
+      "lastLogin": "2024-01-19"
+    },
+    {
+      "name": "Bob Wilson",
+      "email": "bob@company.com",
+      "role": "Viewer",
+      "lastLogin": "2024-01-18"
+    },
+    {
+      "name": "Alice Brown",
+      "email": "alice@company.com",
+      "role": "Editor",
+      "lastLogin": "2024-01-17"
+    },
+    {
+      "name": "Charlie Davis",
+      "email": "charlie@company.com",
+      "role": "Admin",
+      "lastLogin": "2024-01-16"
+    }
+  ]
+}

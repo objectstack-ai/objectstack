@@ -1,0 +1,18 @@
+{
+  "type": "toggle-group",
+  "selectionType": "single",
+  "items": [
+    {
+      "value": "left",
+      "label": "Left"
+    },
+    {
+      "value": "center",
+      "label": "Center"
+    },
+    {
+      "value": "right",
+      "label": "Right"
+    }
+  ]
+}

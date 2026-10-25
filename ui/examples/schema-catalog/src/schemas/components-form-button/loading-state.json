@@ -1,0 +1,5 @@
+{
+  "type": "button",
+  "label": "Loading",
+  "loading": true
+}

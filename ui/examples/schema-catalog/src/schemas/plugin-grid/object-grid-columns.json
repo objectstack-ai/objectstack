@@ -1,0 +1,17 @@
+{
+  "type": "object-grid",
+  "properties": {
+    "objectName": "users",
+    "label": "User Directory",
+    "columns": [
+      { "field": "name", "label": "Full Name", "width": 200, "link": true },
+      { "field": "email", "label": "Email" },
+      { "field": "role", "type": "select" },
+      { "field": "department", "label": "Department" },
+      { "field": "status", "type": "select", "align": "right" }
+    ],
+    "sort": [{ "field": "name", "order": "asc" }],
+    "searchableFields": ["name", "email", "department"],
+    "pagination": { "pageSize": 5 }
+  }
+}

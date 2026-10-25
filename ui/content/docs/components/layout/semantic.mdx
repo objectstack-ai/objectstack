@@ -1,0 +1,77 @@
+---
+title: "Semantic"
+description: "Semantic HTML5 elements for structured content (header, nav, main, aside, section, article, footer)"
+---
+
+import { DemoGrid } from '@/app/components/ComponentDemo';
+
+Semantic components provide HTML5 semantic elements that give meaning to the structure of web content, improving accessibility and SEO.
+
+## Available Elements
+
+ObjectUI provides semantic wrappers for these HTML5 elements:
+- `header` - Page or section header
+- `nav` - Navigation section
+- `main` - Main content area
+- `aside` - Sidebar or complementary content
+- `section` - Thematic grouping of content
+- `article` - Self-contained content
+- `footer` - Page or section footer
+
+## Basic Usage
+
+<SchemaExample id="components-layout-semantic/main-element" />
+
+## Header
+
+<SchemaExample id="components-layout-semantic/header" />
+
+## Navigation
+
+<SchemaExample id="components-layout-semantic/navigation" />
+
+## Section and Article
+
+<DemoGrid>
+  <SchemaExample id="components-layout-semantic/section" />
+  <SchemaExample id="components-layout-semantic/article" />
+</DemoGrid>
+
+## Aside and Footer
+
+<DemoGrid>
+  <SchemaExample id="components-layout-semantic/aside" />
+  <SchemaExample id="components-layout-semantic/footer" />
+</DemoGrid>
+
+## Schema
+
+```plaintext
+// All semantic elements share the same schema structure
+interface SemanticSchema {
+  type: 'header' | 'nav' | 'main' | 'aside' | 'section' | 'article' | 'footer';
+  
+  // Content
+  children?: SchemaNode | SchemaNode[];  // Child components — the only child-list key
+  
+  // Styling
+  className?: string;                     // Tailwind CSS classes
+  
+  // Base properties
+  id?: string;
+  visible?: boolean | string;
+  testId?: string;
+}
+```
+
+`children` is the one child-list key: the renderer takes its child list from `schema.children` only. The `body` spelling was retired by objectui#6771 — schema validation refuses it with a pointer to `children`, and a `body` list renders nothing.
+
+## Examples
+
+### Page Layout
+
+<SchemaExample id="components-layout-semantic/complete-layout" />
+
+### Blog Post
+
+<SchemaExample id="components-layout-semantic/blog-article" />
