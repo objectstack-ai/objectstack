@@ -4052,7 +4052,7 @@ export const ActionButtonPropsSchema = lazySchema(() => strictObject({
     .describe('Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. `navigation`, the runner\'s alias of `url`, is refused: write `url`. Write it here, not as `type`: on a page component `type` is the component itself'),
   variant: z.enum([...BUTTON_PRIMITIVE_VARIANTS, 'primary']).optional()
     .describe('Button variant — the Button primitive\'s vocabulary, plus `primary`, which renders as `default` (renderer default: `default`)'),
-  size: z.enum([...BUTTON_PRIMITIVE_SIZES, 'md']).optional()
+  buttonSize: z.enum([...BUTTON_PRIMITIVE_SIZES, 'md']).optional()
     .describe('Button size — the Button primitive\'s vocabulary, plus `md`, which renders as `default` (renderer default: `default`)'),
   visible: actionCondition().optional()
     .describe('Visibility predicate — a boolean, a CEL string, or a `{ dialect, source }` envelope, evaluated against the row the host binds; the button is not rendered when it is FALSE, and a predicate that fails to evaluate hides it. Omit for always-visible'),
