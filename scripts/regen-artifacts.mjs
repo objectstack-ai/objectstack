@@ -873,6 +873,19 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
       + 'stopped (they merged clean and WRONG). Regenerating a ledger would discard evidence, which is '
       + 'the opposite trade — so this exclusion covers the prose and must stay.',
   },
+  // ── the objectui tree under ui/ (objectstack#25677) ──────────────────────────
+  {
+    path: 'ui/packages/components/src/ui/*.tsx',
+    gen: 'shadcn:update',
+    owner: 'object-ui-monorepo',
+    why:
+      'VENDORED components with hand-kept local patches. `shadcn:update` (`ui/scripts/shadcn-sync.js '
+      + '--update`) fetches a component from the network Shadcn registry, re-applies the patch list in '
+      + '`ui/scripts/shadcn-local-patches.mjs` and refuses to overwrite local edits without `--force`. '
+      + '"Discard both sides and re-run" would swap a reviewed vendored copy for whatever the registry '
+      + 'serves that day and drop every edit the patch list does not carry, and it needs the network, '
+      + 'which a merge must not. A conflict in a vendored component stays a human\'s; never routed.',
+  },
 ]);
 
 /** Marker file (inside the git dir, never the worktree) listing paths the driver deferred. */

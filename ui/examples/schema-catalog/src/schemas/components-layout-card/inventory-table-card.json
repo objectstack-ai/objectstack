@@ -1,0 +1,258 @@
+{
+  "type": "card",
+  "children": [
+    {
+      "type": "flex",
+      "properties": {
+        "align": "center",
+        "justify": "between",
+        "children": [
+          {
+            "type": "text",
+            "content": "Product Inventory",
+            "className": "text-lg font-semibold"
+          },
+          {
+            "type": "flex",
+            "properties": {
+              "gap": 2,
+              "children": [
+                {
+                  "type": "button",
+                  "label": "Filter",
+                  "variant": "outline",
+                  "size": "sm",
+                  "icon": "funnel"
+                },
+                {
+                  "type": "button",
+                  "label": "Export",
+                  "variant": "outline",
+                  "size": "sm",
+                  "icon": "download"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "className": "mb-4"
+    },
+    {
+      "type": "stack",
+      "gap": 0,
+      "children": [
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 4,
+            "children": [
+              {
+                "type": "text",
+                "content": "Product",
+                "className": "w-40"
+              },
+              {
+                "type": "text",
+                "content": "SKU",
+                "className": "w-24"
+              },
+              {
+                "type": "text",
+                "content": "Price",
+                "className": "w-20"
+              },
+              {
+                "type": "text",
+                "content": "Stock",
+                "className": "w-16"
+              },
+              {
+                "type": "text",
+                "content": "Status",
+                "className": "w-24"
+              }
+            ]
+          },
+          "className": "px-4 py-2 bg-muted text-xs font-medium text-muted-foreground border-b"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 4,
+            "children": [
+              {
+                "type": "text",
+                "content": "Wireless Mouse",
+                "className": "w-40 font-medium"
+              },
+              {
+                "type": "text",
+                "content": "WM-001",
+                "className": "w-24 text-muted-foreground"
+              },
+              {
+                "type": "text",
+                "content": "$29.99",
+                "className": "w-20"
+              },
+              {
+                "type": "text",
+                "content": "150",
+                "className": "w-16"
+              },
+              {
+                "type": "badge",
+                "label": "In Stock",
+                "variant": "default"
+              }
+            ]
+          },
+          "className": "px-4 py-3 border-b text-sm"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 4,
+            "children": [
+              {
+                "type": "text",
+                "content": "Mechanical Keyboard",
+                "className": "w-40 font-medium"
+              },
+              {
+                "type": "text",
+                "content": "MK-002",
+                "className": "w-24 text-muted-foreground"
+              },
+              {
+                "type": "text",
+                "content": "$89.99",
+                "className": "w-20"
+              },
+              {
+                "type": "text",
+                "content": "42",
+                "className": "w-16"
+              },
+              {
+                "type": "badge",
+                "label": "Low Stock",
+                "variant": "outline"
+              }
+            ]
+          },
+          "className": "px-4 py-3 border-b text-sm"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 4,
+            "children": [
+              {
+                "type": "text",
+                "content": "USB-C Hub",
+                "className": "w-40 font-medium"
+              },
+              {
+                "type": "text",
+                "content": "UH-003",
+                "className": "w-24 text-muted-foreground"
+              },
+              {
+                "type": "text",
+                "content": "$45.00",
+                "className": "w-20"
+              },
+              {
+                "type": "text",
+                "content": "200",
+                "className": "w-16"
+              },
+              {
+                "type": "badge",
+                "label": "In Stock",
+                "variant": "default"
+              }
+            ]
+          },
+          "className": "px-4 py-3 border-b text-sm"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 4,
+            "children": [
+              {
+                "type": "text",
+                "content": "Monitor Stand",
+                "className": "w-40 font-medium"
+              },
+              {
+                "type": "text",
+                "content": "MS-004",
+                "className": "w-24 text-muted-foreground"
+              },
+              {
+                "type": "text",
+                "content": "$35.00",
+                "className": "w-20"
+              },
+              {
+                "type": "text",
+                "content": "0",
+                "className": "w-16"
+              },
+              {
+                "type": "badge",
+                "label": "Out of Stock",
+                "variant": "destructive"
+              }
+            ]
+          },
+          "className": "px-4 py-3 border-b text-sm"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 4,
+            "children": [
+              {
+                "type": "text",
+                "content": "Webcam HD",
+                "className": "w-40 font-medium"
+              },
+              {
+                "type": "text",
+                "content": "WC-005",
+                "className": "w-24 text-muted-foreground"
+              },
+              {
+                "type": "text",
+                "content": "$65.00",
+                "className": "w-20"
+              },
+              {
+                "type": "text",
+                "content": "88",
+                "className": "w-16"
+              },
+              {
+                "type": "badge",
+                "label": "In Stock",
+                "variant": "default"
+              }
+            ]
+          },
+          "className": "px-4 py-3 text-sm"
+        }
+      ]
+    }
+  ]
+}

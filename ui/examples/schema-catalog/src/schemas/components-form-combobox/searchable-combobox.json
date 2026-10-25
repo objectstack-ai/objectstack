@@ -1,0 +1,30 @@
+{
+  "type": "combobox",
+  "placeholder": "Select language...",
+  "options": [
+    {
+      "value": "js",
+      "label": "JavaScript"
+    },
+    {
+      "value": "ts",
+      "label": "TypeScript"
+    },
+    {
+      "value": "py",
+      "label": "Python"
+    },
+    {
+      "value": "go",
+      "label": "Go"
+    },
+    {
+      "value": "rust",
+      "label": "Rust"
+    },
+    {
+      "value": "java",
+      "label": "Java"
+    }
+  ]
+}

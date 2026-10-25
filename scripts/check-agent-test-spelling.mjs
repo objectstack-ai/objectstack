@@ -160,10 +160,11 @@
  *
  * That objection is correct and is answered here structurally, not waived.
  * `COUNTER_EXAMPLE_FILES` is a declared list of instruction files permitted to
- * spell the bad form as a warning, each entry carrying a REASON. It is EMPTY
- * today, because #11425's refusal is prose ("everything after a bare `--` is
- * discarded") rather than a quoted bad command -- so the escape hatch is not
- * yet needed, and an empty list is the honest state to record. Adding an entry
+ * spell the bad form as a warning, each entry carrying a REASON. #11425's own
+ * refusal is prose ("everything after a bare `--` is discarded") rather than a
+ * quoted bad command, so this repo's corpus never needed the hatch; its one
+ * entry is the imported objectui contributor guide, which quotes the broken
+ * command inside the warning that teaches it. Adding an entry
  * is a visible, reviewed edit to this file, not an inline mute marker scattered
  * through the corpus; `--self-test` rejects an entry without a reason and pins
  * the list small, so it cannot grow into a mute button.
@@ -238,8 +239,8 @@ export const RULE_OWNING_FILES = ['scripts/check-agent-test-spelling.mjs'];
 /**
  * Instruction files permitted to quote the broken spelling as a WARNING.
  *
- * See the header. EMPTY today and that is a measurement, not an oversight:
- * #11425's refusal is prose, so nothing in the corpus needs the hatch yet.
+ * See the header. #11425's refusal is prose, so nothing objectstack wrote needs
+ * the hatch; the one entry arrived with the `ui/` import at the cutover.
  *
  * Shape: `{ path, reason }`. The reason is required -- `--self-test` refuses an
  * entry without one -- because "why is this file allowed to spell it" is the
@@ -247,7 +248,16 @@ export const RULE_OWNING_FILES = ['scripts/check-agent-test-spelling.mjs'];
  *
  * @type {{ path: string, reason: string }[]}
  */
-export const COUNTER_EXAMPLE_FILES = [];
+export const COUNTER_EXAMPLE_FILES = [
+  {
+    path: 'ui/AGENTS.md',
+    reason:
+      'objectui\'s contributor guide (imported as ui/ at the cutover) lists `pnpm --filter <pkg> test -- --run <paths>` ' +
+      'as its "trap two" (objectui#3288): the bullet quotes the broken command to explain that pnpm forwards the `--` ' +
+      'and vitest drops every path after it, and ui/scripts/vitest-invocation-guard.mjs refuses the form at run time. ' +
+      'Rewording the quote would delete the warning, which is the case this list exists for.',
+  },
+];
 
 /** Roots read as the agent-facing instruction corpus. */
 export const INSTRUCTION_ROOTS = ['.claude', 'skills'];

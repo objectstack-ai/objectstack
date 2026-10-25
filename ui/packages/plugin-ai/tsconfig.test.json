@@ -1,0 +1,45 @@
+{
+  // Type-checks this package's TESTS, which `tsconfig.json` excludes.
+  // See `packages/types/tsconfig.test.json` for why that exclusion is a hole on
+  // its own: the build correctly keeps tests out of `dist`, but nothing else
+  // compiled them, so a test could assert a contract the compiler never checked
+  // and then read as evidence that the contract holds (objectui#3009, #2911).
+  //
+  // That hole was live here. `packages/plugin-ai/src` contained no test file at
+  // all, so this package's test coverage was vacuously complete; objectui#8178
+  // added the first two, and without this project `node
+  // scripts/check-type-check-coverage.mjs` exits 1 naming both of them.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    // objectui#8691: test programs only. One notch above the package build's
+    // ES2020, mirroring packages/app-shell. The package SOURCE tsconfig is
+    // untouched, so what this package SHIPS still compiles at the ES2020
+    // baseline; nothing here is emitted.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "noEmit": true,
+    // `registrationInputs-8178.test.ts` reads the three component sources off
+    // disk (`node:fs` / `node:path` / `node:url`) to derive the keys each
+    // renderer really reads, instead of trusting a list a re-key could hold
+    // constant. Naming `types` at all switches off automatic `@types/*`
+    // inclusion -- which is why `@testing-library/jest-dom` is NOT named
+    // alongside `node` the way `plugin-kanban` names it: neither test file here
+    // uses a jest-dom matcher, and declaring one this package does not depend on
+    // is the objectui#8714 divergence pointing the other way. `@types/react`
+    // still reaches the `.tsx` test through ordinary module resolution
+    // (`react/jsx-runtime`, under the root config's `"jsx": "react-jsx"`).
+    "types": ["node"],
+    // Drop the root tsconfig's source-tree `paths` so `@object-ui/types` and
+    // `@object-ui/core` resolve through the workspace dependency's built
+    // `.d.ts` instead of pulling sibling sources in as program inputs (TS6059).
+    "paths": {}
+    // No `composite: false` override, unlike 32 of the 36 siblings that carry
+    // one: it is inert in all of them. These projects extend the ROOT config,
+    // which sets no `composite`, so a package BUILD config's value is never
+    // inherited -- `packages/types` has `"composite": true` in its build and
+    // omits the override with no effect. Here it is moot twice over, since this
+    // package builds with `vite build` and sets no `composite` either. The
+    // other non-composite builds (`layout`, `create-plugin`,
+    // `vscode-extension`) likewise omit it.
+  },
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+}

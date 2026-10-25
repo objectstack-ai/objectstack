@@ -1,0 +1,90 @@
+---
+title: "Page"
+description: "Full-page container with title, description, and content sections"
+---
+
+The Page component provides a standardized full-page layout with built-in support for titles, descriptions, and organized content sections.
+
+## Basic Usage
+
+<SchemaExample id="components-layout-page/simple-page" />
+
+## With Title and Description
+
+<SchemaExample id="components-layout-page/page-with-header" />
+
+`pageType` decides whether the page draws its own `title` and `description`. `app`, `list`,
+`utility` and `home` draw both, unless a titled `page:header` block in the page takes over the
+heading. A page with no `pageType` is a `record` page, which draws neither: its heading is a
+[`page:header`](/docs/layout/page-header) block. So both examples above name `"pageType": "app"`.
+The [layout guide's Content Width](/docs/guide/layout#content-width) section covers the width
+each type sets.
+
+When a titled `page:header` takes over the heading, it also draws the page's `description`,
+under its title and subtitle, so the description never sits above the title.
+
+## Region Block Grid
+
+A page's `regions` lay their blocks out on a 12-column grid. A block's width comes from its
+kind, not from a key on the block: a metric tile (`element:number`, `object-metric`,
+`statistic`) spans 3 columns, a chart (`chart`, `object-chart`) spans 6, and every other block
+spans all 12. The spans fold by screen width:
+
+| Screen width | Metric tile | Chart | Other blocks |
+|---|---|---|---|
+| 1280px and wider | 3 | 6 | 12 |
+| 768px to 1279px | 6 | 12 | 12 |
+| under 768px | 12 | 12 | 12 |
+
+So four metric tiles share one row on a wide screen and take two rows on a 1024px one. A
+`sidebar` or `aside` region beside `main` is a narrow column, so its blocks always span 12.
+On the `dashboard` template each region is a cell of the page's region grid and lays its
+own blocks out the same way. A page's `children` (no `regions`) stack one block per row.
+
+A `page:card` or `page:section` lays its children on the same grid. The container spans 12
+in its region, and its children take their own kind's span, so a card holding four metric
+tiles shows them in one row on a wide screen. Studio's page designer shows each block's
+span on its card, and on the child cards of a `page:card` or `page:section`.
+
+## Schema
+
+```ts
+import type { SchemaNode } from '@object-ui/types';
+
+interface PageSchema {
+  type: 'page';
+  
+  // Header
+  title?: string;                       // Page title; not drawn on a 'record' page
+  icon?: string;                        // Page icon (Lucide icon name)
+  description?: string;                 // Page description; not drawn on a 'record' page
+
+  // Page kind. Default 'record': its heading is a `page:header` block.
+  pageType?: 'record' | 'home' | 'app' | 'utility' | 'list';
+  
+  // Content
+  children?: SchemaNode | SchemaNode[]; // Main content — one node or a list
+  
+  // Styling
+  className?: string;                   // Tailwind CSS classes
+  
+  // Base properties
+  id?: string;
+  visible?: boolean | string | { dialect?: string; source: string };
+  testId?: string;
+}
+```
+
+## Examples
+
+### Dashboard Page
+
+<SchemaExample id="components-layout-page/full-dashboard" />
+
+### Settings Page
+
+<SchemaExample id="components-layout-page/settings-layout" />
+
+### Content Page
+
+<SchemaExample id="components-layout-page/documentation-page" />

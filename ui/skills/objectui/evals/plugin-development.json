@@ -1,0 +1,53 @@
+{
+  "skill_name": "objectui",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I want to create a custom timeline plugin for ObjectUI that shows events on a vertical timeline. The plugin should accept an array of events with date, title, and description. Walk me through the full setup.",
+      "expected_output": "Provides full plugin scaffold: package structure, ComponentRegistry registration with namespace and inputs, TimelineImpl component using useDataScope, types.ts with schema interface, and Vitest unit tests.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "registerComponent",
+          "namespace",
+          "useDataScope",
+          "FieldWidgetComponentProps",
+          "vitest"
+        ],
+        "must_not_contain": [
+          "// TODO: implement"
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "prompt": "I'm getting a namespace collision — my plugin registers 'form' but it conflicts with plugin-form. How do I fix this?",
+      "expected_output": "Explains the namespace system, suggests using skipFallback: true or choosing a unique base type name, and shows correct registration with explicit namespace.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "namespace",
+          "skipFallback",
+          "registerComponent"
+        ],
+        "must_not_contain": []
+      }
+    },
+    {
+      "id": 3,
+      "prompt": "How do I create a custom field widget that renders a star rating input (1-5 stars) and integrates with ObjectUI forms?",
+      "expected_output": "Shows FieldWidgetComponentProps implementation with value/onChange, star rendering logic, proper readonly/disabled handling, and registration pattern.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "FieldWidgetComponentProps",
+          "value",
+          "onChange",
+          "readonly",
+          "disabled"
+        ],
+        "must_not_contain": []
+      }
+    }
+  ]
+}

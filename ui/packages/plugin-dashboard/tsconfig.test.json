@@ -1,0 +1,77 @@
+{
+  // Type-checks this package's TESTS, which `tsconfig.json` excludes.
+  // See `packages/types/tsconfig.test.json` for why that exclusion was a hole:
+  // the build correctly keeps tests out of `dist`, but nothing else compiled
+  // them, so a test could assert a contract the compiler never checked. Here it
+  // hid two reads that could never have worked: `DashboardRenderer.filters` and
+  // `DatasetWidget` both declared their `queryDataset` / `find` mocks with NO
+  // parameters, so `mock.calls` typed as empty tuples and every `calls[0][1]`
+  // the drill and broadcast assertions are built on read out of bounds — cast,
+  // so invisible at runtime too (objectui#4040).
+  //
+  // Chained from this package's `type-check` script, which is what the CI
+  // `Type Check` job runs; scripts/check-type-check-coverage.mjs enforces the
+  // chaining — a config nothing runs is the objectui#3009 failure itself. This
+  // package was the last TEST_DEBT entry, so that table is now empty.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    // A checking project, never an emitting one.
+    "noEmit": true,
+    // The package build emits `dist`; this project emits nothing, so it must
+    // not inherit `composite` / `declaration` from the build config.
+    "composite": false,
+    "declaration": false,
+    "jsx": "react-jsx",
+    // Deliberately NOT raised, unlike plugin-list / plugin-grid / app-shell,
+    // whose suites needed ES2022 for `Array.prototype.at`. Measured: this
+    // package's 47 test files compile clean against the root's ES2020 baseline,
+    // so the tests are held to the same lib the shipped SOURCE targets.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // Naming `types` at all switches off automatic `@types/*` inclusion.
+    // `node` is load-bearing and measured: dropping it turns five suites red
+    // with TS2304 `Cannot find name 'global'` — they all install a `global.fetch`
+    // double.
+    //
+    // `@testing-library/jest-dom` is now listed. It used to be deliberately NOT
+    // listed, on the argument that "removing it changes nothing, because the
+    // seven files that reach for the matchers `import '@testing-library/jest-dom'`
+    // explicitly and a global augmentation reached by an import applies to the
+    // whole program". That augmentation rule is real, but the conclusion does not
+    // follow, and the premise had gone stale (objectui#8722; counts below are off
+    // this project's tsc-resolved file list, not off a glob): 25 files carry the
+    // bare import today, not seven, and of the 39 files that use a matcher, 18
+    // import it NOWHERE. Those 18 are typed by a sibling's import alone, so a
+    // file split or an "unused import" cleanup elsewhere in the package can turn
+    // them red with nothing in the diff naming the cause. The sister ablation in
+    // plugin-detail put numbers on it: 423 TS2339 errors across 65 files, 43 of
+    // them untouched by the edit. Registering the matchers here is what makes
+    // each file's typing independent of every other file's imports.
+    "types": ["node", "@testing-library/jest-dom"],
+    //
+    // `paths` drops the root tsconfig's source-tree mappings so `@object-ui/*`
+    // and `@objectstack/spec` resolve through each workspace dependency's built
+    // `.d.ts` rather than pulling sibling sources in as program inputs (TS6059).
+    //
+    // Empty, like every other wired-up package's. It briefly carried one
+    // exception — `@object-ui/plugin-charts/*` mapped to that package's source —
+    // because two suites imported subpaths the package does not publish (its
+    // `exports` map declares `"."` alone), so they resolved only through the
+    // repo's vitest alias. objectui#4529 ruled both, and both imports now go
+    // through the published root entry, so the mapping is gone rather than
+    // maintained:
+    //   - `normalizeChartSchema` is a genuine cross-package contract — the
+    //     assertions run the emitted schema through the SAME translation layer
+    //     the runtime applies — so plugin-charts publishes it from its entry.
+    //   - `AdvancedChartImpl` was an eager pre-warm of a chunk production only
+    //     ever reaches through `React.lazy`; the surface does not grow to keep
+    //     an eager deep import alive (objectui#4325 / PR #4460), so the import
+    //     is gone and the wait it shortened is budgeted explicitly instead.
+    "paths": {}
+  },
+  // `src/**/*.d.ts` is pulled in explicitly: the build program gets ambient
+  // declarations for free from `"include": ["src"]`, but an ambient declaration
+  // file is only a program input when a pattern NAMES it — being imported is not
+  // enough, because nothing imports it (plugin-map's lesson, #4270). This
+  // package keeps one, `src/global.d.ts`, declaring the `*.css` module.
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/**/*.d.ts"]
+}

@@ -1,0 +1,71 @@
+{
+  "type": "sidebar",
+  "collapsible": false,
+  "className": "gap-1 border-r p-2",
+  "children": [
+    {
+      "type": "flex",
+      "className": "rounded-md px-2 py-1.5 text-sm",
+      "properties": {
+        "align": "center",
+        "justify": "between",
+        "children": [
+          {
+            "type": "text",
+            "content": "Inbox"
+          },
+          {
+            "type": "badge",
+            "label": "12",
+            "className": "ml-auto"
+          }
+        ]
+      }
+    },
+    {
+      "type": "flex",
+      "className": "rounded-md px-2 py-1.5 text-sm",
+      "properties": {
+        "align": "center",
+        "justify": "between",
+        "children": [
+          {
+            "type": "text",
+            "content": "Drafts"
+          },
+          {
+            "type": "badge",
+            "label": "3",
+            "className": "ml-auto"
+          }
+        ]
+      }
+    },
+    {
+      "type": "flex",
+      "className": "rounded-md px-2 py-1.5 text-sm",
+      "properties": {
+        "align": "center",
+        "children": [
+          {
+            "type": "text",
+            "content": "Sent"
+          }
+        ]
+      }
+    },
+    {
+      "type": "flex",
+      "className": "rounded-md px-2 py-1.5 text-sm",
+      "properties": {
+        "align": "center",
+        "children": [
+          {
+            "type": "text",
+            "content": "Trash"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "title": "Complex",
+  "pages": [
+    "table",
+    "data-table",
+    "carousel",
+    "scroll-area",
+    "resizable",
+    "filter-builder",
+    "view-switcher",
+    "filter-ui",
+    "sort-ui"
+  ]
+}

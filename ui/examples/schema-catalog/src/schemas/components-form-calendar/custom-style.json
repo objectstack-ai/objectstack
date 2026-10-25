@@ -1,0 +1,5 @@
+{
+  "type": "ui:calendar",
+  "mode": "single",
+  "className": "rounded-xl border-2 shadow-lg"
+}

@@ -655,7 +655,7 @@ const SECTION_GROUPS: Record<string, Array<{ section: string; pages: string[] }>
   kernel: [
     { section: 'Plugin Lifecycle', pages: ['plugin', 'plugin-lifecycle-events', 'plugin-lifecycle-advanced', 'plugin-runtime', 'plugin-loading', 'plugin-registry', 'plugin-structure', 'plugin-validator'] },
     { section: 'Plugin Security & Dependencies', pages: ['plugin-security', 'plugin-security-advanced', 'plugin-capability', 'plugin-versioning', 'dependency-resolution', 'manifest'] },
-    { section: 'Packages', pages: ['package-artifact', 'package-registry', 'package-upgrade'] },
+    { section: 'Packages', pages: ['package-artifact', 'package-registry'] },
     { section: 'Metadata & Runtime', pages: ['metadata-plugin', 'metadata-loader', 'metadata-protection', 'metadata-persistence', 'misc', 'context', 'execution-context', 'service-registry', 'startup-orchestrator', 'cluster', 'feature', 'cli-extension', 'dev-plugin', 'state-machine'] },
   ],
   // [#16325] The package & marketplace FORMAT half of what used to be `cloud/`.

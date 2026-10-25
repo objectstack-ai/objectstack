@@ -1,0 +1,45 @@
+{
+  // Type-checks this package's TESTS, which `tsconfig.json` now excludes.
+  // Template: `packages/plugin-dashboard/tsconfig.test.json` (objectui#4530);
+  // rationale: `packages/types/tsconfig.test.json`. A test nothing compiles can
+  // assert a contract the compiler never checked and then read as evidence that
+  // the contract holds (objectui#3009).
+  //
+  // As in `@object-ui/fields`, the hole is new and deliberate: until
+  // objectui#4006 this suite was checked only as a side effect of the build
+  // config having no test exclude, which is also how `dist/index.test.d.ts`
+  // came to be published. The exclude and this project are one change —
+  // scripts/check-type-check-coverage.mjs fails 5c on the exclude alone
+  // (measured).
+  //
+  // Chained from this package's `type-check` script, which is what the CI
+  // `Type Check` job runs; the coverage gate enforces the chaining.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    // A checking project, never an emitting one. This matters more here than in
+    // most packages: this package's BUILD config deliberately sets
+    // `noEmit: false` with `declaration` and `composite`, so those three must be
+    // turned back off rather than inherited — this project extends the ROOT
+    // config, not the build one, but stating them keeps that true if the
+    // `extends` target ever changes.
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "jsx": "react-jsx",
+    // Measured: the single suite compiles clean against the root's ES2020
+    // baseline, so the test is held to the same lib the shipped SOURCE targets.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // `paths` drops the root tsconfig's source-tree mappings so `@object-ui/*`
+    // resolves through each workspace dependency's built `.d.ts` rather than
+    // pulling sibling package sources in as program inputs. `type-check`
+    // dependsOn `^build` (turbo.json), so those `.d.ts` exist by the time this
+    // runs. The suite imports exactly one workspace specifier,
+    // `@object-ui/core`, plus its own `./index`.
+    "paths": {}
+  },
+  // Only the test files. There is no ambient `*.d.ts` under `src/` in this
+  // package today — if one is ever added it must be NAMED here, because being
+  // imported is not enough to make an ambient declaration a program input
+  // (plugin-map's lesson, objectui#4270).
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+}

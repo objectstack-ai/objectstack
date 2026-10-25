@@ -1,0 +1,15 @@
+{
+  "type": "card",
+  "children": [
+    {
+      "type": "text",
+      "content": "Card Title",
+      "className": "text-2xl font-semibold"
+    },
+    {
+      "type": "text",
+      "content": "Card content with proper semantic structure.",
+      "className": "text-sm text-muted-foreground mt-2"
+    }
+  ]
+}

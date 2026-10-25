@@ -1,0 +1,111 @@
+# Lychee configuration file for ObjectUI documentation link checking
+# (used by `.github/workflows/check-links.yml` — schedule + workflow_dispatch).
+#
+# Lychee checks two classes of link here: EXTERNAL URLs, and RELATIVE in-repo
+# file links (`docs/**` links into `../../packages/**` source files rely on
+# that). Site-ABSOLUTE routes — `/docs/...`, `/api/...`, `/protocol/...` — are
+# not its job; those belong to `scripts/check-doc-links.mjs`, run by
+# `repo-gates.yml` (the Internal Docs Link Check step). See the `root_dir`
+# section below.
+
+# Maximum number of concurrent requests
+max_concurrency = 10
+
+# Timeout for each request (in seconds)
+timeout = 20
+
+# Number of retries per request
+max_retries = 3
+
+# Accept any valid status code (2xx, 3xx)
+accept = [200, 204, 206, 301, 302, 303, 307, 308]
+
+# Exclude patterns - files and URLs to skip
+exclude = [
+    # Local development URLs
+    "http://localhost*",
+    "https://localhost*",
+
+    # Example and placeholder URLs
+    "https://example.com",
+    "http://example.com",
+
+    # Social media (anti-scraping)
+    "https://twitter.com*",
+    "https://x.com*",
+
+    # GitHub specific patterns that may cause false positives
+    "https://github.com/.*/compare/*",
+    "https://github.com/.*/commit/*",
+
+    # npmjs.com PACKAGE PAGES — the website answers a CI runner with 403, and it
+    # does so for every package page, live or dead (objectui#8128). Measured on
+    # scheduled runs 31295178818 (2026-08-09) and 34011606950 (2026-09-06): all
+    # seven `www.npmjs.com/package/@object-ui/*` links in the swept trees came
+    # back `403 Forbidden`, the same seven in both runs a month apart. That is
+    # anti-scraping, not link rot — `registry.npmjs.org` answered `200` for all
+    # seven on 2026-09-07, `dist-tags.latest = 17.6.0`, so every one of those
+    # package pages exists and renders in a browser. npm returns 404, not 403,
+    # for a package that is not there.
+    #
+    # ⚠️ Scoped to the whole `/package/` path on purpose, NOT to `@object-ui/*`.
+    # The 403 is the host's answer to the client, so it does not depend on which
+    # package is named: a third-party npm link would be rejected identically, and
+    # a per-URL list would grow a line every time a doc page names a package —
+    # the unbounded-maintenance shape this file exists to avoid.
+    #
+    # ⛔ This hides NO detection the sweep ever had. A blanket 403 carries zero
+    # information about the target, so there is no true verdict being suppressed
+    # here — only noise that made 7 of this workflow's 10 rejections unreadable.
+    # What genuinely is NOT covered by anything is filed as objectui#8382
+    # rather than left implied: whether the packages these pages describe are
+    # still PUBLISHED. That question has a working instrument —
+    # `registry.npmjs.org`, used for the measurement above — and it is not this
+    # workflow's job.
+    "^https://www\\.npmjs\\.com/package/",
+
+    # Site-absolute routes, resolved into the sentinel namespace by `root_dir`
+    # below and skipped wholesale here. Rationale: see `root_dir`.
+    "^file:///__site-routes-not-on-disk__/",
+]
+
+# Why site-absolute routes (`/docs/...`) are handled this way
+#
+# When a local file contains an absolute-path link, Lychee without a `root_dir`
+# reports a HARD error:
+#   [ERROR] Cannot resolve root-relative link '/docs/plugins':
+#           To resolve root-relative links in local files, provide a root dir
+# and that failure happens while the URI is being constructed, BEFORE the
+# exclude filter runs — adding `^/docs` or `^/` to `exclude` is measurably a
+# no-op: the errors are still reported and the exit code is still 2.
+# `content/docs/**` contains 297 such links, so once #3449 widened the scan to
+# `content/docs`, leaving them unhandled would make this workflow red from its
+# very first run — trading a false-green report on the wrong tree for a
+# false-red one on the right tree, which is no better.
+#
+# So: `root_dir` resolves site-absolute routes into a sentinel namespace that
+# does not exist on disk, and the exclude entry above skips that namespace
+# entirely. `root_dir` must be an absolute path, and the repository's absolute
+# path differs between a local checkout and a runner, so it can only be a
+# repo-independent constant — the sentinel is forced by that constraint, not
+# chosen for cuteness. Expect one line of output per run:
+#   [WARN] Root dir '/__site-routes-not-on-disk__' does not exist
+# That is intended; the directory is not supposed to exist, and its name is the
+# explanation.
+#
+# Why not have Lychee resolve these routes properly instead: fumadocs routes
+# carry no extension (`/docs/guide/data-source` -> `content/docs/guide/
+# data-source.md`), so judging them needs a real route-to-file mapping. That
+# mapping already exists — `scripts/check-doc-links.mjs` — and a second copy
+# here would only be a second copy free to drift from the first.
+#
+# (This section replaced `remap = ["^/docs/(.*)$ file://./docs/$1"]`, which had
+#  never once fired: `remap` operates on an already-parsed URL, and `/docs/x`
+#  fails to parse before it ever reaches remapping. Its replacement target was
+#  wrong twice over anyway — no extension, and pointing at the internal `docs/`
+#  rather than the site's `content/docs/`.)
+root_dir = "/__site-routes-not-on-disk__"
+
+# Cache configuration
+# Don't use cache to ensure fresh results
+cache = false

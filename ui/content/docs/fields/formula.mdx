@@ -1,0 +1,117 @@
+---
+title: "Formula Field"
+description: "Read-only computed field with automatic calculation"
+---
+
+The Formula Field component displays computed values calculated from other fields. This is a read-only field where the value is automatically calculated by the backend.
+
+## Basic Usage
+
+<SchemaExample id="fields-formula/numeric-formula" />
+
+## Text Formula
+
+<SchemaExample id="fields-formula/text-concatenation" />
+
+## Date Formula
+
+<SchemaExample id="fields-formula/date-calculation" />
+
+## Field Schema
+
+A formula field is authored as `FormulaFieldMetadata` (`@object-ui/types`), which is
+the source of truth for the key set: it extends `BaseFieldMetadata` with the
+expression and its declared return type. Both are `@objectstack/spec`'s own
+`FieldSchema` members, typed by reference:
+
+- `expression` — the formula, written in CEL against the record
+  (`record.quantity * record.unit_price`), or the spec's expression envelope
+  (`{ "dialect": "cel", "source": "…" }`);
+- `returnType` — a closed union of `'number' | 'text' | 'boolean' | 'date'`.
+
+```ts
+import type { FormulaFieldMetadata } from '@object-ui/types';
+
+const totalPrice: FormulaFieldMetadata = {
+  type: 'formula',
+  name: 'total_price',
+  label: 'Total Price',
+  readonly: true,
+  expression: 'record.quantity * record.unit_price',
+  returnType: 'number',
+};
+```
+
+There is no `formula` key. `FieldSchema` refuses it by name and points at
+`expression`, and `FormulaFieldMetadata` does not declare it.
+
+The computed value, and the `className` a host supplies, are **not** metadata keys —
+they are runtime widget props. See [Field Widget Props](/docs/fields/widget-props).
+
+## Return Types
+
+The formula field draws its value by `returnType`. The form and the table cell
+read the same rule, so one stored value reads the same in both:
+
+- **number**: Formatted as a number field formats it, in the viewer's display
+  locale and at the width a `scale` on the field sets (`200000` reads `200,000`
+  in en-US)
+- **boolean**: The UI language's Yes / No word; a value that is not a JS boolean
+  reads as empty
+- **date**: The date field's read-only face (`2020-07-04` reads `Jul 4, 2020` in
+  en-US), in the table cell too: it does not use the date cell's relative style
+- **text**: The value as text, in a monospace font
+
+With no `returnType`, a JS number is drawn as a number and any other value as
+text. Nothing is inferred from the expression.
+
+## Formula Examples
+
+Common formula patterns, each the value of `expression` (CEL, with the record's
+fields under `record.`):
+
+```plaintext
+// Arithmetic
+expression: 'record.price * record.quantity'
+expression: '(record.subtotal - record.discount) * record.tax_rate'
+
+// Text concatenation
+expression: 'record.first_name + " " + record.last_name'
+expression: 'record.city + ", " + record.state + " " + record.zip'
+
+// Conditional
+expression: 'record.age >= 18 ? "Adult" : "Minor"'
+expression: 'record.status == "closed" ? record.completed_at : null'
+
+// Date calculations
+expression: 'addDays(record.created_at, 7)'
+expression: 'daysBetween(record.start_date, record.end_date)'
+```
+
+## Cell Renderer
+
+In tables/grids, `FormulaCellRenderer` draws the value by the same rule as the
+form (see Return Types above). Only text is drawn in a monospace font. A null or
+empty value renders an em-dash.
+
+```ts
+import { FormulaCellRenderer } from '@object-ui/fields';
+
+// <FormulaCellRenderer value={200000} field={field} /> with no returnType
+// renders the number cell's text: 200,000 (en-US)
+```
+
+## Backend Implementation
+
+Formula fields are computed on the backend: the platform evaluates the field's
+`expression` against the record and returns the result as the field's value.
+The widget never evaluates anything; it formats the value it is given by
+`returnType`.
+
+## Use Cases
+
+- **Calculations**: Totals, subtotals, tax amounts
+- **Aggregations**: Sum of related records
+- **Concatenations**: Full names, addresses
+- **Derived Values**: Age from birthdate, days until deadline
+- **Conditional Logic**: Status based on other fields

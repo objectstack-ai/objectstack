@@ -1,0 +1,51 @@
+{
+  "type": "object-kanban",
+  "groupBy": "status",
+  "data": [],
+  "columns": [
+    {
+      "id": "todo",
+      "title": "To Do",
+      "cards": [
+        {
+          "id": "1",
+          "title": "Design new feature",
+          "description": "Create mockups and wireframes"
+        },
+        {
+          "id": "2",
+          "title": "Write documentation",
+          "description": "Update API docs"
+        }
+      ]
+    },
+    {
+      "id": "inprogress",
+      "title": "In Progress",
+      "cards": [
+        {
+          "id": "3",
+          "title": "Implement feature",
+          "description": "Code the new component",
+          "badges": [
+            {
+              "label": "High Priority",
+              "variant": "destructive"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "done",
+      "title": "Done",
+      "cards": [
+        {
+          "id": "4",
+          "title": "Setup project",
+          "description": "Initialize repository"
+        }
+      ]
+    }
+  ]
+}

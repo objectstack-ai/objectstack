@@ -118,6 +118,9 @@ export const DECLARED_WATCH_HINTS = [
   'packages/**/package.json',
   'apps/**/package.json',
   'examples/**/package.json',
+  // The objectui tree under `ui/` (objectstack#25677): the `ui` root member and
+  // every member below it.
+  'ui/**/package.json',
 ];
 
 /**
@@ -788,8 +791,9 @@ export function selfTest() {
     ROOT_FILE_WATCH_HINTS.join(',') === 'pnpm-workspace.yaml/**',
   );
   t(
-    'the member manifests are declared as full-path glob literals for all three roots',
-    DECLARED_WATCH_HINTS.join(',') === 'packages/**/package.json,apps/**/package.json,examples/**/package.json',
+    'the member manifests are declared as full-path glob literals for all four roots',
+    DECLARED_WATCH_HINTS.join(',')
+      === 'packages/**/package.json,apps/**/package.json,examples/**/package.json,ui/**/package.json',
   );
 
   // ── The MEMBER manifests, held against the enumerator's live answer ────────

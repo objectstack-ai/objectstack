@@ -1,0 +1,91 @@
+name: Lockfile Integrity
+
+# objectui#8326 — a pull request's `pnpm-lock.yaml` may not silently DUPLICATE a
+# dependency the workspace declares. (Its second rule, an `@objectstack/*`
+# identity moving BACKWARD, was retired by objectui#12957: `@objectstack/*` now
+# resolves to the build `.objectstack-sha` pins, with no version in the lockfile
+# to move.) The mechanism, both incident causes and every boundary this gate
+# keeps are documented at length in `scripts/check-lockfile-integrity.mjs`.
+#
+# ── Why it is its own workflow ───────────────────────────────────────────────
+#
+# It is the only gate in this repository that needs TWO revisions of a file: the
+# pull request's lockfile and its merge base's. That is why it checks out with
+# `fetch-depth: 0` and fetches the base branch, which no other gate here pays
+# for. Keeping it separate keeps that cost off every other job.
+#
+# ── Why it IS path-filtered, unlike the gates in repo-gates.yml ─────────────
+#
+# Those gates read the whole tree, so any change can trip them and a path filter
+# would build the hole they exist to close. This one reads exactly one file and
+# compares it with its own base: a pull request that does not touch
+# `pnpm-lock.yaml` cannot produce a finding, by construction — the head and base
+# blobs are then the same bytes. So the filter costs no coverage.
+#
+# ⚠️ The filter is also what makes it UNREQUIRABLE: `#3523`'s rule, enforced by
+# `scripts/__tests__/dependabot-merge-gate.test.ts`, is that a required context
+# must come from a workflow whose `pull_request` trigger has no path filter.
+#
+# ── ⛔ Deliberately NOT enrolled as a blocking context ────────────────────────
+#
+# `scripts/dependabot-merge-gate.mjs` classifies `Lockfile Integrity Check` in
+# `NOT_A_GATE`, so a red here does not stop a Dependabot auto-merge and does not
+# block the merge queue. That is a MAINTAINER decision with its own cost, and
+# objectui#8326's dispatch reserved it: what enrolling would take, and what it
+# would have cost over the last 40 lockfile-changing commits on `main`, is
+# written up in that card's pull request as input. ⛔ Do not promote this to
+# `REQUIRED_CONTEXTS` or `OPTIONAL_CONTEXTS` without that decision.
+#
+# Until then it is an ALARM: it names the packages, in one line, on the pull
+# request where the change is. That alone is the whole of what the incident
+# needed — two seats each spent a full diagnosis discovering that a
+# `Bundle Analysis` red was not about the dependency being bumped.
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'pnpm-lock.yaml'
+      - 'scripts/check-lockfile-integrity.mjs'
+      - '.github/workflows/lockfile-integrity.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: lockfile-integrity-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lockfile-integrity:
+    name: Lockfile Integrity Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      # `fetch-depth: 0` because the gate's subject is a DELTA. A shallow
+      # checkout has no merge base, and the script refuses to guess one — it
+      # exits 2 (could not take a reading), which is never a pass.
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22.x'
+
+      # No install and no build: the gate is one `node` call over two text
+      # files, builtins plus one repo-relative module only, which
+      # `repo-gates.yml`'s Pre-Install Import Graph Check enforces (objectui#6148).
+      - name: Fetch the base branch so the merge base exists
+        env:
+          BASE_REF: ${{ github.base_ref || 'main' }}
+        run: git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+
+      - name: Compare this lockfile with its merge base
+        env:
+          BASE_REF: ${{ github.base_ref || 'main' }}
+        run: node scripts/check-lockfile-integrity.mjs --base-ref "origin/${BASE_REF}"

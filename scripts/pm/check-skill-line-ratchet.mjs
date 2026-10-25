@@ -396,6 +396,10 @@ export const CEILINGS = new Map([
   // reading `dispatch-runbook.md` 派发前置 requires. Measured +1, ceiling +1;
   // headroom 0. SKILL.md is not a CROSS_FILE_MOVES destination, so no
   // `ruledRaises` record applies. Landed count, same convention.
+  // Unchanged at 319 by the external-text rule: its 红线 and its 阶段细则索引 row
+  // were paid by deleting two 红线 that restated rules AGENTS.md carries
+  // (worktree/stash, hook-enforced; `content/docs/releases/`, its Documentation
+  // Guardrails row), never by re-wrap.
   ['.claude/skills/pm-dispatch/SKILL.md', 319],
   // Raised 223 → 244 by the triage reading-cost card (maintainer ruling
   // 2026-08-20, quoted in the raising PR): three mandated conventions land in
@@ -1275,6 +1279,11 @@ export const CEILINGS = new Map([
   // `domain:*` seat. A NEW file, so this is not a raise and funds nothing —
   // set at the landed line count, headroom 0, same convention as above.
   ['.claude/skills/pm-dispatch/references/coordinator.md', 49],
+  // The external-text reference (whose text instructs, whose is data) and the
+  // fork-PR flow it amends. Both are NEW to this map, so neither is a raise —
+  // set at the landed line count, headroom 0, same convention as above.
+  ['.claude/skills/pm-dispatch/references/untrusted-text.md', 54],
+  ['.claude/skills/pm-dispatch/references/external-contributions.md', 22],
   ['.claude/skills/pm-dispatch/references/reading-discipline.md', 37],
   ['.claude/skills/pm-dispatch/references/cross-repo-coordination.md', 51],
   // Unchanged at 120 through the maintainer's revocation of every autonomous-
@@ -2207,6 +2216,8 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   // row (their tables stayed in SKILL.md), so each pin is the measurement 0.
   ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 0],
   ['.claude/skills/pm-dispatch/references/coordinator.md', 0],
+  ['.claude/skills/pm-dispatch/references/untrusted-text.md', 0],
+  ['.claude/skills/pm-dispatch/references/external-contributions.md', 0],
   ['.claude/skills/pm-dispatch/references/reading-discipline.md', 0],
   ['.claude/skills/pm-dispatch/references/cross-repo-coordination.md', 0],
   ['.claude/skills/pm-dispatch/references/triage-duties.md', 0],

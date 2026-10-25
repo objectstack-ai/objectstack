@@ -1,0 +1,23 @@
+{
+  "type": "flex",
+  "properties": {
+    "gap": 2,
+    "children": [
+      {
+        "type": "toggle",
+        "label": "🔔 Notifications",
+        "variant": "outline"
+      },
+      {
+        "type": "toggle",
+        "label": "🌙 Dark Mode",
+        "variant": "outline"
+      },
+      {
+        "type": "toggle",
+        "label": "🔊 Sound",
+        "variant": "outline"
+      }
+    ]
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "type": "combobox",
+  "placeholder": "Select framework...",
+  "options": [
+    {
+      "value": "next",
+      "label": "Next.js"
+    },
+    {
+      "value": "react",
+      "label": "React"
+    },
+    {
+      "value": "vue",
+      "label": "Vue"
+    },
+    {
+      "value": "angular",
+      "label": "Angular"
+    }
+  ]
+}

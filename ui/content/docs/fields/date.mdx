@@ -1,0 +1,116 @@
+---
+title: "Date Field"
+description: "Date picker input for date and datetime values"
+---
+
+The Date Field component provides a date picker for selecting dates and optionally times.
+
+## Basic Usage
+
+<SchemaExample id="fields-date/basic-date-picker" />
+
+## With Default Value
+
+<SchemaExample id="fields-date/with-default-date" />
+
+## Field Schema
+
+A date field is authored as `DateFieldMetadata` (`@object-ui/types`), which is the
+source of truth for the key set: it extends `BaseFieldMetadata` with a display format
+and the due/deadline flag.
+
+```ts
+import type { DateFieldMetadata } from '@object-ui/types';
+
+const closeDate: DateFieldMetadata = {
+  type: 'date',
+  name: 'close_date',
+  label: 'Close Date',
+  placeholder: 'Pick a date',
+  required: true,
+  format: 'yyyy-MM-dd',
+  dueLike: true,
+};
+```
+
+`dueLike` declares the date a deadline, gating the relative "Overdue Nd" wording and
+the red styling. It is `@objectstack/spec`'s `FieldSchema.dueLike`, and the spec
+accepts it on `date` and `datetime` fields only. `datetime` is its own type with its
+own metadata (`DateTimeFieldMetadata`) and honours `dueLike` identically; see
+[DateTime Field](/docs/fields/datetime). Nothing is inferred from the field's name:
+without the key, a past `due_date` reads as any past date does.
+
+`settledWhen` says when the deadline is settled for one record: a CEL predicate over
+the record's own columns, read as `record`. While it holds, no overdue wording or
+colour applies to that record. It is `FieldSchema.settledWhen`, and the spec accepts
+it only beside `dueLike: true`:
+
+```ts
+import type { DateFieldMetadata } from '@object-ui/types';
+
+const dueDate: DateFieldMetadata = {
+  type: 'date',
+  name: 'due_date',
+  dueLike: true,
+  settledWhen: "record.status == 'done'",
+};
+```
+
+Every view that draws the date beside its record — the grid, the record page, related
+lists, kanban and gallery cards, the compact list and the tree — evaluates
+`settledWhen` against that record, so a done task's past due date reads neutral while
+an open one's reads overdue. A predicate that fails to evaluate leaves the deadline
+unsettled.
+
+⚠️ The predicate reads the record as the view fetched it. A grid, a list view and a
+related list add the fields `settledWhen` reads to their own query, so the field the
+predicate reads need not be a column. A field the viewer may not read is never
+fetched, so a deadline whose predicate reads one stays unsettled for that viewer. An
+approval's record summary judges the deadline against the snapshot it shows.
+
+There is no date-range key. `@objectstack/spec`'s `FieldSchema` declares no date bound
+(its `min` / `max` are numbers) and refuses `min_date` / `max_date` by name, and no
+widget ever read them, so `DateFieldMetadata` refuses both at compile time.
+
+The value being edited, and the `className` / `disabled` a host supplies, are **not**
+metadata keys — they are runtime widget props. See [Field Widget Props](/docs/fields/widget-props).
+
+## Date Formats
+
+The date field supports various display formats:
+
+- **Short**: 12/31/2024
+- **Medium**: Dec 31, 2024 (default)
+- **Long**: December 31, 2024
+- **Full**: Monday, December 31, 2024
+
+## Use Cases
+
+- **Birthdates**: User birth dates
+- **Deadlines**: Task or project deadlines
+- **Events**: Event start/end dates
+- **Appointments**: Meeting or appointment scheduling
+- **Releases**: Product or content release dates
+
+## Cell Renderer
+
+In tables/grids, dates are formatted consistently:
+
+```ts
+import { DateCellRenderer } from '@object-ui/fields';
+
+// Renders: Dec 31, 2024
+// Or: Dec 31, 2024 2:30 PM (for datetime)
+```
+
+## DateTime Variant
+
+For collecting both date and time:
+
+```plaintext
+{
+  type: 'datetime',
+  name: 'appointment',
+  label: 'Appointment Time'
+}
+```

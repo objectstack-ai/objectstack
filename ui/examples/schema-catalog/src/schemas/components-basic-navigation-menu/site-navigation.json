@@ -1,0 +1,34 @@
+{
+  "type": "navigation-menu",
+  "items": [
+    {
+      "label": "Home",
+      "href": "/"
+    },
+    {
+      "label": "Products",
+      "children": [
+        {
+          "label": "All Products",
+          "href": "/products"
+        },
+        {
+          "label": "New Arrivals",
+          "href": "/products/new"
+        },
+        {
+          "label": "Best Sellers",
+          "href": "/products/popular"
+        }
+      ]
+    },
+    {
+      "label": "About",
+      "href": "/about"
+    },
+    {
+      "label": "Contact",
+      "href": "/contact"
+    }
+  ]
+}

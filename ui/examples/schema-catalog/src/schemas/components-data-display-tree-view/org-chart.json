@@ -1,0 +1,40 @@
+{
+  "type": "tree-view",
+  "title": "Organization",
+  "nodes": [
+    {
+      "id": "ceo",
+      "label": "CEO",
+      "children": [
+        {
+          "id": "cto",
+          "label": "CTO",
+          "children": [
+            {
+              "id": "dev1",
+              "label": "Lead Developer"
+            },
+            {
+              "id": "dev2",
+              "label": "Senior Developer"
+            }
+          ]
+        },
+        {
+          "id": "cmo",
+          "label": "CMO",
+          "children": [
+            {
+              "id": "marketing1",
+              "label": "Marketing Manager"
+            },
+            {
+              "id": "marketing2",
+              "label": "Content Lead"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

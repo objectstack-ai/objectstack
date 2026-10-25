@@ -1,0 +1,44 @@
+{
+  "n": 10000,
+  "initialRenderMs": 59.2,
+  "domRows": 26,
+  "domNodesTotal": 674,
+  "jumps": [
+    {
+      "frac": 0.25,
+      "ms": 30.4,
+      "scrollTop": 99805
+    },
+    {
+      "frac": 0.5,
+      "ms": 29.3,
+      "scrollTop": 199610
+    },
+    {
+      "frac": 0.75,
+      "ms": 29.3,
+      "scrollTop": 299415
+    },
+    {
+      "frac": 1,
+      "ms": 28.5,
+      "scrollTop": 399220
+    }
+  ],
+  "sustainedScroll": {
+    "steps": 120,
+    "avgMs": 17.16,
+    "p95Ms": 21.3,
+    "maxMs": 28.9,
+    "endScrollTop": 36000
+  },
+  "horizontal": {
+    "avgMs": 16.72,
+    "maxMs": 27.9
+  },
+  "switchToMonthMs": 120,
+  "switchToWeekMs": 67,
+  "collapseGroupMs": 80,
+  "hoverTooltipMs": 62,
+  "jsHeapMB": 141.1
+}

@@ -486,6 +486,37 @@ const workspaceGlobs = () => readWorkspaceGlobs(ROOT);
 /** Workspace member directories, relative to the repo root. */
 const workspaceDirs = () => workspacePackageDirs(ROOT);
 
+/**
+ * ── The imported objectui tree is out of scope for now (objectstack#25677) ──
+ *
+ * objectui arrives under `ui/` by `git subtree add` with its own publish
+ * conventions, and this gate judges them by objectstack's: measured on the
+ * merged tree before the cutover, 39 of its 41 publishable packages fail —
+ * LICENSE listed in `files` (36), console `plugin.*` and app-shell
+ * `src/styles.css` published (3), CHANGELOG.md not whitelisted (3), no
+ * `exports` map (2) — and the GATED census floor falls below half of the
+ * 112 live publishable members. Conforming 39 manifests changes what those
+ * packages publish, which is the release lane's surface, so the maintainer
+ * ruled (K1) that the cutover PR scopes this gate to objectstack's own
+ * packages and the @object-ui manifests converge under the aftercare card
+ * named in `until`. That card deletes this constant and the two `continue`s
+ * that read it; nothing else in the gate knows the tree exists.
+ *
+ * The `ui/*` roots stay declared in ROOT_DIR_WATCH_HINTS above: the
+ * declaration self-test reconciles the hints against the live
+ * pnpm-workspace.yaml globs in both directions, and a manifest card under
+ * `ui/` is still a true lead for this gate — it is the one that will red once
+ * the scope is lifted.
+ */
+const IMPORTED_TREE_OUT_OF_SCOPE = Object.freeze({
+  root: 'ui',
+  until: 'objectstack#25753',
+});
+
+/** True for the imported tree's root manifest and every member under it. */
+const inImportedTree = (dir) =>
+  dir === IMPORTED_TREE_OUT_OF_SCOPE.root || dir.startsWith(`${IMPORTED_TREE_OUT_OF_SCOPE.root}/`);
+
 /** Package-relative POSIX paths of every file that is not build output. */
 function walk(absDir, prefix = '', out = []) {
   for (const entry of readdirSync(absDir, { withFileTypes: true })) {
@@ -995,6 +1026,33 @@ function selfTest() {
     expect(ok, `ROOT_DIR_WATCH_HINTS: ${name}`);
   }
 
+  // ── the imported-tree scope (objectstack#25677, ruling K1) ────────────────
+  //
+  // Pinned in both directions: the scope must take the tree's root manifest
+  // and every member under it, and must take NOTHING that merely begins with
+  // the same letters, or a future `packages/ui-*` member slips out of the gate
+  // under a name that looks like a hit.
+  const scopeCases = [
+    ['ui', true, "the imported tree's own root manifest"],
+    ['ui/packages/core', true, 'a member under the imported tree'],
+    ['ui/apps/console', true, 'an app under the imported tree'],
+    ['packages/ui', false, 'an objectstack member whose basename is the root'],
+    ['uix/core', false, 'a sibling root sharing a prefix'],
+    ['packages/ui-kit', false, 'an objectstack member whose name starts with the root'],
+  ];
+  for (const [dir, expected, why] of scopeCases) {
+    const actual = inImportedTree(dir);
+    expect(actual === expected, `inImportedTree("${dir}") === ${actual}, expected ${expected} (${why})`);
+  }
+  expect(
+    declaredRoots.includes(IMPORTED_TREE_OUT_OF_SCOPE.root),
+    `the scoped-out root "${IMPORTED_TREE_OUT_OF_SCOPE.root}" is one of the declared workspace roots (a scope on a tree the workspace does not have is dead text)`,
+  );
+  expect(
+    /^objectstack#\d+$/.test(IMPORTED_TREE_OUT_OF_SCOPE.until),
+    `the scope names the card that lifts it (is "${IMPORTED_TREE_OUT_OF_SCOPE.until}")`,
+  );
+
   // ── GATED and its census floor (#12879) ───────────────────────────────────
   battery('GATED and its census floor (#12879)');
   //
@@ -1040,6 +1098,7 @@ function selfTest() {
   let liveDeclaring = 0;
   let livePublishable = 0;
   for (const dir of workspaceDirs()) {
+    if (inImportedTree(dir)) continue;
     let m;
     try {
       m = JSON.parse(readFileSync(join(ROOT, dir, 'package.json'), 'utf8'));
@@ -1392,6 +1451,7 @@ function selfTest() {
       `population-declaration case(s), ${verdictCases.length} \`exports\` verdict case(s), ` +
       `${floorCases.length} census-floor case(s) (floor ${EXPORTS_CENSUS_FLOOR} vs ` +
       `${liveDeclaring} of ${livePublishable} live), ${cellCases.length} ANNOUNCED cell case(s), ` +
+      `${scopeCases.length} imported-tree scope case(s), ` +
       `${resolveCases.length} subpath-resolution case(s), ${announceCases.length} announcement ` +
       `case(s) and ${controlCases.length} base-read-control case(s) (plus the base reader itself, ` +
       'exercised against this repository), and the shared workspace enumerator\'s own ' +
@@ -1423,7 +1483,13 @@ let members = 0;
 let publishable = 0;
 let exportsDeclaring = 0;
 
+let scopedOut = 0;
+
 for (const dir of workspaceDirs()) {
+  if (inImportedTree(dir)) {
+    scopedOut++;
+    continue;
+  }
   const manifestPath = posix.join(dir, 'package.json');
   let manifest;
   try {
@@ -1776,6 +1842,10 @@ console.log(
     'than dist/ + README.md + CHANGELOG.md, each with a registered reason; ' +
     `${exportsDeclaring} declare an \`exports\` map gating what of that is resolvable ` +
     `(census control: floor ${EXPORTS_CENSUS_FLOOR}); ` +
+    (scopedOut > 0
+      ? `${scopedOut} member(s) under ${IMPORTED_TREE_OUT_OF_SCOPE.root}/ not judged until ` +
+        `${IMPORTED_TREE_OUT_OF_SCOPE.until}; `
+      : '') +
     (announcedRan
       ? 'none narrows its resolvable surface against the merge base without a `minor` changeset ' +
         'naming the deep paths that stop resolving.'

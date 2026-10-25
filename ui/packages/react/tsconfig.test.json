@@ -1,0 +1,48 @@
+{
+  // Type-checks this package's TESTS, which `tsconfig.json` excludes.
+  // See `packages/types/tsconfig.test.json` for why that exclusion was a hole:
+  // the build correctly keeps tests out of `dist`, but nothing else compiled
+  // them, so a test could assert a contract the compiler never checked — and
+  // this package had eight of those, including a `SpecBridge` suite whose
+  // fixtures were authored in a dialect `@objectstack/spec` does not have
+  // (objectui#4040).
+  //
+  // This project is also the ONLY one that compiles
+  // `src/hooks/__tests__/offline-nav-performance-spec-parity.test.ts`, whose
+  // compile-time pins are erased at runtime — vitest proves nothing about them
+  // and `tsc` is the only thing that can (objectui#3181). A narrow
+  // `tsconfig.typetests.json` next door used to name that one file while the
+  // rest of the tree was in TEST_DEBT; the package graduated in objectui#4040
+  // and the narrow project was retired with it, after `--listFiles` showed this
+  // project reads the same file and a provably-false `Assert` appended to it
+  // turned this project red.
+  //
+  // Chained from this package's `type-check` script, which is what the CI
+  // `Type Check` job runs; scripts/check-type-check-coverage.mjs enforces the
+  // chaining — a config nothing runs is the objectui#3009 failure itself.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    // A checking project, never an emitting one.
+    "noEmit": true,
+    // The package build emits `dist`; this project emits nothing, so it must
+    // not inherit `composite` / `declaration` from the build config.
+    "composite": false,
+    "declaration": false,
+    "jsx": "react-jsx",
+    // The root baseline, plus `DOM.Iterable` (which the root already sets and
+    // the retired narrow project did not) — strictly wider than what compiled
+    // the parity test before.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // The parity test resolves `@objectstack/spec`'s own `.d.ts` files off disk
+    // (createRequire / readFileSync / node:path) to read the spec's export
+    // names through the TypeScript checker. Naming `types` at all switches off
+    // automatic `@types/*` inclusion, so `@testing-library/jest-dom` is listed
+    // for the suites that use its matchers.
+    "types": ["node", "@testing-library/jest-dom"],
+    // Drop the root tsconfig's source-tree `paths` so `@object-ui/*` and
+    // `@objectstack/spec` resolve through the workspace dependency's built
+    // `.d.ts` instead of pulling sibling sources in as program inputs (TS6059).
+    "paths": {}
+  },
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+}

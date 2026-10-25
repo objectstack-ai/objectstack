@@ -1,0 +1,11 @@
+{
+  "type": "empty",
+  "icon": "search",
+  "title": "No results for \"example\"",
+  "description": "Try searching with different keywords",
+  "action": {
+    "type": "button",
+    "label": "Clear Search",
+    "variant": "outline"
+  }
+}

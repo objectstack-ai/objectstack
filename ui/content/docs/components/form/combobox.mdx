@@ -1,0 +1,84 @@
+---
+title: "Combobox"
+description: "Searchable dropdown for selecting from a list of options"
+---
+
+import { DemoGrid } from '@/app/components/ComponentDemo';
+
+The Combobox component combines a text input with a dropdown list, allowing users to search and select from options.
+
+## Basic Usage
+
+<SchemaExample id="components-form-combobox/basic-combobox" />
+
+## With Search
+
+<SchemaExample id="components-form-combobox/searchable-combobox" />
+
+## States
+
+<DemoGrid>
+  <SchemaExample id="components-form-combobox/disabled" />
+  <SchemaExample id="components-form-combobox/with-value" />
+</DemoGrid>
+
+## Schema
+
+```ts
+interface ComboboxOption {
+  value: string;
+  label: string;
+  disabled?: boolean;             // Option renders dimmed and cannot be selected
+}
+
+interface ComboboxSchema {
+  type: 'combobox';
+  options?: ComboboxOption[];     // Available options (absent: an empty list)
+  value?: string;                 // Selected value
+  name?: string;                  // Form-serialization key, placed on the trigger button
+
+  // Text
+  placeholder?: string;           // Button placeholder
+  description?: string;           // Help text below the control, announced via aria-describedby
+
+  // States
+  disabled?: boolean | string | { dialect?: string; source: string };   // boolean, predicate expression, or CEL envelope
+  
+  // Styling
+  className?: string;
+}
+```
+
+<Callout type="warn">
+  There is no `defaultValue` on a combobox — authoring it is refused by name,
+  on both the TypeScript face and `safeValidateSchema`. Write `value`.
+
+  A combobox node shows the option named by `value` and its selection does not
+  change, so "the value it starts at" and "the value it shows" are one question;
+  the key was retired under ADR-0049 rather than turned into a second spelling of
+  `value`. A `select` node does take `defaultValue`, because it hands the control
+  a change handler and so has a selection that can move away from its default —
+  and unlike `combobox`, `select` is also a built-in **form field** type, where
+  the form supplies the default itself.
+</Callout>
+
+## Help Text
+
+```json
+{
+  "type": "combobox",
+  "name": "country",
+  "description": "Where the account is billed.",
+  "placeholder": "Select country...",
+  "options": [
+    { "value": "us", "label": "United States" },
+    { "value": "de", "label": "Germany" }
+  ]
+}
+```
+
+## Examples
+
+### Dynamic Options
+
+<SchemaExample id="components-form-combobox/country-selector" />

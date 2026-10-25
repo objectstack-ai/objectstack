@@ -1,0 +1,23 @@
+---
+title: "Dialog"
+description: "Modal dialog overlay for focused interactions"
+---
+
+## Examples
+
+  <SchemaExample id="components-overlay-dialog/dialog-trigger" />
+
+## Schema
+
+```ts
+import type { SchemaNode } from '@object-ui/types';
+
+interface DialogSchema {
+  type: 'dialog';
+  trigger: SchemaNode | SchemaNode[];
+  title?: string;
+  description?: string;
+  content?: SchemaNode | SchemaNode[];
+  footer?: SchemaNode[];
+}
+```

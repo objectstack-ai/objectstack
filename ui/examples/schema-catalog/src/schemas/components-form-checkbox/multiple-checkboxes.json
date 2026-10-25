@@ -1,0 +1,18 @@
+{
+  "type": "stack",
+  "gap": 2,
+  "children": [
+    {
+      "type": "checkbox",
+      "label": "Option 1"
+    },
+    {
+      "type": "checkbox",
+      "label": "Option 2"
+    },
+    {
+      "type": "checkbox",
+      "label": "Option 3"
+    }
+  ]
+}

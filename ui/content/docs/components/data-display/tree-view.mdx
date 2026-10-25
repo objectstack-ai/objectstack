@@ -1,0 +1,81 @@
+---
+title: "Tree View"
+description: "Hierarchical tree structure for displaying nested data"
+---
+
+The Tree View component displays hierarchical data in an expandable tree structure, perfect for file explorers, organizational charts, and nested navigation.
+
+## Basic Usage
+
+<SchemaExample id="components-data-display-tree-view/file-tree" />
+
+## Nested Structure
+
+<SchemaExample id="components-data-display-tree-view/deep-nesting" />
+
+## Schema
+
+```ts
+interface TreeNode {
+  id: string;                           // Unique node identifier
+  label: string;                        // Node label text
+  icon?: string;                        // Icon name ('folder' or 'file')
+  children?: TreeNode[];                // Child nodes
+  data?: any;                           // Additional node data
+}
+
+interface TreeViewSchema {
+  type: 'tree-view';
+  
+  // Data — inline nodes, or bind the tree with `bind` (read first)
+  nodes?: TreeNode[];                   // Tree nodes (the one inline spelling)
+  title?: string;                       // Tree title
+  
+  // Selection
+  defaultExpandedIds?: string[];        // Default expanded node IDs
+  defaultSelectedIds?: string[];        // Default selected node IDs
+  expandedIds?: string[];               // Controlled expanded node IDs
+  selectedIds?: string[];               // Controlled selected node IDs
+  multiSelect?: boolean;                // Enable multi-selection (default: false)
+  
+  // Appearance
+  showLines?: boolean;                  // Show connecting lines (default: true)
+  
+  // Events
+  // RUNTIME SLOT (objectui#6124): a React host supplies it; JSON refuses it
+  // by name. Author behaviour as a node type, e.g. an action:button node.
+  onNodeClick?: (node: TreeNode) => void; // Node click handler
+  
+  // Styling
+  className?: string;                   // Tailwind CSS classes
+  
+  // Base properties
+  id?: string;
+  visible?: boolean | string | { dialect?: string; source: string };
+  testId?: string;
+}
+```
+
+> **Retired: `data`** (objectui#6951, ADR-0049 enforce-or-remove). `data` was a
+> second spelling of the tree's one inline-nodes slot — the renderer read it only
+> as the last limb of `bind || nodes || data` — and it is no longer part of
+> `TreeViewSchema` on either face. A `tree-view` node that authors `data` now
+> fails validation with:
+>
+> > RETIRED (ADR-0049) — `data` is no longer part of TreeViewSchema; write
+> > `nodes` (or bind the tree with `bind`). …
+>
+> Rename the key to `nodes`; the array is unchanged. `bind` is unchanged and is
+> still read first, so a `bind`-only tree-view stays a legal document, and
+> `nodes` stays optional (no presence rule was added). `TreeNode.data` — the
+> per-node payload — is a different member and is untouched.
+
+## Examples
+
+### Organization Chart
+
+<SchemaExample id="components-data-display-tree-view/org-chart" />
+
+### Navigation Menu
+
+<SchemaExample id="components-data-display-tree-view/sidebar-navigation" />

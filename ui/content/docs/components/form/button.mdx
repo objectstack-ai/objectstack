@@ -1,0 +1,81 @@
+---
+title: "Button"
+description: "Trigger actions and events with customizable button styles"
+---
+
+import { DemoGrid } from '@/app/components/ComponentDemo';
+
+The Button component triggers actions when clicked. It supports multiple variants, sizes, and states.
+
+## Basic Usage
+
+<SchemaExample id="components-form-button/simple-button" />
+
+## Variants
+
+<DemoGrid>
+  <SchemaExample id="components-form-button/default" />
+  <SchemaExample id="components-form-button/destructive" />
+  <SchemaExample id="components-form-button/outline" />
+  <SchemaExample id="components-form-button/secondary" />
+  <SchemaExample id="components-form-button/ghost" />
+  <SchemaExample id="components-form-button/link" />
+</DemoGrid>
+
+## Sizes
+
+<DemoGrid>
+  <SchemaExample id="components-form-button/button-sizes" />
+  <SchemaExample id="components-form-button/icon-button" />
+</DemoGrid>
+
+## With Icons
+
+<DemoGrid>
+  <SchemaExample id="components-form-button/button-with-icon" />
+  <SchemaExample id="components-form-button/icon-on-right" />
+</DemoGrid>
+
+## States
+
+<DemoGrid>
+  <SchemaExample id="components-form-button/disabled-state" />
+  <SchemaExample id="components-form-button/loading-state" />
+</DemoGrid>
+
+## Schema
+
+```ts
+interface ButtonSchema {
+  type: 'button';
+  label: string;                    // Button text
+  variant?: 'default' | 'destructive' | 'outline' | 'secondary' | 'ghost' | 'link';
+  size?: 'sm' | 'default' | 'lg' | 'icon';
+  
+  // Icons
+  icon?: string;                    // Lucide icon name
+  iconPosition?: 'left' | 'right'; // Icon placement
+  
+  // States
+  disabled?: boolean | string | { dialect?: string; source: string };   // boolean, predicate expression, or CEL envelope
+  loading?: boolean;
+  
+  // Actions
+  // RUNTIME SLOT (objectui#6124): a React host supplies it; JSON refuses it
+  // by name. Author behaviour as a node type, e.g. an action:button node.
+  onClick?: () => void | Promise<void>;  // Click handler
+  
+  // Styling
+  className?: string;               // Tailwind classes, e.g. "w-full" for a full-width button
+}
+```
+
+## Examples
+
+### Action Buttons
+
+<SchemaExample id="components-form-button/common-action-buttons" />
+
+### Full Width
+
+<SchemaExample id="components-form-button/full-width-button" />

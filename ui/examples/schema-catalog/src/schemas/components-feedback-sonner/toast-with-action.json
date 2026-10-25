@@ -1,0 +1,7 @@
+{
+  "type": "sonner",
+  "variant": "success",
+  "message": "File uploaded",
+  "description": "Your file has been uploaded successfully",
+  "buttonLabel": "Upload File"
+}

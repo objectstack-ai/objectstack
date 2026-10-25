@@ -1,0 +1,291 @@
+{
+  "type": "stack",
+  "gap": 6,
+  "children": [
+    {
+      "type": "text",
+      "content": "Order Summary",
+      "className": "text-2xl font-bold"
+    },
+    {
+      "type": "grid",
+      "columns": {
+        "xs": 1,
+        "md": 2
+      },
+      "gap": 6,
+      "children": [
+        {
+          "type": "card",
+          "children": [
+            {
+              "type": "stack",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "text",
+                  "content": "Shipping Address",
+                  "className": "font-semibold"
+                },
+                {
+                  "type": "stack",
+                  "gap": 1,
+                  "children": [
+                    {
+                      "type": "text",
+                      "content": "John Doe",
+                      "className": "font-medium"
+                    },
+                    {
+                      "type": "text",
+                      "content": "123 Main Street"
+                    },
+                    {
+                      "type": "text",
+                      "content": "Apt 4B"
+                    },
+                    {
+                      "type": "text",
+                      "content": "New York, NY 10001"
+                    },
+                    {
+                      "type": "text",
+                      "content": "United States"
+                    }
+                  ]
+                },
+                {
+                  "type": "button",
+                  "label": "Edit",
+                  "variant": "ghost",
+                  "size": "sm"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "card",
+          "children": [
+            {
+              "type": "stack",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "text",
+                  "content": "Payment Method",
+                  "className": "font-semibold"
+                },
+                {
+                  "type": "flex",
+                  "properties": {
+                    "align": "center",
+                    "gap": 3,
+                    "children": [
+                      {
+                        "type": "flex",
+                        "properties": {
+                          "justify": "center",
+                          "align": "center",
+                          "gap": 0,
+                          "children": [
+                            {
+                              "type": "icon",
+                              "icon": "credit-card",
+                              "className": "h-6 w-6"
+                            }
+                          ]
+                        },
+                        "className": "h-10 w-16 rounded bg-muted"
+                      },
+                      {
+                        "type": "box",
+                        "className": "text-sm",
+                        "children": [
+                          {
+                            "type": "text",
+                            "content": "Visa ending in 4242",
+                            "className": "font-medium"
+                          },
+                          {
+                            "type": "text",
+                            "content": "Expires 12/24",
+                            "className": "text-muted-foreground"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "type": "button",
+                  "label": "Change",
+                  "variant": "ghost",
+                  "size": "sm"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "card",
+      "children": [
+        {
+          "type": "stack",
+          "gap": 4,
+          "children": [
+            {
+              "type": "text",
+              "content": "Order Items",
+              "className": "font-semibold"
+            },
+            {
+              "type": "stack",
+              "gap": 3,
+              "children": [
+                {
+                  "type": "flex",
+                  "properties": {
+                    "justify": "between",
+                    "children": [
+                      {
+                        "type": "text",
+                        "content": "Smartphone Pro × 1"
+                      },
+                      {
+                        "type": "text",
+                        "content": "$899.00",
+                        "className": "font-medium"
+                      }
+                    ]
+                  },
+                  "className": "text-sm"
+                },
+                {
+                  "type": "flex",
+                  "properties": {
+                    "justify": "between",
+                    "children": [
+                      {
+                        "type": "text",
+                        "content": "Wireless Headphones × 2"
+                      },
+                      {
+                        "type": "text",
+                        "content": "$598.00",
+                        "className": "font-medium"
+                      }
+                    ]
+                  },
+                  "className": "text-sm"
+                }
+              ]
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "stack",
+              "gap": 2,
+              "children": [
+                {
+                  "type": "flex",
+                  "properties": {
+                    "justify": "between",
+                    "children": [
+                      {
+                        "type": "text",
+                        "content": "Subtotal"
+                      },
+                      {
+                        "type": "text",
+                        "content": "$1,497.00"
+                      }
+                    ]
+                  },
+                  "className": "text-sm"
+                },
+                {
+                  "type": "flex",
+                  "properties": {
+                    "justify": "between",
+                    "children": [
+                      {
+                        "type": "text",
+                        "content": "Shipping"
+                      },
+                      {
+                        "type": "text",
+                        "content": "$15.00"
+                      }
+                    ]
+                  },
+                  "className": "text-sm"
+                },
+                {
+                  "type": "flex",
+                  "properties": {
+                    "justify": "between",
+                    "children": [
+                      {
+                        "type": "text",
+                        "content": "Tax"
+                      },
+                      {
+                        "type": "text",
+                        "content": "$149.70"
+                      }
+                    ]
+                  },
+                  "className": "text-sm"
+                },
+                {
+                  "type": "separator"
+                },
+                {
+                  "type": "flex",
+                  "properties": {
+                    "justify": "between",
+                    "children": [
+                      {
+                        "type": "text",
+                        "content": "Total"
+                      },
+                      {
+                        "type": "text",
+                        "content": "$1,661.70"
+                      }
+                    ]
+                  },
+                  "className": "font-bold text-lg"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "flex",
+      "properties": {
+        "gap": 3,
+        "children": [
+          {
+            "type": "button",
+            "label": "Back to Cart",
+            "variant": "outline",
+            "className": "flex-1"
+          },
+          {
+            "type": "button",
+            "label": "Place Order",
+            "variant": "default",
+            "className": "flex-1"
+          }
+        ]
+      }
+    }
+  ]
+}

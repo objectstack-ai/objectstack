@@ -1,0 +1,168 @@
+{
+  "type": "scroll-area",
+  "width": "100%",
+  "height": "150px",
+  "orientation": "horizontal",
+  "className": "rounded-md border",
+  "children": [
+    {
+      "type": "flex",
+      "properties": {
+        "gap": 4,
+        "children": [
+          {
+            "type": "flex",
+            "properties": {
+              "justify": "center",
+              "align": "center",
+              "gap": 0,
+              "children": [
+                {
+                  "type": "text",
+                  "content": "Item 1"
+                }
+              ]
+            },
+            "className": "w-40 h-32 bg-slate-200 rounded flex-shrink-0"
+          },
+          {
+            "type": "flex",
+            "properties": {
+              "justify": "center",
+              "align": "center",
+              "gap": 0,
+              "children": [
+                {
+                  "type": "text",
+                  "content": "Item 2"
+                }
+              ]
+            },
+            "className": "w-40 h-32 bg-slate-200 rounded flex-shrink-0"
+          },
+          {
+            "type": "flex",
+            "properties": {
+              "justify": "center",
+              "align": "center",
+              "gap": 0,
+              "children": [
+                {
+                  "type": "text",
+                  "content": "Item 3"
+                }
+              ]
+            },
+            "className": "w-40 h-32 bg-slate-200 rounded flex-shrink-0"
+          },
+          {
+            "type": "flex",
+            "properties": {
+              "justify": "center",
+              "align": "center",
+              "gap": 0,
+              "children": [
+                {
+                  "type": "text",
+                  "content": "Item 4"
+                }
+              ]
+            },
+            "className": "w-40 h-32 bg-slate-200 rounded flex-shrink-0"
+          },
+          {
+            "type": "flex",
+            "properties": {
+              "justify": "center",
+              "align": "center",
+              "gap": 0,
+              "children": [
+                {
+                  "type": "text",
+                  "content": "Item 5"
+                }
+              ]
+            },
+            "className": "w-40 h-32 bg-slate-200 rounded flex-shrink-0"
+          },
+          {
+            "type": "flex",
+            "properties": {
+              "justify": "center",
+              "align": "center",
+              "gap": 0,
+              "children": [
+                {
+                  "type": "text",
+                  "content": "Item 6"
+                }
+              ]
+            },
+            "className": "w-40 h-32 bg-slate-200 rounded flex-shrink-0"
+          },
+          {
+            "type": "flex",
+            "properties": {
+              "justify": "center",
+              "align": "center",
+              "gap": 0,
+              "children": [
+                {
+                  "type": "text",
+                  "content": "Item 7"
+                }
+              ]
+            },
+            "className": "w-40 h-32 bg-slate-200 rounded flex-shrink-0"
+          },
+          {
+            "type": "flex",
+            "properties": {
+              "justify": "center",
+              "align": "center",
+              "gap": 0,
+              "children": [
+                {
+                  "type": "text",
+                  "content": "Item 8"
+                }
+              ]
+            },
+            "className": "w-40 h-32 bg-slate-200 rounded flex-shrink-0"
+          },
+          {
+            "type": "flex",
+            "properties": {
+              "justify": "center",
+              "align": "center",
+              "gap": 0,
+              "children": [
+                {
+                  "type": "text",
+                  "content": "Item 9"
+                }
+              ]
+            },
+            "className": "w-40 h-32 bg-slate-200 rounded flex-shrink-0"
+          },
+          {
+            "type": "flex",
+            "properties": {
+              "justify": "center",
+              "align": "center",
+              "gap": 0,
+              "children": [
+                {
+                  "type": "text",
+                  "content": "Item 10"
+                }
+              ]
+            },
+            "className": "w-40 h-32 bg-slate-200 rounded flex-shrink-0"
+          }
+        ]
+      },
+      "className": "p-4"
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+---
+title: "Accordion"
+description: "Expandable content sections"
+---
+
+## Examples
+
+The second item sets `disabled: true`, which the renderer forwards to that item
+only — the rest of the accordion stays interactive.
+
+  <SchemaExample id="components-disclosure-accordion/basic-accordion" />
+
+## Schema
+
+```ts
+import type { SchemaNode } from '@object-ui/types';
+
+interface AccordionItem {
+  value: string;                        // Unique item identifier
+  title: string;                        // Item title/trigger
+  content: SchemaNode | SchemaNode[];   // Item content
+  disabled?: boolean;                   // Disables this item only
+}
+
+interface AccordionSchema {
+  type: 'accordion';
+  items: AccordionItem[];
+  accordionType?: 'single' | 'multiple';    // Selection mode; default 'single'
+  collapsible?: boolean;                    // Whether items can be collapsed; default true
+  defaultValue?: string | string[];         // Default expanded item value(s)
+  value?: string | string[];                // Controlled expanded item value(s)
+  // RUNTIME SLOT (objectui#6124): a React host supplies it; JSON refuses it
+  // by name. Author behaviour as a node type, e.g. an action:button node.
+  onValueChange?: (value: string | string[]) => void;
+  variant?: 'default' | 'bordered' | 'separated';  // default 'default'
+}
+```

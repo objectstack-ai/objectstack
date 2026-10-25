@@ -1,0 +1,39 @@
+{
+  "name": "@object-ui/react-runtime",
+  "version": "18.1.0",
+  "type": "module",
+  "sideEffects": false,
+  "license": "MIT",
+  "description": "Trusted runtime React execution for kind:'react' pages — vendored react-runner (Sucrase transpile + scope-eval, no sandbox). Enterprise/private-deploy tier.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
+    "directory": "ui/packages/react-runtime"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc && node ../../scripts/check-dist-completeness.mjs",
+    "test": "vitest run --root ../.. packages/react-runtime/",
+    "type-check": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "sucrase": "^3.35.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "devDependencies": {}
+}

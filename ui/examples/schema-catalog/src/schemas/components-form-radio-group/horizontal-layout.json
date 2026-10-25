@@ -1,0 +1,18 @@
+{
+  "type": "radio-group",
+  "orientation": "horizontal",
+  "options": [
+    {
+      "value": "sm",
+      "label": "Small"
+    },
+    {
+      "value": "md",
+      "label": "Medium"
+    },
+    {
+      "value": "lg",
+      "label": "Large"
+    }
+  ]
+}

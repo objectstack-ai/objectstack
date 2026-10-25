@@ -1,0 +1,14 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "fields": [
+    {
+      "name": "price",
+      "label": "Price",
+      "type": "number",
+      "placeholder": "0.00",
+      "scale": 2
+    }
+  ]
+}

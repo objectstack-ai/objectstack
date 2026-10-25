@@ -1,0 +1,35 @@
+{
+  // Type-checks this package's TESTS, which `tsconfig.json` excludes.
+  // See `packages/types/tsconfig.test.json` for why that exclusion was a hole:
+  // the build correctly keeps tests out of `dist`, but nothing else compiled
+  // them, so a test could assert a contract the compiler never checked.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    // objectui#8691: test programs only. One notch above the package build's
+    // ES2020, mirroring packages/app-shell. The package SOURCE tsconfig is
+    // untouched, so what this package SHIPS still compiles at the ES2020
+    // baseline; nothing here is emitted.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "noEmit": true,
+    // The package build emits `dist`; this project emits nothing, so it must
+    // not inherit `composite` / `declaration` from the build config.
+    "composite": false,
+    // The `toBeInTheDocument` / `toHaveTextContent` matchers these tests use are
+    // a global augmentation, not an import, and `@testing-library/jest-dom` does
+    // not live under `@types/` — so it is never picked up automatically and has
+    // to be named here. Naming `types` at all switches off automatic `@types/*`
+    // inclusion, which is why `node` is named alongside it:
+    // `__tests__/kanban-handler-slots-7664.test.tsx` reads `../index.tsx` off
+    // disk, deriving the handler keys `KanbanRenderer` forwards from the read
+    // site rather than from a list a re-key could hold constant (objectui#7664).
+    // Same reason `packages/plugin-calendar/tsconfig.test.json` names it, and
+    // same reason it stays OUT of `tsconfig.json`: package SOURCE ships to
+    // browsers and must not compile against Node APIs.
+    "types": ["@testing-library/jest-dom", "node"],
+    // Drop the root tsconfig's source-tree `paths` so `@object-ui/*` and
+    // `@objectstack/spec` resolve through the workspace dependency's built
+    // `.d.ts` instead of pulling sibling sources in as program inputs (TS6059).
+    "paths": {}
+  },
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+}

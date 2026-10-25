@@ -1,0 +1,100 @@
+// The base of the repo-root TIER configs (`tsconfig.node.json`,
+// `tsconfig.react.json`). NOT the base of the packages — no package extends it.
+//
+// Renamed from `tsconfig.base.json` by objectui#9330. The old name asserted it
+// was the base every package builds on; the `extends` graph below says
+// otherwise, and the name had already produced two contradictory answers to
+// objectui#9189's question "is there a shared base tsconfig?" — read the name
+// and you set an option here, where 38 of 40 packages would never load it:
+// green, inert and invisible.
+//
+// ⛔ The rename moved NO compiler option and added no gate. objectui#9330's
+// ruling (director seat, 2026-09-13) rules a rename and a comment and nothing
+// else, and objectui#7212's population question stays where it is. Anything in
+// this file that changes what a project COMPILES is out of that scope.
+//
+// ## The measured `extends` graph
+//
+// Counted, not recalled: every one of the 94 tracked `tsconfig*.json` files in
+// the repo, read with TypeScript's own JSONC reader (`ts.readConfigFile`), at
+// cb725e78f. Re-derive it rather than trusting this block if it matters — the
+// numbers below are a reading with a date on it, not a contract.
+//
+//   THIS FILE is extended by 3 files and by nothing else:
+//     tsconfig.node.json                         editor / reference only; NO script
+//                                                runs it (see its own header)
+//     tsconfig.react.json                        no in-repo extender at all; named as
+//                                                a template for plugin authors in
+//                                                skills/objectui/guides/plugin-development.md
+//     examples/byo-backend-console/tsconfig.json the one real compile that reaches
+//                                                here (`tsc --noEmit`, `tsc && vite build`)
+//
+//   The root `tsconfig.json` is extended by 75 of the 94, every one of them
+//   under `packages/`: 38 of the 40 `packages/*/tsconfig.json`, 36 of the 37
+//   `packages/*/tsconfig.test.json`, and `packages/types/tsconfig.examples.json`.
+//   Nothing under `apps/` or `examples/` extends it.
+//
+//   `packages/runner/tsconfig.json` and `packages/vscode-extension/tsconfig.json`
+//   extend NOTHING — they are the two of forty that inherit from neither root
+//   config. Recorded here per the ruling, ⛔ not changed by it.
+//
+// ⚠️ Two figures in objectui#9330's own thread disagree and neither may be
+// copied forward. The card body says "all 30 `packages/*/tsconfig.json`"; the
+// ruling says 38. They are the SAME population, and re-measuring at the card's
+// own stated commit c64975e9f settles it: 40 such files, 38 extending the root
+// config — there as well as here. 38 is right at both commits, 30 matches no
+// population in this repo at either (not the published packages, not the ones
+// with a build script, not the ones whose build invokes `tsc`), so it is a
+// miscount rather than a narrower reading.
+//
+// ⚠️ The ruling names FOUR extenders of this file, including
+// `tsconfig.scripts.json`. That one is wrong, and was already wrong when the
+// ruling was written: `tsconfig.scripts.json` extends nothing, and its own
+// header argues at length that it must not extend this file — the `exclude`
+// list below drops the test globs, so inheriting it would compile none of the
+// `scripts/__tests__/` pin tests that project exists for, passing vacuously.
+// ⛔ Do not "complete" the ruling by adding that `extends`.
+//
+// Comments here are `//`, not `/* */`, for the reason `tsconfig.scripts.json`
+// states: a glob containing `**` followed by `/` closes a block comment early,
+// and a tsconfig that silently fails to parse falls back to including the
+// entire repository.
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "lib": ["ES2020"],
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+    
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "removeComments": false,
+    "importHelpers": false,
+    
+    "isolatedModules": true,
+    "allowJs": false
+  },
+  "exclude": [
+    "node_modules",
+    "dist",
+    "build",
+    ".next",
+    "coverage",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.spec.ts",
+    "**/*.spec.tsx"
+  ]
+}

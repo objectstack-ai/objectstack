@@ -1,0 +1,10 @@
+{
+  "type": "tooltip",
+  "content": "Helpful information",
+  "trigger": [
+    {
+      "type": "button",
+      "label": "Hover me"
+    }
+  ]
+}

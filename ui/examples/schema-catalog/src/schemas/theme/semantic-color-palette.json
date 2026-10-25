@@ -1,0 +1,128 @@
+{
+  "type": "grid",
+  "columns": 4,
+  "gap": 3,
+  "className": "p-4",
+  "children": [
+    {
+      "type": "card",
+      "className": "p-4 text-center",
+      "children": [
+        {
+          "type": "box",
+          "className": "w-full h-12 rounded-md bg-primary mb-2"
+        },
+        {
+          "type": "text",
+          "content": "Primary",
+          "className": "text-xs font-medium"
+        }
+      ]
+    },
+    {
+      "type": "card",
+      "className": "p-4 text-center",
+      "children": [
+        {
+          "type": "box",
+          "className": "w-full h-12 rounded-md bg-secondary mb-2"
+        },
+        {
+          "type": "text",
+          "content": "Secondary",
+          "className": "text-xs font-medium"
+        }
+      ]
+    },
+    {
+      "type": "card",
+      "className": "p-4 text-center",
+      "children": [
+        {
+          "type": "box",
+          "className": "w-full h-12 rounded-md bg-accent mb-2"
+        },
+        {
+          "type": "text",
+          "content": "Accent",
+          "className": "text-xs font-medium"
+        }
+      ]
+    },
+    {
+      "type": "card",
+      "className": "p-4 text-center",
+      "children": [
+        {
+          "type": "box",
+          "className": "w-full h-12 rounded-md bg-muted mb-2"
+        },
+        {
+          "type": "text",
+          "content": "Muted",
+          "className": "text-xs font-medium"
+        }
+      ]
+    },
+    {
+      "type": "card",
+      "className": "p-4 text-center",
+      "children": [
+        {
+          "type": "box",
+          "className": "w-full h-12 rounded-md bg-destructive mb-2"
+        },
+        {
+          "type": "text",
+          "content": "Destructive",
+          "className": "text-xs font-medium"
+        }
+      ]
+    },
+    {
+      "type": "card",
+      "className": "p-4 text-center",
+      "children": [
+        {
+          "type": "box",
+          "className": "w-full h-12 rounded-md bg-card border mb-2"
+        },
+        {
+          "type": "text",
+          "content": "Card",
+          "className": "text-xs font-medium"
+        }
+      ]
+    },
+    {
+      "type": "card",
+      "className": "p-4 text-center",
+      "children": [
+        {
+          "type": "box",
+          "className": "w-full h-12 rounded-md bg-popover border mb-2"
+        },
+        {
+          "type": "text",
+          "content": "Popover",
+          "className": "text-xs font-medium"
+        }
+      ]
+    },
+    {
+      "type": "card",
+      "className": "p-4 text-center",
+      "children": [
+        {
+          "type": "box",
+          "className": "w-full h-12 rounded-md border-2 border-border mb-2"
+        },
+        {
+          "type": "text",
+          "content": "Border",
+          "className": "text-xs font-medium"
+        }
+      ]
+    }
+  ]
+}

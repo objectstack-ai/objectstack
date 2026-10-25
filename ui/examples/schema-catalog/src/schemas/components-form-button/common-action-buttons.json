@@ -1,0 +1,25 @@
+{
+  "type": "flex",
+  "properties": {
+    "gap": 3,
+    "children": [
+      {
+        "type": "button",
+        "label": "Save",
+        "variant": "default",
+        "icon": "save"
+      },
+      {
+        "type": "button",
+        "label": "Cancel",
+        "variant": "outline"
+      },
+      {
+        "type": "button",
+        "label": "Delete",
+        "variant": "destructive",
+        "icon": "trash"
+      }
+    ]
+  }
+}

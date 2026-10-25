@@ -1,0 +1,119 @@
+---
+title: "Field Widget Props"
+description: "What a field widget receives at runtime, and why those keys are not field metadata"
+---
+
+Every field reference page in this section documents one thing: the **metadata you
+author** for that field type. This page documents the other half — the props a field
+**widget** receives when it renders.
+
+The two are different shapes with different producers, and confusing them is the most
+common authoring mistake this section can cause. A key like the live value, the
+host-supplied `className`, or the form's `disabled` state belongs to the widget at
+runtime; writing it on an object's field definition publishes a key
+`@objectstack/spec`'s strict schemas reject.
+
+## The type is the source of truth
+
+`FieldWidgetComponentProps` is exported from `@object-ui/fields`. It is a **closed**
+type — there is no `[key: string]: any` in it (objectui#3221), so a misspelled prop is
+a compile error rather than a permanent `undefined`. That is what makes it usable as a
+reference: the compiler answers "is this a real prop", and this page does not have to.
+
+A widget implements it by taking it as its props type:
+
+```tsx
+import { toDomProps, type FieldWidgetComponentProps } from '@object-ui/fields';
+
+/** A custom single-line widget, registered for a field type of your own. */
+export function SlugWidget(props: FieldWidgetComponentProps<string>) {
+  const { value, onChange, field, readonly, disabled, className, error } = props;
+
+  return (
+    <input
+      // The host plumbing, filtered to what may legitimately reach a DOM
+      // element. Never a bare `{...props}` spread: renderer-only props and
+      // authored field-config keys must not become DOM attributes.
+      {...toDomProps(props)}
+      className={className}
+      value={value ?? ''}
+      onChange={(event) => onChange(event.target.value)}
+      placeholder={field.placeholder}
+      readOnly={readonly}
+      disabled={disabled}
+      // The widget drives the a11y state; the message TEXT stays with the form
+      // renderer, and the required MARKER is drawn by its label.
+      aria-invalid={Boolean(error)}
+      aria-required={Boolean(field.required)}
+    />
+  );
+}
+```
+
+Read the full member list from the type — in your editor, or from
+`packages/fields/src/widgets/types.ts`, where every key carries a doc comment naming
+its producer and its consumer. This page deliberately does not copy that list: a
+hand-maintained restatement of a declared surface is exactly the drift these pages are
+being fixed for.
+
+## What the categories are
+
+The type is assembled from five groups, and knowing which group a key is in tells you
+who supplies it:
+
+1. **The controlled-input contract.** The current value, the callback that changes it,
+   the field's metadata carrier, and the display-state flags every widget interprets.
+   Every widget in the package implements this group; the rest are optional.
+2. **Host plumbing.** What a rendering host forwards to widgets that need more than a
+   value — a data source for widgets that query records, live sibling-field values for
+   cascading and dependent options, resolved labels and hints for the copy those gates
+   render, a compact mode for grid cells, and record-selection callbacks for pickers.
+   A widget that needs none of it destructures none of it.
+3. **DOM pass-through.** The identity, focus and event keys that may legitimately land
+   on the element a widget renders — the field's `id`, the `aria-describedby` the form
+   control minted, and so on. `toDomProps` is this group's runtime executor, bound to
+   the declaration in both directions by compile-time assertions, so a key cannot be
+   declared here and silently never delivered. Every other registered widget is held
+   to the same rule with the SDUI contract's own key set — the plugin-widget contract
+   is stated once, in [What Reaches the DOM](/docs/guide/plugin-development#what-reaches-the-dom).
+4. **The ARIA attribute family**, intersected in whole from React's `AriaAttributes`.
+   This group is the bulk of the member count, which is why the count is not a useful
+   thing to quote.
+5. **`data-*` attributes**, open by design and expressed as a template-literal key so
+   `keyof` stays finite — an undeclared prop still fails.
+
+## Metadata and props are two shapes, not one
+
+The authored metadata arrives at the widget under a single carrier
+(objectui#3233 converged it at the producers; there is no second key to check). The
+live value never lives on metadata, and the metadata never lives on the DOM:
+
+```ts
+import type { FieldWidgetComponentProps } from '@object-ui/fields';
+import type { FieldMetadata, TextFieldMetadata } from '@object-ui/types';
+
+// What you AUTHOR: object metadata, validated at publish.
+const slug: TextFieldMetadata = {
+  type: 'text',
+  name: 'slug',
+  label: 'Slug',
+  maxLength: 80,
+};
+
+// What the widget RECEIVES at runtime.
+declare const props: FieldWidgetComponentProps<string>;
+
+const carrier: FieldMetadata = props.field; // the authored metadata, unchanged
+const live: string = props.value;           // never a metadata key
+
+export { slug, carrier, live };
+```
+
+Assigning `slug` into `props.field` type-checks; the reverse — writing `props.value`
+into `slug` — does not, and that asymmetry is the whole distinction.
+
+## Where each half is documented
+
+- **Metadata keys** — the `Field Schema` section of each field page in this section,
+  as a literal annotated with that field type's exported `*FieldMetadata`.
+- **Runtime props** — this page, and the type it names.

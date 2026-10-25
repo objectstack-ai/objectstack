@@ -3322,7 +3322,23 @@ export class AuthPlugin implements Plugin {
           // of recorded as the system. Attribution only: the route's own
           // authorization already happened above, and the writes stay system.
           const { status, body } = await runAttributedToUser(actor.id, () =>
-            runAdminCreateUser({ ...adminUserDeps(), createGrant: createGrantFor(c) }, c.req.raw, actor),
+            runAdminCreateUser(
+              {
+                ...adminUserDeps(),
+                createGrant: createGrantFor(c),
+                // ADR-0093 D3 amendment — multi-org create-user joins the
+                // administrator's own current organization, read from the
+                // session this request already authenticated.
+                getCallerActiveOrganizationId: async () => {
+                  const session = (await authApi.getSession(inProcessSessionReadInput(c.req.raw.headers))) as
+                    | { session?: { activeOrganizationId?: string | null } }
+                    | null;
+                  return session?.session?.activeOrganizationId ?? null;
+                },
+              },
+              c.req.raw,
+              actor,
+            ),
           );
           return c.json(body, status as any);
         } catch (error) {

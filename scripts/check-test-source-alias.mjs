@@ -655,6 +655,24 @@ const WORKSPACE_BARE_MEMBER_MANIFESTS = ['ui/package.json'];
 /** The parent directories those globs enumerate — each glob minus its leaf. */
 const WORKSPACE_PARENT_DIRS = WORKSPACE_PARENT_GLOBS.map((glob) => glob.replace(/\/\*$/, ''));
 
+/**
+ * Where the VITEST-ALIAS half stops (decision F, objectstack#25752 item 17f).
+ * That half -- a workspace dep resolved through `dist/` with no source alias,
+ * and the KNOWN_UNALIASED_TEST_IMPORTS registry that mirrors it -- is asked of
+ * members outside the objectui tree only: objectui's tests resolve their
+ * workspace deps through the built `dist/` by design (its Test UI matrix builds
+ * first), 42 members at the import, and the ruling keeps that. Every other rule
+ * still reads ui/: the clocked-window rule (the function-body half F adopted,
+ * over the same measured specifiers), both ENOTDIR alias-table rules, and the
+ * readability of every config.
+ */
+const ALIAS_HALF_EXCLUDED_DIR = 'ui';
+
+/** Is the package at `rel` asked the vitest-alias half? */
+function inAliasHalf(rel) {
+  return rel !== ALIAS_HALF_EXCLUDED_DIR && !rel.startsWith(`${ALIAS_HALF_EXCLUDED_DIR}/`);
+}
+
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'coverage', '.turbo', '.next', '.cache']);
 const TEST_FILE = /\.(test|spec)\.[cm]?[jt]sx?$/;
 const SOURCE_FILE = /\.[cm]?[jt]sx?$/;
@@ -2120,7 +2138,11 @@ function check(root, registry) {
       'scanner found NO package publishing a subpath export — the `exports` read is broken, not the repo',
     );
 
-  const measured = new Map(packages.filter((p) => p.unaliased.length > 0).map((p) => [p.name, p.unaliased]));
+  // The vitest-alias half, scoped by decision F (`inAliasHalf`). Measured for
+  // every package still -- the clocked-window rule reads the same specifiers.
+  const measured = new Map(
+    packages.filter((p) => p.unaliased.length > 0 && inAliasHalf(p.rel)).map((p) => [p.name, p.unaliased]),
+  );
 
   for (const pkg of packages) {
     if (pkg.unreadable) {
@@ -2315,6 +2337,18 @@ function buildFixtureTree() {
       "import { nested } from '@fx/core/nested';\n" +
       "import { ghost } from '@fx/core/ghost';\n" +
       'export default log + nested + ghost;\n',
+  });
+
+  // (1c) THE OBJECTUI SCOPE (decision F). The violator's shape under ui/, plus a
+  // load inside a test body: the vitest-alias half must not ask it, the
+  // clocked-window rule still must.
+  fixture(root, 'ui/packages/ui-violator', {
+    'package.json': ARTIFACT_MANIFEST('@fx/ui-violator'),
+    'src/thing.test.ts':
+      "import { it } from 'vitest';\n" +
+      "it('y', async () => {\n" +
+      "  await import('@fx/core');\n" +
+      '});\n',
   });
 
   // (2) compliant: anchored array-form alias to source.
@@ -2927,6 +2961,23 @@ function selfTest() {
     expect(!has(bare.failures, 'packages/unreachable'), 'an import no test can reach was treated as a hazard');
     expect(has(bare.failures, 'ENOTDIR'), 'the prefix/ENOTDIR alias trap was not detected');
     expect(has(bare.failures, 'cannot be read statically'), 'a config with spread aliases was read as aliasing nothing');
+    // Decision F: the ui/ member is out of the vitest-alias half and in the clocked-window rule.
+    expect(
+      !bare.failures.some((f) => f.startsWith('ui/packages/ui-violator') && f.includes('no source alias')),
+      'a ui/ member was asked the vitest-alias half that decision F scopes to non-ui/ members',
+    );
+    expect(
+      !bare.measured.has('@fx/ui-violator'),
+      'a ui/ member entered the measured registry population that decision F scopes out',
+    );
+    expect(
+      bare.failures.some((f) => f.startsWith('ui/packages/ui-violator/src/thing.test.ts:3') && f.includes('a CLOCKED window')),
+      'scoping the vitest-alias half also silenced the clocked-window rule for a ui/ member',
+    );
+    expect(
+      has(check(root, { '@fx/ui-violator': ['@fx/core'] }).failures, '@fx/ui-violator: registry entry is no longer needed'),
+      'a registry entry for a ui/ member was not refused as unneeded',
+    );
 
     // ── the payload boundary ─────────────────────────────────────────────
     // A test under a dir the package's own tsconfig excludes is payload (the
@@ -3641,9 +3692,13 @@ if (argv.includes('--self-test')) {
     );
     process.exit(1);
   }
+  const outOfAliasHalf = packages.filter((p) => !inAliasHalf(p.rel)).length;
   console.log(
     `check-test-source-alias OK — ${packages.length} packages with tests scanned; ` +
       `${measured.size} registered as still resolving a workspace dep through \`dist/\`; ` +
-      `${publishedCount} published subpath(s) resolved through every alias table.`,
+      `${publishedCount} published subpath(s) resolved through every alias table.` +
+      (outOfAliasHalf === 0
+        ? ''
+        : ` ${outOfAliasHalf} of them under ${ALIAS_HALF_EXCLUDED_DIR}/ were not asked the vitest-alias half (decision F).`),
   );
 }

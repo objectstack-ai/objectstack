@@ -1,0 +1,7 @@
+dist/
+node_modules/
+# Ignore generated files in src (should only be in dist)
+src/**/*.d.ts
+src/**/*.js
+!src/**/*.test.ts
+!src/**/*.test.js

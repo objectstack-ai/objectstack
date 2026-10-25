@@ -1,0 +1,99 @@
+{
+  "type": "card",
+  "children": [
+    {
+      "type": "flex",
+      "properties": {
+        "align": "center",
+        "justify": "between",
+        "children": [
+          {
+            "type": "text",
+            "content": "Order #12345",
+            "className": "font-semibold"
+          },
+          {
+            "type": "badge",
+            "label": "Pending",
+            "variant": "outline"
+          }
+        ]
+      },
+      "className": "border-b pb-3 mb-4"
+    },
+    {
+      "type": "stack",
+      "gap": 3,
+      "children": [
+        {
+          "type": "flex",
+          "properties": {
+            "gap": 2,
+            "align": "center",
+            "children": [
+              {
+                "type": "text",
+                "content": "Customer:",
+                "className": "text-sm text-muted-foreground w-24"
+              },
+              {
+                "type": "text",
+                "content": "Acme Corp",
+                "className": "text-sm font-medium"
+              }
+            ]
+          }
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "gap": 2,
+            "align": "center",
+            "children": [
+              {
+                "type": "text",
+                "content": "Amount:",
+                "className": "text-sm text-muted-foreground w-24"
+              },
+              {
+                "type": "text",
+                "content": "$1,250.00",
+                "className": "text-sm font-medium"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "type": "flex",
+      "properties": {
+        "justify": "end",
+        "gap": 2,
+        "children": [
+          {
+            "type": "button",
+            "label": "Reject",
+            "variant": "outline",
+            "size": "sm"
+          },
+          {
+            "type": "button",
+            "label": "Request Review",
+            "variant": "secondary",
+            "size": "sm",
+            "icon": "eye"
+          },
+          {
+            "type": "button",
+            "label": "Approve",
+            "variant": "default",
+            "size": "sm",
+            "icon": "check"
+          }
+        ]
+      },
+      "className": "pt-4 border-t mt-4"
+    }
+  ]
+}

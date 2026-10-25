@@ -1,0 +1,255 @@
+{
+  "type": "container",
+  "maxWidth": "6xl",
+  "padding": 0,
+  "children": [
+    {
+      "type": "box",
+      "className": "text-center mb-12",
+      "children": [
+        {
+          "type": "text",
+          "content": "Everything you need to succeed",
+          "className": "text-3xl font-bold mb-2"
+        },
+        {
+          "type": "text",
+          "content": "Powerful features to help you grow your business",
+          "className": "text-muted-foreground"
+        }
+      ]
+    },
+    {
+      "type": "grid",
+      "columns": {
+        "xs": 1,
+        "md": 3
+      },
+      "gap": 8,
+      "children": [
+        {
+          "type": "card",
+          "children": [
+            {
+              "type": "stack",
+              "gap": 3,
+              "children": [
+                {
+                  "type": "flex",
+                  "properties": {
+                    "justify": "center",
+                    "align": "center",
+                    "gap": 0,
+                    "children": [
+                      {
+                        "type": "icon",
+                        "icon": "zap",
+                        "className": "h-6 w-6 text-primary"
+                      }
+                    ]
+                  },
+                  "className": "h-12 w-12 rounded-lg bg-primary/10"
+                },
+                {
+                  "type": "text",
+                  "content": "Lightning Fast",
+                  "className": "text-xl font-semibold"
+                },
+                {
+                  "type": "text",
+                  "content": "Optimized for speed and performance. Your users will love the experience.",
+                  "className": "text-sm text-muted-foreground"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "card",
+          "children": [
+            {
+              "type": "stack",
+              "gap": 3,
+              "children": [
+                {
+                  "type": "flex",
+                  "properties": {
+                    "justify": "center",
+                    "align": "center",
+                    "gap": 0,
+                    "children": [
+                      {
+                        "type": "icon",
+                        "icon": "shield",
+                        "className": "h-6 w-6 text-primary"
+                      }
+                    ]
+                  },
+                  "className": "h-12 w-12 rounded-lg bg-primary/10"
+                },
+                {
+                  "type": "text",
+                  "content": "Secure by Default",
+                  "className": "text-xl font-semibold"
+                },
+                {
+                  "type": "text",
+                  "content": "Enterprise-grade security to protect your data and your users.",
+                  "className": "text-sm text-muted-foreground"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "card",
+          "children": [
+            {
+              "type": "stack",
+              "gap": 3,
+              "children": [
+                {
+                  "type": "flex",
+                  "properties": {
+                    "justify": "center",
+                    "align": "center",
+                    "gap": 0,
+                    "children": [
+                      {
+                        "type": "icon",
+                        "icon": "smartphone",
+                        "className": "h-6 w-6 text-primary"
+                      }
+                    ]
+                  },
+                  "className": "h-12 w-12 rounded-lg bg-primary/10"
+                },
+                {
+                  "type": "text",
+                  "content": "Mobile First",
+                  "className": "text-xl font-semibold"
+                },
+                {
+                  "type": "text",
+                  "content": "Responsive design that works perfectly on any device, anywhere.",
+                  "className": "text-sm text-muted-foreground"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "card",
+          "children": [
+            {
+              "type": "stack",
+              "gap": 3,
+              "children": [
+                {
+                  "type": "flex",
+                  "properties": {
+                    "justify": "center",
+                    "align": "center",
+                    "gap": 0,
+                    "children": [
+                      {
+                        "type": "icon",
+                        "icon": "palette",
+                        "className": "h-6 w-6 text-primary"
+                      }
+                    ]
+                  },
+                  "className": "h-12 w-12 rounded-lg bg-primary/10"
+                },
+                {
+                  "type": "text",
+                  "content": "Beautiful Design",
+                  "className": "text-xl font-semibold"
+                },
+                {
+                  "type": "text",
+                  "content": "Crafted with attention to detail using modern design principles.",
+                  "className": "text-sm text-muted-foreground"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "card",
+          "children": [
+            {
+              "type": "stack",
+              "gap": 3,
+              "children": [
+                {
+                  "type": "flex",
+                  "properties": {
+                    "justify": "center",
+                    "align": "center",
+                    "gap": 0,
+                    "children": [
+                      {
+                        "type": "icon",
+                        "icon": "settings",
+                        "className": "h-6 w-6 text-primary"
+                      }
+                    ]
+                  },
+                  "className": "h-12 w-12 rounded-lg bg-primary/10"
+                },
+                {
+                  "type": "text",
+                  "content": "Fully Customizable",
+                  "className": "text-xl font-semibold"
+                },
+                {
+                  "type": "text",
+                  "content": "Customize every aspect to match your brand and requirements.",
+                  "className": "text-sm text-muted-foreground"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "card",
+          "children": [
+            {
+              "type": "stack",
+              "gap": 3,
+              "children": [
+                {
+                  "type": "flex",
+                  "properties": {
+                    "justify": "center",
+                    "align": "center",
+                    "gap": 0,
+                    "children": [
+                      {
+                        "type": "icon",
+                        "icon": "headphones",
+                        "className": "h-6 w-6 text-primary"
+                      }
+                    ]
+                  },
+                  "className": "h-12 w-12 rounded-lg bg-primary/10"
+                },
+                {
+                  "type": "text",
+                  "content": "24/7 Support",
+                  "className": "text-xl font-semibold"
+                },
+                {
+                  "type": "text",
+                  "content": "Our team is always here to help you succeed, day or night.",
+                  "className": "text-sm text-muted-foreground"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

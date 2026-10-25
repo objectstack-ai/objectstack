@@ -162,7 +162,6 @@ import type * as M88 from './kernel/metadata-plugin.zod.js';
 import type * as M89 from './kernel/metadata-protection.zod.js';
 import type * as M90 from './kernel/package-artifact.zod.js';
 import type * as M91 from './kernel/package-registry.zod.js';
-import type * as M92 from './kernel/package-upgrade.zod.js';
 import type * as M93 from './kernel/plugin-capability.zod.js';
 import type * as M94 from './kernel/plugin-lifecycle-advanced.zod.js';
 import type * as M95 from './kernel/plugin-loading.zod.js';
@@ -279,7 +278,7 @@ import type * as M190 from './kernel/execution-context.zod.js';
 import type * as M191 from './automation/api-trigger-secret-ref.zod.js';
 
 // ---------------------------------------------------------------------------
-// 790 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 786 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1024,12 +1023,6 @@ export type Iso_kernel_packageRegistry__PackageStatusEnum = Assert<Eq< z.input< 
 export type Iso_kernel_packageRegistry__UninstallPackageRequestSchema = Assert<Eq< z.input< typeof M91.UninstallPackageRequestSchema >, z.infer< typeof M91.UninstallPackageRequestSchema > >>;
 export type Iso_kernel_packageRegistry__UninstallPackageResponseSchema = Assert<Eq< z.input< typeof M91.UninstallPackageResponseSchema >, z.infer< typeof M91.UninstallPackageResponseSchema > >>;
 
-// kernel/package-upgrade.zod.ts
-export type Iso_kernel_packageUpgrade__MetadataChangeTypeSchema = Assert<Eq< z.input< typeof M92.MetadataChangeTypeSchema >, z.infer< typeof M92.MetadataChangeTypeSchema > >>;
-export type Iso_kernel_packageUpgrade__RollbackPackageResponseSchema = Assert<Eq< z.input< typeof M92.RollbackPackageResponseSchema >, z.infer< typeof M92.RollbackPackageResponseSchema > >>;
-export type Iso_kernel_packageUpgrade__UpgradeImpactLevelSchema = Assert<Eq< z.input< typeof M92.UpgradeImpactLevelSchema >, z.infer< typeof M92.UpgradeImpactLevelSchema > >>;
-export type Iso_kernel_packageUpgrade__UpgradePhaseSchema = Assert<Eq< z.input< typeof M92.UpgradePhaseSchema >, z.infer< typeof M92.UpgradePhaseSchema > >>;
-
 // kernel/plugin-capability.zod.ts
 export type Iso_kernel_pluginCapability__CapabilityConformanceLevelSchema = Assert<Eq< z.input< typeof M93.CapabilityConformanceLevelSchema >, z.infer< typeof M93.CapabilityConformanceLevelSchema > >>;
 export type Iso_kernel_pluginCapability__ProtocolReferenceSchema = Assert<Eq< z.input< typeof M93.ProtocolReferenceSchema >, z.infer< typeof M93.ProtocolReferenceSchema > >>;
@@ -1708,7 +1701,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 790 isomorphic pins', () => {
+  it('still declares all 786 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2573,7 +2566,18 @@ describe('ADR-0122 type-alias convention', () => {
     // start node gives its hook secret — a plain string, so it is pinned here
     // (Iso_automation_apiTriggerSecretRef__ApiTriggerSecretRefSchema) rather
     // than given a `…Parsed` synonym. +1 added.
-    expect(pins).toHaveLength(790);
+    //
+    // 790 -> 786 is #25608's retirement of `kernel/package-upgrade.zod.ts`
+    // whole (ADR-0049 enforce-or-remove, `RETIRED_DEFS_BY_MAJOR[18]`): four of
+    // its schemas were isomorphic and pinned here —
+    // Iso_kernel_packageUpgrade__MetadataChangeTypeSchema,
+    // Iso_kernel_packageUpgrade__RollbackPackageResponseSchema,
+    // Iso_kernel_packageUpgrade__UpgradeImpactLevelSchema and
+    // Iso_kernel_packageUpgrade__UpgradePhaseSchema — and they leave with the
+    // module, its `M92` import with them (the slot stays empty; the numbering
+    // is a label, not a count). The module's other defs each carried an
+    // `XParsed` alias and were never on this list. -4 removed.
+    expect(pins).toHaveLength(786);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either

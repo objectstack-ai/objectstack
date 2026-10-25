@@ -1,0 +1,48 @@
+---
+title: Schema Catalog
+description: Browseable index of every JSON schema used in the ObjectUI docs.
+---
+
+import { SchemaCatalogIndex } from '@/app/components/SchemaCatalogIndex';
+
+# Schema Catalog
+
+Every interactive demo on this site renders a JSON schema that lives in
+[`@object-ui/example-schema-catalog`](https://github.com/objectstack-ai/objectui/tree/main/examples/schema-catalog).
+This page is the visual gallery over that catalog — live thumbnails for
+every entry, grouped by domain. Click a card to open a full interactive
+preview with the JSON, copy a stable id, or grab a ready-to-paste
+`<SchemaExample id="…" />` snippet for any MDX page.
+
+## How the catalog works
+
+- **Source of truth.** Each schema lives as a single `.json` file under
+  `examples/schema-catalog/src/schemas/<category>/<id>.json` and is
+  imported into the registry by `examples/schema-catalog/src/index.ts`.
+- **One id, one schema.** Ids are stable (e.g. `auth/login-simple`). MDX
+  pages reference schemas with `<SchemaExample id="auth/login-simple" />`,
+  which looks the schema up via `getExample(id)` from the catalog package.
+- **Smoke-tested.** The catalog ships a Vitest suite that resolves every
+  id and instantiates every schema; CI fails if any entry breaks. Adding a
+  schema is a one-file change; renaming or deleting one fails CI loudly.
+- **Not published.** The catalog package is `private: true` — it is a
+  test/docs fixture, not a runtime dependency for consuming apps.
+
+## Browse
+
+<SchemaCatalogIndex />
+
+## Adding a new example
+
+1. Drop the JSON under
+   `examples/schema-catalog/src/schemas/<category>/<your-id>.json`.
+2. Run `pnpm -F @object-ui/example-schema-catalog regenerate` to update
+   `src/index.ts` (the import map is generated).
+3. Reference it from any MDX page:
+
+   ```mdx
+   <SchemaExample id="<category>/<your-id>" />
+   ```
+
+4. `pnpm -F @object-ui/example-schema-catalog test` smoke-tests the new
+   entry; the same test runs in CI on every push.

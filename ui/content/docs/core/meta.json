@@ -1,0 +1,10 @@
+{
+  "title": "Core",
+  "pages": [
+    "schema-renderer",
+    "app-schema",
+    "theme-schema",
+    "enhanced-actions",
+    "report-schema"
+  ]
+}

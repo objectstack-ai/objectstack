@@ -1,0 +1,25 @@
+{
+  "type": "header",
+  "className": "p-4 border-b bg-slate-50",
+  "children": [
+    {
+      "type": "flex",
+      "properties": {
+        "justify": "between",
+        "align": "center",
+        "children": [
+          {
+            "type": "text",
+            "content": "Site Title",
+            "className": "text-xl font-bold"
+          },
+          {
+            "type": "text",
+            "content": "Navigation",
+            "className": "text-sm text-muted-foreground"
+          }
+        ]
+      }
+    }
+  ]
+}

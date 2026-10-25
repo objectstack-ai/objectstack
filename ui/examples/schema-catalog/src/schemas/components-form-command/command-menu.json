@@ -1,0 +1,46 @@
+{
+  "type": "command",
+  "placeholder": "Type a command or search...",
+  "groups": [
+    {
+      "heading": "Suggestions",
+      "items": [
+        {
+          "value": "calendar",
+          "label": "Calendar",
+          "icon": "calendar"
+        },
+        {
+          "value": "search",
+          "label": "Search Emoji",
+          "icon": "face-slightly-smiling"
+        },
+        {
+          "value": "calculator",
+          "label": "Calculator",
+          "icon": "calculator"
+        }
+      ]
+    },
+    {
+      "heading": "Settings",
+      "items": [
+        {
+          "value": "profile",
+          "label": "Profile",
+          "icon": "user"
+        },
+        {
+          "value": "billing",
+          "label": "Billing",
+          "icon": "credit-card"
+        },
+        {
+          "value": "settings",
+          "label": "Settings",
+          "icon": "settings"
+        }
+      ]
+    }
+  ]
+}
