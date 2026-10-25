@@ -4,7 +4,7 @@
 
 ### Minor Changes
 
-- 3937697: feat(cloud-connection): `GET /api/v1/runtime/config` serves the Branding settings' name, logo and colour, falling back to `OS_PRODUCT_NAME`, `OS_LOGO_URL` and `OS_BRAND_COLOR`
+- 78ab647: feat(cloud-connection): `GET /api/v1/runtime/config` serves the Branding settings' name, logo and colour, falling back to `OS_PRODUCT_NAME`, `OS_LOGO_URL` and `OS_BRAND_COLOR`
   
   Clause-②: no (the served `branding` block keeps its shape and no exported type changes; only where its values come from moves)
   
@@ -17,7 +17,7 @@
   A value somebody set wins (saved in Setup, or pinned by the settings layer's own `OS_BRANDING_*` variable). A key nobody set falls back exactly as before: the host's constructor option, then `OS_PRODUCT_NAME` / `OS_LOGO_URL` / `OS_BRAND_COLOR`, then the built-in default. `productShortName`, `pwaDescription` and `pwaThemeColor` follow the name and colour actually served, unless configured themselves. `brandColor` keeps its meaning: the console's browser and installed-app theme colour, beside each app's own `AppBranding` colours.
   
   The door reads the settings only when the settings service lists the `branding` namespace. `@objectstack/service-settings` withholds it under the `group` and `isolated` tenancy postures, so on a walled deployment no tenant data reaches this anonymous door and the deployment's `OS_*` branding is served, as before. A settings read that fails serves the deployment's branding and logs one warning; the door never answers 500 for it.
-- 3937697: fix(cloud-connection)!: a runtime holding the environment service key is platform-managed, so it registers no Cloud Connection Setup page and refuses to disconnect; everywhere else the Cloud Connection entry moves to Setup's Integrations group
+- ae58b26: fix(cloud-connection)!: a runtime holding the environment service key is platform-managed, so it registers no Cloud Connection Setup page and refuses to disconnect; everywhere else the Cloud Connection entry moves to Setup's Integrations group
   
   A runtime whose control-plane credential is the environment service key (`controlPlaneApiKey`, or `OS_CLOUD_API_KEY`, which the cloud sets on the environments it hosts) is connected by the platform, not by anyone on the runtime. It still registered the Cloud Connection page in Setup's Apps group, which read "Connected" and offered Disconnect. Disconnecting there cleared the runtime's stored device credential while the service key stayed in use, so the page went on reading "Connected", and the control plane was asked to revoke a connection the platform had made.
   
@@ -36,7 +36,7 @@
 
 ### Patch Changes
 
-- 3937697: feat(cloud-connection, plugin-security, spec, cli): a marketplace upgrade that would un-make an access choice is refused until it is confirmed (ADR-0126 §6 wall 3)
+- 448374d: feat(cloud-connection, plugin-security, spec, cli): a marketplace upgrade that would un-make an access choice is refused until it is confirmed (ADR-0126 §6 wall 3)
   
   Clause-②: yes (narrowing): a marketplace re-install that installed before is now refused `409` while it would un-make an access choice made in this system, until the same call confirms it (narrowing); the door gains the `confirmAccessUpgrade` body field and the `ACCESS_UPGRADE_CONFIRMATION_REQUIRED` code, plugin-security gains the `security.accessUpgradeCheck` service and its exports, and the CLI gains `--confirm-access-upgrade <token>` (widening).
   Metadata-protocol: none
@@ -54,7 +54,7 @@
   - **Unchanged.** A fresh install is never checked. An upgrade with no finding installs exactly as before.
   
   The error-code ledger registers `ACCESS_UPGRADE_CONFIRMATION_REQUIRED` under `@objectstack/cloud-connection`. `@objectstack/plugin-security` exports `ACCESS_UPGRADE_CHECK_SERVICE`, `createAccessUpgradeCheck` and `accessUpgradeDelta`, and `SecurityPlugin` registers the check under `security.accessUpgradeCheck`.
-- 3937697: fix(cloud-connection)!: one rule for the Cloud Connection capability — the page's record and its three connection-changing requests require `manage_platform_settings`, like its Setup entry; a server holding the environment service key also refuses `bind/start` and `bind/poll`
+- c71d03a: fix(cloud-connection)!: one rule for the Cloud Connection capability — the page's record and its three connection-changing requests require `manage_platform_settings`, like its Setup entry; a server holding the environment service key also refuses `bind/start` and `bind/poll`
   
   Clause-②: no (narrowing)
   Metadata-protocol: none
@@ -72,7 +72,7 @@
   - **Unchanged:** a user who holds `manage_platform_settings`, which the default platform-administrator permission set carries, is served exactly as before on a server without the service key. Anonymous callers still get `401`, and a session the authentication policy is holding still gets its `403`. The device-code flow's steps, the status answer for a permitted caller, and the four other session routes (`install`, `installation`, `installed`, `org-packages`) are unchanged.
   
   **Who acts:** a deployment that relies on organization administrators, or another set holding only Setup Access, to connect its server grants `manage_platform_settings` to those users, through a permission set or a position, and they are served as before.
-- 3937697: feat(core): `isCloudManaged()` is the one reader of `OS_CLOUD_MANAGED`, and a production boot that sets it without a bound control plane refuses to start
+- db1c7cc: feat(core): `isCloudManaged()` is the one reader of `OS_CLOUD_MANAGED`, and a production boot that sets it without a bound control plane refuses to start
   
   Clause-②: yes (widening)
   Metadata-protocol: none
@@ -81,7 +81,7 @@
   - **The fuse.** On a production boot (not `--dev`, which sets `NODE_ENV=development` only when `NODE_ENV` is unset, and not `NODE_ENV=test`; so `NODE_ENV=production os serve --dev` counts as a production boot and is refused the same way), `OS_CLOUD_MANAGED=1` with `OS_CLOUD_API_KEY` unset or empty refuses: `ObjectKernel.bootstrap()` and `LiteKernel.bootstrap()` reject before any plugin initialises, and `isCloudManaged()` throws the same error. The cloud sets both variables on the runtimes it hosts. A self-hosted deployment that has `OS_CLOUD_MANAGED=1` in a copied env file now fails to boot; remove the variable, which a self-hosted deployment never needs.
   - **One caveat:** the fuse reads the environment only. A runtime that binds its control plane solely through `CloudConnectionPlugin`'s `controlPlaneApiKey` option, and also sets `OS_CLOUD_MANAGED=1` in production, is refused. Set `OS_CLOUD_API_KEY` instead.
   - **`@objectstack/cloud-connection`:** the plugin resolves its control-plane credential through `resolveControlPlaneApiKey(controlPlaneApiKey)`, so the plugin's "platform-managed" answer and the fuse share one derivation. Its behaviour is unchanged: the option wins, then `OS_CLOUD_API_KEY`, trimmed.
-- 3937697: fix(cloud-connection)!: a cloud-fetched marketplace install whose package ships a position, permission set or capability name an environment-authored item holds is refused before any write, as the file-import install already was
+- 8d9e8b9: fix(cloud-connection)!: a cloud-fetched marketplace install whose package ships a position, permission set or capability name an environment-authored item holds is refused before any write, as the file-import install already was
   
   Clause-②: no (narrowing)
   Metadata-protocol: none
@@ -100,106 +100,106 @@
   
   - To stay on the earlier version, install that version again through the same door (`POST /api/v1/marketplace/install-local` with its `versionId`). It loads at once, and its ledger entry replaces the one that cannot load, so it also loads after a restart.
   - To take the new version, first move the environment's item off the name. Save it again under a new name, point every assignment that named the old name at the new one, then delete the item under the old name. Then restart, or install the new version again. Only after that does the old name belong to the package, so an assignment left on the old name grants the package's definition from then on.
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
+- Updated dependencies [448374d]
+- Updated dependencies [94842ba]
+- Updated dependencies [7cacad5]
+- Updated dependencies [df8bb40]
+- Updated dependencies [0091d84]
+- Updated dependencies [d5d8146]
+- Updated dependencies [5e9b100]
+- Updated dependencies [7532ea3]
+- Updated dependencies [fde7456]
+- Updated dependencies [b42c621]
+- Updated dependencies [de9cd1f]
+- Updated dependencies [72518d2]
+- Updated dependencies [925fd07]
+- Updated dependencies [e7befa7]
+- Updated dependencies [4cef6e2]
+- Updated dependencies [55d7aab]
+- Updated dependencies [5050442]
+- Updated dependencies [2b1382a]
+- Updated dependencies [e282f32]
+- Updated dependencies [644e4b2]
+- Updated dependencies [0715fac]
+- Updated dependencies [60b42cd]
+- Updated dependencies [9cfc575]
+- Updated dependencies [b9a79ef]
+- Updated dependencies [63085c3]
+- Updated dependencies [0b8bce4]
+- Updated dependencies [688052e]
+- Updated dependencies [6b656bf]
+- Updated dependencies [2069b81]
+- Updated dependencies [157ebd0]
+- Updated dependencies [1862d8d]
+- Updated dependencies [30d21f6]
+- Updated dependencies [eddffc3]
+- Updated dependencies [69712d5]
+- Updated dependencies [dfe60e3]
+- Updated dependencies [e939357]
+- Updated dependencies [045858f]
+- Updated dependencies [baedcec]
+- Updated dependencies [03c12a5]
+- Updated dependencies [f8c5fb3]
+- Updated dependencies [d96f618]
+- Updated dependencies [386f60f]
+- Updated dependencies [28c9a2c]
+- Updated dependencies [2354058]
+- Updated dependencies [edcc8ce]
+- Updated dependencies [9340181]
+- Updated dependencies [fccbd9d]
+- Updated dependencies [c8f4c43]
+- Updated dependencies [db9c02a]
+- Updated dependencies [02ad31a]
+- Updated dependencies [03966ce]
+- Updated dependencies [a1e51d6]
+- Updated dependencies [e3aa111]
+- Updated dependencies [863c580]
+- Updated dependencies [7f5b19d]
+- Updated dependencies [fb7501b]
+- Updated dependencies [504d8b3]
+- Updated dependencies [14e7239]
+- Updated dependencies [fe0ec2b]
+- Updated dependencies [dfab597]
+- Updated dependencies [9127f23]
+- Updated dependencies [3a440b0]
+- Updated dependencies [24360dc]
+- Updated dependencies [ecb4e69]
+- Updated dependencies [8dfd126]
+- Updated dependencies [bda53bb]
+- Updated dependencies [17f3c65]
+- Updated dependencies [b62f959]
+- Updated dependencies [b964ea1]
 - Updated dependencies [4395cbc]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
+- Updated dependencies [9019af9]
+- Updated dependencies [45f9962]
+- Updated dependencies [b531016]
+- Updated dependencies [e5eab06]
+- Updated dependencies [dc532e8]
+- Updated dependencies [d196748]
+- Updated dependencies [5f30f00]
+- Updated dependencies [69913f8]
+- Updated dependencies [7db1697]
+- Updated dependencies [f5b6b3f]
+- Updated dependencies [f4112a7]
+- Updated dependencies [db1c7cc]
+- Updated dependencies [258f4e6]
+- Updated dependencies [882372d]
+- Updated dependencies [303aef0]
+- Updated dependencies [eee2f0d]
+- Updated dependencies [b3034ee]
+- Updated dependencies [d12e650]
+- Updated dependencies [830a63a]
+- Updated dependencies [1000cc7]
+- Updated dependencies [ee63b47]
+- Updated dependencies [bdf762c]
+- Updated dependencies [27b3f1f]
+- Updated dependencies [c898bd8]
+- Updated dependencies [2b7c331]
+- Updated dependencies [7c68b10]
+- Updated dependencies [915e940]
+- Updated dependencies [35d942e]
+- Updated dependencies [ce18e73]
+- Updated dependencies [025f6de]
 - Updated dependencies [9f39094]
   - @objectstack/spec@18.1.0
   - @objectstack/core@18.1.0

@@ -4,7 +4,7 @@
 
 ### Minor Changes
 
-- 3937697: **Shipped in 18.0.0**, whose CHANGELOG missed this entry; listed here one release late.
+- df8bb40: **Shipped in 18.0.0**, whose CHANGELOG missed this entry; listed here one release late.
   
   feat!: an organization-less row on a tenant table no longer draws its autonumber from the `__global__` counter, and a production server boot with no auth secret is refused
   
@@ -26,7 +26,7 @@
   The retired export:
   
   - FROM `GLOBAL_TENANT` TO `GLOBAL_TENANT` imported from `@objectstack/driver-sql`, where the counter and the index emitters keep it (or the literal `'__global__'`).
-- 3937697: feat(driver-sql,driver-turso,driver-memory,objectql,metadata-protocol,cli): an organization-scoped unique index keys the plain organization column, and an index an earlier release built with `COALESCE(organization_id, '__global__')` is read as the same index on a certified database
+- d5d8146: feat(driver-sql,driver-turso,driver-memory,objectql,metadata-protocol,cli): an organization-scoped unique index keys the plain organization column, and an index an earlier release built with `COALESCE(organization_id, '__global__')` is read as the same index on a certified database
   
   Clause-②: yes (widening)
   Metadata-protocol: semantic
@@ -37,7 +37,7 @@
   - **Existing indexes stay as they are.** Nothing is renamed, and no declared organization composite is dropped or rebuilt by the boot, `os migrate plan` or `os migrate apply`; on SQLite the ownership ceremony's NOT NULL step rebuilds the tables it tightens, and their composites come back plain, enforcing the same constraint. One index is re-keyed: the `sys_setting` row-identity index, which the metadata protocol rebuilds on every boot, keys the plain `organization_id` from the next boot on (probe-first; a pure relaxation, so it cannot fail on existing rows). The schema differ reads `COALESCE(<tenant>, …)` and the plain tenant column as one key part, in both directions, where the column is physically `NOT NULL` or the database is certified (its organization-ownership birth marker, or the ownership ceremony's marker at the current shape generation). So `os migrate plan` and the boot report no `recreate_index` for those indexes. On an uncertified database with a nullable tenant column the two forms stay different constraints: the finding is reported, and it names `os migrate organization-ownership` as its remedy.
   - **What widens.** Where a tenant column is still nullable (every table of a database 18.0.0 created, an uncertified 17.x / 18.0 database, a rotation shard, a Turso remote table, a table the ceremony reported), a unique index created from now on does not constrain rows whose organization is NULL, exactly like a NULL in any other key part; in the in-memory driver a record with no organization is exempt from an organization-scoped unique. The unique duplicate pre-flight no longer reports groups of rows with a NULL key part, since the index never refuses them.
   - **Who sees it.** A fresh install and every ceremonied table whose tenant column is NOT NULL see nothing. A database 18.0.0 created from empty is certified by its birth marker yet keeps nullable tenant columns: its existing indexes are kept unchanged, and a new organization unique declared on one of its tables constrains only rows that carry an organization.
-- 3937697: fix(driver-sql)!: on PostgreSQL, `introspectSchema` reads each table's columns in the table's own schema, and refuses a `search_path` that reaches one table name in two schemas instead of silently dropping one
+- 74fcec1: fix(driver-sql)!: on PostgreSQL, `introspectSchema` reads each table's columns in the table's own schema, and refuses a `search_path` that reaches one table name in two schemas instead of silently dropping one
   
   `introspectSchema` lists the base tables of every schema in `current_schemas(false)` and keys the answer by bare table name. Two things went wrong when a connection's `search_path` named more than one schema (`ALTER DATABASE … SET search_path = public, sales`). First, each table's columns came from knex `columnInfo()` on the bare name, which reads only the first schema on the path, so a table that lives only in a later schema (`sales.orders`) was listed with no columns. `listRemoteTables` answered it `columnCount: 0`, and a draft built from it had no fields. Second, a same-named table in a later schema (`sales.customers` behind `public.customers`) was dropped without a word, because one key cannot hold two tables. The PostgreSQL branch now reads every table's columns in its own schema. When one bare name is reached in more than one schema, it refuses the whole introspection with `RESOURCE_CONFLICT` / `409`, naming each colliding table with its schemas in `search_path` order. A connection that reaches one schema, the default `public` deployment included, answers exactly what it answered before. The SQLite and MySQL branches are unchanged.
   
@@ -52,7 +52,7 @@
   - **Also changed (a wrong answer made right, no accept set moved):** a table that lives only in a later schema on the path now reports its own columns where it reported none.
   - **Unchanged:** a connection that reaches one schema, the default `public` deployment included. One schema cannot hold two same-named tables, so it is never refused, and its answer is byte-identical to before.
   - **Fix:** point the connection at one schema (the datasource's `schema` setting sets its `search_path`), or rename one of the two tables on the remote database.
-- 3937697: fix(driver-sql): a SQLite file whose bytes are not a SQLite database fails `connect()` at once, naming the file, and a development boot no longer moves it aside and replaces it with an empty database (#24960)
+- 7f99616: fix(driver-sql): a SQLite file whose bytes are not a SQLite database fails `connect()` at once, naming the file, and a development boot no longer moves it aside and replaces it with an empty database (#24960)
   
   `SqlDriver.connect()` runs `PRAGMA auto_vacuum` as the connection's first statement. On a file that is not a SQLite database (plain text, another format, a file encrypted by another engine) SQLite answers `SQLITE_NOTADB`, which `connect()` logged as "Failed to set PRAGMA auto_vacuum=INCREMENTAL" and swallowed. It resolved over a file it could not read. In production the first query failed later. On a development boot, `resolveSqliteDriver` (`@objectstack/service-datasource`) answered the failed probe by stepping down to wasm SQLite, whose open renamed the file to `<file>.corrupt-<timestamp>`, wrote an empty database in its place and read `connected`, under a warning that blamed the native addon.
   
@@ -67,7 +67,7 @@
   - **Before:** `connect()` resolved; in production the first query failed with `DATABASE_ERROR`, and on a development boot the file was renamed to `<file>.corrupt-<timestamp>` and an empty database was written in its place.
   - **Now:** `connect()` rejects with `SqliteDatabaseFileError`, `code: 'SQLITE_NOTADB'`, naming the file; the file is untouched.
   - **Fix:** point the datasource at a SQLite database file, or move the file aside yourself (an absent file is created empty on the next connect).
-- 3937697: fix(driver-sql): a read-only boot refuses a SQLite datasource whose file can be neither opened nor created, instead of opening an empty in-memory database over it and reporting it connected
+- 4d99158: fix(driver-sql): a read-only boot refuses a SQLite datasource whose file can be neither opened nor created, instead of opening an empty in-memory database over it and reporting it connected
   
   Clause-②: no (narrowing)
   
@@ -81,7 +81,7 @@
   - **TO:** `resolveSqliteAbsentFileTarget`, and so the `SqlDriver` constructor, throws `SqliteDatabaseFileError` naming the file and the operating system's answer: `ENOTDIR` (a path under a regular file), `EACCES` (a directory the process may not write or search), `EROFS` (a read-only mount), or `ENOENT` (a directory whose name a dangling symbolic link holds). The datasource's connect fails with it, as the boot that writes already failed, so `os migrate plan` reports the datasource failed instead of planning into it. The judgement still writes nothing: no directory and no file is created to find out.
   - **Unchanged:** an absent file in a directory that exists, or that could be made, still opens as an empty in-memory database and leaves the disk untouched. An existing file opens as before. The default mode (`'create'`) is untouched, and so is every server dialect: the option is now applied to SQLite clients only, as documented (a `pg` driver given it with a connection string used to have that string rewritten to `:memory:`).
   - **Fix:** if a read-only boot now refuses a SQLite datasource, correct its `filename`: the refusal names the path and the reason.
-- 3937697: fix(driver-sql): a SQLite database whose header SQLite cannot read fails `connect()` at once, naming the file, and a dangling symbolic link as the database's directory is refused on the boot that writes, as the read-only boot already refused it (#25019)
+- d6a5fa3: fix(driver-sql): a SQLite database whose header SQLite cannot read fails `connect()` at once, naming the file, and a dangling symbolic link as the database's directory is refused on the boot that writes, as the read-only boot already refused it (#25019)
   
   Three more SQLite files a declared datasource cannot use, each now classified by the file's own driver at connect:
   
@@ -103,7 +103,7 @@
 
 ### Patch Changes
 
-- 3937697: feat(driver-sql,driver-turso)!: a table the driver creates carries its tenant column NOT NULL, so a write that names no organization is refused at the database
+- 5e9b100: feat(driver-sql,driver-turso)!: a table the driver creates carries its tenant column NOT NULL, so a write that names no organization is refused at the database
   
   Clause-②: yes (narrowing)
   Metadata-protocol: none
@@ -118,14 +118,14 @@
   - **Who sees it.** A composed `os serve` / `os dev` / `os start` with auth stamps every write with its organization, so nothing changes there. A production `os serve` whose `AuthPlugin` did not compose (no `OS_AUTH_SECRET`) and a lean embedding (`@objectstack/objectql/core` or `createStandaloneStack` over a SQL driver, with no organization object) used to write those rows with a NULL organization; now each such write fails, loudly.
   
   **The remedy.** Carry the organization on the write: `ql.insert(object, { ...row, organization_id: orgId })`, or `{ context: { tenantId: orgId } }`. Compose authentication (set `OS_AUTH_SECRET`) so the platform derives it. If the object's rows legitimately belong to no organization, declare it so and it has no tenant column: `systemFields: { tenant: false }` or `tenancy: { enabled: false }`.
-- 3937697: fix(driver-sql): `update()` no longer writes its `updated_at` stamp into the caller's `data`, so webhook deliveries for record updates are stored again on PostgreSQL and MySQL
+- eee65af: fix(driver-sql): `update()` no longer writes its `updated_at` stamp into the caller's `data`, so webhook deliveries for record updates are stored again on PostgreSQL and MySQL
   
   Clause-②: no
   
   - **What was lost.** On PostgreSQL and MySQL, every webhook delivery for a record update was lost. `SqlDriver.update()` assigned its `updated_at` stamp onto the patch object the caller passed in. ObjectQL publishes that same object as the update event's `changes`. On those two dialects the stamp is a knex `Raw` (`CURRENT_TIMESTAMP`) that holds the database client, its pool and a timer. The webhook outbox could not serialise the event (`Converting circular structure to JSON`), so no `sys_http_delivery` row was written. The record write still answered 200, and the webhook still read active. Every other reader of the update event's `changes`, and of the patch after the driver call, saw the same `Raw`. On SQLite the stamp is an ISO string, so the delivery was stored, but the caller's patch and the event's `changes` still carried an `updated_at` the caller never wrote.
   - **What changed.** `update()`, including its rotated-table path, stamps `updated_at` into a fresh object, as `updateMany()` already did. The caller's `data` is left exactly as it was passed.
   - **Unchanged.** The stored `updated_at` value on every dialect, `preserveAudit` imports, tables without an `updated_at` column, `upsert()` (it already stamps a copy of its input), and every export and option.
-- 3937697: fix(driver-sql): on a database the organization-ownership ceremony has not certified, the boot's drift line for an orphaned `organization_id` column names the ceremony instead of `os migrate apply --allow-destructive`
+- 5d66021: fix(driver-sql): on a database the organization-ownership ceremony has not certified, the boot's drift line for an orphaned `organization_id` column names the ceremony instead of `os migrate apply --allow-destructive`
   
   Clause-②: no (operator log line text only)
   Metadata-protocol: none
@@ -133,7 +133,7 @@
   A 17.x database booted on 18.x printed one `[schema-drift]` line per `organization_id` column ending `— "os migrate apply --allow-destructive" to drop it.`, during `os serve` and `os migrate apply --yes`. That command is refused on such a database: the drop is the ceremony's (ADR-0131 D10 item 5). The boot now asks the driver's own reader, `isTenantKeyCertified()`, once per table that has such a drop. When the answer is "not certified", the line keeps the finding and replaces that sentence with `— a drop the organization-ownership ceremony owns, and it has not verified on this database: run "os migrate organization-ownership", which drops it itself.` These are the words `os migrate plan` shows under the same entry.
   
   A certified database prints the same line as before. So does every other column and every other drift kind. Nothing the boot applies or skips changes.
-- 3937697: fix(driver-sql,cli): `os migrate plan` / `apply` no longer offer `--allow-destructive` for a unique index the existing rows already violate
+- 8c73398: fix(driver-sql,cli): `os migrate plan` / `apply` no longer offer `--allow-destructive` for a unique index the existing rows already violate
   
   Clause-②: yes (widening)
   Metadata-protocol: none
@@ -144,7 +144,7 @@
   - **`os migrate plan` / `os migrate apply` (`@objectstack/cli`).** The apply-limit seam reads the entry's own limit first, then the driver's per-op one. A blocked unique index is listed with the conflicting groups as the reason it cannot be applied, the footer and the skip lines stop offering `--allow-destructive` for it, and it is counted among the changes that remain drift. A database with no blocked index prints as before.
   
   Unchanged: `os migrate apply --allow-destructive` still names such an entry as not applied and reports the run PARTIAL with exit 1, because the database still differs from its metadata. To clear it, deduplicate the listed rows and run `os migrate plan` again.
-- 3937697: fix(objectql, driver-sql, spec): a stored field whose `expression` reads an `autonumber` stores the value computed with the number
+- c8f4c43: fix(objectql, driver-sql, spec): a stored field whose `expression` reads an `autonumber` stores the value computed with the number
   
   Clause-②: yes (widening)
   Metadata-protocol: none
@@ -156,7 +156,7 @@
   - **A driver that owns its counter without the member** stores the readers computed without the number, as before, and the engine now says so once per object at `error` level, with the remedy.
   - **`ObjectQL.registerInsertRecomputeListener(id, fn)` (new).** Called per row after that second computation, on the row the driver is handed. `plugin-pinyin-search` registers on it, so a `__search` companion whose name field reads the record number is stamped from the value that carries the number, and `$search` finds the record by pinyin and by its number.
   - **One change in what a refused insert reports.** On an object whose stored expression reads the number, a SQL driver's collision that survives every retry now leaves as `ERR_AUTONUMBER_COLLISION` (the engine's three attempts) instead of `DUPLICATE_RECORD` (the driver's own retries). Every other object is unchanged.
-- 3937697: fix(driver-sql): a SQLite `connect()` that refuses its file closes the connection it opened before it rejects
+- 4e2c42f: fix(driver-sql): a SQLite `connect()` that refuses its file closes the connection it opened before it rejects
   
   Clause-②: no (resource release only: no response, status, error, outcome or export moves)
   Metadata-protocol: none
@@ -165,7 +165,7 @@
   - **What changed.** When a SQLite `connect()` rejects, it destroys its pool and puts a fresh, empty one in its place, then rethrows the same error: same class, code, message and `cause`. Nothing is left open, and the `-shm` / `-wal` siblings are gone when the rejection arrives. A later `connect()` on the same instance opens the file again: it gives the same refusal while the file is bad, and connects once the file is repaired. A release that itself fails is logged at `warn`, and the original refusal is still the error thrown.
   - **Unchanged.** Which files are refused, the codes and the messages. Server dialects (`pg`, `mysql`) are untouched: their `connect()` rejects only when no connection could be made, so there is nothing to release. `SqliteWasmDriver` and the local mode of `TursoDriver` inherit the release through `super.connect()`.
   - **What to do.** Nothing.
-- 3937697: refactor(objectql)!: the per-table platform-object tenancy ledger is retired, and the tenant-audit mute is decided by the object's schema (ADR-0131 D13)
+- 3a440b0: refactor(objectql)!: the per-table platform-object tenancy ledger is retired, and the tenant-audit mute is decided by the object's schema (ADR-0131 D13)
   
   Clause-②: no (narrowing)
   Metadata-protocol: none
@@ -186,7 +186,7 @@
   - FROM `tenantScopedPlatformObjects()` TO the census's `reach: "in"` rows.
   - FROM `PlatformObjectTenancy` TO delete it: no classification exists any more.
   - FROM `PlatformObjectTenancyEntry` TO delete it: no classification exists any more.
-- 3937697: fix(driver-sql): the `[tenant-audit]` warning no longer fires for an insert whose rows carry their organization
+- b62f959: fix(driver-sql): the `[tenant-audit]` warning no longer fires for an insert whose rows carry their organization
   
   Clause-②: no
   Metadata-protocol: none
@@ -196,7 +196,7 @@
   The line is now skipped when every inserted row carries a non-empty tenant column. It still fires for an insert where any row lacks the column, and for every `update`, `delete`, `updateMany`, `deleteMany`, `bulkDelete` and `upsert` with no `tenantId`, whatever the payload says: there the column is a value being written, not the statement's scope. The line's text and prefix are unchanged.
   
   Diagnostics only: no write changes. Turso's local face and the SQLite WASM driver inherit the change; the in-memory and MongoDB drivers have no such warning.
-- 3937697: fix(driver-sql)!: `findWithWindowFunctions()` compiles the function name and sort direction from closed sets and quotes every column it names
+- 6abee03: fix(driver-sql)!: `findWithWindowFunctions()` compiles the function name and sort direction from closed sets and quotes every column it names
   
   Clause-②: no (narrowing)
   Metadata-protocol: none
@@ -212,75 +212,75 @@
   - **Fields:** each `partitionBy` and `orderBy` field is emitted as a quoted column reference, so a field names a column and nothing else.
   - **Unchanged:** every call that names a supported function, a column and `asc` / `desc` compiles to the same window and returns the same rows.
   - **Fix:** use one of the five functions above and `asc` / `desc`. A window that needs an argument (`lag`, `lead`, `ntile`, `first_value`) was never expressible through this door; send it through the driver's `execute()` with bound parameters.
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
+- Updated dependencies [448374d]
+- Updated dependencies [94842ba]
+- Updated dependencies [7cacad5]
+- Updated dependencies [df8bb40]
+- Updated dependencies [0091d84]
+- Updated dependencies [5e9b100]
+- Updated dependencies [7532ea3]
+- Updated dependencies [fde7456]
+- Updated dependencies [de9cd1f]
+- Updated dependencies [925fd07]
+- Updated dependencies [e7befa7]
+- Updated dependencies [55d7aab]
+- Updated dependencies [644e4b2]
+- Updated dependencies [0715fac]
+- Updated dependencies [60b42cd]
+- Updated dependencies [b9a79ef]
+- Updated dependencies [63085c3]
+- Updated dependencies [0b8bce4]
+- Updated dependencies [2069b81]
+- Updated dependencies [1862d8d]
+- Updated dependencies [30d21f6]
+- Updated dependencies [eddffc3]
+- Updated dependencies [69712d5]
+- Updated dependencies [dfe60e3]
+- Updated dependencies [e939357]
+- Updated dependencies [045858f]
+- Updated dependencies [baedcec]
+- Updated dependencies [03c12a5]
+- Updated dependencies [386f60f]
+- Updated dependencies [28c9a2c]
+- Updated dependencies [2354058]
+- Updated dependencies [edcc8ce]
+- Updated dependencies [fccbd9d]
+- Updated dependencies [c8f4c43]
+- Updated dependencies [02ad31a]
+- Updated dependencies [03966ce]
+- Updated dependencies [e3aa111]
+- Updated dependencies [863c580]
+- Updated dependencies [7f5b19d]
+- Updated dependencies [14e7239]
+- Updated dependencies [fe0ec2b]
+- Updated dependencies [dfab597]
+- Updated dependencies [9127f23]
+- Updated dependencies [24360dc]
+- Updated dependencies [ecb4e69]
+- Updated dependencies [8dfd126]
+- Updated dependencies [bda53bb]
+- Updated dependencies [b964ea1]
 - Updated dependencies [4395cbc]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
+- Updated dependencies [9019af9]
+- Updated dependencies [45f9962]
+- Updated dependencies [e5eab06]
+- Updated dependencies [dc532e8]
+- Updated dependencies [d196748]
+- Updated dependencies [5f30f00]
+- Updated dependencies [7db1697]
+- Updated dependencies [f5b6b3f]
+- Updated dependencies [f4112a7]
+- Updated dependencies [db1c7cc]
+- Updated dependencies [303aef0]
+- Updated dependencies [b3034ee]
+- Updated dependencies [d12e650]
+- Updated dependencies [830a63a]
+- Updated dependencies [1000cc7]
+- Updated dependencies [bdf762c]
+- Updated dependencies [27b3f1f]
+- Updated dependencies [7c68b10]
+- Updated dependencies [915e940]
+- Updated dependencies [025f6de]
 - Updated dependencies [9f39094]
   - @objectstack/spec@18.1.0
   - @objectstack/core@18.1.0

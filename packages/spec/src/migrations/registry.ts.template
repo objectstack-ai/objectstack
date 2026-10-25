@@ -2202,6 +2202,21 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'keep. Its D3 record is the semantic entry `hook-body-stored-metadata-target-refused`.',
   },
   {
+    id: 'kernel-package-upgrade-family-retired',
+    order: 109,
+    text:
+      'It also retires the package upgrade model WHOLE (ADR-0049 enforce-or-remove; maintainer '
+      + 'ruling A of 2026-10-19 on the package lifecycle classes, item 3): the ten defs of '
+      + '`kernel/package-upgrade.zod.ts` — the upgrade plan, its metadata diff and impact level, the '
+      + 'pre-upgrade snapshot, the upgrade and rollback request/response pairs and the phase '
+      + 'vocabulary — exported from `@objectstack/spec/kernel`, mounted by no stack key, registered '
+      + 'as no metadata type and read by nothing in this repository, objectui or hotcrm, leave via '
+      + 'RETIRED_DEFS_BY_MAJOR with one D3 semantic entry, together with the four `IPackageService` '
+      + 'upgrade members no provider implemented and the `plan` member of the unrouted '
+      + '`PackageUpgradeResponse`. The `UpgradePlan.estimatedDuration` tombstone leaves with its '
+      + 'def\'s source and its RETIRED_KEYS_BY_MAJOR[18] entry stays as history.',
+  },
+  {
     id: 'list-view-filterable-fields-retired',
     order: 105,
     text:

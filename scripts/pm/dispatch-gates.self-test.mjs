@@ -10016,7 +10016,16 @@ export function selfTest({ tier = 'full' } = {}) {
   t('no per-file entry for the deleted published PM skill survives it, and its old path carries the root mandate only', !MANDATORY_TIER_GLOBS.some((g) => g.glob.includes('objectstack-pm-dispatch')) && fableOf(['skills/objectstack-pm-dispatch/SKILL.md']).hits.every((h) => h.glob === 'skills/**'));
   t('skills/** does NOT reach the internal .claude/skills tree — a pm-dispatch references file still carries no mandate', fableOf(['.claude/skills/pm-dispatch/references/state-machine.md']).mandatory === false);
   t('the skills/** entry is declared with its one-line exit switched off, as data', MANDATORY_TIER_GLOBS.some((g) => g.glob === 'skills/**' && g.oneLineExit === false && g.tier === CONTRACT_REVIEW_TIER));
-  t('every other mandatory entry keeps the one-line exit open (the flag is an opt-out, absent by default)', MANDATORY_TIER_GLOBS.filter((g) => g.glob !== 'skills/**').every((g) => g.oneLineExit === undefined) && catalogHit.hits.every((h) => h.glob !== 'skills/**' || h.oneLineExit === false));
+  // The ADR order (2026-10-25, 「都需要」): ADR text is the second surface whose
+  // one-line exit is closed by path; the rest keep the opt-out absent.
+  const ONE_LINE_BARRED = ['skills/**', 'docs/adr/**'];
+  t('the docs/adr/** entry is declared at the contract-review tier with its one-line exit switched off, as data', MANDATORY_TIER_GLOBS.some((g) => g.glob === 'docs/adr/**' && g.oneLineExit === false && g.tier === CONTRACT_REVIEW_TIER));
+  t('every other mandatory entry keeps the one-line exit open (the flag is an opt-out, absent by default)', MANDATORY_TIER_GLOBS.filter((g) => !ONE_LINE_BARRED.includes(g.glob)).every((g) => g.oneLineExit === undefined) && catalogHit.hits.every((h) => h.glob !== 'skills/**' || h.oneLineExit === false));
+  const adrHit = fableOf(['docs/adr/0028-metadata-naming-and-namespace-isolation.md']);
+  t('an ADR file is mandated, by the docs/adr/** entry alone', adrHit.tier === CONTRACT_REVIEW_TIER && adrHit.hits.length === 1 && adrHit.hits[0].glob === 'docs/adr/**');
+  t('docs/adr/** does NOT reach the rest of docs/ — a sibling docs file carries no mandate', fableOf(['docs/NORTH-STAR.md']).mandatory === false && fableOf(['docs/adr-notes.md']).mandatory === false);
+  const adrLines = tierLines(adrHit).join('\n');
+  t("the ADR rendering refuses the one-line-class exit, naming the glob, and does not borrow the catalog's reason", adrLines.includes("NOT available for this surface — 'docs/adr/**'") && !adrLines.includes('drops to opus execution') && !adrLines.includes('(the published catalog'));
   const catalogLines = tierLines(catalogHit).join('\n');
   t('the published-catalog rendering refuses the one-line-class exit, in those words', catalogLines.includes('one-line-class') && catalogLines.includes('NOT available') && catalogLines.includes('no one-line exemption'));
   t('and does not offer the opus-execution drop the other mandated surfaces get', !catalogLines.includes('drops to opus execution'));

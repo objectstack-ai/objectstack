@@ -4,7 +4,6 @@ import { z } from 'zod';
 import { BaseResponseSchema } from './contract.zod';
 import { InstalledPackageSchema } from '../kernel/package-registry.zod';
 import { DependencyResolutionResultSchema } from '../kernel/dependency-resolution.zod';
-import { UpgradePlanSchema } from '../kernel/package-upgrade.zod';
 import { PackageArtifactSchema } from '../kernel/package-artifact.zod';
 import { ManifestSchema } from '../kernel/manifest.zod';
 import { ArtifactReferenceSchema } from '../marketplace/marketplace.zod';
@@ -595,7 +594,9 @@ export const PackageUpgradeResponseSchema = lazySchema(() => BaseResponseSchema.
   data: z.object({
     success: z.boolean().describe('Whether the upgrade succeeded'),
     phase: z.string().describe('Current upgrade phase'),
-    plan: UpgradePlanSchema.optional().describe('Upgrade plan that was executed'),
+    // `plan` RETIRED (#25608, ADR-0049) with `kernel/package-upgrade.zod.ts`:
+    // it carried the zero-consumer `UpgradePlanSchema`, and no route answers
+    // this body (it is bound to none, see the section note above).
     snapshotId: z.string().optional().describe('Snapshot ID for rollback'),
     conflicts: z.array(z.object({
       path: z.string().describe('Conflict path'),

@@ -17,6 +17,7 @@
   "devDependencies": {
     "@objectstack/driver-sqlite-wasm": "workspace:*",
     "@objectstack/hono": "workspace:*",
+    "@objectstack/mcp": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/plugin-approvals": "workspace:*",
     "@objectstack/plugin-auth": "workspace:*",

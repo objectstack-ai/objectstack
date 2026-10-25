@@ -108,8 +108,9 @@ is rejected by the schema rather than rendering empty.
 `'jsx'` keep loading as `html` pages.
 
 Because `kind: 'react'` executes author JavaScript, it is gated by a host capability that
-defaults **ON** and is disabled server-side per deployment with `OS_PAGE_REACT=off`. The
-`html` tier is unaffected by that switch — it is never executed.
+defaults **OFF** and is turned on server-side per deployment with
+`OS_PAGE_REACT_ENABLED=true`. The `html` tier is unaffected by that switch — it is never
+executed.
 
 <Callout type="warn">
 Neither source tier is styled with Tailwind utility classes. A page's `source` is

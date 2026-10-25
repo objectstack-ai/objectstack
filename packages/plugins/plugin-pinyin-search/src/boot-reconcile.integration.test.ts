@@ -37,6 +37,8 @@ const SYSTEM = { isSystem: true } as const;
 const HISTORIC = '2026-01-01T00:00:00.000Z';
 const ROWS = 2_500;
 const PAGE = 1_000;
+/** SQLite's compound-SELECT ceiling: the most rows one `bulkCreate` can carry. */
+const INSERT_BATCH = 500;
 
 const PROBE_OBJECT = {
   name: PROBE,
@@ -98,9 +100,19 @@ class FixturePlugin implements Plugin {
     };
   }
 
-  /** A write that bypasses every hook and the audit stamp: an import, a migration. */
+  /**
+   * A write that bypasses every hook and the audit stamp: an import, a migration.
+   * Batched `bulkCreate`, not one awaited `create` per row (#25749): 2,500
+   * single-row autocommit inserts timed these cases out under CI load. A batch
+   * is one `… UNION ALL SELECT …` statement on SQLite, which refuses more than
+   * 500 terms ("too many terms in compound SELECT"), hence the slices. The
+   * driver keeps the given `created_at`/`updated_at`, so the history stays older
+   * than any watermark.
+   */
   async directInsert(rows: Array<Record<string, unknown>>): Promise<void> {
-    for (const row of rows) await this.driver.create(PROBE, row);
+    for (let i = 0; i < rows.length; i += INSERT_BATCH) {
+      await this.driver.bulkCreate(PROBE, rows.slice(i, i + INSERT_BATCH));
+    }
   }
 
   async row(id: string): Promise<Record<string, any> | null> {
@@ -167,7 +179,12 @@ function history(): Array<Record<string, unknown>> {
   }));
 }
 
-describe('#25634 the boot reconcile reads what changed since its last completed walk', () => {
+// [#25749] Each case pays for real-kernel boots over a SQLite file (two in
+// most) and at least one full 2,500-row reconcile walk; the forced-rebuild
+// case walks twice. Idle, the slowest case takes about 1 s. On a 4-core box
+// with 20 busy loops the boots and walks alone took 6.8 s and 10.1 s (seed
+// excluded), past vitest's 5 s default, so the suite carries its own budget.
+describe('#25634 the boot reconcile reads what changed since its last completed walk', { timeout: 30_000 }, () => {
   it('a first boot walks every row; an unchanged second boot reads none — and a receipt sits in sys_migration', async () => {
     const first = await boot({ before: (f) => f.directInsert(history()) });
     await first.plugin.whenReconciled();

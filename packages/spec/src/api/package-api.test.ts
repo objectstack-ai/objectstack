@@ -290,22 +290,22 @@ describe('PackageUpgradeResponseSchema', () => {
         success: true,
         phase: 'completed',
         snapshotId: 'snap_001',
-        plan: {
-          packageId: 'com.acme.crm',
-          fromVersion: '1.0.0',
-          toVersion: '2.0.0',
-          impactLevel: 'medium',
-          changes: [
-            { type: 'object', name: 'account', changeType: 'modified', summary: 'Added fields' },
-          ],
-        },
         message: 'Upgrade completed successfully',
       },
     });
     expect(result.data.success).toBe(true);
     expect(result.data.phase).toBe('completed');
     expect(result.data.snapshotId).toBe('snap_001');
-    expect(result.data.plan?.changes).toHaveLength(1);
+  });
+
+  it('no longer declares `plan` — retired with the upgrade-plan model (#25608), so a stray one is stripped', () => {
+    const result = PackageUpgradeResponseSchema.parse({
+      success: true,
+      data: { success: true, phase: 'completed', plan: { packageId: 'com.acme.crm' } },
+    });
+    expect(result.data).not.toHaveProperty('plan');
+    // Lit control: a declared sibling of the retired key still survives the parse.
+    expect(result.data.phase).toBe('completed');
   });
 
   it('should accept upgrade response with merge conflicts', () => {

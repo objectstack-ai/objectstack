@@ -18,7 +18,6 @@
     "---Packages---",
     "package-artifact",
     "package-registry",
-    "package-upgrade",
     "---Metadata & Runtime---",
     "cli-extension",
     "cluster",

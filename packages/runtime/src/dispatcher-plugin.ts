@@ -1325,11 +1325,16 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             // ── MCP (Streamable HTTP) + API keys (ADR-0036) ─────────────
             // Mounted explicitly (there is no catch-all) and routed through
             // dispatch() so the host's project-aware kernel swap + execution
-            // context resolution run first. /mcp accepts POST (JSON-RPC), GET
-            // (SSE) and DELETE (session end) — the transport reads the method
-            // from the request, the dispatcher gates on OS_MCP_SERVER_ENABLED
-            // and the resolved principal. NOTE: the dispatch() branches alone
-            // are unreachable over HTTP without these registrations.
+            // context resolution run first. /mcp is mounted for POST, GET and
+            // DELETE and the transport reads the method from the request: it
+            // is stateless, so it serves POST (JSON-RPC) and answers GET and
+            // DELETE `405 Allow: POST` itself (#25759). GET and DELETE stay
+            // mounted so that answer comes from the transport, after the
+            // dispatcher's anonymous refusal, and not from the adapter's
+            // unmatched-route handler. The dispatcher gates on
+            // OS_MCP_SERVER_ENABLED and the resolved principal. NOTE: the
+            // dispatch() branches alone are unreachable over HTTP without these
+            // registrations.
             const mountMcp = (method: 'GET' | 'POST' | 'DELETE') => {
                 const register = method === 'GET' ? server.get : method === 'DELETE' ? server.delete : server.post;
                 register.call(server, `${prefix}/mcp`, async (req: any, res: any) => {
@@ -1344,6 +1349,13 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             mountMcp('POST');
             mountMcp('GET');
             mountMcp('DELETE');
+            // [#25759] `PUT`, `PATCH` and every verb the transport cannot route
+            // reach the same `dispatch()` through the fallback seam (#24228):
+            // the anonymous 401 first, then the transport's own `405 Allow:
+            // POST`, as on a `createHonoApp` host. Without it the adapter
+            // answered them `405` with the mounted verbs in `Allow`, before
+            // the domain could refuse an anonymous caller.
+            domainDecidesEveryVerb('POST', `${prefix}/mcp`);
 
             // Public SKILL.md download (env-customized portable Agent Skill).
             // Separate registration: `/mcp` above is an exact-path mount, so
@@ -2139,7 +2151,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 if (!resolveMountedRoute) {
                     ctx.logger.warn(
                         '[dispatcher] http.server exposes no `resolveMountedRoute`: on /actions, /keys, '
-                        + '/notifications and /mcp/skill a verb the transport cannot route is answered by the '
+                        + '/notifications, /mcp and /mcp/skill a verb the transport cannot route is answered by the '
                         + 'transport\'s own 405, not by the domain — an anonymous caller is told the route\'s '
                         + 'shape instead of 401, and `Allow` names verbs mounted only to be refused. '
                         + 'Fix: compose an HTTP adapter that implements `resolveMountedRoute` '

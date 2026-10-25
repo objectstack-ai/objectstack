@@ -52,7 +52,6 @@
     "kernel/KernelContext:mode = \"production\"",
     "kernel/Manifest:defaultDatasource = \"default\"",
     "kernel/Manifest:scope = \"project\"",
-    "kernel/MetadataDiffItem:hasConflict = false",
     "kernel/MetadataManagerConfig:fallback = \"none\"",
     "kernel/MetadataManagerConfig:formats = [\"typescript\",\"json\",\"yaml\"]",
     "kernel/MetadataManagerConfig:tableName = \"sys_metadata\"",
@@ -116,7 +115,6 @@
     "kernel/RealTimeNotificationConfig:tenantFilter = true",
     "kernel/RealTimeNotificationConfig:userFilter = true",
     "kernel/ResolvedPackageDependency:type = \"required\"",
-    "kernel/RollbackPackageRequest:rollbackCustomizations = true",
     "kernel/RuntimeConfig:engine = \"v8-isolate\"",
     "kernel/SBOM:format = \"cyclonedx\"",
     "kernel/SBOMEntry:externalRefs = []",
@@ -136,12 +134,6 @@
     "kernel/ServiceRegistryConfig:enableLogging = false",
     "kernel/ServiceRegistryConfig:strictMode = true",
     "kernel/TenantRuntimeContext:features = {}",
-    "kernel/TenantRuntimeContext:mode = \"production\"",
-    "kernel/UpgradePackageRequest:createSnapshot = true",
-    "kernel/UpgradePackageRequest:dryRun = false",
-    "kernel/UpgradePackageRequest:mergeStrategy = \"three-way-merge\"",
-    "kernel/UpgradePackageRequest:skipValidation = false",
-    "kernel/UpgradePlan:affectedCustomizations = 0",
-    "kernel/UpgradePlan:requiresMigration = false"
+    "kernel/TenantRuntimeContext:mode = \"production\""
   ]
 }

@@ -4,7 +4,7 @@
 
 ### Minor Changes
 
-- 3937697: **Shipped in 18.0.0**, whose CHANGELOG missed this entry; listed here one release late.
+- 7cacad5: **Shipped in 18.0.0**, whose CHANGELOG missed this entry; listed here one release late.
   
   feat(plugin-sharing,plugin-approvals,metadata-protocol)!: the organization-less readers of sharing rules, approval units and the seed loader retire (ADR-0131 D2/D8, 18.x step 7)
   
@@ -22,7 +22,7 @@
   - **The scoped seed pre-load reads one thing: its organization's rows.** The second read that collected keys held by organization-less rows, and refused to twin or adopt them, is deleted; a scoped upsert/ignore/update issues no `organization_id IS NULL` read on any path.
   
   Remedy for a database that still holds organization-less rows: `os migrate organization-ownership --out PLAN`, review it, then `os migrate organization-ownership --apply --plan-file PLAN --backup-taken`.
-- 3937697: feat(driver-sql,driver-turso,driver-memory,objectql,metadata-protocol,cli): an organization-scoped unique index keys the plain organization column, and an index an earlier release built with `COALESCE(organization_id, '__global__')` is read as the same index on a certified database
+- d5d8146: feat(driver-sql,driver-turso,driver-memory,objectql,metadata-protocol,cli): an organization-scoped unique index keys the plain organization column, and an index an earlier release built with `COALESCE(organization_id, '__global__')` is read as the same index on a certified database
   
   Clause-②: yes (widening)
   Metadata-protocol: semantic
@@ -33,7 +33,7 @@
   - **Existing indexes stay as they are.** Nothing is renamed, and no declared organization composite is dropped or rebuilt by the boot, `os migrate plan` or `os migrate apply`; on SQLite the ownership ceremony's NOT NULL step rebuilds the tables it tightens, and their composites come back plain, enforcing the same constraint. One index is re-keyed: the `sys_setting` row-identity index, which the metadata protocol rebuilds on every boot, keys the plain `organization_id` from the next boot on (probe-first; a pure relaxation, so it cannot fail on existing rows). The schema differ reads `COALESCE(<tenant>, …)` and the plain tenant column as one key part, in both directions, where the column is physically `NOT NULL` or the database is certified (its organization-ownership birth marker, or the ownership ceremony's marker at the current shape generation). So `os migrate plan` and the boot report no `recreate_index` for those indexes. On an uncertified database with a nullable tenant column the two forms stay different constraints: the finding is reported, and it names `os migrate organization-ownership` as its remedy.
   - **What widens.** Where a tenant column is still nullable (every table of a database 18.0.0 created, an uncertified 17.x / 18.0 database, a rotation shard, a Turso remote table, a table the ceremony reported), a unique index created from now on does not constrain rows whose organization is NULL, exactly like a NULL in any other key part; in the in-memory driver a record with no organization is exempt from an organization-scoped unique. The unique duplicate pre-flight no longer reports groups of rows with a NULL key part, since the index never refuses them.
   - **Who sees it.** A fresh install and every ceremonied table whose tenant column is NOT NULL see nothing. A database 18.0.0 created from empty is certified by its birth marker yet keeps nullable tenant columns: its existing indexes are kept unchanged, and a new organization unique declared on one of its tables constrains only rows that carry an organization.
-- 3937697: fix(metadata-protocol)!: the metadata save doors and `composeStacks` refuse an object's `external` binding on a named managed datasource, from either side of the pair
+- bda53bb: fix(metadata-protocol)!: the metadata save doors and `composeStacks` refuse an object's `external` binding on a named managed datasource, from either side of the pair
   
   Clause-②: yes (narrowing)
   
@@ -58,7 +58,7 @@
   This narrows the **Unchanged** bullet of the #25168 changeset, which said a binding on a datasource "registered by the host or another package, or stored at runtime" gets no verdict at the load doors: the metadata save doors now judge it, and `composeStacks` judges one another input declares.
   
   `@objectstack/spec/data`: exports `externalBindingDatasourceRefusal` and its result type `ExternalBindingDatasourceRefusal`, the one predicate behind the rule, so a runtime door resolves the datasource it can see and asks it rather than copying the judgement. Its behaviour is unchanged.
-- 3937697: fix(metadata-protocol)!: `rollbackMetaItem` and `revertCommit` refuse a stored version the save door refuses, instead of writing it back live
+- 69913f8: fix(metadata-protocol)!: `rollbackMetaItem` and `revertCommit` refuse a stored version the save door refuses, instead of writing it back live
   
   Clause-②: no (narrowing)
   
@@ -86,7 +86,7 @@
 
 ### Patch Changes
 
-- 3937697: fix(lint)!: `os lint` and the react-page props check report the retired list-view `filterableFields` by name, and the readers that still treated it as a field position go
+- b42c621: fix(lint)!: `os lint` and the react-page props check report the retired list-view `filterableFields` by name, and the readers that still treated it as a field position go
   
   Clause-②: yes (narrowing)
   
@@ -123,7 +123,7 @@
   - **`@objectstack/metadata-core`**: the ADR-0106 field-security scrub no longer classifies `filterableFields` as a list-view name list. A body that still carries the key goes the unclassified way and fails closed: a list view whose `filterableFields` names a field the caller may not read is dropped whole, where the scrub used to remove the name.
   
   ⛔ **Untouched:** `userFilters` and `searchableFields` keep their meaning and their checks.
-- 3937697: fix(service-messaging,metadata-protocol)!: a notification preference's User is a `sys_user` reference, so the record title names the person and the write door refuses an id no user holds; the default for every user is an empty User instead of `'*'`
+- e282f32: fix(service-messaging,metadata-protocol)!: a notification preference's User is a `sys_user` reference, so the record title names the person and the write door refuses an id no user holds; the default for every user is an empty User instead of `'*'`
   
   Clause-②: yes (narrowing)
   Metadata-protocol: none
@@ -141,7 +141,7 @@
     - On SQLite and PostgreSQL, `@objectstack/metadata-protocol` rebuilds the index `uniq_sys_notification_preference_a22d7d27` at `kernel:ready` as `(organization_id, COALESCE(user_id, ''), topic, channel)`, so a second default for one topic and channel in one organization is refused (`409`). If existing rows already break that rule, it refuses to migrate: the previous index stays, no row is touched, and the boot log and `os migrate duplicates` list the rows. MySQL/MariaDB and driver-memory keep the declared index, which does not constrain empty Users, and the boot log says so on MySQL.
   - **Unchanged:** `topic = '*'` and `channel = '*'` are still the topic and channel wildcards. Most-specific-wins resolution, mandatory topics, quiet hours and digests behave as before. A row for a real user is read, matched and titled as before, except for the title text. The physical column is still a `varchar(255)`, so no DDL change is needed for it.
   - **The fix for an operator:** nothing, normally; the boot rewrites the old `'*'` rows. If the boot log reports a `'*'` row that shares its topic and channel with a default whose User is already empty, delete the one that should not apply and restart. If it reports that the one-default-per-key index could not be built because two such defaults exist, list them with `os migrate duplicates`, delete one, and restart. A script or import that wrote `user_id: '*'` writes an empty `user_id` (omit it, or send `null`) for the default for every user.
-- 3937697: fix(metadata-protocol)!: the Data API refuses a malformed or negative page window with a 400 naming the parameter as written, instead of a 500 or a silently ignored window
+- 17f3c65: fix(metadata-protocol)!: the Data API refuses a malformed or negative page window with a 400 naming the parameter as written, instead of a 500 or a silently ignored window
   
   Clause-②: no (narrowing)
   Metadata-protocol: none
@@ -155,7 +155,7 @@
   - **Unchanged.** A well-formed window pages exactly as before (`?$top=5&$skip=2`, `{"limit": 5, "offset": 2}`), and `0` stays valid on both (`$top=0` asks for the total alone). A non-number in a `POST` body (`{"limit": "ten"}`) is still the body schema's `400 VALIDATION_FAILED`.
   
   **The remedy.** Send the window as a whole count of zero or more, or leave the parameter out.
-- 3937697: feat(lint)!: a membership key, and a row policy that reads one, are judged when authored, at the CLI and at the object and permission save doors
+- b531016: feat(lint)!: a membership key, and a row policy that reads one, are judged when authored, at the CLI and at the object and permission save doors
   
   Clause-②: no (narrowing: `os validate`, `os build`, `os lint` and the object and permission save doors refuse a `membershipKeys` declaration that cannot resolve and a row policy that reads a membership key in a way that matches no rows; the RLS rule now also judges object writes)
   Metadata-protocol: narrowed
@@ -186,7 +186,7 @@
   - **Remedy:** declare the key on its roster object's `membershipKeys`, or register the resolver that stages it, before publishing the policy; test a key against the column that references the key's target; use `in`, not `==`; keep a key's `filter` to the roster object's own columns. An object write refused for a stored policy is fixed by keeping the field or key that policy reads, or by changing the policy first.
   
   <!-- adr-0087: not-required (no-migration-prescription) Refusals at the CLI and at the object and permission save doors of membership key declarations that cannot resolve and of row policies that read a membership key in a position that matches no rows, plus the RLS rule's crossing to object writes. No authorable key, spelling, export or stored shape moves, and no stored row is read, rewritten or converted; the repair is the author's choice of declaration, resolver, column or operator, which no ledger entry can derive. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id covers these verdicts (not already-registered); and the change is a build and door verdict, not a declaration (not runtime-interface-only or type-surface-only). -->
-- 3937697: fix(spec)!: the published list-query schemas declare the page window the Data API enforces — a non-negative integer — instead of any number
+- 5f30f00: fix(spec)!: the published list-query schemas declare the page window the Data API enforces — a non-negative integer — instead of any number
   
   Clause-②: no (narrowing)
   Metadata-protocol: none
@@ -201,7 +201,7 @@
   - **Unchanged.** A well-formed window parses and pages exactly as before, `0` included (`$top=0` asks for the total alone). Windows inside `expand` and the engine and driver contracts (`QuerySchema`, `EngineQueryOptionsSchema`) are not narrowed: no door refuses those.
   
   **The remedy.** Send the window as a whole count of zero or more, or leave the parameter out.
-- 3937697: fix(spec): `os migrate meta --stored` lists a stored object bound `external` to a stored or registered managed datasource
+- 7db1697: fix(spec): `os migrate meta --stored` lists a stored object bound `external` to a stored or registered managed datasource
   
   Clause-②: yes (widening)
   
@@ -211,7 +211,7 @@
   
   - **Now:** for each stored `object` row carrying `external` and naming a datasource, the pass reads that datasource the way the object save door does (the environment's stored row, else the definition the code layer registers; both go through one read) and hands it to the chain. The row is listed under `rows[].todos` with this entry's id exactly when that door refuses its next save. A datasource declared `schemaMode: 'external'` or `'validate-only'`, and a datasource no layer holds, give no listing, as at the door. Nothing is rewritten.
   - **`@objectstack/spec`:** `ApplyConversionsOptions` (and so `StoredConversionOptions` for `applyConversionsToStoredItem`) gains an optional `knownDatasources`, a map of datasource definitions by name that the caller's door can see beyond the stack. Only the refused-shape listing reads it, so only when an `onTodo` sink is passed. A datasource the stack declares is read from the stack first. Without it, behaviour is unchanged.
-- 3937697: fix: `POST /api/v1/packages/:id/publish-drafts` probes dashboard widgets as the publishing caller, so a correct dataset over a permission-gated object is no longer reported as an error-tier `widget_query_failed`
+- 35d942e: fix: `POST /api/v1/packages/:id/publish-drafts` probes dashboard widgets as the publishing caller, so a correct dataset over a permission-gated object is no longer reported as an error-tier `widget_query_failed`
   
   Clause-②: no
   Metadata-protocol: none
@@ -222,7 +222,7 @@
   - **`@objectstack/metadata-protocol`:** `publishPackageDrafts` passes that context to `runBuildProbes`, which takes a new optional `context`. The widget probe runs `queryDataset` as that caller, the same path the dashboard renderer takes. "Empty although the object has rows" is now judged over the rows that caller can see.
   
   The probe never falls back to a system context. A publisher who cannot read the dataset still gets the error-tier `widget_query_failed`, because that widget will not render for them either.
-- 3937697: fix(metadata-protocol): a publish build probe refused by read admission tells the publisher to get read access, not to change a correct dataset
+- ce18e73: fix(metadata-protocol): a publish build probe refused by read admission tells the publisher to get read access, not to change a correct dataset
   
   Clause-②: no
   Metadata-protocol: none
@@ -232,87 +232,87 @@
   - **An access refusal names the access.** When the analytics service refuses the query with `PERMISSION_DENIED` (an object or a field the caller may not read), the `fix` now says the dataset is not the cause, and that the publisher (or the role the dashboard is for) needs read access to the refused object, and the refused fields when the refusal names them. The refusal is told apart by the error's code, not its message.
   - **Every other failure keeps the dataset fix.** A selection the dataset does not declare, and a member the field-level gate cannot judge (also `PERMISSION_DENIED`, but its remedy is a dataset change), keep "Fix the dataset definition (or the widget's values/dimensions) so the query compiles, then republish."
   - **Nothing else changes.** The issue's `code` (`widget_query_failed`), `severity` (`error`) and `message` are the same, and so is every other probe plane.
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
+- Updated dependencies [448374d]
+- Updated dependencies [94842ba]
+- Updated dependencies [7cacad5]
+- Updated dependencies [df8bb40]
+- Updated dependencies [0091d84]
+- Updated dependencies [5e9b100]
+- Updated dependencies [7532ea3]
+- Updated dependencies [fde7456]
+- Updated dependencies [8cfe1f9]
+- Updated dependencies [b42c621]
+- Updated dependencies [de9cd1f]
+- Updated dependencies [88cc145]
+- Updated dependencies [925fd07]
+- Updated dependencies [e7befa7]
+- Updated dependencies [55d7aab]
+- Updated dependencies [644e4b2]
+- Updated dependencies [0715fac]
+- Updated dependencies [60b42cd]
+- Updated dependencies [b9a79ef]
+- Updated dependencies [63085c3]
+- Updated dependencies [0b8bce4]
+- Updated dependencies [2069b81]
+- Updated dependencies [0a3ce08]
+- Updated dependencies [c5915b2]
+- Updated dependencies [1862d8d]
+- Updated dependencies [30d21f6]
+- Updated dependencies [eddffc3]
+- Updated dependencies [69712d5]
+- Updated dependencies [dfe60e3]
+- Updated dependencies [c0ae356]
+- Updated dependencies [e939357]
+- Updated dependencies [045858f]
+- Updated dependencies [baedcec]
+- Updated dependencies [03c12a5]
+- Updated dependencies [31f0f27]
+- Updated dependencies [386f60f]
+- Updated dependencies [28c9a2c]
+- Updated dependencies [2354058]
+- Updated dependencies [edcc8ce]
+- Updated dependencies [fccbd9d]
+- Updated dependencies [459afea]
+- Updated dependencies [c8f4c43]
+- Updated dependencies [02ad31a]
+- Updated dependencies [03966ce]
+- Updated dependencies [e3aa111]
+- Updated dependencies [863c580]
+- Updated dependencies [7f5b19d]
+- Updated dependencies [14e7239]
+- Updated dependencies [fe0ec2b]
+- Updated dependencies [dfab597]
+- Updated dependencies [9127f23]
+- Updated dependencies [24360dc]
+- Updated dependencies [ecb4e69]
+- Updated dependencies [8dfd126]
+- Updated dependencies [bda53bb]
+- Updated dependencies [b964ea1]
 - Updated dependencies [4395cbc]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
+- Updated dependencies [9019af9]
+- Updated dependencies [45f9962]
+- Updated dependencies [b531016]
+- Updated dependencies [e5eab06]
+- Updated dependencies [dc532e8]
+- Updated dependencies [d196748]
+- Updated dependencies [9d96b2b]
+- Updated dependencies [5f30f00]
+- Updated dependencies [7db1697]
+- Updated dependencies [f5b6b3f]
+- Updated dependencies [f4112a7]
+- Updated dependencies [db1c7cc]
+- Updated dependencies [303aef0]
+- Updated dependencies [b3034ee]
+- Updated dependencies [d12e650]
+- Updated dependencies [830a63a]
+- Updated dependencies [1000cc7]
+- Updated dependencies [ee63b47]
+- Updated dependencies [bdf762c]
+- Updated dependencies [27b3f1f]
+- Updated dependencies [7c68b10]
+- Updated dependencies [915e940]
 - Updated dependencies [4a25192]
-- Updated dependencies [3937697]
+- Updated dependencies [025f6de]
 - Updated dependencies [9f39094]
   - @objectstack/spec@18.1.0
   - @objectstack/core@18.1.0

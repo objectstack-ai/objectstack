@@ -12115,9 +12115,11 @@ export function tierLines(result) {
     ];
   }
   // The one-line-class exit is a card-CONTENT judgment for every mandated
-  // surface but one: a glob declared with `oneLineExit: false` (the published
-  // catalog, 2026-09-10 ruling) closes it by PATH, and one such hit closes it
-  // for the WHOLE card — the exit is taken per card, not per file.
+  // surface except those whose glob is declared with `oneLineExit: false` (the
+  // published catalog, 2026-09-10 ruling; ADR text, 2026-10-25 order): that
+  // closes it by PATH, and one such hit closes it for the WHOLE card — the exit
+  // is taken per card, not per file. The reason printed is the row's own `why`,
+  // already on the hit lines above, so this line names no ruling of its own.
   const oneLineBarred = [...new Set(hits.filter((h) => h.oneLineExit === false).map((h) => h.glob))];
   const oneLineExit =
     oneLineBarred.length === 0
@@ -12125,7 +12127,7 @@ export function tierLines(result) {
         ` discretion, compensated by the skill-face review at ${CONTRACT_REVIEW_TIER}) — judged from the card CONTENT,` +
         ' never from paths'
       : `the one-line-class mechanical-edit downgrade is ⛔ NOT available for this surface — ${oneLineBarred.map((g) => `'${g}'`).join(', ')}` +
-        ' carries no one-line exemption (the published catalog, 2026-09-10 ruling), and one such path closes the exit for the whole card';
+        ' carries no one-line exemption (its row declares `oneLineExit: false`; the reason is on its hit line above), and one such path closes the exit for the whole card';
   return [
     `Model tier — MANDATORY: ${tier} (derived from the file surface, not recalled).`,
     ...hits.map((h) => `  - ${h.path} ⇢ '${h.glob}' — ${h.why}`),
