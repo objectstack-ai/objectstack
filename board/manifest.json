@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repo": "objectstack-ai/objectstack",
-  "generated_at": "2026-10-24T20:21:09.681Z",
+  "generated_at": "2026-10-25T02:00:04.270Z",
   "walk_phase": "incremental",
   "walk": {
     "open_set": {
@@ -11,8 +11,8 @@
     },
     "delta": {
       "complete": true,
-      "cursor": "2026-10-24T20:17:44Z",
-      "since": "2026-10-24T14:20:01Z",
+      "cursor": "2026-10-25T01:59:06Z",
+      "since": "2026-10-24T20:17:44Z",
       "slice": 300
     },
     "history": {
@@ -20,41 +20,41 @@
       "cursor": "2026-09-23T20:24:00Z"
     }
   },
-  "since": "2026-10-24T14:20:01Z",
-  "since_reason": "incremental from the previous run's next_since (2026-10-24T14:20:01Z)",
-  "next_since": "2026-10-24T20:17:44Z",
+  "since": "2026-10-24T20:17:44Z",
+  "since_reason": "incremental from the previous run's next_since (2026-10-24T20:17:44Z)",
+  "next_since": "2026-10-25T01:59:06Z",
   "resume": null,
   "counts": {
-    "issues_open": 184,
-    "issues_closed": 11142,
-    "pulls_open": 30,
-    "pulls_closed": 12241,
-    "records": 23597
+    "issues_open": 183,
+    "issues_closed": 11154,
+    "pulls_open": 29,
+    "pulls_closed": 12253,
+    "records": 23619
   },
   "board": {
-    "open_issues_count": 143,
-    "open_pull_requests": 21,
-    "read_at": "2026-10-24T20:21:08.867Z"
+    "open_issues_count": 141,
+    "open_pull_requests": 20,
+    "read_at": "2026-10-25T02:00:03.578Z"
   },
   "count_check": {
-    "verdict": "surplus",
+    "verdict": "ok",
     "reason": null,
-    "expected": 122,
-    "archived": 184,
+    "expected": 121,
+    "archived": 183,
     "shortfall": 0,
-    "surplus": 3,
-    "gone_ledger": 59,
-    "ok": false
+    "surplus": 0,
+    "gone_ledger": 62,
+    "ok": true
   },
   "freshness": {
     "verdict": "fresh",
     "pending_since": null,
     "reason": null
   },
-  "requests": 245,
+  "requests": 134,
   "run": {
-    "numbers_read": 120,
-    "files_written": 225,
+    "numbers_read": 67,
+    "files_written": 125,
     "walk_complete": true,
     "open_set_completed_here": false,
     "delta_ran": false,

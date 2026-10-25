@@ -1,0 +1,28 @@
+{
+  "number": 25729,
+  "kind": "issue",
+  "title": "pm-dispatch model tiering: a card whose surface touches `docs/adr/**` is dispatched at CONTRACT_REVIEW_TIER with effort xhigh, no one-line exit",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T01:44:19Z",
+  "updated_at": "2026-10-25T01:44:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25729",
+  "body": "Filing gate: ③ a task ordered directly by the project owner, quoted verbatim below.\nReader: `domain:skills` seat, next PR on `scripts/pm/dispatch-gates.data.mjs` (`MANDATORY_TIER_GLOB_ROWS`) plus the PM skill text that states the tiering policy.\nDedupe (open AND closed): \"ADR drafting cards must be dispatched at the fable model tier mandatory tier glob docs/adr\" → 11 hits, none about an ADR tier mandate (nearest: #7945, the spec-semantic tier mandate, and #17950, governed-surface tiering, both closed completed); \"dispatch effort xhigh floor per surface, model tier mandate MANDATORY_TIER_GLOB_ROWS new row\" → 0 hits.\n\n## The order\n\n田騏 (`marchtian`), 2026-10-25T01:40:25Z, in the project thread that drafted #25403, verbatim and untranslated:\n\n> adr 这种任务都需要 fable extra，重新处理并立skills 卡片\n\nRead as: \"fable\" = the `CONTRACT_REVIEW_TIER` constant in `scripts/pm/dispatch-gates.mjs` (the claim template spells the constant, never a model id); \"extra\" = `effort: xhigh`, the claim template's word for extra-high effort (`Container & model` line of the SKILL.md claim template); \"这种任务\" = every card whose deliverable is ADR text, i.e. whose file surface touches `docs/adr/**`. 「都需要」 = no exemption.\n\n## Why\n\nAn ADR is what later cards are cut from (AGENTS.md Prime Directive 13: an accepted ADR binds until a superseding one says otherwise), and `docs/adr/**` lands only by the maintainer's hand (Tier H). A drafting error is paid twice: once by the maintainer reading it, and again by every implementation card built on it. The order puts ADR drafting at the top tier and effort.\n\nThe case that triggered it: #25403 (the inter-app dependency ADR) was claimed with `model: default tier (dispatch-gates --tier: \"no path-derived mandate\", floor sonnet · default opus · ceiling fable)` and `effort: high` (claim comment 6390714959), and draft PR #25717 was written at that tier. Nothing mechanical could have said otherwise: measured at `origin/main` `43edf90b`, `MANDATORY_TIER_GLOB_ROWS` holds three globs (`.claude/skills/pm-dispatch/SKILL.md`, `.claude/agents/os-dev.md`, `skills/**`), and `node scripts/pm/dispatch-gates.mjs --tier docs/adr/0028-metadata-naming-and-namespace-isolation.md` answers \"Model tier — no path-derived mandate: the surface hits none of the 3 declared glob(s)\". #25717 is being re-drafted at the ordered tier.\n\n## What to change\n\n1. **The tier row.** `MANDATORY_TIER_GLOB_ROWS` in `scripts/pm/dispatch-gates.data.mjs` gains `glob: 'docs/adr/**'`, `tier: 'CONTRACT_REVIEW_TIER'`, a `why:` quoting the order, and `oneLineExit: false` — 「都需要」 closes the one-line mechanical-edit exit by path, the same shape the `skills/**` row has. The table's existing self-test guards (the glob names an existing path; no two globs disagree on a tier) cover the new row.\n2. **The effort floor.** The table carries a tier and nothing else, while the order also fixes effort at `xhigh`. Either the row gains an effort floor that `--tier` prints beside the tier, or the PM skill states the floor where the claim's `effort:` word is chosen (`references/execution-duties.md` dispatch section, and the `effort: <medium | high | xhigh | max,按卡难度定>` slot of the SKILL.md claim template). Whichever carrier is chosen, `xhigh` is a floor that \"按卡难度\" can raise to `max` and ⛔ never lower.\n3. **The policy text.** The table's header says it is a machine-readable copy of one predicate from the PM skill's tiering policy, and that the skill wins when they disagree. The skill text that states that policy gains this order as a clause in the same edit, so the table stays a copy.\n4. ⚠ `references/instrument-discipline.md` freezes `dispatch-gates.mjs` against new derivation lines. Item 1 is a data row in an existing table; a printed effort line (item 2, first option) may count as a new line. The PR says which side of that freeze its choice falls on.\n\n## Boundary\n\n- This changes PM-lane rules: `.claude/**` is a governed surface (Tier S), `scripts/pm/**` outside the gate scripts is the `domain:skills` lane's. Whether this order is enough to land a tiering change, or the maintainer's word is owed, is triage's and the director seat's call; ⛔ this card does not decide it.\n- Not in scope: re-dispatching ADR cards that already merged.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

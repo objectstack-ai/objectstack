@@ -1,0 +1,35 @@
+{
+  "number": 25727,
+  "kind": "issue",
+  "title": "tooling(objectui-readiness 3): objectui compiles against objectstack main HEAD — bump .objectstack-sha past the spec commits since e649c2d91e, fix the fallout (TranslationPreview TS1360), repeat until cutover (parent #25677, 2c/6)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:epic",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T01:15:36Z",
+  "updated_at": "2026-10-25T01:59:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25727",
+  "body": "Filing gate ④: sub-issue 2c/6 of the epic #25677 (`pm:epic`; epic PM `session_01RSDL3SFtJaKzcymvCD8RsU`). Part of #25677. ⛔ Not a claim. Measured on the `DO NOT MERGE` verification PR #25718, run 2 (40145825496, head 1a76fa5849).\n\n**Why.** objectui `main` pins objectstack by commit in `.objectstack-sha` = `e649c2d91e`; objectstack `main` was 13 spec commits past it on 2026-10-25 and widens every hour. The merged tree compiles the Console against `packages/spec` at HEAD, not a pin — that is the property the merge exists to give us, and it also means every spec change made since objectui's pin becomes a build error the moment the subtree lands. Run 2 showed the first one: with the nested-turbo race fixed, the root `turbo run build` ran 117 tasks in 11m54s and the only red was `@object-ui/app-shell#build`: `src/views/metadata-admin/previews/TranslationPreview.tsx(99,3) TS1360` — the record of metadata kinds lacks `positions` and `permissions`, which #25701 (47af3dde42) added as translation kinds. The cutover PR cannot be green until objectui compiles against the sha it will be imported with, and because the gap grows with every spec merge, this card is repeated right before cutover.\n\n**Who does it, where it lands:** the epic PM dispatches it (os-dev, objectui checkout). One PR to **objectstack-ai/objectui `main`** per round: bump `.objectstack-sha` to objectstack `main` HEAD (the normal pin-bump path, `pnpm run setup` / the pin scripts), fix every type and test failure the new spec brings, land. The epic PM re-measures on the verification branch (its `ui/` subtree re-imported at the new objectui sha) and records the remaining reds on #25697. The last round runs inside the cutover freeze (sub-issue 5).\n\n## 维护者速读\n\nobjectui 现在钉 objectstack 的提交是 e649c2d91e,objectstack main 已经往前 13 个 spec 提交。合并后 Console 直接对着仓内 spec HEAD 编译(这正是合并要的效果),所以 objectui 没追上的每个 spec 改动在导入那一刻都会变成编译错误 —— 验证分支第二轮已经出现第一个:TranslationPreview 缺 `positions` / `permissions` 两个翻译种类(#25701 加的)。本卡就是让 objectui 追上 objectstack main(走现有的 pin 升级流程,修掉报错),切换前再做最后一轮。不改受管面。\n\n## Measured\n\n| Evidence | Reading |\n|---|---|\n| #25718 run 2 Build Core | 117 tasks, 11m54s; 1 red: `@object-ui/app-shell#build` TS1360 at `TranslationPreview.tsx(99,3)` — `positions`, `permissions` missing from the metadata-kind record |\n| objectui `.objectstack-sha` | `e649c2d91e`; objectstack `main` on 2026-10-25 00:30Z: 13 spec commits past it (`git log e649c2d91e..main -- packages/spec`) |\n| Run 4 (d17ed5edf9) Type Check UI | the `tsc` step over the ui packages against spec HEAD — its full error list is appended to this card when read |\n\n## Scope\n\n1. Bump `.objectstack-sha` to objectstack `main` HEAD at the time of the round; run the pin refresh the way `AGENTS.md` prescribes (packed manifests, `pnpm run setup`).\n2. Fix the fallout in objectui: TranslationPreview's metadata-kind record gains `positions` and `permissions` (with the labels/previews the other kinds have); whatever else the spec delta breaks in `type-check`, `test`, and the spec-alignment gates (`check:spec-symbols`, designer-field-key-parity, …).\n3. Per round, post on this card: the sha bumped to, the number of spec commits covered, the files changed, the gates that moved.\n4. Repeat on the epic PM's call: once now, once right before the cutover freeze (and in between if the gap exceeds ~10 spec commits).\n\nOut of scope: any spec change in objectstack (if a spec commit is wrong, file on objectstack and bump past it); the merged-tree readers (#25723).\n\n## Verification (the dev's)\n\n- objectui standalone: `pnpm type-check`, `pnpm test` (affected), `pnpm check:spec-symbols`, the pin-floor checks — green, no gate skipped; the PR's CI green.\n- The epic PM: re-import the ui/ subtree at the merged objectui sha on the verification branch; `@object-ui/app-shell#build` and Type Check UI's tsc step green against spec HEAD.\n\n## Done when\n\n- objectui `main`'s `.objectstack-sha` equals objectstack `main` HEAD (±0 spec commits) at the start of the cutover freeze, and the verification branch's Type Check UI and root build are green on the spec axis.\n\n**Size:** S per round (today: one component + whatever 13 commits add). **Clause-②:** no. **Metadata-protocol:** none. **Blocked-by:** none for round 1 (objectui#13484 of #25723 should land first so the branch `claude/project-thread-dwhq6r` is free; otherwise a per-card branch).\n\n## 风险\n\n- The spec gap is a moving target; the last round must be inside the freeze or the import compiles against a sha objectui never saw.\n- A spec commit that is itself wrong must be fixed in objectstack first; this card never patches around spec.\n\n## Dedupe\n\nOpen issues 2026-10-25 01:10Z filtered on `.objectstack-sha` / pin bump / TranslationPreview / positions permissions: the routine Dependabot-style pin bumps are not cards; #25701 (closed) added the kinds. **New.**"
+}
