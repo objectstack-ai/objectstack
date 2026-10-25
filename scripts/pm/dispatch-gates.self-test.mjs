@@ -2221,7 +2221,7 @@ export function selfTest({ tier = 'full' } = {}) {
 
     const remaining = prose.match(/the remaining (\d+) carry compound names/);
     const allFiring = prose.match(/keeps firing on all (\d+), the mask keeps blanking all (\d+)/);
-    const genuineLine = prose.match(/([A-Za-z]+) are genuine self-test batteries/);
+    const genuineLine = prose.match(/(\d+|[A-Za-z]+) are genuine self-test batteries/);
     const accidentalLine = prose.match(/([A-Za-z]+) are production code:/);
     const spellingsLine = prose.match(/over (\d+) distinct spellings/);
 
