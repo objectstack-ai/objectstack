@@ -293,14 +293,16 @@ describe('datasource-admin envelope (#3843) — error bodies', () => {
       run: () => drive(mount({ removeDatasource: async () => { throw new Error('not runtime-origin'); } }), '/api/v1/datasources/pg', { method: 'DELETE' }),
     },
     {
-      // The credential migration's THROW arm — an unknown name, a store that
-      // failed — as distinct from its `refused` result, which is a 200 above.
+      // The credential migration's THROW arm — a store that failed — as
+      // distinct from its `refused` result, which is a 200 above. An unknown
+      // name is not this arm: the service throws it with the not-found
+      // envelope and the route answers it 404 (`datasource-unknown-name.test.ts`).
       name: 'a credential-migration failure',
       status: 400,
       code: 'DATASOURCE_ADMIN_ERROR',
       run: () => drive(
-        mount({ migrateCredential: async () => { throw new Error("Datasource 'nope' not found."); } }),
-        '/api/v1/datasources/nope/migrate-credential',
+        mount({ migrateCredential: async () => { throw new Error('secret store offline'); } }),
+        '/api/v1/datasources/warehouse/migrate-credential',
         { method: 'POST', body: '{}' },
       ),
     },

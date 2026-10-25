@@ -8,6 +8,8 @@
     "ActionDescriptorSchema": "automation/ActionDescriptor",
     "ActionParadigm": "automation/ActionParadigm",
     "ActionParadigmSchema": "automation/ActionParadigm",
+    "ApiTriggerSecretRef": "automation/ApiTriggerSecretRef",
+    "ApiTriggerSecretRefSchema": "automation/ApiTriggerSecretRef",
     "ApprovalDecision": "automation/ApprovalDecision",
     "ApprovalEscalation": "automation/ApprovalEscalation",
     "ApprovalEscalationSchema": "automation/ApprovalEscalation",

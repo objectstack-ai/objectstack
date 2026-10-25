@@ -16,6 +16,7 @@ import {
   FLOW_NODE_TEXT_SLOTS,
   TEXT_SLOT_TEMPLATE_REFUSAL,
   closedScopeTemplateRefusal,
+  dollarOnlyTokenRoots,
   flowNodeTextSlotSources,
   templateSlotSource,
   textSlotTemplateRefusal,
@@ -460,6 +461,19 @@ describe('the node contracts — `By {{ $User.Id }}` is refused at the schema (#
       expect(NotifyConfigSchema.safeParse({ recipients: ['u1'], title: text, message: tmpl`${text}` }).success, text).toBe(true);
       expect(ScreenConfigSchema.safeParse({ title: text, description: text }).success, text).toBe(true);
       expect(EndConfigSchema.safeParse({ outcome: 'refused', message: text }).success, text).toBe(true);
+    }
+  });
+});
+
+describe('dollarOnlyTokenRoots — the shape the action runner still reads as `${…}` (#25680)', () => {
+  it('answers the roots when every token is a `${…}` path and no `{{ }}` hole is present', () => {
+    expect(dollarOnlyTokenRoots('Delete ${record.name}?')).toEqual(['record']);
+    expect(dollarOnlyTokenRoots('Sent to ${result.email} for ${record.name}')).toEqual(['result', 'record']);
+  });
+
+  it('answers undefined for anything else: no token, a `{{ }}` hole, a bare `{x}`, or logic', () => {
+    for (const text of ['Delete this?', 'Sent to {{ result.email }} at ${result.at}', 'Run ${record.name} as {role}', '${a + b}', '']) {
+      expect(dollarOnlyTokenRoots(text), text).toBeUndefined();
     }
   });
 });

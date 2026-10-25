@@ -347,6 +347,55 @@ grants it had issued rather than re-granting the whole object. If you really
 do want everyone to read every record of an object, that is the object's
 organization-wide default (`sharingModel`), not a sharing rule.
 
+The gate judges the **lowered filter**, not the intent. A literal
+`condition: 'true'` lowers to an empty filter, so the rule is not served (a
+declared rule is logged at boot as `match-all-criteria`). A field predicate
+that every row happens to satisfy, such as `record.id != ''`, is an ordinary
+rule and is served. Use one only where the OWD would grant too much, as in the
+recipe below.
+
+### Recipe — edit every record, delete none
+
+`modifyAllRecords` cannot express this: Modify All Records includes delete, and
+the schema refuses `allowDelete: false` beside `modifyAllRecords: true`. A
+sharing rule can, because an `edit` share opens update and never delete
+(ADR-0111 D3). On a `public_read` object whose rows an administrator owns:
+
+```typescript
+// The permission set: edit and read, no Modify All, delete withheld.
+objects: {
+  srm_material: { allowRead: true, allowCreate: false, allowEdit: true, allowDelete: false },
+},
+
+// The position distributes the set; the rule shares every row with it at `edit`.
+definePosition({ name: 'srm_buyer', label: 'Buyer', permissionSets: ['srm_buyer_set'] });
+
+defineSharingRule({
+  type: 'criteria',
+  name: 'srm_material_edit_buyers',
+  object: 'srm_material',
+  condition: "record.id != ''",
+  accessLevel: 'edit',
+  sharedWith: { type: 'position', value: 'srm_buyer' },
+});
+```
+
+Measured on a booted in-process stack (`@objectstack/verify`): a member who
+holds `srm_buyer` updates a row the administrator owns, and their delete of
+that row is refused `403 PERMISSION_DENIED`; a row inserted after the rule is
+shared the same way; holding the position without a served rule, the same
+update is refused at the record. The rule's grants follow the position's
+holders and the object's writes, so nobody re-runs it by hand. Field-level
+security narrows which fields the edit may touch.
+
+Three conditions, each one a reason the share would enforce nothing:
+
+- The object needs an **owner field** and an owner-write OWD (`private` or
+  `public_read`). Under `public_read_write` every member with `allowEdit`
+  already edits every row, so the share adds nothing.
+- The condition must be a **field predicate** (see above).
+- The permission set still grants `allowEdit`; a share widens rows, never verbs.
+
 > **Retired shapes.** The pre-ADR-0090 `group` recipient was renamed to
 > `team`, and the `guest` recipient was removed — anonymous access is served
 > by the [public-form grant](/docs/permissions/authorization) and share

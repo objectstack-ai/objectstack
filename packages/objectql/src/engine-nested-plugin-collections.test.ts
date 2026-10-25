@@ -196,7 +196,11 @@ describe('the two registration seams enumerate ONE collection list (#7049)', () 
 
   it.each(CANDIDATES)('registers `%s` identically from a manifest and from a nested plugin', (plural) => {
     const singular = pluralToSingular(plural);
-    const item = { name: `probe_${plural}`, label: `Probe ${plural}` };
+    // [#25649] An action is stored as its `ActionSchema` parse, so the probe
+    // carries the one thing a `script` default needs beyond a name and label.
+    const item = plural === 'actions'
+        ? { name: `probe_${plural}`, label: `Probe ${plural}`, type: 'url', target: 'https://example.com/probe' }
+        : { name: `probe_${plural}`, label: `Probe ${plural}` };
 
     const direct = new ObjectQL();
     direct.registerApp({ id: PKG, name: 'billing', [plural]: [item] });

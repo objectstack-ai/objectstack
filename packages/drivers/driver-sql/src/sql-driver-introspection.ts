@@ -7,6 +7,13 @@
  * catalog reads `introspectSchema` and the schema-sync drift checks are built
  * on — moved out of `sql-driver.ts` whole.
  *
+ * [#25521 cut 4] `introspectSchema`, the public whole-schema read those
+ * helpers serve, moved here too: it lists the tables per dialect and reads each
+ * one through four of them. `listPhysicalColumns`, the other member of the
+ * class's Schema Introspection section, stayed in the class: its body is
+ * shorter than the host literal a stub would need, so moving it would make
+ * `sql-driver.ts` longer, not shorter.
+ *
  * A MOVE, not a redesign. Each function below is the body of the `SqlDriver`
  * method of the same name as it stood, re-indented one level and otherwise
  * unedited: the same catalog statements, the same dialect arms, the same
@@ -27,22 +34,39 @@
  *
  * `introspectColumns` reads `introspectColumnOrder` through a closure that
  * calls it on the driver at call time, so a subclass override or a test spy on
- * the instance is still the one the body reaches.
+ * the instance is still the one the body reaches. `introspectSchema` reads the
+ * four helpers it calls the same way, so `TursoDriver`'s override of
+ * `introspectColumns` (and a test spy on the instance) is still the one it
+ * reaches. `TursoDriver` also overrides `introspectSchema` itself and calls
+ * `super`, which reaches the class method, which hands this body its host.
  *
- * The field `knex` and the three dialect getters go as GETTERS, so each read
- * happens when the body makes it, as it did on the class.
+ * The field `knex`, the three dialect getters and the getter `dialectName` go
+ * as GETTERS, so each read happens when the body makes it, as it did on the
+ * class.
  *
  * The two module-level declarations the bodies read, `UniqueConstraintMember`
  * and `singleColumnUniqueColumns`, stay in `sql-driver.ts`, which exports them
  * already (a test imports `singleColumnUniqueColumns` from there), and are
  * imported from there: the module cycle is evaluation-safe because the one
  * value import is read only inside a function body, never while the two
- * modules are first evaluated. `index.ts` re-exports nothing from this module,
+ * modules are first evaluated. `introspectSchema` also reads the types
+ * `IntrospectedSchema` and `IntrospectedTable`, which `sql-driver.ts` exports
+ * already, and the function `postgresTableNameCollisionError`, which only
+ * this body reads: it stays in `sql-driver.ts` and gained a leading `export`
+ * there (the shape cut 2 applied), so it is imported, not copied, and is read
+ * only inside the body too. `index.ts` re-exports nothing from this module,
  * so the published surface does not move.
  */
 
-import type { IntrospectedColumn, IntrospectedForeignKey, SqlDriver, UniqueConstraintMember } from './sql-driver.js';
-import { singleColumnUniqueColumns } from './sql-driver.js';
+import type {
+  IntrospectedColumn,
+  IntrospectedForeignKey,
+  IntrospectedSchema,
+  IntrospectedTable,
+  SqlDriver,
+  UniqueConstraintMember,
+} from './sql-driver.js';
+import { postgresTableNameCollisionError, singleColumnUniqueColumns } from './sql-driver.js';
 
 /**
  * The `SqlDriver` members the functions below read — every one of them, and
@@ -53,7 +77,12 @@ import { singleColumnUniqueColumns } from './sql-driver.js';
  * for which members are getters.
  */
 export interface IntrospectionHost {
+  readonly dialectName: SqlDriver['dialectName'];
   introspectColumnOrder: SqlDriver['introspectColumnOrder'];
+  introspectColumns: SqlDriver['introspectColumns'];
+  introspectForeignKeys: SqlDriver['introspectForeignKeys'];
+  introspectPrimaryKeys: SqlDriver['introspectPrimaryKeys'];
+  introspectUniqueConstraints: SqlDriver['introspectUniqueConstraints'];
   readonly isMysql: SqlDriver['isMysql'];
   readonly isPostgres: SqlDriver['isPostgres'];
   readonly isSqlite: SqlDriver['isSqlite'];
@@ -662,4 +691,110 @@ export async function introspectUniqueConstraints(
   }
 
   return singleColumnUniqueColumns(members);
+}
+
+/** The body of `SqlDriver#introspectSchema`; the method's signature there is its contract. */
+export async function introspectSchema(this: Pick<IntrospectionHost, 'dialectName' | 'introspectColumns' | 'introspectForeignKeys' | 'introspectPrimaryKeys' | 'introspectUniqueConstraints' | 'isMysql' | 'isPostgres' | 'isSqlite' | 'knex'>): Promise<IntrospectedSchema> {
+  const tables: Record<string, IntrospectedTable> = {};
+  // Stamped BEFORE the reads, not after: a consumer asking "has the remote
+  // changed since this snapshot?" must not be told the snapshot covers a
+  // moment later than the first table it actually read.
+  const introspectedAt = new Date().toISOString();
+  let tableNames: string[] = [];
+  // PostgreSQL only (#24707): the schema each listed table lives in, so its
+  // columns are read THERE. Every other dialect leaves it empty.
+  const schemaByTable = new Map<string, string>();
+
+  if (this.isPostgres) {
+    // Every schema the session can actually reach unqualified, rather than
+    // the literal `'public'` — same answer for a default deployment, where
+    // `current_schemas(false)` is exactly `{public}`, and the right answer for
+    // a session pointed at another schema, where the literal listed nothing.
+    //
+    // `table_schema` and its `search_path` position are selected too
+    // (#24707). The result is keyed by BARE name, so two schemas holding the
+    // same name used to collapse into one key with the later table silently
+    // dropped — refused below instead. And the schema is what the column read
+    // needs: knex `columnInfo()` on a bare name reads `current_schema()`, the
+    // FIRST schema on the path only, so a table in a later schema reported
+    // zero columns. No `ORDER BY` is added: the key order of a single-schema
+    // answer stays exactly what it was.
+    const result = await this.knex.raw(`
+        SELECT table_schema, table_name,
+          array_position(current_schemas(false), table_schema::name) AS path_position
+        FROM information_schema.tables
+        WHERE table_schema = ANY (current_schemas(false))
+        AND table_type = 'BASE TABLE'
+      `);
+    const rows = result.rows as { table_schema: string; table_name: string; path_position: number }[];
+    const schemasByTable = new Map<string, { schema: string; position: number }[]>();
+    for (const row of rows) {
+      const seen = schemasByTable.get(row.table_name);
+      const entry = { schema: row.table_schema, position: Number(row.path_position) };
+      if (seen) seen.push(entry);
+      else schemasByTable.set(row.table_name, [entry]);
+    }
+    const collisions = [...schemasByTable]
+      .filter(([, schemas]) => schemas.length > 1)
+      .map(([table, schemas]) => ({
+        table,
+        schemas: schemas.sort((a, b) => a.position - b.position).map((s) => s.schema),
+      }))
+      .sort((a, b) => (a.table < b.table ? -1 : a.table > b.table ? 1 : 0));
+    if (collisions.length > 0) throw postgresTableNameCollisionError(collisions);
+
+    tableNames = rows.map((row) => row.table_name);
+    for (const row of rows) schemaByTable.set(row.table_name, row.table_schema);
+  } else if (this.isMysql) {
+    const result = await this.knex.raw(`
+        SELECT table_name
+        FROM information_schema.tables
+        WHERE table_schema = DATABASE()
+        AND table_type = 'BASE TABLE'
+      `);
+    tableNames = result[0].map((row: any) => row.TABLE_NAME);
+  } else if (this.isSqlite) {
+    const result = await this.knex.raw(`
+        SELECT name as table_name
+        FROM sqlite_master
+        WHERE type='table'
+        AND name NOT LIKE 'sqlite_%'
+      `);
+    tableNames = result.map((row: any) => row.table_name);
+  }
+
+  for (const tableName of tableNames) {
+    // All four reads take the #7332 default (`onFailure: 'throw'`): this
+    // caller cannot correct a short read, and `introspectColumns` has never
+    // swallowed — so a partially-readable database fails the whole-schema
+    // introspection loudly instead of emitting tables whose keys silently
+    // read as absent (#11161). Every in-tree caller of `introspectSchema`
+    // already handles a throw (the datasource health check reports
+    // `{ ok: false }`, the REST/CLI seams surface the error).
+    // On PostgreSQL the columns are read in the table's OWN schema (#24707);
+    // the three key reads below already scope to `current_schemas(false)`
+    // or resolve along `search_path`, which the refusal above makes
+    // unambiguous among base tables.
+    const columns = await this.introspectColumns(tableName, schemaByTable.get(tableName));
+    const foreignKeys = await this.introspectForeignKeys(tableName);
+    const primaryKeys = await this.introspectPrimaryKeys(tableName);
+    const uniqueConstraints = await this.introspectUniqueConstraints(tableName);
+
+    for (const col of columns) {
+      if (primaryKeys.includes(col.name)) col.primaryKey = true;
+      if (uniqueConstraints.includes(col.name)) col.isUnique = true;
+    }
+
+    tables[tableName] = { name: tableName, columns, foreignKeys, primaryKeys };
+  }
+
+  // `dialectName` — not the raw Knex client, and not the spec's
+  // `SQLDialectSchema` enum. The only in-tree consumer of this key is
+  // `suggestFieldTypeForSqlType(col.type, schema.dialect as SqlDialect)`,
+  // whose `SqlDialect` vocabulary (`packages/spec/src/data/type-compat.ts`)
+  // spells PostgreSQL `postgres`, exactly as `dialectName` does. Emitting
+  // the enum's `postgresql` instead would put the key in `Object.keys()`
+  // while leaving every per-dialect type alias unreachable — the omission
+  // this repairs, wearing a fix's clothes.
+  return { tables, dialect: this.dialectName, introspectedAt };
 }

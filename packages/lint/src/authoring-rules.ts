@@ -758,9 +758,13 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // `runStackExpressionPasses` runs that pass alone, over the written page's
     // action rows and inline actions; an action or object write judges the
     // written action's own `confirmText` / `successMessage` in the same pass.
-    // Every finding is a `warning` (an advisory, never a refusal), because
-    // every such sentence parsed while the keys were plain strings; the
-    // refusal is its own card.
+    // #25680 makes each finding an `error`, so an action, object or page write
+    // carrying one is refused (a narrowing no conversion carries, shipped in
+    // 18.x as its own BREAKING minor, as #25205 did for the bulk slot). One
+    // stays a `warning`: a `${…}` token the console's runner still fills, in a
+    // sentence with no `{{ }}` hole. MEASURED first over the shipped corpus at
+    // `6021b5e837`: 0 findings across examples/**, platform-objects and
+    // plugin-approvals, against one for a planted unbound hole.
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['flow', 'action', 'hook', 'object', 'view', 'page'],
     run: (stack, ctx) =>

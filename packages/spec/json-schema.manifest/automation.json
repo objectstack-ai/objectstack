@@ -5,6 +5,7 @@
     "automation/ActionCategory",
     "automation/ActionDescriptor",
     "automation/ActionParadigm",
+    "automation/ApiTriggerSecretRef",
     "automation/ApprovalDecision",
     "automation/ApprovalEscalation",
     "automation/ApprovalNodeApprover",

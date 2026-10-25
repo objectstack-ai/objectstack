@@ -160,14 +160,15 @@ import {
 } from './builtin-column-collision.js';
 import { recoverUnencodedJsonText } from './unencoded-json-text.js';
 // [#25521 cut 1] The catalog-introspection helpers (`introspectColumnOrder`,
-// `introspectColumns` and the foreign-key, primary-key and unique-constraint reads);
-// the methods of the same names below hand each body the members it reads
-// (`IntrospectionHost`).
+// `introspectColumns` and the foreign-key, primary-key and unique-constraint reads),
+// and [cut 4] `introspectSchema`, the whole-schema read built on them; the methods
+// of the same names below hand each body the members it reads (`IntrospectionHost`).
 import {
   introspectColumnOrder,
   introspectColumns,
   introspectForeignKeys,
   introspectPrimaryKeys,
+  introspectSchema,
   introspectUniqueConstraints,
 } from './sql-driver-introspection.js';
 // [#25521 cut 2] The raw-execution path (`execute`, its refusal terminal
@@ -4960,7 +4961,7 @@ function classifyFilterKey(
  *
  * `collisions` is non-empty; each entry's `schemas` has two or more members.
  */
-function postgresTableNameCollisionError(collisions: ReadonlyArray<{ table: string; schemas: string[] }>): Error {
+export function postgresTableNameCollisionError(collisions: ReadonlyArray<{ table: string; schemas: string[] }>): Error {
   const list = (names: string[]) => names.map((s) => `'${s}'`).join(', ');
   const [first] = collisions;
   const err = new Error(
@@ -15822,109 +15823,25 @@ export class SqlDriver implements IDataDriver {
     return Object.keys(info ?? {});
   }
 
-  async introspectSchema(): Promise<IntrospectedSchema> {
-    const tables: Record<string, IntrospectedTable> = {};
-    // Stamped BEFORE the reads, not after: a consumer asking "has the remote
-    // changed since this snapshot?" must not be told the snapshot covers a
-    // moment later than the first table it actually read.
-    const introspectedAt = new Date().toISOString();
-    let tableNames: string[] = [];
-    // PostgreSQL only (#24707): the schema each listed table lives in, so its
-    // columns are read THERE. Every other dialect leaves it empty.
-    const schemaByTable = new Map<string, string>();
-
-    if (this.isPostgres) {
-      // Every schema the session can actually reach unqualified, rather than
-      // the literal `'public'` — same answer for a default deployment, where
-      // `current_schemas(false)` is exactly `{public}`, and the right answer for
-      // a session pointed at another schema, where the literal listed nothing.
-      //
-      // `table_schema` and its `search_path` position are selected too
-      // (#24707). The result is keyed by BARE name, so two schemas holding the
-      // same name used to collapse into one key with the later table silently
-      // dropped — refused below instead. And the schema is what the column read
-      // needs: knex `columnInfo()` on a bare name reads `current_schema()`, the
-      // FIRST schema on the path only, so a table in a later schema reported
-      // zero columns. No `ORDER BY` is added: the key order of a single-schema
-      // answer stays exactly what it was.
-      const result = await this.knex.raw(`
-        SELECT table_schema, table_name,
-          array_position(current_schemas(false), table_schema::name) AS path_position
-        FROM information_schema.tables
-        WHERE table_schema = ANY (current_schemas(false))
-        AND table_type = 'BASE TABLE'
-      `);
-      const rows = result.rows as { table_schema: string; table_name: string; path_position: number }[];
-      const schemasByTable = new Map<string, { schema: string; position: number }[]>();
-      for (const row of rows) {
-        const seen = schemasByTable.get(row.table_name);
-        const entry = { schema: row.table_schema, position: Number(row.path_position) };
-        if (seen) seen.push(entry);
-        else schemasByTable.set(row.table_name, [entry]);
-      }
-      const collisions = [...schemasByTable]
-        .filter(([, schemas]) => schemas.length > 1)
-        .map(([table, schemas]) => ({
-          table,
-          schemas: schemas.sort((a, b) => a.position - b.position).map((s) => s.schema),
-        }))
-        .sort((a, b) => (a.table < b.table ? -1 : a.table > b.table ? 1 : 0));
-      if (collisions.length > 0) throw postgresTableNameCollisionError(collisions);
-
-      tableNames = rows.map((row) => row.table_name);
-      for (const row of rows) schemaByTable.set(row.table_name, row.table_schema);
-    } else if (this.isMysql) {
-      const result = await this.knex.raw(`
-        SELECT table_name
-        FROM information_schema.tables
-        WHERE table_schema = DATABASE()
-        AND table_type = 'BASE TABLE'
-      `);
-      tableNames = result[0].map((row: any) => row.TABLE_NAME);
-    } else if (this.isSqlite) {
-      const result = await this.knex.raw(`
-        SELECT name as table_name
-        FROM sqlite_master
-        WHERE type='table'
-        AND name NOT LIKE 'sqlite_%'
-      `);
-      tableNames = result.map((row: any) => row.table_name);
-    }
-
-    for (const tableName of tableNames) {
-      // All four reads take the #7332 default (`onFailure: 'throw'`): this
-      // caller cannot correct a short read, and `introspectColumns` has never
-      // swallowed — so a partially-readable database fails the whole-schema
-      // introspection loudly instead of emitting tables whose keys silently
-      // read as absent (#11161). Every in-tree caller of `introspectSchema`
-      // already handles a throw (the datasource health check reports
-      // `{ ok: false }`, the REST/CLI seams surface the error).
-      // On PostgreSQL the columns are read in the table's OWN schema (#24707);
-      // the three key reads below already scope to `current_schemas(false)`
-      // or resolve along `search_path`, which the refusal above makes
-      // unambiguous among base tables.
-      const columns = await this.introspectColumns(tableName, schemaByTable.get(tableName));
-      const foreignKeys = await this.introspectForeignKeys(tableName);
-      const primaryKeys = await this.introspectPrimaryKeys(tableName);
-      const uniqueConstraints = await this.introspectUniqueConstraints(tableName);
-
-      for (const col of columns) {
-        if (primaryKeys.includes(col.name)) col.primaryKey = true;
-        if (uniqueConstraints.includes(col.name)) col.isUnique = true;
-      }
-
-      tables[tableName] = { name: tableName, columns, foreignKeys, primaryKeys };
-    }
-
-    // `dialectName` — not the raw Knex client, and not the spec's
-    // `SQLDialectSchema` enum. The only in-tree consumer of this key is
-    // `suggestFieldTypeForSqlType(col.type, schema.dialect as SqlDialect)`,
-    // whose `SqlDialect` vocabulary (`packages/spec/src/data/type-compat.ts`)
-    // spells PostgreSQL `postgres`, exactly as `dialectName` does. Emitting
-    // the enum's `postgresql` instead would put the key in `Object.keys()`
-    // while leaving every per-dialect type alias unreachable — the omission
-    // this repairs, wearing a fix's clothes.
-    return { tables, dialect: this.dialectName, introspectedAt };
+  introspectSchema(): Promise<IntrospectedSchema> {
+    // [#25521 cut 4] The body moved to `sql-driver-introspection.ts` (see `IntrospectionHost`).
+    const readDialectName = () => this.dialectName;
+    const readIsMysql = () => this.isMysql;
+    const readIsPostgres = () => this.isPostgres;
+    const readIsSqlite = () => this.isSqlite;
+    const readKnex = () => this.knex;
+    const host: ThisParameterType<typeof introspectSchema> = {
+      get dialectName() { return readDialectName(); },
+      introspectColumns: (...a) => this.introspectColumns(...a),
+      introspectForeignKeys: (...a) => this.introspectForeignKeys(...a),
+      introspectPrimaryKeys: (...a) => this.introspectPrimaryKeys(...a),
+      introspectUniqueConstraints: (...a) => this.introspectUniqueConstraints(...a),
+      get isMysql() { return readIsMysql(); },
+      get isPostgres() { return readIsPostgres(); },
+      get isSqlite() { return readIsSqlite(); },
+      get knex() { return readKnex(); },
+    };
+    return introspectSchema.call(host);
   }
 
   // ===================================

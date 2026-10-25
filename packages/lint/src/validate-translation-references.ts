@@ -144,6 +144,17 @@
  * `translation-option-key-unknown` (`warning`). A list this stack only EXTENDS,
  * declared by no package of it, is skipped wholly — rung 2b below, for a list.
  *
+ * ── Positions and permission sets: the security catalog ──────────────────
+ *
+ * `positions.<name>` resolves against `Position.name` and `permissions.<name>`
+ * against `PermissionSet.name` — the names `translatePosition` /
+ * `translatePermissionSet` look a served document up by. A name no package of
+ * this stack declares is an orphan, `translation-target-unknown` (`error`),
+ * the picklist list face's verdict. The audience anchors (`everyone`, `guest`,
+ * `AUDIENCE_ANCHOR_POSITIONS`) are positions the PLATFORM declares in every
+ * environment, so a key naming one resolves and is never an orphan. Leaf keys
+ * below the name are the schema's (`label` / `description`, strict).
+ *
  * ── Cross-package objects ────────────────────────────────────────────────
  *
  * A stack legitimately translates objects it does not define — `sys_user`'s
@@ -188,7 +199,8 @@
  * is the one reader of that carrier, and every collection it may be asked for
  * is a key whose `COMPOSE_KEY_DISPOSITIONS` disposition puts it inside an
  * ADR-0130 D4 entry's assembled body: `objects` (#19064) plus `views`,
- * `pages`, `actions`, `apps`, `dashboards` and `flows` (#19349).
+ * `pages`, `actions`, `apps`, `dashboards` and `flows` (#19349), and
+ * `positions` and `permissions`.
  *
  * ⚠️ `apps` reads BOTH that carrier and `navigationContributions`, and they
  * answer different questions — what a sibling DECLARES, and what this package
@@ -205,7 +217,7 @@
  * fold facts each rests on, and this rule's test file for the lit controls.
  */
 
-import { expandViewContainer } from '@objectstack/spec';
+import { AUDIENCE_ANCHOR_POSITIONS, expandViewContainer } from '@objectstack/spec';
 import { APPROVAL_NODE_TYPE, flowScreenFieldOptionKey } from '@objectstack/spec/automation';
 import {
   FLOW_TERMINAL_MESSAGE_KEYS,
@@ -491,6 +503,10 @@ interface Universe {
    * rung 2b of the object ladder applied to a list (#23566).
    */
   extendedPicklists: Set<string>;
+  /** Position names (`Position.name`) a `positions.<name>` key may name, the audience anchors included. */
+  positions: Set<string>;
+  /** Permission-set names (`PermissionSet.name`) a `permissions.<name>` key may name. */
+  permissionSets: Set<string>;
   /**
    * Page name (`Page.name`) → every component id the page ADDRESSES
    * (`pages.<page>.components.<id>`), with that component's type and, for a
@@ -1648,6 +1664,23 @@ function buildUniverse(stack: AnyRec): Universe {
     }
   }
 
+  // ── Security catalog: the names `positions.<name>` / `permissions.<name>` may name ──
+  //
+  // Both carry disposition `concat` in `COMPOSE_KEY_DISPOSITIONS`, so a
+  // sibling package's declarations are read through the artifact carrier like
+  // every other collection here.
+  const namesOf = (collection: string): Set<string> => {
+    const names = new Set<string>();
+    for (const record of [...recordsOf(stack[collection]), ...artifactProvidedRecords(stack, collection)]) {
+      const name = strName(record.name);
+      if (name) names.add(name);
+    }
+    return names;
+  };
+  const positions = namesOf('positions');
+  for (const anchor of AUDIENCE_ANCHOR_POSITIONS) positions.add(anchor);
+  const permissionSets = namesOf('permissions');
+
   return {
     objects,
     extended,
@@ -1659,6 +1692,8 @@ function buildUniverse(stack: AnyRec): Universe {
     actionOwners,
     picklists,
     extendedPicklists,
+    positions,
+    permissionSets,
     pages,
   };
 }
@@ -2109,6 +2144,25 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
           path: `${listPath}.options`,
           where: `${inLocale} · picklist "${listName}"`,
         });
+      }
+
+      // ── positions.<name> / permissions.<name> ─────────────────────────
+      const securityCatalog = [
+        { group: 'positions', noun: 'position', known: universe.positions, hint: "Match the key to a position's `name`, or drop it." },
+        { group: 'permissions', noun: 'permission set', known: universe.permissionSets, hint: "Match the key to a permission set's `name`, or drop it." },
+      ] as const;
+      for (const { group, noun, known, hint } of securityCatalog) {
+        for (const name of Object.keys(asRecord(rawData[group]))) {
+          if (known.has(name)) continue;
+          orphan(
+            `${inLocale} · ${noun} "${name}"`,
+            `${base}.${group}.${name}`,
+            `Translations are keyed to ${noun} "${name}", which no package in this stack declares, ` +
+              `so nothing resolves this key and the ${noun} keeps its source-locale label.` +
+              suggest(name, known),
+            hint,
+          );
+        }
       }
 
       // ── flows.<name>[.screens.<node_id>[.fields.<field_name>]] ────────

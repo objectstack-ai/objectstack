@@ -250,6 +250,16 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
     tombstone(AdminScopeSchema, 'permission.adminScope', 'authorEnvironmentSets'),
   ],
   'permission-set-managed-by-removed': [tombstone(PermissionSetSchema, 'permission', 'managedBy')],
+  'permission-modify-all-allow-delete-false-to-true': [
+    refusal(
+      'allowDelete: false beside modifyAllRecords: true',
+      () => PermissionSetSchema.safeParse({
+        name: 'buyer',
+        objects: { srm_material: { allowEdit: true, allowDelete: false, modifyAllRecords: true } },
+      }),
+      'objects',
+    ),
+  ],
   'manifest-permissions-string-list-removed': [
     refusal('manifest.permissions as a list of strings', () => ManifestPermissionsSchema.safeParse(['system.user.read'])),
   ],

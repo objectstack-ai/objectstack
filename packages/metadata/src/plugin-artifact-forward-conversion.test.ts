@@ -120,8 +120,15 @@ describe('artifact door — 17.1-built artifact converts forward and registers (
                 // bits, and that pre-existing door behaviour is not under test
                 // here (the conversion's own byte-preservation is pinned by
                 // reference-identity in metadata-core's unit suite).
+                //
+                // [#25575] One bit is rewritten on purpose: HotCRM's source
+                // authors `sales_manager.crm_forecast` with `allowDelete: false`
+                // beside `modifyAllRecords: true`, the refused pair, so the
+                // `permission-modify-all-allow-delete-false-to-true` conversion
+                // writes the `true` the evaluator always acted on.
                 const { allowPurge: _p, allowRestore: _r, ...rest } = grantRaw;
-                expect(grant).toMatchObject(rest);
+                const modifyAllDeleteRewritten = rest.modifyAllRecords === true && rest.allowDelete === false;
+                expect(grant).toMatchObject(modifyAllDeleteRewritten ? { ...rest, allowDelete: true } : rest);
             }
         }
     });
@@ -208,9 +215,14 @@ describe('artifact door — the conversion is versioned, not a blanket amnesty (
         expect(current).toMatch(/^\d+\.\d+\.[1-9]\d*$/);
         const plugin = newPlugin();
         const ctx = fakeCtx();
-        const fixture = loadFixture(); // untouched: 150 × the emitted default
+        const fixture = loadFixture(); // 150 × the emitted default
         const before = loadFixture();
         fixture.manifest.engines.protocol = `^${current}`;
+        // [#25575] An artifact authored against the current surface cannot
+        // carry `allowDelete: false` beside `modifyAllRecords: true` (the next
+        // case pins that refusal), so this one carries the bit that surface
+        // emits. Everything this case judges, the residue, is untouched.
+        fixture.permissions[2].objects.crm_forecast.allowDelete = true;
 
         const total = await plugin._parseAndRegisterArtifact(ctx, fixture, 'fixture-current-residue');
         expect(total).toBe(before.permissions.length);
@@ -233,6 +245,29 @@ describe('artifact door — the conversion is versioned, not a blanket amnesty (
             .map((c) => String(c[0]))
             .filter((m) => m.includes('permission-allow-restore-purge-removed'));
         expect(conversionWarns).toHaveLength(0);
+    });
+
+    it('an artifact claiming the CURRENT spec version that carries allowDelete: false beside modifyAllRecords: true is refused, not converted (#25575)', async () => {
+        // The Modify All delete conversion is versioned like every retired
+        // entry: an artifact whose floor is past its `retiredAfter` claims a
+        // surface that already refused the pair, so the door does not rewrite
+        // it and the strict parse refuses it with its prescription.
+        const plugin = newPlugin();
+        const ctx = fakeCtx();
+        const fixture = loadFixture();
+        expect(fixture.permissions[2].objects.crm_forecast).toMatchObject({ allowDelete: false, modifyAllRecords: true });
+        fixture.manifest.engines.protocol = `^${currentSurfaceFloor()}`;
+        let refused: any;
+        try {
+            await plugin._parseAndRegisterArtifact(ctx, fixture, 'fixture-current-modify-all-delete');
+        } catch (e) {
+            refused = e;
+        }
+        expect(refused, 'the strict parse must refuse the pair').toBeDefined();
+        const issues = (refused.issues ?? []) as Array<{ code: string; path: PropertyKey[] }>;
+        expect(issues.map((i) => [i.code, i.path.join('.')])).toEqual([
+            ['custom', 'permissions.2.objects.crm_forecast.allowDelete'],
+        ]);
     });
 });
 

@@ -139,7 +139,7 @@ manifest: {
   type: 'app',                  // app | plugin | driver | module | ...
   name: 'Acme CRM',             // Human-readable display name
   description: 'CRM system',    // Optional description
-  engines: { protocol: '^17' }, // Metadata-protocol major this app targets
+  engines: { protocol: '^18' }, // Metadata-protocol major this app targets
 }
 ```
 

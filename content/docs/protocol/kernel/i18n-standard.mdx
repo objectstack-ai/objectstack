@@ -398,8 +398,9 @@ One locale of a bundle, as JSON — the same groups a `TranslationData` declares
 Three rules the shape enforces, all of them closed since #4001:
 
 - **The top level is the declared group set and nothing else** — `objects`,
-  `apps`, `messages`, `globalActions`, `dashboards`, `datasets`, `pages`,
-  `flows`, `metadataForms`, `settingsCommon`. A group invented beside them
+  `picklists`, `apps`, `messages`, `globalActions`, `dashboards`, `datasets`,
+  `pages`, `flows`, `positions`, `permissions`, `metadataForms`,
+  `settingsCommon`. A group invented beside them
   (`"account"`, `"fields"`, `"list"`, `"industries"`) is rejected **by name**
   at both authoring doors, with the group to use instead named in the
   rejection.
@@ -482,7 +483,7 @@ what the overlay writes back as the node's `title`.
 The contract is `t(key, locale, params?)` — the target locale is always passed
 explicitly, and the key itself is returned when no translation is found (there
 is no `defaultValue` option). The key is a **dot path into `TranslationData`**,
-so it starts at one of the eleven declared groups.
+so it starts at one of the thirteen declared groups.
 
 ```typescript
 const i18n = kernel.getService('i18n');
@@ -1060,6 +1061,8 @@ beneath an action entry are judged the same way under either.
 | `apps.{app}.navigation.{id}` | a navigation item `id` the app declares (nested `children` and `areas[]` included) or one contributed into it; under an app that is only contributed into, the contributed ids alone |
 | `dashboards.{dash}` / `.widgets.{id}` / `.actions.{actionUrl}` | a dashboard declared / a widget `id` on it / a header action's `actionUrl` on it |
 | `flows.{flow}` | a flow's machine `name`, declared |
+| `positions.{name}` | a position's `name`, declared, or an audience anchor (`everyone`, `guest`) |
+| `permissions.{name}` | a permission set's `name`, declared |
 | `flows.{flow}.screens.{node}` | the `id` of a `type: 'screen'` node in that flow, nodes nested in loop, parallel and try/catch regions included |
 | `flows.{flow}.screens.{node}.fields.{field}` | a `config.fields[].name` on that screen — an object-form screen (`config.objectName`) declares none, and its input labels live under `objects.{objectName}.fields` |
 

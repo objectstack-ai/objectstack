@@ -106,7 +106,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'sliceRegion': 5,
   'codeSpansIn': 3,
   'looksLikeGovernedGlob': 5,
-  'verdict': 6,
+  'verdict': 9,
   'the shipped register + regions, end to end': 5,
   'the dispatch-gates declaration (#9979)': 4,
 });
@@ -381,6 +381,15 @@ function selfTest() {
 
   // Non-enumeration spans in the same region are ignored by both halves.
   assert('unrelated spans are ignored', verdict(`${good} run \`pnpm check:adr-anchors\``, register), { missing: [], unknown: [] });
+
+  // The nested `ui/` workspace rows (#25712) are ordinary globs to both halves:
+  // named, they pass; on the register but not in the prose, containment names
+  // them; in the prose but not on the register, the over-claim half does.
+  const uiGlobs = ['ui/docs/adr/**', 'ui/.claude/**', 'ui/skills/**', 'ui/AGENTS.md', 'ui/CLAUDE.md', 'ui/.github/workflows/**'];
+  const withUi = `${good} Under the \`ui/\` workspace: ${uiGlobs.map((g) => `\`${g}\``).join(' + ')}.`;
+  assert('ui rows named in the prose pass both halves', verdict(withUi, [...register, ...uiGlobs]), { missing: [], unknown: [] });
+  assert('ui rows on the register but not in the prose are each missing', verdict(good, [...register, ...uiGlobs]).missing, uiGlobs);
+  assert('ui globs in the prose ahead of the register are each an over-claim', verdict(withUi, register).unknown, uiGlobs.filter((g) => g.endsWith('**')));
 
   // --- the shipped register + regions, end to end ------------------------
   battery('the shipped register + regions, end to end');

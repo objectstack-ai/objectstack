@@ -70,6 +70,8 @@ export interface CoverageIssue {
     | 'picklist'
     | 'page'
     | 'flow'
+    | 'position'
+    | 'permission'
     | 'metadataForm';
   /** Human-readable explanation. */
   message: string;
@@ -369,6 +371,13 @@ const COVERAGE_SOURCE: Record<ExpectedEntry['source'], CoverageIssue['source']> 
   // locales (#11485). Its six approval flows stayed that invisible until
   // #24916.
   flow: 'flow',
+  // Security-catalog copy (`positions.<p>.label` / `.description`,
+  // `permissions.<s>.label` / `.description`) — the author's own positions and
+  // permission sets, read in Setup and on every approval step that waits on a
+  // position, so each keeps its own bucket and reports as
+  // `i18n/missing-position` / `i18n/missing-permission`.
+  position: 'position',
+  permission: 'permission',
   metadataType: 'metadataForm',
   metadataFormSection: 'metadataForm',
   metadataFormField: 'metadataForm',
@@ -390,6 +399,8 @@ const SOURCE_NOUN: Record<CoverageIssue['source'], string> = {
   picklist: 'Picklist',
   page: 'Page',
   flow: 'Flow',
+  position: 'Position',
+  permission: 'Permission set',
   metadataForm: 'Metadata form',
 };
 
@@ -432,6 +443,8 @@ const SOURCE_SURFACE: Record<CoverageIssue['source'], string> = {
   picklist: 'picklists',
   page: 'pages',
   flow: 'flow screens, approval steps, toasts and refusals',
+  position: 'positions',
+  permission: 'permission sets',
   metadataForm: 'metadata forms',
 };
 

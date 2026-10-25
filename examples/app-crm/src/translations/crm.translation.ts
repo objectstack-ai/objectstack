@@ -230,6 +230,17 @@ export const CrmTranslationBundle = defineTranslationBundle({
         },
       },
     },
+    // The security catalog: what an admin assigns a person to, and what
+    // Setup lists under it.
+    positions: {
+      sales_rep: { label: '销售代表', description: '一线销售代表。' },
+      sales_manager: { label: '销售经理', description: '管理一支销售代表团队。' },
+      finance_approver: { label: '财务审批人', description: '有权审批 30% 以上折扣的财务团队成员。' },
+    },
+    permissions: {
+      crm_sales_user: { label: 'CRM 销售用户' },
+      guest_portal: { label: '访客（公开表单）' },
+    },
     messages: {
       'crm.lead.convert.success': '线索已成功转化为商机。',
       'crm.lead.convert.error': '线索转化失败，请重试。',

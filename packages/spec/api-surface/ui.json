@@ -3,6 +3,7 @@
   "entry": "./ui",
   "exports": [
     "ACTION_CONFIRM_PARAMS_ROOT (const)",
+    "ACTION_COPY_DOLLAR_TRANSITION_ROOTS (const)",
     "ACTION_COPY_RECORD_ROOT (const)",
     "ACTION_ERROR_TEMPLATE_ROOTS (const)",
     "ACTION_LOCATIONS (const)",
