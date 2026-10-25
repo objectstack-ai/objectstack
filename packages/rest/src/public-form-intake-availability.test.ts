@@ -171,9 +171,13 @@ describe('[#21476] a public form that cannot take intake on this posture is not 
   it('CONTROL: single posture, walled object — accepted, and the object is not even read for the predicate', async () => {
     const s = build({ tenancy: 'single' });
     expect((await s.post()).statusCode).toBe(201);
-    // The env-wide view read alone (ADR-0131 C7: the organization layer's
-    // read is deleted); no object read.
-    expect(s.getMetaItems.mock.calls.map(([r]) => r.type)).toEqual(['view']);
+    // The env-wide view read (ADR-0131 C7: the organization layer's read is
+    // deleted), then exactly ONE object read: the submit's own judgement of
+    // the fields it writes against their declarations (#25572: a declared
+    // file field carrying a value is refused), which reads it whenever a
+    // declared field carries a value. None for the predicate: a predicate
+    // that read the object on this posture would be a second object read.
+    expect(s.getMetaItems.mock.calls.map(([r]) => r.type)).toEqual(['view', 'object']);
   });
 
   it('CONTROL: a degraded walled request reads the posture IN FORCE (single) — accepted', async () => {

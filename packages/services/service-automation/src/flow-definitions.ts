@@ -2,15 +2,18 @@
 
 /**
  * The flow definitions of {@link AutomationEngine}: how a stored or authored
- * flow is canonicalised, unregistered, refused and rolled back; how its runtime
- * states and trigger bindings are reported; and the function,
- * connector-provider and credential surfaces a flow reads.
+ * flow is canonicalised, unregistered, withdrawn, refused, toggled and rolled
+ * back; how the durable toggles are hydrated; how a flow's runtime states and
+ * trigger bindings are reported; and the function, connector-provider and
+ * credential surfaces a flow reads.
  *
- * [#25222] Slice 7 of the `engine.ts` split, move-only. Each function here is
- * the body of the `AutomationEngine` method of the same name, moved unedited.
- * The class keeps that method (its name, docblock and position are in the
- * published `.d.ts`) and calls the body with a {@link FlowDefinitionsHost}
- * literal holding exactly the members the body reads.
+ * [#25222] Slices 7 and 8 of the `engine.ts` split, move-only. Each function
+ * here is the body of the `AutomationEngine` method of the same name, moved
+ * unedited. The class keeps that method (its name, docblock and position are
+ * in the published `.d.ts`) and calls the body with a {@link
+ * FlowDefinitionsHost} literal holding exactly the members the body reads. An
+ * async method's stub is no longer `async`: it returns the promise the moved
+ * function makes.
  */
 
 import type { ConnectorProviderFactory } from '@objectstack/spec/integration';
@@ -43,10 +46,12 @@ import {
  * passes exactly those. Methods go as late-bound closures, so a spy or test
  * double set on the instance is still the one called. A field the class assigns
  * only at its declaration or in its constructor goes by value, so the value
- * passed is the field. Two fields go through a getter, because a method
- * reassigns each: `functionResolver` (`setFunctionResolver`) and
- * `flowCredentialSource` (`setFlowCredentialSource`). Each read in the body
- * reads the engine's current value, as it did through `this`.
+ * passed is the field, including where an async body reads it after an
+ * `await`. Three fields go through a getter, because a method reassigns each:
+ * `functionResolver` (`setFunctionResolver`), `flowCredentialSource`
+ * (`setFlowCredentialSource`) and `flowActivationStore`
+ * (`setFlowActivationStore`). Each read in the body reads the engine's current
+ * value, as it did through `this`.
  */
 export interface FlowDefinitionsHost {
     readonly functionResolver: AutomationEngine['functionResolver'];
@@ -72,6 +77,16 @@ export interface FlowDefinitionsHost {
     readonly flowCredentialSource: AutomationEngine['flowCredentialSource'];
     readonly flowVersionHistory: AutomationEngine['flowVersionHistory'];
     readonly credentialResolver: AutomationEngine['credentialResolver'];
+    readonly deactivateFlowTrigger: AutomationEngine['deactivateFlowTrigger'];
+    readonly flowStatusDisabled: AutomationEngine['flowStatusDisabled'];
+    readonly flowActivationStore: AutomationEngine['flowActivationStore'];
+    readonly flowLedgerDisabled: AutomationEngine['flowLedgerDisabled'];
+    readonly rejudgeSubflowCallers: AutomationEngine['rejudgeSubflowCallers'];
+    readonly refuseCustomerAuthoredToggle: AutomationEngine['refuseCustomerAuthoredToggle'];
+    readonly packagedFlowOwner: AutomationEngine['packagedFlowOwner'];
+    readonly refuseEnableOntoDisabledSubflow: AutomationEngine['refuseEnableOntoDisabledSubflow'];
+    readonly parkedRunsOf: AutomationEngine['parkedRunsOf'];
+    readonly activateFlowTrigger: AutomationEngine['activateFlowTrigger'];
 }
 
 /** The body of {@link AutomationEngine.resolveFunction}, moved unedited; that method's docblock is its contract. */
@@ -391,4 +406,154 @@ export function rollbackFlow(this: Pick<FlowDefinitionsHost, 'flowVersionHistory
     }
     this.flows.set(name, entry.definition);
     this.logger.info(`Flow '${name}' rolled back to version ${version}`);
+}
+
+/** The body of {@link AutomationEngine.unregisterConnectorProvider}, moved unedited; that method's docblock is its contract. */
+export function unregisterConnectorProvider(this: Pick<FlowDefinitionsHost, 'connectorProviders' | 'logger'>, providerKey: string): void {
+    this.connectorProviders.delete(providerKey);
+    this.logger.info(`Connector provider unregistered: ${providerKey}`);
+}
+
+/** The body of {@link AutomationEngine.withdrawFlow}, moved unedited; that method's docblock is its contract. */
+export function withdrawFlow(this: Pick<FlowDefinitionsHost, 'deactivateFlowTrigger' | 'flows' | 'flowStatusDisabled' | 'flowVersionHistory' | 'policyDisabledFlows' | 'subflowDeclinedFlows' | 'flowRefusals' | 'logger'>, name: string): void {
+    this.deactivateFlowTrigger(name);
+    this.flows.delete(name);
+    // [ADR-0126 §7.2] `flowLedgerDisabled` is deliberately NOT cleared. It
+    // mirrors a durable row, and unregistering a flow does not delete that
+    // row — so dropping the projection here would silently re-arm a
+    // disabled packaged flow the moment it was re-registered (a hot
+    // reload, a Studio publish, the next boot pull), which is the one
+    // thing the durable switch exists to prevent. The projection is a Set
+    // of names; a genuinely deleted flow leaves one harmless string.
+    this.flowStatusDisabled.delete(name);
+    this.flowVersionHistory.delete(name);
+    // [#17396] Dropped with the flow, unlike `flowLedgerDisabled` above:
+    // that one mirrors a DURABLE row and must survive, while this records
+    // an in-process bind attempt that no longer has a subject.
+    this.policyDisabledFlows.delete(name);
+    this.subflowDeclinedFlows.delete(name);
+    // [#23316] A withdrawal ends a refusal as it ends a registration: the
+    // record's subject is gone. A host that withdraws BECAUSE it refused
+    // records the refusal after this — see {@link recordFlowRefusal}.
+    this.flowRefusals.delete(name);
+    this.logger.info(`Flow unregistered: ${name}`);
+}
+
+/** The body of {@link AutomationEngine.hydrateFlowActivations}, moved unedited; that method's docblock is its contract. */
+export async function hydrateFlowActivations(this: Pick<FlowDefinitionsHost, 'flowActivationStore' | 'flowLedgerDisabled' | 'flows' | 'deactivateFlowTrigger' | 'rejudgeSubflowCallers'>): Promise<string[]> {
+    if (!this.flowActivationStore) return [];
+    const rows = await this.flowActivationStore.list();
+    const disabled: string[] = [];
+    for (const row of rows) {
+        if (row.active) {
+            this.flowLedgerDisabled.delete(row.name);
+            continue;
+        }
+        this.flowLedgerDisabled.add(row.name);
+        // Only a flow this engine actually holds can be unbound; a row for
+        // a flow this deployment does not ship is kept in the projection
+        // (it costs one string, and the flow may be registered later by a
+        // hot reload) but has nothing to disarm now.
+        if (this.flows.has(row.name)) {
+            this.deactivateFlowTrigger(row.name);
+            disabled.push(row.name);
+        }
+    }
+    // [#20725, ADR-0126 §7.3] The callers of what the ledger just switched
+    // off go back to the arming gate. On a stock boot none is armed yet
+    // (the trigger plugins register at kernel:ready, and the gate judges
+    // them then), so this changes nothing there; a host whose trigger was
+    // registered before the pull would otherwise keep a caller armed onto
+    // a subflow this read has just switched off.
+    for (const name of disabled) this.rejudgeSubflowCallers(name);
+    return disabled;
+}
+
+/** The body of {@link AutomationEngine.toggleFlow}, moved unedited; that method's docblock is its contract. */
+export async function toggleFlow(this: Pick<FlowDefinitionsHost, 'flows' | 'refuseCustomerAuthoredToggle' | 'packagedFlowOwner' | 'refuseEnableOntoDisabledSubflow' | 'packagedSubflowCallers' | 'isFlowEnabled' | 'parkedRunsOf' | 'refuseUnderReachingCallers' | 'flowActivationStore' | 'logger' | 'flowLedgerDisabled' | 'activateFlowTrigger' | 'deactivateFlowTrigger' | 'rejudgeSubflowCallers'>, name: string, enabled: boolean): Promise<void> {
+    const flow = this.flows.get(name);
+    if (!flow) {
+        throw new Error(`Flow '${name}' not found`);
+    }
+
+    // [#20726, ADR-0126 §7.2] FIRST, ahead of both §7.3 guards: a flow no
+    // package ships is not this door's to switch in either direction, so
+    // neither guard's question arises, the disable guard's run-store read
+    // is never awaited for it, and the refusal lands before the ledger
+    // write and before any in-process change — with a ledger attached or
+    // in the degraded mode without one. Nothing half-flips.
+    this.refuseCustomerAuthoredToggle(name, enabled);
+    // Past the refusal the loader's set names a package, and the ledger row
+    // is attributed to exactly that one — read with the verdict, so the
+    // run-store await below cannot separate the two.
+    const packageOwner = this.packagedFlowOwner(name) as string;
+
+    // [ADR-0126 §7.3] The subflow guard runs in BOTH directions, because
+    // a subflow pair breaks from either end. Disabling a child breaks the
+    // callers that still reach it — armed, or holding a parked run;
+    // re-arming a caller whose child is off breaks the caller itself, at
+    // its subflow node, on the child's refusal. Arming a flow never breaks
+    // the flows that call IT, so enabling a child is not guarded by its
+    // callers.
+    if (enabled) {
+        this.refuseEnableOntoDisabledSubflow(name);
+    } else {
+        // A switched-off caller guards only while it holds a parked run,
+        // so only then are the run stores read — and only that read is
+        // awaited: every other disable flips exactly as it did before,
+        // synchronously up to its durable write. A store that cannot be
+        // listed throws out of `parkedRunsOf` and nothing is written.
+        const callers = this.packagedSubflowCallers(name);
+        const switchedOff = callers.filter((c) => !this.isFlowEnabled(c));
+        const parked = switchedOff.length > 0
+            ? await this.parkedRunsOf(new Set(switchedOff))
+            : new Map<string, string[]>();
+        this.refuseUnderReachingCallers(name, 'disable', callers, parked);
+    }
+
+    // The durable row FIRST. A store that throws aborts the flip with
+    // nothing changed in process, so the engine never reports an
+    // activation state the ledger does not carry.
+    if (this.flowActivationStore) {
+        await this.flowActivationStore.setActive({
+            name,
+            // [#20761] The package the LOADER's set names, never the
+            // definition's stamps — so no row is attributed to a package
+            // from an authoring door. Read once, up top, with the verdict.
+            packageId: packageOwner,
+            active: enabled,
+        });
+    } else {
+        // Degrading to in-process is a legitimate mode for a host with no
+        // ObjectQL — degrading to it while REPORTING durability is not
+        // (the posture this package already takes for suspended runs).
+        // Note the leak commit 02b41232d measured is closed by the route's authority gate,
+        // not by durability, so this degraded mode is not that leak.
+        this.logger.warn(
+            `[Automation] flow '${name}' ${enabled ? 'enabled' : 'disabled'} IN PROCESS ONLY — no activation ledger is ` +
+            `attached (sys_metadata_activation), so this flip will NOT survive a restart.`,
+        );
+    }
+
+    if (enabled) this.flowLedgerDisabled.delete(name);
+    else this.flowLedgerDisabled.add(name);
+
+    this.logger.info(`Flow '${name}' ${enabled ? 'enabled' : 'disabled'}`);
+    // A disabled flow should stop receiving trigger events; a re-enabled one
+    // should resume. execute() also guards disabled flows, but unbinding
+    // avoids firing the trigger (and its event-source subscription) at all.
+    // Re-enabling moves only the LEDGER bit: a flow whose `status` still
+    // disables it stays unarmed, by `activateFlowTrigger`'s enablement gate
+    // — armed, it would only fire runs `execute()` refuses.
+    if (enabled) {
+        this.activateFlowTrigger(name);
+    } else {
+        this.deactivateFlowTrigger(name);
+    }
+    // [#20725, ADR-0126 §7.3] Enabling a subflow arms the packaged callers
+    // the gate declined onto it — through the gate, which still declines
+    // one held back by ANOTHER disabled subflow. (Disabling it re-judges
+    // nothing that the guard above let through: an armed caller refuses
+    // the disable.)
+    this.rejudgeSubflowCallers(name);
 }

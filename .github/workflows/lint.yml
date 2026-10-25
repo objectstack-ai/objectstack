@@ -3326,6 +3326,13 @@ jobs:
         continue-on-error: true
         run: node scripts/release-verify-npm.mjs --self-test
 
+      # Rationale: `scripts/release-dist-tags.mjs` header (#25581). Its last
+      # battery reads release.yml's `publish` job and pins the step's wiring.
+      - name: Post-publish dist-tag sweep self-test
+        id: post-publish-dist-tag-sweep-self-test
+        continue-on-error: true
+        run: node scripts/release-dist-tags.mjs --self-test
+
       # Release version-commit selection (ADR-0125 D1 as amended 2026-09-29).
       # release.yml's publish lane queues a deployment only on the push that
       # CARRIES the version commit, publishes that commit rather than a later

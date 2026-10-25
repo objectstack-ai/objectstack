@@ -77,6 +77,7 @@ import type { CreateDataRequest, GetMetaItemsRequest } from '@objectstack/spec/a
 import { PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import { renderValidationMessage } from '@objectstack/spec/system';
 import { validationFailure } from '@objectstack/types';
+import { FILE_REFERENCE_TYPES } from '@objectstack/spec/data';
 import type { ServerScopedDataRequest } from './data-action-routes.js';
 import { isExpectedRouteError, mapDataError } from './error-response.js';
 import { logError } from './log.js';
@@ -595,10 +596,40 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                 const judged = requiredFields.filter((name) =>
                     !PUBLIC_FORM_SERVER_MANAGED_FIELDS.has(name)
                     && name !== '__proto__' && name !== 'constructor' && name !== 'prototype');
-                if (judged.length > 0) {
+                // [#25572, ruling C (record 6384525042)] An anonymous public-form
+                // submission carries no file. A value in a field whose declared
+                // type is a file type (`FILE_REFERENCE_TYPES`) is refused, naming
+                // the field, before anything is written; an empty or absent file
+                // field submits as before. A file is provided by a signed-in
+                // caller, through the authenticated upload doors; this door has
+                // none, by that ruling, and a guest-facing form that declares a
+                // file field is refused at publish (the protocol half, #25650).
+                // Forms published before that refusal existed are why the door
+                // judges it too.
+                //
+                // - Judged on what this door WRITES (`filteredData`): only the
+                //   fields the form declares, which `GET /forms/:slug` already
+                //   publishes, so the refusal names nothing the form does not.
+                // - The same emptiness rule as `required` (`isEmptyForRequired`).
+                // - ONE envelope with the `required` judgement above: both are
+                //   collected into one `validationFailure`, the flat
+                //   `400 VALIDATION_FAILED` with `fields[]`, so a submission with
+                //   both problems is told both at once. The field code is the
+                //   closed ADR-0114 catalog's `invalid_value`.
+                // The declared fields this submission carries a value in: the
+                // only ones the file judgement can refuse, so a submission that
+                // carries none reads no object declarations for it.
+                const fileValued = [...allowedFields].filter((name) =>
+                    Object.prototype.hasOwnProperty.call(filteredData, name)
+                    && !isMissing(filteredData[name]));
+                if (judged.length > 0 || fileValued.length > 0) {
                     const objectDef = (await this.readFormObjectDefinitions(p, environmentId))
                         .find((o: any) => o?.name === match.object);
-                    const missing: Array<{ field: string; code: 'required'; message: string; label: string }> = [];
+                    const labelOf = (def: any, name: string): string => {
+                        const declared = typeof def?.label === 'string' ? def.label.trim() : '';
+                        return declared.length > 0 ? declared : name;
+                    };
+                    const refused: Array<{ field: string; code: 'required' | 'invalid_value'; message: string; label: string }> = [];
                     for (const name of judged) {
                         const def = objectDef?.fields?.[name];
                         const value = Object.prototype.hasOwnProperty.call(filteredData, name)
@@ -608,17 +639,29 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                             ? isEmptyForRequired(def, value)
                             : isMissing(value);
                         if (!empty) continue;
-                        const declared = typeof def?.label === 'string' ? def.label.trim() : '';
-                        const label = declared.length > 0 ? declared : name;
-                        missing.push({
+                        const label = labelOf(def, name);
+                        refused.push({
                             field: name,
                             code: 'required',
                             message: renderValidationMessage({ messageKey: 'required', label, field: name, params: {} }),
                             label,
                         });
                     }
-                    if (missing.length > 0) {
-                        throw validationFailure(missing.map((f) => f.message).join('; '), missing);
+                    for (const name of fileValued) {
+                        const def = objectDef?.fields?.[name];
+                        if (!def || typeof def.type !== 'string' || !FILE_REFERENCE_TYPES.has(def.type)) continue;
+                        if (isEmptyForRequired(def, filteredData[name])) continue;
+                        const label = labelOf(def, name);
+                        refused.push({
+                            field: name,
+                            code: 'invalid_value',
+                            message: `${label} cannot take a file here: an anonymous public-form submission carries no file. `
+                                + 'Leave it empty, or sign in and provide the file from your account.',
+                            label,
+                        });
+                    }
+                    if (refused.length > 0) {
+                        throw validationFailure(refused.map((f) => f.message).join('; '), refused);
                     }
                 }
 

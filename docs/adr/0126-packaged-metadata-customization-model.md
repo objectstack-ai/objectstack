@@ -317,8 +317,10 @@ read at each runtime's own consult point; an empty ledger changes nothing anywhe
    >   install of a package shipping a catalog name an environment-authored item holds writes its
    >   install entry, and the next cold boot refuses; it is to be refused before the first write, not
    >   confirmed (#25366).
-   > - **The other classes follow after v18** (ruling item 4), as does the retirement of
-   >   `package-upgrade.zod.ts`. Until then this wall holds in practice for the access class only.
+   > - **The other classes follow after v18** (ruling item 4). Until then this wall holds in
+   >   practice for the access class only. Item 3 retired `kernel/package-upgrade.zod.ts` whole
+   >   (#25608): its upgrade plan, diff, snapshot and rollback model had no implementation, so no
+   >   upgrade protocol stands beside this wall.
 4. **The paper protocol is not the model.** The three-layer
    `metadata-customization.zod.ts` surface (#12057 — exported, documented, zero consumers) is
    **superseded by this ADR as a matter of record**: nothing may build against it, and its

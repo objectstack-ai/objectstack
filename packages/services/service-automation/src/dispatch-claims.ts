@@ -3,19 +3,32 @@
 /**
  * The dispatch and suspension claims of {@link AutomationEngine}: how a
  * dispatch is claimed, in the durable store or in process, then settled and
- * read back; how a run id is minted; how a degraded advance claim is announced;
- * and how a suspension is released.
+ * read back; how the expired in-process claims are pruned; how a run id is
+ * minted; how a degraded advance claim is announced; and how a suspension is
+ * released.
  *
- * [#25222] Slice 7 of the `engine.ts` split, move-only. Each function here is
- * the body of the `AutomationEngine` method of the same name, moved unedited.
- * The class keeps that method (its name, docblock and position are in the
- * published `.d.ts`) and calls the body with a {@link DispatchClaimsHost}
- * literal holding exactly the members the body reads. An async method's stub is
- * no longer `async`: it returns the promise the moved function makes.
+ * [#25222] Slices 7 and 8 of the `engine.ts` split, move-only. Each function
+ * here is the body of the `AutomationEngine` method of the same name, moved
+ * unedited. The class keeps that method (its name, docblock and position are
+ * in the published `.d.ts`) and calls the body with a {@link
+ * DispatchClaimsHost} literal holding exactly the members the body reads. An
+ * async method's stub is no longer `async`: it returns the promise the moved
+ * function makes.
  */
 
 import { describeThrownForLog } from './thrown-cause-diagnostics.js';
-import type { AutomationEngine, FlowDispatchClaim, FlowDispatchOutcome, SuspendedRun, SuspensionReleaseReason } from './engine.js';
+// The value below (`IN_PROCESS_DISPATCH_CLAIM_TTL_MS`) is read only inside the
+// function bodies, at call time, never while a module is evaluating, so the
+// import cycle with ./engine.js is safe under ESM live bindings; the tsup
+// bundle is one file and has no cycle.
+import {
+    IN_PROCESS_DISPATCH_CLAIM_TTL_MS,
+    type AutomationEngine,
+    type FlowDispatchClaim,
+    type FlowDispatchOutcome,
+    type SuspendedRun,
+    type SuspensionReleaseReason,
+} from './engine.js';
 
 /**
  * The `AutomationEngine` members the moved bodies read, each typed as the class
@@ -199,5 +212,13 @@ export async function releaseSuspension(this: Pick<DispatchClaimsHost, 'resolveS
                 `node armed on entry may still be scheduled. The executor's own failure is in this record's meta.`,
             describeThrownForLog(err),
         );
+    }
+}
+
+/** The body of {@link AutomationEngine.pruneInProcessDispatchClaims}, moved unedited; that method's docblock is its contract. */
+export function pruneInProcessDispatchClaims(this: Pick<DispatchClaimsHost, 'inProcessDispatchClaims'>, now: number): void {
+    const cutoff = now - IN_PROCESS_DISPATCH_CLAIM_TTL_MS;
+    for (const [k, rec] of this.inProcessDispatchClaims) {
+        if (rec.at < cutoff) this.inProcessDispatchClaims.delete(k);
     }
 }

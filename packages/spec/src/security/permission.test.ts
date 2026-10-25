@@ -278,6 +278,98 @@ describe('a depth axis beside the super-user bit that short-circuits it is REFUS
   });
 });
 
+describe('allowDelete: false beside modifyAllRecords: true is REFUSED (Modify All includes delete)', () => {
+  // The defect: `modifyAllRecords` is the write bypass for edit, delete and
+  // transfer (`objectPermissionGrants`, and plugin-security's
+  // `MODIFY_ALL_WRITE_KEYS`), so an entry declaring `allowDelete: false` beside
+  // it parsed, was stored, and the holder could still delete every record.
+  // Ruled: keep the Modify All semantics, refuse the pair at authoring and
+  // publish, and name the sharing-rule route for "edit all, delete none".
+
+  // ── REFUSAL direction ────────────────────────────────────────────────
+  it('an explicit allowDelete: false beside modifyAllRecords: true is refused, at the allowDelete path', () => {
+    const r = ObjectPermissionSchema.safeParse({
+      allowRead: true, allowEdit: true, allowDelete: false, viewAllRecords: true, modifyAllRecords: true,
+    });
+    expect(r.success).toBe(false);
+    const issues = r.error!.issues.filter((i) => i.path[i.path.length - 1] === 'allowDelete');
+    expect(issues, 'exactly one issue, LOCATED on the key the author must change').toHaveLength(1);
+    expect(issues[0].code).toBe('custom');
+    // The prescription names the route the author was looking for.
+    expect(issues[0].message).toContain('modifyAllRecords: true');
+    expect(issues[0].message).toContain("accessLevel: 'edit'");
+  });
+
+  it('the refusal reaches through a whole permission set, wildcard entry included', () => {
+    const r = PermissionSetSchema.safeParse({
+      name: 'buyer',
+      objects: {
+        srm_material: { allowRead: true, allowEdit: true, allowDelete: false, modifyAllRecords: true },
+        '*': { allowRead: true, allowDelete: false, modifyAllRecords: true },
+      },
+    });
+    expect(r.success).toBe(false);
+    const paths = r.error!.issues.map((i) => i.path.join('.'));
+    expect(paths).toContain('objects.srm_material.allowDelete');
+    expect(paths).toContain('objects.*.allowDelete');
+  });
+
+  // ── The omitted key: the parse must stay idempotent ──────────────────
+  it('an entry that omits allowDelete under modifyAllRecords: true parses to allowDelete: true', () => {
+    // Without this, `.default(false)` would emit the refused pair, and the
+    // next parse of that output would refuse a set its author wrote correctly.
+    const parsed = ObjectPermissionSchema.parse({ allowRead: true, allowEdit: true, modifyAllRecords: true });
+    expect(parsed.allowDelete).toBe(true);
+    expect(objectPermissionGrants(parsed, 'allowDelete'), 'the parsed bit now says what the fold grants')
+      .toBe(true);
+  });
+
+  it('parse output re-parses unchanged: definePermissionSet → PermissionSetSchema → the stack schema', () => {
+    const once = PermissionSetSchema.parse({
+      name: 'ops',
+      objects: { announcement: { allowRead: true, allowCreate: true, allowEdit: true, modifyAllRecords: true } },
+    });
+    const twice = PermissionSetSchema.parse(once);
+    expect(twice).toEqual(once);
+    const stack = ObjectStackDefinitionSchema.safeParse({
+      manifest: { id: 'com.example.ops', name: 'ops', version: '1.0.0', type: 'app' },
+      permissions: [once],
+    });
+    expect(stack.success, JSON.stringify(stack.error?.issues)).toBe(true);
+  });
+
+  // ── COST direction: what the refusal must NOT cost ───────────────────
+  it('allowDelete: true beside modifyAllRecords: true stays accepted, byte-identical', () => {
+    const parsed = ObjectPermissionSchema.parse({ allowEdit: true, allowDelete: true, modifyAllRecords: true });
+    expect(parsed.allowDelete).toBe(true);
+  });
+
+  it('allowDelete: false WITHOUT modifyAllRecords stays accepted and stays false', () => {
+    expect(ObjectPermissionSchema.parse({ allowEdit: true, allowDelete: false }).allowDelete).toBe(false);
+    expect(ObjectPermissionSchema.parse({ allowEdit: true, allowDelete: false, modifyAllRecords: false }).allowDelete)
+      .toBe(false);
+    // viewAllRecords is the READ bypass only; it does not imply delete.
+    expect(ObjectPermissionSchema.parse({ allowRead: true, allowDelete: false, viewAllRecords: true }).allowDelete)
+      .toBe(false);
+  });
+
+  it('an entry without modifyAllRecords keeps the false default for allowDelete', () => {
+    expect(ObjectPermissionSchema.parse({ allowEdit: true }).allowDelete).toBe(false);
+  });
+
+  it('the WIRE surface stays tolerant and writes nothing in', () => {
+    // #4001's authorable/wire split, as for the scope pairs above.
+    const parsed = EffectiveObjectPermissionSchema.parse({ allowDelete: false, modifyAllRecords: true });
+    expect(parsed.allowDelete).toBe(false);
+    expect(EffectiveObjectPermissionSchema.parse({ modifyAllRecords: true }).allowDelete).toBe(false);
+  });
+
+  it('the stage in front keeps the shape read-through the schema walkers read', () => {
+    expect(Object.keys(ObjectPermissionSchema.shape)).toContain('allowDelete');
+    expect(Object.keys(ObjectPermissionSchema.shape)).toContain('modifyAllRecords');
+  });
+});
+
 describe('allowRestore / allowPurge are RETIRED (ADR-0049)', () => {
   // Removed by the 2026-08-26 maintainer ruling accepting #1883's
   // recommendation B: the `restore`/`purge` ObjectQL operations the bits
