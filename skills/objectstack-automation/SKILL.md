@@ -335,12 +335,12 @@ just never runs. Two pairs are instead **refused** at `os validate` / `build` /
 
 An `api` flow is bound to an inbound HTTP endpoint:
 `POST /api/v1/automation/hooks/:flowName/:hookId`. Configure it on the **start
-node `config`** (the start `config` is a free-form record with no Zod shape):
+node `config`**:
 
 | `config` key | Purpose |
 |:-------------|:--------|
 | `hookId` | URL path token (default `'default'`). **Rotate it to revoke** a leaked endpoint |
-| `secretRef` / `secret` | HMAC-SHA256 shared secret, **required** — without one the flow is refused at registration (`os validate` too). Ship `secretRef: 'NAME'` (an env var the deployment fills, not `OS_*`; unfilled ⇒ `503`), never a literal |
+| `secretRef` / `secret` | HMAC-SHA256 secret, **one required** (else refused at registration and `os validate`). Ship `secretRef: 'NAME'`: an env var the deployment fills, not `OS_*`; unfilled ⇒ `503`. Never a literal |
 
 - **Signature:** `x-objectstack-signature: t=<unix seconds>,v1=<hex>` — `v1` = HMAC-SHA256 of `<t>.<raw body>` under the secret; refused when `t` is over 300 s from the server clock.
 - **Idempotency:** `x-idempotency-key` dedupes retries — author the flow to be idempotent (delivery is at-least-once).
