@@ -2,9 +2,9 @@
   "number": 25706,
   "kind": "pull_request",
   "title": "feat(plugin-auth): the single posture's Default Organization takes its first owner's default currency",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -22,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-24T19:23:17Z",
-  "updated_at": "2026-10-24T19:24:28Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 1,
+  "updated_at": "2026-10-25T04:07:34Z",
+  "closed_at": "2026-10-25T04:07:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-25T04:07:32Z",
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/25706",
   "body": "Fixes #25651\n\nClause-②: no\nMetadata-protocol: none\n\n## What\n\nThe single posture's Default Organization now takes its first owner's default currency (`localization.currency`, one `tenant` row), by the same rule and the same write a new organization's creator gets (the #25495 helper, `organization-default-currency.ts`, reused, no second copy of the rule): the owner's stored `sys_user.locale`, else the binding request's `Accept-Language`, through the CLDR region table. Nothing derivable means nothing is written; a value already set on any rung is kept. No new setting, key or door.\n\n- `ensure-default-organization.ts`: `EnsureDefaultOrganizationResult` gains an optional `ownerUserId`, set exactly when the call bound (`memberCreated`) or promoted (`ownerPromoted`) the owner.\n- `auth-plugin.ts`: the single-posture `runEnsure` (the once-gated default-organization bootstrap) calls `seedCreatedOrganizationCurrency` for the Default Organization and that owner when, and only when, the gate reports the owner first bound. Outside the `organization` plugin factory region of `auth-manager.ts`.\n\n## Where the owner is first bound, and what is visible there (measured)\n\n- `ensureDefaultOrganizationExists` creates the Default Organization at boot with no creator, so it never reaches `onOrganizationCreated`.\n- On the first sign-up, the owner bind runs inside that sign-up's request: `POST /sign-up/email` inserts the `sys_user`; plugin-security's first-user promotion writes the `sys_user_permission_set` grant from its write middleware; plugin-auth's bootstrap middleware fires on that grant insert and binds the owner. A temporary probe on the composed kernel (case 10 below) printed the gate's answers in order: `no_admin`, `no_admin`, `admin_already_in_org` (the re-entrant call while the decision is in flight), then `memberCreated: true` with `ownerUserId` set. The probe was mutation-and-restore through `scripts/ablation-replace.mjs` (blob restored to HEAD `8c554309`), not committed.\n- The request is visible: better-auth's endpoint context (AsyncLocalStorage) is still current there, so `Accept-Language` is read. Case 10 asserts CNY with no stored locale, which is only possible from the request.\n- An email sign-up stores no `sys_user.locale` (it stays unset; only an IdP `locale` claim writes it, `idp-locale-claim.ts`). So on a first email sign-up the sign-up request's `Accept-Language` is the input. A bind at `kernel:ready` (no request) reads the stored locale only.\n\n## Tests\n\n`organization-created-default-currency.test.ts`, a new describe block on the real composition (ObjectKernel, ObjectQL on in-memory SQLite, AuthPlugin, SecurityPlugin, SettingsServicePlugin) under the default `single` posture, the first sign-up through `AuthManager.handleRequest`:\n\n- 10: a zh-CN first sign-up leaves the Default Organization with `localization.currency` `{ value: 'CNY', source: 'tenant' }`, exactly one settings write.\n- 11: no stored language and no `Accept-Language`: `source: 'default'`, no value, zero writes.\n- 12: a currency already stored on the Default Organization (USD) is kept, zero writes.\n\nEach case first asserts the sign-up was bound as the owner, so none passes vacuously.\n\nAblation (one leg): the new call's guard replaced by `if (false as boolean)` via `scripts/ablation-replace.mjs` ⇒ case 10 red (`expected ... to match object { value: 'CNY', source: 'tenant' }`), 11 and 12 green; restored, blob == HEAD `8c554309` and `git diff HEAD` empty. AuthPlugin is imported from source, so no build was in the loop.\n\nRuns at head 1ce6154c18:\n- `pnpm --filter @objectstack/plugin-auth exec vitest run --maxWorkers=2`: Test Files 193 passed (193), Tests 3670 passed, 10 skipped.\n- `pnpm --filter @objectstack/plugin-auth typecheck`: exit 0 (tsc, examples, `check:test-typecheck` OK).\n- eslint `--no-inline-config` on the three touched source files: exit 0.\n- `dispatch-gates --commands`: 74 derived, 73 run exit 0, 1 NOT MEASURED: `check:dual-build-cjs-loads` exit 3, PREREQUISITE NOT MET (it needs a whole-workspace build; CI runs it).\n\n## Acceptance notes\n\n- The log lines `seedCreatedOrganizationCurrency` prints name the \"creator\" (for example \"its creator's language\"); for the Default Organization the first owner stands in for the creator. Wording only, left as is to keep one copy of the rule.\n- The walled posture's default-organization bootstrap (`@objectstack/organizations`) is not wired here; the card and ruling cover the single posture.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JVTd3PprStGa26aez5omLB)_\n"

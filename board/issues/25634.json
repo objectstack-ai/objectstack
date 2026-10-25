@@ -2,8 +2,8 @@
   "number": 25634,
   "kind": "issue",
   "title": "plugin-pinyin-search: every boot scans all rows of transient `sys_inbox_message`, making startup O(table size)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "baozhoutao",
@@ -14,7 +14,6 @@
     "area:records",
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-24T11:44:53Z",
-  "updated_at": "2026-10-24T16:32:15Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-25T04:50:40Z",
+  "closed_at": "2026-10-25T04:49:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25634",
   "body": "## Summary\n\n`PinyinSearchPlugin` runs `backfillSearchCompanion()` synchronously from `kernel:bootstrapped` on every boot. The backfill enumerates every object carrying `__search`, then keyset-walks every row (1,000 rows/page) and only afterwards decides in JavaScript whether a row needs an update.\n\n`sys_inbox_message` is automatically included because it declares `nameField: \"title\"`, is DDL-managed, and does not declare `searchable: false`. It is also a transient, high-write pipeline table. As a result, application startup time becomes linear in retained inbox history even when every row has already been reconciled and no update is necessary.\n\nThis was measured on `@objectstack/*` 17.3.0 with PostgreSQL.\n\n## Production evidence\n\nDatabase:\n\n- `sys_inbox_message`: **6,747,132 rows**\n- total relation size: **3,273 MB** (2,965 MB heap + 307 MB indexes)\n- average title + body payload: only **144 bytes**; the size is row count, not large message bodies\n- `pnpm dev` startup: approximately **4m50s**\n- config load: approximately 0.5s\n- metadata validation: approximately 2.2s\n- the long boot phase is the pinyin companion backfill walking `sys_inbox_message`\n\nThe unusually large row count was produced by the already-fixed notification redelivery defect #23122. That defect is not the subject of this card, but it exposes the scaling behavior clearly: after delivery is fixed, every subsequent restart still walks all historical rows.\n\n## Current code path\n\n`packages/plugins/plugin-pinyin-search/src/pinyin-search-plugin.ts` registers:\n\n```ts\nctx.hook('kernel:bootstrapped', async () => {\n  await backfillSearchCompanion(engine, ctx.logger as any);\n});\n```\n\n`backfillSearchCompanion()` then:\n\n1. calls `registry.getAllObjects()`;\n2. selects every schema with `__search`;\n3. runs `keysetWalk()` with `pageSize: 1000`;\n4. fetches `id`, the display source, and `__search` for every row;\n5. checks `hasBlob` / `hasCjkSource` in JavaScript.\n\nThe schema registry provisions `__search` for any searchable DDL-managed object with an eligible non-PK display field. `sys_inbox_message` qualifies because its display field is `title`.\n\nTherefore a clean second boot does the same full read as the first boot. The algorithm is O(total rows across all companion-bearing objects), not O(rows needing backfill).\n\n## Why a simple `WHERE __search IS NULL` is incomplete\n\nThe current representation uses `null` both for:\n\n- a row never inspected/backfilled; and\n- a row whose display value contains no CJK and correctly needs no companion.\n\nSo pushing down only `__search IS NULL` would still rescan every legitimately non-CJK row on every boot. A durable migration/reconciliation marker, checkpoint, or distinct processed representation is needed if boot-time reconciliation remains automatic.\n\n## Expected behavior\n\nNormal startup should not synchronously reread all historical rows of high-volume/transient objects. Once hooks are bound, ordinary writes already maintain `__search`; historical reconciliation should be bounded and observable.\n\nPossible directions:\n\n1. make the historical backfill an explicit migration/operator command instead of an every-boot action;\n2. persist a per-object completion/checkpoint and scan only records beyond it;\n3. allow object-level opt-out from the companion/backfill and mark pipeline objects such as `sys_inbox_message` non-searchable where appropriate;\n4. run reconciliation after readiness in a bounded background worker rather than blocking boot.\n\n## Acceptance ideas\n\n- A second boot against an unchanged companion-bearing object does not read every row again.\n- A large `sys_inbox_message` history does not delay application readiness linearly with its row count.\n- Rows inserted through normal ObjectQL writes continue to receive `__search` through the existing hooks.\n- An explicit rebuild path remains available for hook-bypassing imports/direct writes.\n- A regression test records rows/pages read on first backfill versus an unchanged subsequent boot.\n\n## Related\n\n- #23122 explains the production inbox amplification that made this visible. Its v18 delivery fix stops new duplicates but intentionally does not delete operator data and does not address pinyin boot scanning.\n"

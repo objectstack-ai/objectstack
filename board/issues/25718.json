@@ -2,7 +2,7 @@
   "number": 25718,
   "kind": "pull_request",
   "title": "DO NOT MERGE — verification run for #25697: PR A + the ui/ subtree import of objectui main cd70b7818d",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": true,
   "author": {
@@ -15,6 +15,7 @@
     "dependencies",
     "documentation",
     "needs-user-decision",
+    "protocol:ui",
     "size/xl",
     "skip-changeset",
     "tests",
@@ -24,11 +25,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-24T23:49:58Z",
-  "updated_at": "2026-10-25T02:17:00Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-25T07:48:34Z",
+  "closed_at": "2026-10-25T07:48:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 12,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/25718",
   "body": "# ⛔ DO NOT MERGE — ⛔ 不要合并、不要批准、不要翻 ready、不要挂 auto-merge\n\nVerification run for objectstack#25697 (PR A = #25710). This branch is PR A's head plus the `ui/` subtree import of objectui `main` at `cd70b7818d` with the #25678 spike's adaptations, so that the four `* UI` jobs run with `ui/` present and their minutes can be read. It is never enqueued and is closed as soon as its runs are read; the real import happens in sub-issue 5 (cutover), on the maintainer's own merge. Part of #25697.\n\n这是 #25697 的验证分支:PR A 的 head 加上 objectui main(`cd70b7818d`)的 `ui/` subtree 导入,只为让四个 UI job 在 `ui/` 存在时跑一次、读出分钟数。读完即关,永不入队;真正的导入在子单 5(切换)由维护者亲手合并。\n\n## What is on the branch (6 commits on top of PR A's 597471c344)\n\n1. `b97bdad2a9` subtree import of objectui `main` @ `cd70b7818d` (history kept)\n2. `32d50453cb` 40 `@objectstack/*` ranges in 32 `ui/` manifests → `workspace:^`\n3. `0dad5c2e11` drop `ui/pnpm-lock.yaml`, `ui/pnpm-workspace.yaml`, park `ui/turbo.json` as `ui/turbo.objectui.json`, remove the preinstall pin gate\n4. `4ddd900062` root `pnpm.overrides` (react 19.3.0 line, qs/shell-quote/tmp/uuid floors) + `@radix-ui/react-focus-scope@1.1.16` patch\n5. `717defb0ee` lockfile recompute (one react/react-dom/@types line at 19.3.0, one zod 4.6.7)\n6. `b2ba3a42da` cherry-pick of PR A's `7ca50a8a7b`\n\n## What this run must show (read on #25697)\n\n- `Type Check UI`, `Test UI (n/16)`, `Lint UI`, `Build & E2E UI` **running** (not skipped) and their cold minutes; a second push reads turbo-warm minutes.\n- Counter-probe (pushed after the first run is read): one commit renaming `size` → `buttonSize` on `ActionButtonPropsSchema` (`packages/spec/src/ui/component.zod.ts`) must turn `Type Check UI` red at `ui/packages/types/src/ui-action.ts:900`; then reverted.\n\n## Expected red on this tree (the import commit's bill, carried to sub-issue 5 / 4b — NOT fixed here)\n\nMeasured locally by the dev over 142 root `check:*` gates: `check:turbo-task-graph` and `check:workspace-manifest-cycles` self-tests (DECLARED_WATCH_HINTS lack `ui/**/package.json`), `check:published-files` self-test (EXPORTS_CENSUS_FLOOR 50 vs 112 publishable), `check:undeclared-dep-imports` (9, Console devDependencies on spec/client), `check:type-check-coverage` and `check:type-check-debt` (`ui/tsconfig.json` is JSONC), `check:cross-package-test-inputs` self-test (the awaiting-import excuse ends at the import, by design), `check:merge-driver` (`shadcn:update` generator, ui manifests), `check:agent-test-spelling` (`ui/AGENTS.md:210`), `check:declared-population-live` (`git ls-files` ENOBUFS), `check:adr-anchors` self-test (ADR-0075 cited by 7 Console files, no such record here), `check:manifest-repository-directory` self-test (`ui/.objectstack-pin/**`), `check:pnpm-flag-spellings` self-test, `check:tier-file-adoption` (47 packages), `check:test-source-alias` (dynamic `import()` in app-shell tests), `check:vendor-export-contract` (`@object-ui/auth` better-auth ^1.7.2 vs root 1.7.12), `check:duration-unit-keys` (9 ms-described keys without a unit in the name, all in `ui/packages/types/src/zod`: autoPlay, autoResponseDelay, timeout, delay, duration, delayDuration, openDelay, closeDelay, refreshInterval).\n\nClause-②: no\nMetadata-protocol: none\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01RSDL3SFtJaKzcymvCD8RsU\n"

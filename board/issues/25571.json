@@ -2,8 +2,8 @@
   "number": 25571,
   "kind": "issue",
   "title": "service-messaging: a flow `notify` node can only address system users, so an applicant who came in through a public form never hears \"received\" or \"rejected\"",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:workflow",
     "domain:server",
     "enhancement",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-24T01:25:45Z",
-  "updated_at": "2026-10-25T02:17:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-25T04:43:17Z",
+  "closed_at": "2026-10-25T04:41:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 8,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25571",
   "body": "Ruled: 6377887204 · batch #9 item 1 (#25496, 6377842908) · letter B · 2026-10-24T00:43:45Z (recipient = a record field of type email only; templated; rate-limited per address; logged)\n\nFiled from the objectstack-ai/hotsrm v0.1 platform evaluation, 2026-10-23, spec 18.0.0.\n\n## What was measured\n- A public form (ADR-0138 guest model) creates a supplier application; the record flow fires, de-duplicates, blocks blacklisted companies and notifies the category manager in-app. All of that works.\n- The `notify` node's recipients must be users. The applicant is not a user yet (they only become one if admitted), so the application's own outcome (\"received\", \"returned for documents\", \"rejected\") cannot reach them. No related issue was found.\n- The only alternative is an `http` node to an external mail service, which needs credentials that the open tier keeps as environment variables, outside the package.\n\n## Wanted\n- A `notify` (or `email`) node recipient form that is an address taken from a record field (`record.contact_email`), rendered through the same template mechanism, subject to the environment's outbound mail configuration.\n- Rate limiting and the usual guest-input sanitising apply since the address was typed by an anonymous visitor.\n\n## Acceptance\nA record flow on a public-form object sends a templated email to the address in one of the record's email fields, with no user account involved, and the send is visible in the messaging log.\n\nDedupe words: notify node email recipient non-user record field address public form applicant notification.\n\n---\n\nRe-filed as `objectstack-fleet[bot]` from #25444, same body and labels. #25444 was written off the fleet relay, under the maintainer's personal account, by a project-thread session through GitHub MCP; pm-dispatch allows content writes only through the relay. #25444's thread (triage, ruling, comments) stays there for reference; this card replaces it in the queue.\nSession: `session_018fnREjMeK9XQeHDwkJXKMW`"

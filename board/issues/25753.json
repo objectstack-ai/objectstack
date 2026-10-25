@@ -1,0 +1,32 @@
+{
+  "number": 25753,
+  "kind": "issue",
+  "title": "aftercare(ui-merge): the first joint 18.x release from the merged repo — both scopes at one version, @object-ui published, docs site deployed — then close #25556 as superseded and the epic (parent #25677, 6/6)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:epic",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T05:34:00Z",
+  "updated_at": "2026-10-25T05:34:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25753",
+  "body": "Filing gate ③ + ④: sub-issue 6/6 of the epic #25677 (`pm:epic`; epic PM `session_01RSDL3SFtJaKzcymvCD8RsU`). Part of #25677. ⛔ Not a claim; the epic PM runs it, the release itself is the maintainer's (Version PRs are human-merged).\n\nBlocked-by: #25752 (sub-issue 5, the cutover) — nothing here is testable before `ui/` is on `main` and 4a / PR B / 4b PR 2 are merged.\n\n**谁付代价（业务筛）:** the merge is only real when a release proves it: one Version PR, both scopes, one `release.yml` run publishing 39 `@object-ui/*` packages beside `@objectstack/*`. Until then downstream (cloud, #25556) still has two sources of truth to reconcile.\n\n## 维护者速读\n\n切换后第一次发版就是验收：一个 Version PR 里 @objectstack 和 @object-ui 同号（两边今天都是 18.1.0，所以首个联合版本是 18.1.x 或 18.2.0），`release.yml` 一次跑出两个 scope，objectui 文档站从新仓部署。你合 Version PR；席位盯发布 run、对每个 @object-ui 包 `npm view` 核对版本、看文档站。之后清理残留（验证分支与 DO NOT MERGE PR、`scripts/ui-import/` 的一次性脚本、迁移说明里的链接）、把 #25556 关为 superseded、关父单。\n\n## Scope\n\n1. **First joint release** (**maintainer merges the Version PR**): the changesets Version PR after cutover bumps both scopes to one version; the seat checks the PR's manifest diff (39 `@object-ui/*` + today's `@objectstack/*`, same string), the maintainer merges, `release.yml` publishes. Seat verifies with `npm view @object-ui/<pkg> version` on a sample of 5 packages plus `@objectstack/console` (built in-workspace by 4a), and that the GitHub Release names both scopes.\n2. **Docs site**: objectui's docs site deploys from `ui/apps/site` through the Vercel project set up in #25752 step 6 (4b's `docs-deploy.yml`); the seat checks one page that changed in the last objectui round renders from the new deploy.\n3. **Cleanup**: close the DO NOT MERGE verify PR #25718 if still open and delete the `-25697-verify` branch; delete or retire `scripts/ui-import/*` (splice-lockfile, 4a-ui-side.patch) with a note where the lock recipe lives (bill item 8); drop the `objectstack#`/`objectui#` cross-repo spelling from the pm scripts if 4b PR 2 left any; liveness ledger has no `evidenceScope: cross-repo` row (4b's), spot-check 3 rows.\n4. **Close out**: #25556 closed as superseded by this epic with a one-line pointer; the parent's checklist all ticked and the parent closed by the maintainer or the seat on the maintainer's word; memory/skills notes for the fleet updated (pm-dispatch references that still say \"two repos\").\n\n## Done when\n\n- One release run published both scopes at the same version; `npm view` agrees for the sampled packages; the docs site serves from the merged repo.\n- #25718 closed, verify branch deleted, one-time import scripts retired, #25556 closed as superseded, #25677 closed.\n\n**Size:** M. **Clause-②:** no. **Metadata-protocol:** none.\n\n## 风险\n\n- The Version PR may bump 39 packages' CHANGELOGs with objectui's travelled `.changeset/*.md`: expected, review the changelog headers once.\n- A publish failure on `@object-ui` scope rights (decision A on #25752) leaves @objectstack published and @object-ui not: re-run the publish step only after the token is fixed; versions already on npm are not republished.\n\n## Dedupe\n\n`search_issues` 2026-10-25 05:33Z 「first release after objectui merge both scopes same version @object-ui publish from objectstack docs site deploy post-merge」: 2 hits (#25727 this epic's 2c; #14324 closed, the 17.2.0 spec publish decision). #25556 (open) is the card this one closes; no other card covers the post-merge release. **New.**"
+}

@@ -2,8 +2,8 @@
   "number": 25649,
   "kind": "issue",
   "title": "Code-package bound actions are registered without ActionSchema parse, so their declared `requiresFeature` is never lowered and never takes effect (declared, not enforced)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:records",
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-24T12:59:13Z",
-  "updated_at": "2026-10-24T17:41:18Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-25T04:00:20Z",
+  "closed_at": "2026-10-25T03:59:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25649",
   "body": "Filing gate ①: class (b), a declared contract that the runtime does not honour. Measured by the cloud os-dev on objectstack-ai/cloud#3210 (report on that card; PR objectstack-ai/cloud#3214). Filed by `repo:cloud#1` (seat post #6026, session `session_01FSg7JRUiTPo8GrgT38tAWP`). ⛔ Not a claim.\n\n**Reader who acts:** the objectstack lane that owns ObjectQL's schema registry and the action contract.\n\n## Measured (local stack, cloud `00e7b6a7`, framework pin `f0fdd45bbc83`)\n- `GET /api/v1/meta/objects/sys_organization` serves cloud's code-package-bound action `change_slug` **unparsed**:\n  - its `visible` is the bare predicate the package wrote;\n  - `requiresFeature: multiOrgEnabled` rides along as a raw key and is **not** lowered into `visible`.\n- The platform object's own actions come back lowered, e.g. `rename_organization`: `'(…) && features.multiOrgEnabled != false'`.\n- **Before** objectstack-ai/cloud#3214, the served `change_slug` had no `visible` at all, so its declared feature gate never took effect.\n- **Seam:** `lowerRequiresFeature` (in the `ActionSchema` parse) is skipped for actions a code package binds through its manifest. The ObjectQL schema registry stores those through `attachBoundActions` without an `ActionSchema` parse. Cloud's `service-tenant` `tenant-plugin.ts` binds them as `actions: tenantActions`.\n\n## Why it matters\nThe contract says a declaration is enforced. Here an authored `requiresFeature` silently does nothing for every package-bound action, in every deployment. Cloud's control plane always runs with multi-organization on, so it shows no visible effect there, but a deployment with the feature off would show these actions anyway.\n\n## Wanted\n- Package-bound actions go through the same `ActionSchema` parse (and `requiresFeature` lowering) as platform-object actions before the registry stores them, or the registry refuses an unparsed action loudly.\n- ⛔ No consumer-side tolerance.\n\n## Acceptance\n- A test: a package-bound action with `requiresFeature` is served with the conjunct lowered into `visible`.\n- An ablation, skipping the parse, turns the test red.\n\n## Dedupe\n`repo:objectstack-ai/objectstack is:open requiresFeature bound action manifest lowered` returns 0 hits."

@@ -1,0 +1,32 @@
+{
+  "number": 25747,
+  "kind": "issue",
+  "title": "Electronic-signature connector family: `connector-esign` with DocuSign first, three fixed actions, consumed by apps as a declarative `provider: 'docusign'` instance",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "area:api",
+    "domain:server",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T05:05:16Z",
+  "updated_at": "2026-10-25T05:55:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25747",
+  "body": "Filing class: ③ maintainer-directed task. The hotclm maintainer, 2026-10-25, verbatim: 「本项目是元数据应用，平台相关的功能应该在平台开发」, and ruled letter **A** on objectstack-ai/hotclm#83 (「同意」, decision batch #1 item 1, 2026-10-25T05:02Z) — option A of that card is this card.\n\n**Reader:** objectstack triage → the `domain:services` lane that owns `packages/connectors/`. Priority: inherits the ruled card's milestone (hotclm M4) per the app-repo rule 「应用仓裁决立出的平台卡取被裁卡优先级，不降档」; triage sets the label.\n\n## Business reason\n\nhotclm F8 (`DESIGN.md` §06 F8, §08) needs electronic signature: 「发起签署」 posts the current `clean` version and the signers to a provider; the provider's callback maps envelope status to the contract, creates the `final_signed` version and stamps `signed_at`. HotCRM is the second consumer (quotes and contracts). The platform deliberately builds no e-sign engine (spec 17 removed it) — this is integration only.\n\nToday the only shipped path is a declarative instance over a generic provider (`provider: 'openapi' | 'rest' | 'mcp'`, ADR-0097). Each app would then re-derive \"envelope → contract\" semantics from DocuSign's several hundred OpenAPI operations, and every regional provider (契约锁 / 法大大 / e签宝) would be configured per app. A platform connector fixes the contract once, and an app that declares `provider: 'docusign'` without the plugin fails loudly at boot (ADR-0097 §2) instead of mis-calling an API at runtime.\n\n## What\n\n- A new package under `packages/connectors/` — `connector-esign` with DocuSign as the first provider (or `connector-docusign` as the first member of an e-sign contract; the lane decides the split) — registering a provider factory under `docusign` at `init()` per ADR-0097 §2.\n- A **closed action set**: `create_envelope` (document as `sys_file` reference + `signers[]` with side/order/email), `get_envelope_status`, `download_signed_document`. Nothing else is authored on the instance (ADR-0097 §5).\n- Credentials are references only (`credentialRef`, ADR-0097 §3). Static credential path open-source; managed OAuth refresh on the enterprise line (ADR-0015, ADR-0022 §4).\n- Inbound callback stays **outside** the connector: webhooks/triggers on `ConnectorSchema` remain unimplemented (ADR-0097 §5), so the app's `api`-triggered flow receives it. This card documents the callback payload the app flow maps, so two apps map it the same way.\n- Precedent and size: `connector-slack` 348 src lines, `connector-rest` 431, `connector-openapi` 822 (tests excluded), all in this monorepo. Independent plugin distribution (ADR-0025 `.osplugin` / `os plugin install`) is not implemented, so the monorepo is the only runnable home for now.\n\n## Acceptance\n\n- An app declares, as pure metadata, `connectors: [{ name: 'esign', type: 'api', provider: 'docusign', auth: { …, credentialRef: 'docusign_sandbox' } }]`; a flow `connector_action` runs all three actions against the DocuSign developer sandbox; a hotclm contract goes `signing → active` with the signed PDF attached (hotclm card 12's acceptance, unchanged).\n- Declared `provider: 'docusign'` with the plugin absent ⇒ boot fails naming the entry, the provider and the plugin that supplies it.\n- A docs page under `content/docs/` and a release-note line.\n\n## Premises the lane re-checks at dispatch\n\n1. A DocuSign developer sandbox credential is reachable from the dev container — the maintainer provides it on this repo's side (part of the hotclm#83 ruling). Without it the acceptance cannot run; ⛔ not faked, not gate-only.\n2. Whether `@objectstack/connector-openapi` is in the published 18.1.0 — if yes, hotclm may prototype its callback flow over it meanwhile; that is not the terminal shape.\n\n## Dedupe\n\n`search_issues` on this repo, 2026-10-25: \"e-signature connector DocuSign esign envelope signed document\" → 0 hits; \"electronic signature connector plugin DocuSign envelope e-sign provider\" → 0 hits. Nearest kin: ADR-0022 (connector-slack routing), ADR-0097 (declarative instances), ADR-0025 (distribution, unimplemented).\n\n## Related\n\nobjectstack-ai/hotclm#83 (the ruling) · hotclm `DESIGN.md` §06 F8, §08, §10 row *Signature* · objectstack-ai/hotclm#38 (`clm_signature.envelope_id` gains its consumer with F8)."
+}
