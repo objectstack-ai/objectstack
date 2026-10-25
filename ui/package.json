@@ -17,7 +17,6 @@
   ],
   "scripts": {
     "setup": "node scripts/objectstack-pin.mjs build && pnpm install --frozen-lockfile",
-    "preinstall": "node scripts/objectstack-pin.mjs check",
     "objectstack:build": "node scripts/objectstack-pin.mjs build",
     "objectstack:status": "node scripts/objectstack-pin.mjs status",
     "dev": "pnpm --filter @object-ui/console dev",
@@ -191,29 +190,6 @@
     "vitest-axe": "^0.1.0",
     "wait-on": "^9.1.0",
     "yaml": "^2.9.0"
-  },
-  "pnpm": {
-    "overrides": {
-      "react": "19.3.0",
-      "react-dom": "19.3.0",
-      "@types/react": "19.3.0",
-      "@types/react-dom": "19.3.0",
-      "dompurify": "^3.4.5",
-      "qs@<6.15.2": "^6.15.2",
-      "shell-quote@<1.8.4": "^1.8.4",
-      "tmp@<0.2.6": "^0.2.6",
-      "uuid@<11.1.1": "^11.1.1",
-      "@objectstack/client": "file:.objectstack-pin/client",
-      "@objectstack/core": "file:.objectstack-pin/core",
-      "@objectstack/formula": "file:.objectstack-pin/formula",
-      "@objectstack/lint": "file:.objectstack-pin/lint",
-      "@objectstack/sdui-parser": "file:.objectstack-pin/sdui-parser",
-      "@objectstack/spec": "file:.objectstack-pin/spec",
-      "@objectstack/types": "file:.objectstack-pin/types"
-    },
-    "patchedDependencies": {
-      "@radix-ui/react-focus-scope": "patches/@radix-ui__react-focus-scope.patch"
-    }
   },
   "msw": {
     "workerDirectory": [
