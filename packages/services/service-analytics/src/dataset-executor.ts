@@ -24,6 +24,7 @@ import {
 import type { CompiledDataset, DerivedMeasureSpec } from './dataset-compiler.js';
 import { explicitDateRangeWindow } from './date-range-array-arm.js';
 import { datasetInvalidError } from './dataset-refusal.js';
+import { durationMeasureIn } from './duration-measure-sql.js';
 import type { OrderLabelResolver } from './dimension-labels.js';
 
 // Re-export the shared protocol shapes so existing importers keep working.
@@ -1191,9 +1192,11 @@ export class DatasetExecutor {
     //
     // Derived measures are evaluated AFTER, so a ratio over a filled 0 computes
     // (0%) instead of being poisoned by an absent operand.
+    // [#25778] A duration measure is absent from the cube and carries its
+    // aggregate beside it.
     const fillColumns: Record<string, string | undefined> = {};
     for (const m of baseMeasures) {
-      const aggregate = compiled.cube.measures?.[m]?.type;
+      const aggregate = compiled.cube.measures?.[m]?.type ?? durationMeasureIn(compiled.durations, m)?.aggregate;
       fillColumns[m] = aggregate;
       if (selection.compareTo) fillColumns[`${m}__compare`] = aggregate;
     }

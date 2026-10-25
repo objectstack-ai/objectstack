@@ -111,6 +111,8 @@ import {
   type DimensionLabelDeps,
 } from './dimension-labels.js';
 import { evaluateAnalyticsQueryOverRows } from './preview-evaluator.js';
+// [#25778] The one lookup of a dataset duration measure by name.
+import { durationMeasureIn } from './duration-measure-sql.js';
 // [#5918] The measure mint refuses a dotted member through the SAME constructor
 // the strategies' member-level refusals use — `INVALID_FIELD` / 400, naming the
 // member as the request spelled it (see `dataset-refusal.ts`'s header for why
@@ -492,6 +494,7 @@ function fieldsOfColumnSql(
  * | `dimensions` | dimension | aggregate |
  * | `timeDimensions` | any | aggregate when bucketed, else predicate (a window) |
  * | `measures` | measure (the field it aggregates) | aggregate |
+ * | a duration measure, in `measures` or `order` (#25778) | its `from` and `to` columns | aggregate / predicate |
  * | `where` leaves | any | predicate |
  * | a requested measure's own filter | any | predicate |
  * | the dataset's own filter | any | predicate |
@@ -542,6 +545,19 @@ function namedQueryFields(
     // (`entry` absent). The caller-supplied kind is refused in every tier.
     else out.push({ object: baseObject, member, expression: true, declared: !!entry });
   };
+  // [#25778] A dataset duration measure is absent from the cube (fail-closed,
+  // `DatasetScope.measureDurations`), so `name` would read nothing for it. It
+  // reads its two columns, and is judged on both.
+  const durationColumns = (member: string, role: FieldReadRole): boolean => {
+    const duration = durationMeasureIn(datasetScope?.measureDurations, member);
+    if (!duration || declaredMemberEntry(cube, member, 'any')) return false;
+    for (const column of [duration.from, duration.to]) {
+      const fields = fieldsOfColumnSql(cube, baseObject, column, role, referenceOf);
+      if (fields) out.push(...fields);
+      else out.push({ object: baseObject, member, expression: true, declared: true });
+    }
+    return true;
+  };
   const filterMembers = (where: unknown): string[] => {
     if (!where || typeof where !== 'object') return [];
     try {
@@ -553,7 +569,7 @@ function namedQueryFields(
 
   for (const member of query.dimensions ?? []) name(member, 'dimension', 'aggregate');
   for (const td of query.timeDimensions ?? []) name(td.dimension, 'any', td.granularity ? 'aggregate' : 'predicate');
-  for (const member of query.measures ?? []) name(member, 'measure', 'aggregate');
+  for (const member of query.measures ?? []) if (!durationColumns(member, 'aggregate')) name(member, 'measure', 'aggregate');
   for (const member of filterMembers((query as { where?: unknown }).where)) name(member, 'any', 'predicate');
   for (const measure of query.measures ?? []) {
     for (const member of filterMembers(datasetScope?.measureFilters?.[measure])) name(member, 'any', 'predicate');
@@ -561,7 +577,7 @@ function namedQueryFields(
   for (const member of filterMembers(datasetScope?.filter)) name(member, 'any', 'predicate');
   const order = (query as { order?: unknown }).order;
   if (order && typeof order === 'object' && !Array.isArray(order)) {
-    for (const key of Object.keys(order)) name(key, 'any', 'predicate');
+    for (const key of Object.keys(order)) if (!durationColumns(key, 'predicate')) name(key, 'any', 'predicate');
   }
   return [...out.filter((f) => f.object === baseObject), ...out.filter((f) => f.object !== baseObject)];
 }
@@ -1716,7 +1732,8 @@ export class AnalyticsService implements IAnalyticsService {
    * - [#10298] `getDatasetScope` — the compiled dataset's definition-level
    *   filter and its per-measure filters, the half of the declaration the Cube
    *   model has no room for. Same source as the allowlist: answered for a cube
-   *   that IS a compiled dataset, `undefined` for every other cube.
+   *   that IS a compiled dataset, `undefined` for every other cube. [#25778]
+   *   Its duration measures ride the same channel.
    */
   private cubeReads(scope: CubeScope): CubeReads {
     return {
@@ -1727,7 +1744,7 @@ export class AnalyticsService implements IAnalyticsService {
       getDatasetScope: (cubeName: string) => {
         const compiled = scope.getCompiledDataset(cubeName);
         if (!compiled) return undefined;
-        return { filter: compiled.filter, measureFilters: compiled.measureFilters };
+        return { filter: compiled.filter, measureFilters: compiled.measureFilters, measureDurations: compiled.durations };
       },
     };
   }
@@ -1884,7 +1901,7 @@ export class AnalyticsService implements IAnalyticsService {
       const measureFilters = resolveFilterTokens(scope.measureFilters, tokenCtx);
       return filter === scope.filter && measureFilters === scope.measureFilters
         ? scope
-        : { filter, measureFilters };
+        : { ...scope, filter, measureFilters };
     };
   }
 
@@ -2137,6 +2154,7 @@ export class AnalyticsService implements IAnalyticsService {
     query: AnalyticsQuery,
     authorCube: Cube | undefined,
     context: ExecutionContext | undefined,
+    scope: CubeScope,
   ): void {
     const name = query.cube;
     if (!name) return;
@@ -2150,8 +2168,10 @@ export class AnalyticsService implements IAnalyticsService {
     if (!baseObject || !BARE_IDENTIFIER.test(baseObject)) return;
     for (const measure of query.measures ?? []) {
       if (typeof measure !== 'string' || measure === '') continue;
-      // Author-declared measures are not this gate's business.
+      // Author-declared measures are not this gate's business. [#25778] A
+      // dataset's duration measure is one, declared beside the cube.
       if (authorCube && declaredMemberEntry(authorCube, measure, 'measure')) continue;
+      if (durationMeasureIn(scope.getCompiledDataset(name)?.durations, measure)) continue;
       const inferredSql = inferredCallerMeasureSql(measure, name);
       // `null` — a dotted non-qualifier measure #5918 already refused — and a
       // column reference (`'*'`, a bare identifier, a relationship path) both
@@ -2278,6 +2298,15 @@ export class AnalyticsService implements IAnalyticsService {
     }
     for (const m of dataset.measures ?? []) {
       if ((m as { derived?: unknown }).derived) continue;
+      // [#25778] A duration measure reads its `from` and `to`. Text that is no
+      // column reference is caller content the statement would read unjudged;
+      // a column reference that is not one bare name is the compiler's to
+      // refuse (`DATASET_INVALID`), as it would be for any malformed key.
+      const duration = (m as { duration?: { from?: unknown; to?: unknown } }).duration;
+      if (duration && [duration.from, duration.to].some((c) => typeof c === 'string' && c !== '' && !isColumnReferenceSql(c))) {
+        caller.push({ object, member: m.name, expression: true, declared: false });
+        continue;
+      }
       if (typeof m.field === 'string' && m.field !== '' && !isColumnReferenceSql(m.field)) {
         caller.push({ object, member: m.name, expression: true, declared: false });
       }
@@ -2409,11 +2438,14 @@ export class AnalyticsService implements IAnalyticsService {
     // [#21156] Refuse a caller-named member that is not a column reference and
     // names no declared member — in every tier, before a strategy compiles it.
     // After `ensureCube` so a non-existent cube/object still answers 404 first.
-    this.assertCallerMembersResolvable(query, authorCube, context);
+    this.assertCallerMembersResolvable(query, authorCube, context, scope);
     const ctx = await this.callCtx(query, context, tokenCtx, scope);
     let skip: Set<AnalyticsStrategy> | undefined;
     for (;;) {
       const strategy = this.resolveStrategy(query, ctx, skip);
+      // [#25778] Asked of every strategy the loop lands on, the runtime
+      // fallback's included.
+      this.assertDurationMeasuresServed(query, scope, strategy);
       this.logger.debug(`[Analytics] Query on cube "${query.cube}" → ${strategy.name}`);
       try {
         // [#8286] ONE gate, every strategy. This is the single seam a strategy
@@ -2654,30 +2686,28 @@ export class AnalyticsService implements IAnalyticsService {
         // [#20917] …and the field-level gate, per query the executor issues,
         // over the same compiled dataset: a drafted seed row carries the same
         // fields the published ones do.
+        const previewScope: DatasetScope = {
+          filter: compiled.filter,
+          measureFilters: compiled.measureFilters,
+          measureDurations: compiled.durations,
+        };
         const previewService = {
           query: async (q: AnalyticsQuery) => {
             // [#21120] The body-column refusal rides this preview path too —
             // a drafted seed row carries the same stored body the published
             // ones do.
-            this.assertStoredMetadataBodyNotQueried(
-              q,
-              compiled.cube,
-              { filter: compiled.filter, measureFilters: compiled.measureFilters },
-            );
+            this.assertStoredMetadataBodyNotQueried(q, compiled.cube, previewScope);
             // …and the generic-exit gate's field half: a drafted seed row
             // carries the same `internal` fields the published ones do.
-            this.assertNoInternalFieldsQueried(
+            this.assertNoInternalFieldsQueried(q, compiled.cube, previewScope);
+            await this.assertFieldsReadable(q, compiled.cube, previewScope, context);
+            return evaluateAnalyticsQueryOverRows(
               q,
               compiled.cube,
-              { filter: compiled.filter, measureFilters: compiled.measureFilters },
+              seedRows!,
+              (field) => this.sourceFieldMeta?.(dataset.object, field)?.type,
+              compiled.durations,
             );
-            await this.assertFieldsReadable(
-              q,
-              compiled.cube,
-              { filter: compiled.filter, measureFilters: compiled.measureFilters },
-              context,
-            );
-            return evaluateAnalyticsQueryOverRows(q, compiled.cube, seedRows!, (field) => this.sourceFieldMeta?.(dataset.object, field)?.type);
           },
         } as IAnalyticsService;
         const previewResult = await new DatasetExecutor(previewService).execute(compiled, selection, context);
@@ -3259,15 +3289,47 @@ export class AnalyticsService implements IAnalyticsService {
     // either. Pre-inference cube captured before `ensureCube`.
     const authorCube = scope.getCube(query.cube!);
     this.ensureCube(query, scope);
-    this.assertCallerMembersResolvable(query, authorCube, context);
+    this.assertCallerMembersResolvable(query, authorCube, context, scope);
     const ctx = await this.callCtx(query, context, tokenCtx, scope);
     const strategy = this.resolveStrategy(query, ctx);
+    this.assertDurationMeasuresServed(query, scope, strategy);
     this.logger.debug(`[Analytics] generateSql on cube "${query.cube}" → ${strategy.name}`);
 
     return strategy.generateSql(query, ctx);
   }
 
   // ── Internal ─────────────────────────────────────────────────────
+
+  /**
+   * [#25778] Refuse a dataset duration measure the chosen strategy does not
+   * serve — `INVALID_FIELD` / 400, naming the measure, before anything runs.
+   *
+   * A duration measure reads two columns of a row, and only the native-SQL
+   * strategy computes it (`duration-measure-sql.ts`): the engine's aggregate
+   * contract names one column per aggregation, so the ObjectQL strategy has
+   * nothing to hand the engine for it. The native strategy declines a query it
+   * cannot compile as one statement on a SQL dialect it names — a time
+   * dimension bucketed by granularity, a field-to-field comparison, an object
+   * an engine middleware or an external datasource serves, a datasource that
+   * is not SQL — and such a query lands here. The measure is absent from the
+   * cube, so the strategy that did land would refuse it as unknown, in words
+   * that name nothing the author can change; this names the measure and why.
+   */
+  private assertDurationMeasuresServed(query: AnalyticsQuery, scope: CubeScope, strategy: AnalyticsStrategy): void {
+    if (strategy instanceof NativeSQLStrategy) return;
+    const durations = scope.getCompiledDataset(query.cube!)?.durations;
+    const measure = (query.measures ?? []).find((m) => durationMeasureIn(durations, m));
+    if (measure === undefined) return;
+    throw invalidMemberError(
+      `Measure "${measure}" of dataset "${query.cube}" is a duration, the time between two datetime fields ` +
+        `of one record, and it is computed only by a query that compiles to one SQL statement on a SQLite, ` +
+        `PostgreSQL or MySQL datasource. This query does not: a time dimension bucketed by granularity, a ` +
+        `field-to-field comparison, or an object served through engine middleware, an external datasource ` +
+        `or a non-SQL driver routes it to ${strategy.name}, which has no duration. Query the measure without ` +
+        `the granularity bucket or the field comparison.`,
+      { member: measure, param: 'measures', cube: query.cube! },
+    );
+  }
 
   /**
    * Refuse a query against a cube declared `public: false` with the SAME
@@ -3398,9 +3460,15 @@ export class AnalyticsService implements IAnalyticsService {
     // rule — including a declared DOTTED key, which `lookupMember` resolves by
     // direct hit and which this loop must therefore check for verbatim FIRST or
     // it would refuse a cube's own authored vocabulary.
+    //
+    // [#25778] A dataset's duration measure is declared too, beside the cube
+    // rather than in it (`DatasetScope.measureDurations`), so it is never
+    // minted: the suffix rule would have read its name as a column to `sum`.
     const extraMeasures: Record<string, any> = {};
+    const durations = scope.getCompiledDataset(name)?.durations;
     for (const m of query.measures || []) {
       if (cube.measures[m] || extraMeasures[m]) continue;
+      if (durationMeasureIn(durations, m)) continue;
       const key = mintableMeasureKey(m, name);
       if (cube.measures[key] || extraMeasures[key]) continue;
       // [#21437] A spelling whose source names no field (`_sum`, `*`) is

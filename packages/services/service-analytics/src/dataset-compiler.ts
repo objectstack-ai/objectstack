@@ -10,7 +10,7 @@ import {
   virtualFieldAggregateRemedy,
 } from '@objectstack/spec/data';
 import type { Dataset, DatasetMeasure, DatasetDimension } from '@objectstack/spec/ui';
-import { DATASET_DURATION_AGGREGATES, resolveI18nLabel } from '@objectstack/spec/ui';
+import { DATASET_DURATION_AGGREGATES, DATASET_DURATION_UNIT_SECONDS, resolveI18nLabel } from '@objectstack/spec/ui';
 import type { FilterCondition } from '@objectstack/spec/data';
 import { datasetInvalidError } from './dataset-refusal.js';
 import { TEMPORAL_SOURCE_FIELD_TYPES } from './measure-result-type.js';
@@ -460,15 +460,20 @@ function assertAggregateFieldTypeCompatible(
  */
 const DURATION_COLUMN_TYPE = 'datetime';
 
+/** One column of the base object by its bare name — the spec's `duration.from` / `to` shape. */
+const DURATION_BASE_COLUMN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
 /**
  * [#25778] Compile one dataset measure's `duration` — the column pair, the
  * unit, and the measure's aggregate — after judging what the metadata can
  * settle before any query runs.
  *
- * - The AGGREGATE is one of `DATASET_DURATION_AGGREGATES`. The spec refuses
- *   any other at parse; this is the guard for a dataset that reaches the
- *   compiler without meeting that parse (the same posture as every other
- *   `DATASET_INVALID` here).
+ * - The SHAPE the spec holds at parse — each column one bare name, the unit
+ *   one of `DATASET_DURATION_UNIT_SECONDS` — and the AGGREGATE, one of
+ *   `DATASET_DURATION_AGGREGATES`. These are the guard for a dataset that
+ *   reaches the compiler without meeting that parse (the same posture as every
+ *   other `DATASET_INVALID` here): the native-SQL face writes the columns into
+ *   its statement and divides by the unit's length.
  * - Each COLUMN is a field the base object declares as `datetime`, judged
  *   through the same `declaredValueShape` hook the aggregate × field-type gate
  *   reads, with the same tiering: no hook, or a field the hook cannot resolve,
@@ -484,6 +489,20 @@ function compileDurationMeasure(
   declaredValueShape?: (objectName: string, field: string) => ValueShapeFieldDef | undefined,
 ): DurationMeasureSpec {
   const { from, to, unit } = measure.duration;
+  for (const [slot, column] of [['from', from], ['to', to]] as const) {
+    if (typeof column === 'string' && DURATION_BASE_COLUMN.test(column)) continue;
+    throw datasetInvalidError(
+      `[dataset-compiler] dataset "${datasetName}" duration measure "${measure.name}" reads ` +
+      `\`duration.${slot}\` ${JSON.stringify(column) ?? 'undefined'}, which names no column: it takes one ` +
+      `\`${DURATION_COLUMN_TYPE}\` field of "${objectName}" by its bare name.`,
+    );
+  }
+  if (!Object.prototype.hasOwnProperty.call(DATASET_DURATION_UNIT_SECONDS, unit)) {
+    throw datasetInvalidError(
+      `[dataset-compiler] dataset "${datasetName}" duration measure "${measure.name}" takes \`duration.unit\` ` +
+      `${Object.keys(DATASET_DURATION_UNIT_SECONDS).join(' / ')}; it declares ${JSON.stringify(unit) ?? 'none'}.`,
+    );
+  }
   const aggregate = measure.aggregate;
   if (!aggregate || !(DATASET_DURATION_AGGREGATES as readonly string[]).includes(aggregate)) {
     throw datasetInvalidError(
