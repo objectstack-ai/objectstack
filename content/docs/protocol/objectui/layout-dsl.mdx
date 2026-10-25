@@ -39,9 +39,9 @@ write the page body as a string. Pick by what the page needs:
 For `html` / `react`, the page body is the `source` string (it is the
 source-of-truth; `regions` is ignored). `html` is **safe by construction** (it
 is parsed into the same SDUI tree this document describes, never executed).
-`react` executes author code, so it is gated by a host capability that is **ON
-by default** and disabled per-deployment with the `OS_PAGE_REACT=off` env
-variable. Both tiers can embed the platform's real data components
+`react` executes author code, so it is gated by a host capability that is **OFF
+by default** and turned on per deployment with the `OS_PAGE_REACT_ENABLED=true`
+env variable. Both tiers can embed the platform's real data components
 (`<ObjectTable>`, `<ObjectForm>`, charts, metrics).
 
 > **Learn more:** [ADR-0080](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0080-ai-authored-ui-jsx-source.md)
@@ -465,8 +465,10 @@ sections:
 
   Both examples were doing something the declared shape already does — see the
   replacement below. For a value that is genuinely one composite thing rather
-  than neighbouring fields, the grouping belongs on the **field**: a field of
-  type `address` (or `composite`) carries its own `fields` list.
+  than neighbouring fields, the grouping belongs on the **field**: a form field of
+  type `address` (or `composite`) carries its own `fields` list. That list is the
+  form's; the object field itself declares no sub-fields (see
+  [Embedded Structured Types](/docs/data-modeling/field-types#embedded-structured-types)).
 </Callout>
 
 Fields sit on the same row because the section says how many columns it has, and

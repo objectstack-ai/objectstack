@@ -1105,7 +1105,7 @@
       "title": "Source-authored page tiers render by the RIGHT path: kind:'html' source is PARSED-never-executed (static, in-browser sdui-parser compile), kind:'react' source is EXECUTED behind its capability gate (live data + interactivity) — command-center-jsx / capability-map (html) vs crm-workbench (react)",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["admin (seeded admin@objectos.ai) driving the published showcase app as an end user"],
@@ -1113,7 +1113,7 @@
         "app": "showcase",
         "requires": [
           "seeded showcase_project rows (the react page's live KPI + <ListView> read them)",
-          "the react-pages capability ON — CAP_REACT_PAGES defaults ON; a boot with OS_PAGE_REACT=off flips it OFF (the both-sides gate check)"
+          "the react-pages capability ON — CAP_REACT_PAGES defaults OFF and the showcase turns it on in its committed .env (OS_PAGE_REACT_ENABLED=true); a boot with OS_PAGE_REACT_ENABLED=false flips it OFF (the both-sides gate check)"
         ],
         "knownGaps": [
           "NO manual build step is needed to VIEW either tier in the running showcase (contra the task's guess): a kind:'html' page compiles IN-BROWSER via @object-ui/sdui-parser compile(source, manifest) at render, against a whitelist manifest built from the LIVE ComponentRegistry (packages/components/src/renderers/layout/page.tsx); a kind:'react' page is transpiled IN-BROWSER by a lazily-loaded Sucrase @object-ui/react-runtime chunk. The only build-shaped risk is the vendored /_console bundle being stale (stale-console-bundle) — a stale sdui-parser/react-runtime mis-compiles a page that is fine on a fresh build. ⚠ A FAULTING html source never reaches the RENDERED page on a stock boot: the metadata save door compiles an html page's source against the deployment's manifest with the same compiler `os validate` uses (packages/metadata-protocol/src/runtime-authoring-gate.ts#HTML_PAGE_SOURCE_COMPILE), so an active save or a publish of a faulting html page answers 422 INVALID_METADATA carrying the compile diagnostics, and nothing is served. The 'HTML page failed to compile (N)' panel is therefore reachable only in the page designer's DRAFT preview, where a ?mode=draft save of the faulting source is admitted and rendered (QA run #23166)",
@@ -1127,7 +1127,7 @@
         "crm-workbench (kind:'react'): open /_console/apps/showcase_app/page/showcase_crm_workbench; screenshot the workbench — the KPI strip (Total / Active) + the real <ListView> and <ObjectForm> master/detail over showcase_project",
         "prove the react tier is EXECUTED against LIVE data: the 'Total projects' KPI equals GET /api/v1/data/showcase_project's count (the page computes it via useAdapter().find('showcase_project'), reading the QueryResult .data envelope), and a showcase_project find query fires on the network — the number is computed at render, not authored",
         "prove react interactivity (executed handlers, not a parsed tree): click a ListView row → the ObjectForm binds THAT record (React useState); click '+ New project' → the form switches to create mode",
-        "both-sides gate: on a boot with OS_PAGE_REACT=off, re-open crm-workbench — it must render the NAMED 'React pages are disabled on this deployment' notice (CapabilityDisabledNotice), never a blank and never an executed page; the html pages still render (html is not gated). If the env toggle cannot be flipped on the stock fixture, record this clause blocked(environment)",
+        "both-sides gate: on a boot with OS_PAGE_REACT_ENABLED=false, re-open crm-workbench — it must render the NAMED 'React pages are disabled on this deployment' notice (CapabilityDisabledNotice), never a blank and never an executed page; the html pages still render (html is not gated). If the env toggle cannot be flipped on the stock fixture, record this clause blocked(environment)",
         "degradation: (a) html — save a faulting html source at the ACTIVE door (or publish one) and capture the 422 INVALID_METADATA with its compile diagnostics; then save the same source as a ?mode=draft draft IN A WRITABLE PACKAGE (?package=PKG) that also holds an app whose navigation references the page, and open it in Studio at /_console/studio/PKG/interfaces?surface=page:NAME, where the draft preview's 'HTML page failed to compile (N)' panel renders with the diagnostic messages. An env-wide (package-less) draft has no Studio surface, and the save gate keeps a faulting html page off the rendered route, so the panel cannot be met anywhere else (knownGaps[0]); (b) react — a react runtime error shows the 'React page error' fallback on the rendered page. Neither may be a blank page"
       ],
       "acceptance": [
@@ -1156,9 +1156,9 @@
           "evidence": "before/after screenshots + the form DOM read"
         },
         {
-          "clause": "the react capability gate is real and BOTH-sided: with CAP_REACT_PAGES on, crm-workbench executes; with OS_PAGE_REACT=off it renders the NAMED 'React pages are disabled on this deployment' notice — never a blank, never a bypassed execution (the html pages are unaffected)",
+          "clause": "the react capability gate is real and BOTH-sided: with CAP_REACT_PAGES on, crm-workbench executes; with OS_PAGE_REACT_ENABLED=false it renders the NAMED 'React pages are disabled on this deployment' notice — never a blank, never a bypassed execution (the html pages are unaffected)",
           "oracle": "screenshot",
-          "verify": "the on-state executes; the off-state shows CapabilityDisabledNotice with the OS_PAGE_REACT=off text; record blocked(environment) if the toggle cannot be exercised on the stock fixture",
+          "verify": "the on-state executes; the off-state shows CapabilityDisabledNotice naming OS_PAGE_REACT_ENABLED; record blocked(environment) if the toggle cannot be exercised on the stock fixture",
           "evidence": "the on-state + off-state screenshots (or the blocked-environment note)"
         },
         {
@@ -1170,7 +1170,7 @@
       ],
       "negative": [
         "an html page whose source is EXECUTED (author JS runs) rather than parsed is a security FAIL — ADR-0080's html tier is parse-never-execute; execution is the react tier's gated privilege only",
-        "a react page that executes with OS_PAGE_REACT=off (the gate bypassed) is a FAIL — the capability is the whole safety boundary for the trusted-execution tier",
+        "a react page that executes with OS_PAGE_REACT_ENABLED=false or unset (the gate bypassed) is a FAIL — the capability is the whole safety boundary for the trusted-execution tier",
         "a react KPI stuck at 0 while the <ListView> beside it shows rows is the crm-workbench QueryResult-envelope bug regressed (reading .records instead of .data) — FAIL, cross-checked against the live count",
         "a compile or runtime error swallowed to a blank page (no named panel) is a FAIL — the author must SEE why the page did not render"
       ],
@@ -1180,17 +1180,18 @@
       ],
       "traps": ["stale-console-bundle", "hydration-race", "single-datapoint", "automation-input"],
       "source": [
-        "packages/spec/src/ui/page.zod.ts#PageSchema (PageSchema.kind = full|slotted|html|react|jsx; html = constrained JSX/HTML+Tailwind compiled by @objectstack/sdui-parser 'parse, never execute' ADR-0080; react = real React executed at render, gated by a host capability defaulting ON, disabled via OS_PAGE_REACT=off, ADR-0081; the superRefine that fails an html/react page with no `source`)",
+        "packages/spec/src/ui/page.zod.ts#PageSchema (PageSchema.kind = full|slotted|html|react|jsx; html = constrained JSX/HTML+Tailwind compiled by @objectstack/sdui-parser 'parse, never execute' ADR-0080; react = real React executed at render, gated by a host capability defaulting OFF, turned on via OS_PAGE_REACT_ENABLED=true, ADR-0081 as amended; the superRefine that fails an html/react page with no `source`)",
         "objectui: packages/components/src/renderers/layout/page.tsx (PageRenderer kind dispatch — compile(src, getJsxManifest()) + SchemaRenderer for html with the 'HTML page failed to compile' panel; ReactKindPage for react; the manifest whitelist is built from the LIVE registry's known types)",
-        "objectui: packages/components/src/renderers/layout/react-page.tsx (ReactKindPage — CAP_REACT_PAGES gate + CapabilityDisabledNotice for OS_PAGE_REACT=off; lazy Sucrase @object-ui/react-runtime transpile; useAdapter/ListView/ObjectForm scope; the 'React page error' fallback)",
+        "objectui: packages/components/src/renderers/layout/react-page.tsx (ReactKindPage — CAP_REACT_PAGES gate + CapabilityDisabledNotice while the tier is off; lazy Sucrase @object-ui/react-runtime transpile; useAdapter/ListView/ObjectForm scope; the 'React page error' fallback)",
         "objectui: packages/sdui-parser/src/index.ts#compile (compile(source, manifest) — the pure in-browser parse used at render, no build step)",
         "examples/app-showcase/src/ui/pages/command-center-jsx.page.ts (kind:'html', static sample KPIs — 'parsed, never executed'), capability-map.page.ts (kind:'html' landing), crm-workbench.page.ts (kind:'react' — useAdapter().find reads the .data envelope, note the #… KPIs-stuck-at-0 fix)",
-        "objectui: content/docs/guide/react-pages.md (react tier: transpiled + evaluated in-app, react-pages capability, OS_PAGE_REACT=off disable)"
+        "objectui: content/docs/guide/react-pages.md (react tier: transpiled + evaluated in-app, react-pages capability, off by default, OS_PAGE_REACT_ENABLED=true enables)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "new item: the html (parse-never-execute, in-browser sdui-parser compile, static) vs react (executed at render, capability-gated, live data + interactivity) source-page tiers — the objectui renderer-path split grounded in PageRenderer's kind dispatch + react-page.tsx's gate, distinguishing command-center-jsx/capability-map (html) from crm-workbench (react); records the honest build-step finding (none needed to view — in-browser compile/transpile) as a knownGap", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-10-13", "change": "acceptance[5] (clause and verify), steps[7] and knownGaps[0] name where an html compile error is observable (assertion defect, minor, #23166 A5; parked on #23121, carried by #23169). The save door compiles an html page's source against the deployment's manifest (runtime-authoring-gate.ts HTML_PAGE_SOURCE_COMPILE), so a faulting html page is refused 422 INVALID_METADATA at save / publish and never publishes, and the compile-error panel is reachable only in the designer's draft preview. QA run #23166 met the 422 and the draft-preview panel. The react half is unchanged", "ref": "#23169" },
-        { "revision": 3, "date": "2026-10-16", "change": "steps[7](a) names how to reach the draft preview (checklist-accuracy finding 8 of QA run #23942, wave #23878). The compile panel is reachable only for a page staged in a writable package that an app's navigation references, opened at /_console/studio/PKG/interfaces?surface=page:NAME; an env-wide draft has no Studio surface, which is what #23942 met. The clause is unchanged", "ref": "#24036" }
+        { "revision": 3, "date": "2026-10-16", "change": "steps[7](a) names how to reach the draft preview (checklist-accuracy finding 8 of QA run #23942, wave #23878). The compile panel is reachable only for a page staged in a writable package that an app's navigation references, opened at /_console/studio/PKG/interfaces?surface=page:NAME; an env-wide draft has no Studio surface, which is what #23942 met. The clause is unchanged", "ref": "#24036" },
+        { "revision": 4, "date": "2026-10-25", "change": "the react-pages tier defaults OFF (ADR-0081 amendment): fixtures.requires names the showcase's committed .env opt-in OS_PAGE_REACT_ENABLED=true, and the both-sides gate's off-state is a boot with OS_PAGE_REACT_ENABLED=false (steps[6], acceptance[4], negative[1], source rows). The clauses are unchanged", "ref": "claude/project-thread-80dotk" }
       ]
     },
     {
