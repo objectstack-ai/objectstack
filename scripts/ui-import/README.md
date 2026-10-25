@@ -117,8 +117,14 @@ Measured on 2026-10-25:
 - on `9e37acd126` with steps 1–3 and the root half of 4a, after `pnpm install
   --frozen-lockfile` and `pnpm run build`: `type-check:scripts`,
   `type-check:vitest-config`, `lint:root` exit 0, and root and objectui
-  `check-changeset-fixed` both pass (112 public packages plus `object-ui`).
-  `changeset version` moves all 113 to 18.2.0 together, `object-ui` included;
+  `check-changeset-fixed` both pass (112 public packages plus `object-ui` at that base).
+  `changeset version` moved all 113 to 18.2.0 together, `object-ui` included;
+- on the cutover head `1c0d02eda4` (objectui frozen at `9e1fe03286`), with steps 1–3 and
+  the root half of 4a: `@object-ui/runner` is private there and in objectui's `ignore`
+  (objectui#13506), so the root `fixed` group drops it and the root `ignore` takes it.
+  Root and objectui `check-changeset-fixed` exit 0 (111 public packages plus `object-ui`),
+  `check:lockstep-package-count` reads 111, and `changeset version` moves all 112 members
+  to 18.2.0 together while `@object-ui/runner` stays at 18.1.0;
 - `vitest run scripts/__tests__`: 17 failed / 5,573 passed. Two of them are 15 s
   timeouts under load (`check-vi-mock-inherit`, `dollar-dialect-alias-census`), which
   pass alone (125/125). Two failed the same way on the earlier merged tree without the

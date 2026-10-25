@@ -117,7 +117,6 @@
       "@object-ui/providers",
       "@object-ui/react",
       "@object-ui/react-runtime",
-      "@object-ui/runner",
       "@object-ui/sdui-parser",
       "@object-ui/types",
       "object-ui"
@@ -127,6 +126,6 @@
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
-  "ignore": ["@object-ui/example-*", "@object-ui/site", "@object-ui/test-support"],
+  "ignore": ["@object-ui/example-*", "@object-ui/site", "@object-ui/runner", "@object-ui/test-support"],
   "privatePackages": { "version": true, "tag": false }
 }
