@@ -3,8 +3,13 @@
 import type { PluginContext } from '@objectstack/core';
 import type { AutomationContext, IDataEngine } from '@objectstack/spec/contracts';
 import { createRecordWallOrganizationResolver, type RecordOrganizationResolver } from '@objectstack/metadata-core';
+import {
+    createLazyCounterStore,
+    incrementFixedWindow,
+    type CounterStore,
+} from '@objectstack/plugin-auth/rate-limit-storage';
 import { defineActionDescriptor, isExpressionEnvelopeShaped, NotifyConfigSchema } from '@objectstack/spec/automation';
-import type { NotifyConfigParsed } from '@objectstack/spec/automation';
+import type { NotifyConfigParsed, NotifyEmailFieldRecipientParsed } from '@objectstack/spec/automation';
 import type { AutomationEngine } from '../engine.js';
 import { renderTextSlot, type VariableMap } from './template.js';
 import { parseNodeConfig } from './parse-config.js';
@@ -202,16 +207,19 @@ type Resolved<T> = { readonly ok: true; readonly value: T } | { readonly ok: fal
  * one — fails the node, naming what it evaluated to and its source; it is
  * never `String(value)`. A `{…}` token never arrives: the contract parse
  * refused it. `empty` names each envelope that evaluated to no recipient, for
- * the guard that fails a node left with none.
+ * the guard that fails a node left with none. `computed` names each recipient
+ * an envelope evaluated to that reads as an email address, for the check that
+ * a user holds it ({@link screenComputedAddresses}).
  */
 function resolveRecipients(
     engine: AutomationEngine,
     value: unknown,
     variables: VariableMap,
     context: AutomationContext,
-): Resolved<{ recipients: string[]; empty: string[] }> {
+): Resolved<{ recipients: string[]; empty: string[]; computed: ComputedAddress[] }> {
     const recipients: string[] = [];
     const empty: string[] = [];
+    const computed: ComputedAddress[] = [];
     const entries: Array<[string, unknown]> = Array.isArray(value)
         ? value.map((entry, index) => [`recipients[${index}]`, entry])
         : value === undefined ? [] : [['recipients', value]];
@@ -233,12 +241,255 @@ function resolveRecipients(
                 };
             }
             const recipient = toStr(item);
-            if (recipient !== undefined) recipients.push(recipient);
+            if (recipient === undefined) continue;
+            const address = isExpressionEnvelopeShaped(raw) ? mailedAddressOf(recipient) : undefined;
+            if (address !== undefined) {
+                computed.push({ index: recipients.length, what, source: sourceOf(raw), address });
+            }
+            recipients.push(recipient);
         }
         if (isExpressionEnvelopeShaped(raw) && recipients.length === before) empty.push(sourceOf(raw));
     }
-    return { ok: true, value: { recipients, empty } };
+    return { ok: true, value: { recipients, empty, computed } };
 }
+
+/** The user identity object an address is checked against — the messaging resolver's `USER_OBJECT`. */
+const USER_OBJECT = 'sys_user';
+
+/**
+ * The elevated context of the directory and record reads below — the posture
+ * the messaging service's own recipient reads take (`FAN_OUT_SYSTEM_CONTEXT`):
+ * each read projects only what it needs, and what it returns leaves this file
+ * only as a recipient.
+ */
+const RECIPIENT_READ = { context: { isSystem: true } } as const;
+
+/** A recipient a value envelope evaluated to that reads as an email address. */
+interface ComputedAddress {
+    /** Its position in the resolved recipient list. */
+    readonly index: number;
+    /** Where it came from, as a failure names it (`recipients[1] evaluated to`). */
+    readonly what: string;
+    /** The envelope's `source`. */
+    readonly source: string;
+    /** The address the email channel would send to (`a@b.c`, also for `user:a@b.c`). */
+    readonly address: string;
+}
+
+/**
+ * The address the email channel would send `recipient` to, or `undefined`
+ * when it sends to none — mirrored from `@objectstack/service-messaging`,
+ * which this package takes no runtime dependency on. The chain reads an
+ * address in TWO places: the `RecipientResolver` keeps an address-shaped
+ * value verbatim when no user holds it, and it hands the remainder of a
+ * `user:` value on as the recipient id with no lookup at all; the email
+ * channel then sends to any recipient id that is address-shaped. So both
+ * `a@b.c` and `user:a@b.c` (and `user:user:a@b.c`, whose remainder is itself
+ * address-shaped) reach the mail as an address. `role:` and `team:` yield
+ * user ids. `owner_of:` reads a stored owner field, which record writes put
+ * there, not the expression, so it is not screened.
+ */
+function mailedAddressOf(recipient: string): string | undefined {
+    if (recipient.startsWith('user:')) {
+        const rest = recipient.slice('user:'.length);
+        return readsAsAddress(rest) ? rest : undefined;
+    }
+    if (/^(role|team|owner_of):/.test(recipient)) return undefined;
+    return readsAsAddress(recipient) ? recipient : undefined;
+}
+
+/**
+ * The resolver's and the email channel's linear "looks like an email" test:
+ * no whitespace, one `@` not at either end, a dot inside the domain.
+ */
+function readsAsAddress(recipient: string): boolean {
+    if (/\s/.test(recipient)) return false;
+    const at = recipient.indexOf('@');
+    if (at <= 0 || at !== recipient.lastIndexOf('@') || at === recipient.length - 1) return false;
+    const domain = recipient.slice(at + 1);
+    const dot = domain.indexOf('.');
+    return dot > 0 && dot < domain.length - 1;
+}
+
+/**
+ * [#25647, ruling 6386629237 letter B] A recipient a value envelope COMPUTED
+ * must be a user. An envelope that evaluates to an address a user holds
+ * resolves to that user's id here; one that evaluates to an address no user
+ * holds fails the node, pointing to `{ emailField }`. An address WRITTEN OUT
+ * in the metadata is the author's constant and is not looked at: it never
+ * reaches `computed`.
+ *
+ * Why the line falls there: an expression can build an address from record
+ * text a visitor typed, so letting it reach the mail channel lets whoever
+ * typed that text choose who this flow mails. The one way to mail a person
+ * who is not a user is the email-field recipient, which reads an `email`-typed
+ * field and carries the per-address limit ({@link registerNotifyNode}).
+ *
+ * So the screen runs only for a node whose `channels` name `email`, the one
+ * channel that sends to the address itself. Any other node (`inbox` alone,
+ * the messaging default) mails nobody, and its recipients go to the messaging
+ * resolver as before, which maps an address a user holds to that user.
+ *
+ * The lookup is the one the messaging resolver makes (`sys_user` by `email`,
+ * the id projected), so "a user holds it" means here what it means there. No
+ * data engine, or a lookup that fails, fails the node: an address that could
+ * not be checked is not sent.
+ */
+async function screenComputedAddresses(
+    data: IDataEngine | undefined,
+    recipients: string[],
+    computed: readonly ComputedAddress[],
+): Promise<Resolved<string[]>> {
+    if (computed.length === 0) return { ok: true, value: recipients };
+    const screened = [...recipients];
+    for (const entry of computed) {
+        const address = entry.address;
+        const located = `notify: ${entry.what} an email address — source: \`${entry.source}\``;
+        if (!data) {
+            return {
+                ok: false,
+                error: `${located}. A computed recipient must be a user, and there is no data engine to look up `
+                    + 'whether a user holds that address, so nothing was sent.',
+            };
+        }
+        let user: Record<string, unknown> | null | undefined;
+        try {
+            user = await data.findOne(USER_OBJECT, { where: { email: address }, fields: ['id'] }, RECIPIENT_READ);
+        } catch (err) {
+            return {
+                ok: false,
+                error: `${located}. Looking up the user who holds it failed (${(err as Error).message}), so nothing was sent.`,
+            };
+        }
+        const id = toStr(user?.id);
+        if (id === undefined) {
+            return {
+                ok: false,
+                error: `${located}, and no user holds it. A value expression names a user, never builds an `
+                    + 'address to mail: an address built from record text lets whoever typed that text choose who '
+                    + 'this flow mails. To mail a person who is not a user, give that address its own `notify` node '
+                    + 'with `recipients: { emailField: \'FIELD\' }`, naming an `email`-typed field of the record that '
+                    + 'triggered the flow, and `channels: \'email\'`. An address written out in the flow is sent as '
+                    + 'written.',
+            };
+        }
+        screened[entry.index] = id;
+    }
+    return { ok: true, value: screened };
+}
+
+/**
+ * True when `value` is ONE email address and nothing else — the check the
+ * address an email-field recipient reads must pass before it is mailed.
+ *
+ * Stricter than the `email` field type's write check, on purpose: that check
+ * (`^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$`) admits a local part holding `,`, `;`,
+ * `:`, `<`, `>` or quotes, and a visitor types this value. Here the local part
+ * is dot-separated RFC 5322 atoms and the domain is dot-separated hostname
+ * labels, so no list separator, display name, header break or audience prefix
+ * (`role:` reads as one to the messaging resolver) can pass. ASCII only, on
+ * purpose too: an internationalised address, a quoted local part or an
+ * IP-literal domain the field type stored is refused, and the refusal says
+ * so. Written as plain scans and single-class tests, linear in the input.
+ */
+function isOneAddress(value: string): boolean {
+    if (value.length === 0 || value.length > 254) return false;
+    const at = value.indexOf('@');
+    if (at <= 0 || at !== value.lastIndexOf('@')) return false;
+    const local = value.slice(0, at);
+    if (local.length > 64) return false;
+    if (!local.split('.').every((atom) => /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+$/.test(atom))) return false;
+    const labels = value.slice(at + 1).split('.');
+    return labels.length >= 2 && labels.every((label) => label.length <= 63
+        && /^[A-Za-z0-9-]+$/.test(label) && !label.startsWith('-') && !label.endsWith('-'));
+}
+
+/** True when the parsed `recipients` is an email-field recipient, `{ emailField }`. */
+function isEmailFieldRecipient(value: unknown): value is NotifyEmailFieldRecipientParsed {
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+        && typeof (value as { emailField?: unknown }).emailField === 'string';
+}
+
+/**
+ * [#25571, ruling 6377887204 letter B] The address an email-field recipient,
+ * `{ emailField }`, names: the value of that field on the run's trigger
+ * record, read back from the STORED row by id — never off the `record` a run
+ * carries, which a trigger door may hand over as its caller wrote it — and
+ * checked to be one address ({@link isOneAddress}).
+ *
+ * Every way there is no address fails the node and says which: a run with no
+ * trigger record, no data engine, a row that no longer exists, an empty field,
+ * a value that is not one address. The value itself is never echoed into the
+ * failure: a visitor typed it.
+ */
+async function resolveEmailFieldAddress(
+    data: IDataEngine | undefined,
+    context: AutomationContext,
+    field: string,
+): Promise<Resolved<string>> {
+    const lead = `notify: \`recipients: { emailField: '${field}' }\` mails the address in that field of the record `
+        + 'that triggered the flow';
+    const trigger = triggerRecordOf(context);
+    if (!trigger) {
+        return {
+            ok: false,
+            error: `${lead}, and this run has no trigger record, so nothing was sent. An email-field recipient `
+                + 'belongs to a record-triggered flow.',
+        };
+    }
+    const at = `\`${field}\` on ${trigger.object} '${trigger.id}'`;
+    if (!data) return { ok: false, error: `${lead}, and there is no data engine to read ${at}, so nothing was sent.` };
+    let row: Record<string, unknown> | null | undefined;
+    try {
+        row = await data.findOne(trigger.object, { where: { id: trigger.id }, fields: ['id', field] }, RECIPIENT_READ);
+    } catch (err) {
+        return { ok: false, error: `${lead}; reading ${at} failed (${(err as Error).message}), so nothing was sent.` };
+    }
+    if (!row) {
+        return {
+            ok: false,
+            error: `${lead}, and ${trigger.object} '${trigger.id}' is not stored (deleted, or not written yet), so `
+                + 'nothing was sent. The address is read from the stored record.',
+        };
+    }
+    const value = row[field];
+    if (value == null || value === '') {
+        return {
+            ok: false,
+            error: `${lead}, and ${at} is empty, so there is no address to mail. Route around this node with a `
+                + '`decision` where the field may be blank.',
+        };
+    }
+    if (typeof value !== 'string' || !isOneAddress(value)) {
+        return {
+            ok: false,
+            error: `${lead}, and ${at} does not hold one plain ASCII email address, so nothing was sent. The address `
+                + 'must be exactly one mailbox, `name@example.com`, in ASCII letters, digits and the usual mailbox '
+                + 'punctuation: no list, display name, separator, quoted local part, IP-literal domain or '
+                + 'non-ASCII character.',
+        };
+    }
+    return { ok: true, value };
+}
+
+/**
+ * [#25571] The per-address limit on email-field recipients: at most
+ * {@link EMAIL_FIELD_SENDS_PER_WINDOW} sends to one address per
+ * {@link EMAIL_FIELD_SEND_WINDOW_SECONDS}, across every flow and node.
+ *
+ * The address came from a record a visitor may have filled in, so without a
+ * limit a public form becomes a way to mail any inbox as often as it can be
+ * submitted. The number is a constant, not a setting: it covers the outcomes
+ * one applicant is told about ("received", "returned for documents",
+ * "rejected") several times over, and nothing in the tree asks for more.
+ */
+export const EMAIL_FIELD_SENDS_PER_WINDOW = 5;
+
+/** The window {@link EMAIL_FIELD_SENDS_PER_WINDOW} counts over, in seconds. */
+export const EMAIL_FIELD_SEND_WINDOW_SECONDS = 60 * 60;
+
+/** Key prefix of the per-address counter; the address follows it, lowercased. */
+const EMAIL_FIELD_COUNTER_PREFIX = 'notify-email-field-sends:';
 
 /**
  * [#19939] The notify value slot holding one string — `sourceId`, the
@@ -301,6 +552,53 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
             return undefined;
         }
     };
+    // [#25571] The store the per-address email-field counter counts in: the
+    // kernel `cache` service, resolved when a send is COUNTED (it registers
+    // async, possibly after this plugin), else a per-process fallback that
+    // announces itself — the one resolution every fleet-wide counter shares.
+    const resolveCounterStore = createLazyCounterStore({
+        resolveCache: async (): Promise<CounterStore | undefined> => {
+            let cache: any;
+            try {
+                cache = await (ctx as { getServiceAsync?: (name: string) => Promise<unknown> }).getServiceAsync?.('cache');
+            } catch {
+                return undefined;
+            }
+            return cache && typeof cache.get === 'function' && typeof cache.set === 'function' ? cache : undefined;
+        },
+        logger: ctx.logger,
+        logPrefix: '[notify]',
+        subject: 'per-address email-field send limit',
+        degradedImpact:
+            'The limit is still enforced, but PER NODE: an N-node deployment admits up to N× the limit to one address',
+    });
+    let counterFaultWarned = false;
+    /**
+     * Admit one email-field send to `address`, or refuse it. A counter that
+     * cannot be read or written admits, said once at `warn`: a cache outage
+     * must not stop every form notification, and the loss is the limit, not
+     * a message.
+     */
+    const admitEmailFieldSend = async (address: string): Promise<boolean> => {
+        try {
+            const store = await resolveCounterStore();
+            const { count } = await incrementFixedWindow(
+                store,
+                EMAIL_FIELD_COUNTER_PREFIX + address.toLowerCase(),
+                EMAIL_FIELD_SEND_WINDOW_SECONDS,
+            );
+            return count <= EMAIL_FIELD_SENDS_PER_WINDOW;
+        } catch (err) {
+            if (!counterFaultWarned) {
+                counterFaultWarned = true;
+                ctx.logger.warn(
+                    `[notify] the per-address email-field send counter failed (${(err as Error).message}); `
+                    + 'email-field sends are admitted without the limit until it answers again',
+                );
+            }
+            return true;
+        }
+    };
     let wallResolver: { readonly data: IDataEngine; readonly resolver: RecordOrganizationResolver } | undefined;
     const wallResolverFor = (data: IDataEngine): RecordOrganizationResolver => {
         if (wallResolver?.data !== data) {
@@ -337,7 +635,7 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                     // Studio form keeps its recipients picker, and the marker
                     // rides `NotifyConfigSchema` (`LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`).
                     recipients: {
-                        description: 'Who the notification goes to: a user id or an audience selector (such as team:ID) as a string, or a list of them — each entry a string or a CEL value envelope { dialect: \'cel\', source } evaluated per run; an entry that evaluates to a list adds each of its recipients. A single-brace {token} is refused.',
+                        description: 'Who the notification goes to: a user id or an audience selector (such as team:ID) as a string, or a list of them — each entry a string or a CEL value envelope { dialect: \'cel\', source } evaluated per run; an entry that evaluates to a list adds each of its recipients, and with channels: email an address it evaluates to must be a user\'s. A single-brace {token} is refused. To mail a person who is not a user, use { emailField: \'FIELD\' } as the whole value, naming an email field of the record that triggered the flow, with channels: email; at most 5 such emails go to one address per hour.',
                     },
                     // The form edits the bare-string spelling of these two
                     // template slots; the contract (`NotifyConfigSchema`) also
@@ -438,9 +736,29 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
             // [#19939] `recipients` is a VALUE slot holding one value or a list:
             // each envelope is evaluated in the run's scope, a list it
             // evaluates to adds each of its recipients (see `resolveRecipients`).
-            const audience = resolveRecipients(engine, cfg.recipients, variables, context);
-            if (!audience.ok) return { success: false, error: audience.error };
-            const { recipients, empty: emptyRecipients } = audience.value;
+            //
+            // [#25571] An email-field recipient, `{ emailField }`, is the whole
+            // value: the address in that field of the trigger record. [#25647]
+            // Any other recipient an envelope computed that reads as an address
+            // must be a user's when the node mails (`screenComputedAddresses`).
+            const emailField = isEmailFieldRecipient(cfg.recipients) ? cfg.recipients.emailField : undefined;
+            let recipients: string[];
+            let emptyRecipients: string[] = [];
+            if (emailField !== undefined) {
+                const address = await resolveEmailFieldAddress(getData(), context, emailField);
+                if (!address.ok) return { success: false, error: address.error };
+                recipients = [address.value];
+            } else {
+                const audience = resolveRecipients(engine, cfg.recipients, variables, context);
+                if (!audience.ok) return { success: false, error: audience.error };
+                const mails = toStringList(cfg.channels).includes('email');
+                const screened = mails
+                    ? await screenComputedAddresses(getData(), audience.value.recipients, audience.value.computed)
+                    : { ok: true as const, value: audience.value.recipients };
+                if (!screened.ok) return { success: false, error: screened.error };
+                recipients = screened.value;
+                emptyRecipients = audience.value.empty;
+            }
             // `title`/`message` are template slots (`templateExpressionInput`,
             // the input `TemplateExpressionInputSchema` is built from): the parse
             // above normalizes a bare string to the
@@ -579,6 +897,20 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
             // derivable, which fails this step below. The WARN that used to
             // predict a NULL row here is gone with the NULL row.
             let organizationId = toStr(context.tenantId);
+
+            // [#25571] Counted when the send is admitted, before anything is
+            // written — so a refused send writes no notification at all, and a
+            // send the messaging service then fails still spent its unit (the
+            // conservative direction for a limit on mail a visitor can cause).
+            if (emailField !== undefined && !(await admitEmailFieldSend(recipients[0]))) {
+                return {
+                    success: false,
+                    error: `notify: \`recipients: { emailField: '${emailField}' }\` — the address in that field has `
+                        + `reached the per-address limit of ${EMAIL_FIELD_SENDS_PER_WINDOW} emails through email-field `
+                        + `recipients per ${EMAIL_FIELD_SEND_WINDOW_SECONDS / 60} minutes, so this one was refused and `
+                        + 'nothing was sent. The limit stops a form a visitor fills in from mailing one inbox without end.',
+                };
+            }
 
             try {
                 if (!organizationId) {

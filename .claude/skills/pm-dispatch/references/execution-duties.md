@@ -6,6 +6,7 @@
 
 - 整车道一次读全,本地求交:`list_issues` 带 `labels: [domain:X]` + 最小字段拿回全车道 open 集。
 - 候选 = open、未 assign、无 `needs-user-decision`、无 `pm:retriage`;⛔ 排除三门皆无的 `tooling` 卡。
+- `tooling` 卡至多占一轮派发的 10%,溢出留积压、⛔ 不入 `pm:queue`;⛔ 无门禁无脚本强制。
 - 无分诊审计评论的卡不是候选,预贴 `pm:queue` 视同无;例外一的 sub-issue 承父卡首触。
 - 已排队父单的 open sub-issue 自动是候选,`pm:epic` 父单的子树除外。
 - 每张候选读全文 + 全部评论,写派发词前做决策复读:评论读到最后一页。
@@ -56,7 +57,6 @@
 
 - 归属 = session ID,⛔ 不认作者字段;`Account:` 派生自 assignee,不等即半态、持卡席下笔补正。
 - 卡 assignee 归 PM,dev 恒不写;PR assignee = 卡的,接管 ② 同笔换;读者 `is:pr is:open assignee:LOGIN`。
-- dev `pr_create` 带 `assignees: [LOGIN]`,同笔指派;席位自有 PR 指派自己。
 - 部分落地(PR 带 `Refs #N (item k)`,⛔ 不 `Fixes`)即释放:合入同笔回 `pm:queue` + 清 assignee。
 - 同笔 `Release:` 行点名已落项与余项去向;余项需换道/拆分加 `pm:retriage`,自队列重新认领。
 - 派发前按序执行原子对:① Assign @me,并把 `pm:dispatched` 与摘 `pm:queue` 放进同一次标签写入。
@@ -93,10 +93,10 @@
 - 下限档给机械卡(正确性由门禁农场机械判定)。
 - 默认判断档给 M/L、裁决实施与任何带设计判断的卡;拿不准就升一档。
 - 上限 = 契约复审档(`CONTRACT_REVIEW_TIER`),给最重协议/流程/编排卡,按卡取用非新默认。
-- 强制条款①:凡改协议语义面的卡一律契约复审档。
+- 强制条款①:凡改协议语义面或 `docs/adr/**` 的卡一律契约复审档;后者 effort 下限 `xhigh`。
 - 协议语义面 = 本 `SKILL.md`、决策框架拷贝所在文件、`.claude/agents/os-dev.md` 与 `skills/**`。
 - 仅 `references/**` 面、或治理面上一行级机械文本改动的卡,降为默认判断档施工。
-- 发布的 `skills/**` 整根随 `npx skills add` 发运,⛔ 无一行级豁免,逐行判机械不作数。
+- `skills/**`(随 `npx skills add` 发运)与 `docs/adr/**` ⛔ 无一行级豁免,逐行判机械不作数。
 - 纯机械一行 PM 酌定可至下限档;降档施工的补偿控制 = 复核席跑契约复审档。
 - 降档施工只经契约复审档复核到达维护者,⛔ 不新增标签不新增链。
 - 强制条款②:放宽接受集或扩大公开面的卡默认判断档施工;命中即 spec 车道的活。

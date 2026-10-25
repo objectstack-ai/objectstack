@@ -42,9 +42,9 @@
 - 收班 = 状态 flush + 在飞显式安置,不是在飞归零;派发口径失效,简报 ⛔ 不列作继承裁决。
 - 离任留守只写简报点名的项,⛔ 不读队列、不新派发、不碰未点名卡。
 - 换班报告默认零建议,只收三类:原则错/缺、可机械化项、平台事实变化。
-- 原则错/缺 → skills 席专题;可机械化项 → 门禁/脚本卡,⛔ 不是散文。
+- 原则错/缺 → 只进简报,维护者点名才立卡;可机械化项 → 门禁/脚本卡,⛔ 不是散文。
 - 平台事实变化 → references 事实表改一行。
-- 三类以 `finding` 入 skills 车道,首触归分诊席;三类之外默认关 not planned。
+- 后两类以 `finding` 入 skills 车道,首触归分诊席;三类之外默认关 not planned。
 - 接管/移交 = 改正文 + 审计评论(只作审计);收尾清单等细则见 `references/seat-post-protocol.md`。
 - epic 委托不入座位贴体系;新 `packages/spec` 工作恒归 spec 座位。
 
@@ -68,7 +68,8 @@
 
 - 每轮向维护者打中文轮次报告(chat 通道):issue → 判决 → PR 链接 → 备注的表。
 - 项目席轮报 = 卡线程清单,⛔ 不逐轮发聊天表;五项健康指标进总监席的每日摘要。
-- 报告加升级项、呈裁清单、awaiting a human merge 项、逐 PR 熔断命中项(无则 none)。
+- 报告加升级项、呈裁清单、逐 PR 熔断命中项(无则 none),与已落 PR 48h 内开出的跟进 PR 数。
+- 与产品提交占比:已合提交不触 `.claude/` `AGENTS.md` `scripts/pm` 门禁脚本 `.github/workflows` 者。
 - 报告含 `UNRECOGNISED` 行:对本轮门禁日志 grep `UNRECOGNISED` 逐行照录,`NOT APPLICABLE` 行也在内。
 - 健康指标五个:可派发库存(open `pm:queue` 未认领及趋势);决策箱(待维护者数)。
 - 决策箱指标还要点名带开放下游依赖的决策卡,从 `Blocked-by:` 反向索引现算。

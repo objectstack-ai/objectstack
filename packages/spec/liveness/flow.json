@@ -9,13 +9,13 @@
     "successMessage": {
       "status": "live",
       "verifiedAt": "2026-08-28",
-      "evidence": "packages/services/service-automation/src/engine.ts#executeWithoutRetry (`successMessage: flow.successMessage` on the terminal success envelope — deliberately not a per-attempt value); packages/services/service-automation/src/engine.ts#resumeInternal (the resumed run returns the same authored string)",
+      "evidence": "packages/services/service-automation/src/dag-traversal.ts#executeWithoutRetry (`successMessage: flow.successMessage` on the terminal success envelope — deliberately not a per-attempt value); packages/services/service-automation/src/run-resume.ts#resumeInternal (the resumed run returns the same authored string)",
       "note": "2026-08-28: RE-ANCHORED (commit 8f10a79f7) and REPOINTED — `:1292` had rotted onto a docblock sentence about `'runtime'` package provenance, ~2,450 lines above the readers. The wrapping `execute` path returns the same field and is named here as prose rather than anchored, because `execute` is too common a word in this file for an anchor to falsify anything. Re-closed by hand against 8cb96ec41."
     },
     "errorMessage": {
       "status": "live",
       "verifiedAt": "2026-08-28",
-      "evidence": "packages/services/service-automation/src/engine.ts#retryExecution (carries the authored text onto the last attempt's failure); packages/services/service-automation/src/engine.ts#resumeInternal (`errorMessage: flow.errorMessage` on the resumed run's failure envelope)",
+      "evidence": "packages/services/service-automation/src/engine.ts#retryExecution (carries the authored text onto the last attempt's failure); packages/services/service-automation/src/run-resume.ts#resumeInternal (`errorMessage: flow.errorMessage` on the resumed run's failure envelope)",
       "note": "2026-08-28: RE-ANCHORED (commit 8f10a79f7) and REPOINTED — `:1348` had rotted onto a docblock heading (\"⛔ This is NOT the retired `flowEnabled` map under a new name\"), ~2,480 lines above the readers. As with `successMessage`, the top-level `execute` path reads the same field and is left as prose for the same reason. Re-closed by hand against 8cb96ec41."
     },
     "label": {
@@ -56,7 +56,7 @@
     "type": {
       "status": "live",
       "verifiedAt": "2026-08-28",
-      "evidence": "packages/services/service-automation/src/engine.ts#resolveTriggerBinding (`flow.type === 'schedule'` and `flow.type === 'api'` decide which trigger the flow is bound to)",
+      "evidence": "packages/services/service-automation/src/plugin-extension-api.ts#deriveTriggerBinding (the binding behind `AutomationEngine.resolveTriggerBinding`: the kind `resolveFlowTriggerKind` answers decides which trigger the flow is bound to); packages/spec/src/automation/flow-trigger-kind.ts#resolveFlowTriggerKind (`f.type === 'schedule'` and `f.type === 'api'`, beside the start node's own config, answer the `schedule` and `api` kinds)",
       "note": "flow.type==='schedule'/'api' drives trigger dispatch. 2026-08-28: RE-ANCHORED (commit 8f10a79f7) and REPOINTED — `:637` had rotted onto a docblock about the unknown-node-type audit being structured rather than logged, ~1,430 lines above the dispatch. Re-closed by hand against 8cb96ec41."
     },
     "variables": {
