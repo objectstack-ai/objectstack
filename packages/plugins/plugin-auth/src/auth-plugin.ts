@@ -13,6 +13,7 @@ import {
   type SettingsChangeHandler,
   type SettingsUnsubscribe,
   SystemObjectName,
+  type DemoStaffParsed,
 } from '@objectstack/spec/system';
 // [#11767] The shared bootstrap population predicate — the audience gate's
 // bootstrap bypass and plugin-security's first-user detection must answer the
@@ -86,6 +87,7 @@ import { authIdentityManifest } from './manifest.js';
 import { scheduleLegacySsoSecretMigration } from './sso-client-secret.js';
 import {
   devSeedAdminEmail,
+  devSeedAdminPassword,
   isDevAdminSeedArmed,
   probeWalledOwnerAccountState,
   warnIfWalledOwnerCannotVerify,
@@ -98,6 +100,15 @@ import {
   type SignInPathConfigView,
 } from './boot-sign-in-reachability.js';
 import { judgePlatformAdmin, isPlatformAdminUser, type PlatformAdminActor } from './platform-admin-gate.js';
+import {
+  decideDemoStaffEnvironmentGate,
+  probeDemoStaffPriorLogin,
+  provisionDemoStaff,
+  type DemoStaffEngine,
+  type DemoStaffGateVerdict,
+  type DemoStaffOutcome,
+  type DemoStaffRefusal,
+} from './demo-staff.js';
 import { cloudManagedRefusal } from './cloud-managed.js';
 import {
   runAdminBanUser,
@@ -313,6 +324,31 @@ export interface AuthPluginOptions extends Partial<AuthConfig> {
    * @default true
    */
   registerOrganizationRecordPage?: boolean;
+
+  /**
+   * The stack's `demoStaff`: demo accounts the development boot creates for
+   * the application's seed data to be dealt to (`demo-staff.ts`). `os serve`
+   * hands over the authored config's list; `os build` leaves the key out of
+   * the artifact, so a deployment booted from one has none.
+   *
+   * Acted on only by a local development boot, and only once an account that
+   * is not a demo account can sign in. Every other boot creates nothing and
+   * logs why at `warn`.
+   */
+  demoStaff?: readonly DemoStaffParsed[];
+}
+
+/**
+ * The `demo-staff` service `AuthPlugin.init()` registers: whether this boot
+ * will provision the stack's `demoStaff` at `kernel:ready`. `@objectstack/runtime`'s
+ * `AppPlugin` reads it to run the application's seed at `kernel:bootstrapped`
+ * instead of during its own `start()`, so a seed row naming a demo account
+ * (`owner_id: 'Legal Counsel 1'`) resolves on the first boot. Decided from
+ * configuration alone (`decideDemoStaffEnvironmentGate`), so it is known
+ * before any plugin starts.
+ */
+export interface DemoStaffingService {
+  readonly armed: boolean;
 }
 
 /**
@@ -468,6 +504,8 @@ export class AuthPlugin implements Plugin {
   private tenancy: TenancyService | null = null;
   /** [ADR-0131 D3] Whether `start()` created the Default Organization (a fresh install). */
   private defaultOrganizationCreatedAtBoot = false;
+  /** The `demoStaff` environment verdict `init()` decided; `kernel:ready` acts on it. */
+  private demoStaffGate: DemoStaffGateVerdict | null = null;
   /**
    * ADR-0069 D5 — each operator-facing allow-list refusal explanation is logged
    * once per process: the first refusal of an undetermined address, and the
@@ -782,6 +820,14 @@ export class AuthPlugin implements Plugin {
     });
     ctx.registerService('tenancy', tenancy);
     this.tenancy = tenancy;
+
+    // The stack's `demoStaff` — decided here, from configuration alone, so the
+    // application's seed (which starts before `kernel:ready`) can wait for the
+    // accounts it names. See `DemoStaffingService`.
+    const demoStaffDeclared = (this.options.demoStaff?.length ?? 0) > 0;
+    if (demoStaffDeclared) this.demoStaffGate = this.decideDemoStaffEnvironment(requestedPosture);
+    const demoStaffing: DemoStaffingService = { armed: demoStaffDeclared && this.demoStaffGate?.act === true };
+    ctx.registerService('demo-staff', demoStaffing);
 
     // Only an explicit `false` leaves the organization page out — see
     // `AuthPluginOptions.registerOrganizationRecordPage`.
@@ -1362,6 +1408,13 @@ export class AuthPlugin implements Plugin {
     // so it runs whenever the runtime boots in development.
     ctx.hook('kernel:ready', async () => {
       await this.maybeSeedDevAdmin(ctx);
+    });
+
+    // Dev-only: the stack's `demoStaff`, right after the development admin —
+    // whose account is what lets the prior-login gate admit them on a fresh
+    // database. Registered after it in the same `start()`, so it runs after it.
+    ctx.hook('kernel:ready', async () => {
+      await this.maybeProvisionDemoStaff(ctx);
     });
 
     // [#8317] The one-off half of the ruling: rows written BEFORE the
@@ -2402,6 +2455,94 @@ export class AuthPlugin implements Plugin {
    * admin can never be provisioned in production. Opt out within dev via
    * OS_SEED_ADMIN=0 (or false/off/no).
    */
+  /**
+   * Provision the stack's `demoStaff` (`demo-staff.ts` holds the three gates
+   * and the argument for each). Answers what happened — nothing when no entry
+   * is declared, the refusal when a gate refused, the outcome otherwise — so
+   * the boot step is testable without reading log lines.
+   *
+   * Every refusal is one `warn` naming the remedy: the declared accounts do not
+   * exist on this boot, and the application's seed rows that name them will
+   * not resolve. A per-entry failure is its own `warn`; the other entries
+   * still run.
+   */
+  /** Question 1 of `demo-staff.ts`, over this process's environment and this plugin's base URL. */
+  private decideDemoStaffEnvironment(posture: ReturnType<typeof resolveTenancyPosture>): DemoStaffGateVerdict {
+    const baseUrl = this.options.baseUrl;
+    return decideDemoStaffEnvironmentGate({
+      nodeEnv: process.env.NODE_ENV,
+      migrateAndExit: process.env.OS_MIGRATE_AND_EXIT === '1',
+      wallEnforced: postureEnforcesWall(posture),
+      baseUrl,
+      baseUrlIsLoopback: !!baseUrl && isLoopbackIssuer(baseUrl),
+    });
+  }
+
+  private async maybeProvisionDemoStaff(
+    ctx: PluginContext,
+  ): Promise<DemoStaffRefusal | DemoStaffOutcome | undefined> {
+    const staff = this.options.demoStaff ?? [];
+    if (staff.length === 0) return undefined;
+    const refuse = (refusal: DemoStaffRefusal): DemoStaffRefusal => {
+      ctx.logger.warn(
+        `[auth] demoStaff: ${staff.length} demo account(s) not created [${refusal.code}] — ${refusal.message}`,
+      );
+      return refusal;
+    };
+
+    const environment = this.demoStaffGate ?? this.decideDemoStaffEnvironment(resolveTenancyPosture());
+    if (!environment.act) return refuse(environment.refusal);
+
+    let ql: DemoStaffEngine | undefined;
+    try { ql = ctx.getService<DemoStaffEngine>('objectql'); } catch { ql = undefined; }
+    const priorLogin = await probeDemoStaffPriorLogin(ql, staff.map((entry) => entry.email));
+    if (!priorLogin.act) return refuse(priorLogin.refusal);
+
+    const manager = this.authManager;
+    const api: any = manager ? await manager.getApi() : undefined;
+    if (!manager || !ql || typeof api?.signUpEmail !== 'function') {
+      return refuse({
+        code: 'SERVICE_UNAVAILABLE',
+        status: 503,
+        reason: 'unanswerable',
+        message: 'the auth sign-up pipeline is not available on this boot, so no account can be created through it.',
+      });
+    }
+
+    const password = devSeedAdminPassword();
+    const outcome = await provisionDemoStaff(staff, {
+      engine: ql,
+      password,
+      // The development admin's door (`maybeSeedDevAdmin`): the real sign-up
+      // pipeline, admitted as the operator class by a ticket for exactly this
+      // address that only this call carries, cleared whatever happens.
+      signUp: async ({ email, password: pw, name }) => {
+        const ticket = manager.stageOperatorProvisioning(email);
+        try {
+          await api.signUpEmail({
+            body: { email, password: pw, name, [AuthManager.OPERATOR_PROVISIONING_TICKET_FIELD]: ticket },
+          });
+        } finally {
+          manager.clearOperatorProvisioning(email);
+        }
+      },
+    });
+
+    for (const failure of outcome.failed) {
+      ctx.logger.warn(`[auth] demoStaff: ${failure.email} was not provisioned — ${failure.message}`);
+    }
+    if (outcome.created.length > 0 || outcome.assignmentsAdded > 0) {
+      ctx.logger.info(
+        `[auth] demoStaff: ${outcome.created.length} demo account(s) created, ${outcome.present.length} already ` +
+          `present, ${outcome.assignmentsAdded} assignment(s) added — they sign in with the development seed ` +
+          `password (${password}).`,
+      );
+    } else {
+      ctx.logger.debug(`[auth] demoStaff: all ${outcome.present.length} demo account(s) already present`);
+    }
+    return outcome;
+  }
+
   private async maybeSeedDevAdmin(ctx: PluginContext): Promise<void> {
     // [commit bf8d129b5] Both clauses (and the seeded address below) are resolved by
     // `walled-owner-verification-path.ts`, because the boot check there treats
@@ -2412,7 +2553,7 @@ export class AuthPlugin implements Plugin {
     if (!isDevAdminSeedArmed()) return;
 
     const email = devSeedAdminEmail();
-    const password = process.env.OS_SEED_ADMIN_PASSWORD?.trim() || 'admin123';
+    const password = devSeedAdminPassword();
     const name = process.env.OS_SEED_ADMIN_NAME?.trim() || 'Dev Admin';
 
     let ql: IDataEngine | undefined;

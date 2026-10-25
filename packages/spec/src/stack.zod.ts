@@ -19,6 +19,7 @@ import { StackServerConfigSchema } from './system/stack-server.zod';
 import { StackEmailConfigSchema } from './system/email-config.zod';
 import { StackSmsConfigSchema } from './system/sms-config.zod';
 import { DevLoginSchema } from './system/dev-login.zod';
+import { DemoStaffSchema } from './system/demo-staff.zod';
 import { hasPlatformObjectPrefix, isPlatformProvidedObjectName } from './system/constants/platform-object-names';
 import { objectStackErrorMap, formatZodError } from './shared/error-map.zod';
 import { strictObject } from './shared/strict-object';
@@ -1243,6 +1244,30 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
   devLogins: z.array(DevLoginSchema).optional().describe('First-run credentials the application contributes to the development boot banner (dev only)'),
 
   /**
+   * DemoStaff: The Demo Accounts This Application's Seed Data Is Dealt To
+   *
+   * The people the application's demo `data` names as record owners. See
+   * {@link DemoStaffSchema} for what one entry means. Unlike `devLogins`, an
+   * entry here DOES create an account that can sign in — which is exactly why
+   * the key is development-only end to end:
+   *
+   * - `os build` writes no `demoStaff` into the artifact, so no deployed
+   *   artifact carries it;
+   * - `@objectstack/plugin-auth` provisions the accounts only on a local
+   *   development boot (`os dev`), after the development admin, and a boot
+   *   that is not one creates nothing and says why.
+   *
+   * Composes as `'concat'`: composing two applications provisions both
+   * publishers' demo accounts. Names and addresses stay unique across the
+   * composed list (a cross-reference error names both entries), and every
+   * `position` / `permissionSets` entry must name one the stack declares. An
+   * artifact ENVELOPE key like `devLogins`: its one reader takes it off the top
+   * level of the definition the boot loaded, so it is never folded into an
+   * assembled package body.
+   */
+  demoStaff: z.array(DemoStaffSchema).optional().describe('Demo accounts the development boot creates for the seed data to be dealt to (dev only, never in the built artifact)'),
+
+  /**
    * Compiled Runtime Bundle Reference
    *
    * Path (relative to the JSON artifact) to a sibling ESM module emitted
@@ -1438,6 +1463,9 @@ export const COMPOSE_KEY_DISPOSITIONS = Object.freeze({
   // `packages` concatenates: dropping one would hide an audience the composed
   // artifact still serves. `devHint` is the scalar half and is `'single'` below.
   devLogins: 'concat',
+  // Both applications' demo accounts are provisioned after a compose; the
+  // cross-reference pass keeps names and addresses unique across the result.
+  demoStaff: 'concat',
 
   // ── Single-valued configuration — same value passes, difference throws ──
   api: 'single',
@@ -1499,7 +1527,7 @@ const CONCAT_ARRAY_FIELDS = STACK_DEFINITION_KEYS
  * would refuse a multi-package artifact naming a key its author correctly
  * wrote, and the refusal would look like a defect in the author's metadata.
  *
- * Four `concat` keys are excluded — the artifact ENVELOPE keys, declared once
+ * Five `concat` keys are excluded — the artifact ENVELOPE keys, declared once
  * in {@link ASSEMBLED_PACKAGE_BODY_ENVELOPE_KEYS} for this type and the runtime
  * shape alike:
  *
@@ -1527,6 +1555,11 @@ const CONCAT_ARRAY_FIELDS = STACK_DEFINITION_KEYS
  *   an application, and which account an operator should sign in with is a
  *   property of the BOOT, not of a package inside it. `concat` stays at the top
  *   level, where composing two applications keeps both publishers' personas.
+ * - `demoStaff`: the demo accounts a DEVELOPMENT boot creates, for the same
+ *   reason as `devLogins`, and one more: `os build` writes the key into no
+ *   artifact at all, so a body could only ever carry it by hand — and its one
+ *   reader, the boot that hands it to `@objectstack/plugin-auth`, reads the top
+ *   level of the definition it loaded.
  *
  * @internal
  */
@@ -1543,7 +1576,7 @@ type AssembledPackageBodyKey = Exclude<{
  * runtime halves cannot name different sets.
  * @internal
  */
-const ASSEMBLED_PACKAGE_BODY_ENVELOPE_KEYS = ['packages', 'plugins', 'devPlugins', 'devLogins'] as const satisfies readonly StackDefinitionKey[];
+const ASSEMBLED_PACKAGE_BODY_ENVELOPE_KEYS = ['packages', 'plugins', 'devPlugins', 'devLogins', 'demoStaff'] as const satisfies readonly StackDefinitionKey[];
 
 /** One member of {@link ASSEMBLED_PACKAGE_BODY_ENVELOPE_KEYS}. @internal */
 type AssembledPackageBodyEnvelopeKey = (typeof ASSEMBLED_PACKAGE_BODY_ENVELOPE_KEYS)[number];
@@ -1572,7 +1605,7 @@ function assembledPackageBodyShape(): Pick<typeof STACK_DEFINITION_COLLECTIONS_S
     // Envelope keys stay on the artifact: `packages` cannot nest,
     // `plugins` / `devPlugins` are assembly instructions no body could carry,
     // and `devLogins` is boot-banner text whose only reader looks at the top
-    // level.
+    // level, as is `demoStaff`, the development boot's demo accounts.
     if ((ASSEMBLED_PACKAGE_BODY_ENVELOPE_KEYS as readonly string[]).includes(key)) continue;
     if (!ASSEMBLED_PACKAGE_BODY_DISPOSITIONS.includes(disposition)) continue;
     shape[key] = (STACK_DEFINITION_COLLECTIONS_SHAPE as Record<string, unknown>)[key];
@@ -3953,6 +3986,100 @@ function collectJobPullMappingErrors(config: ObjectStackDefinition): string[] {
 }
 
 /**
+ * `demoStaff` — the development boot's demo accounts — judged against the
+ * stack that declares them.
+ *
+ * Three refusals, each one a boot that would otherwise go wrong quietly:
+ *
+ * - **Two entries under one name.** A seed dataset deals a record to a person
+ *   by name (`owner_id: 'Legal Counsel 1'`); with two accounts carrying that
+ *   name the reference resolves to whichever the store returns first.
+ * - **Two entries under one address** (compared without regard to case, as
+ *   sign-in compares it). The second provisioning finds the first account and
+ *   leaves it as it is, so the second entry's name, position and permission
+ *   sets are silently never applied.
+ * - **A position or permission set the stack does not declare.** The
+ *   provisioning writes its assignments as the platform, and a platform write
+ *   naming nothing in the security catalog is stored and grants nothing — an
+ *   account that signs in to an empty application. Resolving against the
+ *   stack's OWN declarations (top level and every assembled package body) is
+ *   also the boundary: a demo account can hold only what its application
+ *   declares, never a platform set such as `admin_full_access`.
+ */
+function collectDemoStaffErrors(config: ObjectStackDefinition): string[] {
+  const errors: string[] = [];
+  const staff = Array.isArray(config.demoStaff) ? config.demoStaff : [];
+  if (staff.length === 0) return errors;
+
+  const declaredPositions = new Set<string>();
+  const declaredPermissionSets = new Set<string>();
+  const collectNames = (entries: unknown, into: Set<string>) => {
+    for (const entry of Array.isArray(entries) ? entries : []) {
+      const name = readEntryName(entry);
+      if (name !== undefined) into.add(name);
+    }
+  };
+  collectNames(config.positions, declaredPositions);
+  collectNames(config.permissions, declaredPermissionSets);
+  for (const pkg of Array.isArray(config.packages) ? config.packages : []) {
+    const body = isRecord(pkg) && isRecord(pkg.manifest) ? pkg.manifest : undefined;
+    if (!body) continue;
+    collectNames(body.positions, declaredPositions);
+    collectNames(body.permissions, declaredPermissionSets);
+  }
+
+  const indicesByName = new Map<string, number[]>();
+  const indicesByEmail = new Map<string, number[]>();
+  const push = (map: Map<string, number[]>, key: string, i: number) => {
+    const list = map.get(key) ?? [];
+    list.push(i);
+    map.set(key, list);
+  };
+
+  for (const [i, entry] of staff.entries()) {
+    if (!isRecord(entry)) continue;
+    const where = `stack.demoStaff[${i}]`;
+    if (typeof entry.name === 'string' && entry.name) push(indicesByName, entry.name, i);
+    if (typeof entry.email === 'string' && entry.email) push(indicesByEmail, entry.email.trim().toLowerCase(), i);
+    if (typeof entry.position === 'string' && entry.position && !declaredPositions.has(entry.position)) {
+      errors.push(
+        `Demo account '${String(entry.name)}' (${where}) is assigned position '${entry.position}', which this ` +
+          'stack does not declare in positions. A demo account can hold only a position its application ' +
+          'declares; declare the position or correct the name.',
+      );
+    }
+    for (const set of Array.isArray(entry.permissionSets) ? entry.permissionSets : []) {
+      if (typeof set !== 'string' || !set || declaredPermissionSets.has(set)) continue;
+      errors.push(
+        `Demo account '${String(entry.name)}' (${where}) is granted permission set '${set}', which this stack ` +
+          'does not declare in permissions. A demo account can hold only a permission set its application ' +
+          'declares, never a platform set; declare the set or correct the name.',
+      );
+    }
+  }
+
+  for (const [name, indices] of indicesByName) {
+    if (indices.length < 2) continue;
+    errors.push(
+      `Demo account name '${name}' is declared ${indices.length === 2 ? 'twice' : `${indices.length} times`} in ` +
+        `\`demoStaff\`: ${joinDeclarationOrigins(indices.map((i) => `stack.demoStaff[${i}]`))}. Seed data deals ` +
+        'a record to a person by name, so a reference to this name would resolve to whichever account the ' +
+        'store returns first. Give each demo account its own name.',
+    );
+  }
+  for (const [email, indices] of indicesByEmail) {
+    if (indices.length < 2) continue;
+    errors.push(
+      `Demo account address '${email}' is declared ${indices.length === 2 ? 'twice' : `${indices.length} times`} in ` +
+        `\`demoStaff\`: ${joinDeclarationOrigins(indices.map((i) => `stack.demoStaff[${i}]`))}. One address is ` +
+        'one account, so every entry after the first would never be applied. Give each demo account its own ' +
+        'address.',
+    );
+  }
+  return errors;
+}
+
+/**
  * [ADR-0015 §4.2 · #25168] An object's `external` binding must not name a
  * managed datasource this stack declares.
  *
@@ -4064,6 +4191,9 @@ function validateCrossReferences(
   // Same placement: a job's `pull` names a MAPPING, resolved against the
   // stack's mappings, and needs no object to resolve against.
   errors.push(...collectJobPullMappingErrors(config));
+  // Same placement: the development boot's demo accounts resolve against the
+  // stack's positions and permission sets, and need no object either.
+  errors.push(...collectDemoStaffErrors(config));
 
   if (objectNames.size === 0) return errors;
 
