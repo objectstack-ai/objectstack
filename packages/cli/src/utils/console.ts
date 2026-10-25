@@ -48,7 +48,6 @@ import fs from 'fs';
 import { createHash, randomBytes } from 'crypto';
 import { createRequire } from 'module';
 import { pathToFileURL, fileURLToPath } from 'url';
-import { readEnvWithDeprecation } from '@objectstack/types';
 
 // ─── Constants ──────────────────────────────────────────────────────
 
@@ -796,28 +795,44 @@ function consoleContentSecurityPolicy(input: {
 }
 
 /** The variable a deployment sets to turn the `kind:'react'` page tier on. */
-export const REACT_PAGES_ENV = 'OS_PAGE_REACT_ENABLED';
-/** Its earlier name, read when the new one is unset (`readEnvWithDeprecation`). */
+const REACT_PAGES_ENV = 'OS_PAGE_REACT_ENABLED';
+/** Its earlier name, read when the new one is unset. */
 const REACT_PAGES_LEGACY_ENV = 'OS_PAGE_REACT';
 const REACT_PAGES_ON = new Set(['true', '1', 'on', 'yes', 'enabled']);
 const REACT_PAGES_OFF = new Set(['', 'false', '0', 'off', 'no', 'disabled']);
+
+interface ReactPagesTierReports {
+  /** The value is neither an on nor an off spelling. */
+  unrecognized?: (name: string, value: string) => void;
+  /** Only the legacy name is set. */
+  legacyName?: (legacy: string, preferred: string) => void;
+}
 
 /**
  * Whether this deployment serves the `kind:'react'` page tier (ADR-0081, as
  * amended: off by default). That tier runs the page author's code in every
  * viewer's Console with no sandbox, so it is on only when the operator says so
  * with `OS_PAGE_REACT_ENABLED=true` (or the legacy `OS_PAGE_REACT=on`). A value
- * that is neither an on nor an off spelling leaves the tier off and is reported
- * through `onUnrecognized`, so a typo never reads as a silent refusal.
+ * that is neither an on nor an off spelling leaves the tier off and is reported,
+ * so a typo never reads as a silent refusal.
+ *
+ * The legacy fallback is spelled here rather than through
+ * `readEnvWithDeprecation` (`@objectstack/types`): this module is behind the
+ * published `./console` subpath, which imports Node built-ins only
+ * (`test/published-subpath-console.pin.test.ts` runs it from the packed
+ * tarball with no other package installed).
  */
-export function readReactPagesTier(onUnrecognized?: (name: string, value: string) => void): boolean {
-  const raw = readEnvWithDeprecation(REACT_PAGES_ENV, REACT_PAGES_LEGACY_ENV);
+function readReactPagesTier(reports: ReactPagesTierReports = {}): boolean {
+  let name = REACT_PAGES_ENV;
+  let raw = process.env[REACT_PAGES_ENV];
+  if (raw === undefined && process.env[REACT_PAGES_LEGACY_ENV] !== undefined) {
+    name = REACT_PAGES_LEGACY_ENV;
+    raw = process.env[REACT_PAGES_LEGACY_ENV];
+    reports.legacyName?.(REACT_PAGES_LEGACY_ENV, REACT_PAGES_ENV);
+  }
   const value = String(raw ?? '').trim().toLowerCase();
   if (REACT_PAGES_ON.has(value)) return true;
-  if (!REACT_PAGES_OFF.has(value)) {
-    const name = process.env[REACT_PAGES_ENV] !== undefined ? REACT_PAGES_ENV : REACT_PAGES_LEGACY_ENV;
-    onUnrecognized?.(name, String(raw));
-  }
+  if (!REACT_PAGES_OFF.has(value)) reports.unrecognized?.(name, String(raw));
   return false;
 }
 
@@ -916,6 +931,15 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
           + 'unset it to keep them off. Reported once.',
         );
       };
+      let reportedLegacyReactPagesName = false;
+      const reportLegacyReactPagesName = (legacy: string, preferred: string) => {
+        if (reportedLegacyReactPagesName) return;
+        reportedLegacyReactPagesName = true;
+        ctx.logger?.warn?.(
+          `Console static: env var \`${legacy}\` is deprecated; rename it to \`${preferred}\`. `
+          + 'The legacy name still works for now but will be removed in a future major release.',
+        );
+      };
 
       // A runtime-config read that fails leaves the shell's head as the build
       // shipped it, which is a smaller page, not a broken one: said once, at
@@ -960,7 +984,10 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
         const nonce = randomBytes(16).toString('base64');
         // One read per document, so the injected capability global and the
         // policy's `'unsafe-eval'` always agree.
-        const reactPages = readReactPagesTier(reportUnrecognizedReactPages);
+        const reactPages = readReactPagesTier({
+          unrecognized: reportUnrecognizedReactPages,
+          legacyName: reportLegacyReactPagesName,
+        });
         const html = readIndexHtml(reactPages, nonce);
         const shell = await readShellConfig(app, c, reportShellConfigReadFailure);
         const policy = consoleContentSecurityPolicy({

@@ -213,9 +213,11 @@ describe('\'unsafe-eval\' follows the react-pages tier, which is off unless the 
     expect(html).not.toContain('__OBJECTUI_CAPABILITIES_DISABLED__');
   });
 
-  it('reads the legacy OS_PAGE_REACT in both directions while the new name is unset', async () => {
+  it('reads the legacy OS_PAGE_REACT in both directions while the new name is unset, and names the new one', async () => {
     process.env.OS_PAGE_REACT = 'on';
-    expect((await serve()).scriptSrc).toContain("'unsafe-eval'");
+    const warnings: string[] = [];
+    expect((await serve(warnings)).scriptSrc).toContain("'unsafe-eval'");
+    expect(warnings.filter((w) => w.includes('`OS_PAGE_REACT` is deprecated; rename it to `OS_PAGE_REACT_ENABLED`'))).toHaveLength(1);
     process.env.OS_PAGE_REACT = 'off';
     expect((await serve()).scriptSrc).not.toContain("'unsafe-eval'");
   });
