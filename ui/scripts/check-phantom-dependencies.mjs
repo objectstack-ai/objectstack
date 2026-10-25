@@ -201,6 +201,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
+import { changesetConfigPath } from './workspace-root.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 
@@ -426,10 +427,9 @@ export function moduleSpecifiers(text, fileName = 'file.tsx') {
  * gate whose scope collapsed to nothing passes everything.
  */
 export function readReleaseGroup(root) {
-  const configPath = join(root, '.changeset/config.json');
   let config;
   try {
-    config = JSON.parse(readFileSync(configPath, 'utf8'));
+    config = JSON.parse(readFileSync(changesetConfigPath(root), 'utf8'));
   } catch (error) {
     throw new Error(`cannot read .changeset/config.json: ${error.message}`);
   }

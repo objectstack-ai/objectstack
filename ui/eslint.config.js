@@ -54,12 +54,6 @@ export default tseslint.config({
     'apps/console/plugin.js',
     'apps/console/plugin.d.ts',
     'apps/site/next-env.d.ts',
-    // objectui#13008 — the pinned @objectstack/* build, linked by
-    // `scripts/objectstack-pin.mjs build` beside the committed manifests and
-    // git-ignored (`.gitignore`, "/.objectstack-pin/*/*"); the spec packs its
-    // TypeScript `src/`. The one tracked file per package is a `package.json`,
-    // which no rule here lints.
-    '.objectstack-pin',
   ],
 }, {
   // objectui#4853 — a stale `eslint-disable` is an ERROR, not a warning.

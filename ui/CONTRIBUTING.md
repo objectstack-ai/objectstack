@@ -625,11 +625,11 @@ The release process is automated:
 **The release PR is identified by its head branch, `changeset-release/main`, never
 by its title.** The [Changesets action](https://github.com/changesets/action)
 derives that branch from the base branch, so it is a stable convention that holds
-across repositories. The title is not: it is the `title:` input this repository
-passes to the action in
-[`.github/workflows/changeset-release.yml`](.github/workflows/changeset-release.yml),
-it is repository-local configuration, and it differs from repository to
-repository. To locate the current release PR — its number and its title included
+across repositories. The title is not: it is the `title:` input the objectstack
+monorepo's `.github/workflows/release.yml` passes to the action (objectui's own
+`changeset-release.yml` retired when the two scopes joined one release,
+objectstack#25711), it is repository-local configuration, and it differs from
+repository to repository. To locate the current release PR — its number and its title included
 — search the head branch:
 
 ```text

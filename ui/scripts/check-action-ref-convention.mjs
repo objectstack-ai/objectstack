@@ -141,21 +141,13 @@ export const DECLARED_EXCEPTIONS = [
       'reviewed moment; a floating ref would re-adopt every upstream change on the next scheduled ' +
       'run, with nothing in this repository to roll back to.',
   },
-  // The four below share one reason, said once: each is a third-party action
+  // The three below share one reason, said once: each is a third-party action
   // that runs holding a credential, so the code a floating tag resolves to
   // would receive that credential on the next run after the tag moved, with
   // nothing here reviewing it. A commit sha cannot move; the trailing
   // `# vX.Y.Z` comment names the release it is. First-party `actions/*` refs
-  // stay on the floating-tag default.
-  {
-    workflow: 'changeset-release.yml',
-    action: 'changesets/action',
-    issue: 'objectui#13430',
-    reason:
-      'runs with NPM_TOKEN and GITHUB_TOKEN in the publish and version-PR steps; pinned to the ' +
-      'v1.9.0 commit, the one the workflow comment and the ref-pin test say both v1 properties ' +
-      'were read at (scripts/__tests__/changeset-release-action-ref-pin.test.ts holds the sha).',
-  },
+  // stay on the floating-tag default. (A fourth, changesets/action in
+  // changeset-release.yml, left with that workflow: objectstack#25711.)
   {
     workflow: 'check-links.yml',
     action: 'lycheeverse/lychee-action',

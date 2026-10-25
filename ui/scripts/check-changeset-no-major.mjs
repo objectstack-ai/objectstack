@@ -95,6 +95,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
+import { changesetConfigPath } from './workspace-root.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -220,7 +221,7 @@ export function majorOfRange(range) {
 
 /** The `fixed` groups of `.changeset/config.json`, as arrays of package names. */
 export function readFixedGroups(repoRoot) {
-  const config = JSON.parse(readFileSync(join(repoRoot, '.changeset', 'config.json'), 'utf8'));
+  const config = JSON.parse(readFileSync(changesetConfigPath(repoRoot), 'utf8'));
   return Array.isArray(config.fixed) ? config.fixed.filter(Array.isArray) : [];
 }
 

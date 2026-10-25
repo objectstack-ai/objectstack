@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 // `tsconfig.scripts.json` (`allowJs`), so no `@ts-expect-error` here —
 // re-adding one is now itself an error (TS2578). See objectui#3494.
 import { analyze, globMatcher, normalizePrivatePackages } from '../check-changeset-fixed.mjs';
+import { changesetConfigPath } from '../workspace-root.mjs';
 
 /**
  * `scripts/check-changeset-fixed.mjs` used to answer one question — is every
@@ -128,7 +129,7 @@ describe('analyze', () => {
 
 describe('the repository itself', () => {
   const config = JSON.parse(
-    fs.readFileSync(path.join(repoRoot, '.changeset/config.json'), 'utf8')
+    fs.readFileSync(changesetConfigPath(repoRoot), 'utf8')
   ) as { fixed?: string[][]; ignore?: string[]; privatePackages?: unknown };
 
   const manifests = ['packages', 'apps'].flatMap((dir) =>

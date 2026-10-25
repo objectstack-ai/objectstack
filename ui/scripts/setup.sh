@@ -71,12 +71,11 @@ if [ "$(printf '%s\n%s\n' "$PNPM_FLOOR" "$(pnpm -v)" | sort -V | head -n1)" != "
 fi
 echo -e "${GREEN}✓ pnpm $(pnpm -v) detected${NC}"
 
-# Install dependencies. Every @objectstack/* package resolves to a build of the
-# objectstack commit `.objectstack-sha` pins (objectui#12957), so `setup` builds
-# that first and then installs frozen -- a bare `pnpm install` on a clean
-# checkout fails on the missing build directory. (`pnpm run setup`, never
-# `pnpm setup`: the latter is pnpm's own built-in command.)
-echo -e "\n${YELLOW}📦 Building @objectstack/* at the pin, then installing dependencies...${NC}"
+# Install dependencies. Every @objectstack/* package is a `workspace:^` link to
+# this monorepo's own packages (objectstack#25711), so `setup` is a frozen
+# install and nothing else. (`pnpm run setup`, never `pnpm setup`: the latter is
+# pnpm's own built-in command.)
+echo -e "\n${YELLOW}📦 Installing dependencies...${NC}"
 require_root_script setup
 pnpm run setup
 

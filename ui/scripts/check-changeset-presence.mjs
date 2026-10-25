@@ -424,7 +424,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
-import { revPath } from './workspace-root.mjs';
+import { changesetConfigPath, revPath } from './workspace-root.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 
@@ -631,14 +631,15 @@ function ignoreMatcher(patterns) {
  * build and not a quiet pass.
  */
 export function readReleaseConfig(root) {
-  const dir = join(root, '.changeset');
-  if (!existsSync(dir)) {
+  let configPath;
+  try {
+    configPath = changesetConfigPath(root);
+  } catch {
     throw new Error(
-      `${dir} does not exist. This gate reads \`.changeset/config.json\` to learn which ` +
+      `${join(root, '.changeset')} does not exist. This gate reads \`.changeset/config.json\` to learn which ` +
         'packages a release covers; without it there is nothing to check against.',
     );
   }
-  const configPath = join(dir, 'config.json');
   let config;
   try {
     config = JSON.parse(readFileSync(configPath, 'utf8'));

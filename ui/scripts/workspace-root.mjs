@@ -113,6 +113,8 @@ export const WORKSPACE_MANIFEST = 'pnpm-workspace.yaml';
 export const LOCKFILE = 'pnpm-lock.yaml';
 export const ROOT_MANIFEST = 'package.json';
 export const TURBO_CONFIG = 'turbo.json';
+/** The Changesets config, relative to the root that holds it. */
+export const CHANGESET_CONFIG = '.changeset/config.json';
 /** Where the cutover parks objectui's own `turbo.json` (a nested one must `extends` the root). */
 export const PARKED_TURBO_CONFIG = 'turbo.objectui.json';
 export const TURBO_ROOT_PREFIX = '$TURBO_ROOT$/';
@@ -291,6 +293,26 @@ export function turboConfigPath(root = uiRoot()) {
   const parent = path.dirname(own);
   if (parent !== own && fs.existsSync(path.join(parent, TURBO_CONFIG))) return path.join(parent, TURBO_CONFIG);
   throw new Error(`no ${TURBO_CONFIG} at ${own} or at ${parent} (objectstack#25723).`);
+}
+
+/**
+ * The Changesets config that versions this tree: `.changeset/config.json` at
+ * `root` when it holds one (standalone), else the one at its parent — the
+ * monorepo's, whose one `fixed` group carries `@object-ui/*` and
+ * `@objectstack/*` together (objectstack#25711, ruling D1 「同一个版本号组」;
+ * changesets reads one config per repository). A reader that asks "which of
+ * this tree's packages are published" intersects that group with this tree's
+ * own manifests, so the monorepo's wider group answers the same question.
+ *
+ * @param {string} [root]
+ * @returns {string}
+ */
+export function changesetConfigPath(root = uiRoot()) {
+  const own = path.resolve(root);
+  if (fs.existsSync(path.join(own, CHANGESET_CONFIG))) return path.join(own, CHANGESET_CONFIG);
+  const parent = path.dirname(own);
+  if (parent !== own && fs.existsSync(path.join(parent, CHANGESET_CONFIG))) return path.join(parent, CHANGESET_CONFIG);
+  throw new Error(`no ${CHANGESET_CONFIG} at ${own} or at ${parent} (objectstack#25711).`);
 }
 
 /**

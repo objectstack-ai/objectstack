@@ -10,6 +10,7 @@ export declare const WORKSPACE_MANIFEST: 'pnpm-workspace.yaml';
 export declare const LOCKFILE: 'pnpm-lock.yaml';
 export declare const ROOT_MANIFEST: 'package.json';
 export declare const TURBO_CONFIG: 'turbo.json';
+export declare const CHANGESET_CONFIG: '.changeset/config.json';
 export declare const PARKED_TURBO_CONFIG: 'turbo.objectui.json';
 export declare const TURBO_ROOT_PREFIX: '$TURBO_ROOT$/';
 export declare const VIRTUAL_STORE: '.pnpm';
@@ -37,6 +38,7 @@ export declare function parseWorkspaceGlobs(text: string): string[];
 export declare function workspaceGlobs(root?: string): string[];
 /** The nearest `turbo.json` upward: what turbo hashes from. */
 export declare function turboConfigPath(root?: string): string;
+export declare function changesetConfigPath(root?: string): string;
 /** objectui's own task declaration: `turbo.json` at `root`, else the parked copy. */
 export declare function uiTurboConfigPath(root?: string): string;
 

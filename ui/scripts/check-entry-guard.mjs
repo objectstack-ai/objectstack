@@ -112,7 +112,7 @@
  * same reasoning holds here:
  *
  *   • many of these scripts have real side effects (`shadcn-sync`,
- *     `sync-quick-reference-release`, `regenerate-known-schema-types`), so a
+ *     `regenerate-known-schema-types`), so a
  *     gate that spawns all of them is a gate nobody can run locally;
  *   • "produced output" is not a decidable property of an arbitrary tool -- a
  *     quiet-on-success script is legitimate, so the assertion would have to be

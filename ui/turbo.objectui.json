@@ -2,9 +2,7 @@
   "$schema": "https://turbo.build/schema.json",
   "globalEnv": ["NODE_ENV"],
   "globalDependencies": [
-    "node_modules/@objectstack/spec/.spec-main-shape-gate.json",
-    ".objectstack-sha",
-    "node_modules/.cache/objectstack/.stamp.json"
+    "node_modules/@objectstack/spec/.spec-main-shape-gate.json"
   ],
   "tasks": {
     "build": {
@@ -16,7 +14,7 @@
         "**/*.tsbuildinfo",
         "!**/node_modules/**"
       ],
-      "env": ["NODE_ENV", "VITE_BASE_PATH", "OBJECTSTACK_CLIENT_DIST", "OBJECTSTACK_SPEC_DIST"],
+      "env": ["NODE_ENV", "VITE_BASE_PATH"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/tsconfig.json",

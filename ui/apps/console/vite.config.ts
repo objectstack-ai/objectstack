@@ -17,12 +17,7 @@ import { execFileSync } from 'node:child_process';
 // `native` becomes the default loader (objectui#3384).
 import { viteCryptoStub } from '../../scripts/vite-crypto-stub.ts';
 import { viteMaplibreWorker } from '../../scripts/vite-maplibre-worker.ts';
-import { resolveClientDistInjection, widenVendorChunkTestForClient } from '../../scripts/vite-objectstack-client-dist.ts';
-import {
-  assertSingleZodInstance,
-  formatConditionReport,
-  resolveSpecDistInjection,
-} from '../../scripts/vite-objectstack-spec-dist.ts';
+import { assertSingleZodInstance } from '../../scripts/vite-single-zod.ts';
 import { viteIneffectiveDynamicImports } from '../../scripts/vite-ineffective-dynamic-imports.ts';
 import { frameworkPackagesDir, workspaceChunkTests } from '../../scripts/vite-objectstack-workspace.ts';
 import { viteDeclaredLazyViews } from '../../scripts/vite-declared-lazy-views.ts';
@@ -85,26 +80,20 @@ function preloadCriticalChunks(): Plugin {
  * closure walk has proven it can see the very chunk the linter used to hide in.
  *
  * That makes both module-id tests SUBJECTS of the check, not decoration, and
- * neither may be hardcoded here. `OBJECTSTACK_SPEC_DIST` rewrites all 18
- * `@objectstack/spec` specifiers to absolute paths in the overriding tree —
- * `/…/objectstack/packages/spec/dist/…/index.mjs`, ids with no
- * `@objectstack` segment at all — so a private `/@objectstack[\\/+]spec/`
- * matched zero modules, this counter-probe correctly refused a verdict, and it
- * took every injected build down with it (objectui#5388; measured from the
- * consumer side in objectstack#10136, where it blocked the framework's Console
- * Pin Gate). The spec test is therefore a PARAMETER, fed from the same
- * `resolveSpecDistInjection` output the `vendor-objectstack` group already
- * reads: one producer, both consumers, no second opinion about where the spec
- * lives.
+ * neither may be hardcoded here. A spec reached through a path with no
+ * `@objectstack` segment — the monorepo's own `packages/spec/dist/…` — made a
+ * private `/@objectstack[\\/+]spec/` match zero modules, so this counter-probe
+ * correctly refused a verdict and took the build down with it (objectui#5388).
+ * The spec test is therefore a PARAMETER, fed from the same
+ * `workspaceChunkTests` producer the `vendor-objectstack` group reads: one
+ * producer, both consumers, no second opinion about where the spec lives.
  *
- * `LINT` stays literal — nothing injects `@objectstack/lint` today — but it gets
- * its own counter-probe for the same reason, because its failure mode is the
- * worse one. The spec test going blind fails LOUD (this build stops). The lint
- * test going blind fails SILENT: the assertion below is negative, so zero
- * matches reads exactly like a clean bundle and the guard is green forever.
- * objectstack#9659 proposes injecting four more `@objectstack/*` packages the
- * same way and lint is a plausible member; if it ever joins, this build says so
- * instead of quietly ceasing to guard anything.
+ * `LINT` gets its own counter-probe for the same reason, because its failure
+ * mode is the worse one. The spec test going blind fails LOUD (this build
+ * stops). The lint test going blind fails SILENT: the assertion below is
+ * negative, so zero matches reads exactly like a clean bundle and the guard is
+ * green forever; if the linter's module ids ever change shape, this build says
+ * so instead of quietly ceasing to guard anything.
  */
 function assertLazyLinterStaysLazy(specTest: RegExp): Plugin {
   const LINT = WORKSPACE_CHUNK_TESTS.lint;
@@ -144,9 +133,6 @@ function assertLazyLinterStaysLazy(specTest: RegExp): Plugin {
             `from the app entry, so it must be in the eager closure — its absence means ` +
             `this walk is reading the graph wrongly, not that the bundle improved. ` +
             `Fix the walk before trusting the linter assertion below. ` +
-            `If \`OBJECTSTACK_SPEC_DIST\` is set, check that this test carries the ` +
-            `override's location: an injected spec resolves outside node_modules and the ` +
-            `baseline test cannot see it (objectui#5388). ` +
             `(spec test: ${specTest}; ` +
             `entry chunks: ${[...chunks.values()].filter((c) => c.isEntry).map((c) => c.fileName).join(', ') || 'NONE'}; ` +
             `eager chunks: ${eager.size}/${chunks.size})`,
@@ -168,10 +154,8 @@ function assertLazyLinterStaysLazy(specTest: RegExp): Plugin {
             `this bundle and the assertion below can no longer fail. Two ways to get here. ` +
             `Either the lazy import in app-shell's \`capabilityLint.ts\` is gone, in which case ` +
             `retire this plugin deliberately rather than leaving a guard with no subject; or ` +
-            `the linter's module ids changed shape — e.g. \`@objectstack/lint\` joined the ` +
-            `\`OBJECTSTACK_SPEC_DIST\`-style injection proposed in objectstack#9659, which ` +
-            `rewrites specifiers to absolute paths with no \`@objectstack\` segment. In that ` +
-            `case give this test the injection's location, exactly as the spec test above is ` +
+            `the linter's module ids changed shape (a path with no \`@objectstack\` segment). ` +
+            `In that case give this test the new location, exactly as the spec test above is ` +
             `already parameterised (objectui#5388). (chunks: ${chunks.size})`,
         );
       }
@@ -327,10 +311,8 @@ function emitEagerClosureReport(reportFileName = 'eager-closure.json'): Plugin {
               `Fix the import rather than skipping the member here: a bare specifier the browser ` +
               `cannot load is a broken bundle, not a measurement gap, and dropping it from the ` +
               `walk would make this report under-count — the one direction the counter-probes ` +
-              `above exist to refuse. The known source is an out-of-tree override whose own ` +
-              `dependencies do not resolve from where it lives: check \`OBJECTSTACK_CLIENT_DIST\` ` +
-              `and \`OBJECTSTACK_SPEC_DIST\`, and vite's own "could not be resolved" warnings ` +
-              `earlier in this build.`,
+              `above exist to refuse. Read vite's own "could not be resolved" warnings earlier ` +
+              `in this build.`,
           );
         }
 
@@ -671,31 +653,6 @@ const workspaceAliases: Record<string, string> = {
   '@object-ui/plugin-designer': path.resolve(import.meta.dirname, '../../packages/plugin-designer/src'),
 };
 
-// Opt-in override of the installed `@objectstack/client`. The published client
-// (11.2.0) predates the async import-job API (`data.createImportJob` et al.),
-// so to exercise the full background-import + undo flow through the real
-// console before that client ships, point OBJECTSTACK_CLIENT_DIST at a locally
-// built client (its dist entry or package dir). Inert when unset — production
-// and CI builds use the installed client unchanged.
-//
-// No longer a bare string alias: the value is VALIDATED before it is aliased —
-// the path must exist, it must sit inside a `@objectstack/client` package
-// (directory, `dist/`, or an entry file all resolve to the same package), and
-// that package's own declared `dependencies` must resolve from where it lives.
-// Without that last check an out-of-tree override produced a fully written
-// bundle whose bare specifiers no browser can load, and nothing in the build
-// output named this variable — objectui#6094, the client twin of the spec
-// hook's objectui#5391. See the module for the measurement and for why the
-// check is re-stated there rather than shared with the spec hook.
-const clientDistInjection = resolveClientDistInjection(process.env.OBJECTSTACK_CLIENT_DIST);
-if (clientDistInjection) workspaceAliases['@objectstack/client'] = clientDistInjection.aliasTarget;
-
-// Extra dirs the dev server may read the override from — it lives outside the
-// workspace root, so Vite's default `server.fs.allow` would 403 it (blank page).
-// Unchanged values: the containing package (…/dist/index.mjs → …/<pkg>) and its
-// parent, now computed beside the validation that vouches for the path.
-const clientFsAllow: string[] = clientDistInjection ? clientDistInjection.fsAllow : [];
-
 // Deps pre-bundled for the dev server. Build-time pre-bundling was removed in
 // Vite 5.1, so this list is read by `pnpm dev` only, never by `vite build` —
 // which is why no build or E2E job can see a bad entry here.
@@ -707,7 +664,7 @@ const clientFsAllow: string[] = clientDistInjection ? clientDistInjection.fsAllo
 // package this app does not depend on is skipped with a warning and pre-bundles
 // nothing: `maplibre-gl` was one, and needs no entry of its own, because the
 // `react-map-gl/maplibre` pre-bundle already carries it. The console-config
-// cases in `scripts/__tests__/vite-objectstack-spec-dist.test.ts` resolve every
+// case in `scripts/__tests__/console-optimize-deps.test.ts` resolves every
 // entry the way the dev server does.
 const OPTIMIZE_DEPS_INCLUDE = [
   '@objectstack/spec',
@@ -763,81 +720,6 @@ const VENDOR_OBJECTSTACK_TEST = WORKSPACE_CHUNK_TESTS.vendor;
 // plus the monorepo's workspace path (see `WORKSPACE_CHUNK_TESTS` above).
 const SPEC_MODULE_TEST = WORKSPACE_CHUNK_TESTS.spec;
 
-// Opt-in override of the installed `@objectstack/spec` — the spec twin of
-// OBJECTSTACK_CLIENT_DIST above, so a framework build can bundle the console
-// against its OWN spec instead of the last published one (objectui#4854, ruled
-// on objectstack#8134). Point it at a built spec package (its directory, its
-// `dist/`, or an entry file inside it).
-//
-// It is NOT a copy of the client line: `@objectstack/spec` publishes an 18-entry
-// exports map that redirects every subpath into `dist/`, and a Vite string alias
-// does not consult exports maps. So the injection is derived from the OVERRIDE's
-// own exports map, one alias per entry — see the module for the derivation and
-// for why every failure mode throws instead of falling back.
-//
-// Inert when unset: `null` here leaves the alias table, the pre-bundle list, the
-// vendor chunk test and the dev server's fs allow-list at their baseline values.
-//
-// The injected spec also arrives with its OWN install tree, so left alone its
-// bare `zod` import resolves to the framework's zod and the bundle carries two
-// instances — at the console pin objectui#11327 was reported against, the
-// Studio's spec-derived forms crashed in `z.toJSONSchema` over them. The
-// injection therefore pins every `zod` import to ONE
-// copy: the one `CONSOLE_ZOD_ANCHOR` resolves. That package is the anchor
-// because it is where the console walks spec schemas with its own zod (the
-// metadata-admin `*-schema.ts` modules) and it declares `zod` itself; the
-// injection refuses the build when that copy is outside the range the
-// injected spec declares.
-const CONSOLE_ZOD_ANCHOR = path.resolve(import.meta.dirname, '../../packages/app-shell');
-const specDistInjection = resolveSpecDistInjection(process.env.OBJECTSTACK_SPEC_DIST, {
-  vendorChunkTest: VENDOR_OBJECTSTACK_TEST,
-  specModuleTest: SPEC_MODULE_TEST,
-  consoleZodFrom: CONSOLE_ZOD_ANCHOR,
-});
-if (specDistInjection) Object.assign(workspaceAliases, specDistInjection.aliases);
-
-// objectui#9408 — say which condition arm every entry came from, out loud.
-//
-// The resolver used to walk its OWN preference array instead of the exports
-// map's key order, so the five `browser`-first entries silently resolved to the
-// Node arm and the arm added to keep a browser build off `require('fs')` was
-// unreachable. Nothing in the build said so. The fix makes the pick correct; the
-// table makes it CHECKABLE — a wrong arm is now one grep in the build log
-// instead of an unattributable bundler error at some later pin bump.
-//
-// Printed only when the override is live, so a normal build stays quiet, and to
-// stderr so it cannot land in anything that parses stdout.
-if (specDistInjection) {
-  for (const line of formatConditionReport(specDistInjection)) console.error(line);
-}
-
-const specFsAllow: string[] = specDistInjection ? specDistInjection.fsAllow : [];
-
-// Pre-bundling an ALIASED, out-of-workspace dep is opt-in through this list and
-// nothing else: Vite's pre-alias plugin only registers such a resolution as a
-// dep when `optimizeDeps.include` names the specifier. Keeping the four spec
-// entries while the override is live would therefore park the injected spec in
-// `node_modules/.vite`, whose cache key does not move when the framework
-// rebuilds its spec in place — a stale pre-bundle serving yesterday's schema is
-// the same silent skew this hook exists to end. Dropping them costs a colder
-// dev start and nothing else; `vite build` never reads this list.
-const optimizeDepsInclude = specDistInjection
-  ? OPTIMIZE_DEPS_INCLUDE.filter((specifier) => !Object.hasOwn(specDistInjection.aliases, specifier))
-  : OPTIMIZE_DEPS_INCLUDE;
-
-// An injected spec resolves OUTSIDE node_modules, so the baseline test above
-// stops matching it and the biggest vendor surface in the bundle (spec is
-// imported by 29 packages here) would scatter into its importers' chunks. The
-// injected build should differ from a released one in spec CONTENT, not in
-// chunk layout, so the override's location joins the group's test. The same
-// holds for an injected CLIENT, and there the layout is not cosmetic: left out
-// of this group it lands in `framework`, closing a framework ↔ data-adapter
-// import cycle that kills the console at boot (see the helper's docblock).
-const vendorObjectstackTest = widenVendorChunkTestForClient(
-  specDistInjection ? specDistInjection.vendorChunkTest : VENDOR_OBJECTSTACK_TEST,
-  clientDistInjection,
-);
-
 // A lucide icon module, captured by its file name (`circle-arrow-up`). Read by
 // the `vendor-icons-shell` group below.
 const LUCIDE_ICON_MODULE = /[\\/]node_modules[\\/]lucide-react[\\/]dist[\\/]esm[\\/]icons[\\/]([a-z0-9-]+)\.mjs$/;
@@ -850,16 +732,6 @@ const LAZY_ONLY_INITIAL_ICONS: ReadonlySet<string> = new Set([
   'folder-tree',
   'webhook',
 ]);
-
-// The chunk grouping is not the only consumer of "where does the spec live".
-// `assertLazyLinterStaysLazy`'s counter-probe asks the same question about the
-// emitted module ids, and it used to answer it from a private regex that the
-// injection made unmatchable — so every build with the override set died on a
-// counter-probe that was right about what it saw (objectui#5388). It reads the
-// override's location here, from the same producer, for the same reason.
-const specModuleTest = specDistInjection
-  ? specDistInjection.specModuleTest
-  : SPEC_MODULE_TEST;
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -879,15 +751,11 @@ export default defineConfig({
     // Fails the build if the lazily-imported linter is folded back into an
     // eagerly-loaded chunk. Runs on CI/Vercel too — it costs microseconds and
     // the regression it catches is invisible in every other signal.
-    assertLazyLinterStaysLazy(specModuleTest),
-    // Under OBJECTSTACK_SPEC_DIST: resolve every bare `zod` import — the injected
-    // spec's included — to the console's one copy (objectui#11327). Registered
-    // only while the override is live, like every other injection surface.
-    ...(specDistInjection ? [specDistInjection.singleZodPlugin] : []),
-    // …and in EVERY build, injected or not: fail when the emitted chunks carry
-    // more than one zod instance, or none at all (the counter-probe). Measures
-    // the outcome rather than trusting the redirect above, because the first
-    // mechanism tried for this (`resolve.dedupe`, see below) was a silent no-op.
+    assertLazyLinterStaysLazy(SPEC_MODULE_TEST),
+    // In EVERY build: fail when the emitted chunks carry more than one zod
+    // instance, or none at all (the counter-probe), objectui#11327. Measures the
+    // outcome rather than trusting a mechanism, because the first mechanism
+    // tried for this (`resolve.dedupe`, see below) was a silent no-op.
     assertSingleZodInstance(),
     // The same refusal one directory over: fails the build if the
     // `@object-ui/types/zod` validators rejoin the eager closure, AND if they
@@ -977,14 +845,13 @@ export default defineConfig({
     // ⛔ `zod` is deliberately NOT listed. Dedupe resolves a listed package from
     // the Vite root, and this root (`apps/console`) declares no `zod`: the
     // lookup finds nothing and Vite falls back to each importer's own copy
-    // without a warning. Measured on objectui#11327 with OBJECTSTACK_SPEC_DIST
-    // set — adding `zod` here emitted the same two zod copies, byte-identical.
-    // The one-zod rule is held by `specDistInjection.singleZodPlugin` and
-    // checked by `assertSingleZodInstance` in the plugin list above.
+    // without a warning. Measured on objectui#11327 — adding `zod` here emitted
+    // the same two zod copies, byte-identical. The one-zod rule is checked by
+    // `assertSingleZodInstance` in the plugin list above.
     dedupe: ['react', 'react-dom', 'sonner'],
   },
   optimizeDeps: {
-    include: optimizeDepsInclude
+    include: OPTIMIZE_DEPS_INCLUDE
   },
   build: {
     target: 'esnext',
@@ -1082,7 +949,7 @@ export default defineConfig({
             // diagnostic. Dropping the tag puts the four modules back on every
             // page load, and the lowered ceiling in
             // `scripts/check-eager-closure-budget.mjs` is what reds on it.
-            { name: 'vendor-objectstack', test: vendorObjectstackTest, priority: 95, tags: ['$initial'] },
+            { name: 'vendor-objectstack', test: VENDOR_OBJECTSTACK_TEST, priority: 95, tags: ['$initial'] },
             { name: 'vendor-icons-core', test: /[\\/]node_modules[\\/]lucide-react[\\/]dist[\\/](lucide-react|esm[\\/](Icon|createLucideIcon|defaultAttributes|shared))/, priority: 90 },
             //
             // ## The icons the eager shell imports by name share ONE chunk (objectui#12187)
@@ -1615,13 +1482,6 @@ export default defineConfig({
   },
   server: {
     port: 5180,
-    // Widen the fs allow-list only when an out-of-tree override is set (see
-    // OBJECTSTACK_CLIENT_DIST / OBJECTSTACK_SPEC_DIST above); otherwise keep
-    // Vite's defaults. Both overrides live outside the workspace root, which
-    // Vite's default `fs.allow` serves as a 403 (blank page, no build error).
-    ...(clientFsAllow.length || specFsAllow.length
-      ? { fs: { allow: [path.resolve(import.meta.dirname, '../..'), ...clientFsAllow, ...specFsAllow] } }
-      : {}),
     proxy: {
       '/api': { target: process.env.DEV_PROXY_TARGET || 'http://localhost:3000', changeOrigin: true },
     },

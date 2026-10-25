@@ -24,15 +24,14 @@ import { fileURLToPath } from 'node:url';
  *   - `packages/tenant` was listed in the Package Tiers table; that package was deleted
  *     by objectui#2564 (commit d5b1bc0b4).
  *
- * ## Why this is a sibling file and not more `it`s in the #4143 pin
+ * ## Why this file never reads `## Current Release`
  *
- * `quick-reference-current-release-4143.test.ts` is scoped, in its own words, to the
- * `## Current Release` section — deliberately, because "`## Repository Layout` above it
- * also carries numbers, and asserting over the whole file would conflate a status claim
- * with a package count". That scoping is load-bearing for its reverse direction (no
- * un-derived version literal), which would go red on this page's ports and counts if it
- * were widened. So the two files split by section, and this one never reads
- * `## Current Release`.
+ * That section had its own pin, `quick-reference-current-release-4143.test.ts`, scoped
+ * to it because "`## Repository Layout` above it also carries numbers, and asserting
+ * over the whole file would conflate a status claim with a package count". The pin and
+ * the section's version rows were retired together when objectui's release lane left
+ * (objectstack#25711, decision 17c); the section now holds no literal to pin, and this
+ * file still stops short of it.
  *
  * ## What is pinned here, and what is deliberately not
  *

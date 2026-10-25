@@ -105,11 +105,6 @@ playwright-report
 
 .objectstack
 
-# objectui#13008: `.objectstack-pin/NAME/` tracks one file, the packed package.json
-# of the pinned @objectstack/* build; `pnpm objectstack:build` links the rest beside it.
-/.objectstack-pin/*/*
-!/.objectstack-pin/*/package.json
-
 .playwright-mcp
 # Live e2e auth state (contains a session token) + artifacts
 e2e/live/.auth/

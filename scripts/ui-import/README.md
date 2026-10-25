@@ -38,17 +38,17 @@ their own changes after the cutover.
 
 # ui-import: the objectui side of the release-lane merge (objectstack#25711)
 
-`4a-ui-side.patch` is the `ui/` half of sub-issue 4a of objectstack#25677: it removes
+This is the record of the `ui/` half of sub-issue 4a of objectstack#25677. It removed
 objectui's pin on objectstack (`.objectstack-sha`, `.objectstack-pin/`, the scripts that
 read them), the dist-injection Vite probes, objectui's own release lane and its own
-Changesets config. It is a patch file and not tree edits because `ui/` does not exist on
-`main` until the subtree PR of sub-issue 5 lands; it is applied in that cutover window,
-right after the subtree PR, together with the root half of 4a.
+Changesets config. While `ui/` did not exist on `main` it was carried as a patch file,
+`4a-ui-side.patch`. In the cutover sitting, right after the subtree PR (objectstack#25825)
+landed on `main` (`fd40831416`), 4a's own PR (objectstack#25745) applied it as tree edits
+together with the root half of 4a, and deleted the patch file in the same commit.
 
-## What it changes
+## What it changed
 
-Deleted (step 2 below; the patch carries only modifications and additions, so the
-deleted files' lines are not repeated here):
+Deleted (step 2 below):
 
 - the pin: `.objectstack-sha`, `.objectstack-pin/` (7 packed manifests),
   `scripts/bump-objectstack.sh`, `scripts/objectstack-pin.mjs`,
@@ -68,7 +68,7 @@ deleted files' lines are not repeated here):
   `quick-reference-current-release-4143` pin. Its only release-path caller was
   `changeset-release.yml`, deleted above.
 
-Changed by the patch:
+Changed (step 3 below):
 
 - `scripts/vite-single-zod.ts` (new): the single-zod build guard, moved out of the deleted
   spec probe because it runs in every console build. `apps/console/vite.config.ts` drops
@@ -96,9 +96,9 @@ Changed by the patch:
   `quick-reference-commands-4149.test.ts`: their pin, release-lane and release-sync
   rows.
 
-## Apply
+## How it was applied
 
-From the monorepo root, on the tree the subtree PR produced:
+From the monorepo root, after `git merge origin/main` brought the subtree in:
 
 ```sh
 # 1. Not here: objectui's 65 pending ui/.changeset/*.md stay under ui/ for the
@@ -132,15 +132,17 @@ git rm -r -q --ignore-unmatch -- \
   ui/scripts/__tests__/vite-objectstack-client-dist.test.ts \
   ui/scripts/__tests__/vite-objectstack-spec-dist.test.ts
 
-# 3. The modifications and the three new files.
-git apply --directory=ui --check scripts/ui-import/4a-ui-side.patch
-git apply --directory=ui scripts/ui-import/4a-ui-side.patch
+# 3. The modifications and the three new files: `git apply --directory=ui` of
+#    4a-ui-side.patch, deleted in the same commit.
+
+# 4. The SDUI manifest regenerated from ui/ for the merged tree (107 -> 106
+#    components; objectui#13449 retired `html`): sdui.manifest.json and
+#    scripts/sdui-manifest.record.json, from the patch the 4b PR 2a thread measured.
 ```
 
-The patch is written against the verification branch head `9e37acd126` (objectstack#25697,
-the run 8 tree: objectui `main` imported under `ui/` plus the adaptations). Before the
-cutover, run step 3's `--check` against the final tree and regenerate the patch if it
-fails (sub-issue 5 owns that re-check).
+The patch was written against the verification branch head `9e37acd126` (objectstack#25697,
+the run 8 tree) and re-checked with `git apply --check` on the cutover heads `1c0d02eda4`
+and `c04b36dcb9` and on `main` at `fd40831416` before it was applied.
 
 ## Verify
 

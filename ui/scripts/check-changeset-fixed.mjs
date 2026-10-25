@@ -63,6 +63,7 @@ import { readFileSync, readdirSync, statSync } from "fs";
 import { resolve, dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { isEntrypoint } from "./invoked-as.mjs";
+import { changesetConfigPath } from "./workspace-root.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -165,7 +166,7 @@ function readManifests(dirs) {
 }
 
 function main() {
-  const config = JSON.parse(readFileSync(resolve(root, ".changeset/config.json"), "utf8"));
+  const config = JSON.parse(readFileSync(changesetConfigPath(root), "utf8"));
   const { unclassified, privateInFixed, privatePackages } = analyze(
     config,
     readManifests(PACKAGE_ROOTS)

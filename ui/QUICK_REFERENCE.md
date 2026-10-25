@@ -121,28 +121,13 @@ pnpm changeset publish         # Publish to npm (CI only)
 
 ## Current Release
 
-Every value below is pinned to the manifest that owns it by
-`scripts/__tests__/quick-reference-current-release-4143.test.ts` — edit the anchor and
-that test tells you to edit this block. The one exception is called out on its row.
+The release version is the monorepo's. Every `@object-ui/*` package is in one Changesets
+`fixed` group with every `@objectstack/*` package (`../.changeset/config.json`), so a
+release moves all of them together and any package's `package.json` names the current
+version. The toolchain floors are this tree's `package.json`: `engines` and
+`packageManager`. This block deliberately holds no version literal: the rows that did,
+and the script that rewrote them at `changeset:version`, were retired when objectui's own
+release lane left (objectstack#25711, decision 17c).
 
-You rarely have to edit it by hand. `pnpm quick-reference:sync` rewrites these rows from
-the manifests, and `pnpm quick-reference:check` reports drift without writing. The
-release path runs the sync itself: `changeset:version` bumps every manifest and updates
-this block in the same commit, so a release can no longer leave the block a version
-behind (objectui#5394 — that had happened once per release, three times).
-
-- **Version:** 18.1.0 (the version every `@object-ui/*` manifest carries — they are one
-  `fixed` group in `.changeset/config.json`, so a release moves all of them together)
-- **Spec:** `@objectstack/spec` ^18.0.0-next.1 (declared by the root `package.json` and by
-  `apps/console/package.json`)
-- **Client:** `@objectstack/client` ^18.0.0-next.1 (declared by `apps/console/package.json`
-  and `packages/data-objectstack/package.json`)
-- **Node.js:** ≥ 22.13 (see root `engines.node`)
-- **pnpm:** ≥ 10 (the workspace pins `pnpm@10.31.0` via `packageManager`)
-- **React:** 19.x (the `peerDependencies.react` range the packages declare)
-- **TypeScript:** ≥ 5.0 (strict mode) — the stack floor stated in AGENTS.md §2, not a
-  manifest fact: nothing in this tree declares a `typescript` range to check it against,
-  so this is the one row above that no test can hold to account.
-
-> Pending unreleased work is queued in `.changeset/` — list that directory to see what is
-> staged for the next release.
+> Pending unreleased work is queued in the monorepo's `../.changeset/` — list that
+> directory to see what is staged for the next release.

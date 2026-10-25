@@ -198,10 +198,6 @@ export const ALLOWLIST = new Map([
     "decides the WORKSPACE root for every reader of pnpm-workspace.yaml / pnpm-lock.yaml / the root manifest / the .pnpm store: one probe at `uiRoot()` and one at its parent, anchored on ui-root.mjs -- never a walk, never the cwd (objectstack#25723, objectstack#25733)",
   ],
   [
-    'scripts/objectstack-pin.mjs',
-    'packs the pin from an objectstack tree and refuses one with no pnpm-workspace.yaml -- a probe of THAT tree, not of this root; the file itself is deleted at cutover',
-  ],
-  [
     'scripts/check-new-cross-file-line-citations.mjs',
     "the gate's subject is the REPOSITORY AT THE CWD (its self-test drives it against a scratch repository), so `gateRoot()` reads the toplevel and narrows to `uiRoot()` only when the objectui tree lies inside it -- a probe of THAT repository, not a lookup of this root",
   ],
