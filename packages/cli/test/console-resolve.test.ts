@@ -227,7 +227,7 @@ describe('detectConsoleShaDrift', () => {
 
 describe('formatConsoleDistMissingWarning — the remedy named for where the server runs', () => {
   /** The framework repo's remedy, and the one the warning used to name everywhere. */
-  const BUILD_REMEDY = 'pnpm objectui:build';
+  const BUILD_REMEDY = 'pnpm console:build';
   const RETIRED_REMEDY = '@object-ui/console';
 
   function writeJson(file: string, value: unknown): void {
@@ -256,14 +256,14 @@ describe('formatConsoleDistMissingWarning — the remedy named for where the ser
       name: 'framework-root',
       private: true,
       scripts: withScript
-        ? { build: 'turbo run build', 'objectui:build': 'bash scripts/build-console.sh' }
+        ? { build: 'turbo run build', 'console:build': 'turbo run build:dist --filter=@objectstack/console' }
         : { build: 'turbo run build' },
     });
     const consoleDir = writeUnbuiltConsole(path.join(root, 'packages', 'console'));
     return { root, consoleDir };
   }
 
-  it('names `pnpm objectui:build` and the root to run it in, inside the framework repo', () => {
+  it('names `pnpm console:build` and the root to run it in, inside the framework repo', () => {
     const { root, consoleDir } = makeFrameworkTree(true);
 
     const message = formatConsoleDistMissingWarning(consoleDir);
@@ -307,12 +307,12 @@ describe('formatConsoleDistMissingWarning — the remedy named for where the ser
 
   it('stops at the consuming project\'s own manifest, even inside a framework checkout', () => {
     // A project created inside a directory whose manifest declares the script:
-    // the console it resolved is ITS install, which `objectui:build` does not
+    // the console it resolved is ITS install, which `console:build` does not
     // build, so the install remedy is the true one.
     const outer = tmpRoot('outer');
     writeJson(path.join(outer, 'package.json'), {
       name: 'framework-root',
-      scripts: { 'objectui:build': 'bash scripts/build-console.sh' },
+      scripts: { 'console:build': 'turbo run build:dist --filter=@objectstack/console' },
     });
     const project = path.join(outer, 'scratch', 'my-app');
     const consoleDir = writeUnbuiltConsole(

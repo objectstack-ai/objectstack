@@ -77,8 +77,8 @@
       "outputs": ["dist/**"],
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/skills/**"]
     },
-    "@objectstack/console#build": {
-      "dependsOn": ["^build", "@object-ui/console#build"],
+    "@objectstack/console#build:dist": {
+      "dependsOn": ["@object-ui/console#build"],
       "outputs": ["dist/**"],
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/sdui.manifest.json"]
     },
