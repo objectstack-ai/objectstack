@@ -307,6 +307,30 @@
  * A closure wins over the statement when both are given: it is the narrower
  * set, and its remedy (declare the dependency) is the one that applies.
  *
+ * ## [#25786] `grouping.fields[].orderBy` — named, served, and orderable
+ *
+ * A grouping level's `orderBy` names the field whose value orders its groups.
+ * Unlike the renderer bindings, it REACHES A DOOR: the group header query
+ * (`compileListViewGroupQuery`) carries one `min` / `max` node over it, which
+ * `engine.aggregate` executes. Three verdicts, each the door's own:
+ *
+ *  - **Existence** — {@link LIST_VIEW_FIELD_UNKNOWN}, `error`: the aggregate
+ *    door refuses an unknown column `400 INVALID_FIELD`, so the grouped view
+ *    renders no group at all.
+ *  - **A dotted path** — {@link LIST_VIEW_FIELD_DOTTED} at the `aggregate`
+ *    axis: the header query compiles no join, and the door refuses every
+ *    dotted aggregation operand by name, whatever its head.
+ *  - **Orderability** — {@link LIST_VIEW_GROUP_ORDER_UNORDERABLE}, `error`:
+ *    the pair `min` / `max` × the field's declared type, asked of the spec's
+ *    table (`isAggregateCompatibleWithFieldType`) exactly as the engine's
+ *    aggregate door asks it, with the door's two non-verdicts kept — no
+ *    declared type (the driver-provisioned `id`) and a type outside
+ *    `FieldType` are not judged.
+ *
+ * A level whose `orderBy` names its own grouping field compiles no node, so
+ * nothing is judged at `orderBy` there: the `field` position already judges
+ * the name.
+ *
  * ## Skips — the same three every field-existence rule in this package takes
  *
  * Resolution is {@link resolveFieldPath}'s and its `unknowable` verdicts are
@@ -327,7 +351,12 @@
  * definition table describes it — and the door serves it, so this rule does too.
  */
 
-import { classifyDottedFilterHead } from '@objectstack/spec/data';
+import {
+  FieldType,
+  classifyDottedFilterHead,
+  isAggregateCompatibleWithFieldType,
+  virtualFieldAggregateRemedy,
+} from '@objectstack/spec/data';
 import { ListViewSchema } from '@objectstack/spec/ui';
 
 import { walkFilterFieldKeys } from './filter-walk.js';
@@ -363,6 +392,16 @@ export const LIST_VIEW_OBJECT_UNKNOWN = 'list-view-object-unknown';
  * second-class section on this module for the scope and the measurements.
  */
 export const LIST_VIEW_FIELD_DOTTED = 'list-view-field-dotted';
+
+/**
+ * [#25786] A grouping level whose `orderBy` names a field the group header
+ * query cannot order by: `min` / `max` over its declared type is a pair the
+ * aggregate × field-type table refuses — the string classes, whose order is
+ * collation-dependent, and the virtual `formula` — so the engine's aggregate
+ * door answers the grouped view's header query `400 INVALID_FIELD` and no
+ * group renders. See the section of that name on this module.
+ */
+export const LIST_VIEW_GROUP_ORDER_UNORDERABLE = 'list-view-group-order-unorderable';
 
 /**
  * A list view that still carries a key `@objectstack/spec` retired — reported
@@ -438,7 +477,7 @@ export function retiredKeyVerdictHead(prescription: string): string {
  * measured" — the position is judged for head existence only, exactly as
  * before.
  */
-type DottedAxis = 'projection' | 'filter' | undefined;
+type DottedAxis = 'projection' | 'filter' | 'aggregate' | undefined;
 
 export type ListViewFieldRefSeverity = 'error' | 'warning';
 
@@ -673,6 +712,19 @@ function dottedAxisAt(block: string, key: string): DottedAxis {
   return DOTTED_AXIS[block]?.[key];
 }
 
+/**
+ * [#25786] The second field-naming key on a `grouping.fields[]` entry record,
+ * beside its `field` — see the section of that name on this module. Its own
+ * table rather than a `COLUMN_ENTRY_POSITIONS` row: those keys live one record
+ * further down (`columns[].summary.field`), this one on the entry itself.
+ */
+const GROUPING_ENTRY_POSITIONS: Array<{ key: string; severity: Sev; axis: DottedAxis }> = [
+  { key: 'orderBy', severity: 'error', axis: 'aggregate' },
+];
+
+/** `FieldType`'s members — the vocabulary the aggregate door judges, and nothing outside it. */
+const FIELD_TYPES: ReadonlySet<string> = new Set(FieldType.options);
+
 /** The nested field positions inside one `columns[]` entry record. */
 const COLUMN_ENTRY_POSITIONS: Array<{ block: string; key: string; severity: Sev }> = [
   // `summary` aggregates a column; a stale name aggregates nothing and the
@@ -737,6 +789,7 @@ export function listViewWalkedPositions(): string[] {
       ].map((key) => (block === '' ? key : `${block}.${key}`)),
     ),
     ...COLUMN_ENTRY_POSITIONS.map(({ block, key }) => `columns.${block}.${key}`),
+    ...GROUPING_ENTRY_POSITIONS.map(({ key }) => `grouping.fields.${key}`),
   ];
 }
 
@@ -767,6 +820,17 @@ function describeDottedRefusal(
   // the value onto … and name that"); what a denormalised field is (stored,
   // written when the source changes) is `os explain list-view-field-dotted`.
   const denormalise = `denormalise the value onto "${object}" and name that`;
+
+  if (axis === 'aggregate') {
+    // No classification: the header query compiles no join, so the aggregate
+    // door refuses every dotted operand by name (an unknown column).
+    return {
+      message:
+        `${subject} "${written}" is a dotted path, so the group header query's aggregation refuses it ` +
+        `and the grouped view's header query answers 400 INVALID_FIELD`,
+      hint: `Order by a field of "${object}" itself, or ${denormalise}`,
+    };
+  }
 
   if (axis === 'projection') {
     // No classification: `assertProjectionHasNoDottedPaths` filters on
@@ -954,6 +1018,45 @@ export function validateListViewFieldRefs(
   };
 
   /**
+   * [#25786] One `grouping.fields[]` entry's `orderBy` — see the section of
+   * that name on this module: the shared existence and dotted verdicts at the
+   * `aggregate` axis, then the orderability of the field's declared type.
+   */
+  const checkGroupOrder = (
+    entry: AnyRec,
+    position: (typeof GROUPING_ENTRY_POSITIONS)[number],
+    object: string,
+    where: string,
+    path: string,
+    subject: string,
+  ): void => {
+    const written = strName(entry[position.key]);
+    // Ordering by its own grouping field compiles no node: nothing to judge here.
+    if (!written || written === strName(entry.field)) return;
+    check(written, object, position.severity, where, path, subject, position.axis);
+    if (written.includes('.')) return;
+    const verdict = resolveFieldPath(graph, object, written);
+    if (!verdict || verdict.kind !== 'ok') return;
+    const type = verdict.meta?.type;
+    if (!type || !FIELD_TYPES.has(type)) return;
+    const fn = entry.order === 'desc' ? 'max' : 'min';
+    if (isAggregateCompatibleWithFieldType(fn, type)) return;
+    findings.push({
+      severity: 'error',
+      rule: LIST_VIEW_GROUP_ORDER_UNORDERABLE,
+      where,
+      path,
+      message:
+        `${subject} "${written}" is a \`${type}\` field, and \`${fn}\` over it is refused by the aggregate door ` +
+        `(400 INVALID_FIELD), so the grouped view's header query fails and no group renders`,
+      hint:
+        virtualFieldAggregateRemedy(fn, type) ??
+        `Order by a numeric, date/time or boolean field of "${object}" (for a text label, a number field holding ` +
+          `its rank), or remove \`${position.key}\``,
+    });
+  };
+
+  /**
    * Every position on ONE list view record. `bindingPath` is the key the
    * binding `object` was read from, where an unresolvable binding is reported.
    */
@@ -1042,6 +1145,13 @@ export function validateListViewFieldRefs(
           }
           if (!isRec(entry)) return;
           check(entry.field, bound, severity, hostWhere, `${entryPath}.field`, `${key}[${i}].field`, axis);
+          // [#25786] The keys a `grouping.fields[]` entry carries beside `field`.
+          if (block === 'grouping' && key === 'fields') {
+            for (const nested of GROUPING_ENTRY_POSITIONS) {
+              checkGroupOrder(entry, nested, bound, hostWhere, `${entryPath}.${nested.key}`, `${key}[${i}].${nested.key}`);
+            }
+            return;
+          }
           // The nested positions a `columns[]` entry carries.
           if (block !== '' || key !== 'columns') return;
           for (const nested of COLUMN_ENTRY_POSITIONS) {

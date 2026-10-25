@@ -3278,14 +3278,15 @@ const LIST_VIEW_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
     // The positions are held to `listViewWalkedPositions()` by the rule's test.
     'Every field a list view names must be a field of its bound object: its `columns` (and a ' +
       'column\'s `summary` and `prefix`), `hiddenFields`, `fieldOrder`, ' +
-      '`grouping`, `rowColor` and `userFilters`, the keys of its `filter` and of each ' +
+      '`grouping` (and a grouping level\'s `orderBy`), `rowColor` and `userFilters`, the keys of its `filter` and of each ' +
       '`userFilters.tabs[].filter`, and every binding inside a `kanban`, `calendar`, `gantt`, ' +
       '`timeline`, `gallery`, `map` or `tree` block. Nothing resolves the name at render time: the ' +
       'view renders successfully with a blank, empty or wrong result, and nothing else reports the ' +
       'miss. The verdict\'s "Did you mean" names the nearest field the object declares.',
     'An error where the miss changes what the view returns or collapses what it lays out — for ' +
       'example, a filter key, user filter or gantt quick filter matches no record; a column is sent as the ' +
-      'projection, where the REST ingress answers `400 INVALID_FIELD`; a `kanban.groupByField` ' +
+      'projection, where the REST ingress answers `400 INVALID_FIELD`; a grouping level\'s `orderBy` ' +
+      'is an operand of the group header query, which the aggregate door refuses the same way; a `kanban.groupByField` ' +
       'collapses every card into one lane; a required date field of a `gantt`, `calendar` or ' +
       '`timeline` leaves nothing to place; a map with no coordinate field plots no marker; a ' +
       '`tree.parentField` flattens the tree; a `gantt.lockField` unfreezes every row and a ' +
@@ -3323,6 +3324,10 @@ const LIST_VIEW_FIELD_DOTTED_EXPLANATION: RuleExplanation = {
       '(`assertFilterIsMaterializable` and the REST ingress, `400 INVALID_FIELD`) rather than ' +
       'answered with an empty list. A structured or JSON head, an array (`multiple: true`) head, a ' +
       'file head and an unreadable head are served by the door, so they are not reported.',
+    'Aggregate: a grouping level\'s `orderBy` is the operand of the `min` / `max` node the group ' +
+      'header query orders its groups by. The header query compiles no join, so the aggregate door ' +
+      'refuses every dotted operand whatever its head (`400 INVALID_FIELD`), and the grouped view ' +
+      'renders no group.',
     'The ways out are the doors\' own. At a projection position, name the whole column and read ' +
       'into its value in the client, or read the related record with `expand`; at a filter position, ' +
       'filter on a column of the bound object itself. At either, denormalise the value onto the bound ' +
@@ -3331,6 +3336,26 @@ const LIST_VIEW_FIELD_DOTTED_EXPLANATION: RuleExplanation = {
       'walks an embedded record: `gantt.quickFilters[].field`, `gantt.tooltipFields[]` and every ' +
       'renderer binding. `sort` keeps its own rule. Always an error: every judged position is ' +
       'refused outright by its door.',
+  ],
+};
+
+const LIST_VIEW_GROUP_ORDER_UNORDERABLE_EXPLANATION: RuleExplanation = {
+  rule: 'list-view-group-order-unorderable',
+  covers: 'which fields a grouping level can order its groups by',
+  paragraphs: [
+    'A grouping level\'s `orderBy` orders its groups by another field\'s value — a period label in time ' +
+      'order by its period start. The group header query carries that value per group: the smallest ' +
+      '(`min`) for `order: asc`, the largest (`max`) for `desc`. So the field must be one `min` and `max` ' +
+      'order the same way on every backend: the aggregate × field-type table (`AGGREGATE_FIELD_TYPE_COMPATIBILITY` ' +
+      'in `@objectstack/spec/data`) accepts the numeric, temporal and boolean classes.',
+    'It refuses the string classes — text, option values, references and `autonumber` — because two ' +
+      'backends order strings by two collations, and the virtual `formula`, which stores no column. The ' +
+      'engine\'s aggregate door asks the same table, so such an `orderBy` gets the grouped view\'s header ' +
+      'query refused (`400 INVALID_FIELD`) and no group renders. To order text labels, store each label\'s ' +
+      'rank in a number field and order by that.',
+    'Not judged: a level whose `orderBy` names its own grouping field (it compiles no node), a field with no ' +
+      'declared type, and a declared type outside `FieldType` — the aggregate door judges neither. A name ' +
+      'that resolves to nothing is `list-view-field-unknown`; a dotted one is `list-view-field-dotted`.',
   ],
 };
 
@@ -5010,6 +5035,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [FILTER_EMPTY_NODE_EXPLANATION.rule]: FILTER_EMPTY_NODE_EXPLANATION,
   [LIST_VIEW_FIELD_UNKNOWN_EXPLANATION.rule]: LIST_VIEW_FIELD_UNKNOWN_EXPLANATION,
   [LIST_VIEW_FIELD_DOTTED_EXPLANATION.rule]: LIST_VIEW_FIELD_DOTTED_EXPLANATION,
+  [LIST_VIEW_GROUP_ORDER_UNORDERABLE_EXPLANATION.rule]: LIST_VIEW_GROUP_ORDER_UNORDERABLE_EXPLANATION,
   [LIST_VIEW_OBJECT_OUTSIDE_CLOSURE_EXPLANATION.rule]: LIST_VIEW_OBJECT_OUTSIDE_CLOSURE_EXPLANATION,
   [LIST_VIEW_OBJECT_UNKNOWN_EXPLANATION.rule]: LIST_VIEW_OBJECT_UNKNOWN_EXPLANATION,
   [TRANSLATION_TARGET_UNKNOWN_EXPLANATION.rule]: TRANSLATION_TARGET_UNKNOWN_EXPLANATION,

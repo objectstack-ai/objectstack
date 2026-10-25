@@ -16,6 +16,7 @@ import {
   validateListViewFieldRefs as validateListViewFieldRefsUnrecorded,
   LIST_VIEW_FIELD_UNKNOWN,
   LIST_VIEW_FIELD_DOTTED,
+  LIST_VIEW_GROUP_ORDER_UNORDERABLE,
   LIST_VIEW_OBJECT_OUTSIDE_CLOSURE,
   LIST_VIEW_OBJECT_UNKNOWN,
   listViewWalkedPositions,
@@ -92,7 +93,7 @@ const FULL_LIST_VIEW: AnyRec = {
   filter: [{ field: 'visible_from', operator: 'equals', value: '2026-01-01' }],
   hiddenFields: ['business_unit'],
   fieldOrder: ['title', 'status'],
-  grouping: { fields: [{ field: 'business_unit' }] },
+  grouping: { fields: [{ field: 'business_unit', orderBy: 'due_at' }] },
   rowColor: { field: 'status' },
   userFilters: {
     fields: [{ field: 'status' }],
@@ -298,6 +299,13 @@ describe('#14107 — every other walked position', () => {
     ],
     [{ hiddenFields: [BAD] }, 'views[0].list.hiddenFields[0]', 'warning'],
     [{ fieldOrder: [BAD] }, 'views[0].list.fieldOrder[0]', 'warning'],
+    // [#25786] An operand of the group header query: the aggregate door
+    // refuses an unknown column, so no group renders.
+    [
+      { grouping: { fields: [{ field: 'business_unit', orderBy: BAD }] } },
+      'views[0].list.grouping.fields[0].orderBy',
+      'error',
+    ],
     [{ rowColor: { field: BAD } }, 'views[0].list.rowColor.field', 'warning'],
     [{ userFilters: { fields: [{ field: BAD }] } }, 'views[0].list.userFilters.fields[0].field', 'error'],
     [
@@ -1129,6 +1137,109 @@ describe('[#22161] one-line verdicts — list-view-field-unknown, list-view-fiel
     );
     expect(names.size).toBeGreaterThan(10);
     for (const name of names) expect(text, name).toContain(`\`${name}\``);
+  });
+});
+
+/**
+ * [#25786] `grouping.fields[].orderBy` reaches a door — the group header
+ * query's `min` / `max` node, executed by `engine.aggregate` — so all three of
+ * that door's verdicts are this position's: the name resolves, it is not a
+ * dotted path, and `min` / `max` over its declared type is a pair the
+ * aggregate × field-type table accepts.
+ */
+describe('[#25786] a grouping level ordered by another field', () => {
+  const ordered = (orderBy: string, extra: AnyRec = {}): AnyRec => ({
+    grouping: { fields: [{ field: 'business_unit', orderBy, ...extra }] },
+  });
+  const findingsFor = (patch: AnyRec) => validateListViewFieldRefs(stackWith(mutate(patch)));
+
+  it.each([
+    ['a date field', 'due_at'],
+    ['a number field', 'estimate'],
+    ['a boolean field', 'is_locked'],
+    ['a registry-injected datetime column', 'created_at'],
+  ])('orders by %s — silent', (_label, orderBy) => {
+    expect(findingsFor(ordered(orderBy))).toEqual([]);
+    expect(findingsFor(ordered(orderBy, { order: 'desc' }))).toEqual([]);
+  });
+
+  it.each([
+    ['text', 'title', 'min'],
+    ['select', 'status', 'min'],
+    ['lookup', 'owner', 'max'],
+  ])('a `%s` field is unorderable — `error`, naming the refused pair, at the level\'s `orderBy`', (type, orderBy, fn) => {
+    const findings = findingsFor(ordered(orderBy, fn === 'max' ? { order: 'desc' } : {}));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(LIST_VIEW_GROUP_ORDER_UNORDERABLE);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe('views[0].list.grouping.fields[0].orderBy');
+    expect(findings[0].message).toContain(`is a \`${type}\` field, and \`${fn}\` over it is refused`);
+  });
+
+  it('a virtual `formula` field carries the spec\'s store-it remedy, not the generic one', () => {
+    const [finding, ...rest] = findingsFor(ordered('score'));
+    expect(rest).toEqual([]);
+    expect(finding.rule).toBe(LIST_VIEW_GROUP_ORDER_UNORDERABLE);
+    expect(finding.hint).toMatch(/^The field is computed on read and stores no value/);
+  });
+
+  it('a dotted `orderBy` is refused at the aggregate door, whatever its head', () => {
+    const findings = findingsFor(ordered('owner.name'));
+    expect(findings.map((f) => [f.rule, f.path, f.severity])).toEqual([
+      [LIST_VIEW_FIELD_DOTTED, 'views[0].list.grouping.fields[0].orderBy', 'error'],
+    ]);
+    expect(findings[0].message).toContain('the group header query\'s aggregation refuses it');
+    // A head that resolves to nothing is the unknown class, as everywhere.
+    expect(findingsFor(ordered('ownr.name')).map((f) => f.rule)).toEqual([LIST_VIEW_FIELD_UNKNOWN]);
+  });
+
+  it('ordering by its own grouping field compiles no node — nothing is judged at `orderBy`', () => {
+    // A text grouping field ordering by itself is the default, not a `min` over text.
+    expect(findingsFor(ordered('business_unit'))).toEqual([]);
+    // And a dangling grouping field is reported ONCE, at `field`.
+    const dangling = findingsFor({ grouping: { fields: [{ field: 'nope_field', orderBy: 'nope_field' }] } });
+    expect(idsOf(dangling)).toEqual(['views[0].list.grouping.fields[0].field']);
+  });
+
+  it('a field with no declared type, or a type outside `FieldType`, is not judged — the door judges neither', () => {
+    // `id` is driver-provisioned: the graph knows it and has no type for it.
+    expect(findingsFor(ordered('id'))).toEqual([]);
+    const objects = [{ ...OBJECTS[0], fields: [...OBJECTS[0].fields, { name: 'rank_raw', type: 'integer', label: 'Rank' }] }, OBJECTS[1]];
+    expect(validateListViewFieldRefs(stackWith(mutate(ordered('rank_raw')), objects))).toEqual([]);
+  });
+
+  it('every level is judged, each at its own index', () => {
+    const findings = findingsFor({
+      grouping: { fields: [{ field: 'status', orderBy: 'estimate' }, { field: 'business_unit', orderBy: 'title' }] },
+    });
+    expect(findings.map((f) => [f.rule, f.path])).toEqual([
+      [LIST_VIEW_GROUP_ORDER_UNORDERABLE, 'views[0].list.grouping.fields[1].orderBy'],
+    ]);
+  });
+
+  for (const command of ['validate', 'build'] as const) {
+    it(`an unorderable \`orderBy\` fails \`${command}\``, () => {
+      const { errors } = splitBySeverity(runAuthoringRules(command, { normalized: stackWith(mutate(ordered('title'))) }));
+      expect(errors.map((f) => f.rule)).toContain(LIST_VIEW_GROUP_ORDER_UNORDERABLE);
+    });
+  }
+
+  it('reaches the runtime save door through the reference-integrity suite', () => {
+    const findings = validateReferenceIntegrity(stackWith(mutate(ordered('title'))), { runtimeWriteType: 'view' });
+    expect(findings.map((f) => f.rule)).toContain(LIST_VIEW_GROUP_ORDER_UNORDERABLE);
+  });
+
+  it('`os explain` carries the reasoning, and the verdict is one line', () => {
+    const entry = explainRule(LIST_VIEW_GROUP_ORDER_UNORDERABLE);
+    expect(entry, 'no `os explain` entry').toBeDefined();
+    const text = entry!.paragraphs.join('\n');
+    for (const fact of ['`min`', '`max`', 'collation', '`formula`', 'rank in a number field']) {
+      expect(text, fact).toContain(fact);
+    }
+    for (const f of fired.filter((x) => x.rule === LIST_VIEW_GROUP_ORDER_UNORDERABLE)) {
+      expect(f.hint).not.toContain('\n');
+      expect(f.hint.length, f.hint).toBeLessThanOrEqual(200);
+    }
   });
 });
 
