@@ -119,7 +119,8 @@
       "@object-ui/react-runtime",
       "@object-ui/runner",
       "@object-ui/sdui-parser",
-      "@object-ui/types"
+      "@object-ui/types",
+      "object-ui"
     ]
   ],
   "linked": [],

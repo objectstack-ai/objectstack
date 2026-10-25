@@ -1,3 +1,20 @@
+4a-ui-side.patch: the ui/ half of sub-issue 4a (objectstack#25711), applied by
+sub-issue 5's adaptation commit with `git apply --directory=ui` after the deletions
+listed in scripts/ui-import/README.md. git apply skips every line above the first
+file header, so this text is inert.
+
+Carries Tesla's rulings of 2026-10-25 (director thread, 09:06Z):
+  - decision 17b, ruling B: the private VS Code extension `object-ui` stays in the
+    one fixed group, so objectui's check-changeset-fixed and check-unused-dependencies
+    keep their extension rows, and only their config reads change;
+  - decision 17c, ruling B, carried here: QUICK_REFERENCE.md's release-synced
+    "Current Release" rows, scripts/sync-quick-reference-release.mjs and its two
+    tests are retired, not restored through the release workflows' allowlists.
+
+Written against the verification branch head 9e37acd126 (objectstack#25697 run 8
+tree: objectui main imported under ui/ plus the adaptations), after the README's
+steps 1 and 2.
+
 diff --git a/.gitignore b/.gitignore
 index fbb270c19d..3298ccde0c 100644
 --- a/.gitignore
@@ -36,19 +53,48 @@ index b4f5092b75..7f96e932cd 100644
  
  ```text
 diff --git a/QUICK_REFERENCE.md b/QUICK_REFERENCE.md
-index 097d88086c..f518f6d690 100644
+index f58f06776c..283160e7a9 100644
 --- a/QUICK_REFERENCE.md
 +++ b/QUICK_REFERENCE.md
-@@ -126,7 +126,8 @@ this block in the same commit, so a release can no longer leave the block a vers
- behind (objectui#5394 — that had happened once per release, three times).
+@@ -115,28 +115,13 @@ pnpm changeset publish         # Publish to npm (CI only)
  
- - **Version:** 18.1.0 (the version every `@object-ui/*` manifest carries — they are one
+ ## Current Release
+ 
+-Every value below is pinned to the manifest that owns it by
+-`scripts/__tests__/quick-reference-current-release-4143.test.ts` — edit the anchor and
+-that test tells you to edit this block. The one exception is called out on its row.
+-
+-You rarely have to edit it by hand. `pnpm quick-reference:sync` rewrites these rows from
+-the manifests, and `pnpm quick-reference:check` reports drift without writing. The
+-release path runs the sync itself: `changeset:version` bumps every manifest and updates
+-this block in the same commit, so a release can no longer leave the block a version
+-behind (objectui#5394 — that had happened once per release, three times).
+-
+-- **Version:** 18.1.0 (the version every `@object-ui/*` manifest carries — they are one
 -  `fixed` group in `.changeset/config.json`, so a release moves all of them together)
-+  `fixed` group with every `@objectstack/*` package in the monorepo's
-+  `../.changeset/config.json`, so a release moves all of them together)
- - **Spec:** `@objectstack/spec` ^18.0.0-next.1 (declared by the root `package.json` and by
-   `apps/console/package.json`)
- - **Client:** `@objectstack/client` ^18.0.0-next.1 (declared by `apps/console/package.json`
+-- **Spec:** `@objectstack/spec` ^18.0.0-next.1 (declared by the root `package.json` and by
+-  `apps/console/package.json`)
+-- **Client:** `@objectstack/client` ^18.0.0-next.1 (declared by `apps/console/package.json`
+-  and `packages/data-objectstack/package.json`)
+-- **Node.js:** ≥ 22.13 (see root `engines.node`)
+-- **pnpm:** ≥ 10 (the workspace pins `pnpm@10.31.0` via `packageManager`)
+-- **React:** 19.x (the `peerDependencies.react` range the packages declare)
+-- **TypeScript:** ≥ 5.0 (strict mode) — the stack floor stated in AGENTS.md §2, not a
+-  manifest fact: nothing in this tree declares a `typescript` range to check it against,
+-  so this is the one row above that no test can hold to account.
+-
+-> Pending unreleased work is queued in `.changeset/` — list that directory to see what is
+-> staged for the next release.
++The release version is the monorepo's. Every `@object-ui/*` package is in one Changesets
++`fixed` group with every `@objectstack/*` package (`../.changeset/config.json`), so a
++release moves all of them together and any package's `package.json` names the current
++version. The toolchain floors are this tree's `package.json`: `engines` and
++`packageManager`. This block deliberately holds no version literal: the rows that did,
++and the script that rewrote them at `changeset:version`, were retired when objectui's own
++release lane left (objectstack#25711, decision 17c).
++
++> Pending unreleased work is queued in the monorepo's `../.changeset/` — list that
++> directory to see what is staged for the next release.
 diff --git a/apps/console/vite.config.ts b/apps/console/vite.config.ts
 index 6800efa897..de0b876d06 100644
 --- a/apps/console/vite.config.ts
@@ -364,7 +410,7 @@ index 8861e1cb5f..b8bea1bbed 100644
  }, {
    // objectui#4853 — a stale `eslint-disable` is an ERROR, not a warning.
 diff --git a/package.json b/package.json
-index e722c7596d..cf67fd952e 100644
+index e722c7596d..6eb05d7a73 100644
 --- a/package.json
 +++ b/package.json
 @@ -16,9 +16,7 @@
@@ -387,17 +433,21 @@ index e722c7596d..cf67fd952e 100644
      "check:i18n-keys": "node scripts/check-i18n-call-site-keys.mjs",
      "check:i18n-drift": "node scripts/check-i18n-en-drift.mjs",
      "check:i18n-dead-keys": "node scripts/check-i18n-dead-keys.mjs",
-@@ -129,7 +125,7 @@
-     "changeset:version": "changeset version && node scripts/sync-quick-reference-release.mjs",
-     "quick-reference:sync": "node scripts/sync-quick-reference-release.mjs",
-     "quick-reference:check": "node scripts/sync-quick-reference-release.mjs --check",
+@@ -126,10 +122,8 @@
+     "shadcn:list": "node scripts/shadcn-sync.js --list",
+     "changeset:check": "node scripts/check-changeset-fixed.mjs && node scripts/check-changeset-no-major.mjs",
+     "changeset": "changeset",
+-    "changeset:version": "changeset version && node scripts/sync-quick-reference-release.mjs",
+-    "quick-reference:sync": "node scripts/sync-quick-reference-release.mjs",
+-    "quick-reference:check": "node scripts/sync-quick-reference-release.mjs --check",
 -    "changeset:publish": "node scripts/objectstack-floor.mjs && node scripts/check-published-dist-tooling.mjs && node scripts/check-spec-range-floors.mjs && changeset publish",
++    "changeset:version": "changeset version",
 +    "changeset:publish": "node scripts/check-published-dist-tooling.mjs && changeset publish",
      "test:e2e": "playwright test",
      "test:e2e:ui": "playwright test --ui",
      "test:e2e:live": "playwright test --config=playwright.live.config.ts",
 diff --git a/scripts/__tests__/check-changeset-fixed.test.ts b/scripts/__tests__/check-changeset-fixed.test.ts
-index 58904d0be8..045bf3070d 100644
+index 58904d0be8..c41e20d361 100644
 --- a/scripts/__tests__/check-changeset-fixed.test.ts
 +++ b/scripts/__tests__/check-changeset-fixed.test.ts
 @@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
@@ -408,27 +458,7 @@ index 58904d0be8..045bf3070d 100644
  
  /**
   * `scripts/check-changeset-fixed.mjs` used to answer one question — is every
-@@ -124,11 +125,27 @@ describe('analyze', () => {
-     ]);
-     expect(result.unclassified.map((p) => p.name)).toEqual(['@object-ui/unlisted']);
-   });
-+
-+  it('classifies a private package outside `fixed` only while privatePackages.version is true', () => {
-+    // The monorepo shape (objectstack#25711): the root `fixed` group is public
-+    // packages only, and the extension is versioned on its own.
-+    const shape = [pkg('@object-ui/core'), pkg('object-ui', true)];
-+    const fixed = [['@object-ui/core']];
-+    expect(analyze({ fixed, privatePackages: { version: true, tag: false } }, shape).unclassified).toEqual([]);
-+    expect(
-+      analyze({ fixed, privatePackages: { version: false, tag: false } }, shape).unclassified.map((p) => p.name)
-+    ).toEqual(['object-ui']);
-+    // A PUBLIC package outside `fixed` is still unclassified, whatever the key says.
-+    expect(
-+      analyze({ fixed, privatePackages: { version: true, tag: false } }, [...shape, pkg('@object-ui/loose')])
-+        .unclassified.map((p) => p.name)
-+    ).toEqual(['@object-ui/loose']);
-+  });
- });
+@@ -128,7 +129,7 @@ describe('analyze', () => {
  
  describe('the repository itself', () => {
    const config = JSON.parse(
@@ -437,26 +467,6 @@ index 58904d0be8..045bf3070d 100644
    ) as { fixed?: string[][]; ignore?: string[]; privatePackages?: unknown };
  
    const manifests = ['packages', 'apps'].flatMap((dir) =>
-@@ -164,13 +181,14 @@ describe('the repository itself', () => {
-     ).toEqual([]);
-   });
- 
--  it('still keeps the private VS Code extension inside the fixed group', () => {
--    // The shape the two rules above exist for. If this ever stops being true the
--    // guard is not wrong, but it is no longer guarding anything real — and the
--    // rationale in both files should be re-read before it is trimmed.
-+  it('versions the private VS Code extension on its own, outside the fixed group (objectstack#25711)', () => {
-+    // The monorepo's one config holds only public packages in `fixed`; the
-+    // extension is versioned by `privatePackages.version: true` instead. If it
-+    // ever rejoins the group, rule 3 above is what guards it again.
-     const vscode = manifests.find((m) => m.path === 'packages/vscode-extension/package.json');
-     expect(vscode?.name).toBe('object-ui');
-     expect(vscode?.private).toBe(true);
--    expect((config.fixed ?? []).flat()).toContain('object-ui');
-+    expect((config.fixed ?? []).flat()).not.toContain('object-ui');
-+    expect(normalizePrivatePackages(config.privatePackages)?.version).toBe(true);
-   });
- });
 diff --git a/scripts/__tests__/check-lockfile-dedupe.test.ts b/scripts/__tests__/check-lockfile-dedupe.test.ts
 index c81bfcb92f..4c83ff8bb0 100644
 --- a/scripts/__tests__/check-lockfile-dedupe.test.ts
@@ -516,26 +526,6 @@ index c81bfcb92f..4c83ff8bb0 100644
  describe('the lockfile-dedupe checker', () => {
    it('ships its own self-test, and it passes as shipped', () => {
      const run = spawnSync('node', [SCRIPT, '--self-test'], { cwd: repoRoot, encoding: 'utf8' });
-diff --git a/scripts/__tests__/check-unused-dependencies.test.ts b/scripts/__tests__/check-unused-dependencies.test.ts
-index aa2d460bef..f8684361a0 100644
---- a/scripts/__tests__/check-unused-dependencies.test.ts
-+++ b/scripts/__tests__/check-unused-dependencies.test.ts
-@@ -401,14 +401,13 @@ describe('this repository', () => {
-     expect(findings).toEqual([]);
-   });
- 
--  it('allows exactly the four rows the gate landed with, each still verifying', () => {
-+  it('allows exactly the two rows left since the extension left the release group, each still verifying', () => {
-     expect(
-       Object.fromEntries(
-         Object.entries(DECLARED_WITHOUT_IMPORT).map(([pkg, rows]) => [pkg, Object.keys(rows).sort()]),
-       ),
-     ).toEqual({
-       '@object-ui/cli': ['@object-ui/components', '@object-ui/react'],
--      'object-ui': ['@object-ui/core', '@object-ui/types'],
-     });
-   });
- 
 diff --git a/scripts/__tests__/console-lazy-linter.test.ts b/scripts/__tests__/console-lazy-linter.test.ts
 new file mode 100644
 index 0000000000..8a65e29615
@@ -831,27 +821,33 @@ index 0000000000..f03a3f5416
 +    expect(findings, 'optimizeDeps.include entries the dev server cannot resolve (objectui#10865)').toEqual([]);
 +  });
 +});
-diff --git a/scripts/__tests__/quick-reference-current-release-4143.test.ts b/scripts/__tests__/quick-reference-current-release-4143.test.ts
-index e24a897155..f1d585cac3 100644
---- a/scripts/__tests__/quick-reference-current-release-4143.test.ts
-+++ b/scripts/__tests__/quick-reference-current-release-4143.test.ts
-@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
- import fs from 'node:fs';
- import path from 'node:path';
- import { fileURLToPath } from 'node:url';
-+import { changesetConfigPath } from '../workspace-root.mjs';
- 
- /**
-  * objectui#4143: `QUICK_REFERENCE.md`'s "Current Release" block is a deliberately
-@@ -261,7 +262,7 @@ describe('QUICK_REFERENCE.md "Current Release" — package + spec versions', ()
-    */
-   it('states the one version every workspace package carries', () => {
-     const changesetConfig = JSON.parse(
--      fs.readFileSync(path.join(repoRoot, '.changeset/config.json'), 'utf8'),
-+      fs.readFileSync(changesetConfigPath(repoRoot), 'utf8'),
-     ) as { fixed?: string[][] };
-     const fixedGroup = changesetConfig.fixed?.[0] ?? [];
-     expect(fixedGroup.length, '.changeset/config.json must still declare one `fixed` group').toBeGreaterThan(1);
+diff --git a/scripts/__tests__/quick-reference-commands-4149.test.ts b/scripts/__tests__/quick-reference-commands-4149.test.ts
+index 690797df72..b10d551252 100644
+--- a/scripts/__tests__/quick-reference-commands-4149.test.ts
++++ b/scripts/__tests__/quick-reference-commands-4149.test.ts
+@@ -24,15 +24,14 @@ import { fileURLToPath } from 'node:url';
+  *   - `packages/tenant` was listed in the Package Tiers table; that package was deleted
+  *     by objectui#2564 (commit d5b1bc0b4).
+  *
+- * ## Why this is a sibling file and not more `it`s in the #4143 pin
++ * ## Why this file never reads `## Current Release`
+  *
+- * `quick-reference-current-release-4143.test.ts` is scoped, in its own words, to the
+- * `## Current Release` section — deliberately, because "`## Repository Layout` above it
+- * also carries numbers, and asserting over the whole file would conflate a status claim
+- * with a package count". That scoping is load-bearing for its reverse direction (no
+- * un-derived version literal), which would go red on this page's ports and counts if it
+- * were widened. So the two files split by section, and this one never reads
+- * `## Current Release`.
++ * That section had its own pin, `quick-reference-current-release-4143.test.ts`, scoped
++ * to it because "`## Repository Layout` above it also carries numbers, and asserting
++ * over the whole file would conflate a status claim with a package count". The pin and
++ * the section's version rows were retired together when objectui's release lane left
++ * (objectstack#25711, decision 17c); the section now holds no literal to pin, and this
++ * file still stops short of it.
+  *
+  * ## What is pinned here, and what is deliberately not
+  *
 diff --git a/scripts/__tests__/vite-single-zod.test.ts b/scripts/__tests__/vite-single-zod.test.ts
 new file mode 100644
 index 0000000000..4c28d5ff29
@@ -1089,31 +1085,10 @@ index 4649366c1c..de1e40af0e 100644
      workflow: 'check-links.yml',
      action: 'lycheeverse/lychee-action',
 diff --git a/scripts/check-changeset-fixed.mjs b/scripts/check-changeset-fixed.mjs
-index fc2d74218d..9dee73c030 100644
+index fc2d74218d..94cf536546 100644
 --- a/scripts/check-changeset-fixed.mjs
 +++ b/scripts/check-changeset-fixed.mjs
-@@ -4,11 +4,19 @@
-  * release. Three rules, all decided from the config file plus the manifests:
-  *
-  *   1. every workspace package under `packages/` and `apps/` is either in the
-- *      `fixed` group or matched by `ignore`;
-+ *      `fixed` group or matched by `ignore` — or is PRIVATE while
-+ *      `privatePackages.version` is true, which versions it on its own;
-  *   2. `privatePackages` is declared explicitly;
-  *   3. no PRIVATE package sits in the `fixed` group while
-  *      `privatePackages.version` is false.
-  *
-+ * Rule 1's private arm arrived with the objectstack monorepo (objectstack#25711):
-+ * the one `.changeset/config.json` there is the root's, its `fixed` group holds
-+ * exactly the PUBLIC packages of both scopes (the root's own
-+ * `scripts/check-changeset-fixed.mjs` refuses a private name in it, and the
-+ * release scripts read the group as "what npm serves"), so `object-ui` left the
-+ * group and is versioned by `privatePackages` instead.
-+ *
-  * Rule 1 is the original one and is version-agnostic. Rules 2 and 3 exist
-  * because `@changesets/cli@3` changed what an ABSENT `privatePackages` means,
-  * and this repo has a private package inside the `fixed` group — `object-ui`
-@@ -63,6 +71,7 @@ import { readFileSync, readdirSync, statSync } from "fs";
+@@ -63,6 +63,7 @@ import { readFileSync, readdirSync, statSync } from "fs";
  import { resolve, dirname, join } from "path";
  import { fileURLToPath } from "url";
  import { isEntrypoint } from "./invoked-as.mjs";
@@ -1121,18 +1096,7 @@ index fc2d74218d..9dee73c030 100644
  
  const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
  
-@@ -124,7 +133,9 @@ export function analyze(config, manifests) {
-   const isIgnored = globMatcher(config.ignore ?? []);
-   const privatePackages = normalizePrivatePackages(config.privatePackages);
- 
--  const unclassified = manifests.filter((pkg) => !isFixed(pkg.name) && !isIgnored(pkg.name));
-+  const unclassified = manifests.filter(
-+    (pkg) => !isFixed(pkg.name) && !isIgnored(pkg.name) && !(pkg.private && privatePackages?.version === true),
-+  );
-   const privateInFixed =
-     privatePackages?.version === true
-       ? []
-@@ -165,7 +176,7 @@ function readManifests(dirs) {
+@@ -165,7 +166,7 @@ function readManifests(dirs) {
  }
  
  function main() {
@@ -1163,18 +1127,19 @@ index 585524b06c..7a1ff80d89 100644
  }
  
 diff --git a/scripts/check-changeset-presence.mjs b/scripts/check-changeset-presence.mjs
-index 05cc46b835..542c1e088e 100644
+index 2971dfffa7..a256fa15c5 100644
 --- a/scripts/check-changeset-presence.mjs
 +++ b/scripts/check-changeset-presence.mjs
-@@ -424,6 +424,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+@@ -424,7 +424,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
  import { dirname, join, resolve } from 'node:path';
  import { fileURLToPath } from 'node:url';
  import { isEntrypoint } from './invoked-as.mjs';
-+import { changesetConfigPath } from './workspace-root.mjs';
+-import { revPath } from './workspace-root.mjs';
++import { changesetConfigPath, revPath } from './workspace-root.mjs';
  
  const scriptDir = dirname(fileURLToPath(import.meta.url));
  
-@@ -626,14 +627,15 @@ function ignoreMatcher(patterns) {
+@@ -631,14 +631,15 @@ function ignoreMatcher(patterns) {
   * build and not a quiet pass.
   */
  export function readReleaseConfig(root) {
@@ -1194,6 +1159,19 @@ index 05cc46b835..542c1e088e 100644
    let config;
    try {
      config = JSON.parse(readFileSync(configPath, 'utf8'));
+diff --git a/scripts/check-entry-guard.mjs b/scripts/check-entry-guard.mjs
+index 61de3b7df3..c98d2daad8 100644
+--- a/scripts/check-entry-guard.mjs
++++ b/scripts/check-entry-guard.mjs
+@@ -112,7 +112,7 @@
+  * same reasoning holds here:
+  *
+  *   • many of these scripts have real side effects (`shadcn-sync`,
+- *     `sync-quick-reference-release`, `regenerate-known-schema-types`), so a
++ *     `regenerate-known-schema-types`), so a
+  *     gate that spawns all of them is a gate nobody can run locally;
+  *   • "produced output" is not a decidable property of an arbitrary tool -- a
+  *     quiet-on-success script is legitimate, so the assertion would have to be
 diff --git a/scripts/check-lockfile-dedupe.mjs b/scripts/check-lockfile-dedupe.mjs
 index 1ff08cc6a5..039117dad1 100644
 --- a/scripts/check-lockfile-dedupe.mjs
@@ -1317,12 +1295,12 @@ index 3298563188..6a24ce309e 100644
      throw new Error(`cannot read .changeset/config.json: ${error.message}`);
    }
 diff --git a/scripts/check-ui-root-lookups.mjs b/scripts/check-ui-root-lookups.mjs
-index a04f2f0af4..20ac02c4af 100644
+index e37d979cb4..00035c8ae6 100644
 --- a/scripts/check-ui-root-lookups.mjs
 +++ b/scripts/check-ui-root-lookups.mjs
-@@ -99,10 +99,6 @@ export const ALLOWLIST = new Map([
+@@ -197,10 +197,6 @@ export const ALLOWLIST = new Map([
      'scripts/workspace-root.mjs',
-     "decides the WORKSPACE root for every reader of pnpm-workspace.yaml / pnpm-lock.yaml / the root manifest: one probe at `uiRoot()` and one at its parent, anchored on ui-root.mjs -- never a walk, never the cwd (objectstack#25723)",
+     "decides the WORKSPACE root for every reader of pnpm-workspace.yaml / pnpm-lock.yaml / the root manifest / the .pnpm store: one probe at `uiRoot()` and one at its parent, anchored on ui-root.mjs -- never a walk, never the cwd (objectstack#25723, objectstack#25733)",
    ],
 -  [
 -    'scripts/objectstack-pin.mjs',
@@ -1331,76 +1309,8 @@ index a04f2f0af4..20ac02c4af 100644
    [
      'scripts/check-new-cross-file-line-citations.mjs',
      "the gate's subject is the REPOSITORY AT THE CWD (its self-test drives it against a scratch repository), so `gateRoot()` reads the toplevel and narrows to `uiRoot()` only when the objectui tree lies inside it -- a probe of THAT repository, not a lookup of this root",
-diff --git a/scripts/check-unused-dependencies.mjs b/scripts/check-unused-dependencies.mjs
-index fe12daa98a..ae9a1eaa93 100644
---- a/scripts/check-unused-dependencies.mjs
-+++ b/scripts/check-unused-dependencies.mjs
-@@ -301,7 +301,13 @@ export function consumedNames(root, pkgDir) {
-  * Declarations with a consumer this gate structurally cannot see.
-  *
-  * Every row states its evidence and RE-DERIVES it on each run, and a row that
-- * has stopped applying fails the build — see the header. Four rows, two shapes.
-+ * has stopped applying fails the build — see the header. Two rows, one shape.
-+ *
-+ * The extension's two rows (`object-ui`: `@object-ui/core`, `@object-ui/types`,
-+ * bundled by `noExternal` in its tsup config) left when the release group moved
-+ * to the monorepo's `.changeset/config.json` (objectstack#25711): that group may
-+ * not name a private package, so the private extension is no longer a released
-+ * package this gate scans.
-  *
-  * @type {Record<string, Record<string, Allowance>>}
-  */
-@@ -310,10 +316,6 @@ export const DECLARED_WITHOUT_IMPORT = {
-     '@object-ui/components': generatedSourceAllowance('@object-ui/components'),
-     '@object-ui/react': generatedSourceAllowance('@object-ui/react'),
-   },
--  'object-ui': {
--    '@object-ui/core': bundlerInlinedAllowance('@object-ui/core'),
--    '@object-ui/types': bundlerInlinedAllowance('@object-ui/types'),
--  },
- };
- 
- /**
-@@ -351,37 +353,6 @@ function generatedSourceAllowance(name) {
-   };
- }
- 
--/**
-- * The extension shape: the bundler INLINES the package by name from its config.
-- *
-- * `packages/vscode-extension/tsup.config.ts` lists both names in `noExternal`,
-- * so their code is compiled into the extension's `dist` even though no file in
-- * the extension imports the bare specifier.
-- */
--function bundlerInlinedAllowance(name) {
--  const config = 'tsup.config.ts';
--  return {
--    reason:
--      `bundled into this package's \`dist\` by \`noExternal\` in ${config}, which names it as a string ` +
--      'rather than importing it',
--    verify(root, pkg) {
--      const path = join(root, pkg.dir, config);
--      let text;
--      try {
--        text = readFileSync(path, 'utf8');
--      } catch {
--        return [`${pkg.dir}/${config} cannot be read, so the allowance cannot be verified`];
--      }
--      const noExternal = /noExternal\s*:\s*\[([^\]]*)\]/s.exec(text);
--      if (!noExternal) return [`${pkg.dir}/${config} no longer declares \`noExternal\``];
--      if (!noExternal[1].includes(`'${name}'`) && !noExternal[1].includes(`"${name}"`)) {
--        return [`${pkg.dir}/${config}'s \`noExternal\` no longer names '${name}'`];
--      }
--      return [];
--    },
--  };
--}
--
- /**
-  * One package's findings.
-  *
 diff --git a/scripts/markdown-test-inputs.mjs b/scripts/markdown-test-inputs.mjs
-index c717fe7cf3..19bfaab5ba 100644
+index c717fe7cf3..c2f697563c 100644
 --- a/scripts/markdown-test-inputs.mjs
 +++ b/scripts/markdown-test-inputs.mjs
 @@ -894,13 +894,6 @@ export const ADJUDICATED = new Map([
@@ -1430,6 +1340,33 @@ index c717fe7cf3..19bfaab5ba 100644
    [
      'scripts/__tests__/quick-reference-commands-4149.test.ts',
      {
+@@ -1135,13 +1122,6 @@ export const ADJUDICATED = new Map([
+       walker: 'not-markdown: directory listings that test whether a documented path exists',
+     },
+   ],
+-  [
+-    'scripts/__tests__/quick-reference-current-release-4143.test.ts',
+-    {
+-      reads: ['QUICK_REFERENCE.md'],
+-      walker: 'not-markdown: package and app directories',
+-    },
+-  ],
+   // objectui#12214. Its fixtures write a `README.md` into a temp directory to
+   // prove a root documentation change is not a full-run trigger; the selector
+   // it tests never opens a markdown file.
+@@ -1152,12 +1132,6 @@ export const ADJUDICATED = new Map([
+       notRead: ['README.md'],
+     },
+   ],
+-  [
+-    'scripts/__tests__/sync-quick-reference-release.test.ts',
+-    {
+-      reads: ['QUICK_REFERENCE.md'],
+-    },
+-  ],
+   [
+     'scripts/__tests__/unconsumed-widget-option-claim-6186.test.ts',
+     {
 diff --git a/scripts/setup.sh b/scripts/setup.sh
 index 442a909d91..507e54aa7b 100755
 --- a/scripts/setup.sh
@@ -1452,27 +1389,6 @@ index 442a909d91..507e54aa7b 100755
  require_root_script setup
  pnpm run setup
  
-diff --git a/scripts/sync-quick-reference-release.mjs b/scripts/sync-quick-reference-release.mjs
-index 6cfba47786..3e6ee6ddd2 100644
---- a/scripts/sync-quick-reference-release.mjs
-+++ b/scripts/sync-quick-reference-release.mjs
-@@ -63,6 +63,7 @@ import { readFileSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
- import { resolve, dirname, join } from 'node:path';
- import { fileURLToPath } from 'node:url';
- import { isEntrypoint } from './invoked-as.mjs';
-+import { changesetConfigPath } from './workspace-root.mjs';
- 
- const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
- 
-@@ -147,7 +148,7 @@ export function readAnchors(root = repoRoot) {
-   const dataObjectstack = manifest(root, 'packages/data-objectstack/package.json');
-   const reactManifest = manifest(root, 'packages/react/package.json');
- 
--  const changesetConfig = JSON.parse(readFileSync(join(root, '.changeset/config.json'), 'utf8'));
-+  const changesetConfig = JSON.parse(readFileSync(changesetConfigPath(root), 'utf8'));
-   const fixedGroup = changesetConfig.fixed?.[0] ?? [];
-   if (fixedGroup.length <= 1) {
-     throw new Error('.changeset/config.json must still declare one `fixed` group of packages');
 diff --git a/scripts/vite-single-zod.ts b/scripts/vite-single-zod.ts
 new file mode 100644
 index 0000000000..9f24058c42
@@ -1619,7 +1535,7 @@ index 0000000000..9f24058c42
 +  };
 +}
 diff --git a/scripts/workspace-root.d.mts b/scripts/workspace-root.d.mts
-index 42a1503262..81eb85aa07 100644
+index da7f3ad172..ee6a559ca9 100644
 --- a/scripts/workspace-root.d.mts
 +++ b/scripts/workspace-root.d.mts
 @@ -10,6 +10,7 @@ export declare const WORKSPACE_MANIFEST: 'pnpm-workspace.yaml';
@@ -1629,8 +1545,8 @@ index 42a1503262..81eb85aa07 100644
 +export declare const CHANGESET_CONFIG: '.changeset/config.json';
  export declare const PARKED_TURBO_CONFIG: 'turbo.objectui.json';
  export declare const TURBO_ROOT_PREFIX: '$TURBO_ROOT$/';
- 
-@@ -32,6 +33,7 @@ export declare function parseWorkspaceGlobs(text: string): string[];
+ export declare const VIRTUAL_STORE: '.pnpm';
+@@ -37,6 +38,7 @@ export declare function parseWorkspaceGlobs(text: string): string[];
  export declare function workspaceGlobs(root?: string): string[];
  /** The nearest `turbo.json` upward: what turbo hashes from. */
  export declare function turboConfigPath(root?: string): string;
@@ -1639,10 +1555,10 @@ index 42a1503262..81eb85aa07 100644
  export declare function uiTurboConfigPath(root?: string): string;
  
 diff --git a/scripts/workspace-root.mjs b/scripts/workspace-root.mjs
-index 3e5e068e46..47084d5c2b 100644
+index bdffb350ad..7ad238a44a 100644
 --- a/scripts/workspace-root.mjs
 +++ b/scripts/workspace-root.mjs
-@@ -81,6 +81,8 @@ export const WORKSPACE_MANIFEST = 'pnpm-workspace.yaml';
+@@ -113,6 +113,8 @@ export const WORKSPACE_MANIFEST = 'pnpm-workspace.yaml';
  export const LOCKFILE = 'pnpm-lock.yaml';
  export const ROOT_MANIFEST = 'package.json';
  export const TURBO_CONFIG = 'turbo.json';
@@ -1651,7 +1567,7 @@ index 3e5e068e46..47084d5c2b 100644
  /** Where the cutover parks objectui's own `turbo.json` (a nested one must `extends` the root). */
  export const PARKED_TURBO_CONFIG = 'turbo.objectui.json';
  export const TURBO_ROOT_PREFIX = '$TURBO_ROOT$/';
-@@ -233,6 +235,26 @@ export function turboConfigPath(root = uiRoot()) {
+@@ -293,6 +295,26 @@ export function turboConfigPath(root = uiRoot()) {
    throw new Error(`no ${TURBO_CONFIG} at ${own} or at ${parent} (objectstack#25723).`);
  }
  

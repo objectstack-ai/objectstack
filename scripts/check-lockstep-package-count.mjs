@@ -68,18 +68,25 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import * as os from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PRIVATE_FIXED_MEMBERS } from './check-changeset-fixed.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..');
 
-/** Reads the one true count: the length of the lockstep `fixed` group. */
-function trueCount(root) {
+/**
+ * Reads the one true count: the length of the lockstep `fixed` group, less the
+ * private members `check-changeset-fixed.mjs` declares (`PRIVATE_FIXED_MEMBERS`,
+ * the VS Code extension since objectstack#25711). Every prose occurrence counts
+ * PUBLISHED packages, and those members ship at the release's version without
+ * ever reaching npm.
+ */
+function trueCount(root, privateMembers = PRIVATE_FIXED_MEMBERS) {
   const configPath = resolve(root, '.changeset/config.json');
   const config = JSON.parse(readFileSync(configPath, 'utf8'));
   if (!Array.isArray(config.fixed) || !Array.isArray(config.fixed[0])) {
     throw new Error(`${configPath}: "fixed" is not an array containing a group array`);
   }
-  return config.fixed[0].length;
+  return config.fixed[0].filter((name) => !Object.hasOwn(privateMembers, name)).length;
 }
 
 // Every prose restatement of the lockstep package count, as of #17039. Each
@@ -150,7 +157,7 @@ function run(root, { fix = false } = {}) {
 
 function formatReport({ truth, results }) {
   const lines = [
-    `lockstep package count (source: .changeset/config.json fixed[0].length) = ${truth}`,
+    `lockstep package count (source: .changeset/config.json fixed[0].length, less the declared private members) = ${truth}`,
   ];
   for (const r of results) {
     if (r.status === 'OK') {
@@ -268,6 +275,16 @@ function selfTest() {
       'duplicated anchor: reported as ROTTED_ANCHOR with matchCount 2',
       dupedRows.every((r) => r.status === 'ROTTED_ANCHOR' && r.matchCount === 2),
     );
+
+    // Case 5: a declared private member sits in the group but is not counted
+    // (objectstack#25711); an undeclared name is counted like any other.
+    write(
+      join(tmp, '.changeset', 'config.json'),
+      JSON.stringify({ fixed: [['@objectstack/pkg-0', '@objectstack/pkg-1', 'private-ext']] }),
+    );
+    t('declared private member: not counted', trueCount(tmp, { 'private-ext': 'fixture' }) === 2);
+    t('the same name undeclared: counted', trueCount(tmp, {}) === 3);
+    t('the real declaration is what the gate subtracts by default', trueCount(tmp) === 3);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

@@ -36,7 +36,8 @@
  * .changeset/config.json enumerates the same 112 names, but it is a DERIVED
  * declaration validated against the workspace by scripts/check-changeset-fixed.mjs
  * (which reddens both when a public package is missing from the group and
- * when a group name no longer exists) — deriving from the group would mean
+ * when a group name no longer exists), and it also holds the private members
+ * that gate declares, which are never packed here — deriving from the group would mean
  * reading a copy that a gate keeps honest, rather than the thing itself.
  */
 
