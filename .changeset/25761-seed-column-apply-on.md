@@ -4,7 +4,7 @@
 '@objectstack/skills': minor
 ---
 
-feat(spec,metadata-protocol): a seed dataset column can be written only when its row is created (`columns.<field>.applyOn: 'create'`)
+feat(spec,metadata-protocol): a seed dataset column can be written only when its row is created (`columns.FIELD.applyOn: 'create'`)
 
 Clause-②: yes
 Metadata-protocol: added
