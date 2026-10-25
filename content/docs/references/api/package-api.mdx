@@ -587,7 +587,7 @@ Upgrade package response
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
-| **data** | `{ success: boolean; phase: string; plan?: object; snapshotId?: string; … }` | ✅ |  |
+| **data** | `{ success: boolean; phase: string; snapshotId?: string; conflicts?: object[]; … }` | ✅ |  |
 
 ### Nested Shape: `PackageUpgradeResponse.error`
 
@@ -618,7 +618,6 @@ Upgrade package response
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Whether the upgrade succeeded |
 | **phase** | `string` | ✅ | Current upgrade phase |
-| **plan** | `{ packageId: string; fromVersion: string; toVersion: string; impactLevel: Enum<'none' \| 'low' \| 'medium' \| 'high' \| 'critical'>; … }` | optional | Upgrade plan that was executed |
 | **snapshotId** | `string` | optional | Snapshot ID for rollback |
 | **conflicts** | `{ path: string; baseValue: any; incomingValue: any; customValue: any }[]` | optional | Unresolved merge conflicts |
 | **errorMessage** | `string` | optional | Error message if failed |
