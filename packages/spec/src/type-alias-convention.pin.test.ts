@@ -279,7 +279,7 @@ import type * as M190 from './kernel/execution-context.zod.js';
 import type * as M191 from './automation/api-trigger-secret-ref.zod.js';
 
 // ---------------------------------------------------------------------------
-// 790 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 792 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1548,6 +1548,10 @@ export type Iso_ui_dashboard__WidgetColorVariantSchema = Assert<Eq< z.input< typ
 
 // ui/dataset.zod.ts
 export type Iso_ui_dataset__DatasetDimensionSchema = Assert<Eq< z.input< typeof M160.DatasetDimensionSchema >, z.infer< typeof M160.DatasetDimensionSchema > >>;
+// [#25778] The duration measure's `{ from, to, unit }` and its unit enum: two
+// bare names and an enum, no default, transform, catch or pipe.
+export type Iso_ui_dataset__DatasetDurationUnit = Assert<Eq< z.input< typeof M160.DatasetDurationUnit >, z.infer< typeof M160.DatasetDurationUnit > >>;
+export type Iso_ui_dataset__DatasetMeasureDurationSchema = Assert<Eq< z.input< typeof M160.DatasetMeasureDurationSchema >, z.infer< typeof M160.DatasetMeasureDurationSchema > >>;
 export type Iso_ui_dataset__DatasetMeasureSchema = Assert<Eq< z.input< typeof M160.DatasetMeasureSchema >, z.infer< typeof M160.DatasetMeasureSchema > >>;
 export type Iso_ui_dataset__DatasetSchema = Assert<Eq< z.input< typeof M160.DatasetSchema >, z.infer< typeof M160.DatasetSchema > >>;
 export type Iso_ui_dataset__DerivedMeasureOp = Assert<Eq< z.input< typeof M160.DerivedMeasureOp >, z.infer< typeof M160.DerivedMeasureOp > >>;
@@ -1708,7 +1712,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 790 isomorphic pins', () => {
+  it('still declares all 792 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2573,7 +2577,14 @@ describe('ADR-0122 type-alias convention', () => {
     // start node gives its hook secret — a plain string, so it is pinned here
     // (Iso_automation_apiTriggerSecretRef__ApiTriggerSecretRefSchema) rather
     // than given a `…Parsed` synonym. +1 added.
-    expect(pins).toHaveLength(790);
+    //
+    // 790 -> 792 is #25778: the dataset duration measure's
+    // `DatasetMeasureDurationSchema` (`{ from, to, unit }`, two bare names and
+    // an enum) and its `DatasetDurationUnit` enum, pinned here
+    // (Iso_ui_dataset__DatasetMeasureDurationSchema,
+    // Iso_ui_dataset__DatasetDurationUnit) rather than given `…Parsed`
+    // synonyms. +2 added.
+    expect(pins).toHaveLength(792);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either
