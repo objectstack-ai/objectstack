@@ -1546,28 +1546,6 @@ export const UNJUDGED = new Map([
       + 'at :189-:193 from the `for (const root of ROOTS)` at :462, for every `.md` file under it '
       + 'minus the entry\'s own `exclude` list',
   }],
-  ['scripts/check-console-injection.mjs distDir packages', {
-    population: false,
-    base: '91f65c4ea',
-    why: 'the word is a `join()` path COMPONENT at check-console-injection.mjs:940 — the gate '
-      + 'assembles the console dist directory from four bare single-segment words, so the extractor '
-      + 'sees the top-level one and nothing else. It never walks that root: `evaluate` at :247 opens '
-      + 'the index file at :252, the stamp beside it at :268, and every JavaScript asset directly '
-      + 'inside that directory\'s assets child at :269 — `readBundle` in console-spec-probes.mjs, '
-      + 'non-recursive. Surfaced by the #17057 property widening because the component sits inside '
-      + 'the `distDir` property of the argv object, which the recogniser now reads',
-  }],
-  ['scripts/check-console-injection.mjs specDir packages', {
-    population: false,
-    base: '91f65c4ea',
-    why: 'the same shape one line down, at check-console-injection.mjs:941: a `join()` component of '
-      + 'the spec package directory, assembled from bare words. The gate reads that package\'s '
-      + 'manifest and the built JavaScript its `exports` map points at — `readSpecBlob` in '
-      + 'console-spec-probes.mjs, reached at :348 — never an arbitrary file under the top-level '
-      + 'root. ⚠️ Both of this gate\'s real populations are themselves invisible to the derivation, '
-      + 'for the DIFFERENT reason that they are assembled rather than spelled; that is a fact this '
-      + 'note records and not a verdict on what, if anything, should be declared for them',
-  }],
   ['scripts/check-doc-frontmatter.mjs ROOTS docs', {
     population: false,
     base: '91f65c4ea',

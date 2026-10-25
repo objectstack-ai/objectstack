@@ -1840,10 +1840,11 @@ jobs:
       #
       # The Console is a workspace package now: `ui/apps/console`
       # (@object-ui/console) builds against this tree's @objectstack/* through
-      # `workspace:^`, and `@objectstack/console#build` (root turbo.json) copies
-      # that dist with the tracked sdui.manifest.json, so the `pnpm run build`
-      # below builds it with everything else. The pin-currency gate, the
-      # vendored-dist cache keyed on `.objectui-sha`, its SHA stamp check and
+      # `workspace:^`, and `@objectstack/console#build:dist` (root turbo.json)
+      # copies that dist with the tracked sdui.manifest.json; `pnpm run release`
+      # runs it (`pnpm run console:build`) after the build below. The
+      # pin-currency gate, the vendored-dist cache keyed on `.objectui-sha`,
+      # its SHA stamp check and
       # its spec-injection check are gone with the pin: each answered "was the
       # Console built from the objectui commit, and against the spec, this
       # release names", and both are true by construction when the Console
@@ -1948,8 +1949,9 @@ jobs:
 
       # ──────────────────────────────────────────────────────────────────────
       # The publish itself. `pnpm run release` = build (both scopes; the turbo
-      # cache makes it the build above) + scripts/release-publish.sh, which is `changeset publish` followed by ONE
-      # atomic `git push origin --tags` (#2191: the action's concurrent per-tag
+      # cache makes it the build above) + console:build (the Console dist into
+      # packages/console) + scripts/release-publish.sh, which is `changeset
+      # publish` followed by ONE atomic `git push origin --tags` (#2191: the action's concurrent per-tag
       # pushes raced GitHub's ref backend and lost ~half the tags).
       #
       # changesets/action is NOT used here, and that is deliberate: handed a

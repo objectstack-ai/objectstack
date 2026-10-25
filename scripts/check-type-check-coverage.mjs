@@ -853,7 +853,7 @@ const DEBT = {
 // nature changes, the RECONCILED direction forces this entry out.
 const EXEMPT = {
   '@objectstack/console':
-    'Published objectui build artifact -- package.json/README/CHANGELOG plus a dist/ pulled in by `pnpm objectui:refresh`. No TypeScript sources, no tsconfig; the sources are type-checked in the objectui repo.',
+    'Published Console build artifact -- package.json/README/CHANGELOG plus a dist/ copied from ui/apps/console by its own build:dist (build-dist.sh, plain bash; objectstack#25711). No TypeScript sources, no tsconfig; the sources are type-checked as @object-ui/console under ui/.',
   '@objectstack/skills':
     'Published skills catalog -- package.json/README/CHANGELOG plus a dist/skills tree copied from the repository root skills/** by its own build (scripts/sync-catalog.mjs, plain node). No TypeScript sources, no tsconfig; the catalog is markdown and JSON, judged by the skill gates over skills/**.',
 };

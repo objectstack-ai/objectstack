@@ -33,8 +33,9 @@ name: Cut RC
 # ---------------------------------------------------------
 # There is no objectui pin to read. The Console source is `ui/apps/console` in
 # this repository (@object-ui/console, ruling D1 「同一个版本号组」): the snapshot
-# above freezes it together with the spec it builds against, `pnpm run build`
-# builds it and `@objectstack/console` copies its dist, and the 39 published
+# above freezes it together with the spec it builds against, `pnpm run
+# console:build` builds it and copies its dist into `@objectstack/console`
+# (packages/console/build-dist.sh), and the 39 published
 # @object-ui/* packages are members of the one Changesets `fixed` group, so the
 # version pass below numbers them with everything else. Nothing here reaches
 # into another repository, and nothing moves a pin, because neither exists.
@@ -272,14 +273,18 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # The whole workspace, both scopes: @object-ui/console builds against this
-      # snapshot's @objectstack/* (`workspace:^`), and `@objectstack/console#build`
-      # (root turbo.json) copies its dist with the TRACKED repo-root
-      # sdui.manifest.json and runs the single-zod canary on what it ships
-      # (packages/console/build-dist.sh). `pnpm run release` below builds again,
-      # as a turbo cache hit.
+      # The whole workspace, both scopes, then the Console: @object-ui/console
+      # builds against this snapshot's @objectstack/* (`workspace:^`), and
+      # `@objectstack/console#build:dist` (root turbo.json) copies its dist with
+      # the TRACKED repo-root sdui.manifest.json and runs the single-zod canary on
+      # what it ships (packages/console/build-dist.sh). Built HERE, before the
+      # version commit, so a Console that cannot build stops the cut before
+      # anything is written; `pnpm run release` below builds both again, as turbo
+      # cache hits.
       - name: Build the workspace (both scopes, the Console included)
-        run: pnpm run build
+        run: |
+          pnpm run build
+          pnpm run console:build
 
       # ────────────────────────────────────────────────────────────────────────
       # PRE-VERSION GATES. Every one of these reads `.changeset/*`, so all of them

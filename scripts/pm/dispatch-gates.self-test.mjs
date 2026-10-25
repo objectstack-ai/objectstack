@@ -658,8 +658,10 @@ export function selfTest({ tier = 'full' } = {}) {
   // sources: `pr-automation.yml` (the `--base` gates), `ci.yml` (the shard
   // attestation), `engine-split-metric.yml` (`--days 90`),
   // `required-set-patrol.yml` (a complete argv behind a continuation and a
-  // redirection), `prerelease-pin-watch.yml` (`--verbose 2>&1`). The live half
-  // at the end of the block re-reads them from the workflows themselves.
+  // redirection), `prerelease-pin-watch.yml` (`--verbose 2>&1`; that workflow
+  // left with the objectui pin, objectstack#25711, and its row stays as a
+  // fixture of the shape). The live half at the end of the block re-reads the
+  // others from the workflows themselves.
   const keyWf = [
     'jobs:',
     '  gates:',
@@ -1002,10 +1004,11 @@ export function selfTest({ tier = 'full' } = {}) {
         'scripts/check-adr-0087-registration.mjs', 'scripts/check-changeset-no-major.mjs']
         .every((script) => valueBearing.some((i) => i.script === script)),
     );
+    // The card named three; the third, `scripts/check-prerelease-pin-watch.mjs
+    // --verbose`, left with the objectui pin it watched (objectstack#25711).
     t(
-      '⭐ …and the three the card called value-bearing that are really LITERAL render as runnable commands instead',
-      ['scripts/check-engine-split-ratio.mjs --days 90', 'scripts/check-required-contexts.mjs --verify-required-set',
-        'scripts/check-prerelease-pin-watch.mjs --verbose']
+      '⭐ …and the two the card called value-bearing that are really LITERAL render as runnable commands instead',
+      ['scripts/check-engine-split-ratio.mjs --days 90', 'scripts/check-required-contexts.mjs --verify-required-set']
         .every((key) => direct.some((i) => i.check === key && i.argvVariables.length === 0)),
     );
     t(

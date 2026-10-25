@@ -104,17 +104,21 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  *
  * Declared, never inferred: a new foreign scope has to be added here
  * deliberately, which is the difference between a documented exemption and a
- * silent hole. `scripts/build-console.sh` runs its `@object-ui/console` filters
- * inside `$BUILD_ROOT` -- a checkout of `objectstack-ai/objectui` at the SHA
- * pinned in `.objectui-sha` -- never against this workspace, so resolving those
- * against this tree would be asking the wrong root.
+ * silent hole. The `@object-ui/` entry's first cause is gone: it was
+ * `scripts/build-console.sh`, which ran its `@object-ui/console` filters inside a
+ * checkout of `objectstack-ai/objectui` at the SHA pinned in `.objectui-sha`, and
+ * both left with the pin (objectstack#25711). It stays declared until the objectui
+ * subtree lands under `ui/` (sub-issue 5 of objectstack#25677): before that a
+ * filter naming an `@object-ui/` package matches nothing in this tree by design.
+ * ⛔ Retire the entry in the PR that lands `ui/`, where every such name becomes a
+ * workspace package this gate can judge.
  */
 export const FOREIGN_SCOPES = [
   {
     scope: '@object-ui/',
     reason:
-      'the objectui repo (objectstack-ai/objectui); scripts/build-console.sh runs these '
-      + 'filters inside that checkout, not this workspace',
+      'the objectui tree, which this workspace holds under ui/ only once the subtree import '
+      + 'of objectstack#25677 lands',
   },
 ];
 
@@ -451,9 +455,8 @@ export function extractFilters(text) {
  * THIS workspace naming a package that does not exist.
  *
  * The `cd` bail-out is the load-bearing one: a command that changes directory
- * may be filtering against another root entirely (`scripts/build-console.sh`
- * does exactly that, in the objectui checkout), and this function has no way to
- * know which. Unknown root, no verdict.
+ * may be filtering against another root entirely, and this function has no way
+ * to know which. Unknown root, no verdict.
  *
  * @param {string} command
  * @param {string} cwd
