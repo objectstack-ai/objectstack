@@ -64,6 +64,8 @@ export const SalesDataset = defineDataset({
     { name: 'won_amount', aggregate: 'sum', field: 'amount', filter: { stage: 'closed_won' } },
     // Derived measure — references OTHER measures by name only (no raw fields/SQL).
     { name: 'win_rate', derived: { op: 'ratio', of: ['won_amount', 'revenue'] }, format: '0.0%' },
+    // Duration measure — the time between two datetime fields of each record.
+    { name: 'avg_days_to_close', aggregate: 'avg', duration: { from: 'created_at', to: 'closed_at', unit: 'days' } },
   ],
 });
 ```
@@ -93,6 +95,38 @@ export default defineStack({
   measures by name only (`ratio` / `sum` / `difference` / `product`).
 - **RLS / tenant scoping is enforced by the runtime**, per joined object — never
   declared in the dataset. There is one place to reason about access.
+
+### Duration measures
+
+A measure can aggregate the time between two `datetime` fields of the same
+record (time to resolve, time to first response, cycle time) with `duration`
+in place of `field`:
+
+```ts
+{ name: 'avg_hours_to_resolve', aggregate: 'avg', duration: { from: 'created_at', to: 'resolved_at', unit: 'hours' } }
+```
+
+- `from` and `to` name two `datetime` fields of the dataset's own object, by
+  their bare names. A relationship path, an expression, or a `date`, `time`,
+  number or text field is refused: `os validate` reports
+  `measure-duration-field-type-refused`, and the dataset compile answers
+  `400 DATASET_INVALID`.
+- `unit` is `seconds`, `minutes`, `hours` or `days`, and the measure answers a
+  number of them (`1.5` hours). `aggregate` is `avg`, `min`, `max` or `sum`.
+- A record missing either instant is left out, as a null is left out of an
+  `avg`. A `to` earlier than its `from` counts as a negative duration. Over a
+  group with no record carrying both, `sum` answers `0` and the others answer
+  nothing.
+- A measure `filter`, and a `derived` measure naming the duration measure in
+  `of`, work as they do for any measure.
+- It runs as one SQL statement on SQLite, PostgreSQL and MySQL, and answers the
+  same number on each. A query the service cannot compile to one such
+  statement is refused with `400 INVALID_FIELD` naming the measure, rather than
+  answered another way: a time dimension bucketed by `granularity` (a monthly
+  trend), a field-to-field comparison in a filter, an object served through
+  engine middleware or an external datasource, or a datasource that is not SQL.
+- Comparing each record's duration against a value held on another object (an
+  SLA target per ticket type, say) is not part of it.
 
 ## Binding a dashboard widget
 

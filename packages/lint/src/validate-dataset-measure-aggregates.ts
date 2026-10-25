@@ -185,13 +185,29 @@
  * The same skips 1, 3 and 4 hold, plus a member that writes no `sql`; and on
  * a measure, skip 5 and a measure that writes no `type`.
  *
- * Both legs ride the one registry entry: gating, on all three commands. At the
+ * ## [#25778] The duration leg — `measure-duration-field-type-refused`
+ *
+ * A dataset measure written `duration: { from, to, unit }` aggregates the time
+ * between two columns of the same record, and the dataset compile
+ * (`dataset-compiler.ts`) refuses it with `400 DATASET_INVALID` when either
+ * column is declared anything but `DATASET_DURATION_FIELD_TYPE` (`datetime`,
+ * `@objectstack/spec/ui`): a `date`, a `time`, a number or a text holds no
+ * instant to measure from. This leg makes the same refusal where the author
+ * is standing, one finding per refused column, at
+ * `datasets[N].measures[M].duration.from` / `.to`. Each column is a bare name
+ * on the dataset's own object (the spec refuses anything else at parse), read
+ * on the object graph under the same skips 1, 3 and 4: a name that does not
+ * resolve is `dataset-field-unknown`'s finding, and an untyped one is not
+ * judged. A duration measure has no `field`, so the aggregate leg never
+ * reads it.
+ *
+ * The legs ride the one registry entry: gating, on all three commands. At the
  * runtime write door that entry is dispatched for a `dataset` write, whose
  * per-write snapshot carries no `analyticsCubes`, so the cube leg reads nothing
  * there; an `analytics_cube` write is dispatched to no rule today.
  *
  * The function keeps its name: it is the registry's key (`authoring-rules.ts`),
- * and the dimension and cube legs ride on that one entry.
+ * and the dimension, duration and cube legs ride on that one entry.
  */
 
 import {
@@ -202,6 +218,7 @@ import {
   virtualFieldAggregateRemedy,
   type ValueShapeFieldDef,
 } from '@objectstack/spec/data';
+import { DATASET_DURATION_FIELD_TYPE } from '@objectstack/spec/ui';
 
 import { collectionEntries } from './collection-entries.js';
 import {
@@ -232,6 +249,14 @@ export const MEASURE_AGGREGATE_FIELD_TYPE_REFUSED = 'measure-aggregate-field-typ
  */
 export const DIMENSION_JSON_STORED_FIELD_REFUSED = 'dimension-json-stored-field-refused';
 
+/**
+ * [#25778] Stable diagnostic id for a dataset duration measure whose `from` or
+ * `to` names a field declared anything but `datetime`. Named for the same axis
+ * as {@link MEASURE_AGGREGATE_FIELD_TYPE_REFUSED}, the field's declared type,
+ * on the duration measure's own two slots.
+ */
+export const MEASURE_DURATION_FIELD_TYPE_REFUSED = 'measure-duration-field-type-refused';
+
 export interface DatasetMeasureAggregateFinding {
   /**
    * Always `error`. The pair is decidable from the author's own declarations —
@@ -243,12 +268,16 @@ export interface DatasetMeasureAggregateFinding {
    * analytics door answers every query grouping by it with `400 INVALID_FIELD`.
    */
   severity: 'error';
-  rule: typeof MEASURE_AGGREGATE_FIELD_TYPE_REFUSED | typeof DIMENSION_JSON_STORED_FIELD_REFUSED;
+  rule:
+    | typeof MEASURE_AGGREGATE_FIELD_TYPE_REFUSED
+    | typeof DIMENSION_JSON_STORED_FIELD_REFUSED
+    | typeof MEASURE_DURATION_FIELD_TYPE_REFUSED;
   /** Human-readable location, e.g. `dataset "sales" › measure "avg_closed"` or `cube "sales" › dimension "meta"`. */
   where: string;
   /**
    * Config path, e.g. `datasets[0].measures[2].aggregate`, `datasets[0].dimensions[1].field`,
-   * `analyticsCubes[0].dimensions.meta.sql` or `analyticsCubes[0].measures.distinct_meta.type`.
+   * `datasets[0].measures[3].duration.from`, `analyticsCubes[0].dimensions.meta.sql` or
+   * `analyticsCubes[0].measures.distinct_meta.type`.
    */
   path: string;
   message: string;
@@ -456,6 +485,31 @@ function refusedMeasureFinding(
 }
 
 /**
+ * [#25778] The finding for a duration measure's `from` or `to` over a field
+ * declared anything but {@link DATASET_DURATION_FIELD_TYPE}: one verdict
+ * sentence, and one remedy line. Why a `date` or a `time` holds no instant,
+ * and which door refuses it later, are `os explain
+ * measure-duration-field-type-refused`.
+ */
+function durationColumnFinding(
+  site: MemberSite,
+  slot: 'from' | 'to',
+  shape: ValueShapeFieldDef,
+  baseObject: string,
+): DatasetMeasureAggregateFinding {
+  return {
+    severity: 'error',
+    rule: MEASURE_DURATION_FIELD_TYPE_REFUSED,
+    where: site.where,
+    path: site.path,
+    message:
+      `\`duration.${slot}\` reads field "${site.column}" (${declaredAs(shape)} on ${site.declarer}), which holds ` +
+      `no instant, so the dataset compile refuses it (400 DATASET_INVALID)`,
+    hint: `Point \`duration.${slot}\` at a \`${DATASET_DURATION_FIELD_TYPE}\` field of "${baseObject}".`,
+  };
+}
+
+/**
  * [#21082] The column a cube member's `sql` reads, resolved the way the
  * analytics door resolves it (`hop-object.ts`): a hop the cube declares a
  * join for reaches that join's `name` (keyed by the path up to the hop, its
@@ -580,7 +634,8 @@ function cubeMemberFindings(cube: AnyRec, cubePath: string, graph: ObjectGraph):
 
 /**
  * Refuse every dataset measure whose `aggregate` the field's declaration
- * cannot carry, and every dataset dimension whose field is JSON-stored; then
+ * cannot carry, [#25778] every duration column not declared `datetime`, and
+ * every dataset dimension whose field is JSON-stored; then
  * [#21082] every cube dimension whose `sql` column is JSON-stored, and
  * [#21419] every cube measure whose `type` the column's declaration cannot
  * carry. Returns findings (empty =
@@ -642,6 +697,35 @@ export function validateDatasetMeasureAggregates(stack: unknown): DatasetMeasure
     });
 
     recordsOf(ds.measures).forEach((measure, k) => {
+      // ── [#25778] The duration leg: each of the two columns, on the base object ──
+      if (isRec(measure.duration)) {
+        const measureName = strName(measure.name) ?? `#${k}`;
+        for (const slot of ['from', 'to'] as const) {
+          const column = strName(measure.duration[slot]);
+          if (!column) continue;
+          // ── Skip 3: the name does not resolve — `dataset-field-unknown`'s finding ──
+          const verdict = resolveFieldPath(graph, object, column);
+          if (!verdict || isUnjudgeable(verdict) || verdict.kind !== 'ok') continue;
+          // ── Skip 4: the field declares no type ──
+          const fieldType = verdict.meta?.type;
+          if (!fieldType || fieldType === DATASET_DURATION_FIELD_TYPE) continue;
+          findings.push(
+            durationColumnFinding(
+              {
+                where: `dataset "${dsName}" › measure "${measureName}"`,
+                path: `datasets[${di}].measures[${k}].duration.${slot}`,
+                column,
+                declarer: declarerOf(verdict, object),
+              },
+              slot,
+              shapeOf(verdict, fieldType),
+              object,
+            ),
+          );
+        }
+        return;
+      }
+
       // ── Skip 2: nothing written in one of the two positions ──
       const aggregate = strName(measure.aggregate);
       const field = strName(measure.field);

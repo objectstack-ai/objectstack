@@ -42,7 +42,7 @@
  * name, for this face and for the service's gates.
  */
 
-import { DATASET_DURATION_UNIT_SECONDS, type DatasetDurationUnitValue } from '@objectstack/spec/ui';
+import { DATASET_DURATION_UNIT_SECONDS, type DatasetDurationUnit } from '@objectstack/spec/ui';
 import type { DurationMeasureSpec } from './strategies/types.js';
 import type { AnalyticsSqlDialect } from './text-match-sql.js';
 
@@ -87,7 +87,7 @@ export function durationOperandSql(
   dialect: DurationSqlDialect,
   fromSql: string,
   toSql: string,
-  unit: DatasetDurationUnitValue,
+  unit: DatasetDurationUnit,
 ): string {
   const seconds = durationSecondsSql(dialect, fromSql, toSql);
   const length = DATASET_DURATION_UNIT_SECONDS[unit];

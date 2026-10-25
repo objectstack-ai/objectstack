@@ -2060,7 +2060,8 @@ const MEASURE_AGGREGATE_FIELD_TYPE_REFUSED_EXPLANATION: RuleExplanation = {
       'datetime, time, boolean, toggle.',
     'So the fix is a field of an accepted type, or an aggregate the field\'s declaration accepts. A ' +
       'quantity that must be added up or averaged has to be STORED as a numeric field and aggregated as ' +
-      'one.',
+      'one. The time BETWEEN two `datetime` fields of a record is not an aggregate over either one: it is ' +
+      'a `duration: { from, to, unit }` measure (`measure-duration-field-type-refused`).',
     // Held equal to `VIRTUAL_FIELD_AGGREGATE_REMEDY` (`@objectstack/spec/data`) — the `fix:` line, and
     // the compile leg's remedy, for this pair — by `validate-dataset-measure-aggregates.test.ts`.
     'A `formula` field stores no value, whatever its `returnType` says, so `sum`, `avg`, `min` and `max` ' +
@@ -2101,6 +2102,25 @@ const DIMENSION_JSON_STORED_FIELD_REFUSED_EXPLANATION: RuleExplanation = {
       'counts or lists the records that hold VALUE, one query per member.',
     JSON_STORED_COLUMN,
     ANALYTICS_MEMBER_WALK,
+  ],
+};
+
+const MEASURE_DURATION_FIELD_TYPE_REFUSED_EXPLANATION: RuleExplanation = {
+  rule: 'measure-duration-field-type-refused',
+  covers: 'which fields a duration measure measures between',
+  paragraphs: [
+    'A duration measure, `duration: { from, to, unit }` on a dataset measure, aggregates the time from one ' +
+      'field to another on the same record: `avg`, `min`, `max` or `sum` of `to` minus `from`, as a number ' +
+      'of `unit`s (seconds, minutes, hours or days). The time between two INSTANTS is the same number on ' +
+      'every backend, so both fields must be declared `datetime`. A `date` is a calendar day and a `time` ' +
+      'a wall clock, neither one an instant; a `text` holding ISO strings or a number holding epoch values ' +
+      'is no instant the database knows, and each SQL family would read it its own way.',
+    'So the fix is a `datetime` field of the dataset\'s own object in each slot, by its bare name. A ' +
+      'record missing either instant takes no part in the aggregate, and a `to` earlier than its `from` ' +
+      'counts as a negative duration.',
+    'The dataset compile refuses the same column later, with `400 DATASET_INVALID` when a query is built. ' +
+      'This rule makes the same refusal where the author is standing. A name the object does not declare ' +
+      'is `dataset-field-unknown`\'s finding, and a field with no declared type is not judged.',
   ],
 };
 
@@ -4965,6 +4985,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [VALIDATION_RULE_JSON_SCHEMA_UNKNOWN_FORMAT_EXPLANATION.rule]: VALIDATION_RULE_JSON_SCHEMA_UNKNOWN_FORMAT_EXPLANATION,
   [MEASURE_AGGREGATE_FIELD_TYPE_REFUSED_EXPLANATION.rule]: MEASURE_AGGREGATE_FIELD_TYPE_REFUSED_EXPLANATION,
   [DIMENSION_JSON_STORED_FIELD_REFUSED_EXPLANATION.rule]: DIMENSION_JSON_STORED_FIELD_REFUSED_EXPLANATION,
+  [MEASURE_DURATION_FIELD_TYPE_REFUSED_EXPLANATION.rule]: MEASURE_DURATION_FIELD_TYPE_REFUSED_EXPLANATION,
   [REACT_CHART_DRILLDOWN_INVALID_EXPLANATION.rule]: REACT_CHART_DRILLDOWN_INVALID_EXPLANATION,
   [REACT_CHART_AGGREGATE_INVALID_EXPLANATION.rule]: REACT_CHART_AGGREGATE_INVALID_EXPLANATION,
   [REACT_CHART_FIELD_UNPROVISIONED_EXPLANATION.rule]: REACT_CHART_FIELD_UNPROVISIONED_EXPLANATION,

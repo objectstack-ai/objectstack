@@ -10,7 +10,12 @@ import {
   virtualFieldAggregateRemedy,
 } from '@objectstack/spec/data';
 import type { Dataset, DatasetMeasure, DatasetDimension } from '@objectstack/spec/ui';
-import { DATASET_DURATION_AGGREGATES, DATASET_DURATION_UNIT_SECONDS, resolveI18nLabel } from '@objectstack/spec/ui';
+import {
+  DATASET_DURATION_AGGREGATES,
+  DATASET_DURATION_FIELD_TYPE,
+  DATASET_DURATION_UNIT_SECONDS,
+  resolveI18nLabel,
+} from '@objectstack/spec/ui';
 import type { FilterCondition } from '@objectstack/spec/data';
 import { datasetInvalidError } from './dataset-refusal.js';
 import { TEMPORAL_SOURCE_FIELD_TYPES } from './measure-result-type.js';
@@ -451,15 +456,6 @@ function assertAggregateFieldTypeCompatible(
   );
 }
 
-/**
- * The one field type a duration measure's `from` / `to` may be declared as.
- * A `datetime` is an instant (ADR-0053), and the time between two instants is
- * a duration on every backend. A `date` is a calendar day with no instant and
- * a `time` a wall clock with no day, so neither denotes a point a duration can
- * be measured from.
- */
-const DURATION_COLUMN_TYPE = 'datetime';
-
 /** One column of the base object by its bare name — the spec's `duration.from` / `to` shape. */
 const DURATION_BASE_COLUMN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -494,7 +490,7 @@ function compileDurationMeasure(
     throw datasetInvalidError(
       `[dataset-compiler] dataset "${datasetName}" duration measure "${measure.name}" reads ` +
       `\`duration.${slot}\` ${JSON.stringify(column) ?? 'undefined'}, which names no column: it takes one ` +
-      `\`${DURATION_COLUMN_TYPE}\` field of "${objectName}" by its bare name.`,
+      `\`${DATASET_DURATION_FIELD_TYPE}\` field of "${objectName}" by its bare name.`,
     );
   }
   if (!Object.prototype.hasOwnProperty.call(DATASET_DURATION_UNIT_SECONDS, unit)) {
@@ -513,13 +509,13 @@ function compileDurationMeasure(
   if (declaredValueShape) {
     for (const [slot, column] of [['from', from], ['to', to]] as const) {
       const fieldType = declaredValueShape(objectName, column)?.type;
-      if (!fieldType || fieldType === DURATION_COLUMN_TYPE) continue;
+      if (!fieldType || fieldType === DATASET_DURATION_FIELD_TYPE) continue;
       throw datasetInvalidError(
         `[dataset-compiler] dataset "${datasetName}" duration measure "${measure.name}" reads ` +
         `\`duration.${slot}\` "${column}", which object "${objectName}" declares as \`${fieldType}\`. ` +
-        `A duration spans two \`${DURATION_COLUMN_TYPE}\` fields of the same record, because an instant is ` +
+        `A duration spans two \`${DATASET_DURATION_FIELD_TYPE}\` fields of the same record, because an instant is ` +
         `the one value every backend measures the time between alike; a \`${fieldType}\` field holds no ` +
-        `instant. Point \`duration.${slot}\` at a \`${DURATION_COLUMN_TYPE}\` field of "${objectName}".`,
+        `instant. Point \`duration.${slot}\` at a \`${DATASET_DURATION_FIELD_TYPE}\` field of "${objectName}".`,
       );
     }
   }

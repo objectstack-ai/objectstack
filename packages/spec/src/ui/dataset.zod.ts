@@ -235,6 +235,17 @@ export const DATASET_DURATION_UNIT_SECONDS: Readonly<Record<z.infer<typeof Datas
  */
 export const DATASET_DURATION_AGGREGATES = ['avg', 'min', 'max', 'sum'] as const;
 
+/**
+ * [#25778] The one field type a duration measure's `from` and `to` may be
+ * declared as. A `datetime` is an instant (ADR-0053), and the time between two
+ * instants is the same number on every backend. A `date` is a calendar day and
+ * a `time` a wall clock, so neither is a point a duration is measured from;
+ * a `text` holding ISO strings is not an instant the database knows. Judged
+ * where the declaration is in hand: the dataset compile (`400 DATASET_INVALID`)
+ * and `os validate` (`measure-duration-field-type-refused`).
+ */
+export const DATASET_DURATION_FIELD_TYPE = 'datetime';
+
 const DATASET_DURATION_COLUMN_NOT_BASE =
   'a duration reads two columns of the SAME record: name a `datetime` field of the dataset\'s own object '
   + '(`submitted_at`), by its bare name. A relationship path, a SQL expression, `\'*\'` or an empty string '
@@ -695,7 +706,7 @@ export function defineDataset(dataset: Dataset): Dataset {
 export type DatasetDimension = z.input<typeof DatasetDimensionSchema>;
 export type DatasetMeasure = z.input<typeof DatasetMeasureSchema>;
 export type DatasetMeasureDuration = z.input<typeof DatasetMeasureDurationSchema>;
-export type DatasetDurationUnitValue = z.input<typeof DatasetDurationUnit>;
+export type DatasetDurationUnit = z.input<typeof DatasetDurationUnit>;
 export type DerivedMeasureOpValue = z.input<typeof DerivedMeasureOp>;
 export type Dataset = z.input<typeof DatasetSchema>;
 

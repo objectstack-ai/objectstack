@@ -17,7 +17,7 @@ export type {
 
 import type { FilterCondition, ValueShapeFieldDef } from '@objectstack/spec/data';
 import type { IObjectQLEngine, StrategyContext } from '@objectstack/spec/contracts';
-import type { DATASET_DURATION_AGGREGATES, DatasetDurationUnitValue } from '@objectstack/spec/ui';
+import type { DATASET_DURATION_AGGREGATES, DatasetDurationUnit } from '@objectstack/spec/ui';
 
 /**
  * [#19995] The engine's judge-only `where` admission, as the contract declares
@@ -94,7 +94,7 @@ export interface DurationMeasureSpec {
   aggregate: (typeof DATASET_DURATION_AGGREGATES)[number];
   from: string;
   to: string;
-  unit: DatasetDurationUnitValue;
+  unit: DatasetDurationUnit;
 }
 
 /** A {@link StrategyContext} that can answer for a compiled dataset (#10298). */
