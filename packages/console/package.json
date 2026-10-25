@@ -1,7 +1,7 @@
 {
   "name": "@objectstack/console",
   "version": "18.1.0",
-  "description": "Prebuilt Console SPA pinned to this framework release, installed as a dependency of @objectstack/cli. Source of truth: @object-ui/console (https://github.com/objectstack-ai/objectui).",
+  "description": "Prebuilt Console SPA built from this workspace's ui/apps/console (@object-ui/console) at the same version, installed as a dependency of @objectstack/cli.",
   "license": "Apache-2.0",
   "homepage": "https://github.com/objectstack-ai/objectstack/tree/main/packages/console",
   "repository": {
@@ -24,6 +24,7 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "prepublishOnly": "node -e \"const fs=require('fs');const p='dist/index.html';if(!fs.existsSync(p)){console.error('\\n✗ @objectstack/console: '+p+' is missing — run scripts/build-console.sh before publishing.\\n');process.exit(1)}\""
+    "build": "bash build-dist.sh",
+    "prepublishOnly": "node -e \"const fs=require('fs');const p='dist/index.html';if(!fs.existsSync(p)){console.error('\\n✗ @objectstack/console: '+p+' is missing — run pnpm console:build at the repo root before publishing.\\n');process.exit(1)}\""
   }
 }
