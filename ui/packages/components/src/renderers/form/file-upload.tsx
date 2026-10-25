@@ -7,6 +7,7 @@
  */
 
 import { ComponentRegistry } from '@object-ui/core';
+import { createSafeTranslation } from '@object-ui/i18n';
 import type { FileUploadSchema } from '@object-ui/types';
 import { Label, Button } from '../../ui';
 import { Upload, X, Rocket, CheckCircle2 } from 'lucide-react';
@@ -14,8 +15,16 @@ import { useState, useRef, useEffect } from 'react';
 import { cn } from '../../lib/utils';
 import { toFormControlDomProps } from '../../lib/form-control-dom-props';
 
+const useSafeFileUploadTranslation = createSafeTranslation(
+  {
+    'fields.file.remove': 'Remove {{name}}',
+  },
+  'fields.file.remove',
+);
+
 ComponentRegistry.register('file-upload', 
   ({ schema, className, value, onChange, ...props }: { schema: FileUploadSchema; className?: string; value?: File[]; onChange?: (files: File[]) => void; [key: string]: any }) => {
+    const { t } = useSafeFileUploadTranslation();
     const [files, setFiles] = useState<File[]>(value || []);
     const [isUploading, setIsUploading] = useState(false);
     const [progress, setProgress] = useState(0);
@@ -93,8 +102,16 @@ ComponentRegistry.register('file-upload',
             {...toFormControlDomProps(inputProps)}
           />
           
-          <div 
+          <div
+            role="button"
+            tabIndex={0}
             onClick={handleClick}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                handleClick();
+              }
+            }}
             className={cn(
                 "relative overflow-hidden cursor-pointer rounded-lg border-2 border-dashed transition-all duration-300 min-h-[120px] flex flex-col items-center justify-center p-4 sm:p-6 gap-3",
                 isUploading 
@@ -151,6 +168,7 @@ ComponentRegistry.register('file-upload',
                     size="sm"
                     className="h-6 w-6 p-0 hover:bg-destructive/10 hover:text-destructive"
                     onClick={() => handleRemoveFile(index)}
+                    aria-label={t('fields.file.remove', { name: file.name })}
                   >
                     <X className="h-3 w-3" />
                   </Button>

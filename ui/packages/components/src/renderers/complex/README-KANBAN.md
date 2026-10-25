@@ -239,7 +239,7 @@ Individual columns can also be styled:
 
 ## Technical Details
 
-- Built with React 18+ and TypeScript
+- Built with React 19 and TypeScript
 - Uses @dnd-kit for drag-and-drop functionality
 - Integrates with Shadcn UI components (Card, Badge, ScrollArea)
 - Supports both pointer and touch interactions

@@ -19,7 +19,6 @@ import {
 import '../renderers';
 import type {
   DivSchema,
-  HtmlSchema,
   IconSchema,
   ImageSchema,
   SeparatorSchema,
@@ -40,7 +39,6 @@ const spanNode = (schema: TextSpanSchema): TextSpanSchema => schema;
 const imageNode = (schema: ImageSchema): ImageSchema => schema;
 const iconNode = (schema: IconSchema): IconSchema => schema;
 const separatorNode = (schema: SeparatorSchema): SeparatorSchema => schema;
-const htmlNode = (schema: HtmlSchema): HtmlSchema => schema;
 
 /**
  * Comprehensive tests for basic renderer components
@@ -275,21 +273,21 @@ describe('Basic Renderers - Display Issue Detection', () => {
     });
   });
 
-  describe('HTML Renderer', () => {
-    it('should be properly registered', () => {
-      const validation = validateComponentRegistration('html');
-      expect(validation.isRegistered).toBe(true);
+  describe('the retired `html` node type (objectui#13449)', () => {
+    // The raw-HTML renderer injected `schema.html` through
+    // `dangerouslySetInnerHTML` with no sanitiser, and `@objectstack/spec`
+    // declares no `html` component. It is retired, not sanitised: neither
+    // registry key survives.
+    it('registers neither the bare key nor `ui:html`', () => {
+      expect(validateComponentRegistration('html').isRegistered).toBe(false);
+      expect(validateComponentRegistration('ui:html').isRegistered).toBe(false);
     });
 
-    it('should render HTML content safely', () => {
-      const { container } = renderComponent(htmlNode({
-        type: 'html',
-        html: '<p>HTML Content</p>',
-      }));
-
-      // HTML renderer uses dangerouslySetInnerHTML
-      const hasContent = container.querySelector('p') || container.textContent?.includes('HTML Content');
-      expect(hasContent).toBeTruthy();
+    it('control: a sibling basic renderer from the same module set is still registered', () => {
+      // Without this, the two `false` readings above would also pass under a
+      // `../renderers` import that registered nothing at all.
+      expect(validateComponentRegistration('text').isRegistered).toBe(true);
+      expect(validateComponentRegistration('ui:text').isRegistered).toBe(true);
     });
   });
 });

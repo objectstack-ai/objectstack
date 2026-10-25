@@ -10,7 +10,7 @@
  * Registry collision guard.
  *
  * `@object-ui/components` registers display widgets (`text`, `image`,
- * `avatar`, `html`, `grid`) under their bare names, and the html tier's
+ * `avatar`, `grid`) under their bare names, and the html tier's
  * inline `code` element passthrough (objectui#10756). `@object-ui/fields`
  * registers form-input widgets that — by name — collide with those.
  *
@@ -37,7 +37,7 @@ import { ComponentRegistry } from '@object-ui/core';
 import '@object-ui/components';
 import { registerAllFields } from '../index';
 
-const COLLIDING_TYPES = ['text', 'html', 'image', 'avatar', 'grid', 'code'] as const;
+const COLLIDING_TYPES = ['text', 'image', 'avatar', 'grid', 'code'] as const;
 
 describe('registry collision (fields ↔ components)', () => {
   beforeAll(() => {
@@ -101,5 +101,16 @@ describe('registry collision (fields ↔ components)', () => {
       expect(ComponentRegistry.get(type), `bare "${type}" is owned by @object-ui/components`).toBeTruthy();
       expect(ComponentRegistry.get(type)).not.toBe(ComponentRegistry.get(`field:${type}`));
     }
+  });
+
+  it('bare `html` resolves to NOTHING once the raw-HTML node type retired (objectui#13449)', () => {
+    // `html` left COLLIDING_TYPES: `@object-ui/components` no longer registers
+    // the raw-HTML `ui:html` node that owned the bare key. The field widget
+    // still stands down from it, so a stale `{ type: 'html' }` node draws the
+    // unknown-component panel instead of a rich-text editor, and a form still
+    // reaches the widget under its namespace.
+    expect(ComponentRegistry.get('field:html'), 'field:html must be registered').toBeTruthy();
+    expect(ComponentRegistry.get('html'), 'bare "html" must not be registered').toBeFalsy();
+    expect(ComponentRegistry.get('ui:html'), '"ui:html" must not be registered').toBeFalsy();
   });
 });

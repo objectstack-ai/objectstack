@@ -24,7 +24,7 @@ lazy-load it behind a capability flag.
 npm install @object-ui/react-runtime
 ```
 
-`react ^18.0.0 || ^19.0.0` is a peer dependency.
+`react ^19.0.0` is a peer dependency.
 
 ## Usage
 

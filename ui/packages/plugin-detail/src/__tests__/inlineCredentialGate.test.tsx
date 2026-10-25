@@ -301,6 +301,12 @@ describe('blast radius — the detail row honours the shared exclusion, minus wh
 
     it(`\`${type}\` ${exempt ? 'keeps' : 'loses'} its detail inline-edit affordance`, () => {
       renderSection({ name: 'f', label: 'F' }, { fields: { f: { type } } }, { f: sampleFor(type) });
+      // A sample that is an empty value (`signature`, `filter-condition`) makes
+      // the one-field section all-empty, and a kept all-empty section folds its
+      // rows behind one "Show N empty fields" row (objectui#13386). Reveal it,
+      // so the affordance is read off the row itself.
+      const fold = screen.queryByRole('button', { name: /empty field/i });
+      if (fold) fireEvent.click(fold);
       expect(hasPencil()).toBe(exempt);
     });
 

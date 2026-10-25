@@ -116,7 +116,7 @@ import fs from 'node:fs';
 import process from 'node:process';
 
 import { isEntrypoint } from './invoked-as.mjs';
-import { LOCKFILE, lockfilePath, workspaceRoot } from './workspace-root.mjs';
+import { LOCKFILE, lockfilePath, revPath, workspaceRoot } from './workspace-root.mjs';
 
 export const EXIT_CLEAN = 0;
 export const EXIT_FINDINGS = 1;
@@ -372,13 +372,13 @@ function flagValue(args, flag) {
 function readSource(spec) {
   if (spec.includes(':') && !fs.existsSync(spec)) {
     const [rev, file] = [spec.slice(0, spec.indexOf(':')), spec.slice(spec.indexOf(':') + 1)];
-    const out = spawnSync('git', ['show', `${rev}:${file}`], {
+    const out = spawnSync('git', ['show', revPath(rev, file)], {
       cwd: workspaceRoot(),
       encoding: 'utf8',
       maxBuffer: 64 * 1024 * 1024,
     });
     if (out.status !== 0) {
-      throw new Error(`git show ${rev}:${file} failed: ${(out.stderr || '').trim()}`);
+      throw new Error(`git show ${revPath(rev, file)} failed: ${(out.stderr || '').trim()}`);
     }
     return out.stdout;
   }
@@ -391,8 +391,9 @@ function readSource(spec) {
  */
 export function resolveSources(argv) {
   // The one lockfile sits at the workspace root -- this repository's own, or
-  // the monorepo's one level up (objectstack#25723). `<rev>:<path>` below is
-  // relative to the repository root, which in both layouts is that same directory.
+  // the monorepo's one level up (objectstack#25723). `<rev>:<path>` is read as
+  // `revPath(rev, path)` with git's cwd at that root, so `<path>` is relative to
+  // the workspace root in both layouts (objectstack#25728).
   const head = flagValue(argv, '--head') ?? lockfilePath();
   const explicitBase = flagValue(argv, '--base');
   if (explicitBase) return { base: explicitBase, head };

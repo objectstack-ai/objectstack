@@ -1138,6 +1138,22 @@ export function FlowCanvas({
                           title={branch.title}
                           onPointerDown={selectable ? (e) => e.stopPropagation() : undefined}
                           onClick={selectable ? (e) => { e.stopPropagation(); onSelectEdge!(edge, eid); } : undefined}
+                          // objectui#13461 — the label is the edge's one keyboard
+                          // stop: the wide hit path above is pointer-only.
+                          role={selectable ? 'button' : undefined}
+                          tabIndex={selectable ? 0 : undefined}
+                          aria-pressed={selectable ? selected : undefined}
+                          onKeyDown={
+                            selectable
+                              ? (e) => {
+                                  if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    onSelectEdge!(edge, eid);
+                                  }
+                                }
+                              : undefined
+                          }
                           className={cn(
                             'max-w-full truncate rounded-full border bg-background/95 px-2 py-0.5 text-[10px] font-medium shadow-sm backdrop-blur-sm transition-colors',
                             selectable && 'cursor-pointer hover:border-primary/60',

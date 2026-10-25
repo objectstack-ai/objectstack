@@ -3,6 +3,7 @@ import { Input, EmptyValue } from '@object-ui/components';
 import { Button } from '@object-ui/components';
 import { isEmptyValue } from '@object-ui/core';
 import { Eye, EyeOff } from 'lucide-react';
+import { useObjectTranslation } from '@object-ui/i18n';
 import { coerceToSafeValue } from '../coerceToSafeValue.js';
 import { FieldWidgetComponentProps } from './types.js';
 import { toDomProps } from './toDomProps.js';
@@ -64,6 +65,7 @@ function passwordAutoComplete(name: unknown): 'current-password' | 'new-password
  * See {@link passwordAutoComplete} for how the token is picked.
  */
 export function PasswordField({ value, onChange, field, readonly, className, ...props }: FieldWidgetComponentProps<string>) {
+  const { t } = useObjectTranslation();
   const [showPassword, setShowPassword] = useState(false);
   const config = field;
 
@@ -93,6 +95,7 @@ export function PasswordField({ value, onChange, field, readonly, className, ...
         className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
         onClick={() => setShowPassword(!showPassword)}
         tabIndex={-1}
+        aria-label={showPassword ? t('fields.password.hide') : t('fields.password.show')}
       >
         {showPassword ? (
           <EyeOff className="size-4 text-gray-500" />

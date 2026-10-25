@@ -117,7 +117,7 @@ export const DetailViewSectionSchema = z.object({
   hideEmpty: z
     .boolean()
     .optional()
-    .describe('Hide an all-empty section entirely; `false` keeps its heading and label skeleton'),
+    .describe('Hide an all-empty section entirely; `false` keeps it — read-only as its heading plus one fold row, edit mode as every row'),
   // Closed vocabulary — the six design-system tint tokens
   // `@object-ui/plugin-detail`'s `HEADER_COLOR_CLASSES` resolves, and the six
   // `@objectstack/spec` declares on its strict `record:details` section schema

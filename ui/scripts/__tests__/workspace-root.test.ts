@@ -26,6 +26,7 @@ import {
   turboConfigPath,
   uiScopedTurboConfig,
   uiTurboConfigPath,
+  virtualStorePath,
   workspaceGlobs,
   workspaceManifestPath,
   workspaceRoot,
@@ -103,6 +104,7 @@ describe('workspaceRoot() -- rule (a): the tree, else its parent, else a throw',
       expect(lockfilePath(ws)).toBe(path.join(ws, 'pnpm-lock.yaml'));
       expect(rootManifestPath(ws)).toBe(path.join(ws, 'package.json'));
       expect(rootManifest(ws).pnpm?.overrides).toEqual({ react: '19.0.0' });
+      expect(virtualStorePath(ws)).toBe(path.join(ws, 'node_modules', '.pnpm'));
     });
   });
 
@@ -116,6 +118,9 @@ describe('workspaceRoot() -- rule (a): the tree, else its parent, else a throw',
       expect(workspaceManifestPath(ui)).toBe(path.join(mono, 'pnpm-workspace.yaml'));
       expect(lockfilePath(ui)).toBe(path.join(mono, 'pnpm-lock.yaml'));
       expect(rootManifest(ui).name).toBe('fixture-mono');
+      // The store is the workspace root's, never `<ui>/node_modules/.pnpm`
+      // (objectstack#25733): the tree's own node_modules holds only symlinks.
+      expect(virtualStorePath(ui)).toBe(path.join(mono, 'node_modules', '.pnpm'));
     });
   });
 
@@ -123,6 +128,7 @@ describe('workspaceRoot() -- rule (a): the tree, else its parent, else a throw',
     withTree({ 'none/sub/package.json': '{}' }, (tmp) => {
       expect(() => workspaceRoot(path.join(tmp, 'none/sub'))).toThrow(/no pnpm-workspace\.yaml at/);
       expect(() => workspaceGlobs(path.join(tmp, 'none/sub'))).toThrow(/no pnpm-workspace\.yaml at/);
+      expect(() => virtualStorePath(path.join(tmp, 'none/sub'))).toThrow(/no pnpm-workspace\.yaml at/);
     });
   });
 });
@@ -220,6 +226,7 @@ describe('this checkout', () => {
     expect(isNestedWorkspace()).toBe(ws !== uiRoot());
     expect(fs.existsSync(lockfilePath())).toBe(true);
     expect(fs.existsSync(workspaceManifestPath())).toBe(true);
+    expect(fs.existsSync(virtualStorePath())).toBe(true);
     expect(typeof rootManifest().name).toBe('string');
     const globs = workspaceGlobs();
     expect(globs.length).toBeGreaterThan(2);

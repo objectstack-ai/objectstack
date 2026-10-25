@@ -7,7 +7,7 @@
  */
 
 import { useCallback, useRef, useState } from 'react';
-import type { BulkActionDef, DataSource } from '@object-ui/types';
+import type { BulkActionDef, BulkWriteResult, DataSource } from '@object-ui/types';
 import { RelatedCountStore } from '@object-ui/components';
 import { executeBulkBatch } from '@object-ui/core';
 import { normalizeMultiValuePatch, type MultiValueFieldDef } from './multiValueFields';
@@ -86,13 +86,19 @@ export interface BulkExecutorOptions {
    * on `DataSource` — an adapter with no server-side bulk primitive keeps
    * working through the per-row fallback below. The executor only ever hands
    * them ids it has already reduced to `string`, so the narrowed door costs
-   * it nothing.
+   * it nothing. Either may resolve to a count or to a `BulkWriteResult`
+   * naming each failed id (objectui#13442); the executor reads both.
+   *
+   * `batchMutationEvents` is derived the same way, and optional for the same
+   * reason (objectui#13442): when the adapter has it, a run's writes notify
+   * subscribed views once at the end instead of once per row.
    */
   dataSource: {
     update: (resource: string, id: string, patch: Record<string, unknown>) => Promise<unknown>;
     delete: (resource: string, id: string) => Promise<unknown>;
     bulkUpdate?: DataSource['bulkUpdate'];
     bulkDelete?: DataSource['bulkDelete'];
+    batchMutationEvents?: DataSource['batchMutationEvents'];
   };
   /**
    * Per-record dispatcher for a PROMOTED bulk action — one declared object
@@ -162,8 +168,17 @@ export interface BulkExecutorOptions {
  * - Per-row preserves exact (id, error) attribution for the result CSV.
  * - The hook automatically falls back from bulk to per-row when bulkUpdate
  *   throws, so users still get actionable error detail on hard failures.
- *   Soft (`succeeded < total`) shortfalls surface as a single aggregate
- *   error entry per batch — see comments inline.
+ *   Soft (`succeeded < total`) shortfalls keep their per-record ids and
+ *   server reasons when the adapter reports them (`BulkWriteResult`,
+ *   objectui#13442); only failures it does not name fold into one aggregate
+ *   entry per batch — see `executeBulkBatch`.
+ *
+ * Refreshes: a run (and an undo) executes inside the adapter's
+ * `batchMutationEvents` scope when it has one, so subscribed views refetch
+ * once per run rather than once per row (objectui#13442). Without that, a
+ * one-row-per-batch run over a 100-row list refetched and re-rendered the
+ * whole list after every row, and the gaps that left between requests were
+ * most of the wall time.
  *
  * A `custom` def with `execution: 'aggregate'` (objectui#3139) rides the same
  * bulk-first decision tree, but its "bulk call" is ONE `runAggregate` dispatch
@@ -188,6 +203,20 @@ export function useBulkExecutor({ resource, dataSource, objectFields, runAction,
     rows: Array<Record<string, unknown>>;
     params: Record<string, unknown>;
   } | null>(null);
+
+  /**
+   * Run `work` inside the adapter's `batchMutationEvents` scope when it has
+   * one (objectui#13442), so the writes `work` makes notify subscribed views
+   * once when it settles instead of once per row. Called as a member, so an
+   * adapter's own `this` is intact.
+   */
+  const holdingMutationEvents = useCallback(
+    <R,>(work: () => Promise<R>): Promise<R> =>
+      typeof dataSource.batchMutationEvents === 'function'
+        ? dataSource.batchMutationEvents(work)
+        : work(),
+    [dataSource],
+  );
 
   const reset = useCallback(() => {
     setProgress({ total: 0, done: 0, failed: 0, inFlight: false });
@@ -240,113 +269,115 @@ export function useBulkExecutor({ resource, dataSource, objectFields, runAction,
         }
       }
 
-      for (let i = 0; i < rows.length; i += batchSize) {
-        const batch = rows.slice(i, i + batchSize);
+      await holdingMutationEvents(async () => {
+        for (let i = 0; i < rows.length; i += batchSize) {
+          const batch = rows.slice(i, i + batchSize);
 
-        // Collect ids up-front so both bulk and per-row paths share the
-        // same id list (and the same "missing id" failures).
-        const validIds: string[] = [];
-        for (let k = 0; k < batch.length; k += 1) {
-          const id = batch[k].id != null ? String(batch[k].id) : '';
-          if (id) {
-            validIds.push(id);
-          } else {
-            failed += 1;
-            errors.push({ id: `index_${i + k}`, error: 'Missing record id' });
+          // Collect ids up-front so both bulk and per-row paths share the
+          // same id list (and the same "missing id" failures).
+          const validIds: string[] = [];
+          for (let k = 0; k < batch.length; k += 1) {
+            const id = batch[k].id != null ? String(batch[k].id) : '';
+            if (id) {
+              validIds.push(id);
+            } else {
+              failed += 1;
+              errors.push({ id: `index_${i + k}`, error: 'Missing record id' });
+            }
           }
-        }
 
-        if (validIds.length === 0) {
-          setProgress({ total, done: succeeded, failed, inFlight: true });
-          continue;
-        }
+          if (validIds.length === 0) {
+            setProgress({ total, done: succeeded, failed, inFlight: true });
+            continue;
+          }
 
-        // Row lookup for the runner paths, which need the whole record (not
-        // just its id) to attach as `_rowRecord` / hand to the aggregate call.
-        const rowById = new Map<string, Record<string, unknown>>();
-        for (const row of batch) {
-          const id = row.id != null ? String(row.id) : '';
-          if (id) rowById.set(id, row);
-        }
+          // Row lookup for the runner paths, which need the whole record (not
+          // just its id) to attach as `_rowRecord` / hand to the aggregate call.
+          const rowById = new Map<string, Record<string, unknown>>();
+          for (const row of batch) {
+            const id = row.id != null ? String(row.id) : '';
+            if (id) rowById.set(id, row);
+          }
 
-        // Decide whether the adapter can collapse this whole batch into 1
-        // call. Single-row batches skip bulk (no win, just overhead) — EXCEPT
-        // in aggregate mode, where even one selected row must go through the
-        // single aggregate call: the target endpoint reads `_selectedIds`,
-        // which the per-record dispatch shape never carries.
-        const allowBulk = validIds.length >= 2 || isAggregate;
-        let bulkCall: ((ids: string[]) => Promise<number>) | undefined;
-        let label = 'bulk';
-        // The one real error from a failed aggregate call. The perRow
-        // "fallback" below re-throws it per id for attribution — it must
-        // never re-dispatch (see the `custom` case).
-        let aggregateError: unknown;
-        if (isAggregate && runAggregate) {
-          bulkCall = async (ids) => {
-            try {
-              await runAggregate(def, ids.map((id) => rowById.get(id) ?? { id }), { ...params });
-              // All-or-nothing: the single call resolving means it covered
-              // every id. Partial success has no envelope on this path — a
-              // server that cannot cover the whole selection must reject.
-              return ids.length;
-            } catch (e) {
-              aggregateError = e;
-              throw e;
+          // Decide whether the adapter can collapse this whole batch into 1
+          // call. Single-row batches skip bulk (no win, just overhead) — EXCEPT
+          // in aggregate mode, where even one selected row must go through the
+          // single aggregate call: the target endpoint reads `_selectedIds`,
+          // which the per-record dispatch shape never carries.
+          const allowBulk = validIds.length >= 2 || isAggregate;
+          let bulkCall: ((ids: string[]) => Promise<number | BulkWriteResult>) | undefined;
+          let label = 'bulk';
+          // The one real error from a failed aggregate call. The perRow
+          // "fallback" below re-throws it per id for attribution — it must
+          // never re-dispatch (see the `custom` case).
+          let aggregateError: unknown;
+          if (isAggregate && runAggregate) {
+            bulkCall = async (ids) => {
+              try {
+                await runAggregate(def, ids.map((id) => rowById.get(id) ?? { id }), { ...params });
+                // All-or-nothing: the single call resolving means it covered
+                // every id. Partial success has no envelope on this path — a
+                // server that cannot cover the whole selection must reject.
+                return ids.length;
+              } catch (e) {
+                aggregateError = e;
+                throw e;
+              }
+            };
+            label = 'aggregate action';
+          } else if (def.operation === 'update' && typeof dataSource.bulkUpdate === 'function') {
+            bulkCall = (ids) => dataSource.bulkUpdate!(resource, ids, buildPatch());
+            label = 'bulk update';
+          } else if (def.operation === 'delete' && typeof dataSource.bulkDelete === 'function') {
+            bulkCall = (ids) => dataSource.bulkDelete!(resource, ids);
+            label = 'bulk delete';
+          }
+
+          const perRow = (id: string): Promise<unknown> => {
+            switch (def.operation) {
+              case 'delete':
+                return dataSource.delete(resource, id);
+              case 'update':
+                return dataSource.update(resource, id, buildPatch());
+              case 'custom':
+                // Aggregate mode never fans out: the ONE bulkCall above either
+                // covered every id or failed as a whole. Reaching here means it
+                // threw (or `runAggregate` was never wired) — attribute the real
+                // error to each id rather than re-dispatching N per-record calls
+                // against an endpoint written for one `_selectedIds` call.
+                if (isAggregate) {
+                  return Promise.reject(
+                    aggregateError instanceof Error
+                      ? aggregateError
+                      : new Error(
+                          aggregateError !== undefined
+                            ? String(aggregateError)
+                            : `Aggregate action ${def.name} has no dispatcher wired`,
+                        ),
+                  );
+                }
+                // A PROMOTED def (`actionDef` present) runs its object action once
+                // per record through the injected runner. Without one, this is
+                // the historical callout shape — no mutation, caller wires
+                // onComplete.
+                return def.actionDef && runAction
+                  ? runAction(def, rowById.get(id) ?? { id }, { ...params })
+                  : Promise.resolve();
+              default:
+                return Promise.reject(new Error(`Unknown operation: ${def.operation}`));
             }
           };
-          label = 'aggregate action';
-        } else if (def.operation === 'update' && typeof dataSource.bulkUpdate === 'function') {
-          bulkCall = (ids) => dataSource.bulkUpdate!(resource, ids, buildPatch());
-          label = 'bulk update';
-        } else if (def.operation === 'delete' && typeof dataSource.bulkDelete === 'function') {
-          bulkCall = (ids) => dataSource.bulkDelete!(resource, ids);
-          label = 'bulk delete';
+
+          const outcome = await executeBulkBatch(
+            { ids: validIds, originalSize: batch.length, offset: i, allowBulk, label },
+            { bulkCall, perRow },
+          );
+          succeeded += outcome.succeeded;
+          failed += outcome.failed;
+          errors.push(...outcome.errors);
+          setProgress({ total, done: succeeded, failed, inFlight: true });
         }
-
-        const perRow = (id: string): Promise<unknown> => {
-          switch (def.operation) {
-            case 'delete':
-              return dataSource.delete(resource, id);
-            case 'update':
-              return dataSource.update(resource, id, buildPatch());
-            case 'custom':
-              // Aggregate mode never fans out: the ONE bulkCall above either
-              // covered every id or failed as a whole. Reaching here means it
-              // threw (or `runAggregate` was never wired) — attribute the real
-              // error to each id rather than re-dispatching N per-record calls
-              // against an endpoint written for one `_selectedIds` call.
-              if (isAggregate) {
-                return Promise.reject(
-                  aggregateError instanceof Error
-                    ? aggregateError
-                    : new Error(
-                        aggregateError !== undefined
-                          ? String(aggregateError)
-                          : `Aggregate action ${def.name} has no dispatcher wired`,
-                      ),
-                );
-              }
-              // A PROMOTED def (`actionDef` present) runs its object action once
-              // per record through the injected runner. Without one, this is
-              // the historical callout shape — no mutation, caller wires
-              // onComplete.
-              return def.actionDef && runAction
-                ? runAction(def, rowById.get(id) ?? { id }, { ...params })
-                : Promise.resolve();
-            default:
-              return Promise.reject(new Error(`Unknown operation: ${def.operation}`));
-          }
-        };
-
-        const outcome = await executeBulkBatch(
-          { ids: validIds, originalSize: batch.length, offset: i, allowBulk, label },
-          { bulkCall, perRow },
-        );
-        succeeded += outcome.succeeded;
-        failed += outcome.failed;
-        errors.push(...outcome.errors);
-        setProgress({ total, done: succeeded, failed, inFlight: true });
-      }
+      });
 
       const finalResult: BulkResult = { total, succeeded, failed, errors };
       // Only retain the snapshot for rows that actually succeeded — there's
@@ -365,7 +396,7 @@ export function useBulkExecutor({ resource, dataSource, objectFields, runAction,
       }
       return finalResult;
     },
-    [resource, dataSource, objectFields, runAction, runAggregate],
+    [resource, dataSource, objectFields, runAction, runAggregate, holdingMutationEvents],
   );
 
   /**
@@ -384,8 +415,11 @@ export function useBulkExecutor({ resource, dataSource, objectFields, runAction,
     setResult(null);
     setProgress({ total, done: 0, failed: 0, inFlight: true });
 
-    const settled = await Promise.allSettled(
-      snapshot.map(entry => dataSource.update(resource, entry.id, entry.prev)),
+    // One refresh for the whole replay, not one per reverted row.
+    const settled = await holdingMutationEvents(() =>
+      Promise.allSettled(
+        snapshot.map(entry => dataSource.update(resource, entry.id, entry.prev)),
+      ),
     );
     settled.forEach((res, idx) => {
       if (res.status === 'fulfilled') succeeded += 1;
@@ -406,7 +440,7 @@ export function useBulkExecutor({ resource, dataSource, objectFields, runAction,
     setProgress({ total, done: succeeded, failed, inFlight: false });
     setResult(undoResult);
     return undoResult;
-  }, [resource, dataSource]);
+  }, [resource, dataSource, holdingMutationEvents]);
 
   /**
    * Re-attempt a single previously-failed row using the same operation +

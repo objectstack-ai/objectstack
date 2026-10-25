@@ -10,8 +10,11 @@
  * WidgetRegistry - Runtime widget management with auto-discovery.
  *
  * Provides registration, loading, and lookup of runtime widgets
- * described by RuntimeWidgetManifest objects. Widgets can be loaded from
- * ES module URLs, provided inline, or resolved from the component registry.
+ * described by RuntimeWidgetManifest objects. A widget's component is either
+ * provided inline (imported at build time) or resolved from the component
+ * registry. Nothing is ever loaded from a URL: the former `module` source,
+ * which did that through a runtime dynamic import, is retired (AGENTS.md
+ * commandment #6, objectui#13450) and refused by name in `load()`.
  *
  * @module
  */
@@ -40,6 +43,12 @@ export interface WidgetRegistryOptions {
  *
  * @example
  * ```ts
+ * // The widget's React component. In an app it is imported at build time
+ * // (e.g. `import { CustomChart } from './widgets/CustomChart'`).
+ * function CustomChart() {
+ *   return null;
+ * }
+ *
  * const widgets = new WidgetRegistry({ componentRegistry: registry });
  *
  * widgets.register({
@@ -47,7 +56,7 @@ export interface WidgetRegistryOptions {
  *   version: '1.0.0',
  *   type: 'chart',
  *   label: 'Custom Chart',
- *   source: { type: 'module', url: '/widgets/chart.js' },
+ *   source: { type: 'inline', component: CustomChart },
  * });
  *
  * const resolved = await widgets.load('custom-chart');
@@ -279,32 +288,32 @@ export class WidgetRegistry {
         return component;
       }
 
-      case 'module': {
-        // Runtime-only dynamic import for loading widgets from external URLs
-        // This uses Function constructor to prevent bundlers (Webpack/Turbopack/Vite)
-        // from attempting static analysis at build time, which would fail since
-        // source.url is only known at runtime.
-        //
-        // Security: Widget URLs must be from trusted sources only. Never pass
-        // user-supplied URLs directly to RuntimeWidgetManifest. URLs should be validated
-        // and controlled by the application developer.
-        //
-        // CSP Consideration: If your application uses strict Content Security Policy,
-        // ensure dynamic imports are allowed or use 'inline' or 'registry' source types.
-        const dynamicImport = new Function('url', 'return import(url)');
-        const mod = await dynamicImport(source.url);
-        const exportName = source.exportName ?? 'default';
-        const component = mod[exportName];
-        if (!component) {
+      default: {
+        // Exhaustive over `RuntimeWidgetSource`: a member added to the union
+        // without an arm above fails to compile here. What still reaches this
+        // line at runtime is a manifest that did not come through the type —
+        // plain JavaScript, a cast, or one written against an older
+        // `@object-ui/types` — and it is refused loudly, never skipped.
+        const unhandled: never = source;
+        const sourceType = (unhandled as { type?: unknown }).type;
+        if (sourceType === 'module') {
+          // The retired `module` source (objectui#13450). It loaded code from
+          // `source.url` through a dynamic `import()` built with the Function
+          // constructor — the runtime dynamic import AGENTS.md commandment #6
+          // forbids. Refused by name so an old manifest says what to do.
           throw new Error(
-            `Widget "${manifest.name}" module at "${source.url}" does not export "${exportName}"`,
+            `Widget "${manifest.name}" uses the retired "module" source: loading widget code ` +
+              `from a URL at runtime is no longer supported. Import the component at build ` +
+              `time and declare { type: 'inline', component }, or register it in the ` +
+              `component registry and declare { type: 'registry', registryKey }.`,
           );
         }
-        return component;
+        const shown = typeof sourceType === 'string' ? `"${sourceType}"` : String(sourceType);
+        throw new Error(
+          `Widget "${manifest.name}" has an unknown source type ${shown}; ` +
+            `the supported source types are "inline" and "registry".`,
+        );
       }
-
-      default:
-        throw new Error(`Unknown widget source type for "${manifest.name}"`);
     }
   }
 

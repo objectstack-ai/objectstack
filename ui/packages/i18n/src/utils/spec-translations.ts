@@ -89,6 +89,11 @@ const SPEC_TRANSLATION_GROUPS = [
   // `picklist` metadata kind); added at that bump (objectui#11438). The
   // transform below copies it through onto `app` like any other group.
   'picklists',
+  // objectstack `47af3dde42` serves `positions` and `permissions` (positions
+  // and permission sets are translatable); added at the pin move to that
+  // commit (objectui#13478), copied through onto `app` the same way.
+  'positions',
+  'permissions',
 ] as const;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

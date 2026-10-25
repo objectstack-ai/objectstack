@@ -16,7 +16,7 @@
  * contract (`getPublicConfigs`).
  *
  * Shaped like Salesforce App Builder standard components — small, object-centric
- * — plus a thin layout/content layer and one escape hatch. A component not yet
+ * — plus a thin layout/content layer. A component not yet
  * registered is simply skipped (the list is aspirational-safe). Registrations
  * may also opt in individually via `tier: 'public'`.
  *
@@ -169,8 +169,13 @@ export const PUBLIC_BLOCKS: readonly string[] = [
   'badge',
   'alert',
   'button',
-  // ── Tier C — escape hatch (flagged, second-class) ─────────────────────────
-  'html',
+  // ⛔ The raw-HTML `html` block that sat here as a "Tier C escape hatch" is
+  // RETIRED (objectui#13449): it injected `schema.html` unsanitised, so any
+  // metadata author — a `kind:'html'` page included, which could write it as an
+  // `<html html="…">` tag — could put script-bearing markup in front of every
+  // viewer, and `@objectstack/spec` declares no `html` component. Rich HTML is
+  // a sanitised field value (`html` / `richtext`) or a `kind:'html'` page;
+  // there is no raw-HTML block.
 ];
 
 /** Fast membership set built from {@link PUBLIC_BLOCKS}. */

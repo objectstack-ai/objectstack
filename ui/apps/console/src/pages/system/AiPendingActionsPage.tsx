@@ -16,6 +16,7 @@
 
 import { useMemo } from 'react';
 import { ConsolePageHeader } from '@object-ui/app-shell';
+import { useObjectTranslation } from '@object-ui/i18n';
 import { AiPendingActionsInbox } from '@object-ui/plugin-chatbot';
 
 /**
@@ -33,6 +34,10 @@ function resolveApiBase(): string {
 
 export function AiPendingActionsPage() {
   const apiBase = useMemo(() => resolveApiBase(), []);
+  // objectui#13460 — the page's own copy reads `console.system.aiApprovals.*`;
+  // each inline `defaultValue` is the `en` pack's value, held byte-identical to
+  // it by `pnpm check:i18n-keys`, so a provider-less mount still reads English.
+  const { t } = useObjectTranslation();
 
   return (
     <div>
@@ -42,15 +47,20 @@ export function AiPendingActionsPage() {
         body. This page draws no icon, so the header draws no chip. Below `sm`
         the header hides the subtitle. */}
     <ConsolePageHeader
-      title="AI Approvals"
-      subtitle="Review actions an AI agent proposed. Approve to execute them server-side; reject to send a reason back to the model so it can revise the next turn."
+      title={t('console.system.aiApprovals.title', { defaultValue: 'AI Approvals' })}
+      subtitle={t('console.system.aiApprovals.subtitle', {
+        defaultValue:
+          'Review actions an AI agent proposed. Approve to execute them server-side; reject to send a reason back to the model so it can revise the next turn.',
+      })}
     />
     <div className="p-6 max-w-6xl mx-auto">
       <AiPendingActionsInbox
         apiBase={apiBase}
         variant="card"
-        title="Queue"
-        description="Polled every 5 seconds. Decisions are recorded under your identity."
+        title={t('console.system.aiApprovals.queueTitle', { defaultValue: 'Queue' })}
+        description={t('console.system.aiApprovals.queueDescription', {
+          defaultValue: 'Polled every 5 seconds. Decisions are recorded under your identity.',
+        })}
       />
     </div>
     </div>

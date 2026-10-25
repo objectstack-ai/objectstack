@@ -3,17 +3,19 @@
  * module-id tests, with the objectstack monorepo's `packages/` directory as
  * one more alternative (objectstack ruling D1: objectui becomes `ui/`).
  *
- * Two directions are pinned. STANDALONE, the directory the alternative names
- * does not exist beside this checkout and the three tests ARE the baseline
- * literals, byte for byte -- `vite-objectstack-spec-dist.test.ts` pins the
+ * Two directions are pinned, each on a FIXTURE layout so the pins read the same
+ * whichever layout this checkout is (objectstack#25733). STANDALONE, the
+ * directory the alternative names does not exist beside the objectui tree and
+ * the three tests ARE the baseline literals, byte for byte -- `vite-objectstack-spec-dist.test.ts` pins the
  * vendor literal as a flagged surface (objectui#4854), so "matches nothing"
  * is not enough; the alternative must not be there at all.
  * MERGED, an id under `<monorepo>/packages/<name>/dist/` is the vendor group
  * (spec in, lint out) and the two probes find their subjects; measured on the
  * spike, the baseline missed all three and the console build failed on its own
- * lazy-linter guard.
+ * lazy-linter guard. The checkout itself is asked only which arm its own
+ * layout selects.
  */
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -26,6 +28,7 @@ import {
   frameworkPackagesDir,
   workspaceChunkTests,
 } from '../vite-objectstack-workspace.ts';
+import { isNestedWorkspace } from '../workspace-root.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const consoleDir = path.join(repoRoot, 'apps/console');
@@ -33,7 +36,17 @@ const consoleDir = path.join(repoRoot, 'apps/console');
 /** A monorepo laid out as the spike wired it: `<root>/ui/apps/console`, `<root>/packages/<name>`. */
 const MONOREPO = '/srv/objectstack';
 const merged = workspaceChunkTests(candidateFrameworkPackagesDir(path.join(MONOREPO, 'ui/apps/console')));
-const standalone = workspaceChunkTests(frameworkPackagesDir(consoleDir));
+
+/**
+ * A standalone objectui tree laid out on disk: `<tmp>/objectui/apps/console`,
+ * with no `packages/` beside the tree. Not this checkout's own console, which
+ * under the monorepo HAS the framework's `packages/` three levels up.
+ */
+const standaloneFixture = mkdtempSync(path.join(os.tmpdir(), 'objectui-standalone-'));
+const standaloneConsoleDir = path.join(standaloneFixture, 'objectui/apps/console');
+mkdirSync(standaloneConsoleDir, { recursive: true });
+afterAll(() => rmSync(standaloneFixture, { recursive: true, force: true }));
+const standalone = workspaceChunkTests(frameworkPackagesDir(standaloneConsoleDir));
 
 const PLAIN_SPEC = '/w/node_modules/@objectstack/spec/dist/index.mjs';
 const STORE_SPEC = '/w/node_modules/.pnpm/@objectstack+spec@18.1.0/node_modules/@objectstack/spec/dist/index.mjs';
@@ -45,9 +58,10 @@ describe('workspaceChunkTests (objectstack ruling D1)', () => {
   it('locates the monorepo packages dir three levels above the console, and names it only when it exists', () => {
     expect(candidateFrameworkPackagesDir(path.join(MONOREPO, 'ui/apps/console'))).toBe(path.join(MONOREPO, 'packages'));
     expect(candidateFrameworkPackagesDir(consoleDir)).toBe(path.resolve(repoRoot, '../packages'));
-    // The standing fact the standalone pin rests on, checked rather than assumed.
-    expect(existsSync(candidateFrameworkPackagesDir(consoleDir))).toBe(false);
-    expect(frameworkPackagesDir(consoleDir)).toBeNull();
+    // The standing fact the standalone pin rests on, checked on its fixture
+    // rather than assumed of the checkout.
+    expect(existsSync(candidateFrameworkPackagesDir(standaloneConsoleDir))).toBe(false);
+    expect(frameworkPackagesDir(standaloneConsoleDir)).toBeNull();
     expect(frameworkPackagesDir(path.join(MONOREPO, 'ui/apps/console'))).toBeNull();
     // A real monorepo-shaped tree: the directory exists, so it is named.
     const root = mkdtempSync(path.join(os.tmpdir(), 'objectstack-workspace-'));
@@ -76,6 +90,20 @@ describe('workspaceChunkTests (objectstack ruling D1)', () => {
     // And merged is a widening of them: every baseline arm is still there.
     for (const key of ['vendor', 'spec', 'lint'] as const) {
       expect(merged[key].source).toContain(BASELINE_CHUNK_TESTS[key].source.replace(/^\(|\)$/g, ''));
+    }
+  });
+
+  it('this checkout: the console takes the arm its own layout names', () => {
+    // Standalone no `packages/` sits beside the tree and the baseline literals
+    // apply; under the monorepo the framework's `packages/` is that directory.
+    // The workspace root is the independent witness of which layout this is.
+    const own = frameworkPackagesDir(consoleDir);
+    if (isNestedWorkspace()) {
+      expect(own).toBe(path.resolve(repoRoot, '../packages'));
+      expect(workspaceChunkTests(own)).not.toBe(BASELINE_CHUNK_TESTS);
+    } else {
+      expect(own).toBeNull();
+      expect(workspaceChunkTests(own)).toBe(BASELINE_CHUNK_TESTS);
     }
   });
 

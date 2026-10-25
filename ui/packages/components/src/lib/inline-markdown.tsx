@@ -20,8 +20,8 @@
  * A link keeps its `href` only for `http:`, `https:`, `mailto:` and `tel:`, or
  * for a scheme-less reference (a path, a query, a fragment). Anything else —
  * `javascript:`, `data:`, `vbscript:`, in any case — prints its text with no
- * anchor. React 19 blocks `javascript:` URLs itself; this package's peer range
- * admits React 18, which does not. An `href` carrying whitespace or a control
+ * anchor. React 19 blocks `javascript:` URLs itself; this check does not lean
+ * on that, and refuses the other schemes too. An `href` carrying whitespace or a control
  * character is refused outright, because browsers strip those before reading
  * the scheme (`java\tscript:` runs as `javascript:`).
  *

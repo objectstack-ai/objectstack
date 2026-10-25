@@ -53,12 +53,15 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
  * which React majors this repo builds and tests against — so it is written here as the
  * single place that states it, and this test is what makes "declared" mean "enforced".
  *
- * Both halves of the range are load-bearing and for different reasons. The `^18.0.0` arm
- * is the floor the packages actually support. The `^19.0.0` arm is the CEILING: it is
- * what stops a published manifest from promising a major that does not exist yet. The
- * workspace resolves React through a root `pnpm.overrides` pin (`19.2.8` at the time of
- * writing), so 19 is also the only major any of these packages has ever been exercised
- * against — an upper bound above it would be a claim with no test behind it.
+ * The caret is both the floor and the CEILING: it is what stops a published manifest from
+ * promising a major that does not exist yet. The workspace resolves React through a root
+ * `pnpm.overrides` pin, so 19 is the only major any of these packages is ever exercised
+ * against, and the range claims nothing beyond it.
+ *
+ * Until objectui#13465 the norm was `^18.0.0 || ^19.0.0`. The `^18.0.0` arm was a
+ * published promise nothing in the tree ever installed or tested: no React 18 resolves in
+ * the lockfile and no CI lane runs one. The maintainer ruled to narrow the promise to the
+ * tested major (ruling comment 6386224339, letter A) rather than to add a React 18 lane.
  *
  * Moving the norm (adding a `^20.0.0` arm when React 20 is genuinely supported) is
  * deliberately a repo-wide act: every declaration moves together or this test goes red.
@@ -66,7 +69,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
  * cannot have per-package React support windows without the difference being a lie
  * somewhere.
  */
-const REACT_PEER_NORM = '^18.0.0 || ^19.0.0';
+const REACT_PEER_NORM = '^19.0.0';
 
 /** The React packages the norm governs. Both were widened together in objectui#3690. */
 const GOVERNED = ['react', 'react-dom'] as const;

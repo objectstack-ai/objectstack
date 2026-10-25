@@ -10,6 +10,7 @@ import * as React from "react"
 import { cn } from "@object-ui/components"
 import { Button, Input, ScrollArea, Avatar, AvatarFallback, AvatarImage } from "@object-ui/components"
 import { Send } from "lucide-react"
+import { useObjectTranslation } from "@object-ui/i18n"
 // The package's single chat message contract — the RUNTIME shape, named
 // `ChatbotEnhancedMessage` so it no longer shares a name with
 // `@object-ui/types`' authoring `ChatMessage` (objectui#6349, batch 5). See the
@@ -49,6 +50,7 @@ const Chatbot = React.forwardRef<HTMLDivElement, ChatbotProps>(
     },
     ref
   ) => {
+    const { t } = useObjectTranslation()
     const [inputValue, setInputValue] = React.useState("")
     const scrollRef = React.useRef<HTMLDivElement>(null)
     const inputRef = React.useRef<HTMLInputElement>(null)
@@ -127,6 +129,7 @@ const Chatbot = React.forwardRef<HTMLDivElement, ChatbotProps>(
               onClick={handleSend}
               disabled={disabled || !inputValue.trim()}
               size="icon"
+              aria-label={t("chatbot.sendMessage")}
             >
               <Send className="h-4 w-4" />
             </Button>

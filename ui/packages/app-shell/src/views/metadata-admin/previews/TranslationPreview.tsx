@@ -43,7 +43,9 @@ import {
   MessageCircle,
   PanelsTopLeft,
   Settings2,
+  ShieldCheck,
   SquareChevronDown,
+  Users,
   Workflow,
 } from 'lucide-react';
 import { EmptyDescription } from '@object-ui/components';
@@ -94,6 +96,8 @@ const CATEGORY_DEFS = {
   datasets: { label: 'engine.translationPreview.category.datasets', icon: Database, flat: false },
   pages: { label: 'engine.translationPreview.category.pages', icon: PanelsTopLeft, flat: false },
   flows: { label: 'engine.translationPreview.category.flows', icon: Workflow, flat: false },
+  positions: { label: 'engine.translationPreview.category.positions', icon: Users, flat: false },
+  permissions: { label: 'engine.translationPreview.category.permissions', icon: ShieldCheck, flat: false },
   metadataForms: { label: 'engine.translationPreview.category.metadataForms', icon: FileText, flat: false },
   settingsCommon: { label: 'engine.translationPreview.category.settingsCommon', icon: Settings2, flat: false },
 } satisfies Record<TranslationGroup, Omit<CategoryDef, 'key'>>;

@@ -53,7 +53,7 @@ const DELETE_ENVIRONMENT = {
     },
     already_archived: 'Environment ${result.name} was already archived',
   },
-  successMessage: 'Environment ${result.name} updated',
+  successMessage: 'Environment {{ result.name }} updated',
 };
 
 function harness(language: 'zh-CN' | 'ja-JP' | 'en', onToast: ToastHandler) {
@@ -183,9 +183,9 @@ describe('outcome copy reaches the toast in the user\'s locale (objectui#11344)'
     const localized = result.current.localize('environment', {
       ...DELETE_ENVIRONMENT,
       outcomeMessages: { already_archived: 'Environment ${result.name} was already archived' },
-      successMessage: { en: 'Environment ${result.name} updated', 'zh-CN': '环境 ${result.name} 已更新' },
+      successMessage: { en: 'Environment {{ result.name }} updated', 'zh-CN': '环境 {{ result.name }} 已更新' },
     });
-    expect(localized.successMessage).toBe('环境 ${result.name} 已更新');
+    expect(localized.successMessage).toBe('环境 {{ result.name }} 已更新');
 
     await act(async () => {
       await result.current.action.execute(dispatched(localized));

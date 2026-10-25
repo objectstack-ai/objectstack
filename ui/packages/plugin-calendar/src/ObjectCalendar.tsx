@@ -1013,20 +1013,21 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
     const resolveColorFieldValue = createFieldColorResolver(
       (objectSchema?.fields as Record<string, any> | undefined)?.[colorField ?? ''],
     );
-    const resolveTitle = (record: Record<string, any>): string => {
-      // 1. Explicit titleField wins when present on the record.
-      if (titleField) {
-        const v = record[titleField];
-        const s = typeof v === 'string' ? v.trim() : v;
-        if (s) return String(s);
-      }
-      // 2-4. Unified object-level resolver (ADR-0079): objectSchema.titleFormat
-      //   → objectSchema.displayNameField → type-aware field derivation →
-      //   `Record #<id>` floor. Replaces the old per-view chain (template render
-      //   → NAME_FIELD_KEY → hard-coded name list → "Untitled") so an event
-      //   object whose name lives in e.g. `activity_name` shows the real name.
-      return getRecordDisplayName(objectSchema, record);
-    };
+    // The author-chosen `titleField` goes to the unified resolver as its
+    // explicit rung rather than being stringified here: a lookup arrives
+    // expanded to an object (`{ id, name, … }`) and `String(object)` is the
+    // literal `[object Object]`. The resolver reduces an expanded reference to
+    // its display name, treats a whitespace-only value as empty, and leaves a
+    // raw id string as it is.
+    //
+    // Precedence: explicit titleField (when it yields a value) →
+    //   objectSchema.nameField / displayNameField → objectSchema.titleFormat →
+    //   type-aware field derivation → `Record #<id>` floor (ADR-0079). That
+    //   replaces the old per-view chain (template render → NAME_FIELD_KEY →
+    //   hard-coded name list → "Untitled") so an event object whose name lives
+    //   in e.g. `activity_name` shows the real name.
+    const resolveTitle = (record: Record<string, any>): string =>
+      getRecordDisplayName(objectSchema, record, { titleField });
 
     const scheduled: CalendarViewEvent[] = [];
     const unscheduled: UnscheduledRecord[] = [];

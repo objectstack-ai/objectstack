@@ -88,6 +88,7 @@ import {
   resolveAffordance,
   resolveFilterPlaceholders,
   toFilterNodeSafely,
+  GANTT_CONFIG_SPELLING,
   type FilterTokenScope,
   type SchemaLike,
 } from '@object-ui/core';
@@ -165,54 +166,22 @@ export const FLAT_MAP_CONFIG_SPELLING = {
 } as const satisfies Record<keyof ObjectMapConfig, string>;
 
 /**
- * The flat products of `generateViewSchema`'s `gantt` and `timeline` branches,
- * by the same mechanism as {@link FLAT_MAP_CONFIG_SPELLING}: one entry per key
- * the `@objectstack/spec` list view's block of that kind declares, under the
- * name the renderer reads it by on the node (the same name for every key).
- * objectui#6152 round 14 put them in place of the raw spreads of each block,
- * which forwarded every key a stored block carried, after the node's own keys:
- * an undeclared key reached the node, a block key named like a node key
- * (`objectName`) overrode the node's own value, and the timeline block's
- * pre-#2231 `dateField` alias landed on `ObjectTimeline`'s FLAT `dateField`
- * prop, where it bound the axis. `ListView` carries the same gantt table.
+ * The flat product of `generateViewSchema`'s `timeline` branch, by the same
+ * mechanism as {@link FLAT_MAP_CONFIG_SPELLING}: one entry per key the
+ * `@objectstack/spec` list view's `timeline` block declares, under the name the
+ * renderer reads it by on the node (the same name for every key).
+ * objectui#6152 round 14 put it in place of the raw spread of the block, which
+ * forwarded every key a stored block carried, after the node's own keys: an
+ * undeclared key reached the node, a block key named like a node key
+ * (`objectName`) overrode the node's own value, and the block's pre-#2231
+ * `dateField` alias landed on `ObjectTimeline`'s FLAT `dateField` prop, where
+ * it bound the axis. The `gantt` branch's table is `GANTT_CONFIG_SPELLING`
+ * from `@object-ui/core`, shared with `ListView` (objectui#13458).
  *
- * TOTAL over the spec's own types: a key the spec adds to either block fails
- * `tsc` here until it is listed. Type-only import, so the alias-closure walker
- * the map table's docblock describes is not involved.
+ * TOTAL over the spec's own type: a key the spec adds to the block fails `tsc`
+ * here until it is listed. Type-only import, so the alias-closure walker the
+ * map table's docblock describes is not involved.
  */
-const GANTT_CONFIG_SPELLING = {
-  startDateField: 'startDateField',
-  endDateField: 'endDateField',
-  titleField: 'titleField',
-  progressField: 'progressField',
-  dependenciesField: 'dependenciesField',
-  colorField: 'colorField',
-  parentField: 'parentField',
-  typeField: 'typeField',
-  baselineStartField: 'baselineStartField',
-  baselineEndField: 'baselineEndField',
-  groupByField: 'groupByField',
-  resourceView: 'resourceView',
-  assigneeField: 'assigneeField',
-  effortField: 'effortField',
-  capacity: 'capacity',
-  tooltipFields: 'tooltipFields',
-  quickFilters: 'quickFilters',
-  autoZoomToFilter: 'autoZoomToFilter',
-  viewMode: 'viewMode',
-  borderColorField: 'borderColorField',
-  lockField: 'lockField',
-  objectField: 'objectField',
-  summaryExtent: 'summaryExtent',
-  defaultCollapsedDepth: 'defaultCollapsedDepth',
-  dependencyTypes: 'dependencyTypes',
-  timeZone: 'timeZone',
-  exportFileName: 'exportFileName',
-  interactions: 'interactions',
-  timeSegments: 'timeSegments',
-} as const satisfies Record<keyof NonNullable<SpecListView['gantt']>, string>;
-
-/** The timeline block's declared keys; see {@link GANTT_CONFIG_SPELLING}. */
 const TIMELINE_CONFIG_SPELLING = {
   startDateField: 'startDateField',
   endDateField: 'endDateField',
@@ -223,8 +192,8 @@ const TIMELINE_CONFIG_SPELLING = {
 } as const satisfies Record<keyof NonNullable<SpecListView['timeline']>, string>;
 
 /**
- * The gallery block's declared keys; see {@link GANTT_CONFIG_SPELLING}. One
- * difference from the two tables above: the picked keys go out NESTED, as the
+ * The gallery block's declared keys; see {@link TIMELINE_CONFIG_SPELLING}. One
+ * difference from that table and the gantt's: the picked keys go out NESTED, as the
  * node's own `gallery` block, because that is where `ObjectGallery` reads all
  * five (`schema.gallery.KEY`, objectui#12053). The spec's block and the
  * renderer's reads are the same five keys, so this table is both.

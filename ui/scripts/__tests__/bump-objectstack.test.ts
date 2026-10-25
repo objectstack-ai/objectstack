@@ -138,8 +138,8 @@ describe('scripts/bump-objectstack.sh (objectui#12957)', () => {
     // The pin was built, as the pin and not as a stand-in for the checkout read above.
     expect(buildCall(objectui)).toEqual({ argv: ['build', '--write-manifests'], standIn: false });
     expect(git(objectui, 'log', '-1', '--format=%s')).toBe(`chore: bump objectstack to ${mainTip.slice(0, 12)}`);
-    expect(git(objectui, 'show', '--name-only', '--format=', 'HEAD').split('\n').sort()).toEqual(['.objectstack-pin/spec/package.json', '.objectstack-sha']);
-    expect(git(objectui, 'show', 'HEAD:.objectstack-pin/spec/package.json')).toContain(mainTip);
+    expect(git(objectui, 'show', '--name-only', '--relative', '--format=', 'HEAD').split('\n').sort()).toEqual(['.objectstack-pin/spec/package.json', '.objectstack-sha']);
+    expect(git(objectui, 'show', 'HEAD:./.objectstack-pin/spec/package.json')).toContain(mainTip);
   });
 
   it('REFUSES when the build of the new pin fails, restores the old pin, and commits nothing', () => {

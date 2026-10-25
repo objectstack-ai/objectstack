@@ -383,8 +383,8 @@ double-displays it.
     "lucide-react": "^1.43.0"
   },
   "peerDependencies": {
-    "react": "^18.0.0 || ^19.0.0",
-    "react-dom": "^18.0.0 || ^19.0.0"
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   },
   "scripts": {
     "build": "vite build",

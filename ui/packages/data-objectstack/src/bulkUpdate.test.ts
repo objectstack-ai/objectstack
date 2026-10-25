@@ -34,22 +34,22 @@ function makeDS(stub: { updateMany?: any; update?: any }) {
 }
 
 describe('ObjectStackDataSource.bulkUpdate', () => {
-  it('returns 0 and skips network when ids is empty', async () => {
+  it('returns a zero result and skips network when ids is empty', async () => {
     const updateMany = vi.fn();
     const ds = makeDS({ updateMany });
-    const n = await ds.bulkUpdate('sys_notification', [], { is_read: true });
-    expect(n).toBe(0);
+    const res = await ds.bulkUpdate('sys_notification', [], { is_read: true });
+    expect(res).toEqual({ succeeded: 0, errors: [] });
     expect(updateMany).not.toHaveBeenCalled();
   });
 
   it('issues a single updateMany call with the per-id record shape', async () => {
     const updateMany = vi.fn().mockResolvedValue({ succeeded: 3, failed: 0, results: [] });
     const ds = makeDS({ updateMany });
-    const n = await ds.bulkUpdate('sys_notification', ['a', 'b', 'c'], {
+    const res = await ds.bulkUpdate('sys_notification', ['a', 'b', 'c'], {
       is_read: true,
       read_at: '2026-05-23T05:00:00.000Z',
     });
-    expect(n).toBe(3);
+    expect(res).toEqual({ succeeded: 3, errors: [] });
     expect(updateMany).toHaveBeenCalledTimes(1);
     const [resource, records, opts] = updateMany.mock.calls[0];
     expect(resource).toBe('sys_notification');
@@ -64,30 +64,30 @@ describe('ObjectStackDataSource.bulkUpdate', () => {
   it('honors server-reported partial success counts', async () => {
     const updateMany = vi.fn().mockResolvedValue({ succeeded: 2, failed: 1, results: [] });
     const ds = makeDS({ updateMany });
-    const n = await ds.bulkUpdate('sys_notification', ['a', 'b', 'c'], { is_read: true });
-    expect(n).toBe(2);
+    const res = await ds.bulkUpdate('sys_notification', ['a', 'b', 'c'], { is_read: true });
+    expect(res.succeeded).toBe(2);
   });
 
   it('falls back to per-id updates when client.data.updateMany is missing', async () => {
     const update = vi.fn().mockResolvedValue({ record: {} });
     const ds = makeDS({ update });
-    const n = await ds.bulkUpdate('sys_notification', ['a', 'b'], { is_read: true });
-    expect(n).toBe(2);
+    const res = await ds.bulkUpdate('sys_notification', ['a', 'b'], { is_read: true });
+    expect(res).toEqual({ succeeded: 2, errors: [] });
     expect(update).toHaveBeenCalledTimes(2);
     expect(update.mock.calls[0][0]).toBe('sys_notification');
     expect(update.mock.calls[0][1]).toBe('a');
     expect(update.mock.calls[0][2]).toEqual({ is_read: true });
   });
 
-  it('fallback path tolerates per-row failures (continueOnError semantics)', async () => {
+  it('fallback path tolerates per-row failures and keeps each one (objectui#13442)', async () => {
     const update = vi
       .fn()
       .mockResolvedValueOnce({ record: {} })
       .mockRejectedValueOnce(new Error('row 2 failed'))
       .mockResolvedValueOnce({ record: {} });
     const ds = makeDS({ update });
-    const n = await ds.bulkUpdate('sys_notification', ['a', 'b', 'c'], { is_read: true });
-    expect(n).toBe(2);
+    const res = await ds.bulkUpdate('sys_notification', ['a', 'b', 'c'], { is_read: true });
+    expect(res).toEqual({ succeeded: 2, errors: [{ id: 'b', error: 'row 2 failed' }] });
     expect(update).toHaveBeenCalledTimes(3);
   });
 });

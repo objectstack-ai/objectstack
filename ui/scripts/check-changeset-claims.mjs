@@ -283,6 +283,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
 import { NOT_A_CHANGESET, changedFiles, describeDeclaration, resolveBaseRef } from './check-changeset-presence.mjs';
+import { revPath } from './workspace-root.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 
@@ -353,7 +354,9 @@ function git(root, args, { allowFailure = false } = {}) {
 }
 
 /**
- * Every tracked path at `ref`, indexed by basename.
+ * Every tracked path at `ref`, indexed by basename, relative to `root` on both
+ * sides: `ls-files` and `ls-tree` (without `--full-tree`) answer from git's cwd
+ * (scripts/workspace-root.mjs, "Paths handed to git").
  *
  * `ref === null` means the working tree, so an author running this locally is
  * answered about the checkout in front of them. UNTRACKED files join the
@@ -369,7 +372,7 @@ export function treeIndex(root, ref) {
   const listing =
     ref === null
       ? git(root, ['ls-files']) + git(root, ['ls-files', '--others', '--exclude-standard'])
-      : git(root, ['ls-tree', '-r', '--name-only', '--full-tree', ref]);
+      : git(root, ['ls-tree', '-r', '--name-only', ref]);
   const paths = new Set();
   const byBasename = new Map();
   for (const path of listing.split('\n')) {
@@ -427,7 +430,7 @@ export function readBlobs(root, ref, paths) {
 
   const batch = execFileSync('git', ['cat-file', '--batch'], {
     cwd: root,
-    input: paths.map((path) => `${ref}:${path}`).join('\n') + '\n',
+    input: paths.map((path) => revPath(ref, path)).join('\n') + '\n',
     maxBuffer: 512 * 1024 * 1024,
     stdio: ['pipe', 'pipe', 'pipe'],
   });
@@ -1122,7 +1125,7 @@ export function dateClaim(root, { base, head = null }, file, claim, pkg) {
   // The base first — see the note above. A claim that was already standing when
   // this change started is dated by the front matter it was standing against,
   // never by the commit that just moved it.
-  const atBase = git(root, ['show', `${base}:${file}`], { allowFailure: true });
+  const atBase = git(root, ['show', revPath(base, file)], { allowFailure: true });
   if (carries(atBase)) return declaredPackages(atBase).includes(pkg) ? 'born' : 'went';
 
   const range = head ? `${base}..${head}` : base;
@@ -1130,7 +1133,7 @@ export function dateClaim(root, { base, head = null }, file, claim, pkg) {
   const commits = (log ?? '').split('\n').filter((line) => line !== '');
   const needle = claim.replace(/\s+/g, ' ').toLowerCase();
   for (const commit of commits) {
-    const source = git(root, ['show', `${commit}:${file}`], { allowFailure: true });
+    const source = git(root, ['show', revPath(commit, file)], { allowFailure: true });
     if (source === null) continue;
     const body = source
       .replace(/^---\r?\n[\s\S]*?\r?\n---/, '')

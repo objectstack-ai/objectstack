@@ -69,7 +69,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import * as React from 'react';
 import { RecordContextProvider } from '@object-ui/react';
 import { RecordDetailsRenderer } from '../record-details';
@@ -304,10 +304,13 @@ describe('record:details — an authored `hideEmpty` decides the ALL-EMPTY secti
     expect(emptyPlaceholders()).toHaveLength(0);
   });
 
-  it('`hideEmpty: false` KEEPS the heading and the label skeleton of an all-empty section', () => {
+  it('`hideEmpty: false` KEEPS an all-empty section: its heading plus one fold row (#13386)', () => {
     // The escape hatch, and the half that makes the key worth declaring: a
     // brand-new record keeps the structure its author wrote. Under objectui#7129
-    // this spelling parsed nowhere and read nowhere; it now does both.
+    // this spelling parsed nowhere and read nowhere; it now does both. Ruling C
+    // on objectui#13386 settled HOW it is kept for a reader: the heading plus
+    // ONE fold row — the toggle a partly-filled section uses — not a column of
+    // placeholders. The rows are one click away.
     renderDetails({
       sections: [
         { name: 'deal_terms', label: 'Deal Terms', fields: ['stage', 'amount', 'close_date', 'next_step'], hideEmpty: false },
@@ -318,9 +321,17 @@ describe('record:details — an authored `hideEmpty` decides the ALL-EMPTY secti
     expect(screen.getByText('Firmographics')).toBeInTheDocument();
     expect(screen.getByText('Deal Terms')).toBeInTheDocument();
     for (const label of ['Stage', 'Amount', 'Close Date', 'Next Step']) {
+      expect(screen.queryByText(label)).not.toBeInTheDocument();
+    }
+    expect(emptyPlaceholders()).toHaveLength(0);
+    const fold = screen.getByRole('button', { name: /Show 4 empty fields/ });
+
+    fireEvent.click(fold);
+    for (const label of ['Stage', 'Amount', 'Close Date', 'Next Step']) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
     expect(emptyPlaceholders()).toHaveLength(4);
+    expect(screen.getByRole('button', { name: /Hide empty fields/ })).toBeInTheDocument();
   });
 
   it('the OTHER domain is untouched: all three spellings render the same partly-filled section (#7129 Q2-C)', () => {
@@ -356,7 +367,7 @@ describe('record:details — an authored `hideEmpty` decides the ALL-EMPTY secti
 });
 
 describe('record:details — the default reaches ONLY the surface that declares the key (#8603)', () => {
-  it('the direct-`fields` fallback body keeps its skeleton when every field is empty', () => {
+  it('the direct-`fields` fallback body is kept when every field is empty, folded (#13386)', () => {
     // No `sections`, so the body falls back to the authored `fields` list and
     // `DetailView` synthesizes the section itself. There is no entry for an
     // author to write `hideEmpty` on, in the spec or anywhere else, so the
@@ -366,8 +377,12 @@ describe('record:details — the default reaches ONLY the surface that declares 
     // ⚠️ This case is what makes `=== true` in `DetailSection` load-bearing
     // rather than stylistic: under `!== false` the synthesized section would
     // take the hide, and this body would be empty.
+    //
+    // Kept, it folds like every kept all-empty section (objectui#13386): one
+    // fold row, and the rows behind it.
     renderDetails({ fields: ['stage', 'amount', 'close_date', 'next_step'] }, {});
 
+    fireEvent.click(screen.getByRole('button', { name: /Show 4 empty fields/ }));
     for (const label of ['Stage', 'Amount', 'Close Date', 'Next Step']) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }

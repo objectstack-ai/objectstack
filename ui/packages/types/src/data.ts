@@ -502,21 +502,29 @@ export interface DataSource<T = any> {
    * HTTP request; adapters without bulk support may fall back to a
    * sequential per-id loop (callers should not assume atomicity).
    *
-   * Returns the count of successfully updated rows. Per-row failures
-   * (e.g. RLS-rejected, validation errors) are tolerated when the
-   * adapter supports it; total errors throw.
+   * Per-row failures (e.g. RLS-rejected, validation errors) are tolerated
+   * when the adapter supports it; total errors throw.
+   *
+   * The result is EITHER a plain count of updated rows OR a
+   * {@link BulkWriteResult}, which adds each failed record's id and the
+   * server's reason (objectui#13442). An adapter whose server reports
+   * per-row outcomes should return the {@link BulkWriteResult}: with only a
+   * count, a caller can say how many rows failed but not which ones or why,
+   * and is pushed onto a slow per-row path to find out. An adapter that has
+   * only a count keeps returning the number. Callers accept both.
    *
    * @param resource - Object/table name
    * @param ids - Target record ids. Each a `string` — see the record-id rule
    *   on {@link DataSource} (objectui#9511).
    * @param patch - Field updates applied uniformly to every id
-   * @returns Number of rows reported as updated by the server
+   * @returns The rows reported as updated: a count, or a
+   *   {@link BulkWriteResult} that also names each failed id
    */
   bulkUpdate?(
     resource: string,
     ids: ReadonlyArray<string>,
     patch: Partial<T>,
-  ): Promise<number>;
+  ): Promise<number | BulkWriteResult>;
 
   /**
    * Bulk delete multiple records by id in a single server call.
@@ -527,19 +535,22 @@ export interface DataSource<T = any> {
    * bulk support may fall back to a sequential per-id loop (callers
    * should not assume atomicity).
    *
-   * Returns the count of successfully deleted rows. Per-row failures
-   * (e.g. RLS-rejected, foreign-key constraint) are tolerated when the
-   * adapter supports it; total errors throw.
+   * Per-row failures (e.g. RLS-rejected, foreign-key constraint) are
+   * tolerated when the adapter supports it; total errors throw.
+   *
+   * Returns a count or a {@link BulkWriteResult}, on the same terms as
+   * {@link bulkUpdate}.
    *
    * @param resource - Object/table name
    * @param ids - Target record ids. Each a `string` — see the record-id rule
    *   on {@link DataSource} (objectui#9511).
-   * @returns Number of rows reported as deleted by the server
+   * @returns The rows reported as deleted: a count, or a
+   *   {@link BulkWriteResult} that also names each failed id
    */
   bulkDelete?(
     resource: string,
     ids: ReadonlyArray<string>,
-  ): Promise<number>;
+  ): Promise<number | BulkWriteResult>;
 
   /**
    * Atomically persist an ordered set of cross-object operations (optional).
@@ -832,6 +843,37 @@ export interface DataSource<T = any> {
    * ```
    */
   onMutation?(callback: (event: DataSourceMutationEvent<T>) => void): () => void;
+
+  /**
+   * Run `work` with this data source's {@link onMutation} events held back,
+   * then deliver them coalesced once `work` settles (objectui#13442).
+   *
+   * A caller that writes many rows in a loop (a bulk action on its per-row
+   * path, an undo that replays N updates) otherwise fires one event per row,
+   * and every subscribed view refetches and re-renders once per event. On a
+   * 100-row list that refetch storm, not the server, is what makes the run
+   * slow. Held, the run costs one refresh per touched resource.
+   *
+   * Contract for implementations:
+   *
+   * - Writes run exactly as they would outside the scope. Only the delivery
+   *   of their events is deferred.
+   * - When `work` settles, resolved or rejected, the held events are
+   *   delivered: per `(resource, type)` pair, the original event if only one
+   *   was held, or ONE event naming just `resource` and `type` (no `id`, no
+   *   `record`) if several were. A resource-level event already means "this
+   *   resource's lists may be stale", which is the right refresh for a run.
+   * - Scopes nest. Events are delivered when the outermost scope settles.
+   * - The scope is not per caller: an unrelated write made while it is open
+   *   is held too, and is delivered when the scope settles.
+   *
+   * Optional: without it, a caller runs `work` directly and every write
+   * notifies as it lands.
+   *
+   * @param work - The writes to run. Its result is passed through.
+   * @returns What `work` resolved to; rejects with what it rejected with
+   */
+  batchMutationEvents?<R>(work: () => Promise<R>): Promise<R>;
 
   /**
    * Synchronously download a server-streamed export of a resource.
@@ -1250,6 +1292,35 @@ export interface DataSourceMutationEvent<T = any> {
    * own boundary before it emits, so no subscriber has to.
    */
   id?: string;
+}
+
+/**
+ * One record a bulk write did not apply (objectui#13442).
+ */
+export interface BulkWriteRowError {
+  /**
+   * The id of the failed record: one of the ids the caller passed in. A
+   * `string`, per the record-id rule on {@link DataSource}.
+   */
+  id: string;
+  /** Why it failed, as the server reported it, in human-readable form. */
+  error: string;
+}
+
+/**
+ * Per-record outcome of {@link DataSource.bulkUpdate} /
+ * {@link DataSource.bulkDelete} (objectui#13442).
+ *
+ * `succeeded` is the count the server reported. `errors` names each failed
+ * record it could attribute. An adapter that cannot attribute a failure leaves
+ * it out of `errors`, so `ids.length - succeeded` can be larger than
+ * `errors.length`; a caller reports that remainder as unattributed failures.
+ */
+export interface BulkWriteResult {
+  /** Number of rows the server reported as written. */
+  succeeded: number;
+  /** One entry per failed record, with its id and the server's reason. */
+  errors: BulkWriteRowError[];
 }
 
 /**

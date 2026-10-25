@@ -239,35 +239,47 @@ export function OrganizationsPage() {
             const isActive = org.id === activeOrganization?.id;
             const isSwitching = switchingId === org.id;
             return (
-              <button type="button"
+              // objectui#13461 — the card holds two controls side by side: the
+              // card itself switches to the organization, "Manage" opens its
+              // members. "Manage" used to be a clickable `span` inside the card's
+              // `button`, which a keyboard could not reach and a screen reader
+              // read as part of the card's name; a button cannot hold another.
+              <div
                 key={org.id}
-                onClick={() => handleSelect(org)}
-                disabled={isSwitching}
-                className="group flex items-center gap-3 rounded-lg border bg-card p-4 text-left transition-colors hover:border-primary/50 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
-                data-testid={`organization-card-${org.slug}`}
+                className={`group flex items-center gap-3 rounded-lg border bg-card p-4 transition-colors hover:border-primary/50 hover:bg-accent${isSwitching ? ' opacity-60' : ''}`}
               >
-                <Avatar className="h-10 w-10 rounded-md shrink-0">
-                  {org.logo && <AvatarImage src={org.logo} alt={org.name} />}
-                  <AvatarFallback className="rounded-md bg-primary/10 text-primary text-sm font-medium">
-                    {getOrgInitials(org.name)}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate font-medium">{org.name}</div>
-                  <div className="truncate text-xs text-muted-foreground">
-                    {isActive
-                      ? t('organizations.current', { defaultValue: 'Current organization' })
-                      : org.slug}
+                <button
+                  type="button"
+                  onClick={() => handleSelect(org)}
+                  disabled={isSwitching}
+                  className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  data-testid={`organization-card-${org.slug}`}
+                >
+                  <Avatar className="h-10 w-10 rounded-md shrink-0">
+                    {org.logo && <AvatarImage src={org.logo} alt={org.name} />}
+                    <AvatarFallback className="rounded-md bg-primary/10 text-primary text-sm font-medium">
+                      {getOrgInitials(org.name)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-medium">{org.name}</div>
+                    <div className="truncate text-xs text-muted-foreground">
+                      {isActive
+                        ? t('organizations.current', { defaultValue: 'Current organization' })
+                        : org.slug}
+                    </div>
                   </div>
-                </div>
-                <span
-                  className="text-xs text-primary underline-offset-4 hover:underline shrink-0"
-                  onClick={(e) => { e.stopPropagation(); navigate(`/organizations/${org.slug}/members`); }}
+                </button>
+                <button
+                  type="button"
+                  className="shrink-0 rounded-sm text-xs text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  onClick={() => navigate(`/organizations/${org.slug}/members`)}
+                  data-testid={`organization-manage-${org.slug}`}
                 >
                   {t('organizations.manage', { defaultValue: 'Manage' })}
-                </span>
+                </button>
                 {isSwitching && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
-              </button>
+              </div>
             );
           })}
         </div>

@@ -71,7 +71,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import * as React from 'react';
 import { RecordContextProvider } from '@object-ui/react';
 import { RecordDetailsProps } from '@objectstack/spec/ui';
@@ -263,7 +263,7 @@ describe('DetailViewSection.hideEmpty — all four parties declare and honour it
   it('4/4 — `record:details` READS the key end to end, in BOTH directions', () => {
     // An all-empty section is the case this key owns and the case the read
     // decides: `hideEmpty: true` (and the renderer default) makes the whole
-    // section disappear, `false` keeps its heading and label skeleton.
+    // section disappear, `false` keeps it — folded, read-only (#13386).
     //
     // ⚠️ Deliberately end-to-end rather than "the renderer passes it on".
     // Measured on #7129's ablation: `RecordDetailsRenderer` spreads `...s`, so
@@ -312,11 +312,15 @@ describe('DetailViewSection.hideEmpty — all four parties declare and honour it
     expect(screen.queryAllByTitle('No value')).toHaveLength(0);
     hidden.unmount();
 
-    // (b) authored `false` — heading and skeleton stay. Same fixture, same
-    // control, so the pair isolates the key and nothing else.
+    // (b) authored `false` — the section stays. Same fixture, same control, so
+    // the pair isolates the key and nothing else. Read-only, a kept all-empty
+    // section is its heading plus one fold row (ruling C, objectui#13386), and
+    // the rows are behind it.
     const kept = renderWith({ hideEmpty: false });
     expect(screen.getByText('Firmographics')).toBeInTheDocument();
     expect(screen.getByText('Deal Terms')).toBeInTheDocument();
+    expect(screen.queryAllByTitle('No value')).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: /Show 3 empty fields/ }));
     for (const label of ['Stage', 'Amount', 'Close Date']) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }

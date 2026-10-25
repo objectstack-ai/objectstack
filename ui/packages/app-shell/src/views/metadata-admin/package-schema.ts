@@ -50,20 +50,19 @@ export const PACKAGE_FORM_FIELDS = [
   'dependencies',
 ] as const;
 
+/**
+ * No `try`/`catch` around the spec derivations in this file (objectui#13459).
+ * Their only input is the bundled `@objectstack/spec`, so a derivation that
+ * fails is a build-time fact: the tests beside this file go red, and at runtime
+ * the throw reaches the route's error boundary. It used to be caught, warned
+ * about in the console and turned into `undefined`, which rendered a designer
+ * form silently missing fields that the author could then save past.
+ */
 let _schema: JsonSchema | undefined;
-let _schemaFailed = false;
 
 /** JSONSchema for the whole package manifest (memoised, spec-derived). */
-export function getPackageSchema(): JsonSchema | undefined {
-  if (_schema || _schemaFailed) return _schema;
-  try {
-    _schema = z.toJSONSchema(ManifestSchema, TO_JSON_OPTS) as JsonSchema;
-  } catch (err) {
-    _schemaFailed = true;
-    if (typeof console !== 'undefined') {
-      console.warn('[package-schema] failed to derive manifest JSONSchema from spec', err);
-    }
-  }
+export function getPackageSchema(): JsonSchema {
+  _schema ??= z.toJSONSchema(ManifestSchema, TO_JSON_OPTS) as JsonSchema;
   return _schema;
 }
 

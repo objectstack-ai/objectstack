@@ -318,3 +318,8 @@ Authoring note: the mode the overlay opens in is `navigation.mode` on the view
 (`drawer` | `modal` | `split` | `popover`), and it means the same thing on every
 list-type renderer. In `split` the renderer's own view moves into the left
 panel; in `popover` the panel is anchored to the element the user clicked.
+What opens is the same on every one of them too: the grid, tree, kanban,
+calendar, gantt, list, gallery, map and timeline all mount `@object-ui/plugin-detail`'s
+`RecordDetailPanel`, so a record reads with its declared labels and typed
+values, and without its `hidden` fields, whichever view it was opened from
+(objectui#13458).

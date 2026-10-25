@@ -133,7 +133,7 @@ behind (objectui#5394 — that had happened once per release, three times).
   and `packages/data-objectstack/package.json`)
 - **Node.js:** ≥ 22.13 (see root `engines.node`)
 - **pnpm:** ≥ 10 (the workspace pins `pnpm@10.31.0` via `packageManager`)
-- **React:** 18.x or 19.x (the `peerDependencies.react` range the packages declare)
+- **React:** 19.x (the `peerDependencies.react` range the packages declare)
 - **TypeScript:** ≥ 5.0 (strict mode) — the stack floor stated in AGENTS.md §2, not a
   manifest fact: nothing in this tree declares a `typescript` range to check it against,
   so this is the one row above that no test can hold to account.

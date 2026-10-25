@@ -6,6 +6,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+import type { BulkWriteResult } from '@object-ui/types';
+
 /**
  * Outcome of a single batch execution. Mirrors the fields callers care
  * about so they can fold these into their own aggregate result.
@@ -25,11 +27,13 @@ export interface BulkBatchOutcome {
 export interface BulkBatchOps {
   /**
    * One server call that mutates every id in the batch with the same
-   * shape. Returns the count of rows the server reports as succeeded.
-   * Throws when the entire request fails (network, 500, auth) — that
-   * signals "fall back to per-row" upstream.
+   * shape. Resolves to the count of rows the server reports as succeeded,
+   * or to a {@link BulkWriteResult} that also names each failed id and the
+   * server's reason (objectui#13442) — what `DataSource.bulkUpdate` /
+   * `bulkDelete` resolve to. Throws when the entire request fails (network,
+   * 500, auth) — that signals "fall back to per-row" upstream.
    */
-  bulkCall?: (ids: string[]) => Promise<number>;
+  bulkCall?: (ids: string[]) => Promise<number | BulkWriteResult>;
   /**
    * Per-row mutation. Called once per id in the batch when bulk is
    * unavailable, when bulk throws, or when the batch is too small for
@@ -73,10 +77,14 @@ export interface BulkBatchInput {
  *
  * Decision tree:
  * 1. `allowBulk` AND `ops.bulkCall` provided → call it.
- *    - returned `n === ids.length` → all good, no per-row pass.
- *    - returned `n < ids.length`   → aggregate error for the shortfall,
- *      no per-row pass (the server already accepted the request; calling
- *      per-row would re-mutate the rows that already succeeded).
+ *    - succeeded `=== ids.length`  → all good, no per-row pass.
+ *    - succeeded `< ids.length`    → the shortfall is reported, with no
+ *      per-row pass (the server already accepted the request; calling
+ *      per-row would re-mutate the rows that already succeeded). Each
+ *      failed row the call named in its `errors` gets its own entry, under
+ *      its own id and the server's reason (objectui#13442), so Retry and the
+ *      error CSV work per record. Only failures it did NOT name — a plain
+ *      count names none — fold into one `batch_${offset}` aggregate entry.
  *    - threw                       → fall through to per-row to recover
  *      actionable per-id error detail for the user.
  * 2. Otherwise → per-row via Promise.allSettled.
@@ -91,25 +99,51 @@ export async function executeBulkBatch(
   const outcome: BulkBatchOutcome = { succeeded: 0, failed: 0, errors: [] };
 
   if (allowBulk && typeof ops.bulkCall === 'function') {
+    let res: number | BulkWriteResult;
     try {
-      const n = await ops.bulkCall(ids);
-      const bulkSucceeded = Math.max(0, Math.min(n, ids.length));
-      outcome.succeeded += bulkSucceeded;
-      const bulkFailed = ids.length - bulkSucceeded;
-      if (bulkFailed > 0) {
-        outcome.failed += bulkFailed;
-        outcome.errors.push({
-          id: `batch_${offset}`,
-          error: `${bulkFailed} record${bulkFailed === 1 ? '' : 's'} failed in ${label}`,
-        });
-      }
-      return outcome;
+      res = await ops.bulkCall(ids);
     } catch {
       // Fall through to per-row — gives the user actionable detail.
+      return runPerRow(ids, ops.perRow, outcome);
     }
+    const reported = typeof res === 'number' ? res : res.succeeded;
+    const bulkSucceeded = Math.max(0, Math.min(reported, ids.length));
+    outcome.succeeded += bulkSucceeded;
+    const bulkFailed = ids.length - bulkSucceeded;
+    if (bulkFailed > 0) {
+      outcome.failed += bulkFailed;
+      // Per-record entries for the failures the call named — one per id,
+      // only ids of THIS batch, and never more than the shortfall, so the
+      // entries always add up to `failed`.
+      const inBatch = new Set(ids);
+      const attributed = new Set<string>();
+      for (const rowError of typeof res === 'number' ? [] : res.errors) {
+        if (attributed.size >= bulkFailed) break;
+        if (!inBatch.has(rowError.id) || attributed.has(rowError.id)) continue;
+        attributed.add(rowError.id);
+        outcome.errors.push({ id: rowError.id, error: rowError.error });
+      }
+      const unattributed = bulkFailed - attributed.size;
+      if (unattributed > 0) {
+        outcome.errors.push({
+          id: `batch_${offset}`,
+          error: `${unattributed} record${unattributed === 1 ? '' : 's'} failed in ${label}`,
+        });
+      }
+    }
+    return outcome;
   }
 
-  const settled = await Promise.allSettled(ids.map((id) => ops.perRow(id)));
+  return runPerRow(ids, ops.perRow, outcome);
+}
+
+/** The per-row pass: every id through `perRow`, each failure under its own id. */
+async function runPerRow(
+  ids: string[],
+  perRow: BulkBatchOps['perRow'],
+  outcome: BulkBatchOutcome,
+): Promise<BulkBatchOutcome> {
+  const settled = await Promise.allSettled(ids.map((id) => perRow(id)));
   settled.forEach((res, idx) => {
     if (res.status === 'fulfilled') {
       outcome.succeeded += 1;

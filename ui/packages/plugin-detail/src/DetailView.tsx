@@ -36,6 +36,7 @@ import {
   X,
 } from 'lucide-react';
 import { DetailSection } from './DetailSection';
+import { EmptySectionsFold } from './EmptySectionsFold';
 import { DetailTabs } from './DetailTabs';
 import { SectionGroup } from './SectionGroup';
 import { HeaderHighlight } from './HeaderHighlight';
@@ -1127,6 +1128,20 @@ export const DetailView: React.FC<DetailViewProps> = ({
     );
   }
 
+  // objectui#13386 — a body whose sections are ALL empty draws one fold row
+  // for the whole body (`EmptySectionsFold`). Only when the sections ARE the
+  // body: section groups draw fields of their own beside them.
+  const foldEmptySections = (rendered: React.ReactNode) =>
+    schema.sectionGroups?.length ? rendered : (
+      <EmptySectionsFold
+        sections={schema.sections ?? []}
+        data={{ ...data, ...editedValues }}
+        isEditing={isInlineEditing}
+      >
+        {rendered}
+      </EmptySectionsFold>
+    );
+
   return (
     <TooltipProvider>
       <div className={cn('space-y-6', className)}>
@@ -1909,7 +1924,7 @@ export const DetailView: React.FC<DetailViewProps> = ({
                 />
               ))
             )}
-            {schema.sections && schema.sections.length > 0 && (
+            {schema.sections && schema.sections.length > 0 && foldEmptySections(
               schema.sections.map((section, index) => (
                 <SectionBoundary key={index} section={section} index={index}>
                   <DetailSection
@@ -2058,7 +2073,7 @@ export const DetailView: React.FC<DetailViewProps> = ({
           {/* Sections */}
           {schema.sections && schema.sections.length > 0 && (
             <div className="space-y-3 sm:space-y-4">
-              {schema.sections.map((section, index) => (
+              {foldEmptySections(schema.sections.map((section, index) => (
                 <SectionBoundary key={index} section={section} index={index}>
                   <DetailSection
                     section={section}
@@ -2072,7 +2087,7 @@ export const DetailView: React.FC<DetailViewProps> = ({
                     dataSource={dataSource}
                   />
                 </SectionBoundary>
-              ))}
+              )))}
             </div>
           )}
 

@@ -32,7 +32,7 @@ import { useDensityMode, resolveInlineAriaProps } from '@object-ui/react';
 import type { DependsOnInput, ListViewSchema, ObjectMapConfig } from '@object-ui/types';
 import { detectStatusField, isSystemManagedField } from '@object-ui/types';
 import { usePullToRefresh } from '@object-ui/mobile';
-import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields } from '@object-ui/core';
+import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING } from '@object-ui/core';
 import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLocale, pickLocalized } from '@object-ui/i18n';
 // Two resolvers, two vocabularies — the repo spells the distinction into the
 // NAMES (objectui#4167). `resolveInlineI18nLabel` is the spec's own
@@ -43,10 +43,11 @@ import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLoc
 // on the FLAT `schema.ariaLabel` and is resolved by `SchemaRenderer` instead
 // (objectui#5134).
 import { resolveI18nLabel as resolveInlineI18nLabel, normalizeFilterOperator, PaginationConfigSchema } from '@objectstack/spec/ui';
-import type { GroupingConfig, ListView as SpecListView } from '@objectstack/spec/ui';
+import type { GroupingConfig } from '@objectstack/spec/ui';
 import { resolveInjectedSystemColumns, resolveSearchFieldResolution, type SearchFieldMeta } from '@objectstack/spec/data';
 import { SystemFieldName } from '@objectstack/spec/system';
 import { usePermissions } from '@object-ui/permissions';
+import { RecordDetailPanel } from '@object-ui/plugin-detail';
 
 /**
  * The `case 'map'` branch below builds an `object-map` schema by flattening
@@ -110,58 +111,10 @@ export const FLAT_MAP_CONFIG_SPELLING = {
 } as const satisfies Record<keyof ObjectMapConfig, string>;
 
 /**
- * The `case 'gantt'` branch's flat product, by the same mechanism as
- * {@link FLAT_MAP_CONFIG_SPELLING}: one entry per key the `@objectstack/spec`
- * list view's `gantt` block declares, under the name `ObjectGantt` reads it by
- * on the node (the same name for every key). objectui#6152 round 14 put it in
- * place of the two raw spreads of `options.gantt` / `gantt`, which forwarded
- * every key a stored block carried, after the node's own keys: an undeclared
- * key reached the node, and a block key named like a node key (`objectName`,
- * `filter`) overrode the node's own value. Every list-view door refuses an
- * undeclared key in this block, so nothing an author can store is lost.
- *
- * TOTAL over the spec's own type, as the map table is over `ObjectMapConfig`:
- * a key the spec adds to the block fails `tsc` here until it is listed, so a
- * declared key cannot be dropped by not being written down. Type-only import,
- * so the alias-closure walker the map table's docblock describes is not
- * involved.
- */
-const GANTT_CONFIG_SPELLING = {
-  startDateField: 'startDateField',
-  endDateField: 'endDateField',
-  titleField: 'titleField',
-  progressField: 'progressField',
-  dependenciesField: 'dependenciesField',
-  colorField: 'colorField',
-  parentField: 'parentField',
-  typeField: 'typeField',
-  baselineStartField: 'baselineStartField',
-  baselineEndField: 'baselineEndField',
-  groupByField: 'groupByField',
-  resourceView: 'resourceView',
-  assigneeField: 'assigneeField',
-  effortField: 'effortField',
-  capacity: 'capacity',
-  tooltipFields: 'tooltipFields',
-  quickFilters: 'quickFilters',
-  autoZoomToFilter: 'autoZoomToFilter',
-  viewMode: 'viewMode',
-  borderColorField: 'borderColorField',
-  lockField: 'lockField',
-  objectField: 'objectField',
-  summaryExtent: 'summaryExtent',
-  defaultCollapsedDepth: 'defaultCollapsedDepth',
-  dependencyTypes: 'dependencyTypes',
-  timeZone: 'timeZone',
-  exportFileName: 'exportFileName',
-  interactions: 'interactions',
-  timeSegments: 'timeSegments',
-} as const satisfies Record<keyof NonNullable<SpecListView['gantt']>, string>;
-
-/**
  * Copy the declared keys an author actually wrote onto the flat product,
  * each under its flat spelling — the map's keys by default, the gantt's when
- * that branch passes {@link GANTT_CONFIG_SPELLING}.
+ * that branch passes `GANTT_CONFIG_SPELLING` (`@object-ui/core`, one copy
+ * shared with `plugin-view`'s `ObjectView`, objectui#13458).
  *
  * Values travel AS WRITTEN: this is transport, not a second validation of the
  * declared block — that reading belongs to `getMapConfig` in `ObjectMap.tsx`
@@ -6575,18 +6528,42 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           {...navigation}
           title={detailTitle}
         >
-          {(record) => (
-            <div className="space-y-3">
-              {Object.entries(record).map(([key, value]) => (
-                <div key={key} className="flex flex-col">
-                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                    {key.replace(/_/g, ' ')}
-                  </span>
-                  <span className="text-sm">{String(value ?? '—')}</span>
+          {(record) => {
+            // objectui#13458 — the same payload the grid, tree, kanban, calendar
+            // and gantt overlays mount, in place of a raw key/value dump: declared
+            // labels, typed widgets, `hidden` honoured, the object's field order.
+            // Read-only, as on the grid and the tree: capability is handler
+            // presence, and this view hands the panel no write path.
+            const recordId = record.id ?? record._id;
+            if (schema.objectName && (typeof recordId === 'string' || typeof recordId === 'number')) {
+              return (
+                <div className="px-6 pt-6 pb-6">
+                  <RecordDetailPanel
+                    record={record}
+                    objectName={schema.objectName}
+                    recordId={recordId}
+                    dataSource={dataSource}
+                    objectSchema={objectDef}
+                    onClose={navigation.close}
+                  />
                 </div>
-              ))}
-            </div>
-          )}
+              );
+            }
+            // No addressable record (inline rows with no object name or id): the
+            // panel needs both, so the plain reading of the row is the answer.
+            return (
+              <div className="space-y-3">
+                {Object.entries(record).map(([key, value]) => (
+                  <div key={key} className="flex flex-col">
+                    <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                      {key.replace(/_/g, ' ')}
+                    </span>
+                    <span className="text-sm">{String(value ?? '—')}</span>
+                  </div>
+                ))}
+              </div>
+            );
+          }}
         </NavigationOverlay>
       )}
     </div>

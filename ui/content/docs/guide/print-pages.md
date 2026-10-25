@@ -73,6 +73,9 @@ needs.
   the cap's lines and a note under them naming the cap and, when the server
   reports one, the total — a printed copy never drops lines in silence.
 - A collapsible `record:details` section draws open on a print page.
+- A `record:details` section prints every declared field, empty ones included,
+  with no "Show N empty fields" row. A section `hideEmpty` hides still prints
+  nothing.
 
 A block reads whether it is on a print page with `usePrintPage()` from
 `@object-ui/react`, which returns the page's `print` declaration or `null`.

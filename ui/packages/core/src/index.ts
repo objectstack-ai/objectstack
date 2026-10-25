@@ -56,6 +56,9 @@ export * from './utils/column-identity.js';
 export * from './utils/sort-values.js';
 export * from './utils/sort-query.js';
 export * from './utils/resolve-view-id.js';
+// The list view `gantt` block's flat spelling, one copy below both lowerings
+// (`plugin-list`'s `ListView`, `plugin-view`'s `ObjectView`), objectui#13458.
+export * from './utils/gantt-config-spelling.js';
 export * from './evaluator/index.js';
 export * from './actions/index.js';
 export * from './query/index.js';
@@ -66,6 +69,8 @@ export * from './errors/index.js';
 export * from './utils/debug.js';
 export * from './utils/debug-collector.js';
 export * from './utils/freeze-schema.js';
+// The shared key/value-bag check (objectui#13458); locals switch to it when touched.
+export * from './utils/is-plain-object.js';
 export * from './protocols/index.js';
 export * from './styling/scoped-styles.js';
 export * from './runtime/capabilities.js';

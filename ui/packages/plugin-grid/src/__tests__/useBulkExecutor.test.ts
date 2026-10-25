@@ -341,6 +341,136 @@ describe('useBulkExecutor', () => {
     });
   });
 
+  // objectui#13442 — a bulk call that names its failed rows keeps them per
+  // record, and a run's writes notify subscribed views once, not per row.
+  describe('per-record bulk results and one refresh per run (objectui#13442)', () => {
+    it('keeps each failed row under its own id and reason when bulkUpdate returns a BulkWriteResult', async () => {
+      const bulkUpdate = vi.fn(async () => ({
+        succeeded: 2,
+        errors: [{ id: '2', error: 'Discharge date is required before push' }],
+      }));
+      const ds = { update: vi.fn(), delete: vi.fn(), bulkUpdate };
+      const rows = [
+        { id: '1', priority: 'low' },
+        { id: '2', priority: 'low' },
+        { id: '3', priority: 'low' },
+      ];
+      const { result } = renderHook(() => useBulkExecutor({ resource: 'task', dataSource: ds }));
+
+      await act(async () => {
+        await result.current.run(upd(), rows, {});
+      });
+
+      expect(result.current.result).toEqual({
+        total: 3,
+        succeeded: 2,
+        failed: 1,
+        errors: [{ id: '2', error: 'Discharge date is required before push' }],
+      });
+      expect(ds.update).not.toHaveBeenCalled();
+
+      // The failed row is now a record Retry can act on.
+      ds.update.mockResolvedValueOnce({});
+      let ok: boolean | undefined;
+      await act(async () => {
+        ok = await result.current.retry('2');
+      });
+      expect(ok).toBe(true);
+      expect(ds.update).toHaveBeenCalledWith('task', '2', { priority: 'high' });
+      expect(result.current.result?.errors).toEqual([]);
+
+      // ...and undo skips it: only the rows that landed in the run are reverted.
+      ds.update.mockClear();
+      ds.update.mockResolvedValue({});
+      await act(async () => {
+        await result.current.undo();
+      });
+      expect(ds.update.mock.calls.map((c) => c[1]).sort()).toEqual(['1', '3']);
+    });
+
+    it('keeps each failed row of a bulkDelete BulkWriteResult too', async () => {
+      const bulkDelete = vi.fn(async () => ({
+        succeeded: 1,
+        errors: [
+          { id: '1', error: 'Cannot delete a closed order' },
+          { id: '3', error: 'Record was not deleted' },
+        ],
+      }));
+      const ds = { update: vi.fn(), delete: vi.fn(), bulkDelete };
+      const { result } = renderHook(() => useBulkExecutor({ resource: 'task', dataSource: ds }));
+
+      await act(async () => {
+        await result.current.run(
+          { name: 'rm', operation: 'delete' } as BulkActionDef,
+          [{ id: '1' }, { id: '2' }, { id: '3' }],
+          {},
+        );
+      });
+
+      expect(result.current.result?.failed).toBe(2);
+      expect(result.current.result?.errors).toEqual([
+        { id: '1', error: 'Cannot delete a closed order' },
+        { id: '3', error: 'Record was not deleted' },
+      ]);
+    });
+
+    it('runs every write of a run inside ONE batchMutationEvents scope when the adapter has it', async () => {
+      let open = 0;
+      let scopes = 0;
+      const writesInsideScope: string[] = [];
+      const writesOutsideScope: string[] = [];
+      // A plain generic function, not a `vi.fn`: a mock's type is not generic,
+      // so it would not satisfy the `DataSource` member it stands in for.
+      async function batchMutationEvents<R>(work: () => Promise<R>): Promise<R> {
+        scopes += 1;
+        open += 1;
+        try {
+          return await work();
+        } finally {
+          open -= 1;
+        }
+      }
+      const update = vi.fn(async (_: string, id: string) => {
+        (open > 0 ? writesInsideScope : writesOutsideScope).push(id);
+        return {};
+      });
+      const ds = { update, delete: vi.fn(), batchMutationEvents };
+      const rows = Array.from({ length: 6 }, (_, i) => ({ id: String(i + 1), priority: 'low' }));
+      const { result } = renderHook(() => useBulkExecutor({ resource: 'task', dataSource: ds }));
+
+      // batchSize 1: every row on the per-row path, one batch per row.
+      await act(async () => {
+        await result.current.run(upd({ batchSize: 1 }), rows, {});
+      });
+
+      expect(scopes).toBe(1);
+      expect(writesInsideScope).toEqual(['1', '2', '3', '4', '5', '6']);
+      expect(writesOutsideScope).toEqual([]);
+
+      // Undo replays N updates: one scope for the whole replay as well.
+      writesInsideScope.length = 0;
+      await act(async () => {
+        await result.current.undo();
+      });
+      expect(scopes).toBe(2);
+      expect(writesInsideScope.sort()).toEqual(['1', '2', '3', '4', '5', '6']);
+      expect(writesOutsideScope).toEqual([]);
+    });
+
+    it('runs unscoped, as before, when the adapter has no batchMutationEvents', async () => {
+      const update = vi.fn(async () => ({}));
+      const ds = { update, delete: vi.fn() };
+      const { result } = renderHook(() => useBulkExecutor({ resource: 'task', dataSource: ds }));
+
+      await act(async () => {
+        await result.current.run(upd({ batchSize: 1 }), [{ id: '1' }, { id: '2' }], {});
+      });
+
+      expect(update).toHaveBeenCalledTimes(2);
+      expect(result.current.result?.succeeded).toBe(2);
+    });
+  });
+
   // [#3139] `execution: 'aggregate'` — ONE dispatch for the whole selection,
   // pinned side by side with the per-record semantics above so neither can
   // drift into the other.

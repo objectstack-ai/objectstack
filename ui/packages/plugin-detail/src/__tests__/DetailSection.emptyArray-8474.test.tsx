@@ -223,7 +223,7 @@ describe('DetailSection — an empty array is not a cell value (#8474)', () => {
     expect(affordances(), 'both revealed rows draw the affordance').toHaveLength(2);
   });
 
-  it('⭐ AMPLIFICATION — one empty array must not suppress the all-empty skeleton', () => {
+  it('⭐ AMPLIFICATION — one empty array must not suppress the all-empty fold', () => {
     // The consequence that reaches furthest, and the one a single-row fixture
     // misses. 4 fields, every one of them empty except `tags`, which holds `[]`.
     // Before the fix that was `filledCount === 1`, all `shouldAutoHideEmpty`
@@ -234,21 +234,28 @@ describe('DetailSection — an empty array is not a cell value (#8474)', () => {
     // CONTROL — the section rendered at all.
     expect(shown('Details'), 'CONTROL: the section heading rendered').toBe(true);
 
-    // The skeleton the heuristic reserves for an all-empty section: every label
-    // keeps its row, so the record reads as a structure waiting to be filled.
+    // The section is ALL empty, so it takes the all-empty fold (objectui#13386,
+    // ruling C): ONE row that counts all FOUR fields. Had one empty array counted as
+    // filled, the section would be partly filled instead — a lone `tags` row
+    // over a blank plus a toggle counting THREE — which is the defect this
+    // case exists to catch.
+    expect(
+      screen.queryByRole('button', { name: /empty fields/i })?.textContent,
+      'the fold counts every row, `tags` included',
+    ).toMatch(/Show 4 empty fields/);
+    expect(shown('tags'), '`tags` is folded with the rest, not drawn alone').toBe(false);
+    expect(affordances(), 'nothing is drawn alone before the reveal').toHaveLength(0);
+
+    // Revealed, every label keeps its row, so the record reads as a structure
+    // waiting to be filled.
+    fireEvent.click(screen.getByRole('button', { name: /Show 4 empty fields/ }));
     for (const label of ['tags', 'stage', 'amount', 'close_date']) {
       expect(
         shown(label),
-        `row \`${label}\` must survive the all-empty skeleton — one empty array must not arm auto-hide and bury the genuinely empty rows`,
+        `row \`${label}\` must survive the all-empty fold — one empty array must not arm auto-hide and bury the genuinely empty rows`,
       ).toBe(true);
     }
     expect(affordances(), 'all four rows draw the `No value` affordance').toHaveLength(4);
-
-    // Nothing was hidden, so there is nothing to offer to reveal.
-    expect(
-      screen.queryByRole('button', { name: /empty fields/i }),
-      'no rows were hidden, so no show-empty toggle is offered',
-    ).toBeNull();
   });
 
   it('NON-REGRESSION — a POPULATED array is still a value, and so is a populated object', () => {

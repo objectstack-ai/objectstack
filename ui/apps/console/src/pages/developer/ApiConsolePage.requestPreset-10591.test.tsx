@@ -186,7 +186,7 @@ describe('ApiConsolePage request preset (objectui#10591)', () => {
     // with no discovery payload), then check nothing hit the preset.
     expect(await screen.findByText('Auth')).toBeInTheDocument();
     expect(fetchedUrls().some((u) => u.includes('/ai/tools/'))).toBe(false);
-    expect(screen.queryByText('Sending request...')).not.toBeInTheDocument();
+    expect(screen.queryByText('Sending request…')).not.toBeInTheDocument();
   });
 
   it('control: with no query string it opens exactly as before', async () => {

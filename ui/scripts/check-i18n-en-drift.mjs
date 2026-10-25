@@ -138,6 +138,20 @@
  * cannot drift from the packs it claims to read. Anything the parser does not
  * understand THROWS rather than being skipped: a silently dropped subtree would
  * make this gate green over exactly the keys it stopped reading.
+ *
+ * ## A base commit with no objectui tree at all (objectstack#25728)
+ *
+ * Paths into a revision are `revPath(ref, path)` (`scripts/workspace-root.mjs`,
+ * "Paths handed to git"), so under the objectstack monorepo the packs are read
+ * from `ui/` at the base. One change has no such tree at its base: the one that
+ * IMPORTS objectui as `ui/` (and every branch cut from it before it lands). Its
+ * merge base is objectstack `main` without `ui/`, so no pack can be read there.
+ * That is not a missing pack, it is a missing BEFORE side: every key is new in
+ * the change, and drift between two sides needs two. `treeExistsAt` asks git
+ * whether the tree itself (`<base>:./`) exists; only when it does not is the
+ * before side empty, and the CLI says so. Standalone the tree is the repository
+ * root, which exists at every commit, so this never fires there; a tree that
+ * exists at the base with a pack missing still THROWS, as it always did.
  */
 
 import ts from 'typescript';
@@ -151,6 +165,7 @@ import {
   readDesignerPairs,
 } from './check-i18n-designer-table-parity.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
+import { revPath } from './workspace-root.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 
@@ -329,14 +344,14 @@ export function readPacks(root, ref) {
   const packs = new Map();
   for (const lang of LOCALES) {
     const rel = packPath(lang);
-    const label = ref === null ? rel : `${ref}:${rel}`;
+    const label = ref === null ? rel : revPath(ref, rel);
     let text;
     if (ref === null) {
       const full = join(root, rel);
       if (!existsSync(full)) throw new Error(`${rel} does not exist in the working tree`);
       text = readFileSync(full, 'utf8');
     } else {
-      text = gitQuiet(root, ['show', `${ref}:${rel}`]);
+      text = gitQuiet(root, ['show', revPath(ref, rel)]);
       if (text === null) throw new Error(`cannot read ${label} — is ${ref} in this clone?`);
     }
     packs.set(lang, parsePack(text, label));
@@ -567,10 +582,23 @@ export function applyLedger(findings, ledger, enAfter) {
  * @param {{ base: string, head?: string | null }} options
  */
 export function analyze(root, { base, head = null }) {
-  const before = readPacks(root, base);
+  const treeAtBase = treeExistsAt(root, base);
+  const before = treeAtBase ? readPacks(root, base) : new Map(LOCALES.map((lang) => [lang, new Map()]));
   const after = readPacks(root, head);
   const { findings, counters } = findDrift(before, after);
-  return { before, after, findings, counters };
+  return { before, after, findings, counters, treeAtBase };
+}
+
+/**
+ * Whether the tree git runs in exists at `ref` (`<ref>:./`). False only for a
+ * change that imports the tree -- see "A base commit with no objectui tree".
+ *
+ * @param {string} root
+ * @param {string} ref
+ * @returns {boolean}
+ */
+export function treeExistsAt(root, ref) {
+  return gitQuiet(root, ['cat-file', '-e', revPath(ref, '')]) !== null;
 }
 
 // -- the designer table, a SECOND population (objectui#8834) ------------------
@@ -620,14 +648,14 @@ export const DESIGNER_FOLLOWERS = ['zh'];
  * @returns {{ values: Map<string, Map<string, string>>, fileMissing: boolean }}
  */
 export function readDesignerTables(root, ref, { require = true } = {}) {
-  const label = ref === null ? DESIGNER_TABLE : `${ref}:${DESIGNER_TABLE}`;
+  const label = ref === null ? DESIGNER_TABLE : revPath(ref, DESIGNER_TABLE);
   let text;
   if (ref === null) {
     const full = join(root, DESIGNER_TABLE);
     if (!existsSync(full)) throw new Error(`${DESIGNER_TABLE} does not exist in the working tree`);
     text = readFileSync(full, 'utf8');
   } else {
-    text = gitQuiet(root, ['show', `${ref}:${DESIGNER_TABLE}`]);
+    text = gitQuiet(root, ['show', revPath(ref, DESIGNER_TABLE)]);
     if (text === null) {
       if (require) throw new Error(`cannot read ${label} — is ${ref} in this clone?`);
       return { values: new Map(), fileMissing: true };
@@ -720,7 +748,7 @@ if (invokedDirectly) {
   }
 
   const head = argOf('--head');
-  const { after, findings, counters } = analyze(root, { base: base.ref, head });
+  const { after, findings, counters, treeAtBase } = analyze(root, { base: base.ref, head });
   const enAfter = after.get('en');
 
   // Guard against a refactor quietly emptying the comparison: with no keys, every
@@ -770,7 +798,11 @@ if (invokedDirectly) {
       `(${counters.addedEnKeys} key(s) added, ${counters.removedEnKeys} removed — those are ` +
       `all-locales-key-parity's), ${counters.followedPacks} pack value(s) followed, ` +
       `${counters.absentInPack} pack/key pair(s) skipped because the pack does not define the key, ` +
-      `${waived.length} finding(s) waived by the ledger.`,
+      `${waived.length} finding(s) waived by the ledger` +
+      (treeAtBase
+        ? '.'
+        : ' — this tree does not exist at the base commit (the change imports it), so every key is new ' +
+          'here and there was no before side to compare.'),
   );
 
   console.log(

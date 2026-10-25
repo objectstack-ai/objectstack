@@ -51,9 +51,11 @@
  *   `SchemaRenderer` and the real registry, over a record on which every field
  *   of the section is empty. `true` hides the section: no heading, no
  *   skeleton. A sibling node in the SAME render, identical but for the key,
- *   draws its heading and its placeholder, so the absence is a decision about
+ *   draws its heading and its fold row, so the absence is a decision about
  *   `hideEmpty` and not an artefact of the fixture. `false` and an omitted key
- *   both keep the heading and the placeholder — the node's declared default.
+ *   both keep the section — the node's declared default. Since objectui#13386
+ *   (ruling C) a kept all-empty section draws, read-only, its heading plus ONE
+ *   fold row in place of its placeholders, so "kept" is read off the fold row.
  */
 
 import React from 'react';
@@ -111,6 +113,18 @@ const placeholdersIn = (heading: HTMLElement | null) => {
 };
 
 /**
+ * The fold row a kept all-empty section draws in read-only mode
+ * (objectui#13386): the text of the section's "Show N empty field(s)" toggle.
+ */
+const foldIn = (heading: HTMLElement | null) => {
+  const card = heading?.closest('.bg-card') ?? null;
+  const button = card
+    ? Array.from(card.querySelectorAll('button')).find((b) => /empty field/i.test(b.textContent ?? ''))
+    : undefined;
+  return button?.textContent ?? null;
+};
+
+/**
  * Renders the node under test beside a CONTROL node that is identical except
  * for its title and for carrying no `hideEmpty`, over the same all-empty record.
  */
@@ -150,25 +164,28 @@ describe('objectui#10485 — an authored detail-section hideEmpty reaches Detail
     renderBesideControl({ hideEmpty: true });
 
     // The lit control: the same all-empty section, without the key, in the
-    // same render, draws its heading and its placeholder.
+    // same render, draws its heading and its fold row.
     const control = screen.getByText(CONTROL_TITLE);
-    expect(placeholdersIn(control)).toBe(1);
+    expect(foldIn(control)).toMatch(/Show 1 empty field/);
 
     expect(screen.queryByText(TITLE)).toBeNull();
-    expect(screen.getAllByTitle('No value')).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: /empty field/i })).toHaveLength(1);
+    expect(screen.queryAllByTitle('No value')).toHaveLength(0);
   });
 
-  it('`hideEmpty: false` keeps the heading and the label skeleton of an all-empty section', () => {
+  it('`hideEmpty: false` keeps an all-empty section: its heading plus one fold row', () => {
     renderBesideControl({ hideEmpty: false });
 
-    expect(placeholdersIn(screen.getByText(TITLE))).toBe(1);
-    expect(placeholdersIn(screen.getByText(CONTROL_TITLE))).toBe(1);
+    expect(foldIn(screen.getByText(TITLE))).toMatch(/Show 1 empty field/);
+    expect(foldIn(screen.getByText(CONTROL_TITLE))).toMatch(/Show 1 empty field/);
+    expect(placeholdersIn(screen.getByText(TITLE))).toBe(0);
   });
 
   it('an OMITTED hideEmpty keeps the all-empty section too: the node declares no hide by default', () => {
     render(<SchemaRenderer schema={authoredNode()} data={EMPTY_RECORD} />);
 
-    expect(screen.getByText('Street')).toBeTruthy();
-    expect(placeholdersIn(screen.getByText(TITLE))).toBe(1);
+    expect(foldIn(screen.getByText(TITLE))).toMatch(/Show 1 empty field/);
+    // Folded, not dropped: the row is one click away.
+    expect(screen.queryByText('Street')).toBeNull();
   });
 });

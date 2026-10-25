@@ -254,12 +254,14 @@ function validateComponent(config: unknown) {
 - `InputOTPSchema`, `ComboboxSchema`, `LabelSchema`
 - `CommandSchema`, `FormSchema`
 
-### Data Display Components (15)
+### Data Display Components (14)
 - `AlertSchema`, `BadgeSchema`, `AvatarSchema`
 - `ListSchema`, `TableSchema`, `DataTableSchema`
 - `MarkdownSchema`, `TreeViewSchema`, `ChartSchema`
 - `TimelineSchema`, `BreadcrumbSchema`, `PivotTableSchema`
-- `KbdSchema`, `HtmlSchema`, `StatisticSchema`
+- `KbdSchema`, `StatisticSchema`
+
+`html` is RETIRED (objectui#13449): its renderer injected the authored markup unsanitised and `@objectstack/spec` declares no such component. Its arm stays in `DataDisplaySchema` as a refusal, not exported: a node naming it is refused by name at `type`, with the remedy of an `html` / `richtext` field or a `kind: 'html'` page.
 
 ### Feedback Components (8)
 - `LoadingSchema`, `ProgressSchema`, `SkeletonSchema`

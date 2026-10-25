@@ -24,7 +24,9 @@
  *  - a plain string, and an envelope, for each key;
  *  - each declared root: `confirmText` → `record`, `params`;
  *    `successMessage` → `result`, `record`; `errorMessage` → none (verbatim);
- *  - the transition: a `${…}` sentence is still filled as before;
+ *  - no `${…}` reading: a sentence with no `{{ }}` hole is shown as written,
+ *    `${…}` tokens included (objectui#13476 retired the transitional
+ *    reading this card kept);
  *  - one dialect per sentence: a value filled into a `{{ }}` hole is never
  *    read again as `${…}`;
  *  - a non-string never reaches the confirm handler or the toast.
@@ -88,8 +90,10 @@ describe('confirmText reads the envelope and fills {{ }} over record and params 
     expect(await confirmTextFor(runner, { ...BASE, confirmText: envelope('By {{ user.name }}{{ result.id }}.') })).toBe('By .');
   });
 
-  it('transition: a `${…}` sentence is still read through the expression evaluator', async () => {
-    expect(await confirmTextFor(header(), { ...BASE, confirmText: 'Archive ${record.name}?' })).toBe('Archive Acme?');
+  it('a `${…}` token in a sentence with no hole is text, not an expression (objectui#13476)', async () => {
+    expect(await confirmTextFor(header(), { ...BASE, confirmText: 'Archive ${record.name}?' })).toBe('Archive ${record.name}?');
+    const row = { ...BASE, confirmText: envelope('Archive ${record.name}?'), params: { _rowRecord: { ...ROW } } };
+    expect(await confirmTextFor(list(), row)).toBe('Archive ${record.name}?');
   });
 
   it('one dialect per sentence: a record value is never evaluated as `${…}` after filling a hole', async () => {
@@ -165,9 +169,9 @@ describe('successMessage reads the envelope and fills {{ }} over result and reco
     expect(toastText()).toBe('Invitation sent');
   });
 
-  it('transition: the platform objects\' `${result.email}` sentence is still filled', async () => {
+  it('a `${result.*}` token in a sentence with no hole is text, not filled (objectui#13476)', async () => {
     await runner.execute({ type: 'script', name: 'invite', successMessage: 'Invitation sent to ${result.email}' });
-    expect(toastText()).toBe('Invitation sent to ann@example.com');
+    expect(toastText()).toBe('Invitation sent to ${result.email}');
   });
 
   it('one dialect per sentence: a filled value is not read again as `${result.*}`', async () => {

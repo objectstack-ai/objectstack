@@ -218,7 +218,7 @@ describe('DetailSection — one definition of emptiness, and it trims (#8376)', 
     expect(affordances(), 'both revealed rows draw the affordance').toHaveLength(2);
   });
 
-  it('⭐ AMPLIFICATION — one whitespace-only value must not suppress the all-empty skeleton', () => {
+  it('⭐ AMPLIFICATION — one whitespace-only value must not suppress the all-empty fold', () => {
     // The consequence that reaches furthest. 4 fields, every one of them empty
     // except `notes`, which holds only spaces. Under the raw test that was
     // `filledCount === 1`, which is all `shouldAutoHideEmpty` needs: the section
@@ -229,21 +229,28 @@ describe('DetailSection — one definition of emptiness, and it trims (#8376)', 
     // section with nothing visible would have dropped it entirely).
     expect(shown('Details'), 'CONTROL: the section heading rendered').toBe(true);
 
-    // The skeleton the heuristic reserves for an all-empty section: every label
-    // keeps its row, so the record reads as a structure waiting to be filled.
+    // The section is ALL empty, so it takes the all-empty fold (objectui#13386,
+    // ruling C): ONE row that counts all FOUR fields. Had one whitespace-only value counted as
+    // filled, the section would be partly filled instead — a lone `notes` row
+    // over a blank plus a toggle counting THREE — which is the defect this
+    // case exists to catch.
+    expect(
+      screen.queryByRole('button', { name: /empty fields/i })?.textContent,
+      'the fold counts every row, `notes` included',
+    ).toMatch(/Show 4 empty fields/);
+    expect(shown('notes'), '`notes` is folded with the rest, not drawn alone').toBe(false);
+    expect(affordances(), 'nothing is drawn alone before the reveal').toHaveLength(0);
+
+    // Revealed, every label keeps its row, so the record reads as a structure
+    // waiting to be filled.
+    fireEvent.click(screen.getByRole('button', { name: /Show 4 empty fields/ }));
     for (const label of ['notes', 'stage', 'amount', 'close_date']) {
       expect(
         shown(label),
-        `row \`${label}\` must survive the all-empty skeleton — one whitespace-only value must not arm auto-hide and bury the genuinely empty rows`,
+        `row \`${label}\` must survive the all-empty fold — one whitespace-only value must not arm auto-hide and bury the genuinely empty rows`,
       ).toBe(true);
     }
     expect(affordances(), 'all four rows draw the `No value` affordance').toHaveLength(4);
-
-    // Nothing was hidden, so there is nothing to offer to reveal.
-    expect(
-      screen.queryByRole('button', { name: /empty fields/i }),
-      'no rows were hidden, so no show-empty toggle is offered',
-    ).toBeNull();
   });
 
   it('NON-REGRESSION — object-valued cells are still FILLED (the half that must NOT delegate)', () => {

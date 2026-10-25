@@ -81,7 +81,7 @@ import {
 } from '@object-ui/components';
 import { createAuthenticatedFetch } from '@object-ui/auth';
 import { useMetadataClient } from '../useMetadata.js';
-import { t, tFormat, useMetadataLocale } from '../i18n.js';
+import { t, tFormat, useMetadataLocale, type SupportedLocale } from '../i18n.js';
 // objectui#7265 — this page used to re-describe the introspection row as a
 // module-local `interface RemoteTable { name; schema?; columnCount? }`. It is
 // the SAME wire shape `GET /datasources/:name/remote-tables` returns, and the
@@ -129,7 +129,7 @@ interface DatasourceRow {
  * "nothing is known", not "something is wrong" — while `error`/`blocked` carry
  * the operator-facing reason as a native tooltip (the file's existing idiom).
  */
-function StatusChip({ status, reason }: { status?: string; reason?: string }) {
+function StatusChip({ status, reason, locale }: { status?: string; reason?: string; locale: SupportedLocale }) {
   if (!status) return null;
   const chip = (cls: string, label: string) => (
     <span
@@ -141,13 +141,13 @@ function StatusChip({ status, reason }: { status?: string; reason?: string }) {
   );
   switch (status) {
     case 'ok':
-      return chip('bg-emerald-500/10 text-emerald-600 dark:text-emerald-400', 'connected');
+      return chip('bg-emerald-500/10 text-emerald-600 dark:text-emerald-400', t('engine.datasource.statusOk', locale));
     case 'error':
-      return chip('bg-destructive/10 text-destructive', 'connect failed');
+      return chip('bg-destructive/10 text-destructive', t('engine.datasource.statusError', locale));
     case 'blocked':
-      return chip('bg-amber-500/10 text-amber-600 dark:text-amber-400', 'blocked by policy');
+      return chip('bg-amber-500/10 text-amber-600 dark:text-amber-400', t('engine.datasource.statusBlocked', locale));
     case 'unvalidated':
-      return chip('bg-muted text-muted-foreground', 'not connected');
+      return chip('bg-muted text-muted-foreground', t('engine.datasource.statusUnvalidated', locale));
     default:
       return chip('bg-muted text-muted-foreground', status);
   }
@@ -184,11 +184,12 @@ interface EditorForm {
   secret: string;
 }
 
+/** The Schema mode select's options, in its order; each label is an `engine.datasource.*` row (objectui#13460). */
 const SCHEMA_MODES = [
-  { value: 'managed', label: 'Managed (ObjectStack owns the schema)' },
-  { value: 'external', label: 'External (read existing schema as-is)' },
-  { value: 'validate-only', label: 'Validate only' },
-];
+  { value: 'managed', labelKey: 'engine.datasource.schemaModeManaged' },
+  { value: 'external', labelKey: 'engine.datasource.schemaModeExternal' },
+  { value: 'validate-only', labelKey: 'engine.datasource.schemaModeValidateOnly' },
+] as const;
 
 /**
  * The platform's primary datasource, the name the server's
@@ -234,7 +235,14 @@ function defaultConfig(driver: DriverEntry | undefined): Record<string, unknown>
 export function DatasourceResourcePage(_props: { type?: string }): React.ReactElement {
   const authFetch = React.useMemo(() => createAuthenticatedFetch(), []);
   const metaClient = useMetadataClient();
+  // objectui#13460 — the page's copy is `engine.datasource.*` in the Studio
+  // table (en-US + zh-CN, the `engine.*` carve-out in `packages/i18n/README.md`).
+  // Author data (names, driver labels and descriptions, server messages) and the
+  // driver config schema's enum option values (objectui#13353) stay as served.
   const locale = useMetadataLocale();
+  /** The locale the memoised loaders below read at call time, so a language switch does not refetch. */
+  const localeRef = React.useRef(locale);
+  React.useEffect(() => { localeRef.current = locale; }, [locale]);
 
   const [rows, setRows] = React.useState<DatasourceRow[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -286,7 +294,7 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
       const data = await api('/api/v1/datasources');
       setRows(Array.isArray(data?.datasources) ? data.datasources : []);
     } catch (err) {
-      toast.error(`Load datasources: ${(err as Error).message}`);
+      toast.error(tFormat('engine.datasource.loadFailed', localeRef.current, { error: (err as Error).message }));
       setRows([]);
     } finally {
       setLoading(false);
@@ -301,8 +309,9 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
       const r = await api(`/api/v1/datasources/${encodeURIComponent(name)}/test`, { method: 'POST', body: '{}' });
       // A 200 `{ ok: false, error }` is a failed probe, so it is reported as a
       // failure with the server's text as given (objectui#13207).
-      if (r?.ok === false) toast.error(`${name}: ${r?.error ?? 'failed'}`);
-      else toast.success(`${name}: connection ok${r?.latencyMs != null ? ` (${r.latencyMs}ms)` : ''}`);
+      if (r?.ok === false) toast.error(`${name}: ${r?.error ?? t('engine.datasource.failed', locale)}`);
+      else if (r?.latencyMs != null) toast.success(tFormat('engine.datasource.rowTestOkLatency', locale, { name, latency: r.latencyMs }));
+      else toast.success(tFormat('engine.datasource.rowTestOk', locale, { name }));
       void load();
     } catch (err) {
       toast.error(`${name}: ${(err as Error).message}`);
@@ -315,10 +324,10 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
     setBusy(`del:${name}`);
     try {
       await api(`/api/v1/datasources/${encodeURIComponent(name)}`, { method: 'DELETE' });
-      toast.success(`Deleted ${name}.`);
+      toast.success(tFormat('engine.datasource.deleted', locale, { name }));
       void load();
     } catch (err) {
-      toast.error(`Delete ${name}: ${(err as Error).message}`);
+      toast.error(tFormat('engine.datasource.deleteFailed', locale, { name, error: (err as Error).message }));
     } finally {
       setBusy(null);
     }
@@ -342,7 +351,7 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
       setDrivers(list);
       return list;
     } catch (err) {
-      toast.error(`Load drivers: ${(err as Error).message}`);
+      toast.error(tFormat('engine.datasource.loadDriversFailed', localeRef.current, { error: (err as Error).message }));
       return [];
     }
   }, [api, drivers]);
@@ -390,7 +399,7 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
       });
       setEditorOpen(true);
     } catch (err) {
-      toast.error(`Open ${row.name}: ${(err as Error).message}`);
+      toast.error(tFormat('engine.datasource.openFailed', locale, { name: row.name, error: (err as Error).message }));
     } finally {
       setBusy(null);
     }
@@ -447,8 +456,9 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
     try {
       const r = await api('/api/v1/datasources/test', { method: 'POST', body: JSON.stringify({ driver: form.driver, config: form.config, ...(form.secret ? { secret: form.secret } : {}) }) });
       const res = r?.result ?? r;
-      if (res?.ok === false) setTestMsg({ ok: false, text: res?.error ?? 'Connection failed' });
-      else setTestMsg({ ok: true, text: `Connection ok${res?.latencyMs != null ? ` (${res.latencyMs}ms)` : ''}` });
+      if (res?.ok === false) setTestMsg({ ok: false, text: res?.error ?? t('engine.datasource.connectionFailed', locale) });
+      else if (res?.latencyMs != null) setTestMsg({ ok: true, text: tFormat('engine.datasource.connectionOkLatency', locale, { latency: res.latencyMs }) });
+      else setTestMsg({ ok: true, text: t('engine.datasource.connectionOk', locale) });
     } catch (err) {
       setTestMsg({ ok: false, text: (err as Error).message });
     } finally {
@@ -462,15 +472,15 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
     try {
       if (editing) {
         await api(`/api/v1/datasources/${encodeURIComponent(editing)}`, { method: 'PATCH', body: JSON.stringify(draftBody(form)) });
-        toast.success(`Updated ${editing}.`);
+        toast.success(tFormat('engine.datasource.updated', locale, { name: editing }));
       } else {
         await api('/api/v1/datasources', { method: 'POST', body: JSON.stringify({ name: form.name, ...draftBody(form) }) });
-        toast.success(`Created ${form.name}.`);
+        toast.success(tFormat('engine.datasource.created', locale, { name: form.name }));
       }
       setEditorOpen(false);
       void load();
     } catch (err) {
-      toast.error(`Save: ${(err as Error).message}`);
+      toast.error(tFormat('engine.datasource.saveFailed', locale, { error: (err as Error).message }));
     } finally {
       setSavingEditor(false);
     }
@@ -508,7 +518,7 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
       // was closed before the refusal arrived.
       const message = (err as Error).message;
       if (syncNameRef.current === name && syncSeqRef.current === seq) setSyncError(message);
-      else toast.error(`Introspect ${name}: ${message}`);
+      else toast.error(tFormat('engine.datasource.introspectFailed', locale, { name, error: message }));
     }
   };
 
@@ -537,8 +547,9 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
       }
     }
     setSyncing(false);
-    if (ok) toast.success(`Synced ${ok} object${ok > 1 ? 's' : ''} from ${syncName}.`);
-    if (failures.length) toast.error(`Failed: ${failures.join('; ')}`);
+    if (ok === 1) toast.success(tFormat('engine.datasource.syncedOne', locale, { name: syncName }));
+    else if (ok) toast.success(tFormat('engine.datasource.synced', locale, { count: ok, name: syncName }));
+    if (failures.length) toast.error(tFormat('engine.datasource.syncFailed', locale, { failures: failures.join('; ') }));
     setSyncName(null);
   };
 
@@ -606,25 +617,31 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="flex items-center gap-2 text-xl font-semibold">
-            <Database className="h-5 w-5" /> Datasources
+            <Database className="h-5 w-5" /> {t('engine.datasource.title', locale)}
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">Connect external databases and sync their tables in as objects.</p>
+          <p className="mt-1 text-sm text-muted-foreground">{t('engine.datasource.subtitle', locale)}</p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
-            <RefreshCw className={'mr-1.5 h-4 w-4' + (loading ? ' animate-spin' : '')} /> Refresh
+            <RefreshCw className={'mr-1.5 h-4 w-4' + (loading ? ' animate-spin' : '')} /> {t('engine.datasource.refresh', locale)}
           </Button>
           <Button size="sm" onClick={() => void openCreate()}>
-            <Plus className="mr-1.5 h-4 w-4" /> New datasource
+            <Plus className="mr-1.5 h-4 w-4" /> {t('engine.datasource.new', locale)}
           </Button>
         </div>
       </div>
 
       {loading ? (
-        <div className="flex items-center gap-2 py-12 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</div>
+        <div className="flex items-center gap-2 py-12 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> {t('engine.datasource.loading', locale)}</div>
       ) : rows.length === 0 ? (
         <div className="rounded-lg border border-dashed bg-muted/20 py-16 text-center text-sm text-muted-foreground">
-          No datasources yet. Click <span className="font-medium">New datasource</span> to connect one.
+          {/* The action's name is a slot so each language places it (`{action}`). */}
+          {t('engine.datasource.empty', locale).split(/\{action\}/).map((part, i, arr) => (
+            <React.Fragment key={i}>
+              {part}
+              {i < arr.length - 1 && <span className="font-medium">{t('engine.datasource.new', locale)}</span>}
+            </React.Fragment>
+          ))}
         </div>
       ) : (
         <div className="divide-y rounded-lg border bg-card">
@@ -640,7 +657,7 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
                   </div>
                   <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
                     <span className="rounded bg-muted px-1.5 py-0.5 font-mono">{ds.driver}</span>
-                    <StatusChip status={ds.status} reason={ds.statusReason} />
+                    <StatusChip status={ds.status} reason={ds.statusReason} locale={locale} />
                     {ds.origin && <span>· {ds.origin}</span>}
                   </div>
                   {ds.statusReason && (ds.status === 'error' || ds.status === 'blocked') && (
@@ -650,19 +667,19 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
                   )}
                 </div>
                 <Button variant="ghost" size="sm" disabled={busy === `test:${ds.name}`} onClick={() => void test(ds.name)}>
-                  {busy === `test:${ds.name}` ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Plug className="mr-1.5 h-4 w-4" />} Test
+                  {busy === `test:${ds.name}` ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Plug className="mr-1.5 h-4 w-4" />} {t('engine.datasource.test', locale)}
                 </Button>
                 {offersSync(ds) && (
                   <Button variant="secondary" size="sm" onClick={() => void openSync(ds.name)}>
-                    <Boxes className="mr-1.5 h-4 w-4" /> Sync objects
+                    <Boxes className="mr-1.5 h-4 w-4" /> {t('engine.datasource.sync', locale)}
                   </Button>
                 )}
                 {!isCode && (
                   <>
-                    <Button variant="ghost" size="icon" className="h-8 w-8" title="Edit" disabled={busy === `edit:${ds.name}`} onClick={() => void openEdit(ds)}>
+                    <Button variant="ghost" size="icon" className="h-8 w-8" title={t('engine.datasource.edit', locale)} disabled={busy === `edit:${ds.name}`} onClick={() => void openEdit(ds)}>
                       {busy === `edit:${ds.name}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Pencil className="h-4 w-4" />}
                     </Button>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" title="Delete" disabled={busy === `del:${ds.name}`} onClick={() => setConfirmDelete(ds)}>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" title={t('engine.datasource.delete', locale)} disabled={busy === `del:${ds.name}`} onClick={() => setConfirmDelete(ds)}>
                       {busy === `del:${ds.name}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                     </Button>
                   </>
@@ -677,9 +694,11 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
       <Dialog open={editorOpen} onOpenChange={(o) => { if (!o) setEditorOpen(false); }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>{editing ? `Edit “${editing}”` : 'New datasource'}</DialogTitle>
+            <DialogTitle>
+              {editing ? tFormat('engine.datasource.editTitle', locale, { name: editing }) : t('engine.datasource.new', locale)}
+            </DialogTitle>
             <DialogDescription>
-              {editing ? 'Update the connection. Leave the credential blank to keep the current one.' : 'Connect an external database. Credentials are encrypted and never stored in metadata.'}
+              {editing ? t('engine.datasource.editDescription', locale) : t('engine.datasource.newDescription', locale)}
             </DialogDescription>
           </DialogHeader>
 
@@ -687,27 +706,27 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
             <div className="max-h-[60vh] space-y-3 overflow-y-auto pr-1">
               {!editing && (
                 <div className="space-y-1">
-                  <Label className="text-xs">Name *</Label>
+                  <Label className="text-xs">{t('engine.datasource.name', locale)} *</Label>
                   <Input
                     value={form.name}
                     placeholder="my_database"
                     onChange={(e) => setForm((f) => (f ? { ...f, name: e.target.value } : f))}
                   />
                   {!nameValid && form.name.length > 0 && (
-                    <p className="text-[11px] text-destructive">Lowercase letters, digits, and underscores; must not start with a digit.</p>
+                    <p className="text-[11px] text-destructive">{t('engine.datasource.nameInvalid', locale)}</p>
                   )}
                 </div>
               )}
 
               <div className="space-y-1">
-                <Label className="text-xs">Label</Label>
-                <Input value={form.label} placeholder="Human-friendly name" onChange={(e) => setForm((f) => (f ? { ...f, label: e.target.value } : f))} />
+                <Label className="text-xs">{t('engine.datasource.label', locale)}</Label>
+                <Input value={form.label} placeholder={t('engine.datasource.labelPlaceholder', locale)} onChange={(e) => setForm((f) => (f ? { ...f, label: e.target.value } : f))} />
               </div>
 
               <div className="space-y-1">
-                <Label className="text-xs">Driver *</Label>
+                <Label className="text-xs">{t('engine.datasource.driver', locale)} *</Label>
                 <Select value={form.driver} onValueChange={onDriverChange} disabled={!!editing}>
-                  <SelectTrigger><SelectValue placeholder="Choose a driver" /></SelectTrigger>
+                  <SelectTrigger><SelectValue placeholder={t('engine.datasource.driverPlaceholder', locale)} /></SelectTrigger>
                   <SelectContent>
                     {drivers.map((d) => <SelectItem key={d.id} value={d.id}>{d.label}</SelectItem>)}
                   </SelectContent>
@@ -719,11 +738,11 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
               {Object.entries(selectedDriver?.configSchema?.properties ?? {}).map(([k, p]) => renderField(k, p))}
 
               <div className="space-y-1">
-                <Label className="text-xs">Schema mode</Label>
+                <Label className="text-xs">{t('engine.datasource.schemaMode', locale)}</Label>
                 <Select value={form.schemaMode} onValueChange={(v) => setForm((f) => (f ? { ...f, schemaMode: v } : f))}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {SCHEMA_MODES.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+                    {SCHEMA_MODES.map((m) => <SelectItem key={m.value} value={m.value}>{t(m.labelKey, locale)}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -739,13 +758,13 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
 
           <DialogFooter className="gap-2 sm:justify-between">
             <Button variant="ghost" size="sm" disabled={!form?.driver || testingDraft} onClick={() => void testDraft()}>
-              {testingDraft ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Plug className="mr-1.5 h-4 w-4" />} Test connection
+              {testingDraft ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Plug className="mr-1.5 h-4 w-4" />} {t('engine.datasource.testConnection', locale)}
             </Button>
             <div className="flex items-center gap-2">
-              <Button variant="ghost" size="sm" onClick={() => setEditorOpen(false)}>Cancel</Button>
+              <Button variant="ghost" size="sm" onClick={() => setEditorOpen(false)}>{t('engine.cancel', locale)}</Button>
               <Button size="sm" disabled={!canSave} onClick={() => void saveEditor()}>
                 {savingEditor && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
-                {editing ? 'Save changes' : 'Create datasource'}
+                {editing ? t('engine.datasource.saveChanges', locale) : t('engine.datasource.create', locale)}
               </Button>
             </div>
           </DialogFooter>
@@ -756,34 +775,42 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
       <Dialog open={!!syncName} onOpenChange={(o) => { if (!o) setSyncName(null); }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Sync objects from “{syncName}”</DialogTitle>
-            <DialogDescription>Pick the remote tables to import as objects. Each becomes an object definition.</DialogDescription>
+            <DialogTitle>{tFormat('engine.datasource.syncTitle', locale, { name: syncName ?? '' })}</DialogTitle>
+            <DialogDescription>{t('engine.datasource.syncDescription', locale)}</DialogDescription>
           </DialogHeader>
           {syncError != null ? (
             <div role="alert" className="py-8 text-center text-sm text-destructive">{syncError}</div>
           ) : tables == null ? (
-            <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Introspecting…</div>
+            <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> {t('engine.datasource.introspecting', locale)}</div>
           ) : tables.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">No remote tables found on this datasource.</p>
+            <p className="py-8 text-center text-sm text-muted-foreground">{t('engine.datasource.noRemoteTables', locale)}</p>
           ) : (
             <div className="max-h-[50vh] space-y-1 overflow-y-auto">
-              {tables.map((t) => {
-                const key = t.schema ? `${t.schema}.${t.name}` : t.name;
+              {tables.map((table) => {
+                const key = table.schema ? `${table.schema}.${table.name}` : table.name;
                 return (
                   <label key={key} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent">
-                    <input type="checkbox" checked={selected.has(t.name)} onChange={() => toggle(t.name)} className="h-4 w-4" />
+                    <input type="checkbox" checked={selected.has(table.name)} onChange={() => toggle(table.name)} className="h-4 w-4" />
                     <span className="flex-1">{key}</span>
-                    {t.columnCount != null && <span className="text-[11px] text-muted-foreground">{t.columnCount} cols</span>}
+                    {table.columnCount != null && (
+                      <span className="text-[11px] text-muted-foreground">
+                        {tFormat('engine.datasource.columnCount', locale, { count: table.columnCount })}
+                      </span>
+                    )}
                   </label>
                 );
               })}
             </div>
           )}
           <div className="mt-2 flex items-center justify-end gap-2">
-            <Button variant="ghost" size="sm" onClick={() => setSyncName(null)}>Cancel</Button>
+            <Button variant="ghost" size="sm" onClick={() => setSyncName(null)}>{t('engine.cancel', locale)}</Button>
             <Button size="sm" disabled={syncing || selected.size === 0} onClick={() => void runSync()}>
               {syncing ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Boxes className="mr-1.5 h-4 w-4" />}
-              Create {selected.size || ''} object{selected.size === 1 ? '' : 's'}
+              {selected.size === 0
+                ? t('engine.datasource.createObjectsNone', locale)
+                : selected.size === 1
+                  ? t('engine.datasource.createObjectsOne', locale)
+                  : tFormat('engine.datasource.createObjects', locale, { count: selected.size })}
             </Button>
           </div>
         </DialogContent>

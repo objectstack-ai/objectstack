@@ -478,6 +478,7 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { isEntrypoint } from './invoked-as.mjs';
 import { TOOLING_FILE } from './check-phantom-dependencies.mjs';
+import { virtualStorePath } from './workspace-root.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -1592,12 +1593,24 @@ export function peerMappedCount(state = {}) {
  * Where a package is physically installed in this workspace, found WITHOUT
  * assuming it resolves from anywhere in particular: pnpm's virtual store holds
  * one directory per (package, version, peer-set), named with `/` replaced by `+`.
- * Used only by the UNDECLARED control, which must never confuse "this specifier
- * does not resolve" with "this package is not installed" — the second proves
- * nothing about how far resolution reaches.
+ * Used by both controls, which must never confuse "this specifier does not
+ * resolve" with "this package is not installed" — the second proves nothing
+ * about how far resolution reaches.
+ *
+ * The store is the WORKSPACE root's (`virtualStorePath`), not `root`'s: under
+ * the objectstack monorepo `root` is `ui/`, whose `node_modules` holds only the
+ * symlinks of its own manifest's dependencies, and the store every installed
+ * copy lives in is one level up (objectstack#25733). Standalone the two are the
+ * same directory. A tree no `pnpm-workspace.yaml` governs has nothing installed
+ * in it, so the answer there is `null`, the same as a missing store.
  */
 export function findInstalledCopy(root = repoRoot, specifier = '') {
-  const storeDir = join(root, 'node_modules', '.pnpm');
+  let storeDir;
+  try {
+    storeDir = virtualStorePath(root);
+  } catch {
+    return null;
+  }
   if (!existsSync(storeDir)) return null;
   const prefix = `${specifier.replace(/\//g, '+')}@`;
   for (const entry of readdirSync(storeDir).sort()) {

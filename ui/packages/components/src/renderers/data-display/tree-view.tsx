@@ -12,6 +12,15 @@ import { ChevronRight, ChevronDown, Folder, File, FolderOpen } from 'lucide-reac
 import { useState } from 'react';
 import { cn } from '../../lib/utils';
 import { useDataScope } from '@object-ui/react';
+import { createSafeTranslation } from '@object-ui/i18n';
+
+const useSafeTreeTranslation = createSafeTranslation(
+  {
+    'common.expand': 'Expand',
+    'common.collapse': 'Collapse',
+  },
+  'common.expand',
+);
 
 const TreeNodeComponent = ({ 
   node, 
@@ -20,6 +29,7 @@ const TreeNodeComponent = ({
   node: TreeNode; 
   onNodeClick?: (node: TreeNode) => void;
 }) => {
+  const { t } = useSafeTreeTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const hasChildren = node.children && node.children.length > 0;
 
@@ -28,25 +38,43 @@ const TreeNodeComponent = ({
     setIsOpen(!isOpen);
   };
 
-  const handleClick = () => {
-    if (onNodeClick) {
-      onNodeClick(node);
-    }
-  };
+  const nodeBody = (
+    <>
+      {node.icon === 'folder' || hasChildren ? (
+        isOpen ?
+          <FolderOpen className="h-4 w-4 mr-2 text-primary" /> :
+          <Folder className="h-4 w-4 mr-2 text-muted-foreground group-hover:text-primary transition-colors" />
+      ) : (
+        <File className="h-4 w-4 mr-2 text-muted-foreground group-hover:text-primary transition-colors" />
+      )}
+
+      <span className={cn(
+          "text-sm transition-colors",
+          isOpen ? "font-medium text-foreground" : "text-muted-foreground group-hover:text-foreground"
+      )}>
+          {node.label}
+      </span>
+    </>
+  );
 
   return (
     <div className="relative">
+      {/* objectui#13461 — the row is a container, not a click target: the
+          expand toggle and (when the host passes `onNodeClick`) the node itself
+          are each a real button, so both are reachable by keyboard. The node
+          used to be a clickable `div` around the toggle's `button`. */}
       <div
         className={cn(
-          'group flex items-center py-1.5 px-2 rounded-sm cursor-pointer transition-colors',
+          'group flex items-center py-1.5 px-2 rounded-sm transition-colors',
           'hover:bg-accent hover:text-accent-foreground',
           isOpen && hasChildren && 'bg-accent/50' 
         )}
-        onClick={handleClick}
       >
         {hasChildren ? (
           <button type="button"
             onClick={handleToggle}
+            aria-expanded={isOpen}
+            aria-label={isOpen ? t('common.collapse') : t('common.expand')}
             className="mr-2 p-0.5 h-5 w-5 flex items-center justify-center rounded-sm hover:bg-muted text-muted-foreground transition-colors"
           >
             {isOpen ? (
@@ -61,20 +89,17 @@ const TreeNodeComponent = ({
           </span>
         )}
         
-        {node.icon === 'folder' || hasChildren ? (
-          isOpen ? 
-            <FolderOpen className="h-4 w-4 mr-2 text-primary" /> : 
-            <Folder className="h-4 w-4 mr-2 text-muted-foreground group-hover:text-primary transition-colors" />
+        {onNodeClick ? (
+          <button
+            type="button"
+            onClick={() => onNodeClick(node)}
+            className="flex min-w-0 flex-1 cursor-pointer items-center rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {nodeBody}
+          </button>
         ) : (
-          <File className="h-4 w-4 mr-2 text-muted-foreground group-hover:text-primary transition-colors" />
+          nodeBody
         )}
-        
-        <span className={cn(
-            "text-sm transition-colors",
-            isOpen ? "font-medium text-foreground" : "text-muted-foreground group-hover:text-foreground"
-        )}>
-            {node.label}
-        </span>
       </div>
 
       {hasChildren && isOpen && (
@@ -122,7 +147,8 @@ ComponentRegistry.register('tree-view',
             <TreeNodeComponent
               key={node.id}
               node={node}
-              onNodeClick={handleNodeClick}
+              // A node is a button only when the host supplied a handler for it.
+              onNodeClick={schema.onNodeClick ? handleNodeClick : undefined}
             />
           ))}
         </div>

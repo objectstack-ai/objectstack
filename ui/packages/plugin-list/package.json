@@ -16,6 +16,13 @@
   "main": "dist/index.umd.cjs",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
+  "sideEffects": [
+    "./dist/ObjectGallery.js",
+    "./dist/index.js",
+    "./dist/index.umd.cjs",
+    "./src/ObjectGallery.tsx",
+    "./src/index.tsx"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -40,11 +47,12 @@
     "@object-ui/i18n": "workspace:^",
     "@object-ui/mobile": "workspace:^",
     "@object-ui/permissions": "workspace:^",
+    "@object-ui/plugin-detail": "workspace:^",
     "@object-ui/react": "workspace:^",
     "@object-ui/types": "workspace:^",
     "@objectstack/spec": "workspace:^",
-    "react": "^18.0.0 || ^19.0.0",
-    "react-dom": "^18.0.0 || ^19.0.0"
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@object-ui/components": "workspace:*",
@@ -53,6 +61,7 @@
     "@object-ui/i18n": "workspace:*",
     "@object-ui/mobile": "workspace:*",
     "@object-ui/permissions": "workspace:*",
+    "@object-ui/plugin-detail": "workspace:*",
     "@object-ui/react": "workspace:*",
     "@object-ui/test-support": "workspace:*",
     "@object-ui/types": "workspace:*",

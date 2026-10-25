@@ -173,8 +173,11 @@ const REFUSED_AT_TYPE = 0;
  * refused at `type` by design so the bare spelling stays the one authorable
  * key (maintainer ruling 6312301934), a named stopgap raise. The raise covers
  * these five keys only; any other rise is still a regression.
+ * objectui#13449: minus `ui:html`, the namespaced twin of the raw-HTML `html`
+ * node type, retired from the registry with its renderer; the armed bare `html`
+ * left with its arm, which became a refusal, so it moved nothing here.
  */
-const NAMESPACED_REFUSED_AT_TYPE = 307;
+const NAMESPACED_REFUSED_AT_TYPE = 306;
 
 /** The bare registry keys — the population the card measured. */
 const BARE_KEYS = KNOWN_SCHEMA_TYPES.filter((key) => !key.includes(':'));
@@ -632,6 +635,26 @@ describe('registered NAMESPACED component types refused at `type` — a ratchet 
     expect(refusedAtType('cloud:plan-status')).toBe(false);
     // Control: an unknown `cloud:` literal still takes the generic path.
     expect(refusedAtType('cloud:no-such-widget-12954')).toBe(true);
+  });
+
+  it('refuses `html` BY NAME at `type` — its registration left and its arm became a refusal (objectui#13449)', () => {
+    // The bare key was armed and `ui:html` was not, so the bare count did not
+    // move and the namespaced pin above fell by one. The arm stays as
+    // `retiredNodeType()`'s refusal, so the strict face — the one `objectui
+    // validate` judges through — answers with a `custom` issue at `type`, not
+    // the generic `invalid_union` `refusedAtType` reads.
+    expect(BARE_KEYS).not.toContain('html');
+    expect(NAMESPACED_KEYS).not.toContain('ui:html');
+    const result = validateAuthoredDocument({ type: 'html', html: '<p>x</p>' });
+    expect(result.success).toBe(false);
+    const named = (result.success ? [] : result.error.issues).filter(
+      (issue) => issue.code === 'custom' && issue.path.length === 1 && issue.path[0] === 'type',
+    );
+    expect(named).toHaveLength(1);
+    expect(named[0]?.message).toContain('`html` is a RETIRED node type');
+    expect(refusedAtType('html')).toBe(false);
+    // Control: an unknown bare literal still takes the generic path.
+    expect(refusedAtType('no-such-node-13449')).toBe(true);
   });
 
   it('counts `cloud:workspace-timezone-notice` armed — it registered WITH its arm (objectui#11930)', () => {

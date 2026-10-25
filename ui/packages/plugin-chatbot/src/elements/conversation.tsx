@@ -8,6 +8,7 @@
 
 import { Button } from "@object-ui/components";
 import { cn } from "@object-ui/components";
+import { useObjectTranslation } from "@object-ui/i18n";
 import { ArrowDownIcon } from "lucide-react";
 import type { ComponentProps } from "react";
 import { useCallback } from "react";
@@ -86,6 +87,7 @@ export const ConversationScrollButton = ({
   className,
   ...props
 }: ConversationScrollButtonProps) => {
+  const { t } = useObjectTranslation();
   const { isAtBottom, scrollToBottom } = useStickToBottomContext();
 
   const handleScrollToBottom = useCallback(() => {
@@ -104,6 +106,8 @@ export const ConversationScrollButton = ({
           size="icon"
           type="button"
           variant="outline"
+          // Before the spread, so a caller's own name still wins.
+          aria-label={t("chatbot.scrollToBottom")}
           {...props}
         >
           <ArrowDownIcon className="size-4" />

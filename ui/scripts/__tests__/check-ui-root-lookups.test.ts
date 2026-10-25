@@ -39,6 +39,16 @@ describe('check-ui-root-lookups (objectstack ruling D1)', () => {
     expect(data).toEqual([]);
   });
 
+  it('reads the store joined to the tree once, where the path first names it, and the root from the file it is in (objectstack#25733)', () => {
+    const head = "import { join, resolve } from 'node:path';\nimport { uiRoot } from './ui-root.mjs';\n";
+    const nested = lookupsIn('scripts/x.mjs', `${head}const store = join(uiRoot(), 'node_modules', '.pnpm');\nconst entry = join(store, 'x@1.0.0', 'node_modules');`);
+    expect(nested.map((h) => [h.shape, h.text])).toEqual([['workspace-file-at-ui-root', "join(uiRoot(), 'node_modules', '.pnpm')"]]);
+    // The same climb lands on the tree from one file and on `scripts/` from another.
+    const climb = "const root = resolve(__dirname, '../..');\nconst store = join(root, 'node_modules', '.pnpm');";
+    expect(lookupsIn('scripts/__tests__/x.test.ts', `${head}${climb}`).map((h) => h.shape)).toEqual(['workspace-file-at-ui-root']);
+    expect(lookupsIn('scripts/__tests__/deeper/x.test.ts', `${head}${climb}`)).toEqual([]);
+  });
+
   it('finds no lookup outside the helper in this tree, and every allowlist entry is live', () => {
     const result = scan(repoRoot);
     expect(result.scanned).toBeGreaterThan(100);

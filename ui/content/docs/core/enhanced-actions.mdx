@@ -323,10 +323,15 @@ What to write instead:
   one message per snake_case `outcome` the handler returns in its answer. The
   success toast shows the `outcomeMessages` entry the answer's `outcome` names,
   else `successMessage` (objectui#11344). Both may read the handler's answer as
-  `${result.*}` — `'Environment ${result.name} archived'` — the same scope
-  `onSuccess.navigate` reads. A `message` in the server's answer is not shown
-  unless the copy asks for it as `${result.message}`. Without either, the
-  runner falls back to a generic "Action completed successfully".
+  `result`. An `outcomeMessages` entry writes it as `${result.*}` —
+  `'Environment ${result.name} archived'` — the same scope `onSuccess.navigate`
+  reads. `successMessage` writes it as a `{{ }}` hole —
+  `'Environment {{ result.name }} updated'` — and can also name the record the
+  action ran against as `{{ record.* }}`; a `${…}` token in it is shown as
+  written (objectui#13476). A `message` in the server's answer is not shown
+  unless the copy asks for it (`{{ result.message }}` in `successMessage`).
+  Without either, the runner falls back to a generic "Action completed
+  successfully".
   That fallback is text the runner writes itself, and so are the "Action
   failed" error toast for an error with no readable message, a parallel
   chain's "One or more parallel actions failed", and the label it hands your
@@ -408,7 +413,7 @@ const complexAction: ActionSchema = {
   
   // Confirm before processing
   actionType: 'confirm',
-  confirmText: 'Process this order for ${data.customerName}?',
+  confirmText: 'Process this order for {{ record.customer_name }}?',
   
   // Execution gate - this action is the premium path; the standard path is a
   // sibling action carrying the opposite predicate

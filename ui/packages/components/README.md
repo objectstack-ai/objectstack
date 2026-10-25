@@ -36,8 +36,8 @@ npm install @object-ui/components @object-ui/react @object-ui/core
 ```
 
 **Peer Dependencies:**
-- `react` ^18.0.0 || ^19.0.0
-- `react-dom` ^18.0.0 || ^19.0.0
+- `react` ^19.0.0
+- `react-dom` ^19.0.0
 - `tailwindcss` ^4.2.1
 
 ## Setup

@@ -33,7 +33,7 @@ objectui renders for every product the same way — ObjectStack Cloud, HotCRM, a
 
 ## 2. Tech Stack (strict)
 
-- **Core:** React 18+ (Hooks), TypeScript 5.0+ (strict).
+- **Core:** React 19 (Hooks), TypeScript 5.0+ (strict).
 - **Styling:** Tailwind CSS (utility-first).
   - ✅ Use `class-variance-authority` (cva) for component variants.
   - ✅ Use `tailwind-merge` + `clsx` (via `cn()`) for class overrides.

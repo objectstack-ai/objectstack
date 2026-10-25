@@ -503,7 +503,9 @@ describe("objectui#8397 — the manifest the emitted file's reader installs", ()
       [`node_modules/${ROOT_DECLARED_CONTROL}/index.d.ts`]: 'export declare const control: number;\n',
       // The gate reads "is it installed?" from pnpm's virtual store, so the
       // fixture lays one out: an UNINSTALLED control produces TS2307 whether the
-      // bound ran or not, and would pin nothing.
+      // bound ran or not, and would pin nothing. The store is the WORKSPACE
+      // root's (objectstack#25733), so the fixture is one.
+      'pnpm-workspace.yaml': "packages:\n  - 'packages/*'\n",
       [`node_modules/.pnpm/${ROOT_DECLARED_CONTROL}@4.0.0/node_modules/${ROOT_DECLARED_CONTROL}/package.json`]:
         JSON.stringify({ name: ROOT_DECLARED_CONTROL, version: '4.0.0', types: './index.d.ts' }),
       [`node_modules/.pnpm/${ROOT_DECLARED_CONTROL}@4.0.0/node_modules/${ROOT_DECLARED_CONTROL}/index.d.ts`]:

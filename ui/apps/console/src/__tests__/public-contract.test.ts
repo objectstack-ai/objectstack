@@ -112,7 +112,7 @@ const EXPECTED_COVERED = [
   'badge',
   'alert',
   'button',
-  'html',
+  // `html` left with the raw-HTML node type it named (objectui#13449).
 ];
 
 /**

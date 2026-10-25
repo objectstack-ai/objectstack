@@ -24,8 +24,9 @@
  *     the dialog's Confirm — no objectui code drops it. Pinned with its
  *     control (a refused invite raises the server's message and no success
  *     toast), and with the copy that NAMES the invitee: the runner fills
- *     `${result.*}` from the answer (objectui#11344), so an action whose
- *     `successMessage` reads `${result.email}` gets the invitee's address.
+ *     `{{ result.* }}` from the answer (objectui#11344, objectui#13367), so
+ *     an action whose `successMessage` reads `{{ result.email }}` gets the
+ *     invitee's address.
  *     Whether `invite_user` declares such copy is the action's metadata.
  *   - **The subtitle.** An action that declares `description` gets it as the
  *     dialog's subtitle; one that declares none gets the generic line. Both
@@ -286,7 +287,7 @@ describe('objectui#11817 — Invite User says it worked', () => {
   });
 
   it('copy that reads the answer\'s `result.email` names the invitee', async () => {
-    mountList('sys_user', 'all_users', [sysUser(`Invitation sent to \${result.email}`), ...MEMBERS]);
+    mountList('sys_user', 'all_users', [sysUser('Invitation sent to {{ result.email }}'), ...MEMBERS]);
     await inviteAda();
 
     expect(await screen.findByText('Invitation sent to ada@example.com', undefined, { timeout: 5000 })).toBeInTheDocument();

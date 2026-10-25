@@ -21,6 +21,7 @@ import {
   versionSatisfiesRange,
   zodPackageDirOf,
 } from '../vite-objectstack-spec-dist';
+import { BASELINE_CHUNK_TESTS, frameworkPackagesDir, workspaceChunkTests } from '../vite-objectstack-workspace.ts';
 
 /**
  * objectui#4854 — `apps/console/vite.config.ts` honours `OBJECTSTACK_SPEC_DIST`,
@@ -92,6 +93,16 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
  */
 const BASE_VENDOR_TEST =
   /([\\/]node_modules[\\/]@objectstack[\\/](?!lint[\\/])|[\\/]@objectstack\+(?!lint@))/;
+
+/**
+ * The vendor test the console config builds in THIS checkout's layout with no
+ * override set: `BASE_VENDOR_TEST` standalone, the same arms plus the
+ * framework's `packages/` when the tree is `ui/` of the objectstack monorepo
+ * (objectstack#25733). "Inert" means "unmoved from this", in either layout;
+ * that the standalone arm IS the baseline literal, byte for byte, is pinned on
+ * a fixture layout in `vite-objectstack-workspace.test.ts`.
+ */
+const LAYOUT_VENDOR_TEST = workspaceChunkTests(frameworkPackagesDir(path.join(repoRoot, 'apps/console'))).vendor;
 
 /**
  * The baseline "this module id is the spec" test, as the console config spells it.
@@ -930,11 +941,13 @@ describe('objectui#4854: the four flagged surfaces in the console config', () =>
       'react-map-gl/maplibre',
     ]);
 
-    // 3. the vendor-objectstack chunk test — the literal, unwidened.
+    // 3. the vendor-objectstack chunk test — the layout's own, unwidened. The
+    //    mirror above is still the helper's baseline, so it cannot drift alone.
     const groups = config.build.rollupOptions.output.advancedChunks.groups as { name: string; test: RegExp }[];
     const vendor = groups.find((g) => g.name === 'vendor-objectstack');
     expect(vendor).toBeDefined();
-    expect(vendor!.test.source).toBe(BASE_VENDOR_TEST.source);
+    expect(BASE_VENDOR_TEST.source).toBe(BASELINE_CHUNK_TESTS.vendor.source);
+    expect(vendor!.test.source).toBe(LAYOUT_VENDOR_TEST.source);
     // …and what that literal MEANS, so a future rewrite that keeps the shape
     // but changes the membership cannot pass by pasting a new string in.
     // Reads off the live config's own regex, never the mirror above.
@@ -990,7 +1003,7 @@ describe('objectui#4854: the four flagged surfaces in the console config', () =>
       (config.build.rollupOptions.output.advancedChunks.groups as { name: string; test: RegExp }[]).find(
         (g) => g.name === 'vendor-objectstack'
       )!.test;
-    expect(vendorOf(injected).source.startsWith(BASE_VENDOR_TEST.source)).toBe(true);
+    expect(vendorOf(injected).source.startsWith(LAYOUT_VENDOR_TEST.source)).toBe(true);
     expect(vendorOf(injected).test(`${fs.realpathSync(installedSpecDir)}/dist/ui/index.mjs`)).toBe(true);
     // Widening appends an arm; it must not resurrect the lint exclusion the
     // baseline arms carry, or a spec-dist build would silently re-eagerize the

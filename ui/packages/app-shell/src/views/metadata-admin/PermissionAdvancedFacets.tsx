@@ -530,6 +530,7 @@ export function PermissionAdvancedFacets({
                     size="icon"
                     className="h-7 w-7 text-muted-foreground hover:text-destructive"
                     onClick={() => setPolicies(policies.filter((_, j) => j !== i))}
+                    aria-label={t('perm.rls.remove')}
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
@@ -648,6 +649,7 @@ export function PermissionAdvancedFacets({
                     delete next[tab];
                     setTabs(next);
                   }}
+                  aria-label={t('perm.tabs.remove')}
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>

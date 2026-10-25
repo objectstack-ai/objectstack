@@ -228,11 +228,6 @@
       "type": "markdown",
       "id": "readme",
       "content": "# Welcome\n\nThis is a **markdown** component.\n\n- Feature 1\n- Feature 2\n- Feature 3"
-    },
-    "html": {
-      "type": "html",
-      "id": "custom-html",
-      "html": "<div class=\"custom-content\"><h2>Custom HTML</h2><p>This is raw HTML content.</p></div>"
     }
   },
   "compositeExample": {

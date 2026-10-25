@@ -158,8 +158,8 @@ export interface ActionDef {
    *
    * A string or the `template` envelope (objectui#13367, the renderer half of
    * objectstack#24814): its `{{ }}` holes are filled over `record` and
-   * `params`, and a sentence with none keeps the transitional `${…}` reading.
-   * See `confirmMessage`.
+   * `params`, and a sentence with none is shown as written — a `${…}` token is
+   * text (objectui#13476). See `confirmMessage`.
    */
   confirmText?: ActionCopyTemplate;
   /**
@@ -276,8 +276,8 @@ export interface ActionDef {
   toast?: { showOnSuccess?: boolean; showOnError?: boolean; duration?: number };
   /** Success message (from UIActionSchema). The success toast's second rung,
    *  after {@link outcomeMessages}. A string or the `template` envelope
-   *  (objectui#13367): `{{ }}` holes over `result` and `record`, or, in a
-   *  sentence with none, the transitional `${result.*}` tokens. */
+   *  (objectui#13367): `{{ }}` holes over `result` and `record`; a sentence
+   *  with none is shown as written, `${…}` tokens included (objectui#13476). */
   successMessage?: ActionCopyTemplate;
   /** Error message (from UIActionSchema). A string or the `template`
    *  envelope (objectui#13367); shown as written — no scope is declared for
@@ -626,8 +626,8 @@ export type ToastHandler = (message: string, options?: {
  *
  * An author's `outcomeMessages` / `successMessage` / `errorMessage` and an
  * action's own error are never in this table: the host localizes authored copy
- * before dispatch, and the runner only fills in their holes (`{{ }}` or the
- * transitional `${result.*}`).
+ * before dispatch, and the runner only fills in their holes (`{{ }}` in
+ * `successMessage`, `${result.*}` in `outcomeMessages`).
  */
 const RUNNER_TEXT = {
   completedSuccessfully: {
@@ -1521,12 +1521,11 @@ export class ActionRunner {
       // (objectui#4314): it had zero producers and no bundle key, so a dialog
       // authored that way silently lost localization.
       //
-      // Read through `templateEvaluatorFor`, not the runner's own evaluator:
-      // a row dispatch binds no `record` in the runner's context, so a
-      // `${record.*}` hole the record header fills was shown raw from a list
-      // row (objectui#12967).
-      const templates = this.templateEvaluatorFor(action);
-      const confirmMessage = this.confirmMessage(action, templates);
+      // Its `{{ }}` holes read the dispatch's record (`dispatchRecord`), not
+      // the runner's context alone: a row dispatch binds no `record` there, so
+      // a hole the record header fills was shown raw from a list row
+      // (objectui#12967).
+      const confirmMessage = this.confirmMessage(action);
       if (confirmMessage !== undefined) {
         const confirmed = await this.confirmHandler(confirmMessage);
         if (!confirmed) {
@@ -1589,6 +1588,10 @@ export class ActionRunner {
             return lastRun;
           };
 
+          // The dialog's `description` / `helpText` read the dispatch's record
+          // as `record`: a row dispatch binds none in the runner's context
+          // (objectui#12967).
+          const templates = this.templateEvaluatorFor(action);
           const collected = await this.paramCollectionHandler(
             paramDefs,
             action,
@@ -1763,25 +1766,27 @@ export class ActionRunner {
    *
    * Rungs 1 and 2 are the author's copy. Both arrive already localized — the
    * host's localizer resolves the bundle entry or the inline `I18nLabel` map
-   * before dispatch — and both have their `${result.*}` tokens filled in here,
-   * through the one token grammar and scope `onSuccess.navigate` reads
-   * (`substituteScopeTokens` over `readActionPayload(result.data)`). Only the
-   * sink differs: a toast is text, so a value is inserted as-is, where a URL
-   * position percent-encodes it.
+   * before dispatch — and both read the same payload,
+   * `readActionPayload(result.data)`, as `result`.
    *
-   * Rung 2 is also a `template` slot (objectui#13367, the renderer half of
+   * Rung 1 has its `${result.*}` tokens filled in here, through the one token
+   * grammar and scope `onSuccess.navigate` reads (`substituteScopeTokens`).
+   * Only the sink differs: a toast is text, so a value is inserted as-is, where
+   * a URL position percent-encodes it.
+   *
+   * Rung 2 is a `template` slot (objectui#13367, the renderer half of
    * objectstack#24814): a string or the `{ dialect: 'template', source }`
    * envelope. A sentence with a `{{ }}` hole is filled by the template engine
-   * over `result` (the same payload) and `record` (the record the action ran
-   * against), and is then not read for `${…}` tokens; one without keeps the
-   * `${result.*}` reading above until the spec card converts the platform's
-   * own `${result.email}`-style sentences.
+   * over `result` and `record` (the record the action ran against). A
+   * sentence with none is shown as written: the transitional `${result.*}`
+   * reading it kept is gone (objectui#13476), and objectstack's publish gate
+   * refuses a `${…}` token in this copy.
    *
    * ⛔ `result.data.message` is not a rung. It used to outrank both rungs of
    * author copy, which put whatever language the server happened to write in
    * front of the user's locale; the contract names no server-message rung, and
    * an author who wants the server's sentence can still write
-   * `${result.message}` as the copy.
+   * `{{ result.message }}` as the copy.
    *
    * A rung counts only when it is a non-empty string (for rung 2, or an
    * envelope whose `source` is one). An `I18nLabel` map that
@@ -1807,7 +1812,7 @@ export class ActionRunner {
     if (successCopy !== undefined && successCopy.trim() !== '') {
       return hasTemplateHoles(successCopy)
         ? fillTemplateHoles(successCopy, { result: payload, record: this.dispatchRecord(action) })
-        : substituteScopeTokens(successCopy, { result: payload }, (value) => value);
+        : successCopy;
     }
     return this.runnerText(RUNNER_TEXT.completedSuccessfully);
   }
@@ -1821,9 +1826,9 @@ export class ActionRunner {
    * the record the action runs against, the same one `templateEvaluatorFor`
    * binds — and `params`, the action's static params object when it has one
    * (the dialog's collected values do not exist yet: the confirmation comes
-   * first). A sentence with no `{{ }}` hole keeps the transitional `${…}`
-   * reading through `templates`, so the platform's own `${…}` copy works
-   * until the spec card converts it.
+   * first). A sentence with no `{{ }}` hole is shown as written: a `${…}`
+   * token in it is text, not an expression (objectui#13476 retired the
+   * transitional `${…}` reading; objectstack's publish gate refuses the token).
    *
    * A declared value that carries no text — an envelope with no string
    * `source` — still gates the run: the author declared a confirmation, and
@@ -1831,15 +1836,12 @@ export class ActionRunner {
    * shows no body text, never the object, which as a React child crashes the
    * page. Every answer is a string for the same reason.
    */
-  private confirmMessage(action: ActionDef, templates: ExpressionEvaluator): string | undefined {
+  private confirmMessage(action: ActionDef): string | undefined {
     const declared: unknown = action.confirmText;
     if (!declared) return undefined;
     const text = actionCopySource(declared);
     if (text === undefined) return '';
-    if (!hasTemplateHoles(text)) {
-      const evaluated: unknown = templates.evaluate(text);
-      return typeof evaluated === 'string' ? evaluated : evaluated == null ? '' : String(evaluated);
-    }
+    if (!hasTemplateHoles(text)) return text;
     const params = action.params;
     const staticParams = params && typeof params === 'object' && !Array.isArray(params)
       ? Object.fromEntries(Object.entries(params).filter(([key]) => key !== '_rowRecord'))
@@ -2815,10 +2817,10 @@ export class ActionRunner {
     // there would widen the authorable surface with nothing behind it and
     // silently blank the token instead of leaving the author's mistake visible.
     //
-    // The success toast's copy is the one other caller of the grammar, through
-    // `substituteScopeTokens` directly (`composeSuccessMessage`): `result` only,
-    // because that is the one scope the contract declares for the copy, and no
-    // encoding, because a toast is text.
+    // The success toast's `outcomeMessages` copy is the one other caller of the
+    // grammar, through `substituteScopeTokens` directly (`composeSuccessMessage`):
+    // `result` only, because that is the one scope the contract declares for the
+    // copy, and no encoding, because a toast is text.
     const scopes: Record<string, unknown> = { param: params, ctx: this.buildInterpolationContext() };
     if (resultScope !== undefined) scopes.result = resultScope;
     return substituteScopeTokens(target, scopes, encodeURIComponent);
@@ -2866,9 +2868,10 @@ export class ActionRunner {
   }
 
   /**
-   * The evaluator a dispatch's authored copy is read through: `confirmText`,
-   * and the param dialog's `description` / `helpText` via the handler's
-   * `interpolate` argument.
+   * The evaluator a dispatch's authored copy is read through: the param
+   * dialog's `description` / `helpText`, via the handler's `interpolate`
+   * argument. (`confirmText` reads `{{ }}` holes only, over `dispatchRecord`,
+   * the same record this binds — see `confirmMessage`.)
    *
    * One rule for every door (objectui#12967): the record the action runs
    * against is `record`. The record header binds it in the runner's context
@@ -2999,7 +3002,7 @@ export function readOnSuccessNavigation(value: unknown): OnSuccessNavigation | n
 /**
  * The runner's ONE `${scope.path}` token grammar — the substitution behind
  * `interpolateTarget` (url / api targets and the `onSuccess.navigate` hop) and
- * behind the success toast's `${result.*}` copy (`composeSuccessMessage`).
+ * behind the success toast's `outcomeMessages` copy (`composeSuccessMessage`).
  *
  * The scope MAP defines the vocabulary: the pattern is built from its keys, so
  * a token naming a scope the caller did not pass is left in the text exactly as

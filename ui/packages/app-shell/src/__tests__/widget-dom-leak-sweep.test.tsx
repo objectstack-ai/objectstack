@@ -37,9 +37,9 @@
  *   | plugin-calendar  |       3 |               0 |                 0 |
  *   | plugin-chatbot   |       3 |               0 |                 0 |
  *   | plugin-dashboard |       7 |               0 |                 0 |
- *   | components       |     150 |              82 |          12 .. 15 |
+ *   | components       |     149 |              81 |          12 .. 15 |
  *
- * **82 of 168 targets leak.** All of them are the `components` row, which is
+ * **81 of 167 targets leak.** All of them are the `components` row, which is
  * objectui#5574 and is covered in its own section below. The four packages
  * objectui#4425 named now read zero. Three migration steps have closed their
  * rows since the phase-1 measurement:
@@ -128,7 +128,7 @@
  * have failed. These two differ in exactly one thing: which namespace the extra
  * widget went into.
  *
- * ### The reading — 119 of 158 ON ARRIVAL, in seven shapes; 82 today
+ * ### The reading — 119 of 158 ON ARRIVAL, in seven shapes; 81 today
  *
  * The card named four candidates (`flex`, `stack`, `container`, `text`) and was
  * careful to call them candidates. All four leaked. So did 115 others, and the
@@ -145,9 +145,10 @@
  * so their rows had to go for the gate to pass — the two-way expiry below,
  * working exactly once it had something to expire. Later slices took more,
  * and objectui#5632's `ui:sidebar-trigger` took the last shape that named a
- * single renderer: **82 rows in FOUR shapes** remain, on a target set of 150
- * today (it grew past 158, and objectui#10859 batch 8 phase 2d took the ten
- * retired `ui:sidebar-*` part keys out of it). What the arrival reading measured is preserved here in prose and in
+ * single renderer: **81 rows in FOUR shapes** remain, on a target set of 149
+ * today (it grew past 158, objectui#10859 batch 8 phase 2d took the ten
+ * retired `ui:sidebar-*` part keys out of it, and objectui#13449 took the
+ * retired raw-HTML `ui:html`). What the arrival reading measured is preserved here in prose and in
  * the burn-down note on {@link COMPONENTS_LEAK_GROUPS}; what the gate asserts
  * is always current truth, which is the whole point of not writing dates into
  * a ledger.
@@ -615,7 +616,7 @@ const CALENDAR_OBJECT_EXTRAS = {
  * an ordinary authored prop while doing it.
  *
  * Measured on the tree this landed on: 152 of 158 targets matched it.
- * Today 147 of 150 targets match it; the other three are in
+ * Today 146 of 149 targets match it; the other three are in
  * {@link READY_OVERRIDE_REASONS}, each with the reason it cannot —
  * a recorded limitation with its own two-way assertion below, never a quiet
  * exemption (the `omitCanaries` discipline, applied to readiness).
@@ -772,7 +773,7 @@ const COMPONENTS_PLAIN_TYPES: readonly string[] = [
   'ui:date-picker', 'ui:dd', 'ui:del', 'ui:div', 'ui:dl', 'ui:dt', 'ui:em', 'ui:email',
   'ui:empty', 'ui:figcaption', 'ui:figure', 'ui:file-upload', 'ui:filter-builder', 'ui:flex',
   'ui:footer', 'ui:form', 'ui:grid', 'ui:h1', 'ui:h2', 'ui:h3', 'ui:h4', 'ui:h5', 'ui:h6',
-  'ui:header', 'ui:home', 'ui:hr', 'ui:html', 'ui:i', 'ui:icon', 'ui:image', 'ui:img',
+  'ui:header', 'ui:home', 'ui:hr', 'ui:i', 'ui:icon', 'ui:image', 'ui:img',
   'ui:input',
   'ui:input-otp', 'ui:ins', 'ui:kbd', 'ui:label', 'ui:li', 'ui:list', 'ui:loading',
   'ui:main', 'ui:mark', 'ui:menubar', 'ui:nav', 'ui:navigation-menu', 'ui:ol', 'ui:p',
@@ -908,8 +909,8 @@ const TARGETS: Readonly<Record<string, readonly Target[]>> = {
     // key onto this package's own namespace; the renderer is the same one.
     { type: 'plugin-dashboard:dashboard', ready: '.grid.auto-rows-min' },
   ],
-  // objectui#5574 — 150 targets, built above rather than spelled here because
-  // 133 of them need nothing but the shared readiness class.
+  // objectui#5574 — 149 targets, built above rather than spelled here because
+  // 132 of them need nothing but the shared readiness class.
   components: COMPONENTS_TARGETS,
 };
 
@@ -1002,7 +1003,7 @@ interface LedgerEntry {
 /* ── objectui#5574: the `packages/components` reading, as a LEDGER ─────────── */
 
 /**
- * 82 of the 150 `packages/components` targets leak, and they do it in exactly
+ * 81 of the 149 `packages/components` targets leak, and they do it in exactly
  * FOUR shapes (119 targets in seven shapes did on arrival; see the burn-down
  * note below — and note the arrival count of shapes read `eight` here until
  * objectui#5632 counted them: the groups were seven, and the card's own table
@@ -1107,8 +1108,8 @@ interface LedgerEntry {
  * leaking a NINTH attribute the gate fails, because the measured set no longer
  * equals the recorded one; if it stops leaking, the gate ALSO fails until the
  * row goes. An allowlist has neither property. Nothing below is skipped,
- * `it.skip`-ed, quarantined or excluded from the sweep — all 150 targets render
- * and all 150 are scanned on every run, the 68 clean ones included.
+ * `it.skip`-ed, quarantined or excluded from the sweep — all 149 targets render
+ * and all 149 are scanned on every run, the 68 clean ones included.
  */
 
 /**
@@ -1177,7 +1178,7 @@ const COMPONENTS_LEAK_GROUPS: readonly LedgerGroup[] = [
       'ui:cite', 'ui:code', 'ui:collapsible', 'ui:command', 'ui:dd', 'ui:del', 'ui:div',
       'ui:dl', 'ui:dt', 'ui:em', 'ui:empty', 'ui:figcaption', 'ui:figure',
       'ui:footer', 'ui:h1', 'ui:h2', 'ui:h3', 'ui:h4', 'ui:h5', 'ui:h6', 'ui:header',
-      'ui:hr', 'ui:html', 'ui:i', 'ui:image', 'ui:img', 'ui:ins', 'ui:kbd',
+      'ui:hr', 'ui:i', 'ui:image', 'ui:img', 'ui:ins', 'ui:kbd',
       'ui:label', 'ui:li', 'ui:list', 'ui:loading', 'ui:main', 'ui:mark', 'ui:menubar',
       'ui:nav', 'ui:navigation-menu', 'ui:ol', 'ui:p', 'ui:pagination', 'ui:pre',
       'ui:progress', 'ui:q', 'ui:resizable', 'ui:scroll-area', 'ui:section',
@@ -1221,7 +1222,7 @@ const LEAK_LEDGER: Readonly<Record<string, LedgerEntry>> = {
   // set, so a regression there is a NEW leak on an unledgered target and fails
   // on the empty-report branch below, naming every attribute.
 
-  /* ── packages/components: 82 of 150 targets, in four measured shapes ───── */
+  /* ── packages/components: 81 of 149 targets, in four measured shapes ───── */
   ...Object.fromEntries(
     COMPONENTS_LEAK_GROUPS.flatMap((group) =>
       group.targets.map((type) => [
@@ -1783,11 +1784,11 @@ const wordForCount = (count: number): string => COUNT_WORDS[count] ?? String(cou
  */
 const DOCBLOCK_COUNTS = {
   /** `packages/components` targets swept: the plain types plus the specials. */
-  componentsTargets: 150,
+  componentsTargets: 149,
   /** Of those, the ones needing nothing but the shared readiness class. */
-  componentsPlainTypes: 133,
+  componentsPlainTypes: 132,
   /** Ledgered `packages/components` rows — targets with a recorded leak. */
-  componentsLedgered: 82,
+  componentsLedgered: 81,
   /** The complement: swept, scanned and clean. */
   componentsClean: 68,
   /** Measured shapes the ledgered rows fall into. */
@@ -1795,15 +1796,15 @@ const DOCBLOCK_COUNTS = {
   /** Registry prefixes `packages/components` owns. */
   componentsPrefixes: 5,
   /** Targets the shared readiness selector reaches. */
-  componentsReadyMatched: 147,
+  componentsReadyMatched: 146,
   /** The rest, each with a recorded reason it cannot. */
   componentsReadyOverrides: 3,
   /** Attributes leaked by the shape with the most members. */
   commonestShapeAttributes: 14,
   /** Every target this sweep renders, all five packages. */
-  allTargets: 168,
+  allTargets: 167,
   /** Every ledgered row, all five packages. */
-  allLedgered: 82,
+  allLedgered: 81,
 } as const;
 
 type CountName = keyof typeof DOCBLOCK_COUNTS;

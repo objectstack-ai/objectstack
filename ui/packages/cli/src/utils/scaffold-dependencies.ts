@@ -102,7 +102,7 @@ export function platformPackageRange(): string {
  * React's range in every generated manifest.
  *
  * Quotes the repo root verbatim (an exact pin there) rather than the wider
- * `^18.0.0 || ^19.0.0` the platform packages accept as a peer. The peer range
+ * caret range the platform packages accept as a peer. The peer range
  * says what CAN work; this says what is actually exercised — inside this
  * workspace the temp app resolves React by hoisting to the root, so the root's
  * version is the only one the generated code has ever run against. Declaring

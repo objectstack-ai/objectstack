@@ -96,6 +96,7 @@ import { useMobileViewSwitcher } from './MobileViewSwitcherContext.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
 import { useCommandPalette, useCommandPaletteProviderMounted } from '../context/CommandPaletteProvider.js';
 import { useUrlOverlay } from '../hooks/useUrlOverlay.js';
+import { metadataText } from '../hooks/useNavTargetLabel.js';
 import { KEYBOARD_SHORTCUTS_PARAM } from '../urlParams.js';
 import { useAiSurfaceEnabled } from '../hooks/useAiSurface.js';
 import { useStudioDesignGate } from '../hooks/useStudioDesignGate.js';
@@ -469,7 +470,7 @@ export function AppHeader({
   // no AI (Community Edition) so it can't dead-end on a chat with no agent.
   // Same signal as the FAB and the `/ai` route guard.
   const { enabled: aiEnabled } = useAiSurfaceEnabled();
-  const { t } = useObjectTranslation();
+  const { t, language } = useObjectTranslation();
   const { objectPluralLabel, dashboardLabel, pageLabel, reportLabel, viewLabel, appLabel } = useObjectLabel();
   // The dashboard, page and report lists are LAZY getters: reading one starts
   // its `/meta/:type` read. They are read below only on the route type that
@@ -703,7 +704,9 @@ export function AppHeader({
       if (pathParts[3]) {
         const reportName = pathParts[3];
         const reportDef = preferLocal(metadata.reports as any[], reportName, (currentApp as any)?._packageId);
-        const fallback = reportDef?.label || humanizeSlug(reportName);
+        // A report's `label` may be an inline locale map; drawn raw, the crumb
+        // blanked the report page (objectui#13470).
+        const fallback = metadataText(reportDef?.label, language) ?? humanizeSlug(reportName);
         extraSegments.push({ label: reportLabel({ name: reportName, label: fallback }) });
       }
     } else if (routeType === 'system') {
@@ -1189,7 +1192,12 @@ export function AppHeader({
         <div data-topbar-group className="flex items-center gap-0.5 shrink-0">        {/* User Profile + Organization switcher */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 rounded-full">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0 rounded-full"
+              aria-label={t('user.accountMenu', { defaultValue: 'Account menu' })}
+            >
               <Avatar className="h-7 w-7 rounded-full">
                 <AvatarImage src={user?.image} alt={user?.name ?? 'User'} />
                 <AvatarFallback className="rounded-full bg-primary text-primary-foreground text-xs">

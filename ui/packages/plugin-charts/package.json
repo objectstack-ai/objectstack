@@ -16,6 +16,13 @@
   "main": "dist/index.umd.cjs",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
+  "sideEffects": [
+    "./dist/ObjectChart.js",
+    "./dist/index.js",
+    "./dist/index.umd.cjs",
+    "./src/ObjectChart.tsx",
+    "./src/index.tsx"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -40,8 +47,8 @@
     "recharts": "^3.10.1"
   },
   "peerDependencies": {
-    "react": "^18.0.0 || ^19.0.0",
-    "react-dom": "^18.0.0 || ^19.0.0"
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@object-ui/test-support": "workspace:*",

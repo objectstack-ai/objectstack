@@ -12,7 +12,10 @@ import './span';
 import './separator';
 import './image';
 import './icon';
-import './html';
+// `./html` (the raw-HTML `html` node type) is retired (objectui#13449): it
+// injected `schema.html` unsanitised and `@objectstack/spec` declares no such
+// component. Rich HTML is a field value (`html` / `richtext`, sanitised) or a
+// `kind: 'html'` page.
 import './html-elements';
 import './button-group';
 import './pagination';

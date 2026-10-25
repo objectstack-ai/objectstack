@@ -868,13 +868,13 @@ describe('ActionRunner', () => {
       // This row pinned the opposite until objectui#11344: the server's
       // sentence outranked the author's copy. Ruling A on
       // objectstack-ai/cloud#2315 retired that rung \u2014 the server returns facts
-      // and the author's copy (here, `${result.*}`-interpolated) is the toast.
+      // and the author's copy (here, `{{ result.* }}`-filled) is the toast.
       runner.registerHandler('check-updates', vi.fn().mockResolvedValue({
         success: true,
         data: { message: '2 app update(s) available: CRM 1.0.0\u21921.0.1', update_count: 2 },
       }));
 
-      await runner.execute({ type: 'check-updates', successMessage: 'Checked: ${result.update_count} update(s).' });
+      await runner.execute({ type: 'check-updates', successMessage: 'Checked: {{ result.update_count }} update(s).' });
 
       expect(toastHandler).toHaveBeenCalledWith(
         'Checked: 2 update(s).',

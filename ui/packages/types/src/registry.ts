@@ -53,7 +53,6 @@ import type {
   TreeViewSchema,
   ChartSchema,
   TimelineSchema,
-  HtmlSchema,
   StatisticSchema,
   BarChartSchema,
 } from './data-display.js';
@@ -221,7 +220,11 @@ export interface SchemaRegistry {
   'tree-view': TreeViewSchema;
   'chart': ChartSchema;
   'timeline': TimelineSchema;
-  'html': HtmlSchema;
+  // ⛔ `'html'` RETIRED (objectui#13449): the raw-HTML node injected its `html`
+  // string unsanitised and `@objectstack/spec` declares no such component, so
+  // `ComponentType` no longer offers it. The zod half is
+  // `RetiredHtmlNodeSchema` in `zod/data-display.zod.ts`, which refuses a
+  // `type: "html"` node by name.
   'statistic': StatisticSchema;
   'bar-chart': BarChartSchema;
 

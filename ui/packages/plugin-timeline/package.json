@@ -16,6 +16,13 @@
   "main": "dist/index.umd.cjs",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
+  "sideEffects": [
+    "./dist/index.js",
+    "./dist/index.umd.cjs",
+    "./dist/renderer.js",
+    "./src/index.tsx",
+    "./src/renderer.tsx"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -36,6 +43,7 @@
     "@object-ui/i18n": "workspace:*",
     "@object-ui/mobile": "workspace:*",
     "@object-ui/permissions": "workspace:*",
+    "@object-ui/plugin-detail": "workspace:*",
     "@object-ui/react": "workspace:*",
     "@object-ui/types": "workspace:*",
     "@objectstack/spec": "workspace:^",
@@ -43,8 +51,8 @@
     "zod": "^4.6.5"
   },
   "peerDependencies": {
-    "react": "^18.0.0 || ^19.0.0",
-    "react-dom": "^18.0.0 || ^19.0.0"
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@object-ui/data-objectstack": "workspace:*",

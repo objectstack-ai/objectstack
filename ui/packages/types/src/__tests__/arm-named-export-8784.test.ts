@@ -185,6 +185,11 @@ const ABSENT_BY_DECISION: Readonly<Record<string, string>> = {
     + 'retired `cloud:plan-status` literal (objectui#12954), in the shape of the `kanban` row above. '
     + 'The decision is written on the barrel beside the `cloud.zod.js` export: "it is deliberately '
     + 'NOT exported — nothing outside this package parses against a refusal arm".',
+  html:
+    'data-display.zod.ts#RetiredHtmlNodeSchema — the same ADR-0049 refusal arm, for the '
+    + 'retired raw-HTML `html` literal (objectui#13449), in the shape of the `kanban` row above. '
+    + 'The decision is written on the barrel beside the `data-display.zod.js` block: "it is '
+    + 'deliberately NOT exported — nothing outside this package parses against a refusal arm".',
 
   // ⭐ The two rows objectui#9067 moved here out of ABSENT_PENDING_DECISION. They
   // quote `.changeset/8499-node-slot-registered-arms.md` rather than cite it,

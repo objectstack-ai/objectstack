@@ -427,9 +427,12 @@ export function trackedFiles(root = REPO_ROOT) {
     .filter(Boolean);
 }
 
-/** The files changed between the merge base of `base` and `head`, and `head`. */
+/**
+ * The files changed between the merge base of `base` and `head`, and `head`,
+ * relative to `root` (`--relative`; scripts/workspace-root.mjs, "Paths handed to git").
+ */
 export function changedFiles(root, base, head = 'HEAD') {
-  return execFileSync('git', ['diff', '--name-only', '--no-renames', `${base}...${head}`], {
+  return execFileSync('git', ['diff', '--name-only', '--relative', '--no-renames', `${base}...${head}`], {
     cwd: root,
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,

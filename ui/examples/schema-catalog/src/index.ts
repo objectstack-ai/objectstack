@@ -39,7 +39,6 @@ import components_basic_div_grid_layout from './schemas/components-basic-div/gri
 import components_basic_div_nested_divs from './schemas/components-basic-div/nested-divs.json' with { type: 'json' };
 import components_basic_div_use_box_instead from './schemas/components-basic-div/use-box-instead.json' with { type: 'json' };
 import components_basic_div_use_card_instead from './schemas/components-basic-div/use-card-instead.json' with { type: 'json' };
-import components_basic_html_basic_html from './schemas/components-basic-html/basic-html.json' with { type: 'json' };
 import components_basic_icon_basic_icon from './schemas/components-basic-icon/basic-icon.json' with { type: 'json' };
 import components_basic_icon_colored_icons from './schemas/components-basic-icon/colored-icons.json' with { type: 'json' };
 import components_basic_icon_icon_sizes from './schemas/components-basic-icon/icon-sizes.json' with { type: 'json' };
@@ -703,15 +702,6 @@ const REGISTRY: Record<string, Example> = {
       category: 'components-basic-div',
     },
     schema: components_basic_div_use_card_instead,
-  },
-  'components-basic-html/basic-html': {
-    id: 'components-basic-html/basic-html',
-    meta: {
-      title: "Basic Html",
-      description: "",
-      category: 'components-basic-html',
-    },
-    schema: components_basic_html_basic_html,
   },
   'components-basic-icon/basic-icon': {
     id: 'components-basic-icon/basic-icon',

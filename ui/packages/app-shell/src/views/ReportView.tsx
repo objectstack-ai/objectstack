@@ -24,6 +24,7 @@ import type { DatasetDrillArgs } from '@object-ui/plugin-report';
 import { DrillDownDrawer } from '@object-ui/plugin-dashboard';
 import { DrillNavigationProvider } from '@object-ui/react';
 import { useOpenRecordList } from './useOpenRecordList.js';
+import { metadataText } from '../hooks/useNavTargetLabel.js';
 
 // Fallback fields when no schema is available
 const FALLBACK_FIELDS = [
@@ -38,7 +39,7 @@ const FALLBACK_FIELDS = [
 ];
 
 export function ReportView({ dataSource }: { dataSource?: DataSource }) {
-  const { t } = useObjectTranslation();
+  const { t, language } = useObjectTranslation();
   const { reportName } = useParams<{ reportName: string }>();
   const { showDebug } = useMetadataInspector();
   const adapter = useAdapter();
@@ -110,10 +111,11 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
   const handleDatasetDrill = useCallback(
     async ({ dataset, groupKey, object, objectFilter }: DatasetDrillArgs) => {
       try {
-        // Drawer header: the clicked group's display values (e.g. "West / Q3").
+        // Drawer header: the clicked group's display values (e.g. "West / Q3"),
+        // else the report's label in the viewer's language (objectui#13470).
         const titleParts = Object.values(groupKey).filter((v) => v != null).map((v) => String(v));
         const title = titleParts.join(' / ')
-          || String(reportData?.label ?? reportData?.name ?? 'Details');
+          || (metadataText(reportData?.label, language) ?? String(reportData?.name ?? 'Details'));
 
         // Fast path (ADR-0021 D2): the renderer already resolved the dataset's
         // base object + an exact object FIELD → RAW value filter from the
@@ -163,7 +165,7 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
         console.warn('ReportView: drill failed', err);
       }
     },
-    [metadataClient, objects, reportData],
+    [metadataClient, objects, reportData, language],
   );
 
   // Derive available fields from object schema for filter/sort editors
@@ -390,6 +392,15 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
 
   // Use live-edited schema for preview (persists after closing panel until metadata refreshes)
   const previewReport = editSchema || reportData;
+  // `label` and `description` are the spec's `string | I18nLabel`, so an
+  // inline locale map (`{ en, 'zh-CN' }`) is valid metadata and is served
+  // unchanged. Drawn raw, React refused the object and the page went blank
+  // (objectui#13470). Each resolves to the viewer's language through
+  // `metadataText`, the reader the app's report index names a report with.
+  const heading = metadataText(previewReport.title, language)
+    ?? metadataText(previewReport.label, language)
+    ?? 'Report Viewer';
+  const description = metadataText(previewReport.description, language);
   // Every report renders through the spec ReportRenderer dispatcher: it routes
   // dataset-bound reports to DatasetReportRenderer (aggregation, charts, KPIs,
   // drill protocol end-to-end), bridges stored pre-9.0 spec JSON to the
@@ -402,9 +413,9 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
     <div className="flex flex-col h-full overflow-hidden bg-background">
       <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 sm:gap-4 p-4 sm:p-6 border-b shrink-0">
         <div className="min-w-0 flex-1">
-           <h1 className="text-lg sm:text-xl md:text-2xl font-bold tracking-tight truncate">{previewReport.title || previewReport.label || 'Report Viewer'}</h1>
-           {previewReport.description && (
-             <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{previewReport.description}</p>
+           <h1 className="text-lg sm:text-xl md:text-2xl font-bold tracking-tight truncate">{heading}</h1>
+           {description && (
+             <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{description}</p>
            )}
         </div>
         <div className="shrink-0 flex items-center gap-1.5">

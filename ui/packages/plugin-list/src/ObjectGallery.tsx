@@ -15,6 +15,7 @@ import type { DataSource, GalleryConfig, ObjectGallerySchema, QueryParams } from
 import { ChevronRight, ChevronDown } from 'lucide-react';
 import { getCellRenderer, resolveCellRendererType, readFileValues } from '@object-ui/fields';
 import { useDisplayLocale } from '@object-ui/i18n';
+import { RecordDetailPanel } from '@object-ui/plugin-detail';
 import { ListEmptyState, hasDeclaredFilter } from './ListEmptyState';
 import { useListViewTranslation } from './ListView';
 
@@ -883,18 +884,44 @@ export const ObjectGallery: React.FC<ObjectGalleryProps> = (props) => {
             )}
             {navigation.isOverlay && (
                 <NavigationOverlay {...navigation} title="Gallery Item">
-                    {(record) => (
-                        <div className="space-y-3">
-                            {Object.entries(record).map(([key, value]) => (
-                                <div key={key} className="flex flex-col">
-                                    <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                                        {key.replace(/_/g, ' ')}
-                                    </span>
-                                    <span className="text-sm">{String(value ?? '—')}</span>
+                    {(record) => {
+                        // objectui#13458 — the same payload the grid, tree, kanban,
+                        // calendar and gantt overlays mount, in place of a raw
+                        // key/value dump: declared labels, typed widgets, `hidden`
+                        // honoured, the object's field order. Read-only, as on the
+                        // grid and the tree: capability is handler presence, and
+                        // this view hands the panel no write path.
+                        const recordId = record.id ?? record._id;
+                        if (schema.objectName && (typeof recordId === 'string' || typeof recordId === 'number')) {
+                            return (
+                                <div className="px-6 pt-6 pb-6">
+                                    <RecordDetailPanel
+                                        record={record}
+                                        objectName={schema.objectName}
+                                        recordId={recordId}
+                                        dataSource={dataSource ?? undefined}
+                                        objectSchema={objectDef}
+                                        onClose={navigation.close}
+                                    />
                                 </div>
-                            ))}
-                        </div>
-                    )}
+                            );
+                        }
+                        // No addressable record (inline rows with no object name or
+                        // id): the panel needs both, so the plain reading of the row
+                        // is the answer.
+                        return (
+                            <div className="space-y-3">
+                                {Object.entries(record).map(([key, value]) => (
+                                    <div key={key} className="flex flex-col">
+                                        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                                            {key.replace(/_/g, ' ')}
+                                        </span>
+                                        <span className="text-sm">{String(value ?? '—')}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        );
+                    }}
                 </NavigationOverlay>
             )}
         </>

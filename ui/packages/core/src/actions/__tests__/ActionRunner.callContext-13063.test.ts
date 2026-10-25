@@ -87,7 +87,7 @@ describe('execute with a call context (objectui#13063)', () => {
     runner.setConfirmHandler(confirm);
 
     const result = await runner.execute(
-      { type: 'form', target: 'task.edit', confirmText: 'Log time on ${record.name}?' },
+      { type: 'form', target: 'task.edit', confirmText: 'Log time on {{ record.name }}?' },
       { record: ROW, objectName: 'task' },
     );
     expect(result.success).toBe(false);

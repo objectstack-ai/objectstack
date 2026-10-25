@@ -7,7 +7,7 @@
  */
 
 /**
- * objectui#12967 — one action, two doors: a `${record.*}` hole in its
+ * objectui#12967 — one action, two doors: a `record` hole in its
  * `confirmText` reads filled from the record header and from a list row.
  *
  * The header door is an `ActionProvider` whose context carries `record` (the
@@ -15,7 +15,8 @@
  * `ObjectGrid` firing the same action from a row's menu, which dispatches it as
  * `{ ...def, params: { _rowRecord: row } }` under a provider whose context
  * names no record (a list page). Before the fix the row door's confirm read
- * `Pause ${record.display_name}?`, the template source.
+ * `Pause ${record.display_name}?`, the template source. (The hole is written
+ * `{{ record.* }}` since objectui#13476 retired the `${…}` reading.)
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, waitFor, cleanup } from '@testing-library/react';
@@ -100,13 +101,13 @@ afterEach(() => cleanup());
 
 describe('one action, two doors: a record hole in `confirmText` (objectui#12967)', () => {
   it('(a) reads filled from the record header and from a list row', async () => {
-    expect(await headerConfirm('Pause ${record.display_name}?')).toBe('Pause Acme?');
-    expect(await rowConfirm('Pause ${record.display_name}?')).toBe('Pause Acme?');
+    expect(await headerConfirm('Pause {{ record.display_name }}?')).toBe('Pause Acme?');
+    expect(await rowConfirm('Pause {{ record.display_name }}?')).toBe('Pause Acme?');
   });
 
   it('(c) CONTROL: a hole naming a field the record lacks degrades the same way on both doors', async () => {
-    const header = await headerConfirm('Pause ${record.no_such_field}?');
-    const row = await rowConfirm('Pause ${record.no_such_field}?');
+    const header = await headerConfirm('Pause {{ record.no_such_field }}?');
+    const row = await rowConfirm('Pause {{ record.no_such_field }}?');
     expect(header).toBe('Pause ?');
     expect(row).toBe(header);
   });

@@ -24,7 +24,7 @@ import {
   ReportSchema as SpecReportSchema,
 } from '@objectstack/spec/ui';
 import { BaseSchema, SchemaNodeSchema } from './base.zod.js';
-import { aliasKeyRefusal, handlerKeyRefusal, neitherContentChannelGuidance, retirementTombstone } from './tombstone.zod.js';
+import { aliasKeyRefusal, handlerKeyRefusal, neitherContentChannelGuidance, retiredNodeType, retirementTombstone } from './tombstone.zod.js';
 import { TABLE_COLUMN_TYPES, type TreeNode, type TimelineFeedItem, type TimelineGanttItem } from '../data-display.js';
 import { stripImportedDefaults } from './imported-defaults.js';
 
@@ -1646,26 +1646,40 @@ export const KbdSchema = BaseSchema.extend({
 });
 
 /**
- * HTML Schema - Raw HTML renderer
+ * ⛔ The `html` node type is RETIRED (objectui#13449) — this is its NAMED
+ * REFUSAL, the half a deletion would not have given.
+ *
+ * Its renderer (`@object-ui/components`, `ui:html` plus the bare `html` key)
+ * wrote the authored `html` string into the page through
+ * `dangerouslySetInnerHTML` with no sanitiser, so anyone who could write
+ * metadata — a `kind:'html'` page included, which compiled `<html html="…">`
+ * with no diagnostic — could put script-bearing markup in front of every
+ * viewer. `@objectstack/spec` declares no `html` component, so it went rather
+ * than gaining a sanitiser. `HtmlSchema`'s member-by-member arm went with the
+ * TypeScript interface; what stays is an arm claiming the literal, in the shape
+ * of `complex.zod.ts#RetiredKanbanNodeSchema` (objectui#8802, maintainer ruling
+ * 2026-09-09): deleting the arm would already refuse, but with the union's
+ * remedy-free `Invalid input`.
+ *
+ * ⛔ The `html` FIELD type (`HtmlFieldMetadata`, a form or record field whose
+ * value is rendered through the sanitised fields path) is a different layer and
+ * is untouched: field metadata never parses against this node union.
+ *
+ * Deliberately NOT exported from `index.zod.ts`: nothing outside this package
+ * parses against a refusal arm. No TypeScript twin either — the TS half of the
+ * retirement is the ABSENCE of an `html` member in `DataDisplaySchema`.
+ *
+ * Pinned in `../__tests__/html-node-retired-13449.test.ts`.
  */
-export const HtmlSchema = BaseSchema.extend({
-  type: z.literal('html'),
-  html: z.string().describe('HTML content'),
-  body: retirementTombstone(
-    'REFUSED (objectui#9256, ADR-0049) — `html` reads NEITHER content channel: measured with the '
-    + 'TypeScript type checker across all 24 registering packages, no renderer read consumes `body` or '
-    + '`children` for this node, and `SchemaRenderer` strips both out of the props bag it spreads. An '
-    + 'authored value therefore rendered NOTHING — no render-time error or warning and no element; only the parser tier\'s `not-a-container` warning (objectui#9910) noticed it. '
-    + 'What it renders instead: `html`.',
-  ),
-  children: retirementTombstone(
-    'REFUSED (objectui#9256, ADR-0049) — `html` reads NEITHER content channel: measured with the '
-    + 'TypeScript type checker across all 24 registering packages, no renderer read consumes `body` or '
-    + '`children` for this node, and `SchemaRenderer` strips both out of the props bag it spreads. An '
-    + 'authored value therefore rendered NOTHING — no render-time error or warning and no element; only the parser tier\'s `not-a-container` warning (objectui#9910) noticed it. '
-    + 'What it renders instead: `html`.',
-  ),
-});
+export const RetiredHtmlNodeSchema = retiredNodeType(
+  'html',
+  'Its renderer wrote the authored `html` string into the page unsanitised, and ' +
+    '`@objectstack/spec` declares no `html` component (objectui#13449). For rich text ' +
+    'a user edits, declare an `html` or `richtext` FIELD on the object — its value ' +
+    'renders through the sanitised fields path; for authored page copy, write a ' +
+    '`kind: \'html\'` page, whose JSX is parsed against a tag whitelist and never ' +
+    'injected as markup.',
+);
 
 /** objectui#9256 (family-D re-measure): ONE refusal string for both content channels of `BarChartSchema`. */
 const BAR_CHART_NEITHER_CHANNEL = neitherContentChannelGuidance(
@@ -1722,7 +1736,8 @@ const DataDisplaySchemaInferred = z.discriminatedUnion('type', [
   PivotTableSchema,
   TimelineSchema,
   KbdSchema,
-  HtmlSchema,
+  // objectui#13449 — the retired `html` literal's named refusal.
+  RetiredHtmlNodeSchema,
   BarChartSchema,
 ]);
 

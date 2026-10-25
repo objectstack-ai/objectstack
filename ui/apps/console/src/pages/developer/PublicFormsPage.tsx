@@ -77,6 +77,7 @@
 import { useEffect, useState } from 'react';
 import { useHref } from 'react-router-dom';
 import { useAdapter } from '@object-ui/app-shell';
+import { useObjectTranslation } from '@object-ui/i18n';
 import {
   Card,
   CardContent,
@@ -110,6 +111,7 @@ import { Copy, ExternalLink, FormInput, RefreshCw, Code2, Link2, Settings2, Plus
 import { toast } from 'sonner';
 import { anonymousFormIntakeCandidates } from '@objectstack/spec/ui';
 import { checkSubmitRedirectUrl } from '../../components/submitRedirect';
+import { SLOT, withSlots } from '../../lib/inlineSlots';
 
 /** One `view` item as `GET /meta/view` serves it: a `ViewItem` (module header). */
 type ServedViewItem = Record<string, any>;
@@ -142,13 +144,8 @@ const PUBLIC_FORM_ROUTE = '/f';
 
 type SubmitBehaviorKind = 'thank-you' | 'redirect' | 'continue' | 'next-record';
 
-/** The "After submit" picker's options, in the order the dialog offers them. */
-const SUBMIT_BEHAVIOR_OPTIONS: ReadonlyArray<{ value: SubmitBehaviorKind; label: string }> = [
-  { value: 'thank-you', label: 'Show a thank-you panel' },
-  { value: 'redirect', label: 'Redirect to a URL' },
-  { value: 'continue', label: 'Reset for another response' },
-  { value: 'next-record', label: 'Advance to next record (internal queues)' },
-];
+/** The "After submit" picker's options, in the order the dialog offers them; labels are translated at render. */
+const SUBMIT_BEHAVIOR_KINDS: readonly SubmitBehaviorKind[] = ['thank-you', 'redirect', 'continue', 'next-record'];
 
 /** The item a value none of a picker's options carries is shown by. */
 const OUTSIDE_OPTIONS = 'outside';
@@ -211,6 +208,13 @@ function FormsPicker<V extends string>({
 }
 
 export function PublicFormsPage() {
+  // objectui#13460 — the page's copy reads `console.developer.publicForms.*`
+  // (and `common.*` for Refresh / Actions / Cancel / Save); each inline
+  // `defaultValue` is the `en` pack's value, held byte-identical to it by
+  // `pnpm check:i18n-keys`, so a provider-less mount still reads English.
+  // Left as written: the snippets (code), the example slugs and paths in the
+  // placeholders, and the redirect refusal, which is the spec's own prose.
+  const { t } = useObjectTranslation();
   const adapter = useAdapter();
   const client: any = adapter?.getClient?.();
 
@@ -319,12 +323,13 @@ export function PublicFormsPage() {
   const formatReact = (slug: string) =>
     `<iframe\n  src={\`${formatPublicUrl(slug)}\`}\n  title="Public form"\n  style={{ width: '100%', height: 640, border: 0 }}\n/>`;
 
+  /** `label` is the whole translated toast ("Copied URL"). */
   const copy = async (label: string, value: string) => {
     try {
       await navigator.clipboard.writeText(value);
-      toast.success(`Copied ${label}`);
+      toast.success(label);
     } catch {
-      toast.error('Clipboard unavailable');
+      toast.error(t('console.developer.publicForms.clipboardUnavailable', { defaultValue: 'Clipboard unavailable' }));
     }
   };
 
@@ -334,7 +339,7 @@ export function PublicFormsPage() {
     if (!cand) return;
     const slug = sanitizeSlug(publishSlug);
     if (!slug) {
-      toast.error('Invalid slug');
+      toast.error(t('console.developer.publicForms.invalidSlug', { defaultValue: 'Invalid slug' }));
       return;
     }
     // The form body of a served ViewItem is its `config` (module header).
@@ -354,13 +359,13 @@ export function PublicFormsPage() {
     setPublishing(true);
     try {
       await client.meta.saveItem('view', cand.name, next);
-      toast.success(`Published ${cand.name}`);
+      toast.success(t('console.developer.publicForms.published', { defaultValue: 'Published {{name}}', name: cand.name }));
       setPublishOpen(false);
       setPublishView('');
       setPublishSlug('');
       await load();
     } catch (e: any) {
-      toast.error(`Publish failed: ${e?.message ?? e}`);
+      toast.error(t('console.developer.publicForms.publishFailed', { defaultValue: 'Publish failed: {{message}}', message: String(e?.message ?? e) }));
     } finally {
       setPublishing(false);
     }
@@ -383,7 +388,7 @@ export function PublicFormsPage() {
     if (!editRow) return;
     const slug = sanitizeSlug(editSlug);
     if (!slug) {
-      toast.error('Invalid slug');
+      toast.error(t('console.developer.publicForms.invalidSlug', { defaultValue: 'Invalid slug' }));
       return;
     }
     setEditUrlRefusal(null);
@@ -432,18 +437,27 @@ export function PublicFormsPage() {
     setSaving(true);
     try {
       await client.meta.saveItem('view', editRow.name, next);
-      toast.success(`Saved ${editRow.name}`);
+      toast.success(t('console.developer.publicForms.saved', { defaultValue: 'Saved {{name}}', name: editRow.name }));
       setEditOpen(false);
       setEditRow(null);
       await load();
     } catch (e: any) {
-      toast.error(`Save failed: ${e?.message ?? e}`);
+      toast.error(t('console.developer.publicForms.saveFailed', { defaultValue: 'Save failed: {{message}}', message: String(e?.message ?? e) }));
     } finally {
       setSaving(false);
     }
   };
 
   const hasRows = rows.length > 0;
+
+  const behaviorLabels: Record<SubmitBehaviorKind, string> = {
+    'thank-you': t('console.developer.publicForms.behaviorThankYou', { defaultValue: 'Show a thank-you panel' }),
+    redirect: t('console.developer.publicForms.behaviorRedirect', { defaultValue: 'Redirect to a URL' }),
+    continue: t('console.developer.publicForms.behaviorContinue', { defaultValue: 'Reset for another response' }),
+    'next-record': t('console.developer.publicForms.behaviorNextRecord', { defaultValue: 'Advance to next record (internal queues)' }),
+  };
+  const submitBehaviorOptions = SUBMIT_BEHAVIOR_KINDS.map((value) => ({ value, label: behaviorLabels[value] }));
+  const publishLabel = t('console.developer.publicForms.publishButton', { defaultValue: 'Publish form…' });
 
   return (
     <div className="flex flex-1 flex-col gap-4 p-4 md:p-6 overflow-auto">
@@ -452,11 +466,13 @@ export function PublicFormsPage() {
           <div>
             <CardTitle className="flex items-center gap-2">
               <FormInput className="h-4 w-4" />
-              Public Forms
+              {t('console.developer.publicForms.title', { defaultValue: 'Public Forms' })}
             </CardTitle>
             <CardDescription>
-              Forms anyone can fill out — no login required. Publish a form to get a
-              shareable link; submissions land directly in the bound object.
+              {t('console.developer.publicForms.description', {
+                defaultValue:
+                  'Forms anyone can fill out — no login required. Publish a form to get a shareable link; submissions land directly in the bound object.',
+              })}
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
@@ -465,14 +481,18 @@ export function PublicFormsPage() {
               size="sm"
               onClick={() => setPublishOpen(true)}
               disabled={publishable.length === 0}
-              title={publishable.length === 0 ? 'No non-public FormViews available' : 'Publish a FormView'}
+              title={
+                publishable.length === 0
+                  ? t('console.developer.publicForms.publishNone', { defaultValue: 'No non-public FormViews available' })
+                  : t('console.developer.publicForms.publishTooltip', { defaultValue: 'Publish a FormView' })
+              }
             >
               <Plus className="h-3.5 w-3.5" />
-              <span className="ml-1.5">Publish form…</span>
+              <span className="ml-1.5">{publishLabel}</span>
             </Button>
             <Button variant="outline" size="sm" onClick={load} disabled={loading}>
               <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
-              <span className="ml-1.5">Refresh</span>
+              <span className="ml-1.5">{t('common.refresh', { defaultValue: 'Refresh' })}</span>
             </Button>
           </div>
         </CardHeader>
@@ -484,10 +504,16 @@ export function PublicFormsPage() {
           )}
           {!loading && !hasRows && (
             <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
-              <p className="font-medium text-foreground">No public forms yet</p>
+              <p className="font-medium text-foreground">{t('console.developer.publicForms.emptyTitle', { defaultValue: 'No public forms yet' })}</p>
               <p className="mt-1">
-                Click <strong>Publish form…</strong> above to share an existing form, or
-                build a new one in Views &amp; Apps and mark it public.
+                {withSlots(
+                  t('console.developer.publicForms.emptyBody', {
+                    defaultValue:
+                      'Click {{action}} above to share an existing form, or build a new one in Views & Apps and mark it public.',
+                    action: SLOT[0],
+                  }),
+                  [<strong key="action">{publishLabel}</strong>],
+                )}
               </p>
             </div>
           )}
@@ -495,11 +521,11 @@ export function PublicFormsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Object</TableHead>
-                  <TableHead>Slug</TableHead>
-                  <TableHead>Public URL</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead>{t('console.developer.publicForms.columnName', { defaultValue: 'Name' })}</TableHead>
+                  <TableHead>{t('console.developer.publicForms.columnObject', { defaultValue: 'Object' })}</TableHead>
+                  <TableHead>{t('console.developer.publicForms.columnSlug', { defaultValue: 'Slug' })}</TableHead>
+                  <TableHead>{t('console.developer.publicForms.columnPublicUrl', { defaultValue: 'Public URL' })}</TableHead>
+                  <TableHead className="text-right">{t('common.actions', { defaultValue: 'Actions' })}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -539,31 +565,31 @@ export function PublicFormsPage() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            title="Copy URL"
-                            onClick={() => copy('URL', url)}
+                            title={t('console.developer.publicForms.copyUrl', { defaultValue: 'Copy URL' })}
+                            onClick={() => copy(t('console.developer.publicForms.copiedUrl', { defaultValue: 'Copied URL' }), url)}
                           >
                             <Link2 className="h-3.5 w-3.5" />
                           </Button>
                           <Button
                             variant="ghost"
                             size="sm"
-                            title="Copy <iframe> embed"
-                            onClick={() => copy('iframe snippet', formatIframe(row.slug))}
+                            title={t('console.developer.publicForms.copyIframe', { defaultValue: 'Copy <iframe> embed' })}
+                            onClick={() => copy(t('console.developer.publicForms.copiedIframe', { defaultValue: 'Copied iframe snippet' }), formatIframe(row.slug))}
                           >
                             <Code2 className="h-3.5 w-3.5" />
                           </Button>
                           <Button
                             variant="ghost"
                             size="sm"
-                            title="Copy React snippet"
-                            onClick={() => copy('React snippet', formatReact(row.slug))}
+                            title={t('console.developer.publicForms.copyReact', { defaultValue: 'Copy React snippet' })}
+                            onClick={() => copy(t('console.developer.publicForms.copiedReact', { defaultValue: 'Copied React snippet' }), formatReact(row.slug))}
                           >
                             <Copy className="h-3.5 w-3.5" />
                           </Button>
                           <Button
                             variant="ghost"
                             size="sm"
-                            title="Edit sharing & post-submit behavior"
+                            title={t('console.developer.publicForms.editSharing', { defaultValue: 'Edit sharing & post-submit behavior' })}
                             onClick={() => openEditor(row)}
                           >
                             <Settings2 className="h-3.5 w-3.5" />
@@ -582,23 +608,32 @@ export function PublicFormsPage() {
       <Dialog open={publishOpen} onOpenChange={setPublishOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Publish a FormView</DialogTitle>
+            <DialogTitle>{t('console.developer.publicForms.publishDialogTitle', { defaultValue: 'Publish a FormView' })}</DialogTitle>
             <DialogDescription>
-              Pick an existing FormView to open it to anonymous visitors.
-              Publishing sets <code className="text-xs">sharing.enabled</code>,{' '}
-              <code className="text-xs">sharing.allowAnonymous</code> and{' '}
-              <code className="text-xs">sharing.publicLink</code> in its config: the
-              public form route serves a form only when all three are set.
+              {withSlots(
+                t('console.developer.publicForms.publishDialogDescription', {
+                  defaultValue:
+                    'Pick an existing FormView to open it to anonymous visitors. Publishing sets {{enabled}}, {{allowAnonymous}} and {{publicLink}} in its config: the public form route serves a form only when all three are set.',
+                  enabled: SLOT[0],
+                  allowAnonymous: SLOT[1],
+                  publicLink: SLOT[2],
+                }),
+                [
+                  <code key="enabled" className="text-xs">sharing.enabled</code>,
+                  <code key="allowAnonymous" className="text-xs">sharing.allowAnonymous</code>,
+                  <code key="publicLink" className="text-xs">sharing.publicLink</code>,
+                ],
+              )}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1.5">
-              <Label htmlFor="publish-view">FormView</Label>
+              <Label htmlFor="publish-view">{t('console.developer.publicForms.formView', { defaultValue: 'FormView' })}</Label>
               <FormsPicker
                 id="publish-view"
                 value={publishView}
                 options={[
-                  { value: '', label: '— Select a FormView —' },
+                  { value: '', label: t('console.developer.publicForms.selectFormView', { defaultValue: '— Select a FormView —' }) },
                   ...publishable.map((p) => ({
                     value: p.name,
                     label: `${p.label ?? p.name} (${p.name}) ${p.object ? `· ${p.object}` : ''}`,
@@ -608,7 +643,7 @@ export function PublicFormsPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="publish-slug">URL slug</Label>
+              <Label htmlFor="publish-slug">{t('console.developer.publicForms.urlSlug', { defaultValue: 'URL slug' })}</Label>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-muted-foreground whitespace-nowrap">{`${publicFormPath}/`}</span>
                 <Input
@@ -619,16 +654,16 @@ export function PublicFormsPage() {
                 />
               </div>
               <p className="text-xs text-muted-foreground">
-                Lowercase letters, digits, dashes and underscores only.
+                {t('console.developer.publicForms.slugHint', { defaultValue: 'Lowercase letters, digits, dashes and underscores only.' })}
               </p>
             </div>
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setPublishOpen(false)} disabled={publishing}>
-              Cancel
+              {t('common.cancel', { defaultValue: 'Cancel' })}
             </Button>
             <Button onClick={publish} disabled={publishing || !publishView || !publishSlug}>
-              {publishing ? 'Publishing…' : 'Publish'}
+              {publishing ? t('console.developer.publicForms.publishing', { defaultValue: 'Publishing…' }) : t('console.developer.publicForms.publish', { defaultValue: 'Publish' })}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -638,15 +673,17 @@ export function PublicFormsPage() {
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>
-              {editRow ? `Edit ${editRow.label ?? editRow.name}` : 'Edit form'}
+              {editRow
+                ? t('console.developer.publicForms.editTitle', { defaultValue: 'Edit {{name}}', name: editRow.label ?? editRow.name })
+                : t('console.developer.publicForms.editTitleFallback', { defaultValue: 'Edit form' })}
             </DialogTitle>
             <DialogDescription>
-              Configure the public URL and what happens after submit.
+              {t('console.developer.publicForms.editDescription', { defaultValue: 'Configure the public URL and what happens after submit.' })}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1.5">
-              <Label htmlFor="edit-slug">URL slug</Label>
+              <Label htmlFor="edit-slug">{t('console.developer.publicForms.urlSlug', { defaultValue: 'URL slug' })}</Label>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-muted-foreground whitespace-nowrap">{`${publicFormPath}/`}</span>
                 <Input
@@ -657,11 +694,11 @@ export function PublicFormsPage() {
               </div>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="edit-behavior">After submit</Label>
+              <Label htmlFor="edit-behavior">{t('console.developer.publicForms.afterSubmit', { defaultValue: 'After submit' })}</Label>
               <FormsPicker
                 id="edit-behavior"
                 value={editBehavior}
-                options={SUBMIT_BEHAVIOR_OPTIONS}
+                options={submitBehaviorOptions}
                 onPick={(kind) => {
                   setEditBehavior(kind);
                   setEditUrlRefusal(null);
@@ -671,19 +708,19 @@ export function PublicFormsPage() {
             {editBehavior === 'thank-you' && (
               <>
                 <div className="space-y-1.5">
-                  <Label htmlFor="edit-tytitle">Title</Label>
+                  <Label htmlFor="edit-tytitle">{t('console.developer.publicForms.thankYouTitle', { defaultValue: 'Title' })}</Label>
                   <Input
                     id="edit-tytitle"
-                    placeholder="Thanks!"
+                    placeholder={t('console.developer.publicForms.thankYouTitlePlaceholder', { defaultValue: 'Thanks!' })}
                     value={editBehaviorTitle}
                     onChange={(e) => setEditBehaviorTitle(e.target.value)}
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="edit-tymsg">Message</Label>
+                  <Label htmlFor="edit-tymsg">{t('console.developer.publicForms.thankYouMessage', { defaultValue: 'Message' })}</Label>
                   <Input
                     id="edit-tymsg"
-                    placeholder="Your submission has been received."
+                    placeholder={t('console.developer.publicForms.thankYouMessagePlaceholder', { defaultValue: 'Your submission has been received.' })}
                     value={editBehaviorMessage}
                     onChange={(e) => setEditBehaviorMessage(e.target.value)}
                   />
@@ -692,7 +729,7 @@ export function PublicFormsPage() {
             )}
             {editBehavior === 'redirect' && (
               <div className="space-y-1.5">
-                <Label htmlFor="edit-url">Redirect URL</Label>
+                <Label htmlFor="edit-url">{t('console.developer.publicForms.redirectUrl', { defaultValue: 'Redirect URL' })}</Label>
                 {/*
                   Not `type="url"`: that type's own notion of valid is an
                   ABSOLUTE URL, which is the one thing this key refuses, so it
@@ -721,9 +758,15 @@ export function PublicFormsPage() {
                   </p>
                 ) : (
                   <p id="edit-url-hint" className="text-xs text-muted-foreground">
-                    An in-app path, starting with <code>/</code> — interpolate a field of
-                    the submitted record as <code>{'{{record.field_name}}'}</code>. To send
-                    the browser out of the app, use an app navigation item instead.
+                    {withSlots(
+                      t('console.developer.publicForms.redirectHint', {
+                        defaultValue:
+                          'An in-app path, starting with {{slash}} — interpolate a field of the submitted record as {{token}}. To send the browser out of the app, use an app navigation item instead.',
+                        slash: SLOT[0],
+                        token: SLOT[1],
+                      }),
+                      [<code key="slash">/</code>, <code key="token">{'{{record.field_name}}'}</code>],
+                    )}
                   </p>
                 )}
               </div>
@@ -731,10 +774,10 @@ export function PublicFormsPage() {
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setEditOpen(false)} disabled={saving}>
-              Cancel
+              {t('common.cancel', { defaultValue: 'Cancel' })}
             </Button>
             <Button onClick={saveEdit} disabled={saving || !editSlug}>
-              {saving ? 'Saving…' : 'Save'}
+              {saving ? t('console.developer.publicForms.saving', { defaultValue: 'Saving…' }) : t('common.save', { defaultValue: 'Save' })}
             </Button>
           </DialogFooter>
         </DialogContent>

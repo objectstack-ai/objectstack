@@ -360,8 +360,12 @@ export interface DetailViewSection {
    * Hide this section's empty fields, and — when EVERY field is empty — hide
    * the whole section: no heading, no skeleton.
    *
-   * Set `false` to keep an all-empty section's heading and label skeleton, the
-   * spelling a brand-new record needs so its authored sections do not vanish.
+   * Set `false` to keep an all-empty section, the spelling a brand-new record
+   * needs so its authored sections do not vanish. A kept all-empty section
+   * draws, in read-only mode, its heading plus ONE fold row that counts the
+   * empty fields and reveals them on request — the same fold a partly-filled
+   * section uses (ruling C on objectui#13386); in edit mode it draws every
+   * field as an editable row.
    *
    * ## ⚠️ Omitting it does NOT mean the same thing on both consumers
    *
@@ -375,8 +379,8 @@ export interface DetailViewSection {
    *   declared on.
    * - **`detail-view`** (`DetailViewRenderer`, whose registration takes a
    *   `sections` input) hands each section to `DetailSection` unchanged. No
-   *   default is applied there, so an omitted key leaves the all-empty section
-   *   rendering its heading and skeleton. Only an explicit `true` hides it.
+   *   default is applied there, so an omitted key keeps the all-empty section
+   *   (folded, as above). Only an explicit `true` hides it.
    *
    * Measured at objectui#8603, non-vacuously — a sibling control section that
    * must render was present in every case, and it rendered in all six:

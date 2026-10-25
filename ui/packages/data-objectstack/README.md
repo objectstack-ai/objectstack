@@ -1123,6 +1123,9 @@ new ObjectStackAdapter(config: {
 - `update(resource, id, data)` - Update an existing record
 - `delete(resource, id)` - Delete a record
 - `bulk(resource, operation, data)` - Batch operations (create/update/delete)
+- `bulkUpdate(resource, ids, patch)` / `bulkDelete(resource, ids)` - One `updateMany` / `deleteMany` request for many ids (`continueOnError: true`). Resolves to `{ succeeded, errors }`: the server's count plus one `{ id, error }` per refused record, with the server's reason
+- `onMutation(listener)` - Subscribe to create/update/delete events (returns unsubscribe function)
+- `batchMutationEvents(work)` - Run `work` with mutation events held, then deliver them coalesced (one per resource and type) when it settles, so bound views refresh once for a loop of writes
 - `batchTransaction(operations)` - Cross-object atomic batch (master-detail); atomic when the backend advertises `transactionalBatch`, else non-atomic client-side fallback
 - `getObjectSchema(objectName)` - Get schema metadata (cached)
 - `getCacheStats()` - Get cache statistics

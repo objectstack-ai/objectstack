@@ -39,20 +39,19 @@ const TO_JSON_OPTS = { io: 'input', unrepresentable: 'any' } as const;
  */
 export const PAGE_FIELDS_OWNED_ELSEWHERE = new Set(['name', 'regions', 'children']);
 
+/**
+ * No `try`/`catch` around the spec derivations in this file (objectui#13459).
+ * Their only input is the bundled `@objectstack/spec`, so a derivation that
+ * fails is a build-time fact: the tests beside this file go red, and at runtime
+ * the throw reaches the route's error boundary. It used to be caught, warned
+ * about in the console and turned into `undefined`, which rendered a designer
+ * form silently missing fields that the author could then save past.
+ */
 let _pageSchema: JsonSchema | undefined;
-let _pageSchemaFailed = false;
 
 /** JSONSchema for the whole Page document (memoised, spec-derived). */
-export function getPageSchema(): JsonSchema | undefined {
-  if (_pageSchema || _pageSchemaFailed) return _pageSchema;
-  try {
-    _pageSchema = z.toJSONSchema(PageSchema, TO_JSON_OPTS) as JsonSchema;
-  } catch (err) {
-    _pageSchemaFailed = true;
-    if (typeof console !== 'undefined') {
-      console.warn('[page-schema] failed to derive Page JSONSchema from spec', err);
-    }
-  }
+export function getPageSchema(): JsonSchema {
+  _pageSchema ??= z.toJSONSchema(PageSchema, TO_JSON_OPTS) as JsonSchema;
   return _pageSchema;
 }
 
@@ -67,21 +66,14 @@ let _pageForm: FormViewSpec | undefined;
 export function getPageForm(): FormViewSpec | undefined {
   if (_pageForm) return _pageForm;
   if (!specPageForm || typeof specPageForm !== 'object') return undefined;
-  try {
-    const clone = JSON.parse(JSON.stringify(specPageForm)) as FormViewSpec;
-    for (const section of clone.sections ?? []) {
-      section.fields = (section.fields ?? []).filter((f: any) => {
-        const name = typeof f === 'string' ? f : f?.field;
-        return !PAGE_FIELDS_OWNED_ELSEWHERE.has(name);
-      });
-    }
-    clone.sections = (clone.sections ?? []).filter((s) => (s.fields ?? []).length > 0);
-    _pageForm = clone;
-  } catch (err) {
-    if (typeof console !== 'undefined') {
-      console.warn('[page-schema] failed to prune Page authoring form from spec', err);
-    }
-    _pageForm = specPageForm as FormViewSpec;
+  const clone = JSON.parse(JSON.stringify(specPageForm)) as FormViewSpec;
+  for (const section of clone.sections ?? []) {
+    section.fields = (section.fields ?? []).filter((f: any) => {
+      const name = typeof f === 'string' ? f : f?.field;
+      return !PAGE_FIELDS_OWNED_ELSEWHERE.has(name);
+    });
   }
+  clone.sections = (clone.sections ?? []).filter((s) => (s.fields ?? []).length > 0);
+  _pageForm = clone;
   return _pageForm;
 }

@@ -24,8 +24,11 @@ import type { ComponentInputControlType } from './base.js';
  * `@object-ui/core`'s `WidgetRegistry` registers, and what the designer palette
  * lists.
  *
- * A manifest provides all metadata needed to discover, load, and render
- * a widget without requiring an upfront import of its code.
+ * A manifest provides the metadata needed to list, register and render a
+ * widget. Its code is never fetched by the manifest: the component is either
+ * imported at build time and handed over (`inline`) or already registered in
+ * the component registry (`registry`). See {@link RuntimeWidgetSource} for why
+ * there is no URL-loaded source.
  *
  * Today this is objectui's ONLY widget-registration contract: no published
  * `@objectstack/spec` schema models one.
@@ -61,6 +64,12 @@ import type { ComponentInputControlType } from './base.js';
  *
  * @example
  * ```ts
+ * // The widget's React component. In an app it is imported at build time
+ * // (e.g. `import { CustomChart } from './widgets/CustomChart'`).
+ * function CustomChart() {
+ *   return null;
+ * }
+ *
  * const manifest: RuntimeWidgetManifest = {
  *   name: 'custom-chart',
  *   version: '1.0.0',
@@ -69,7 +78,8 @@ import type { ComponentInputControlType } from './base.js';
  *   description: 'A custom chart powered by D3.',
  *   category: 'data-visualization',
  *   icon: 'BarChart',
- *   source: { type: 'module', url: '/widgets/custom-chart.js' },
+ *   // Imported at build time, so the bundler sees it; never a URL.
+ *   source: { type: 'inline', component: CustomChart },
  * };
  * ```
  */
@@ -139,10 +149,24 @@ export interface RuntimeWidgetManifest {
  * the spec's `inline` carried source **code** to evaluate (`{ type: 'inline',
  * code: string }`), objectui's carries an **already-resolved component**
  * ({@link WidgetSourceInline}). The other members never overlapped — the spec
- * had `npm`/`remote`, objectui has `module`/`registry` — so a value of one
+ * had `npm`/`remote`, objectui had `module`/`registry` — so a value of one
  * union was never a valid value of the other. ⚠️ The spec's union was retired
  * with the rest of the widget-registration vocabulary (objectstack#5055): the
  * union declared below is objectui's own, and never derived from it.
+ *
+ * RETIRED — the `module` member (`{ type: 'module', url, exportName? }`, the
+ * `WidgetSourceModule` interface) was removed by objectui#13450. It loaded a
+ * widget's code from a URL at runtime through a dynamic `import()` built with
+ * the Function constructor, which AGENTS.md commandment #6 forbids ("No
+ * `eval()` / runtime dynamic imports to load components"). There is no
+ * tombstone member: a manifest written in TypeScript is refused here by the
+ * discriminant, and one that reaches `WidgetRegistry.load()` untyped is refused
+ * there by name, before any code is fetched. Migration: import the component
+ * at build time and declare `{ type: 'inline', component }`, or register it
+ * in the component registry and declare `{ type: 'registry', registryKey }`.
+ * Remote widgets as a product capability would be a new contract (a signed
+ * manifest and an allow-listed origin, decided in `@objectstack/spec`), not a
+ * member of this union.
  *
  * The variant interfaces keep their `WidgetSource…` names: the spec never
  * exported those, and renaming them would churn the public surface without
@@ -152,28 +176,8 @@ export interface RuntimeWidgetManifest {
  * longer owns `WidgetSource`" row pins the vacancy.
  */
 export type RuntimeWidgetSource =
-  | WidgetSourceModule
   | WidgetSourceInline
   | WidgetSourceRegistry;
-
-/**
- * Load from an ES module URL.
- *
- * ⚠️ SECURITY WARNING: Only use URLs from trusted sources.
- * Never pass user-supplied URLs directly. URLs should be validated
- * and controlled by your application. This feature uses dynamic imports
- * which bypass static analysis and may be restricted by Content Security Policy.
- */
-export interface WidgetSourceModule {
-  type: 'module';
-  /**
-   * URL to the ES module (e.g., '/widgets/chart.js' or 'https://cdn.example.com/widget.mjs')
-   * Must be from a trusted source - never user input.
-   */
-  url: string;
-  /** Named export to use (default: 'default') */
-  exportName?: string;
-}
 
 /** The component is provided inline (already loaded) */
 export interface WidgetSourceInline {

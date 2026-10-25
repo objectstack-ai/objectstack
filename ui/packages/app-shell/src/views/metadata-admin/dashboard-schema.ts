@@ -39,20 +39,19 @@ const FORM_FIELDS_OWNED_ELSEWHERE = new Set([
   'name', // record identity — not user-editable here
 ]);
 
+/**
+ * No `try`/`catch` around the spec derivations in this file (objectui#13459).
+ * Their only input is the bundled `@objectstack/spec`, so a derivation that
+ * fails is a build-time fact: the tests beside this file go red, and at runtime
+ * the throw reaches the route's error boundary. It used to be caught, warned
+ * about in the console and turned into `undefined`, which rendered a designer
+ * form silently missing fields that the author could then save past.
+ */
 let _dashboardDocSchema: JsonSchema | undefined;
-let _dashboardDocFailed = false;
 
 /** JSONSchema for the whole (flat) Dashboard document. */
-export function getDashboardSchema(): JsonSchema | undefined {
-  if (_dashboardDocSchema || _dashboardDocFailed) return _dashboardDocSchema;
-  try {
-    _dashboardDocSchema = z.toJSONSchema(DashboardSchema, TO_JSON_OPTS) as JsonSchema;
-  } catch (err) {
-    _dashboardDocFailed = true;
-    if (typeof console !== 'undefined') {
-      console.warn('[dashboard-schema] failed to derive Dashboard JSONSchema from spec', err);
-    }
-  }
+export function getDashboardSchema(): JsonSchema {
+  _dashboardDocSchema ??= z.toJSONSchema(DashboardSchema, TO_JSON_OPTS) as JsonSchema;
   return _dashboardDocSchema;
 }
 
@@ -79,31 +78,24 @@ export function getDashboardForm(locale?: SupportedLocale | string): FormViewSpe
   const cacheKey = String(locale ?? '');
   if (_dashboardForm.has(cacheKey)) return _dashboardForm.get(cacheKey);
   if (!specDashboardForm || typeof specDashboardForm !== 'object') return undefined;
-  try {
-    const clone = JSON.parse(JSON.stringify(specDashboardForm)) as FormViewSpec;
-    for (const section of clone.sections ?? []) {
-      section.fields = (section.fields ?? []).filter((f: any) => {
-        const name = typeof f === 'string' ? f : f?.field;
-        return !FORM_FIELDS_OWNED_ELSEWHERE.has(name);
-      });
-    }
-    // Drop now-empty sections so we don't render bare headers.
-    clone.sections = (clone.sections ?? []).filter(
-      (s: any) => (s.fields ?? []).length > 0,
-    );
-    // Localize AFTER pruning: the overlay only has to reach what renders, and
-    // pruning cannot drop a section the overlay just renamed.
-    const localized = localizeMetadataForm(
-      clone as unknown as Record<string, unknown>,
-      'dashboard',
-      locale,
-    ) as unknown as FormViewSpec;
-    _dashboardForm.set(cacheKey, localized);
-    return localized;
-  } catch (err) {
-    if (typeof console !== 'undefined') {
-      console.warn('[dashboard-schema] failed to prepare dashboardForm from spec', err);
-    }
-    return undefined;
+  const clone = JSON.parse(JSON.stringify(specDashboardForm)) as FormViewSpec;
+  for (const section of clone.sections ?? []) {
+    section.fields = (section.fields ?? []).filter((f: any) => {
+      const name = typeof f === 'string' ? f : f?.field;
+      return !FORM_FIELDS_OWNED_ELSEWHERE.has(name);
+    });
   }
+  // Drop now-empty sections so we don't render bare headers.
+  clone.sections = (clone.sections ?? []).filter(
+    (s: any) => (s.fields ?? []).length > 0,
+  );
+  // Localize AFTER pruning: the overlay only has to reach what renders, and
+  // pruning cannot drop a section the overlay just renamed.
+  const localized = localizeMetadataForm(
+    clone as unknown as Record<string, unknown>,
+    'dashboard',
+    locale,
+  ) as unknown as FormViewSpec;
+  _dashboardForm.set(cacheKey, localized);
+  return localized;
 }

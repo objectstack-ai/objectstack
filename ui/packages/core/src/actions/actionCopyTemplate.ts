@@ -56,10 +56,11 @@ const TEMPLATE_HOLE = /\{\{[^}]*\}\}/;
 
 /**
  * Whether `text` carries a `{{ }}` hole, which makes it a `template`-dialect
- * sentence. The runner reads ONE dialect per sentence: a sentence with a
- * `{{ }}` hole is filled by the template engine alone, and one without keeps
- * the transitional `${…}` reading. So a value filled into a hole is never read
- * a second time as a `${…}` expression.
+ * sentence. A sentence with a `{{ }}` hole is filled by the template engine
+ * alone; one without is shown as written — the transitional `${…}` reading it
+ * used to get is retired (objectui#13476). So no `${…}` token in this copy is
+ * ever read as an expression, and a value filled into a hole is never read a
+ * second time.
  */
 export function hasTemplateHoles(text: string): boolean {
   return TEMPLATE_HOLE.test(text);

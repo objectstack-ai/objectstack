@@ -137,7 +137,13 @@ export function LiveCanvas({ appName, appSegment, materialized = false, path, re
             <span className="hidden sm:inline">{t('topbar.designInStudio', { defaultValue: 'Design in Studio' })}</span>
           </Button>
         )}
-        <Button size="sm" variant="ghost" onClick={onClose} data-testid="live-canvas-close">
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={onClose}
+          data-testid="live-canvas-close"
+          aria-label={t('common.close')}
+        >
           <X className="h-3.5 w-3.5" />
         </Button>
       </div>

@@ -45,7 +45,6 @@ The foundation of your UI. These are simple, single-purpose components:
 - **[Icon](/docs/components/basic/icon)** - Render icons from Lucide React
 - **[Image](/docs/components/basic/image)** - Display images with lazy loading
 - **[Separator](/docs/components/basic/separator)** - Visual divider between content
-- **[HTML](/docs/components/basic/html)** - Render raw HTML content
 
 ### Form Components
 

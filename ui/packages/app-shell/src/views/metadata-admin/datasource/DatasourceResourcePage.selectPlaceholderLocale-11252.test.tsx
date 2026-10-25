@@ -80,7 +80,8 @@ async function openModeSelect(language: string, driver = tursoDriver()) {
       <DatasourceResourcePage />
     </I18nProvider>,
   );
-  fireEvent.click(screen.getByRole('button', { name: /New datasource/ }));
+  // The toolbar button speaks the designer's locale too (objectui#13460).
+  fireEvent.click(screen.getByRole('button', { name: t('engine.datasource.new', language) }));
   const label = await screen.findByText('Transport mode');
   const trigger = label.parentElement?.querySelector('[role="combobox"]');
   expect(trigger, 'the `mode` enum renders a select trigger beside its label').toBeTruthy();

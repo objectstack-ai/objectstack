@@ -68,8 +68,11 @@ function isPlainFilterObject(value: unknown): value is Record<string, unknown> {
  * equal only as the same reference, and a structure deeper than the bound is
  * "changed". Every uncertainty answers "changed", which re-resolves and
  * re-queries; the comparison can drop a redundant query, never a needed one.
+ *
+ * Exported for `plugin-grid`'s `ObjectGrid`, which holds its own filters the
+ * same way and used to carry a byte-identical copy (objectui#13458).
  */
-function isSameAuthoredFilter(a: unknown, b: unknown, depth = 0): boolean {
+export function isSameAuthoredFilter(a: unknown, b: unknown, depth = 0): boolean {
   if (Object.is(a, b)) return true;
   if (depth >= AUTHORED_FILTER_MAX_DEPTH) return false;
   if (a instanceof Date || b instanceof Date) {

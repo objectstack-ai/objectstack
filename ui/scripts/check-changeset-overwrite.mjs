@@ -105,6 +105,7 @@ import {
   resolveBaseRef,
   untrackedChangesets,
 } from './check-changeset-presence.mjs';
+import { revPath } from './workspace-root.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 
@@ -166,7 +167,7 @@ function contentAt(root, ref, file) {
     }
   }
   try {
-    return execFileSync('git', ['show', `${ref}:${file}`], {
+    return execFileSync('git', ['show', revPath(ref, file)], {
       cwd: root,
       encoding: 'utf8',
       maxBuffer: 64 * 1024 * 1024,

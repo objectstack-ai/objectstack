@@ -1002,6 +1002,12 @@ const DOC_TYPE_EXEMPTIONS = {
       'fallback, which is the only reason this value used to pass here as a registered key.',
   },
   'content/docs/fields/rich-text.mdx': {
+    html:
+      'FIELD type documented by this page: `HtmlFieldMetadata` (`FieldMetadata`, ' +
+      'packages/types/src/field-types.ts) declares the literal, and the form renders it through ' +
+      '`field:html`, whose value displays through the sanitised fields path. Not a node type. ' +
+      'objectui#13449 retired the raw-HTML `html` NODE type (`ui:html` and its bare key), which is ' +
+      'the only reason this value used to pass here as a registered key.',
     richtext:
       'FIELD type documented by this page: `RichtextFieldMetadata` (`FieldMetadata`, ' +
       'packages/types/src/field-types.ts) declares the literal, and the form renders it through ' +

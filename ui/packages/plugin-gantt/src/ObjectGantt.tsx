@@ -604,21 +604,32 @@ function warnOnShadowedFlatGanttKeys(schema: ObjectGanttSchema): void {
  * and worth stating, because the map case cannot produce it: the spec's
  * `GanttConfigSchema` REQUIRES `startDateField` / `endDateField` / `titleField`
  * (`ObjectMapConfigSchema` requires nothing), so an INCOMPLETE block now
- * outranks a complete flat spelling and yields an incomplete config. Both
+ * outranks a complete flat spelling, and that block is REFUSED (below). Both
  * diagnostics fire on that node — `Invalid gantt configuration` from the
  * `safeParse` below, and the shadow warning naming the flat keys that lost.
+ *
+ * A block that fails `GanttConfigSchema` is refused, never drawn (objectui#13459).
+ * It used to be warned about in the console and then returned as-is, so a block
+ * with a misspelt or missing key still rendered something plausible and the
+ * author never learnt it was wrong. `invalidBlock` carries the parse issues to
+ * the refusal screen instead; `config` is `null` on that branch, so nothing
+ * downstream can read the unvalidated block. Same posture as `ObjectTimeline`'s
+ * refusal: the renderer says what is wrong rather than guessing what was meant.
  */
-function getGanttConfig(schema: ObjectGanttSchema): GanttConfigEx | null {
+function getGanttConfig(schema: ObjectGanttSchema): {
+  config: GanttConfigEx | null;
+  invalidBlock: readonly string[] | null;
+} {
   // 1. The `gantt` block (the ObjectGridSchema-style shape) — the authoring
   // face, and the winner whenever it is present.
   if (schema.gantt) {
-    const config = schema.gantt as GanttConfigEx;
-    const result = GanttConfigSchema.safeParse(config);
+    const result = GanttConfigSchema.safeParse(schema.gantt);
+    warnOnShadowedFlatGanttKeys(schema);
     if (!result.success) {
       console.warn(`[ObjectGantt] Invalid gantt configuration:`, result.error.format());
+      return { config: null, invalidBlock: describeGanttBlockIssues(result.error.issues) };
     }
-    warnOnShadowedFlatGanttKeys(schema);
-    return config;
+    return { config: schema.gantt as GanttConfigEx, invalidBlock: null };
   }
 
   // 2. The internal flat form — the ObjectView / ListView flatten product.
@@ -627,7 +638,7 @@ function getGanttConfig(schema: ObjectGanttSchema): GanttConfigEx | null {
   // `safeParse`d, also unchanged: this branch never validated, and adding
   // validation to it is a separate question from precedence.
   if (schema.startDateField && schema.endDateField) {
-      return {
+      const flat: GanttConfigEx = {
           startDateField: schema.startDateField,
           endDateField: schema.endDateField,
           titleField: schema.titleField || 'name',
@@ -658,9 +669,21 @@ function getGanttConfig(schema: ObjectGanttSchema): GanttConfigEx | null {
           timeZone: schema.timeZone,
           dependencyTypes: schema.dependencyTypes,
       };
+      return { config: flat, invalidBlock: null };
   }
 
-  return null;
+  return { config: null, invalidBlock: null };
+}
+
+/**
+ * One line per `GanttConfigSchema` issue, `path: message`, for the refusal
+ * screen. The path is spelled from the block (`gantt.quickFilters.0.field`) so
+ * the author can find the key; an issue on the block itself names `gantt`.
+ */
+function describeGanttBlockIssues(
+  issues: readonly { path: readonly PropertyKey[]; message: string }[],
+): string[] {
+  return issues.map((issue) => `${['gantt', ...issue.path.map(String)].join('.')}: ${issue.message}`);
 }
 
 export const ObjectGantt: React.FC<ObjectGanttProps> = ({
@@ -734,7 +757,7 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
     return rawDataConfig;
   }, [dataConfigKey]);
 
-  const ganttConfig = getGanttConfig(schema);
+  const { config: ganttConfig, invalidBlock: invalidGanttBlock } = getGanttConfig(schema);
   const dataProvider = dataConfig?.provider;
   const hasInlineData = dataProvider === 'value';
   /*
@@ -2312,6 +2335,21 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
       <div className={className}>
         <div className="flex items-center justify-center h-96">
           <div className="text-destructive">Error: {error.message}</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (invalidGanttBlock) {
+    return (
+      <div className={className}>
+        <div className="flex items-center justify-center h-96">
+          {/* English, like the "configuration required" refusal below: both
+              address the view's author, not the end user. */}
+          <div className="text-destructive" role="alert" data-testid="gantt-invalid-config">
+            Invalid gantt configuration — the `gantt` block does not match the spec, so the
+            chart is not drawn. Fix: {invalidGanttBlock.join('; ')}
+          </div>
         </div>
       </div>
     );

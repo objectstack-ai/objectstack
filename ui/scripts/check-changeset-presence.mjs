@@ -424,6 +424,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
+import { revPath } from './workspace-root.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 
@@ -567,10 +568,14 @@ export function resolveBaseRef(root, { explicit = null, env = process.env } = {}
  * diff that cannot be computed is not an empty diff.
  *
  * @param {string[]} pathspecs extra pathspecs; `[]` means the whole tree
- * @returns {string[]} repo-relative POSIX paths
+ * `--relative`: paths come back relative to `root`, not to the git repository
+ * root, so they read the same standalone and under the monorepo's `ui/`
+ * (scripts/workspace-root.mjs, "Paths handed to git").
+ *
+ * @returns {string[]} POSIX paths relative to `root`
  */
 export function changedFiles(root, { base, head = null, filter = null, pathspecs = [] }) {
-  const args = ['diff', '--name-only', '-z'];
+  const args = ['diff', '--name-only', '--relative', '-z'];
   if (filter) args.push(`--diff-filter=${filter}`);
   args.push(base);
   if (head) args.push(head);
@@ -888,7 +893,7 @@ function manifestAt(root, ref, file) {
     const onDisk = join(root, file);
     source = existsSync(onDisk) ? readFileSync(onDisk, 'utf8') : null;
   } else {
-    source = gitQuiet(root, ['show', `${ref}:${file}`]);
+    source = gitQuiet(root, ['show', revPath(ref, file)]);
   }
   if (source === null) return null;
   try {
@@ -993,7 +998,7 @@ export function addedDeclarations(root, { base, head = null }) {
     seen.add(file);
     // Added at `head`, so it is readable there — from disk when `head` is the
     // working tree, out of the object store otherwise.
-    const source = head === null ? readFileSync(join(root, file), 'utf8') : gitQuiet(root, ['show', `${head}:${file}`]);
+    const source = head === null ? readFileSync(join(root, file), 'utf8') : gitQuiet(root, ['show', revPath(head, file)]);
     results.push({ file, declaration: source === null ? { kind: 'none' } : describeDeclaration(source) });
   }
   return results.sort((a, b) => a.file.localeCompare(b.file));

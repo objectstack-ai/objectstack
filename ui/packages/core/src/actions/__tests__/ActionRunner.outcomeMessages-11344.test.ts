@@ -15,9 +15,10 @@
  * the user's locale. `ActionSchema.outcomeMessages` (`@objectstack/spec`
  * 17.6.0) carries the copy per outcome, and the spec's own docblock gives the
  * selection: the success payload's top-level `outcome` names the entry; failing
- * a match, `successMessage`; failing that, the runner's default text. Each
- * message may interpolate `${result.*}`, the scope `onSuccess.navigate`
- * declares.
+ * a match, `successMessage`; failing that, the runner's default text. An
+ * `outcomeMessages` entry may interpolate `${result.*}`, the scope
+ * `onSuccess.navigate` declares; `successMessage` is a `template` slot and
+ * reads the same payload as `{{ result.* }}` (objectui#13367, objectui#13476).
  *
  * Every assertion reads what the host's toast handler RECEIVES — the only thing
  * the user sees. The handler's answer in most rows also carries a `message`, so
@@ -42,7 +43,7 @@ const DELETE_ENVIRONMENT: ActionDef = {
     archived: 'Environment ${result.name} archived',
     already_archived: 'Environment ${result.name} was already archived',
   },
-  successMessage: 'Environment ${result.name} updated',
+  successMessage: 'Environment {{ result.name }} updated',
 };
 
 describe('ActionRunner success toast — outcomeMessages, then successMessage, then the default (objectui#11344)', () => {
@@ -85,22 +86,28 @@ describe('ActionRunner success toast — outcomeMessages, then successMessage, t
     expect(shown()).toBe('Environment prod archived');
   });
 
-  it('rung 2 — an outcome with no entry falls back to successMessage, interpolated the same way', async () => {
+  it('rung 2 — an outcome with no entry falls back to successMessage, filled from the same payload', async () => {
     answer = { success: true, data: { ...ARCHIVED, outcome: 'purge_deferred' } };
     await runner.execute(DELETE_ENVIRONMENT);
     expect(shown()).toBe('Environment prod updated');
   });
 
-  it('rung 2 — an action with only successMessage shows it, interpolated', async () => {
+  it('rung 2 — an action with only successMessage shows it, filled', async () => {
     answer = { success: true, data: { update_count: 2, summary: 'CRM 1.0.0→1.0.1' } };
     await runner.execute({
       type: 'script',
       name: 'check_app_updates',
-      successMessage: '${result.update_count} update(s): ${result.summary}',
+      successMessage: '{{ result.update_count }} update(s): {{ result.summary }}',
     });
-    // Inserted as TEXT. The same grammar percent-encodes in a URL position
-    // (`onSuccess.navigate`), which here would read `CRM%201.0.0%E2%86%921.0.1`.
+    // Inserted as TEXT, never percent-encoded the way a URL position
+    // (`onSuccess.navigate`) would read it: `CRM%201.0.0%E2%86%921.0.1`.
     expect(shown()).toBe('2 update(s): CRM 1.0.0→1.0.1');
+  });
+
+  it('rung 2 — a `${result.*}` token in a successMessage with no hole is text (objectui#13476)', async () => {
+    answer = { success: true, data: { ...ARCHIVED, outcome: 'purge_deferred' } };
+    await runner.execute({ ...DELETE_ENVIRONMENT, successMessage: 'Environment ${result.name} updated' });
+    expect(shown()).toBe('Environment ${result.name} updated');
   });
 
   it('rung 3 — neither rung applies: the runner default, in its translator\'s language', async () => {
@@ -125,19 +132,18 @@ describe('ActionRunner success toast — outcomeMessages, then successMessage, t
     expect(shown()).toBe('Action completed successfully');
   });
 
-  it("an author can still show the server's sentence by writing ${result.message} as the copy", async () => {
-    await runner.execute({ type: 'script', name: 'publish', successMessage: '${result.message}' });
+  it("an author can still show the server's sentence by writing {{ result.message }} as the copy", async () => {
+    await runner.execute({ type: 'script', name: 'publish', successMessage: '{{ result.message }}' });
     expect(shown()).toBe(ARCHIVED.message);
   });
 
-  it('the copy reads the `result` scope only — a `${ctx.*}` or `${param.*}` token stays as written', async () => {
+  it('an outcome entry reads the `result` scope only — a `${ctx.*}` or `${param.*}` token stays as written', async () => {
     // `result` is the one scope the contract declares for this copy. The
     // grammar is shared with url / api targets, whose `ctx` and `param` scopes
     // stay theirs: a token naming them here is left visible, not blanked.
     await runner.execute({
-      type: 'script',
-      name: 'delete_environment',
-      successMessage: '${result.name} by ${ctx.user.name} with ${param.reason}',
+      ...DELETE_ENVIRONMENT,
+      outcomeMessages: { archived: '${result.name} by ${ctx.user.name} with ${param.reason}' },
     });
     expect(shown()).toBe('prod by ${ctx.user.name} with ${param.reason}');
   });

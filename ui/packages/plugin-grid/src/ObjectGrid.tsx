@@ -26,7 +26,7 @@ import type { ObjectGridSchema, DataSource, DependsOnInput, ListColumn, TableCol
 import { isSystemManagedField, normalizeTableColumnType } from '@object-ui/types';
 import type { I18nLabel } from '@objectstack/spec/ui';
 import { parseFilterAST, resolveFieldScale, type FilterCondition } from '@objectstack/spec/data';
-import { SchemaRenderer, useDataScope, useNavigationOverlay, useAction, useSafeFieldLabel, usePredicateScope, useCapabilityGate, useRelatedRecordActions, RelatedRecordActionsProvider, useDataInvalidation, notifyDataChanged, useFilterScope, useMetadata } from '@object-ui/react';
+import { SchemaRenderer, useDataScope, useNavigationOverlay, useAction, useSafeFieldLabel, usePredicateScope, useCapabilityGate, useRelatedRecordActions, RelatedRecordActionsProvider, useDataInvalidation, notifyDataChanged, useFilterScope, useMetadata, isSameAuthoredFilter } from '@object-ui/react';
 import { createSafeTranslation } from '@object-ui/i18n';
 // objectui#8920 — the grid reaches a cell renderer through THIS module and
 // nowhere else. `getCellRenderer` / `resolveCellRendererType` are deliberately
@@ -120,46 +120,6 @@ function resolveGridFilters(authored: AuthoredGridFilters, scope: FilterTokenSco
     onUnresolved: scope.onUnresolved,
     resolved: resolveFilterPlaceholders(authored, scope),
   };
-}
-
-/** Depth past which {@link isSameAuthoredFilter} gives up and answers "changed". */
-const AUTHORED_FILTER_MAX_DEPTH = 12;
-
-function isPlainFilterObject(value: unknown): value is Record<string, unknown> {
-  if (value === null || typeof value !== 'object') return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-}
-
-/**
- * Compare two authored filters by structure, never by serialising them.
- *
- * The same rules as `plugin-view`'s `isStructurallyEqual` (objectui#6460),
- * which this package cannot import: `plugin-view` depends on `plugin-grid`.
- * Primitives by `Object.is`, a `Date` by its instant, arrays element by element
- * and in order, plain objects by key set and value. Anything else is equal
- * only as the same reference, and a structure deeper than the bound is
- * "changed". Every uncertainty answers "changed", which re-resolves and
- * re-queries; the comparison can drop a redundant query, never a needed one.
- */
-function isSameAuthoredFilter(a: unknown, b: unknown, depth = 0): boolean {
-  if (Object.is(a, b)) return true;
-  if (depth >= AUTHORED_FILTER_MAX_DEPTH) return false;
-  if (a instanceof Date || b instanceof Date) {
-    return a instanceof Date && b instanceof Date && a.getTime() === b.getTime();
-  }
-  if (Array.isArray(a) || Array.isArray(b)) {
-    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
-    return a.every((item, i) => isSameAuthoredFilter(item, b[i], depth + 1));
-  }
-  if (isPlainFilterObject(a) && isPlainFilterObject(b)) {
-    const keys = Object.keys(a);
-    if (keys.length !== Object.keys(b).length) return false;
-    return keys.every((key) => (
-      Object.prototype.hasOwnProperty.call(b, key) && isSameAuthoredFilter(a[key], b[key], depth + 1)
-    ));
-  }
-  return false;
 }
 
 /**

@@ -63,6 +63,7 @@
   "publishConfig": {
     "access": "public"
   },
+  "sideEffects": true,
   "files": [
     "dist",
     "README.md",

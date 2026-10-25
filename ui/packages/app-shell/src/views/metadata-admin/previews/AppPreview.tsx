@@ -319,9 +319,6 @@ export function AppPreview({ name, draft, editing, selection, onSelectionChange,
   const designMode = !!(editing && onSelectionChange);
   const canEdit = designMode && !!onPatch;
   const selectedId = selection && selection.kind === 'nav' ? selection.id : null;
-  const onSelect = designMode
-    ? (path: string, item: NavItem) => onSelectionChange!({ kind: 'nav', id: path, label: item.label })
-    : undefined;
 
   const baseRuntimeUrl = appName ? `/apps/${encodeURIComponent(appName)}/` : null;
 
@@ -400,7 +397,6 @@ export function AppPreview({ name, draft, editing, selection, onSelectionChange,
                   item={item}
                   depth={0}
                   path={`${rootKey}[${i}]`}
-                  onSelect={onSelect}
                   selectedId={selectedId}
                   locale={locale}
                 />
@@ -417,14 +413,12 @@ function NavRow({
   item,
   depth,
   path,
-  onSelect,
   selectedId,
   locale,
 }: {
   item: NavItem;
   depth: number;
   path: string;
-  onSelect?: (path: string, item: NavItem) => void;
   selectedId: string | null;
   locale?: string;
 }) {
@@ -433,10 +427,13 @@ function NavRow({
   const selected = selectedId === path;
   return (
     <>
+      {/* objectui#13461 — a read-only row. It used to take an `onSelect` that
+          made the row a mouse-only click target, but this list renders only
+          outside design mode and the handler existed only inside it, so the
+          row never selected anything; design mode selects in `AppNavCanvas`. */}
       <div
-        className={`flex items-center gap-2 px-3 py-2 text-xs hover:bg-accent/40 ${onSelect ? 'cursor-pointer' : ''} ${selected ? 'bg-primary/5 ring-1 ring-primary' : ''}`}
+        className={`flex items-center gap-2 px-3 py-2 text-xs hover:bg-accent/40 ${selected ? 'bg-primary/5 ring-1 ring-primary' : ''}`}
         style={{ paddingLeft: `${12 + depth * 16}px` }}
-        onClick={onSelect ? (e) => { e.stopPropagation(); onSelect(path, item); } : undefined}
       >
         {/* eslint-disable-next-line react-hooks/static-components -- kindIcon returns a stable icon component from a static registry, not one created during render */}
         <Icon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
@@ -472,7 +469,6 @@ function NavRow({
           item={c}
           depth={depth + 1}
           path={`${path}.children[${i}]`}
-          onSelect={onSelect}
           selectedId={selectedId}
           locale={locale}
         />

@@ -18,6 +18,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ConsolePageHeader } from '@object-ui/app-shell';
+import { useObjectTranslation } from '@object-ui/i18n';
 import {
   Card,
   CardContent,
@@ -30,6 +31,7 @@ import {
 import { Terminal, Copy, Check, Plug, Database, KeyRound } from 'lucide-react';
 
 import { AgentConnectSection } from './AgentConnectSection';
+import { SLOT, withSlots } from '../../lib/inlineSlots';
 
 interface ConsoleObjectMeta {
   name: string;
@@ -43,7 +45,9 @@ const METHOD_STYLES: Record<string, string> = {
   DELETE: 'bg-red-500/10 text-red-700 dark:text-red-400',
 };
 
-function CopyButton({ value, label }: { value: string; label?: string }) {
+/** `ariaLabel` is the whole translated name ("Copy base URL"), never a fragment glued to "Copy". */
+function CopyButton({ value, ariaLabel }: { value: string; ariaLabel: string }) {
+  const { t } = useObjectTranslation();
   const [copied, setCopied] = useState(false);
   return (
     <Button
@@ -56,15 +60,22 @@ function CopyButton({ value, label }: { value: string; label?: string }) {
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
       }}
-      aria-label={`Copy ${label ?? 'value'}`}
+      aria-label={ariaLabel}
     >
       {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-      {copied ? 'Copied' : 'Copy'}
+      {copied
+        ? t('console.developer.integrations.copied', { defaultValue: 'Copied' })
+        : t('console.developer.integrations.copy', { defaultValue: 'Copy' })}
     </Button>
   );
 }
 
 export function IntegrationsPage() {
+  // objectui#13460 — the page's copy reads `console.developer.integrations.*`;
+  // each inline `defaultValue` is the `en` pack's value, held byte-identical to
+  // it by `pnpm check:i18n-keys`, so a provider-less mount still reads English.
+  // The cURL sample stays as written: it is code, not copy.
+  const { t } = useObjectTranslation();
   const navigate = useNavigate();
   const { appName } = useParams();
   const basePath = appName ? `/apps/${appName}` : '';
@@ -107,11 +118,11 @@ export function IntegrationsPage() {
   );
 
   const endpointsFor = (obj: string) => [
-    { method: 'GET', path: `/api/v1/data/${obj}`, desc: 'List / query' },
-    { method: 'POST', path: `/api/v1/data/${obj}`, desc: 'Create' },
-    { method: 'GET', path: `/api/v1/data/${obj}/:id`, desc: 'Read one' },
-    { method: 'PATCH', path: `/api/v1/data/${obj}/:id`, desc: 'Update' },
-    { method: 'DELETE', path: `/api/v1/data/${obj}/:id`, desc: 'Delete' },
+    { method: 'GET', path: `/api/v1/data/${obj}`, desc: t('console.developer.integrations.endpointList', { defaultValue: 'List / query' }) },
+    { method: 'POST', path: `/api/v1/data/${obj}`, desc: t('console.developer.integrations.endpointCreate', { defaultValue: 'Create' }) },
+    { method: 'GET', path: `/api/v1/data/${obj}/:id`, desc: t('console.developer.integrations.endpointRead', { defaultValue: 'Read one' }) },
+    { method: 'PATCH', path: `/api/v1/data/${obj}/:id`, desc: t('console.developer.integrations.endpointUpdate', { defaultValue: 'Update' }) },
+    { method: 'DELETE', path: `/api/v1/data/${obj}/:id`, desc: t('console.developer.integrations.endpointDelete', { defaultValue: 'Delete' }) },
   ];
 
   return (
@@ -121,20 +132,29 @@ export function IntegrationsPage() {
         subtitle beside the title from `sm` up, in one row across the page
         above the padded body. Below `sm` the header hides the subtitle. */}
     <ConsolePageHeader
-      title="Integrations & APIs"
-      subtitle="Every object you build is instantly a REST API. Drive your app from code or an agent."
+      title={t('console.developer.integrations.title', { defaultValue: 'Integrations & APIs' })}
+      subtitle={t('console.developer.integrations.subtitle', {
+        defaultValue: 'Every object you build is instantly a REST API. Drive your app from code or an agent.',
+      })}
       icon={<Plug className="h-4 w-4" />}
     />
     <div className="flex flex-col gap-6 p-4 sm:p-6">
       {/* Base URL */}
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-base">Base URL</CardTitle>
-          <CardDescription className="text-xs">This environment's API root.</CardDescription>
+          <CardTitle className="text-base">
+            {t('console.developer.integrations.baseUrlTitle', { defaultValue: 'Base URL' })}
+          </CardTitle>
+          <CardDescription className="text-xs">
+            {t('console.developer.integrations.baseUrlDescription', { defaultValue: "This environment's API root." })}
+          </CardDescription>
         </CardHeader>
         <CardContent className="flex items-center gap-2">
           <code className="flex-1 truncate rounded bg-muted px-2 py-1.5 font-mono text-xs">{baseUrl}/api/v1</code>
-          <CopyButton value={`${baseUrl}/api/v1`} label="base URL" />
+          <CopyButton
+            value={`${baseUrl}/api/v1`}
+            ariaLabel={t('console.developer.integrations.copyBaseUrl', { defaultValue: 'Copy base URL' })}
+          />
         </CardContent>
       </Card>
 
@@ -146,21 +166,41 @@ export function IntegrationsPage() {
         <CardHeader className="pb-2 flex flex-row items-center justify-between">
           <div>
             <CardTitle className="text-base flex items-center gap-2">
-              <Database className="size-4" /> REST endpoints
+              <Database className="size-4" />{' '}
+              {t('console.developer.integrations.endpointsTitle', { defaultValue: 'REST endpoints' })}
             </CardTitle>
             <CardDescription className="text-xs">
-              Auto-generated CRUD for every published object (OData query params on list).
+              {t('console.developer.integrations.endpointsDescription', {
+                defaultValue: 'Auto-generated CRUD for every published object (OData query params on list).',
+              })}
             </CardDescription>
           </div>
           <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={() => navigate(`${basePath}/developer/api-console`)}>
-            <Terminal className="size-4" /> Open API Console
+            <Terminal className="size-4" />{' '}
+            {t('console.developer.integrations.openApiConsole', { defaultValue: 'Open API Console' })}
           </Button>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          {loading && <p className="text-sm text-muted-foreground">Loading objects…</p>}
-          {error && <p className="text-sm text-destructive">Couldn't load objects: {error}</p>}
+          {loading && (
+            <p className="text-sm text-muted-foreground">
+              {t('console.developer.integrations.loadingObjects', { defaultValue: 'Loading objects…' })}
+            </p>
+          )}
+          {error && (
+            <p className="text-sm text-destructive">
+              {t('console.developer.integrations.loadFailed', {
+                defaultValue: "Couldn't load objects: {{message}}",
+                message: error,
+              })}
+            </p>
+          )}
           {!loading && !error && objects.length === 0 && (
-            <p className="text-sm text-muted-foreground">No business objects yet — build one with the AI assistant, publish it, and it appears here as an API.</p>
+            <p className="text-sm text-muted-foreground">
+              {t('console.developer.integrations.noObjects', {
+                defaultValue:
+                  'No business objects yet — build one with the AI assistant, publish it, and it appears here as an API.',
+              })}
+            </p>
           )}
           {objects.map((obj) => (
             <div key={obj.name} className="rounded-lg border">
@@ -186,18 +226,36 @@ export function IntegrationsPage() {
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-base flex items-center gap-2">
-            <KeyRound className="size-4" /> Authentication
+            <KeyRound className="size-4" />{' '}
+            {t('console.developer.integrations.authTitle', { defaultValue: 'Authentication' })}
           </CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-2 text-sm text-muted-foreground">
           <p>
-            In the console you're already authenticated — use <strong>Open API Console</strong> above to call these endpoints now.
+            {withSlots(
+              t('console.developer.integrations.authInConsole', {
+                defaultValue:
+                  "In the console you're already authenticated — use {{action}} above to call these endpoints now.",
+                action: SLOT[0],
+              }),
+              [<strong key="action">{t('console.developer.integrations.openApiConsole', { defaultValue: 'Open API Console' })}</strong>],
+            )}
           </p>
           <p>
-            For external programs and AI agents, generate a <strong>self-serve API key</strong> in
-            the <strong>Connect an AI agent</strong> section above. Send it as the{' '}
-            <code className="font-mono text-xs">x-api-key</code> header; it runs under your
-            permissions and row-level security, and is revocable.
+            {withSlots(
+              t('console.developer.integrations.authExternal', {
+                defaultValue:
+                  'For external programs and AI agents, generate a {{apiKey}} in the {{section}} section above. Send it as the {{header}} header; it runs under your permissions and row-level security, and is revocable.',
+                apiKey: SLOT[0],
+                section: SLOT[1],
+                header: SLOT[2],
+              }),
+              [
+                <strong key="key">{t('console.developer.integrations.selfServeKey', { defaultValue: 'self-serve API key' })}</strong>,
+                <strong key="section">{t('console.developer.integrations.connectSection', { defaultValue: 'Connect an AI agent' })}</strong>,
+                <code key="header" className="font-mono text-xs">x-api-key</code>,
+              ],
+            )}
           </p>
         </CardContent>
       </Card>
@@ -205,8 +263,13 @@ export function IntegrationsPage() {
       {/* Sample */}
       <Card>
         <CardHeader className="pb-2 flex flex-row items-center justify-between">
-          <CardTitle className="text-base">Sample (cURL)</CardTitle>
-          <CopyButton value={curl} label="cURL sample" />
+          <CardTitle className="text-base">
+            {t('console.developer.integrations.sampleTitle', { defaultValue: 'Sample (cURL)' })}
+          </CardTitle>
+          <CopyButton
+            value={curl}
+            ariaLabel={t('console.developer.integrations.copySample', { defaultValue: 'Copy cURL sample' })}
+          />
         </CardHeader>
         <CardContent>
           <pre className="overflow-x-auto rounded bg-muted p-3 font-mono text-xs leading-relaxed">{curl}</pre>

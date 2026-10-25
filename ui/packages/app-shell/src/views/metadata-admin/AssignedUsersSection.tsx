@@ -112,8 +112,12 @@ interface AssignedRow {
   userId: string;
   name: string;
   email: string;
-  /** How the user holds the set: a direct grant, or via one or more positions. */
-  via: Array<{ kind: 'direct' } | { kind: 'position'; position: string }>;
+  /**
+   * How the user holds the set: a direct grant, or via one or more positions.
+   * A position carries its machine name and, where its registry definition
+   * has one, its label (objectui#13477).
+   */
+  via: Array<{ kind: 'direct' } | { kind: 'position'; position: string; label?: string }>;
 }
 
 /**
@@ -235,6 +239,22 @@ export function positionsDistributing(positions: readonly unknown[], setName: st
   return out;
 }
 
+/**
+ * The labels of the registry's `position` definitions, by name — the list
+ * {@link positionsDistributing} reads, which `/meta/position` serves in the
+ * caller's language (objectui#13477). A definition with no label has no entry,
+ * so its chip shows the name, as `CitedItemChip` in `AccessExplainPanel` does.
+ */
+function positionLabels(positions: readonly unknown[]): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const raw of positions) {
+    const p = raw as { name?: unknown; label?: unknown } | null;
+    if (typeof p?.name !== 'string' || typeof p.label !== 'string' || !p.label.trim()) continue;
+    out.set(p.name, p.label);
+  }
+  return out;
+}
+
 export function AssignedUsersSection({ permissionSetName, onHoldersRead }: AssignedUsersSectionProps) {
   const adapter = useAdapter() as any;
   // Read through a ref so a host's inline callback does not re-key `load`.
@@ -315,9 +335,11 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead }: Assig
       // are THE distribution channel — a direct-grants-only list told the
       // admin "0 users" for any normally-administered set.
       let positionNames: string[] = [];
+      let labelByPosition = new Map<string, string>();
       let boundEveryone = false;
       try {
         const positions = await metadataStoreRef.current.ensureType('position');
+        labelByPosition = positionLabels(positions);
         const names = positionsDistributing(positions, permissionSetName);
         // The audience anchors are implicit memberships — `everyone` is every
         // signed-in member; enumerating them as rows would be noise. Surface
@@ -345,7 +367,11 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead }: Assig
       for (const a of assignments) {
         if (!a?.user_id || !a?.position) continue;
         const uid = String(a.user_id);
-        viaByUser.set(uid, [...(viaByUser.get(uid) ?? []), { kind: 'position' as const, position: String(a.position) }]);
+        const position = String(a.position);
+        viaByUser.set(uid, [
+          ...(viaByUser.get(uid) ?? []),
+          { kind: 'position' as const, position, label: labelByPosition.get(position) },
+        ]);
       }
 
       const userIds = [...viaByUser.keys()];
@@ -535,14 +561,20 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead }: Assig
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5 min-w-0">
                   <span className="text-sm truncate">{r.name}</span>
-                  {r.via.map((v, i) => (
-                    <span
-                      key={i}
-                      className="shrink-0 rounded border bg-muted/40 px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground"
-                    >
-                      {v.kind === 'direct' ? c.direct : c.viaPosition(v.position)}
-                    </span>
-                  ))}
+                  {r.via.map((v, i) => {
+                    // A position reads by its label, with its name on `title`;
+                    // with no label the name is the text (objectui#13477).
+                    const shown = v.kind === 'position' ? v.label ?? v.position : '';
+                    return (
+                      <span
+                        key={i}
+                        className="shrink-0 rounded border bg-muted/40 px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground"
+                        title={v.kind === 'position' && shown !== v.position ? v.position : undefined}
+                      >
+                        {v.kind === 'direct' ? c.direct : c.viaPosition(shown)}
+                      </span>
+                    );
+                  })}
                 </div>
                 {r.email && r.email !== r.name && (
                   <div className="text-xs text-muted-foreground truncate">{r.email}</div>

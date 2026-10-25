@@ -310,7 +310,7 @@ function rootRangeOf(name: string): string | undefined {
  * Ranges every non-root in-repo manifest declares for `name`, keyed by range.
  *
  * `peerDependencies` are excluded deliberately: a peer says what a library
- * ACCEPTS (`react` at `^18.0.0 || ^19.0.0`, `react-router-dom` at
+ * ACCEPTS (`react` at `^19.0.0`, `react-router-dom` at
  * `^6.0.0 || ^7.0.0`), which is a different fact from the single version this
  * repo installs and tests with — and a generated app has to name the latter.
  */
@@ -1380,15 +1380,46 @@ describe('generation onto disk', () => {
     }
   }
 
+  /**
+   * A workspace root this file builds itself: a directory holding its own
+   * `pnpm-workspace.yaml`, with one member below it. Not `REPO_ROOT`: the
+   * objectui tree is a workspace root only standalone, and under the
+   * objectstack monorepo it is `ui/`, a member whose workspace file is one
+   * level up (objectstack#25733). A fixture names the branch in both layouts.
+   */
+  function withWorkspace(run: (root: string, member: string) => void): void {
+    withTempDir((root) => {
+      writeFileSync(join(root, 'pnpm-workspace.yaml'), "packages:\n  - 'packages/*'\n");
+      const member = join(root, 'packages', 'app');
+      mkdirSync(member, { recursive: true });
+      run(root, member);
+    });
+  }
+
   it('writes the IN-WORKSPACE map when the generator runs at a workspace root', () => {
-    // `REPO_ROOT` walks up from `import.meta.url`, so this pins the same branch
-    // whatever directory the run was launched from — and `IN_WORKSPACE` is that
-    // same file-derived root, which is what keeps the expectation independent
-    // too. Put either side back on `process.cwd()` and this case silently
-    // becomes a third copy of the ambient mirror.
-    withTempDir((dir) => {
-      writingFrom(REPO_ROOT, () => createTempApp(dir, SCHEMA));
-      expect(filesOnDisk(dir)).toEqual(buildAppFiles(SCHEMA, IN_WORKSPACE));
+    // The fixture root is derived here, not from `process.cwd()`, so this pins
+    // the same branch whatever directory the run was launched from, and the
+    // expectation names that same root. Put either side back on
+    // `process.cwd()` and this case silently becomes a third copy of the
+    // ambient mirror.
+    withWorkspace((root) => {
+      withTempDir((dir) => {
+        writingFrom(root, () => createTempApp(dir, SCHEMA));
+        expect(filesOnDisk(dir)).toEqual(buildAppFiles(SCHEMA, { cwd: root, isMonorepo: true }));
+      });
+    });
+  });
+
+  it('writes the STANDALONE map from a workspace MEMBER — the generator does not walk up', () => {
+    // `currentContext()` asks `isWorkspaceRoot(cwd)`, the predicate `dev` and
+    // `serve` alias by: a `pnpm-workspace.yaml` ABOVE cwd makes no alias table,
+    // so it must not make empty dependency maps either. This is a user's
+    // package inside their own monorepo, and the objectui tree under `ui/`.
+    withWorkspace((_root, member) => {
+      withTempDir((dir) => {
+        writingFrom(member, () => createTempApp(dir, SCHEMA));
+        expect(filesOnDisk(dir)).toEqual(buildAppFiles(SCHEMA, { cwd: member, isMonorepo: false }));
+      });
     });
   });
 

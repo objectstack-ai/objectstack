@@ -1036,7 +1036,8 @@ const RecordDetailsBody: React.FC<RecordDetailsRendererProps> = ({
         // entry with no schema default, and states the fallback as the
         // renderer's: hiding is on, so a section whose fields are ALL empty
         // renders nothing at all — no heading, no skeleton — and `false` keeps
-        // the heading and the label skeleton a brand-new record needs.
+        // the section a brand-new record needs (read-only, its heading plus one
+        // fold row since objectui#13386; edit mode, every row).
         //
         // ⭐ The default is resolved HERE, on an AUTHORED section, and that
         // placement is the whole design. `DetailSection` tests `=== true`, so

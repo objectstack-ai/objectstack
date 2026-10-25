@@ -1,6 +1,7 @@
 import React from 'react';
 import { Button, Badge, cn } from '@object-ui/components';
 import { Plus, X, ExternalLink } from 'lucide-react';
+import { useObjectTranslation } from '@object-ui/i18n';
 import { FieldWidgetComponentProps } from './types.js';
 
 // TOMBSTONE (objectui#4811): this widget is NOT in `fieldWidgetMap`
@@ -39,6 +40,7 @@ export function MasterDetailField({
   className,
   ...props 
 }: FieldWidgetComponentProps<MasterDetailValue[]>) {
+  const { t } = useObjectTranslation();
   const items = value || [];
   const config = field;
 
@@ -77,6 +79,7 @@ export function MasterDetailField({
                 variant="ghost"
                 size="sm"
                 onClick={() => handleView(item)}
+                aria-label={t('fields.masterDetail.view', { name: item.label })}
               >
                 <ExternalLink className="w-4 h-4" />
               </Button>
@@ -108,6 +111,7 @@ export function MasterDetailField({
                 variant="ghost"
                 size="sm"
                 onClick={() => handleView(item)}
+                aria-label={t('fields.masterDetail.view', { name: item.label })}
               >
                 <ExternalLink className="w-4 h-4" />
               </Button>
@@ -117,6 +121,7 @@ export function MasterDetailField({
                 size="sm"
                 onClick={() => handleRemove(item.id)}
                 disabled={props.disabled}
+                aria-label={t('fields.masterDetail.remove', { name: item.label })}
               >
                 <X className="w-4 h-4" />
               </Button>

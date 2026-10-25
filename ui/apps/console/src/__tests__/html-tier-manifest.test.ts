@@ -202,7 +202,12 @@ describe('the curated tier is unmoved — the JSON-surface vocabulary did not gr
     expect(curated).toEqual(PUBLIC_BLOCKS.filter((tag) => tag in published.components));
     // Anti-vacuity: the curated tier resolved, and to the vocabulary it is.
     expect(curated.length).toBeGreaterThan(50);
-    expect(curated).toEqual(expect.arrayContaining(['object-grid', 'box', 'html']));
+    expect(curated).toEqual(expect.arrayContaining(['object-grid', 'box', 'text']));
+    // The raw-HTML `html` block left the curated tier with its node type
+    // (objectui#13449). Read off the manifest the published artifact is built
+    // from, not off the roster, so a stray registration would show up here.
+    expect(curated).not.toContain('html');
+    expect('html' in published.components).toBe(false);
   });
 
   it('the stamped entries are exactly the roster, in roster order, and nothing else', () => {

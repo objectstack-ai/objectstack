@@ -244,3 +244,12 @@ describe('AppHeader avatar menu — the single-org door to workspace management 
     expect(screen.getByTestId('header-my-organizations')).toBeInTheDocument();
   });
 });
+
+describe('AppHeader avatar menu trigger — an accessible name (objectui#13461)', () => {
+  it('names the avatar button, which holds only the avatar', () => {
+    render(<AppHeader variant="home" />);
+    // The mocked `t` returns the call's `defaultValue`: the key is `user.accountMenu`.
+    const trigger = screen.getByRole('button', { name: 'Account menu' });
+    expect(trigger).toHaveTextContent('ZS');
+  });
+});

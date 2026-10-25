@@ -12,6 +12,7 @@ export declare const ROOT_MANIFEST: 'package.json';
 export declare const TURBO_CONFIG: 'turbo.json';
 export declare const PARKED_TURBO_CONFIG: 'turbo.objectui.json';
 export declare const TURBO_ROOT_PREFIX: '$TURBO_ROOT$/';
+export declare const VIRTUAL_STORE: '.pnpm';
 
 /** The directory whose `pnpm-workspace.yaml` governs the tree: `root`, else its parent, else a throw. */
 export declare function workspaceRoot(root?: string): string;
@@ -19,6 +20,8 @@ export declare function workspaceRoot(root?: string): string;
 export declare function isNestedWorkspace(root?: string): boolean;
 /** The tree's directory-name prefix in the parent's globs (`ui/`), or `''`. */
 export declare function nestedPrefix(root?: string): string;
+/** `<ref>:./<path>`: a file at a revision, relative to the cwd git runs in. */
+export declare function revPath(ref: string, file: string): string;
 export declare function workspaceManifestPath(root?: string): string;
 export declare function lockfilePath(root?: string): string;
 export declare function rootManifestPath(root?: string): string;
@@ -26,6 +29,8 @@ export declare function rootManifest(root?: string): {
   name?: string;
   pnpm?: { overrides?: Record<string, string>; patchedDependencies?: Record<string, string> };
 } & Record<string, unknown>;
+/** pnpm's `node_modules/.pnpm` at the workspace root, where every installed copy lives. */
+export declare function virtualStorePath(root?: string): string;
 /** The `packages:` globs of a workspace file's text; throws on every shape it does not know. */
 export declare function parseWorkspaceGlobs(text: string): string[];
 /** The globs that describe this tree, relative to `root` in both layouts. */

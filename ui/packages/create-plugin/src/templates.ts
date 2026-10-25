@@ -169,8 +169,8 @@ export function buildPackageJson(vars: PluginTemplateVars): Record<string, unkno
     },
     dependencies: { ...DEPENDENCIES },
     peerDependencies: {
-      react: '^18.0.0 || ^19.0.0',
-      'react-dom': '^18.0.0 || ^19.0.0'
+      react: '^19.0.0',
+      'react-dom': '^19.0.0'
     },
     devDependencies: { ...DEV_DEPENDENCIES }
   };

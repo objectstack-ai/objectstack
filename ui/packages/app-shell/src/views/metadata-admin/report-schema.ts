@@ -38,20 +38,19 @@ const FORM_FIELDS_OWNED_ELSEWHERE = new Set([
   'name', // record identity — not user-editable here
 ]);
 
+/**
+ * No `try`/`catch` around the spec derivations in this file (objectui#13459).
+ * Their only input is the bundled `@objectstack/spec`, so a derivation that
+ * fails is a build-time fact: the tests beside this file go red, and at runtime
+ * the throw reaches the route's error boundary. It used to be caught, warned
+ * about in the console and turned into `undefined`, which rendered a designer
+ * form silently missing fields that the author could then save past.
+ */
 let _reportDocSchema: JsonSchema | undefined;
-let _reportDocFailed = false;
 
 /** JSONSchema for the whole (flat) Report document. */
-export function getReportSchema(): JsonSchema | undefined {
-  if (_reportDocSchema || _reportDocFailed) return _reportDocSchema;
-  try {
-    _reportDocSchema = z.toJSONSchema(ReportSchema, TO_JSON_OPTS) as JsonSchema;
-  } catch (err) {
-    _reportDocFailed = true;
-    if (typeof console !== 'undefined') {
-      console.warn('[report-schema] failed to derive Report JSONSchema from spec', err);
-    }
-  }
+export function getReportSchema(): JsonSchema {
+  _reportDocSchema ??= z.toJSONSchema(ReportSchema, TO_JSON_OPTS) as JsonSchema;
   return _reportDocSchema;
 }
 
@@ -80,48 +79,41 @@ let _reportForm: FormViewSpec | undefined;
 export function getReportForm(): FormViewSpec | undefined {
   if (_reportForm) return _reportForm;
   if (!specReportForm || typeof specReportForm !== 'object') return undefined;
-  try {
-    const clone = JSON.parse(JSON.stringify(specReportForm)) as FormViewSpec;
-    const schemaProps = getReportSchema()?.properties as Record<string, unknown> | undefined;
-    for (const section of clone.sections ?? []) {
-      section.fields = (section.fields ?? []).filter((f: any) => {
-        const name = typeof f === 'string' ? f : f?.field;
-        if (FORM_FIELDS_OWNED_ELSEWHERE.has(name)) return false;
-        // Schema-subset pass: drop form fields the schema no longer carries.
-        if (schemaProps && !(name in schemaProps)) return false;
-        return true;
-      });
-    }
-    if (schemaProps && 'runtimeFilter' in schemaProps) {
-      const declared = new Set<string>();
-      for (const s of clone.sections ?? []) {
-        for (const f of s.fields ?? []) {
-          declared.add(typeof f === 'string' ? f : (f as any)?.field);
-        }
-      }
-      if (!declared.has('runtimeFilter')) {
-        clone.sections = [
-          ...(clone.sections ?? []),
-          {
-            label: 'Filter',
-            description: 'Render-time scope filter, ANDed at query time.',
-            collapsible: true,
-            collapsed: true,
-            fields: [{ field: 'runtimeFilter', widget: 'json' }],
-          },
-        ];
-      }
-    }
-    // Drop now-empty sections so we don't render bare headers.
-    clone.sections = (clone.sections ?? []).filter(
-      (s: any) => (s.fields ?? []).length > 0,
-    );
-    _reportForm = clone;
-  } catch (err) {
-    if (typeof console !== 'undefined') {
-      console.warn('[report-schema] failed to prepare reportForm from spec', err);
-    }
-    return undefined;
+  const clone = JSON.parse(JSON.stringify(specReportForm)) as FormViewSpec;
+  const schemaProps = getReportSchema().properties as Record<string, unknown> | undefined;
+  for (const section of clone.sections ?? []) {
+    section.fields = (section.fields ?? []).filter((f: any) => {
+      const name = typeof f === 'string' ? f : f?.field;
+      if (FORM_FIELDS_OWNED_ELSEWHERE.has(name)) return false;
+      // Schema-subset pass: drop form fields the schema no longer carries.
+      if (schemaProps && !(name in schemaProps)) return false;
+      return true;
+    });
   }
+  if (schemaProps && 'runtimeFilter' in schemaProps) {
+    const declared = new Set<string>();
+    for (const s of clone.sections ?? []) {
+      for (const f of s.fields ?? []) {
+        declared.add(typeof f === 'string' ? f : (f as any)?.field);
+      }
+    }
+    if (!declared.has('runtimeFilter')) {
+      clone.sections = [
+        ...(clone.sections ?? []),
+        {
+          label: 'Filter',
+          description: 'Render-time scope filter, ANDed at query time.',
+          collapsible: true,
+          collapsed: true,
+          fields: [{ field: 'runtimeFilter', widget: 'json' }],
+        },
+      ];
+    }
+  }
+  // Drop now-empty sections so we don't render bare headers.
+  clone.sections = (clone.sections ?? []).filter(
+    (s: any) => (s.fields ?? []).length > 0,
+  );
+  _reportForm = clone;
   return _reportForm;
 }

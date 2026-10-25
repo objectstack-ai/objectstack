@@ -3672,6 +3672,13 @@ export interface BarChartSchema extends BaseSchema {
 
 /**
  * Union type of all data display schemas
+ *
+ * ⛔ `HtmlSchema` (`type: 'html'`, a raw-HTML node) is RETIRED (objectui#13449):
+ * its renderer injected `html` unsanitised and `@objectstack/spec` declares no
+ * such component. The TypeScript half of the retirement is its ABSENCE here;
+ * the zod half is `RetiredHtmlNodeSchema` in `zod/data-display.zod.ts`, which
+ * refuses a `type: "html"` node by name. The `html` FIELD type
+ * (`HtmlFieldMetadata`, `field-types.ts`) is a different layer and stays.
  */
 export type DataDisplaySchema =
   | AlertSchema
@@ -3685,69 +3692,8 @@ export type DataDisplaySchema =
   | ChartSchema
   | PivotTableSchema
   | TimelineSchema
-  | HtmlSchema
   | StatisticSchema
   | BreadcrumbSchema
   | KbdSchema
   | BarChartSchema;
 
-/**
- * Raw HTML component
- */
-export interface HtmlSchema extends BaseSchema {
-  type: 'html';
-  /**
-   * The HTML content string
-   */
-  html: string;
-  /**
-   * REFUSED BY NAME (objectui#9256, ADR-0049) — `html` reads NEITHER content
-   * channel: no renderer read consumes `body` or `children` for this node.
-   *
-   * MEASURED with the TypeScript TYPE CHECKER and not with grep, across all 24
-   * packages that register components plus the generic traversers — a docblock
-   * mention is not a read, and `body: schema.requestBody` in
-   * `packages/plugin-chatbot/src/renderer.tsx` is the kind of prefix hit grep
-   * scores. Every read is filed under the TYPE of the object it is read from;
-   * this declaration carries none. What the renderer DOES read off this node:
-   * `html` (in `packages/components/src/renderers/basic/html.tsx`).
-   *
-   * Before objectui#9256 tombstoned them here, `body` and `children` were both
-   * inherited-and-optional from {@link BaseSchema} — so authoring either here
-   * type-checked, parsed green through `.passthrough()`, and rendered NOTHING:
-   * no render-time error or warning and no element; only the parser tier's
-   * `not-a-container` warning (objectui#9910) noticed it. objectui#6771 has since retired `body` on
-   * `BaseSchema` itself; `BaseSchema` still declares `children`, so this node's
-   * own tombstone is what refuses it here. `SchemaRenderer` strips both keys
-   * out of the props bag it spreads, so neither reaches the component by
-   * another route either.
-   *
-   * @deprecated Not a channel `html` reads — nothing renders it.
-   */
-  body?: never;
-  /**
-   * REFUSED BY NAME (objectui#9256, ADR-0049) — `html` reads NEITHER content
-   * channel: no renderer read consumes `body` or `children` for this node.
-   *
-   * MEASURED with the TypeScript TYPE CHECKER and not with grep, across all 24
-   * packages that register components plus the generic traversers — a docblock
-   * mention is not a read, and `body: schema.requestBody` in
-   * `packages/plugin-chatbot/src/renderer.tsx` is the kind of prefix hit grep
-   * scores. Every read is filed under the TYPE of the object it is read from;
-   * this declaration carries none. What the renderer DOES read off this node:
-   * `html` (in `packages/components/src/renderers/basic/html.tsx`).
-   *
-   * Before objectui#9256 tombstoned them here, `body` and `children` were both
-   * inherited-and-optional from {@link BaseSchema} — so authoring either here
-   * type-checked, parsed green through `.passthrough()`, and rendered NOTHING:
-   * no render-time error or warning and no element; only the parser tier's
-   * `not-a-container` warning (objectui#9910) noticed it. objectui#6771 has since retired `body` on
-   * `BaseSchema` itself; `BaseSchema` still declares `children`, so this node's
-   * own tombstone is what refuses it here. `SchemaRenderer` strips both keys
-   * out of the props bag it spreads, so neither reaches the component by
-   * another route either.
-   *
-   * @deprecated Not a channel `html` reads — nothing renders it.
-   */
-  children?: never;
-}

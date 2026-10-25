@@ -6,7 +6,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'fs';
 import { dirname, join } from 'path';
 import chalk from 'chalk';
 import * as yaml from 'js-yaml';
@@ -16,6 +16,7 @@ import {
   REACT_RANGE,
   SCAFFOLD_DEV_DEPENDENCIES
 } from './scaffold-dependencies.js';
+import { isWorkspaceRoot } from './workspace-vite.js';
 
 export interface RouteInfo {
   path: string;
@@ -281,10 +282,25 @@ export interface AppGeneratorContext {
   isMonorepo: boolean;
 }
 
-/** The context the CLI commands themselves generate under. */
+/**
+ * The context the CLI commands themselves generate under.
+ *
+ * "Runs at a workspace root" means `cwd` ITSELF holds a `pnpm-workspace.yaml`,
+ * and nothing wider: the answer is `isWorkspaceRoot(cwd)`, the same predicate
+ * `dev`, `serve` and `build` use to skip `npm install` and to build the alias
+ * table from that file's globs (`utils/workspace-vite.ts`). The two must agree,
+ * because this branch writes both dependency maps EMPTY on the promise that the
+ * command will alias the platform packages instead. So a directory that is only
+ * a workspace MEMBER is not a workspace root, whatever lies above it: a user's
+ * package inside their own monorepo, and equally the objectui tree when it is
+ * `ui/` of the objectstack monorepo (objectstack#25733), get the standalone map.
+ * Walking up to the nearest `pnpm-workspace.yaml` would hand them empty maps
+ * that no alias table backs. A user's project behaves as it always has: the
+ * file in `cwd` means in-workspace, no file means standalone.
+ */
 function currentContext(): AppGeneratorContext {
   const cwd = process.cwd();
-  return { cwd, isMonorepo: existsSync(join(cwd, 'pnpm-workspace.yaml')) };
+  return { cwd, isMonorepo: isWorkspaceRoot(cwd) };
 }
 
 /**

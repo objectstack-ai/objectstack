@@ -273,13 +273,20 @@ function CodeListBlock({ value }: { value: string[] }) {
 }
 
 function SecretBlock({ value }: { value: string }) {
+  const { t } = useObjectTranslation();
   const [revealed, setRevealed] = useState(false);
   return (
     <div className="flex items-center gap-2">
       <code className="flex-1 rounded bg-muted px-2 py-1 text-sm font-mono break-all">
         {revealed ? value : value.replace(/./g, '•')}
       </code>
-      <Button type="button" variant="outline" size="sm" onClick={() => setRevealed((v) => !v)}>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => setRevealed((v) => !v)}
+        aria-label={revealed ? t('actions.resultDialog.hideValue') : t('actions.resultDialog.showValue')}
+      >
         {revealed ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
       </Button>
       <CopyButton value={value} />

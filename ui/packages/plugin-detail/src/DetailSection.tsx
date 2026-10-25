@@ -338,8 +338,9 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
   // the key — a premise the 17.3.0 pin move made false. The spec declares it
   // on `RecordDetailsProps.sections[]` and its describe() promises exactly
   // this: hiding is the renderer default, an all-empty section then renders
-  // nothing at all (no heading, no skeleton), and `false` keeps the heading
-  // and the label skeleton on an all-empty record.
+  // nothing at all (no heading, no skeleton), and `false` keeps the section
+  // on an all-empty record — in read-only mode as its heading plus one fold
+  // row (objectui#13386, `foldAllEmptySection` below).
   //
   // ⚠️ `=== true`, and the DEFAULT IS NOT HERE. `RecordDetailsRenderer`
   // resolves it (`hideEmpty: s.hideEmpty ?? true` on the authored section),
@@ -365,11 +366,33 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
   const allFieldsEmpty = section.fields.length > 0 && filledCount === 0;
   const hideAllEmptySection = section.hideEmpty === true && allFieldsEmpty && !isEditing;
 
-  const hideEmptyEffective =
-    !showEmptyOverride && (shouldAutoHideEmpty || hideAllEmptySection);
+  // objectui#13386 (ruling C, batch #7 item 4, maintainer 2026-10-23) — what a
+  // KEPT all-empty section draws for a reader: its heading plus ONE fold row,
+  // the same "Show N empty fields" toggle a partly-filled section uses, instead
+  // of a column of em-dashes. `@objectstack/spec`'s `hideEmpty` describe() now
+  // states exactly this (objectstack#25511). No key, shape or default moved:
+  // the hide above still decides WHETHER the section draws, this decides only
+  // HOW a section that draws looks.
+  //
+  // "Kept" is every all-empty section the hide does not take — an authored
+  // `false`, and an omitted key wherever no default resolves it (`detail-view`,
+  // the `detail-section` node, the `record:details` direct-`fields` fallback).
+  // Omitted and `false` already meant the same on those surfaces, and the fold
+  // keeps them meaning the same, so `!hideAllEmptySection` and not
+  // `=== false`.
+  //
+  // Same two boundaries as the heuristic above, for the same reasons: edit mode
+  // renders every row as an input (the ruling leaves it unchanged), and a print
+  // page prints every declared row with no toggle (objectui#12717).
+  const foldAllEmptySection =
+    allFieldsEmpty && !hideAllEmptySection && !isEditing && !isPrintPage;
 
-  // Filter out empty fields when the auto-hide heuristic kicked in, or when an
-  // all-empty section is hiding itself (its early return is below every hook).
+  const hideEmptyEffective =
+    !showEmptyOverride && (shouldAutoHideEmpty || hideAllEmptySection || foldAllEmptySection);
+
+  // Filter out empty fields when the auto-hide heuristic kicked in, when an
+  // all-empty section is folded, or when one is hiding itself (its early
+  // return is below every hook).
   const visibleFields = hideEmptyEffective
     ? section.fields.filter((field) => !isEmptyValue(field))
     : section.fields;
@@ -772,7 +795,7 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
 
   // Hide entire section when all fields are empty AND the user has not asked to
   // reveal them. Who decides this is the authored `hideEmpty` (`hideEmptyEffective`
-  // above, default on, `false` to keep the skeleton); this line is the mechanism
+  // above, default on, `false` to keep the section); this line is the mechanism
   // it reaches, which is why restoring the read there needed no new exit here.
   // This early return MUST come AFTER every hook above (including
   // the virtual-scroll useEffect) — never before. When a section is all-empty
@@ -782,18 +805,19 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
   // than during the previous render"). This is the master-detail drill-in
   // crash: navigating account → project reuses this DetailSection fiber, and
   // its sections flip from empty to populated. Keeping the guard below all
-  // hooks makes the hook count invariant.
-  if (visibleFields.length === 0 && emptyCount === section.fields.length) return null;
+  // hooks makes the hook count invariant. A FOLDED all-empty section is not
+  // hidden: it draws its heading and the fold row (objectui#13386).
+  if (visibleFields.length === 0 && emptyCount === section.fields.length && !foldAllEmptySection) return null;
 
   const renderedFields = visibleCount !== undefined
     ? layoutFields.slice(0, visibleCount)
     : layoutFields;
 
-  const showEmptyToggle = emptyCount > 0 && shouldAutoHideEmpty;
+  const showEmptyToggle = emptyCount > 0 && (shouldAutoHideEmpty || foldAllEmptySection);
 
   const content = (
     <>
-      {isMobile ? (
+      {renderedFields.length === 0 ? null : isMobile ? (
         <div className="flex flex-col divide-y divide-border/60">
           {renderedFields.map(renderField)}
         </div>
@@ -811,7 +835,7 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
         </div>
       )}
       {showEmptyToggle && (
-        <div className="mt-3 -ml-2">
+        <div className={cn('-ml-2', renderedFields.length > 0 && 'mt-3')}>
           <Button
             type="button"
             variant="ghost"

@@ -959,7 +959,7 @@ import { RecordApprovalDecisionBlockSchema } from '../zod/record-approval-decisi
 import { RecordApprovalsBlockSchema, RecordAttachmentsBlockSchema } from '../zod/record-panels.zod.js';
 import { CalendarEventSchema, CalendarViewSchema, CarouselItemSchema, CarouselSchema, ChatbotSchema, ChatbotEnhancedSchema, ChatbotFloatingSchema, ChatMessageSchema, ChatMessageSourceSchema, ChatToolInvocationSchema, DashboardComponentSchema, DashboardConfigSchema, DashboardWidgetConfigSchema, DashboardWidgetLayoutSchema, DashboardWidgetSchema, FilterBuilderSchema, FilterFieldSchema, KanbanCardSchema, KanbanColumnSchema, CardTemplateSchema, FilterGroupSchema } from '../zod/complex.zod.js';
 import { ActionSchema, CRUDDialogSchema, DetailSchema } from '../zod/crud.zod.js';
-import { AlertSchema, AvatarSchema, BadgeSchema, BarChartSchema, ChartDataSeriesSchema, ChartSchema, DataTableSchema, DrillDownConfigSchema, HtmlSchema, KbdSchema, ListItemSchema, ListSchema, MarkdownSchema, PivotTableSchema, StaticTableColumnSchema, StatisticSchema, TableColumnSchema, TableSchema, TimelineEventSchema, TimelineFeedItemSchema, TimelineGanttItemBarSchema, TimelineGanttItemSchema, TimelineSchema, TreeNodeSchema, TreeViewSchema } from '../zod/data-display.zod.js';
+import { AlertSchema, AvatarSchema, BadgeSchema, BarChartSchema, ChartDataSeriesSchema, ChartSchema, DataTableSchema, DrillDownConfigSchema, KbdSchema, ListItemSchema, ListSchema, MarkdownSchema, PivotTableSchema, StaticTableColumnSchema, StatisticSchema, TableColumnSchema, TableSchema, TimelineEventSchema, TimelineFeedItemSchema, TimelineGanttItemBarSchema, TimelineGanttItemSchema, TimelineSchema, TreeNodeSchema, TreeViewSchema } from '../zod/data-display.zod.js';
 import { BPMNEdgeSchema, BPMNLaneSchema, BPMNNodeSchema, DataModelDesignerSchema, DataModelEntitySchema, DataModelFieldSchema, DataModelRelationshipSchema, DesignerCanvasConfigSchema, DesignerComponentSchema, DesignerFieldDefinitionSchema, DesignerFieldOptionSchema, DesignerPaletteCategorySchema, DesignerPaletteItemSchema, DesignerPositionSchema, FieldDesignerSchema, ObjectDefinitionSchema, ObjectManagerSchema, PageDesignerSchema, ProcessDesignerSchema, ReportDesignerElementSchema, ReportDesignerSchema, ReportDesignerSectionSchema } from '../zod/designer.zod.js';
 import { AccordionItemSchema, AccordionSchema, CollapsibleSchema, ToggleGroupItemSchema, ToggleGroupSchema } from '../zod/disclosure.zod.js';
 import { EmptySchema, LoadingSchema, ProgressSchema, SkeletonSchema, SonnerSchema, SpinnerSchema, ToasterSchema, ToastSchema } from '../zod/feedback.zod.js';
@@ -981,7 +981,7 @@ import type { RecordApprovalsBlockSchema as Ts_RecordApprovalsBlockSchema, Recor
 import type { CalendarEvent as Ts_CalendarEvent, CalendarViewSchema as Ts_CalendarViewSchema, CarouselItem as Ts_CarouselItem, CarouselSchema as Ts_CarouselSchema, ChatbotSchema as Ts_ChatbotSchema, ChatbotEnhancedSchema as Ts_ChatbotEnhancedSchema, ChatbotFloatingSchema as Ts_ChatbotFloatingSchema, ChatMessage as Ts_ChatMessage, ChatMessageSource as Ts_ChatMessageSource, ChatToolInvocation as Ts_ChatToolInvocation, DashboardComponentSchema as Ts_DashboardComponentSchema, DashboardWidgetLayout as Ts_DashboardWidgetLayout, DashboardWidgetSchema as Ts_DashboardWidgetSchema, FilterBuilderSchema as Ts_FilterBuilderSchema, FilterField as Ts_FilterField, KanbanCard as Ts_KanbanCard, KanbanColumn as Ts_KanbanColumn, CardTemplate as Ts_CardTemplate } from '../complex';
 import type { BPMNEdge as Ts_BPMNEdge, BPMNLane as Ts_BPMNLane, BPMNNode as Ts_BPMNNode, DashboardConfig as Ts_DashboardConfig, DashboardWidgetConfig as Ts_DashboardWidgetConfig, DataModelDesignerSchema as Ts_DataModelDesignerSchema, DataModelEntity as Ts_DataModelEntity, DataModelField as Ts_DataModelField, DataModelRelationship as Ts_DataModelRelationship, DesignerCanvasConfig as Ts_DesignerCanvasConfig, DesignerFieldDefinition as Ts_DesignerFieldDefinition, DesignerFieldOption as Ts_DesignerFieldOption, DesignerPaletteCategory as Ts_DesignerPaletteCategory, DesignerPaletteItem as Ts_DesignerPaletteItem, DesignerPosition as Ts_DesignerPosition, FieldDesignerSchema as Ts_FieldDesignerSchema, ObjectDefinition as Ts_ObjectDefinition, ObjectManagerSchema as Ts_ObjectManagerSchema, PageDesignerSchema as Ts_PageDesignerSchema, ProcessDesignerSchema as Ts_ProcessDesignerSchema, ReportDesignerElement as Ts_ReportDesignerElement, ReportDesignerSchema as Ts_ReportDesignerSchema, ReportDesignerSection as Ts_ReportDesignerSection } from '../designer';
 import type { CRUDDialogSchema as Ts_CRUDDialogSchema, DetailSchema as Ts_DetailSchema } from '../crud';
-import type { AlertSchema as Ts_AlertSchema, AvatarSchema as Ts_AvatarSchema, BadgeSchema as Ts_BadgeSchema, BarChartSchema as Ts_BarChartSchema, ChartDataSeries as Ts_ChartDataSeries, ChartSchema as Ts_ChartSchema, DataTableSchema as Ts_DataTableSchema, DrillDownConfig as Ts_DrillDownConfig, HtmlSchema as Ts_HtmlSchema, KbdSchema as Ts_KbdSchema, ListItem as Ts_ListItem, ListSchema as Ts_ListSchema, MarkdownSchema as Ts_MarkdownSchema, PivotTableSchema as Ts_PivotTableSchema, StaticTableColumn as Ts_StaticTableColumn, StatisticSchema as Ts_StatisticSchema, TableColumn as Ts_TableColumn, TableSchema as Ts_TableSchema, TimelineEvent as Ts_TimelineEvent, TimelineFeedItem as Ts_TimelineFeedItem, TimelineGanttItem as Ts_TimelineGanttItem, TimelineGanttItemBar as Ts_TimelineGanttItemBar, TimelineSchema as Ts_TimelineSchema, TreeViewSchema as Ts_TreeViewSchema, BreadcrumbItem as Ts_BreadcrumbItem, BreadcrumbSchema as Ts_BreadcrumbSchema } from '../data-display';
+import type { AlertSchema as Ts_AlertSchema, AvatarSchema as Ts_AvatarSchema, BadgeSchema as Ts_BadgeSchema, BarChartSchema as Ts_BarChartSchema, ChartDataSeries as Ts_ChartDataSeries, ChartSchema as Ts_ChartSchema, DataTableSchema as Ts_DataTableSchema, DrillDownConfig as Ts_DrillDownConfig, KbdSchema as Ts_KbdSchema, ListItem as Ts_ListItem, ListSchema as Ts_ListSchema, MarkdownSchema as Ts_MarkdownSchema, PivotTableSchema as Ts_PivotTableSchema, StaticTableColumn as Ts_StaticTableColumn, StatisticSchema as Ts_StatisticSchema, TableColumn as Ts_TableColumn, TableSchema as Ts_TableSchema, TimelineEvent as Ts_TimelineEvent, TimelineFeedItem as Ts_TimelineFeedItem, TimelineGanttItem as Ts_TimelineGanttItem, TimelineGanttItemBar as Ts_TimelineGanttItemBar, TimelineSchema as Ts_TimelineSchema, TreeViewSchema as Ts_TreeViewSchema, BreadcrumbItem as Ts_BreadcrumbItem, BreadcrumbSchema as Ts_BreadcrumbSchema } from '../data-display';
 import type { AccordionItem as Ts_AccordionItem, AccordionSchema as Ts_AccordionSchema, CollapsibleSchema as Ts_CollapsibleSchema, ToggleGroupItem as Ts_ToggleGroupItem, ToggleGroupSchema as Ts_ToggleGroupSchema } from '../disclosure';
 import type { EmptySchema as Ts_EmptySchema, LoadingSchema as Ts_LoadingSchema, ProgressSchema as Ts_ProgressSchema, SkeletonSchema as Ts_SkeletonSchema, SonnerSchema as Ts_SonnerSchema, SpinnerSchema as Ts_SpinnerSchema, ToasterSchema as Ts_ToasterSchema, ToastSchema as Ts_ToastSchema } from '../feedback';
 import type { ButtonSchema as Ts_ButtonSchema, CalendarSchema as Ts_CalendarSchema, CheckboxSchema as Ts_CheckboxSchema, CodeEditorSchema as Ts_CodeEditorSchema, ComboboxOption as Ts_ComboboxOption, ComboboxSchema as Ts_ComboboxSchema, CommandGroup as Ts_CommandGroup, CommandItem as Ts_CommandItem, CommandSchema as Ts_CommandSchema, DatePickerSchema as Ts_DatePickerSchema, FieldCondition as Ts_FieldCondition, FieldValidationRules as Ts_FieldValidationRules, FileUploadSchema as Ts_FileUploadSchema, FormField as Ts_FormField, FormSchema as Ts_FormSchema, InputOTPSchema as Ts_InputOTPSchema, InputSchema as Ts_InputSchema, InputShorthandSchema as Ts_InputShorthandSchema, UiCalendarSchema as Ts_UiCalendarSchema, LabelSchema as Ts_LabelSchema, RadioGroupSchema as Ts_RadioGroupSchema, RadioOption as Ts_RadioOption, SelectOption as Ts_SelectOption, SelectSchema as Ts_SelectSchema, SliderSchema as Ts_SliderSchema, SwitchSchema as Ts_SwitchSchema, TextareaSchema as Ts_TextareaSchema, ToggleSchema as Ts_ToggleSchema } from '../form';
@@ -1853,7 +1853,6 @@ const MIRRORS = {
   'data-display.zod.ts#ChartSchema': ChartSchema,
   'data-display.zod.ts#DataTableSchema': DataTableSchema,
   'data-display.zod.ts#DrillDownConfigSchema': DrillDownConfigSchema,
-  'data-display.zod.ts#HtmlSchema': HtmlSchema,
   'data-display.zod.ts#KbdSchema': KbdSchema,
   'data-display.zod.ts#BarChartSchema': BarChartSchema,
   'data-display.zod.ts#ListItemSchema': ListItemSchema,
@@ -2066,7 +2065,6 @@ interface Declared {
   'data-display.zod.ts#ChartSchema': Ts_ChartSchema;
   'data-display.zod.ts#DataTableSchema': Ts_DataTableSchema;
   'data-display.zod.ts#DrillDownConfigSchema': Ts_DrillDownConfig;
-  'data-display.zod.ts#HtmlSchema': Ts_HtmlSchema;
   'data-display.zod.ts#KbdSchema': Ts_KbdSchema;
   'data-display.zod.ts#BarChartSchema': Ts_BarChartSchema;
   'data-display.zod.ts#ListItemSchema': Ts_ListItem;
@@ -4839,6 +4837,11 @@ const EXCLUSIONS: Readonly<Record<string, string>> = {
   // former pair `cloud.zod.ts#CloudPlanStatusSchema` left `MIRRORS` with it.
   'cloud.zod.ts#RetiredCloudPlanStatusNodeSchema':
     'a RETIRED node type refusal arm (objectui#12954), not a mirror — its only member is the `type` literal it refuses on, and the TS half of that retirement is the ABSENCE of a `cloud:plan-status` member in `AnySchema`',
+  // objectui#13449 — the same kind of arm for the retired `html` literal,
+  // pinned in `./html-node-retired-13449.test.ts`. Its former pair
+  // `data-display.zod.ts#HtmlSchema` left `MIRRORS` with it.
+  'data-display.zod.ts#RetiredHtmlNodeSchema':
+    'a RETIRED node type refusal arm (objectui#13449), not a mirror — its only member is the `type` literal it refuses on, and the TS half of that retirement is the ABSENCE of an `html` member in `DataDisplaySchema`',
   'ai.zod.ts#AIComponentSchema':
     "a union OVER the mirrors, not an object of its own — its members are checked individually above",
   'product-blocks.zod.ts#ProductBlockComponentSchema':
@@ -5310,7 +5313,7 @@ const ZOD_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'zod');
  * MINUEND under it had moved. Nothing failed on any of those days, because nothing
  * compared the registry to a number. objectui#7433 is that absence, not the digits.
  */
-const EXPECTED_MIRROR_PAIRS = 205;
+const EXPECTED_MIRROR_PAIRS = 204;
 
 /**
  * A ledger this file can size from its own AST. `WiderThanDeclared` joined at

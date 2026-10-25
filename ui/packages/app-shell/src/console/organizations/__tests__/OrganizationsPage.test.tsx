@@ -11,7 +11,7 @@
 
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -101,5 +101,27 @@ describe('OrganizationsPage — zero-org first run', () => {
     await waitFor(() =>
       expect(screen.getByTestId('create-workspace-dialog')).toBeInTheDocument(),
     );
+  });
+});
+
+describe('OrganizationsPage — the card\'s "Manage" control (objectui#13461)', () => {
+  it('is its own button beside the card button, and opens the members page without switching', async () => {
+    authState.organizations = [
+      { id: 'o1', name: 'Alpha', slug: 'alpha' },
+      { id: 'o2', name: 'Beta', slug: 'beta' },
+    ];
+    render(<OrganizationsPage />);
+    const manage = await screen.findByTestId('organization-manage-alpha');
+    const card = screen.getByTestId('organization-card-alpha');
+    // A real button, reachable by Tab, and not nested in the card's button.
+    expect(manage.tagName).toBe('BUTTON');
+    expect(manage).toHaveAttribute('type', 'button');
+    expect(card.tagName).toBe('BUTTON');
+    expect(card.contains(manage)).toBe(false);
+    expect(manage.closest('button')).toBe(manage);
+
+    fireEvent.click(manage);
+    expect(navigate).toHaveBeenCalledWith('/organizations/alpha/members');
+    expect(authState.switchOrganization).not.toHaveBeenCalled();
   });
 });

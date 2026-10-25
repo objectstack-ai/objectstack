@@ -1376,6 +1376,34 @@ describe('third-party resolution reaches exactly as far as the imported packages
       ).toBeTruthy();
     });
 
+    it('finds an installed copy in the WORKSPACE root store, in both layouts (objectstack#25733)', () => {
+      // Standalone the tree is the workspace root; under the monorepo it is
+      // `ui/`, whose node_modules has no `.pnpm`, and the store is one level up.
+      // A tree no workspace governs has nothing installed in it.
+      const store = 'node_modules/.pnpm/@scope+pkg@1.0.0/node_modules/@scope/pkg/package.json';
+      const workspace = "packages:\n  - 'packages/*'\n";
+      const root = tempTree({
+        'ws/pnpm-workspace.yaml': workspace,
+        [`ws/${store}`]: '{}',
+        'mono/pnpm-workspace.yaml': workspace,
+        [`mono/${store}`]: '{}',
+        'mono/ui/node_modules/other/package.json': '{}',
+        [`loose/${store}`]: '{}',
+      });
+      try {
+        expect(findInstalledCopy(path.join(root, 'ws'), '@scope/pkg')).toBe(
+          'node_modules/.pnpm/@scope+pkg@1.0.0/node_modules/@scope/pkg',
+        );
+        expect(findInstalledCopy(path.join(root, 'mono/ui'), '@scope/pkg')).toBe(
+          '../node_modules/.pnpm/@scope+pkg@1.0.0/node_modules/@scope/pkg',
+        );
+        expect(findInstalledCopy(path.join(root, 'mono/ui'), 'absent')).toBeNull();
+        expect(findInstalledCopy(path.join(root, 'loose'), '@scope/pkg')).toBeNull();
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    });
+
     it('neither control specifier is declared by any workspace package, in EITHER field the map reads', () => {
       // Widened with the map (objectui#8919). A control that stays green only
       // because the suite asks about one of two fields is a control that can be

@@ -789,7 +789,7 @@ describe('renamed local dialects do not collide with a spec export (objectui#307
     ['PageNodeRegionSchema', 'zod twin of PageNodeRegion'],
     // `MobileResponsiveConfig` retired with its type (objectui#7519).
     ['RuntimeWidgetManifest', 'SDUI component manifest, not the field-widget plugin'],
-    ['RuntimeWidgetSource', 'objectui module/inline/registry loader union'],
+    ['RuntimeWidgetSource', 'objectui inline/registry loader union'],
     ['InspectorFlowNode', "app-shell's flow-inspector read type, `id` REQUIRED"],
     ['ScopeFlowNode', "app-shell's pre-validation scope probe, members `unknown`"],
   ])('the spec does not own `%s` (%s)', (name) => {

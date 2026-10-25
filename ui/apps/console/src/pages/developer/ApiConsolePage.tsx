@@ -30,6 +30,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAdapter } from '@object-ui/app-shell';
+import { useObjectTranslation } from '@object-ui/i18n';
 import {
   Badge,
   Collapsible,
@@ -46,6 +47,7 @@ import {
   Loader2, Search, RefreshCw, Trash2, Plus, X,
 } from 'lucide-react';
 import { useApiDiscovery, type EndpointDef, type HttpMethod } from './hooks/useApiDiscovery';
+import { SLOT, withSlots } from '../../lib/inlineSlots';
 
 const METHOD_COLORS: Record<string, string> = {
   GET:    'text-emerald-600 bg-emerald-50 border-emerald-200 dark:text-emerald-400 dark:bg-emerald-950/50',
@@ -62,14 +64,8 @@ const STATUS_COLORS: Record<string, string> = {
   '5': 'text-red-600 dark:text-red-400',
 };
 
-const QUERY_PARAM_PRESETS = [
-  { key: '$top', placeholder: '10', hint: 'limit' },
-  { key: '$skip', placeholder: '0', hint: 'offset' },
-  { key: '$sort', placeholder: 'name', hint: 'sort field' },
-  { key: '$select', placeholder: 'name,email', hint: 'fields' },
-  { key: '$count', placeholder: 'true', hint: 'total count' },
-  { key: '$filter', placeholder: "status eq 'active'", hint: 'OData filter' },
-];
+/** The query-parameter preset chips, in the order the panel offers them; each chip's hint is translated at render. */
+const QUERY_PARAM_PRESETS = ['$top', '$skip', '$sort', '$select', '$count', '$filter'] as const;
 
 interface QueryParam {
   id: number;
@@ -154,6 +150,11 @@ function MethodPicker({
 }
 
 export function ApiConsolePage() {
+  // objectui#13460 — the page's copy reads `console.developer.apiConsole.*`;
+  // each inline `defaultValue` is the `en` pack's value, held byte-identical to
+  // it by `pnpm check:i18n-keys`, so a provider-less mount still reads English.
+  // Verbs, paths, status codes and the JSON placeholders stay as written.
+  const { t } = useObjectTranslation();
   const adapter = useAdapter();
   const client: any = adapter?.getClient?.();
   const { groups, loading: discovering, refresh } = useApiDiscovery();
@@ -281,13 +282,16 @@ export function ApiConsolePage() {
       const duration = Math.round(performance.now() - start);
       setResponse({
         status: 0,
-        body: `Network Error: ${err.message}`,
+        body: t('console.developer.apiConsole.networkError', {
+          defaultValue: 'Network Error: {{message}}',
+          message: err.message,
+        }),
         duration,
       });
     } finally {
       setLoading(false);
     }
-  }, [client, effectiveUrl, effectiveMethod, requestBody, loading]);
+  }, [client, effectiveUrl, effectiveMethod, requestBody, loading, t]);
 
   const replayHistoryEntry = useCallback((entry: RequestHistoryEntry) => {
     setMethodOverride(entry.method);
@@ -318,18 +322,29 @@ export function ApiConsolePage() {
 
   const statusColor = (status: number) => STATUS_COLORS[String(status)[0]] ?? 'text-muted-foreground';
 
+  const presetHints: Record<(typeof QUERY_PARAM_PRESETS)[number], string> = {
+    $top: t('console.developer.apiConsole.hintLimit', { defaultValue: 'limit' }),
+    $skip: t('console.developer.apiConsole.hintOffset', { defaultValue: 'offset' }),
+    $sort: t('console.developer.apiConsole.hintSort', { defaultValue: 'sort field' }),
+    $select: t('console.developer.apiConsole.hintSelect', { defaultValue: 'fields' }),
+    $count: t('console.developer.apiConsole.hintCount', { defaultValue: 'total count' }),
+    $filter: t('console.developer.apiConsole.hintFilter', { defaultValue: 'OData filter' }),
+  };
+
   return (
     <div className="flex flex-1 min-h-0 overflow-hidden">
 
       <div className="w-72 shrink-0 border-r flex flex-col overflow-hidden">
         <div className="p-3 border-b space-y-2">
           <div className="flex items-center gap-2">
-            <h3 className="text-sm font-semibold text-foreground flex-1">API Endpoints</h3>
+            <h3 className="text-sm font-semibold text-foreground flex-1">
+              {t('console.developer.apiConsole.endpointsTitle', { defaultValue: 'API Endpoints' })}
+            </h3>
             <button type="button"
               onClick={refresh}
               disabled={discovering}
               className="p-1 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
-              title="Refresh endpoints"
+              title={t('console.developer.apiConsole.refreshEndpoints', { defaultValue: 'Refresh endpoints' })}
             >
               <RefreshCw className={`h-3.5 w-3.5 ${discovering ? 'animate-spin' : ''}`} />
             </button>
@@ -340,7 +355,7 @@ export function ApiConsolePage() {
               type="text"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              placeholder="Search endpoints..."
+              placeholder={t('console.developer.apiConsole.searchPlaceholder', { defaultValue: 'Search endpoints…' })}
               className="w-full rounded-md border bg-background pl-8 pr-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
             />
           </div>
@@ -350,12 +365,16 @@ export function ApiConsolePage() {
           {discovering ? (
             <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">
               <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              Discovering APIs...
+              {t('console.developer.apiConsole.discovering', { defaultValue: 'Discovering APIs…' })}
             </div>
           ) : filteredGroups.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 text-muted-foreground text-sm">
               <Globe className="h-6 w-6 opacity-30 mb-2" />
-              <span>{searchQuery ? 'No matching endpoints' : 'No endpoints found'}</span>
+              <span>
+                {searchQuery
+                  ? t('console.developer.apiConsole.noMatching', { defaultValue: 'No matching endpoints' })
+                  : t('console.developer.apiConsole.noEndpoints', { defaultValue: 'No endpoints found' })}
+              </span>
             </div>
           ) : (
             filteredGroups.map(group => {
@@ -400,25 +419,27 @@ export function ApiConsolePage() {
 
         <div className="p-3 border-t space-y-2">
           <div className="flex items-center justify-between">
-            <h4 className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Query Parameters</h4>
+            <h4 className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+              {t('console.developer.apiConsole.queryParameters', { defaultValue: 'Query Parameters' })}
+            </h4>
             <button type="button"
               onClick={() => addQueryParam()}
               className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
             >
               <Plus className="h-3 w-3" />
-              Add
+              {t('console.developer.apiConsole.addParameter', { defaultValue: 'Add' })}
             </button>
           </div>
 
           <div className="flex flex-wrap gap-1">
             {QUERY_PARAM_PRESETS.map(preset => (
               <button type="button"
-                key={preset.key}
-                onClick={() => addQueryParam(preset.key, '')}
+                key={preset}
+                onClick={() => addQueryParam(preset, '')}
                 className="text-[10px] px-1.5 py-0.5 rounded border bg-muted/30 text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors font-mono"
-                title={preset.hint}
+                title={presetHints[preset]}
               >
-                {preset.key}
+                {preset}
               </button>
             ))}
           </div>
@@ -437,14 +458,14 @@ export function ApiConsolePage() {
                     type="text"
                     value={param.key}
                     onChange={e => updateQueryParam(param.id, 'key', e.target.value)}
-                    placeholder="key"
+                    placeholder={t('console.developer.apiConsole.parameterKey', { defaultValue: 'key' })}
                     className="flex-1 min-w-0 rounded border bg-background px-1.5 py-0.5 text-[10px] font-mono focus:outline-none focus:ring-1 focus:ring-ring"
                   />
                   <input
                     type="text"
                     value={param.value}
                     onChange={e => updateQueryParam(param.id, 'value', e.target.value)}
-                    placeholder="value"
+                    placeholder={t('console.developer.apiConsole.parameterValue', { defaultValue: 'value' })}
                     className="flex-1 min-w-0 rounded border bg-background px-1.5 py-0.5 text-[10px] font-mono focus:outline-none focus:ring-1 focus:ring-ring"
                   />
                   <button type="button"
@@ -478,7 +499,7 @@ export function ApiConsolePage() {
               className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
             >
               {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
-              Send
+              {t('console.developer.apiConsole.send', { defaultValue: 'Send' })}
             </button>
           </div>
           {queryParams.some(p => p.enabled && p.key.trim()) && (
@@ -491,7 +512,9 @@ export function ApiConsolePage() {
         <div className="flex-1 flex flex-col min-h-0 overflow-auto">
           {['POST', 'PATCH', 'PUT'].includes(effectiveMethod) && (
             <div className="p-3 border-b space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Request Body (JSON)</label>
+              <label className="text-xs font-medium text-muted-foreground">
+                {t('console.developer.apiConsole.requestBody', { defaultValue: 'Request Body (JSON)' })}
+              </label>
               <textarea
                 value={requestBody}
                 onChange={e => setRequestBody(e.target.value)}
@@ -505,7 +528,7 @@ export function ApiConsolePage() {
           {loading && (
             <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">
               <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              Sending request...
+              {t('console.developer.apiConsole.sending', { defaultValue: 'Sending request…' })}
             </div>
           )}
 
@@ -526,7 +549,9 @@ export function ApiConsolePage() {
                   className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
                 >
                   {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                  {copied ? 'Copied' : 'Copy'}
+                  {copied
+                    ? t('console.developer.apiConsole.copied', { defaultValue: 'Copied' })
+                    : t('console.developer.apiConsole.copy', { defaultValue: 'Copy' })}
                 </button>
               </div>
               <pre className="flex-1 overflow-auto p-3 text-xs font-mono bg-muted/10 whitespace-pre-wrap break-all">
@@ -539,8 +564,20 @@ export function ApiConsolePage() {
             <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
               <div className="text-center space-y-2">
                 <Globe className="h-10 w-10 mx-auto opacity-20" />
-                <p>Select an endpoint or type a URL and click <strong>Send</strong></p>
-                <p className="text-xs opacity-60">All registered APIs are auto-discovered from the platform</p>
+                <p>
+                  {withSlots(
+                    t('console.developer.apiConsole.emptyHint', {
+                      defaultValue: 'Select an endpoint or type a URL and click {{send}}',
+                      send: SLOT[0],
+                    }),
+                    [<strong key="send">{t('console.developer.apiConsole.send', { defaultValue: 'Send' })}</strong>],
+                  )}
+                </p>
+                <p className="text-xs opacity-60">
+                  {t('console.developer.apiConsole.emptySubhint', {
+                    defaultValue: 'All registered APIs are auto-discovered from the platform',
+                  })}
+                </p>
               </div>
             </div>
           )}
@@ -549,14 +586,14 @@ export function ApiConsolePage() {
             <div className="border-t">
               <div className="flex items-center justify-between px-3 py-2">
                 <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  History ({history.length})
+                  {t('console.developer.apiConsole.history', { defaultValue: 'History ({{total}})', total: history.length })}
                 </h4>
                 <button type="button"
                   onClick={() => setHistory([])}
                   className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
                 >
                   <Trash2 className="h-3 w-3" />
-                  Clear
+                  {t('console.developer.apiConsole.clearHistory', { defaultValue: 'Clear' })}
                 </button>
               </div>
               <div className="space-y-0.5 px-2 pb-2 max-h-60 overflow-auto">
@@ -581,7 +618,7 @@ export function ApiConsolePage() {
                       <button type="button"
                         onClick={e => { e.stopPropagation(); replayHistoryEntry(entry); }}
                         className="shrink-0 p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                        title="Replay request"
+                        title={t('console.developer.apiConsole.replay', { defaultValue: 'Replay request' })}
                       >
                         <Play className="h-2.5 w-2.5" />
                       </button>

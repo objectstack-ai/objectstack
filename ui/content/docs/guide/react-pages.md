@@ -350,6 +350,12 @@ look uniform — `<record:related-list>` is not registered, only
 The plain wrapper on this tier is `<box>`. `<div>` is deprecated here as it is in
 JSON, and the page is refused at compile time with an error that names `box`.
 
+There is no raw-HTML block on this tier, or on any other. The `html` node type,
+which wrote an authored HTML string into the page unsanitised, is retired, so an
+`<html>` tag is refused at compile time as an unknown component. Rich text a user
+edits belongs in an `html` or `richtext` field, whose value renders through the
+sanitised fields path.
+
 Use it for anything author- or AI-generated. Expressions are limited to what the
 schema supports (`${data.x}`), and there is no local state or event handling
 beyond the action system.

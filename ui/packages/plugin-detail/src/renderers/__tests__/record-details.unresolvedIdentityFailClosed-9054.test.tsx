@@ -50,7 +50,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import * as React from 'react';
 import { RecordContextProvider } from '@object-ui/react';
@@ -211,6 +211,10 @@ describe('objectui#9054 — an unresolvable field identity is EXCLUDED, not kept
       redactFields: ['salary'],
     });
 
+    // The lone placeholder makes the body all-empty, so it is folded behind one
+    // "Show 1 empty field" row (objectui#13386); the row counting it is itself
+    // the entry's survival. Revealed, the placeholder row is there.
+    fireEvent.click(screen.getByRole('button', { name: /Show 1 empty field/ }));
     expect(ghostRows()).toHaveLength(1);
     expect(container.textContent).not.toBe('');
   });

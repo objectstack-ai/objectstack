@@ -431,6 +431,7 @@ export function FileField({ value, onChange, field, readonly, onUploadingChange,
                     handleRemove(idx);
                   }}
                   className="h-6 w-6 p-0"
+                  aria-label={t('fields.file.remove', { name: file.name })}
                 >
                   <X className="size-3" />
                 </Button>

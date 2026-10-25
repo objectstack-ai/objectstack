@@ -95,12 +95,44 @@ function makeFixtureRoot(): string {
  * A copy of the installed client placed outside the workspace — manifest and
  * `dist/` intact, no reachable `node_modules` for its two dependencies.
  *
- * This is the card's reproduction, reduced to a fixture.
+ * This is the card's reproduction, reduced to a fixture. The package's OWN
+ * `node_modules` stays behind: a store copy has none (its dependencies are its
+ * siblings in the store), but under the objectstack monorepo the installed
+ * client is a workspace link to a package that carries one, and copying that
+ * would carry the dependencies along (objectstack#25733).
  */
 function outOfTreeClientCopy(): string {
   const dest = path.join(makeFixtureRoot(), 'client');
-  fs.cpSync(fs.realpathSync(installedClientDir), dest, { recursive: true, dereference: true });
+  const source = fs.realpathSync(installedClientDir);
+  const ownNodeModules = path.join(source, 'node_modules');
+  fs.cpSync(source, dest, { recursive: true, dereference: true, filter: (src) => src !== ownNodeModules });
   return dest;
+}
+
+/**
+ * pnpm's store layout, on disk: the client in
+ * `.pnpm/@objectstack+client@1.0.0/node_modules/@objectstack/client` with its
+ * dependency as a sibling there, and a console whose `node_modules` holds only
+ * a SYMLINK to it. That is how a standalone checkout installs the client; under
+ * the objectstack monorepo it is a workspace link instead, so the realpath
+ * measurement below builds this layout rather than reading the checkout's
+ * (objectstack#25733).
+ */
+function storeLayoutClient(): { linked: string; real: string } {
+  const root = makeFixtureRoot();
+  const storeModules = path.join(root, 'node_modules/.pnpm/@objectstack+client@1.0.0/node_modules');
+  const real = path.join(storeModules, '@objectstack/client');
+  fs.mkdirSync(real, { recursive: true });
+  fs.writeFileSync(
+    path.join(real, 'package.json'),
+    JSON.stringify({ name: CLIENT_PACKAGE_NAME, dependencies: { '@objectstack/core': '1.0.0' } })
+  );
+  fs.mkdirSync(path.join(storeModules, '@objectstack/core'), { recursive: true });
+  fs.writeFileSync(path.join(storeModules, '@objectstack/core/package.json'), '{"name":"@objectstack/core"}');
+  const linked = path.join(root, 'console/node_modules/@objectstack/client');
+  fs.mkdirSync(path.dirname(linked), { recursive: true });
+  fs.symlinkSync(real, linked, 'dir');
+  return { linked, real: fs.realpathSync(real) };
 }
 
 /**
@@ -190,22 +222,23 @@ describe('objectui#6094: a VALID override is still injected — all three spelli
   });
 
   it('resolves the dependency walk through the pnpm symlink, not around it', () => {
-    // Skipped only where the installed client is NOT a symlink (a hoisted,
-    // non-pnpm install), because then there is no symlink for the realpath to
-    // make a difference to and the counter-probe would be measuring nothing.
-    if (fs.realpathSync(installedClientDir) === installedClientDir) return;
-
     // The measurement that makes `realpathSync` load-bearing rather than
-    // tidy: from the symlink path, the client's own dependency is NOT found —
-    // the walk climbs `apps/console/node_modules` → `apps/console` → the repo
-    // root, none of which carry `node_modules/@objectstack/core`. From the
-    // store path it is found, beside the store copy of the client.
-    expect(walkResolves(installedClientDir, '@objectstack/core')).toBe(false);
-    expect(walkResolves(fs.realpathSync(installedClientDir), '@objectstack/core')).toBe(true);
+    // tidy, on the store layout: from the symlink path, the client's own
+    // dependency is NOT found — the walk climbs `console/node_modules` →
+    // `console` → the fixture root, none of which carry
+    // `node_modules/@objectstack/core`. From the store path it is found,
+    // beside the store copy of the client.
+    const { linked, real } = storeLayoutClient();
+    expect(real).not.toBe(linked);
+    expect(walkResolves(linked, '@objectstack/core')).toBe(false);
+    expect(walkResolves(real, '@objectstack/core')).toBe(true);
     // …so the injection, which walks from `packageDir`, must be reading the
     // store path. Without this the check would reject the installed client —
     // the one input it must accept.
-    expect(resolveClientDistInjection(installedClientDir)!.packageDir).not.toBe(installedClientDir);
+    expect(resolveClientDistInjection(linked)!.packageDir).toBe(real);
+    // And this checkout's own installed client, store copy or workspace link,
+    // is judged at its real path too.
+    expect(resolveClientDistInjection(installedClientDir)!.packageDir).toBe(realClientDir());
   });
 
   it('does not demand `peerDependencies` — they come from the consuming app', () => {

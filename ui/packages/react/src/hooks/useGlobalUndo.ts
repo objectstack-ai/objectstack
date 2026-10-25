@@ -155,7 +155,7 @@ export function useGlobalUndo(options: UseGlobalUndoOptions = {}) {
   // paint in the commit, so the only window this moves is the render phase
   // itself — where `undo` / `redo`, being async data mutations, are not
   // callable. `useEffectEvent` would be idiomatic but is React 19.2+, and this
-  // package's peer range starts at React 18.
+  // package's peer range starts at React 19.0.
   useInsertionEffect(() => {
     optionsRef.current = options;
   });

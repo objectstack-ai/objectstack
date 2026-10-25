@@ -1001,9 +1001,10 @@ interface KnownClaim {
  * to the range its manifest actually declares, and `plugin-report` joined in
  * objectui#3690 from the opposite direction: it had carried this line WITHOUT the
  * manifest to back it, so the manifest was widened to `^18.0.0 || ^19.0.0` rather than
- * the sentence rewritten.
+ * the sentence rewritten. objectui#13465 then narrowed every manifest and every one of
+ * these lines to `^19.0.0` in the same change, which is why the key below names 19.
  */
-const PEER_18_19 = 'react' + TICK + ' ^18.0.0';
+const PEER_19 = 'react' + TICK + ' ^19.0.0';
 const PEER_RESTATEMENT_OK =
   'Restates this package peerDependencies.react verbatim; asserted against the manifest by the peer-line assertion below (objectui#3717), no longer by a human reading it.';
 
@@ -1047,7 +1048,7 @@ const KNOWN_CLAIMS: KnownClaim[] = [
   },
   {
     file: 'content/docs/guide/plugins.md',
-    claim: 'react": "^18.0.0',
+    claim: 'react": "^19.0.0',
     kind: 'sample',
     why: 'A peerDependencies range in the plugin skeleton: what the copied plugin ACCEPTS from its host, which its author owns and may legitimately widen or narrow. Stays a sample while the two devDependency ranges in the same block became anchored in objectui#3855 - installed-here versus accepted-from-the-host is the distinction, not which fence the line sits in.',
   },
@@ -1098,12 +1099,6 @@ const KNOWN_CLAIMS: KnownClaim[] = [
     why: 'A capability floor for RTL logical properties ("requires v3.3+ or v4"), not a claim about the version shipped here. Satisfied by the ^4.x this repo uses, but nothing can check it.',
   },
   {
-    file: 'content/docs/guide/troubleshooting.md',
-    claim: 'React 18+',
-    kind: 'unanchored',
-    why: 'Consistent with the ^18.0.0 || ^19.0.0 peer ranges, but stated repo-wide with no per-package anchor, so no gate can tell when it stops being true.',
-  },
-  {
     file: 'content/docs/plugins/plugin-markdown.mdx',
     claim: 'react | 18.2.0',
     kind: 'sample',
@@ -1117,26 +1112,26 @@ const KNOWN_CLAIMS: KnownClaim[] = [
   },
 
   // --- packages/<name>/README.md ----------------------------------------------
-  { file: 'packages/auth/README.md', claim: PEER_18_19, kind: 'restatement', why: PEER_RESTATEMENT_OK },
-  { file: 'packages/collaboration/README.md', claim: PEER_18_19, kind: 'restatement', why: PEER_RESTATEMENT_OK },
-  { file: 'packages/components/README.md', claim: PEER_18_19, kind: 'restatement', why: PEER_RESTATEMENT_OK },
+  { file: 'packages/auth/README.md', claim: PEER_19, kind: 'restatement', why: PEER_RESTATEMENT_OK },
+  { file: 'packages/collaboration/README.md', claim: PEER_19, kind: 'restatement', why: PEER_RESTATEMENT_OK },
+  { file: 'packages/components/README.md', claim: PEER_19, kind: 'restatement', why: PEER_RESTATEMENT_OK },
   {
     file: 'packages/components/README.md',
     claim: 'tailwindcss' + TICK + ' ^4.2.1',
     kind: 'restatement',
     why: 'Restates this package peerDependencies.tailwindcss verbatim. Newly VISIBLE to the scan in objectui#3750 — the TOOLCHAIN word-boundary fix above — and repaired in the same change: it read ^3.0.0 against a ^4.2.1 manifest, and the package is Tailwind 4 only (its postcss.config.js loads @tailwindcss/postcss, which has no v3 counterpart, and src/index.css opens with an @import of tailwindcss and uses the v4-only @theme and @custom-variant at-rules, with no tailwind.config.js anywhere).',
   },
-  { file: 'packages/i18n/README.md', claim: PEER_18_19, kind: 'restatement', why: PEER_RESTATEMENT_OK },
-  { file: 'packages/layout/README.md', claim: PEER_18_19, kind: 'restatement', why: PEER_RESTATEMENT_OK },
-  { file: 'packages/mobile/README.md', claim: PEER_18_19, kind: 'restatement', why: PEER_RESTATEMENT_OK },
-  { file: 'packages/permissions/README.md', claim: PEER_18_19, kind: 'restatement', why: PEER_RESTATEMENT_OK },
-  { file: 'packages/plugin-ai/README.md', claim: PEER_18_19, kind: 'restatement', why: PEER_RESTATEMENT_OK },
-  { file: 'packages/plugin-designer/README.md', claim: PEER_18_19, kind: 'restatement', why: PEER_RESTATEMENT_OK },
-  { file: 'packages/plugin-report/README.md', claim: PEER_18_19, kind: 'restatement', why: PEER_RESTATEMENT_OK },
-  { file: 'packages/react/README.md', claim: PEER_18_19, kind: 'restatement', why: PEER_RESTATEMENT_OK },
+  { file: 'packages/i18n/README.md', claim: PEER_19, kind: 'restatement', why: PEER_RESTATEMENT_OK },
+  { file: 'packages/layout/README.md', claim: PEER_19, kind: 'restatement', why: PEER_RESTATEMENT_OK },
+  { file: 'packages/mobile/README.md', claim: PEER_19, kind: 'restatement', why: PEER_RESTATEMENT_OK },
+  { file: 'packages/permissions/README.md', claim: PEER_19, kind: 'restatement', why: PEER_RESTATEMENT_OK },
+  { file: 'packages/plugin-ai/README.md', claim: PEER_19, kind: 'restatement', why: PEER_RESTATEMENT_OK },
+  { file: 'packages/plugin-designer/README.md', claim: PEER_19, kind: 'restatement', why: PEER_RESTATEMENT_OK },
+  { file: 'packages/plugin-report/README.md', claim: PEER_19, kind: 'restatement', why: PEER_RESTATEMENT_OK },
+  { file: 'packages/react/README.md', claim: PEER_19, kind: 'restatement', why: PEER_RESTATEMENT_OK },
   {
     file: 'packages/react-runtime/README.md',
-    claim: 'react ^18.0.0',
+    claim: 'react ^19.0.0',
     kind: 'restatement',
     why: 'Restates this package peerDependencies.react verbatim, in the prose spelling rather than a peer block. Until objectui#3741 both sides read ">=18": the manifest was the last react peer in the workspace with no upper bound, so the README faithfully restated a range that would have claimed React 20 the day it shipped. Narrowing the manifest to the group norm brought this line with it — the restatement was never the defect, the range it restated was.',
   },
@@ -1154,19 +1149,13 @@ const KNOWN_CLAIMS: KnownClaim[] = [
   // the measurement and for why two of these blocks anchor and one does not.
   {
     file: 'skills/objectui/SKILL.md',
-    claim: 'React 18+',
-    kind: 'unanchored',
-    why: 'The Tech Stack floor this file mirrors verbatim from AGENTS.md section 2 ("React 18+ (Hooks), TypeScript 5.0+ (Strict)"). Consistent with the ^18.0.0 || ^19.0.0 peer ranges, but stated repo-wide with no per-package anchor - the same claim, the same class and the same reason as the content/docs/guide/troubleshooting.md entry above.',
-  },
-  {
-    file: 'skills/objectui/SKILL.md',
     claim: 'TypeScript 5.0',
     kind: 'unanchored',
-    why: 'The second half of that same mirrored sentence, and a FLOOR ("5.0+") rather than a statement of what this repo builds with - 40 manifests declare typescript ^6.0.3, which satisfies it, and would still satisfy it after another major. Deliberately not "corrected" to 6.0 here: the sentence is copied from AGENTS.md section 2, and editing the skills copy alone would desync the two agent-facing texts. What this gate cannot measure, stated so it is not mistaken for checked: whether 5.0 is still a true floor for a CONSUMER, given the published declarations are emitted by TypeScript 6.',
+    why: 'The second half of the Tech Stack sentence this file mirrors verbatim from AGENTS.md section 2, and a FLOOR ("5.0+") rather than a statement of what this repo builds with - 40 manifests declare typescript ^6.0.3, which satisfies it, and would still satisfy it after another major. Deliberately not "corrected" to 6.0 here: the sentence is copied from AGENTS.md section 2, and editing the skills copy alone would desync the two agent-facing texts. What this gate cannot measure, stated so it is not mistaken for checked: whether 5.0 is still a true floor for a CONSUMER, given the published declarations are emitted by TypeScript 6.',
   },
   {
     file: 'skills/objectui/guides/plugin-development.md',
-    claim: 'react": "^18.0.0',
+    claim: 'react": "^19.0.0',
     kind: 'sample',
     why: 'The peerDependencies range of the plugin skeleton on that page: what the copied plugin ACCEPTS from its host, which its author owns and may legitimately widen or narrow. Same line, same class and same reasoning as the content/docs/guide/plugins.md peer entry above - installed-here versus accepted-from-the-host is the distinction, not which fence the line sits in.',
   },

@@ -119,7 +119,7 @@ has the six keys the renderer reads and the release that still drops `2xl`).
 
 ## Tech stack (strict constraints)
 
-- **Core:** React 18+ (hooks), TypeScript 5.0+ (strict).
+- **Core:** React 19 (hooks), TypeScript 5.0+ (strict).
 - **Styling:** Tailwind CSS. Required: `class-variance-authority` for variants,
   `tailwind-merge` + `clsx` (`cn()`) for overrides. Forbidden: inline styles
   (`style={{}}`), CSS Modules, styled-components.

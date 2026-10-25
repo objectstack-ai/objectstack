@@ -410,8 +410,8 @@ export default defineConfig({
     "build": "vite build && tsc --emitDeclarationOnly"
   },
   "peerDependencies": {
-    "react": "^18.0.0 || ^19.0.0",
-    "react-dom": "^18.0.0 || ^19.0.0"
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   },
   "dependencies": {
     "heavy-library": "^1.0.0"

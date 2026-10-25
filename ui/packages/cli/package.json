@@ -15,6 +15,7 @@
   "bin": {
     "objectui": "./dist/cli.js"
   },
+  "sideEffects": true,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

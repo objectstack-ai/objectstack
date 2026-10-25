@@ -5,7 +5,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { WidgetRegistry } from '../WidgetRegistry';
 import { Registry } from '../Registry';
-import type { RuntimeWidgetManifest, WidgetRegistryEvent } from '@object-ui/types';
+import type {
+  RuntimeWidgetManifest,
+  RuntimeWidgetSource,
+  WidgetRegistryEvent,
+} from '@object-ui/types';
 
 function createManifest(overrides: Partial<RuntimeWidgetManifest> = {}): RuntimeWidgetManifest {
   return {
@@ -316,6 +320,109 @@ describe('WidgetRegistry', () => {
       expect(stats.categories).toContain('charts');
       expect(stats.categories).toContain('forms');
       expect(stats.categories).toHaveLength(2);
+    });
+  });
+
+  describe('the retired `module` source (objectui#13450)', () => {
+    /**
+     * Runs `body` with the global Function constructor replaced by a proxy that
+     * records every construction and call. The retired arm built its loader
+     * with `new Function('url', 'return import(url)')`, so a refusal that still
+     * reached that sink shows up here even if the import itself then failed.
+     */
+    async function withFunctionSpy(body: () => Promise<void>): Promise<string[]> {
+      const original = globalThis.Function;
+      const calls: string[] = [];
+      globalThis.Function = new Proxy(original, {
+        construct(target, args) {
+          calls.push(`new Function(${args.map(String).join(', ')})`);
+          return Reflect.construct(target, args);
+        },
+        apply(target, thisArg, args) {
+          calls.push(`Function(${args.map(String).join(', ')})`);
+          return Reflect.apply(target, thisArg, args);
+        },
+      });
+      try {
+        await body();
+      } finally {
+        globalThis.Function = original;
+      }
+      return calls;
+    }
+
+    it('refuses a manifest that still declares a `module` source, by name, without loading code', async () => {
+      const componentRegistry = new Registry();
+      const reg = new WidgetRegistry({ componentRegistry });
+      reg.register(
+        createManifest({
+          type: 'retired-module-widget',
+          // @ts-expect-error `module` is no longer a member of RuntimeWidgetSource.
+          source: { type: 'module', url: '/widgets/chart.js' },
+        }),
+      );
+
+      let refusal: unknown;
+      const functionCalls = await withFunctionSpy(async () => {
+        refusal = await reg.load('test-widget').then(
+          () => undefined,
+          (err: unknown) => err,
+        );
+      });
+
+      expect(refusal).toBeInstanceOf(Error);
+      const message = (refusal as Error).message;
+      // The named subjects, not the wording: the widget, the retired source
+      // type, and both replacements an author can move to.
+      expect(message).toContain('"test-widget"');
+      expect(message).toContain('"module"');
+      expect(message).toContain("type: 'inline'");
+      expect(message).toContain("type: 'registry'");
+      // Nothing was built to fetch the URL, and nothing was registered.
+      expect(functionCalls).toEqual([]);
+      expect(reg.isLoaded('test-widget')).toBe(false);
+      expect(componentRegistry.get('retired-module-widget')).toBeUndefined();
+    });
+
+    it('emits widget:error for the refusal, and loadAll() reports it instead of skipping it', async () => {
+      widgetRegistry.register(createManifest({ name: 'good', type: 'good' }));
+      widgetRegistry.register(
+        createManifest({
+          name: 'old',
+          type: 'old',
+          source: { type: 'module', url: '/widgets/old.js' } as unknown as RuntimeWidgetSource,
+        }),
+      );
+      const events: WidgetRegistryEvent[] = [];
+      widgetRegistry.on((e) => events.push(e));
+
+      const results = await widgetRegistry.loadAll();
+
+      const old = results.find((r) => r.name === 'old');
+      expect(old?.result).toBeInstanceOf(Error);
+      expect((old?.result as Error).message).toContain('"module"');
+      expect(results.find((r) => r.name === 'good')?.result).not.toBeInstanceOf(Error);
+      expect(events.some((e) => e.type === 'widget:error' && e.name === 'old')).toBe(true);
+    });
+
+    it('refuses any other unknown source type loudly, naming the supported ones', async () => {
+      widgetRegistry.register(
+        createManifest({
+          source: { type: 'remote', url: 'https://cdn.example.com/w.mjs' } as unknown as RuntimeWidgetSource,
+        }),
+      );
+
+      const refusal = await widgetRegistry.load('test-widget').then(
+        () => undefined,
+        (err: unknown) => err,
+      );
+
+      expect(refusal).toBeInstanceOf(Error);
+      const message = (refusal as Error).message;
+      expect(message).toContain('"remote"');
+      expect(message).toContain('"inline"');
+      expect(message).toContain('"registry"');
+      expect(message).not.toContain('retired');
     });
   });
 });

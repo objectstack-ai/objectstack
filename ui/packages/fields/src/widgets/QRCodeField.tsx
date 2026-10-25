@@ -1,6 +1,7 @@
 import React from 'react';
 import { Input, Button, EmptyValue } from '@object-ui/components';
 import { QrCode, Copy } from 'lucide-react';
+import { useObjectTranslation } from '@object-ui/i18n';
 import { FieldWidgetComponentProps } from './types.js';
 import { toDomProps } from './toDomProps.js';
 
@@ -9,6 +10,7 @@ import { toDomProps } from './toDomProps.js';
  * Uses a simple SVG-based QR code generator
  */
 export function QRCodeField({ value, onChange, field, readonly, error, ...props }: FieldWidgetComponentProps<string>) {
+  const { t } = useObjectTranslation();
   const [showQR, setShowQR] = React.useState(false);
   const config = field;
 
@@ -68,6 +70,7 @@ export function QRCodeField({ value, onChange, field, readonly, error, ...props 
               variant="outline"
               size="sm"
               onClick={copyToClipboard}
+              aria-label={t('fields.qrCode.copy')}
             >
               <Copy className="w-4 h-4" />
             </Button>
@@ -76,6 +79,7 @@ export function QRCodeField({ value, onChange, field, readonly, error, ...props 
               variant="outline"
               size="sm"
               onClick={() => setShowQR(!showQR)}
+              aria-label={showQR ? t('fields.qrCode.hide') : t('fields.qrCode.show')}
             >
               <QrCode className="w-4 h-4" />
             </Button>

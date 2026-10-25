@@ -265,7 +265,7 @@ const pageSchema = {
 
 ## Technical Details
 
-- Built with React 18+ hooks
+- Built with React 19 hooks
 - Uses Radix UI primitives (Select, Popover)
 - Type-safe with TypeScript
 - Accessible keyboard navigation

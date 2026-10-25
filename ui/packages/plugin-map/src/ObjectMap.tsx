@@ -33,6 +33,7 @@ import {
 } from '@object-ui/react';
 import { NavigationOverlay, cn, useIsMobile } from '@object-ui/components';
 import { usePermissions } from '@object-ui/permissions';
+import { RecordDetailPanel } from '@object-ui/plugin-detail';
 import {
   buildExpandFields,
   convertSortToQueryParams,
@@ -1604,18 +1605,42 @@ export const ObjectMap: React.FC<ObjectMapProps> = ({
       {rowCeiling && <NonGridRowCeilingNote result={rowCeiling} />}
       {navigation.isOverlay && (
         <NavigationOverlay {...navigation} title="Location Details">
-          {(record) => (
-            <div className="space-y-3">
-              {Object.entries(record).map(([key, value]) => (
-                <div key={key} className="flex flex-col">
-                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                    {key.replace(/_/g, ' ')}
-                  </span>
-                  <span className="text-sm">{String(value ?? '—')}</span>
+          {(record) => {
+            // objectui#13458 — the same payload the grid, tree, kanban, calendar
+            // and gantt overlays mount, in place of a raw key/value dump: declared
+            // labels, typed widgets, `hidden` honoured, the object's field order.
+            // Read-only, as on the grid and the tree: capability is handler
+            // presence, and this view hands the panel no write path.
+            const recordId = record.id ?? record._id;
+            if (recordSourceObjectName && (typeof recordId === 'string' || typeof recordId === 'number')) {
+              return (
+                <div className="px-6 pt-6 pb-6">
+                  <RecordDetailPanel
+                    record={record}
+                    objectName={recordSourceObjectName}
+                    recordId={recordId}
+                    dataSource={dataSource}
+                    objectSchema={objectSchema}
+                    onClose={navigation.close}
+                  />
                 </div>
-              ))}
-            </div>
-          )}
+              );
+            }
+            // No addressable record (inline rows with no object name or id): the
+            // panel needs both, so the plain reading of the row is the answer.
+            return (
+              <div className="space-y-3">
+                {Object.entries(record).map(([key, value]) => (
+                  <div key={key} className="flex flex-col">
+                    <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                      {key.replace(/_/g, ' ')}
+                    </span>
+                    <span className="text-sm">{String(value ?? '—')}</span>
+                  </div>
+                ))}
+              </div>
+            );
+          }}
         </NavigationOverlay>
       )}
     </div>

@@ -16,7 +16,8 @@
  * runner. The runner read `confirmText` in its own context only, so one
  * action's `${record.display_name}` read filled from the header and raw from a
  * row. The param dialog's `description` / `helpText` were never filled on
- * either door.
+ * either door. (`confirmText` has read `{{ }}` holes only since objectui#13476;
+ * the row is still its `record`.)
  *
  * Each pin drives the SAME action through both doors:
  *   - header — a runner whose context carries `record`, dispatch without a row;
@@ -31,7 +32,7 @@ const ROW = { id: 'env_1', display_name: 'Acme' };
 const PAUSE: ActionDef = {
   name: 'pause_environment',
   label: 'Pause',
-  confirmText: 'Pause ${record.display_name}?',
+  confirmText: 'Pause {{ record.display_name }}?',
   onClick: () => {},
 };
 
@@ -85,7 +86,7 @@ describe('ActionRunner — a row action reads the row as `record` (objectui#1296
   });
 
   it('(c) CONTROL: a hole naming a field the record lacks degrades the same way on both doors', async () => {
-    const missing: ActionDef = { ...PAUSE, confirmText: 'Pause ${record.no_such_field}?' };
+    const missing: ActionDef = { ...PAUSE, confirmText: 'Pause {{ record.no_such_field }}?' };
     const header = await confirmTextFor(headerDoor(), missing);
     const row = await confirmTextFor(listDoor(), asRow(missing));
     // The header's degradation, measured: the member reads `undefined` and the
@@ -96,11 +97,11 @@ describe('ActionRunner — a row action reads the row as `record` (objectui#1296
 
   it('CONTROL: a dispatch without a row reads the runner context unchanged', async () => {
     // A list page firing a row-less action: `record` is unbound, so the hole
-    // stays as authored — the evaluator's existing answer for an unbound root.
-    expect(await confirmTextFor(listDoor(), PAUSE)).toBe('Pause ${record.display_name}?');
+    // prints empty — the template engine's answer for an unbound root.
+    expect(await confirmTextFor(listDoor(), PAUSE)).toBe('Pause ?');
   });
 
-  it('(d) CONTROL: a toast\'s `${result.*}` is read from the result, unchanged by the row binding', async () => {
+  it('(d) CONTROL: a toast\'s `{{ result.* }}` is read from the result, unchanged by the row binding', async () => {
     const runner = listDoor();
     const toast = vi.fn();
     runner.setToastHandler(toast);
@@ -108,7 +109,7 @@ describe('ActionRunner — a row action reads the row as `record` (objectui#1296
     const result = await runner.execute(asRow({
       name: 'custom_run',
       type: 'custom' as never,
-      successMessage: 'Done: ${result.display_name}',
+      successMessage: 'Done: {{ result.display_name }}',
     } as ActionDef));
     expect(result.success).toBe(true);
     expect(toast).toHaveBeenCalledWith('Done: From result', expect.objectContaining({ type: 'success' }));

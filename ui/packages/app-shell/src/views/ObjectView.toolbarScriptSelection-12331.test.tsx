@@ -27,7 +27,7 @@
  * record-scoped action refuses 0 and 2 rows with a toast and sends nothing; one
  * row sends one request, and its result reaches the user through the runner's
  * success toast — the action's own copy, filled from the answer's
- * `${result.*}`, or the runner's generic line when it declares none.
+ * `{{ result.* }}`, or the runner's generic line when it declares none.
  *
  * The last block replays HotCRM's own declaration: a `list_item` placement and
  * a FIELD-BACKED param, so the dialog draws a record picker and the toast
@@ -249,7 +249,7 @@ describe('objectui#12331 — a record-scoped script action at list_toolbar, with
   });
 
   it('1 row: exactly one request carries that row, and the result reaches the user', async () => {
-    mountLeads(RECORD_SCOPED, `Added \${result.count}, skipped \${result.skipped}`);
+    mountLeads(RECORD_SCOPED, 'Added {{ result.count }}, skipped {{ result.skipped }}');
     await tickRows(1);
     await launchFromHeader();
 

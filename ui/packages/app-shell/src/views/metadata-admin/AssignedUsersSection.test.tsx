@@ -85,7 +85,8 @@ describe('AssignedUsersSection — effective holders (objectui#2382)', () => {
     expect(screen.getByText('2')).toBeTruthy();
     // Attribution badges.
     expect(screen.getAllByText('direct').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('via position contributor').length).toBeGreaterThan(0);
+    // The chip reads the position's label from the registry (objectui#13477).
+    expect(screen.getAllByText('via position Contributor').length).toBeGreaterThan(0);
   });
 
   it('surfaces the everyone-anchor binding as a note instead of enumerating members', async () => {

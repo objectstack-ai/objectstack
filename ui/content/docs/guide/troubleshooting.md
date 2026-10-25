@@ -76,7 +76,7 @@ Then check that the Tailwind 4 build plugin is actually installed and wired up â
 
 **Symptom:** Build or runtime errors about missing modules like `react`, `react-dom`, or `react-hook-form`.
 
-**Cause:** ObjectUI packages declare React 18+ as a **peer dependency**. Your host project must provide them.
+**Cause:** ObjectUI packages declare React 19 as a **peer dependency**. Your host project must provide them.
 
 **Fix:**
 

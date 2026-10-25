@@ -205,7 +205,11 @@ export {
   TimelineGanttItemBarSchema,
   TimelineSchema,
   KbdSchema,
-  HtmlSchema,
+  // ⛔ `HtmlSchema` RETIRED with the `html` node type (objectui#13449).
+  // `RetiredHtmlNodeSchema` takes its place inside `DataDisplaySchema` so an
+  // authored `type: "html"` is refused BY NAME with its remedy; it is
+  // deliberately NOT exported — nothing outside this package parses against a
+  // refusal arm.
   BarChartSchema,
   DataDisplaySchema,
 } from './data-display.zod.js';

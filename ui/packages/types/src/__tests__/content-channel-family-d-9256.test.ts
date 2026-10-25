@@ -146,7 +146,6 @@ import {
 import {
   ListSchema as ListMirror,
   TimelineSchema as TimelineMirror,
-  HtmlSchema as HtmlMirror,
   AvatarSchema as AvatarMirror,
   TreeViewSchema as TreeViewMirror,
   StatisticSchema as StatisticMirror,
@@ -259,7 +258,6 @@ const ROWS: ReadonlyArray<readonly [
   type: string, mirror: Mirror, dead: ReadonlyArray<'body' | 'children'>, required: Record<string, unknown>,
 ]> = [
   ['separator', SeparatorMirror as unknown as Mirror, ['body', 'children'], {}],
-  ['html', HtmlMirror as unknown as Mirror, ['body', 'children'], {"html":"x"}],
   ['button-group', ButtonGroupMirror as unknown as Mirror, ['body', 'children'], {}],
   ['pagination', PaginationMirror as unknown as Mirror, ['body', 'children'], {"totalPages":1}],
   ['navigation-menu', NavigationMenuMirror as unknown as Mirror, ['body', 'children'], {}],
@@ -372,9 +370,12 @@ const CASES = ROWS.flatMap(([type, mirror, dead, required]) =>
 
 describe('objectui#9256 — family D refuses the content channels its renderers never read', () => {
   it('the population is the measured one — a row dropped from the table fails here', () => {
-    expect(ROWS).toHaveLength(67);
+    // 66 since objectui#13449 retired the `html` node type: its row left with
+    // the arm, whose remaining claim is the by-name refusal pinned in
+    // `html-node-retired-13449.test.ts`.
+    expect(ROWS).toHaveLength(66);
     // 3 fewer than 2x: the chatbot faces carry `children` only.
-    expect(CASES).toHaveLength(67 * 2 - 3);
+    expect(CASES).toHaveLength(66 * 2 - 3);
   });
 
   it.each(CASES)('%s is refused at that key\'s own path', (_label, mirror, key, required) => {

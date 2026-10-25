@@ -44,46 +44,36 @@ const FORM_FIELDS_OWNED_ELSEWHERE = new Set([
   'name', // record identity — not user-editable here
 ]);
 
+/**
+ * No `try`/`catch` around the spec derivations in this file (objectui#13459).
+ * Their only input is the bundled `@objectstack/spec`, so a derivation that
+ * fails is a build-time fact: the tests beside this file go red, and at runtime
+ * the throw reaches the route's error boundary. It used to be caught, warned
+ * about in the console and turned into `undefined`, which rendered a designer
+ * form silently missing fields that the author could then save past.
+ */
 let _viewDocSchema: JsonSchema | undefined;
-let _viewDocFailed = false;
 
-function viewDocSchema(): JsonSchema | undefined {
-  if (_viewDocSchema || _viewDocFailed) return _viewDocSchema;
-  try {
-    _viewDocSchema = z.toJSONSchema(ViewSchema, TO_JSON_OPTS) as JsonSchema;
-  } catch (err) {
-    _viewDocFailed = true;
-    if (typeof console !== 'undefined') {
-      console.warn('[view-schema] failed to derive View JSONSchema from spec', err);
-    }
-  }
+function viewDocSchema(): JsonSchema {
+  _viewDocSchema ??= z.toJSONSchema(ViewSchema, TO_JSON_OPTS) as JsonSchema;
   return _viewDocSchema;
 }
 
 /** JSONSchema for a single LIST-family view (grid/kanban/calendar/…). */
 export function getListVariantSchema(): JsonSchema | undefined {
-  return viewDocSchema()?.properties?.list;
+  return viewDocSchema().properties?.list;
 }
 
 /** JSONSchema for a single FORM-family view. */
 export function getFormVariantSchema(): JsonSchema | undefined {
-  return viewDocSchema()?.properties?.form;
+  return viewDocSchema().properties?.form;
 }
 
 let _listColumnSchema: JsonSchema | undefined;
-let _listColumnFailed = false;
 
 /** JSONSchema for a single list column (ListColumn). */
-export function getListColumnSchema(): JsonSchema | undefined {
-  if (_listColumnSchema || _listColumnFailed) return _listColumnSchema;
-  try {
-    _listColumnSchema = z.toJSONSchema(ListColumnSchema, TO_JSON_OPTS) as JsonSchema;
-  } catch (err) {
-    _listColumnFailed = true;
-    if (typeof console !== 'undefined') {
-      console.warn('[view-schema] failed to derive ListColumn JSONSchema from spec', err);
-    }
-  }
+export function getListColumnSchema(): JsonSchema {
+  _listColumnSchema ??= z.toJSONSchema(ListColumnSchema, TO_JSON_OPTS) as JsonSchema;
   return _listColumnSchema;
 }
 
@@ -98,24 +88,17 @@ let _viewForm: FormViewSpec | undefined;
 export function getViewForm(): FormViewSpec | undefined {
   if (_viewForm) return _viewForm;
   if (!specViewForm || typeof specViewForm !== 'object') return undefined;
-  try {
-    const clone = JSON.parse(JSON.stringify(specViewForm)) as FormViewSpec;
-    for (const section of clone.sections ?? []) {
-      section.fields = (section.fields ?? []).filter((f: any) => {
-        const name = typeof f === 'string' ? f : f?.field;
-        return !FORM_FIELDS_OWNED_ELSEWHERE.has(name);
-      });
-    }
-    // Drop now-empty sections so we don't render bare headers.
-    clone.sections = (clone.sections ?? []).filter(
-      (s: any) => (s.fields ?? []).length > 0,
-    );
-    _viewForm = clone;
-  } catch (err) {
-    if (typeof console !== 'undefined') {
-      console.warn('[view-schema] failed to prepare viewForm from spec', err);
-    }
-    return undefined;
+  const clone = JSON.parse(JSON.stringify(specViewForm)) as FormViewSpec;
+  for (const section of clone.sections ?? []) {
+    section.fields = (section.fields ?? []).filter((f: any) => {
+      const name = typeof f === 'string' ? f : f?.field;
+      return !FORM_FIELDS_OWNED_ELSEWHERE.has(name);
+    });
   }
+  // Drop now-empty sections so we don't render bare headers.
+  clone.sections = (clone.sections ?? []).filter(
+    (s: any) => (s.fields ?? []).length > 0,
+  );
+  _viewForm = clone;
   return _viewForm;
 }

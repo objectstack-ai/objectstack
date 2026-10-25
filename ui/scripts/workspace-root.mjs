@@ -40,7 +40,10 @@
  *       the bare `ui` entry is the objectui root itself and is dropped. So the
  *       globs are relative to `uiRoot()` in both layouts.
  *   (c) `lockfilePath()` and `rootManifestPath()` / `rootManifest()` follow the
- *       same root.
+ *       same root, and so does `virtualStorePath()`, pnpm's `node_modules/.pnpm`:
+ *       under the monorepo `<uiRoot>/node_modules` holds only the symlinks of
+ *       the objectui root package's own declared dependencies, and the store
+ *       every installed copy lives in is the workspace root's (objectstack#25733).
  *   (d) `turboConfigPath()` is the nearest `turbo.json` upward (what turbo
  *       hashes from); `uiTurboConfigPath()` is objectui's OWN task declaration,
  *       `turbo.json` at `uiRoot()` or the parked `turbo.objectui.json`; and
@@ -54,6 +57,35 @@
  * Standalone, every answer here is exactly the path or list the readers
  * computed before: the file is at the objectui root, so rule (a) picks it and
  * rule (b) returns the globs verbatim.
+ *
+ * ## Paths handed to git: git's own cwd-relative forms (objectstack#25728)
+ *
+ * The second half of the same class. Standalone, the git repository root IS
+ * the objectui tree; under the monorepo it is the OBJECTSTACK root, one level
+ * up, and git reads some paths against that root whatever `cwd` the script
+ * spawns it with. `git show <ref>:packages/x` then asks for a file that sits
+ * at `ui/packages/x`, and `git diff --name-only` answers `ui/packages/x` to a
+ * reader that matches `packages/...`. The one idiom, for every script:
+ *
+ *   - git runs with `cwd` at the tree it judges -- `uiRoot()`, or the
+ *     repository under test when a gate is driven against a scratch repo;
+ *   - a path INTO a revision is `revPath(ref, path)`, i.e. `<ref>:./<path>`:
+ *     git resolves `./` against the cwd, so the same spelling names the same
+ *     file in both layouts (and in a scratch repo, where `./` is the root);
+ *   - a path listing OUT of `diff` / `diff-tree` / `log` / `show`
+ *     (`--name-only`, `--name-status`, `--numstat`, `--stat`, `--raw`) carries
+ *     `--relative`, so git prints paths from the cwd and leaves out the
+ *     monorepo's own files;
+ *   - `ls-files`, `ls-tree`, `grep` and a pathspec after `--` are already
+ *     cwd-relative, so they never carry `--full-name` / `--full-tree`.
+ *
+ * Standalone every one of these is a no-op (the cwd is the repository root),
+ * so a reader's answer there is the one it computed before. Calls that hand git
+ * no path (`rev-parse`, `merge-base`, `cat-file -e <sha>`) need nothing.
+ * `nestedPrefix()` below is the WORKSPACE answer and is not used for git: git
+ * already knows where the cwd sits, and a scratch repo has no workspace.
+ * `pnpm check:ui-root-lookups` refuses the root-relative spellings so the class
+ * does not grow back; its header names the shapes and the bound.
  *
  * ## The one parser
  *
@@ -84,6 +116,8 @@ export const TURBO_CONFIG = 'turbo.json';
 /** Where the cutover parks objectui's own `turbo.json` (a nested one must `extends` the root). */
 export const PARKED_TURBO_CONFIG = 'turbo.objectui.json';
 export const TURBO_ROOT_PREFIX = '$TURBO_ROOT$/';
+/** pnpm's virtual store directory, inside the workspace root's `node_modules`. */
+export const VIRTUAL_STORE = '.pnpm';
 
 /**
  * The directory whose `pnpm-workspace.yaml` governs the objectui tree: `root`
@@ -125,6 +159,18 @@ export function nestedPrefix(root = uiRoot()) {
   return isNestedWorkspace(root) ? `${path.basename(path.resolve(root))}/` : '';
 }
 
+/**
+ * `<ref>:./<path>` -- a file at a revision, named relative to the cwd git runs
+ * in rather than to the repository root (see "Paths handed to git" above).
+ *
+ * @param {string} ref a revision (`HEAD`, a sha, `origin/main`)
+ * @param {string} file POSIX path relative to the tree git runs in
+ * @returns {string}
+ */
+export function revPath(ref, file) {
+  return `${ref}:./${file.replace(/^(?:\.\/)+/, '')}`;
+}
+
 /** @param {string} [root] @returns {string} absolute path of the governing `pnpm-workspace.yaml`. */
 export function workspaceManifestPath(root = uiRoot()) {
   return path.join(workspaceRoot(root), WORKSPACE_MANIFEST);
@@ -156,6 +202,20 @@ export function rootManifestPath(root = uiRoot()) {
  */
 export function rootManifest(root = uiRoot()) {
   return JSON.parse(fs.readFileSync(rootManifestPath(root), 'utf8'));
+}
+
+/**
+ * pnpm's virtual store at the workspace root: one directory per installed
+ * (package, version, peer-set), named with `/` spelled `+`. A reader asking
+ * "is this package installed ANYWHERE in the workspace" looks here; the
+ * objectui root's own `node_modules` answers only for what its manifest
+ * declares, and in the monorepo it has no `.pnpm` at all.
+ *
+ * @param {string} [root]
+ * @returns {string}
+ */
+export function virtualStorePath(root = uiRoot()) {
+  return path.join(workspaceRoot(root), 'node_modules', VIRTUAL_STORE);
 }
 
 /**

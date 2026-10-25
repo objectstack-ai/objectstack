@@ -98,6 +98,7 @@ export function MetadataResourceHistoryPage({
             variant="ghost"
             size="sm"
             onClick={() => setRefreshKey((k) => k + 1)}
+            aria-label={t('engine.edit.refresh', locale)}
           >
             <RefreshCw className="h-4 w-4" />
           </Button>

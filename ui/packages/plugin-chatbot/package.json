@@ -16,6 +16,7 @@
   "main": "dist/index.umd.cjs",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
+  "sideEffects": true,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -54,8 +55,8 @@
     "use-stick-to-bottom": "^1.1.6"
   },
   "peerDependencies": {
-    "react": "^18.0.0 || ^19.0.0",
-    "react-dom": "^18.0.0 || ^19.0.0"
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@types/react": "19.3.0",

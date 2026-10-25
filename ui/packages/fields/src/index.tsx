@@ -4780,10 +4780,9 @@ const FIELD_TYPES_SKIP_FALLBACK = new Set([
   // expect (e.g. `{ type: 'markdown', content }` → the markdown renderer, not
   // the RichText editor). Without skipFallback each of these logged a
   // "bare-name fallback is being overwritten" warning at boot.
-  // Display widgets (text/html/image/avatar/grid live in @object-ui/components
+  // Display widgets (text/image/avatar/grid live in @object-ui/components
   // or @object-ui/layout as the bare-name owners).
   'text',
-  'html',
   'image',
   'avatar',
   'grid',
@@ -4848,6 +4847,14 @@ const FIELD_TYPES_SKIP_FALLBACK = new Set([
   'url',
   'user',
   'vector',
+  // ── Retired bare node key (objectui#13449) ────────────────────────────────
+  // `html` sat in the display-widget group above while `@object-ui/components`
+  // registered its raw-HTML `ui:html` node, which owned the bare key. That node
+  // type is retired, so no package owns bare `html` any more. It stays in this
+  // set so the bare key resolves to NOTHING: a stale `{ type: 'html' }` node
+  // must draw the unknown-component panel, never this rich-text editor, and a
+  // form keeps reaching the widget as `field:html`.
+  'html',
 ]);
 
 /**

@@ -708,6 +708,44 @@ function impureNode(node: ts.Node): ts.Node | undefined {
   return hit;
 }
 
+/** Every identifier declared at the top level of this source file (imports excluded). */
+function moduleScopeBindings(source: ts.SourceFile): Set<string> {
+  const names = new Set<string>();
+  for (const stmt of source.statements) {
+    if (ts.isVariableStatement(stmt)) {
+      for (const d of stmt.declarationList.declarations) {
+        if (ts.isIdentifier(d.name)) names.add(d.name.text);
+      }
+    } else if (
+      (ts.isFunctionDeclaration(stmt) || ts.isClassDeclaration(stmt)) &&
+      stmt.name &&
+      ts.isIdentifier(stmt.name)
+    ) {
+      names.add(stmt.name.text);
+    }
+  }
+  return names;
+}
+
+/**
+ * `X.displayName = 'X'` where `X` is declared in THIS module and the right-hand
+ * side calls nothing (objectui#13464). The write is provably module-local: a
+ * bundler that drops the module drops its target with it, so nothing outside can
+ * observe the difference. This is the same carve-out
+ * `scripts/check-side-effects-array.mjs` makes as `local-binding-write`, and
+ * without it a pure React library could never declare `false` here. A write to
+ * an IMPORTED binding or a global is still a finding, and so is any right-hand
+ * side that calls or constructs something.
+ */
+function isModuleLocalBindingWrite(stmt: ts.ExpressionStatement, localBindings: Set<string>): boolean {
+  const expr = stmt.expression;
+  if (!ts.isBinaryExpression(expr) || expr.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return false;
+  if (!ts.isPropertyAccessExpression(expr.left)) return false;
+  const target = expr.left.expression;
+  if (!ts.isIdentifier(target) || !localBindings.has(target.text)) return false;
+  return impureNode(expr.right) === undefined;
+}
+
 /** Statement kinds that RUN when the module is evaluated (as opposed to declaring). */
 function isExecutedStatement(stmt: ts.Statement): boolean {
   return (
@@ -746,6 +784,7 @@ function scanModule(absFile: string): ModuleScan {
 
   const effects: SideEffectStatement[] = [];
   const relativeSpecifiers: string[] = [];
+  const localBindings = moduleScopeBindings(source);
 
   for (const stmt of source.statements) {
     if (ts.isImportDeclaration(stmt) || ts.isExportDeclaration(stmt)) {
@@ -766,6 +805,7 @@ function scanModule(absFile: string): ModuleScan {
       // A bare string is a directive prologue (`'use client'`), not a statement
       // anything can observe.
       if (ts.isStringLiteral(stmt.expression)) continue;
+      if (isModuleLocalBindingWrite(stmt, localBindings)) continue;
       const hit = impureNode(stmt);
       if (hit) {
         effects.push({
@@ -1032,22 +1072,44 @@ describe('`sideEffects` declarations match load-time behaviour (objectui#3943)',
   it('discovers the declaring packages (guard cannot pass by finding nothing)', () => {
     // The hazard here is a SILENT one, so a guard that inspected an empty list
     // would reproduce it exactly: green output, nothing checked. These floors
-    // sit at the census re-measured for objectui#6683 — 9 packages declare the
-    // field, 5 of them `false` and 2 an array (`components`/`fields` declare
-    // `true`) — so a lost workspace root, a broken glob parser or a renamed
+    // sit at the census re-measured for objectui#13464, when every published
+    // package came to declare the field: 12 `false` and 17 arrays, the rest
+    // `true` — so a lost workspace root, a broken glob parser or a renamed
     // field is a failure and not a quiet pass.
-    expect(declaringPackages.length).toBeGreaterThanOrEqual(7);
-    expect(falsePackages.length).toBeGreaterThanOrEqual(5);
-    expect(arrayPackages.length).toBeGreaterThanOrEqual(2);
+    expect(declaringPackages.length).toBeGreaterThanOrEqual(29);
+    expect(falsePackages.length).toBeGreaterThanOrEqual(12);
+    expect(arrayPackages.length).toBeGreaterThanOrEqual(17);
 
-    // The census by name. `components`/`fields` declare `true` and are excluded
-    // on purpose: `true` is the conservative claim and can never lose a
+    // The census by name. `true` packages (`components`, `fields`, four
+    // plugins and the executables) are excluded on purpose: `true` is the conservative claim and can never lose a
     // registration, so it is not falsifiable in the direction that hurts.
     expect(declaringPackages.map((p) => p.name)).toEqual([
       '@object-ui/app-shell',
+      '@object-ui/auth',
+      '@object-ui/collaboration',
       '@object-ui/core',
+      '@object-ui/data-objectstack',
       '@object-ui/i18n',
       '@object-ui/layout',
+      '@object-ui/mobile',
+      '@object-ui/permissions',
+      '@object-ui/plugin-calendar',
+      '@object-ui/plugin-charts',
+      '@object-ui/plugin-designer',
+      '@object-ui/plugin-detail',
+      '@object-ui/plugin-editor',
+      '@object-ui/plugin-form',
+      '@object-ui/plugin-gantt',
+      '@object-ui/plugin-kanban',
+      '@object-ui/plugin-list',
+      '@object-ui/plugin-map',
+      '@object-ui/plugin-markdown',
+      '@object-ui/plugin-report',
+      '@object-ui/plugin-timeline',
+      '@object-ui/plugin-tree',
+      '@object-ui/plugin-view',
+      '@object-ui/providers',
+      '@object-ui/react',
       '@object-ui/react-runtime',
       '@object-ui/sdui-parser',
       '@object-ui/types',
@@ -1381,6 +1443,51 @@ describe('`sideEffects` declarations match load-time behaviour (objectui#3943)',
       wildcards,
       ['A `sideEffects` array entry uses a glob, which this guard does not expand.', ...wildcards].join('\n'),
     ).toEqual([]);
+  });
+});
+
+/**
+ * The module-local write carve-out, pinned in both directions (objectui#13464).
+ * The carve-out exists so a pure React library can declare `false`; each
+ * neighbouring shape below must still be a finding, or the carve-out would have
+ * opened the objectui#3899 hole one statement wide.
+ */
+describe('a write to a binding this module declares is not a load-time side effect (objectui#13464)', () => {
+  const effectsOf = (code: string): string[] => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'objectui-13464-scan-'));
+    try {
+      const file = path.join(dir, 'probe.tsx');
+      writeFileSync(file, code);
+      return scanModule(file).effects.map((e) => e.kind);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  it('`X.displayName = "X"` on a function, class or const this module declares is pure', () => {
+    expect(effectsOf("const X = () => null;\nX.displayName = 'X';")).toEqual([]);
+    expect(effectsOf("export function Y() { return null; }\nY.displayName = 'Y';")).toEqual([]);
+    expect(effectsOf("class Z {}\nZ.label = 'z';")).toEqual([]);
+    expect(effectsOf("export const W = {};\nW.label = `w`;")).toEqual([]);
+  });
+
+  it('the same write to an IMPORTED binding is still a top-level write', () => {
+    expect(effectsOf("import { X } from './x';\nX.displayName = 'X';")).toEqual(['top-level write']);
+    expect(effectsOf("import * as R from './r';\nR.flag = true;")).toEqual(['top-level write']);
+  });
+
+  it('a write to a global is still a top-level write', () => {
+    expect(effectsOf('window.installed = true;')).toEqual(['top-level write']);
+    expect(effectsOf('globalThis.flag = 1;')).toEqual(['top-level write']);
+  });
+
+  it('a local write whose right-hand side calls or constructs something is still a finding', () => {
+    expect(effectsOf("const X = {};\nX.label = make();")).toEqual(['top-level write']);
+    expect(effectsOf("const X = {};\nX.store = new Map();")).toEqual(['top-level write']);
+  });
+
+  it('only a property write is carved out: an element write on a local binding is still a finding', () => {
+    expect(effectsOf("const X = {};\nX['label'] = 'x';")).toEqual(['top-level write']);
   });
 });
 

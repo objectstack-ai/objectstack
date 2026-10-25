@@ -33,7 +33,7 @@ import { isFilterAST, parseFilterAST } from '@objectstack/spec/data';
 // and `ValueDataSource` read these same two functions, so the rule-entry form
 // below cannot judge a different set than the `$` dialect beside it.
 import { isRefusedTextComparand, textComparandRefusalReason } from '@objectstack/spec/data';
-import type { ApiError, ValidateDataIssue } from '@objectstack/spec/api';
+import type { ApiError, BatchUpdateResponse, ValidateDataIssue } from '@objectstack/spec/api';
 import { ValidateDataIssueSchema } from '@objectstack/spec/api';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 // #4237 — the metadata save door's advisory reader, shared with `MetadataClient`
@@ -55,6 +55,8 @@ import type {
   DeleteViewResult,
   ViewHomeDeleteOutcome,
   BatchTransactionOperation,
+  BulkWriteResult,
+  BulkWriteRowError,
   DataSourceMutationEvent,
   QueryParams,
   QueryResult,
@@ -3203,6 +3205,63 @@ function isCallerAbort(error: unknown, init?: RequestInit): boolean {
   return (error as { name?: unknown } | null)?.name === 'AbortError';
 }
 
+/** The message of a rejection, after the client error is normalised. */
+function rowErrorMessage(err: unknown): string {
+  const normalised = normaliseClientError(err);
+  return normalised instanceof Error ? normalised.message : String(normalised);
+}
+
+/**
+ * Read what `updateMany` / `deleteMany` answered into a {@link BulkWriteResult}
+ * (objectui#13442).
+ *
+ * The server answers `BatchUpdateResponse` (`@objectstack/spec/api`): a
+ * `succeeded` count plus `results[]`, one row per requested record. With
+ * `continueOnError: true` a failed row carries `success: false` and its
+ * reason in `errors[].message` — a business-rule rejection from a hook, an
+ * RLS refusal, a validation failure. Reading only `succeeded` threw those
+ * away, so a caller could tell how many rows failed but not which or why.
+ *
+ * A failed row is attributed by its `index`, the spec's "Index of the record
+ * in the request array", which maps back to exactly the id the caller passed;
+ * by its `id` only where `index` is absent, since the spec declares `id` as
+ * the id "if operation succeeded". A failed row with neither is left out of
+ * `errors` (the caller reports it as an unattributed failure), and one with
+ * no `errors[]` — `deleteMany`'s "matched, and not removed" outcome — gets a
+ * generic reason naming the verb.
+ *
+ * Shapes other than the response object keep their historical reading: a
+ * bare array is a count of rows written, and no body (`deleteMany` used to
+ * answer `void`) means every requested row was written.
+ */
+function bulkWriteResultFrom(
+  res: unknown,
+  requested: ReadonlyArray<string>,
+  verb: 'updated' | 'deleted',
+): BulkWriteResult {
+  if (Array.isArray(res)) return { succeeded: res.length, errors: [] };
+  if (!res || typeof res !== 'object') return { succeeded: requested.length, errors: [] };
+  const body = res as Partial<BatchUpdateResponse>;
+  const errors: BulkWriteRowError[] = [];
+  for (const row of Array.isArray(body.results) ? body.results : []) {
+    if (!row || row.success !== false) continue;
+    const id =
+      typeof row.index === 'number' && requested[row.index] !== undefined
+        ? requested[row.index]
+        : typeof row.id === 'string' && row.id
+          ? row.id
+          : undefined;
+    if (id === undefined) continue;
+    const reasons = (row.errors ?? [])
+      .map((e) => e?.message)
+      .filter((m): m is string => typeof m === 'string' && m.trim() !== '');
+    errors.push({ id, error: reasons.length > 0 ? reasons.join('; ') : `Record was not ${verb}` });
+  }
+  const succeeded =
+    typeof body.succeeded === 'number' ? body.succeeded : requested.length - errors.length;
+  return { succeeded, errors };
+}
+
 /**
  * ObjectStack Data Source Adapter
  *
@@ -3286,6 +3345,12 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
   // calendar) auto-refresh — the interface ListView relies on to reflect
   // inline-edit "Save All" writes without a manual reload.
   private mutationListeners = new Set<(event: DataSourceMutationEvent<T>) => void>();
+  // objectui#13442 — how many `batchMutationEvents` scopes are open, and the
+  // events held back while any is. Keyed by type + resource, so a 100-row run
+  // holds one entry, not 100; `count` decides at release whether the one
+  // original event can be delivered as it was.
+  private mutationHoldDepth = 0;
+  private heldMutations = new Map<string, { event: DataSourceMutationEvent<T>; count: number }>();
 
   // Subscribers registered via onWriteWarning(). Emitted after a create/update
   // whose response carried `droppedFields` (objectstack-ai/objectstack#3431 / objectstack-ai/objectstack#3455) so the app
@@ -3846,19 +3911,41 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    * Create a new record.
    */
   /**
-   * Notify all mutation subscribers. A throwing listener must not break the
-   * mutation or starve the other subscribers, so each is isolated.
+   * Notify all mutation subscribers, or hold the event while a
+   * {@link batchMutationEvents} scope is open. A throwing listener must not
+   * break the mutation or starve the other subscribers, so each is isolated
+   * (see {@link deliverMutation}).
    */
   private emitMutation(event: DataSourceMutationEvent<T>): void {
-    // A record read still on the wire when a write to its resource lands was
-    // asked before that write, so a caller asking after it — typically the
-    // refetch a listener below triggers — must not join it (objectui#11699).
-    // Dropped before the listeners run. The pending read still answers the
-    // callers that already hold it.
-    const prefix = `${event.resource}::`;
+    this.dropInflightReads(event.resource);
+    if (this.mutationHoldDepth > 0) {
+      // Inside a `batchMutationEvents` scope (objectui#13442): hold the event
+      // instead of delivering it. The write itself has already happened.
+      const key = JSON.stringify([event.type, event.resource]);
+      const held = this.heldMutations.get(key);
+      if (held) held.count += 1;
+      else this.heldMutations.set(key, { event, count: 1 });
+      return;
+    }
+    this.deliverMutation(event);
+  }
+
+  /**
+   * A record read still on the wire when a write to its resource lands was
+   * asked before that write, so a caller asking after it — typically the
+   * refetch a mutation listener triggers — must not join it (objectui#11699).
+   * Dropped before the listeners run. The pending read still answers the
+   * callers that already hold it.
+   */
+  private dropInflightReads(resource: string): void {
+    const prefix = `${resource}::`;
     for (const key of Array.from(this.inflightFindOnes.keys())) {
       if (key.startsWith(prefix)) this.inflightFindOnes.delete(key);
     }
+  }
+
+  /** Hand one event to every mutation subscriber, each isolated. */
+  private deliverMutation(event: DataSourceMutationEvent<T>): void {
     for (const listener of this.mutationListeners) {
       try {
         listener(event);
@@ -3879,6 +3966,45 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     return () => {
       this.mutationListeners.delete(callback);
     };
+  }
+
+  /**
+   * Run `work` with mutation events held back, then deliver them coalesced
+   * when it settles (objectui#13442) — see `DataSource.batchMutationEvents`
+   * for the contract.
+   *
+   * The reason it exists: every `update()` / `delete()` emits one event, and
+   * each subscribed view (ListView, ObjectView, kanban, calendar, and the
+   * console's invalidation bridge with every bus reader behind it) refetches
+   * and re-renders once per event. A bulk action on its per-row path over a
+   * 100-row list measured ~100 s in the browser for ~19 s of server work, the
+   * rest being that refetch storm. Inside this scope the same run notifies
+   * once per touched resource.
+   *
+   * Release, per held `(type, resource)` pair: the original event when only
+   * one was held (its `id` / `record` intact), otherwise one resource-level
+   * event. Nested scopes release when the outermost settles, and a rejection
+   * releases too — the writes that landed before it still happened.
+   */
+  async batchMutationEvents<R>(work: () => Promise<R>): Promise<R> {
+    this.mutationHoldDepth += 1;
+    try {
+      return await work();
+    } finally {
+      this.mutationHoldDepth -= 1;
+      if (this.mutationHoldDepth === 0) this.releaseHeldMutations();
+    }
+  }
+
+  /** Deliver what a closed `batchMutationEvents` scope held, coalesced. */
+  private releaseHeldMutations(): void {
+    const held = Array.from(this.heldMutations.values());
+    this.heldMutations.clear();
+    for (const { event, count } of held) {
+      // Reads asked DURING the scope are as stale as the ones it dropped.
+      this.dropInflightReads(event.resource);
+      this.deliverMutation(count === 1 ? event : { type: event.type, resource: event.resource });
+    }
   }
 
   /**
@@ -4382,21 +4508,28 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    * does not expose `updateMany` (older clients / offline adapters).
    * In that case `continueOnError` semantics are emulated locally so
    * callers see the same return shape.
+   *
+   * Resolves to a {@link BulkWriteResult}: the server's `succeeded` count,
+   * plus each failed record's id and the server's reason, read off
+   * `results[].errors[]` (objectui#13442). It used to resolve to the count
+   * alone, which left a caller unable to say which rows failed or why — the
+   * reason apps fell back to one-row batches, and the slow path with them.
    */
   async bulkUpdate(
     resource: string,
     ids: ReadonlyArray<string | number>,
     patch: Partial<T>,
-  ): Promise<number> {
+  ): Promise<BulkWriteResult> {
     await this.connect();
-    if (!ids || ids.length === 0) return 0;
-    const records = ids.map((id) => ({ id: String(id), data: patch as any }));
+    if (!ids || ids.length === 0) return { succeeded: 0, errors: [] };
+    const strIds = ids.map((id) => String(id));
+    const records = strIds.map((id) => ({ id, data: patch as any }));
 
     // Notify subscribers once for the whole batch (not per-id) so a single
     // "mark all read"/"archive selected" refreshes bound views exactly once.
-    const emitBulk = (count: number): number => {
-      if (count > 0) this.emitMutation({ type: 'update', resource });
-      return count;
+    const emitBulk = (result: BulkWriteResult): BulkWriteResult => {
+      if (result.succeeded > 0) this.emitMutation({ type: 'update', resource });
+      return result;
     };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -4404,50 +4537,49 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     if (typeof updateMany === 'function') {
       try {
         const res = await updateMany(resource, records, { continueOnError: true });
-        // The server returns BatchUpdateResponse { succeeded, failed, ... };
-        // fall back to ids.length on adapters that return a bare array.
-        if (res && typeof res === 'object' && typeof (res as any).succeeded === 'number') {
-          return emitBulk((res as any).succeeded as number);
-        }
-        if (Array.isArray(res)) return emitBulk((res as any[]).length);
-        return emitBulk(ids.length);
+        return emitBulk(bulkWriteResultFrom(res, strIds, 'updated'));
       } catch (err) {
         throw normaliseClientError(err);
       }
     }
 
-    // Fallback: sequential per-id updates, tolerating failures.
+    // Fallback: sequential per-id updates, tolerating failures — each one
+    // kept under its own id with its own reason.
     let succeeded = 0;
-    for (const id of ids) {
+    const errors: BulkWriteRowError[] = [];
+    for (const id of strIds) {
       try {
-        await this.client.data.update<T>(resource, String(id), patch);
+        await this.client.data.update<T>(resource, id, patch);
         succeeded++;
-      } catch {
-        // continueOnError semantics — swallow per-row errors
+      } catch (err) {
+        // continueOnError semantics — the run goes on, the reason is kept.
+        errors.push({ id, error: rowErrorMessage(err) });
       }
     }
-    return emitBulk(succeeded);
+    return emitBulk({ succeeded, errors });
   }
 
   /**
    * Single-call bulk delete. Mirrors the bulkUpdate contract: prefers
    * the server's `deleteMany` primitive when the client supports it;
    * otherwise emulates `continueOnError` by looping `delete` per id and
-   * swallowing per-row failures. Returns the count of rows reported
-   * deleted by the server (or successfully deleted in fallback mode).
+   * keeping each per-row failure. Resolves to a {@link BulkWriteResult}:
+   * the count of rows reported deleted by the server (or successfully
+   * deleted in fallback mode), plus each failed record's id and reason
+   * (objectui#13442).
    */
   async bulkDelete(
     resource: string,
     ids: ReadonlyArray<string | number>,
-  ): Promise<number> {
+  ): Promise<BulkWriteResult> {
     await this.connect();
-    if (!ids || ids.length === 0) return 0;
+    if (!ids || ids.length === 0) return { succeeded: 0, errors: [] };
     const strIds = ids.map((id) => String(id));
 
     // Notify subscribers once for the whole batch (see bulkUpdate).
-    const emitBulk = (count: number): number => {
-      if (count > 0) this.emitMutation({ type: 'delete', resource });
-      return count;
+    const emitBulk = (result: BulkWriteResult): BulkWriteResult => {
+      if (result.succeeded > 0) this.emitMutation({ type: 'delete', resource });
+      return result;
     };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -4455,28 +4587,28 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     if (typeof deleteMany === 'function') {
       try {
         const res = await deleteMany(resource, strIds, { continueOnError: true });
-        if (res && typeof res === 'object' && typeof (res as any).succeeded === 'number') {
-          return emitBulk((res as any).succeeded as number);
-        }
-        if (Array.isArray(res)) return emitBulk((res as any[]).length);
-        // deleteMany historically returns void on success — assume all hit.
-        return emitBulk(strIds.length);
+        // `deleteMany` historically answered `void` on success, which
+        // `bulkWriteResultFrom` reads as "every id deleted".
+        return emitBulk(bulkWriteResultFrom(res, strIds, 'deleted'));
       } catch (err) {
         throw normaliseClientError(err);
       }
     }
 
-    // Fallback: sequential per-id deletes, tolerating failures.
+    // Fallback: sequential per-id deletes, tolerating failures — each one
+    // kept under its own id with its own reason.
     let succeeded = 0;
+    const errors: BulkWriteRowError[] = [];
     for (const id of strIds) {
       try {
         await this.client.data.delete(resource, id);
         succeeded++;
-      } catch {
-        // continueOnError semantics — swallow per-row errors
+      } catch (err) {
+        // continueOnError semantics — the run goes on, the reason is kept.
+        errors.push({ id, error: rowErrorMessage(err) });
       }
     }
-    return emitBulk(succeeded);
+    return emitBulk({ succeeded, errors });
   }
 
   /**

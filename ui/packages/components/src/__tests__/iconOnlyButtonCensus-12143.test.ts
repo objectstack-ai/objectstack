@@ -228,20 +228,8 @@ const unnamed: Judged[] = iconOnly.filter((j) => !j.named);
  * that card's fix.
  */
 const BACKLOG: Array<[file: string, icons: string[]]> = [
-  ['packages/app-shell/src/console/ai/LiveCanvas.tsx', ['X']],
-  ['packages/app-shell/src/views/ActionResultDialog.tsx', ['EyeOff | Eye']],
-  ['packages/app-shell/src/views/metadata-admin/PermissionAdvancedFacets.tsx', ['Trash2', 'Trash2']],
-  ['packages/app-shell/src/views/metadata-admin/ResourceHistoryPage.tsx', ['RefreshCw']],
-  ['packages/components/src/custom/sort-builder.tsx', ['X']],
-  ['packages/components/src/renderers/form/file-upload.tsx', ['X']],
-  ['packages/fields/src/widgets/FileField.tsx', ['X']],
-  ['packages/fields/src/widgets/MasterDetailField.tsx', ['ExternalLink', 'ExternalLink', 'X']],
-  ['packages/fields/src/widgets/PasswordField.tsx', ['EyeOff | Eye']],
-  ['packages/fields/src/widgets/QRCodeField.tsx', ['Copy', 'QrCode']],
   ['packages/plugin-ai/src/AIFormAssist.tsx', ['RefreshCw', 'X', 'Check', 'X']],
   ['packages/plugin-ai/src/AIRecommendations.tsx', ['ExternalLink', 'X', 'ThumbsUp', 'ThumbsDown']],
-  ['packages/plugin-chatbot/src/elements/conversation.tsx', ['ArrowDownIcon']],
-  ['packages/plugin-chatbot/src/index.tsx', ['Send']],
   ['packages/plugin-detail/src/DetailView.tsx', ['ArrowLeft', 'ChevronLeft', 'ChevronRight']],
   ['packages/plugin-detail/src/RecordComments.tsx', ['Send']],
   ['packages/plugin-list/src/ListView.tsx', ['X']],

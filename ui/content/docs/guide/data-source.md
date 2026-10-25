@@ -178,6 +178,40 @@ await dataSource.find('users', {
 
 Data-aware plugins may also use optional methods such as `batchTransaction`, `bulkUpdate`, `bulkDelete`, `getView`, or `listViewOverrides` when an adapter supports them. Keep the required CRUD methods implemented first, then add optional capabilities as your UI needs them.
 
+### Bulk writes: per-record results and one refresh per run
+
+`bulkUpdate` and `bulkDelete` resolve to either a plain count or a `BulkWriteResult`: the count plus one `{ id, error }` entry per record the server refused, with the server's reason. An adapter whose server reports per-row outcomes should return the `BulkWriteResult` (the `@object-ui/data-objectstack` adapter does, from the `results[].errors[]` of `updateMany` / `deleteMany`). An adapter that has only a count keeps returning the number. A caller handles both:
+
+```typescript
+import type { DataSource } from '@object-ui/types';
+
+declare const dataSource: DataSource;
+
+const res = await dataSource.bulkUpdate?.('order', ['o1', 'o2', 'o3'], { status: 'closed' });
+if (typeof res === 'number') {
+  console.log(`${res} updated`);
+} else if (res) {
+  console.log(`${res.succeeded} updated`);
+  for (const { id, error } of res.errors) console.warn(`${id}: ${error}`);
+}
+```
+
+The grid's bulk actions read both shapes. A refused record shows up in the result dialog and the error CSV under its own id and reason, and **Retry** works on it, whatever the action's `batchSize`.
+
+Every `create` / `update` / `delete` normally fires one `onMutation` event, and every bound view refetches once per event. A loop that writes many rows (a bulk action on its per-row path, an undo) would refetch the list once per row. Wrap such a loop in the optional `batchMutationEvents(work)`: the events its writes fire are held and delivered when `work` settles, one per touched resource and mutation type, so bound views refresh once. The grid's bulk executor does this when the adapter has the method.
+
+```typescript
+import type { DataSource } from '@object-ui/types';
+
+declare const dataSource: DataSource;
+
+const ids = ['o1', 'o2', 'o3'];
+const write = async () => {
+  for (const id of ids) await dataSource.update('order', id, { status: 'closed' });
+};
+await (dataSource.batchMutationEvents ? dataSource.batchMutationEvents(write) : write());
+```
+
 `listMetadataItems(type)` lists one metadata registry type as `{ name, label }` headers, for the `position-ref` / `permission-ref` field widgets (see the [Fields guide](./fields.md)). An empty array means the registry has no item of that type, so a failed load must **reject**, never resolve `[]`.
 
 ### Cross-object atomic writes (`batchTransaction`)

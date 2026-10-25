@@ -27,19 +27,19 @@ function makeDS(stub: { deleteMany?: any; delete?: any }) {
 }
 
 describe('ObjectStackDataSource.bulkDelete', () => {
-  it('returns 0 and skips network when ids is empty', async () => {
+  it('returns a zero result and skips network when ids is empty', async () => {
     const deleteMany = vi.fn();
     const ds = makeDS({ deleteMany });
-    const n = await ds.bulkDelete('sys_notification', []);
-    expect(n).toBe(0);
+    const res = await ds.bulkDelete('sys_notification', []);
+    expect(res).toEqual({ succeeded: 0, errors: [] });
     expect(deleteMany).not.toHaveBeenCalled();
   });
 
   it('issues a single deleteMany call with the id list', async () => {
     const deleteMany = vi.fn().mockResolvedValue({ succeeded: 3, failed: 0 });
     const ds = makeDS({ deleteMany });
-    const n = await ds.bulkDelete('task', ['a', 'b', 'c']);
-    expect(n).toBe(3);
+    const res = await ds.bulkDelete('task', ['a', 'b', 'c']);
+    expect(res).toEqual({ succeeded: 3, errors: [] });
     expect(deleteMany).toHaveBeenCalledTimes(1);
     const [resource, ids, opts] = deleteMany.mock.calls[0];
     expect(resource).toBe('task');
@@ -47,11 +47,11 @@ describe('ObjectStackDataSource.bulkDelete', () => {
     expect(opts).toEqual({ continueOnError: true });
   });
 
-  it('returns ids.length when deleteMany returns void (older clients)', async () => {
+  it('reads every id as deleted when deleteMany returns void (older clients)', async () => {
     const deleteMany = vi.fn().mockResolvedValue(undefined);
     const ds = makeDS({ deleteMany });
-    const n = await ds.bulkDelete('task', ['a', 'b']);
-    expect(n).toBe(2);
+    const res = await ds.bulkDelete('task', ['a', 'b']);
+    expect(res).toEqual({ succeeded: 2, errors: [] });
   });
 
   it('falls back to per-id delete loop when deleteMany is missing', async () => {
@@ -59,9 +59,9 @@ describe('ObjectStackDataSource.bulkDelete', () => {
       if (id === 'b') throw new Error('FK violation');
     });
     const ds = makeDS({ delete: del });
-    const n = await ds.bulkDelete('task', ['a', 'b', 'c']);
-    // continueOnError-emulated: b throws, a + c succeed.
-    expect(n).toBe(2);
+    const res = await ds.bulkDelete('task', ['a', 'b', 'c']);
+    // continueOnError-emulated: b throws, a + c succeed, b keeps its reason.
+    expect(res).toEqual({ succeeded: 2, errors: [{ id: 'b', error: 'FK violation' }] });
     expect(del).toHaveBeenCalledTimes(3);
   });
 
