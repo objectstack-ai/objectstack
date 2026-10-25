@@ -3,7 +3,6 @@
 分诊席每次 fire 路由与查重前读本文;执行席跨仓认领、派发或转移时读本文。
 
 - 产品依赖方向固定:`objectstack`(后端,`packages/spec` 是唯一契约)→ `objectui`(前端)与 `cloud`。
-- objectui 构建产物经 `pnpm objectui:refresh` 回流。
 - 多车道仓 `objectstack`、`objectui`:中央分诊是 `domain:*`/type/定级的唯一生产者。
 - 单车道仓 `cloud`、`objectos`、`hotcrm`、`www.objectos.ai`;未来新仓默认此类。
 - 单车道仓 `repo:*` 席自理机械三务,⛔ 不产 `domain:*`;决策卡入本仓收件箱,不落 objectstack。
@@ -26,8 +25,9 @@
 - 缝卡收窄为真协调卡:留 objectstack 带 `repo:*`,正文点名读者(哪个座位、哪一步)。
 - 决策卡留在立卡仓,总监席扫全部仓 `needs-user-decision` 呈批;在飞卡 ⛔ 不中途转仓。
 - 规则 2:跨层功能点或 objectui 消费的 `Seam:` 卡恒由分诊立父单 + 逐层子单,spec/后端先行。
+- `main` 有 `ui/` 起,新 spec 键不再先行、取代上句次序:与首个读者同 PR,hotcrm 读者同合并批。
 - 下游带 `Blocked-by: <owner/repo>#<n>`;`Blocked-by` 未关闭/未合并的不派发,对 GitHub 现验。
-- 被链接或同父的两单永不同批。
+- 被链接或同父的两单永不同批;`ui/` 起的新键与首个读者除外,⛔ `planned` 行不单独进 main。
 - pin 滞后是盲区:本仓 pin 是否已覆盖该 commit 是第二读数,派发前用 REST `compare` 核祖先。
 - 本地 `merge-base` 在浅检出上给假非祖先;未覆盖 ⇒ 派发令要求 PR 正文留档分叉窗口。
 - ⛔ pin bump 不做 rider:走专用 bump 脚本连带 override 与 lockfile。

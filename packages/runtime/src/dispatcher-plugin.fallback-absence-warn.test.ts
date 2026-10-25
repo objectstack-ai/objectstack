@@ -169,7 +169,7 @@ describe('dispatcher declarative-endpoint seam — absence is loud (#5400)', () 
 
 /**
  * [#24228] The fallback seam also hands a domain that decides every verb
- * (`/actions`, `/keys`, `/notifications`, `/mcp/skill`) the requests its
+ * (`/actions`, `/keys`, `/notifications`, `/mcp`, `/mcp/skill`) the requests its
  * router could not route on that domain's paths. Which paths those are is the
  * router's verdict, asked through `IHttpServer.resolveMountedRoute` — OPTIONAL
  * on the contract like the seam itself. A transport that has the seam but not
