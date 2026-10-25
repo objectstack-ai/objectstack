@@ -102,6 +102,12 @@ import {
   type AdminRescueNote,
 } from './admin-rescue-note.js';
 import {
+  SUBMITTER_EXCLUSION_NOTE_SNAPSHOT_KEY,
+  submitterExclusionNoteOf,
+  submitterExclusionNoteText,
+  type SubmitterExclusionNote,
+} from './submitter-exclusion-note.js';
+import {
   localizeRequestLabels,
   readerLabelsFor,
   type ReaderLabelI18n,
@@ -2092,6 +2098,23 @@ export class ApprovalService implements IApprovalService {
   }
 
   /**
+   * [#25573] The slate slots a step that sets `excludeSubmitter: true` keeps
+   * its submitter out of: the addresses the submitter acts under without
+   * naming one (`actingAddresses`: the user id and the account's email). None
+   * when the step does not set it, or the request has no submitter. Read by
+   * every writer of a slate — the open, the reassign door and the SLA
+   * escalation — so the three keep the same person off it.
+   */
+  private async excludedSubmitterSlots(
+    config: { excludeSubmitter?: unknown } | null | undefined,
+    submitterId: unknown,
+  ): Promise<string[]> {
+    if (config?.excludeSubmitter !== true || submitterId == null || String(submitterId) === '') return [];
+    const userId = String(submitterId);
+    return actingAddresses({ userId, email: await this.callerAccountEmail(userId) });
+  }
+
+  /**
    * The caller's server-resolved acting identity (`approver-address.ts`'s
    * `ActingCaller`): the context's user id, the email that user's own account
    * carries, and `context.positions` — or `null` for a context with no user id,
@@ -3621,15 +3644,46 @@ export class ApprovalService implements IApprovalService {
     const requestOrg = subjectOrg ?? ctxOrg;
     const resolvedFrom: Record<string, unknown> = {};
     const exprCtx = { trigger: input.record ?? null, vars: input.variables ?? null };
+    const submitterId = input.submitterId !== undefined ? input.submitterId : (context.userId ?? null);
+    // [#25573] `excludeSubmitter: true` (ruling 6377888641, letter B): the
+    // submitter is taken off every slate this request can open on. It runs on
+    // the RESOLVED slate, so the one seam covers every approver type (`user`,
+    // `field`, `manager`, `position`, `team`, `department`,
+    // `org_membership_level`, `expression`) and an out-of-office hop that lands
+    // on the submitter. The slots removed are the addresses the submitter acts
+    // under without naming one ({@link excludedSubmitterSlots}), never a
+    // `position:<p>` literal, which other holders take. `approvers`, the `fallback` slate and the administrators an
+    // `admin_rescue` opens on are all screened, because the ruled outcome is
+    // "never approved by the submitter": a submitter who is also on the
+    // fallback list or an administrator would otherwise get their own request
+    // back one route later. A slate this empties takes the node's
+    // `onEmptyApprovers` route like any slate that names no one; that route is
+    // never `auto_approve`, which the spec refuses beside `excludeSubmitter:
+    // true`. Off (the default), no slate is touched and nothing is read.
+    const submitterSlots = await this.excludedSubmitterSlots(input.config, submitterId);
+    /** The slates the exclusion took the submitter off, for the route note. */
+    const excludedFrom = new Set<'approvers' | 'fallback' | 'administrators'>();
+    const withoutSubmitter = (
+      slate: string[], from: 'approvers' | 'fallback' | 'administrators', slateGroups: Record<string, string[]>,
+    ): string[] => {
+      const kept = slate.filter((slot) => !submitterSlots.includes(slot));
+      if (kept.length !== slate.length) {
+        excludedFrom.add(from);
+        for (const slot of submitterSlots) delete slateGroups[slot];
+      }
+      return kept;
+    };
+    /** Which slate the request opens on — what the route note names. */
+    let slateSource: 'approvers' | 'fallback' | 'administrators' | 'no_one' = 'approvers';
     // `let`, not `const`: the `fallback` empty-slate policy below REPLACES this
     // slate with the node's declared fallback approvers.
-    let approvers = await this.expandApprovers(
+    let approvers = withoutSubmitter(await this.expandApprovers(
       { approvers: input.config.approvers }, liveRecord, requestOrg, {
         now: nowDate.getTime(), substitutions, groups,
         exprCtx,
         resolvedFrom,
       },
-    );
+    ), 'approvers', groups);
 
     // Empty-slate policy (#3447 P2). "Empty" = no CONCRETE person — an
     // unstaffed position / empty expression result leaves only `type:value`
@@ -3649,7 +3703,9 @@ export class ApprovalService implements IApprovalService {
       if (emptyPolicy === 'fail') {
         throw new Error(
           `NO_APPROVERS: approval node '${input.nodeId}' on ${input.object}/${input.recordId} resolved to no `
-          + `concrete approver and its onEmptyApprovers policy is 'fail'. Check that the approver target(s) `
+          + `concrete approver${excludedFrom.has('approvers')
+            ? " other than the request's submitter, whom the node's excludeSubmitter removes,"
+            : ''} and its onEmptyApprovers policy is 'fail'. Check that the approver target(s) `
           + `are staffed / the routing field or expression yields user ids at node entry.`,
         );
       }
@@ -3680,13 +3736,13 @@ export class ApprovalService implements IApprovalService {
         // the policy was chosen to avoid.
         if (Array.isArray(declared) && declared.length) {
           const fallbackResolvedFrom: Record<string, unknown> = {};
-          const fallbackApprovers = await this.expandApprovers(
+          const fallbackApprovers = withoutSubmitter(await this.expandApprovers(
             { approvers: declared }, liveRecord, requestOrg, {
               now: nowDate.getTime(), substitutions, groups,
               exprCtx,
               resolvedFrom: fallbackResolvedFrom,
             },
-          );
+          ), 'fallback', groups);
           // Keep the primary slate's resolution inputs (they explain WHY the
           // fallback fired) and namespace the fallback's own, so neither
           // clobbers the other in the `__resolvedFrom` audit snapshot.
@@ -3707,6 +3763,7 @@ export class ApprovalService implements IApprovalService {
             // describes the slate the approvers actually see.
             for (const slot of approvers) delete groups[slot];
             approvers = fallbackApprovers;
+            slateSource = 'fallback';
           } else {
             fallbackDegraded = 'resolved_to_no_one';
             this.logger?.warn?.(
@@ -3748,20 +3805,33 @@ export class ApprovalService implements IApprovalService {
       // Re-tested rather than assumed: a `fallback` that landed people above
       // has already turned this into a normal request.
       if (!slateNamesAPerson(approvers)) {
-        const reason = adminRescueReason(approvers, fallbackDegraded);
+        const reason = adminRescueReason(approvers, fallbackDegraded, excludedFrom.has('approvers'));
         const found = await this.organizationAdministrators(requestOrg);
         const administrators = 'ids' in found ? found.ids : [];
-        if (administrators.length) {
+        // [#25573] Expanded into collectors of its own, and adopted only when
+        // the slate still names someone once the submitter is off it: an
+        // organization whose only administrator submitted the request has no
+        // one here, and its out-of-office hops must not be told about a slate
+        // the request does not open on.
+        const administratorGroups: Record<string, string[]> = {};
+        const administratorSubstitutions: OooSubstitution[] = [];
+        const administratorSlate = administrators.length
+          ? withoutSubmitter(await this.expandApprovers(
+            {
+              approvers: administrators.map((value) => ({ type: 'user', value, group: ADMIN_RESCUE_GROUP })),
+            },
+            liveRecord, requestOrg, {
+              now: nowDate.getTime(), substitutions: administratorSubstitutions, groups: administratorGroups, exprCtx,
+            },
+          ), 'administrators', administratorGroups)
+          : [];
+        if (slateNamesAPerson(administratorSlate)) {
           // Every per_group tag collected so far describes a slot that is no
           // longer on this request (the primary slate's literals, and a failed
           // fallback's): the tally reads the administrators' one group only.
           for (const slot of Object.keys(groups)) delete groups[slot];
-          const administratorSlate = await this.expandApprovers(
-            {
-              approvers: administrators.map((value) => ({ type: 'user', value, group: ADMIN_RESCUE_GROUP })),
-            },
-            liveRecord, requestOrg, { now: nowDate.getTime(), substitutions, groups, exprCtx },
-          );
+          Object.assign(groups, administratorGroups);
+          substitutions.push(...administratorSubstitutions);
           resolvedFrom['admin_rescue:abandoned'] = [...approvers];
           resolvedFrom['admin_rescue:reason'] = reason;
           this.logger?.warn?.(
@@ -3778,9 +3848,12 @@ export class ApprovalService implements IApprovalService {
             action_id: uid('aact'),
             abandoned: [...approvers],
             ...(fallbackDegraded ? { fallback: fallbackDegraded } : {}),
+            ...(excludedFrom.has('approvers') ? { submitter_excluded: true as const } : {}),
           };
           approvers = administratorSlate;
+          slateSource = 'administrators';
         } else {
+          slateSource = 'no_one';
           // Break-glass stays break-glass (#3424): an organization whose
           // administrators' slate resolves to nobody opens the request on the
           // slate that names no one — the only option that neither waves the
@@ -3788,7 +3861,10 @@ export class ApprovalService implements IApprovalService {
           // override can decide it. Said loudly, with the fix.
           const why = 'failure' in found
             ? `the administrators of organization '${requestOrg}' could not be read (${found.failure})`
-            : requestOrg
+            : administrators.length
+              ? `every administrator of organization '${requestOrg}' resolves to the request's submitter, whom `
+                + `the node's excludeSubmitter removes`
+              : requestOrg
               ? `organization '${requestOrg}' has no administrator`
               : 'the request has no organization, so it has no organization administrators';
           this.logger?.warn?.(
@@ -3830,6 +3906,12 @@ export class ApprovalService implements IApprovalService {
       configSnapshot.__resolvedFrom = resolvedFrom;
     }
     if (adminRescueNote) configSnapshot[ADMIN_RESCUE_NOTE_SNAPSHOT_KEY] = adminRescueNote;
+    // [#25573] The record shows when the exclusion changed the route: the
+    // route the request took once the submitter was off its slate.
+    const exclusionNote: SubmitterExclusionNote | undefined = excludedFrom.size
+      ? { action_id: uid('aact'), route: slateSource === 'approvers' ? 'remaining_approvers' : slateSource }
+      : undefined;
+    if (exclusionNote) configSnapshot[SUBMITTER_EXCLUSION_NOTE_SNAPSHOT_KEY] = exclusionNote;
     // ADR-0044 round numbering: rounds of a revise loop share the run — count
     // this (run, node)'s prior requests; the new one is round N+1. Stamped on
     // the snapshot (precedent: __flowLabel), so no schema migration.
@@ -3840,7 +3922,6 @@ export class ApprovalService implements IApprovalService {
       const n = Array.isArray(prior) ? prior.length : 0;
       if (n > 0) configSnapshot.__round = n + 1;
     } catch { /* round display is best-effort */ }
-    const submitterId = input.submitterId !== undefined ? input.submitterId : (context.userId ?? null);
     const row: any = {
       id,
       process_name: processName,
@@ -3892,6 +3973,17 @@ export class ApprovalService implements IApprovalService {
         step_name: input.nodeId, step_index: 0, action: 'comment',
         actor_id: null,
         comment: adminRescueNoteText(adminRescueNote),
+        created_at: now,
+      }), { context: SYSTEM_CTX });
+    }
+    // [#25573] Its sibling note, the same shape: no person took the submitter
+    // off the slate, the node's `excludeSubmitter` did.
+    if (exclusionNote) {
+      await this.engine.insert('sys_approval_action', await this.actionRow(row, {
+        id: exclusionNote.action_id, request_id: id, organization_id: requestOrg,
+        step_name: input.nodeId, step_index: 0, action: 'comment',
+        actor_id: null,
+        comment: submitterExclusionNoteText(exclusionNote),
         created_at: now,
       }), { context: SYSTEM_CTX });
     }
@@ -4108,6 +4200,25 @@ export class ApprovalService implements IApprovalService {
     const nodeId: string | null = raw.flow_node_id ?? raw.current_step ?? null;
     const runId: string | null = raw.flow_run_id ?? null;
     const now = this.clock.now().toISOString();
+
+    // [#25573] `excludeSubmitter: true` holds at the decision as well as at
+    // the open: the submitter never approves their own request, whatever put
+    // a slot in their hands after it opened (a `position:<p>` literal they
+    // were staffed into later) and through the privileged override too. The
+    // reassign door and the SLA escalation keep the submitter off the slate;
+    // this is the one check every approval passes through. Refused before any
+    // write. A rejection approves nothing, so it stays theirs to make.
+    const decider = recordedActor(context);
+    if (
+      input.decision === 'approve' && config.excludeSubmitter === true
+      && raw.submitter_id && decider && decider === String(raw.submitter_id)
+    ) {
+      throw new Error(
+        `FORBIDDEN: '${decider}' submitted this request, and its approval step sets excludeSubmitter, so they `
+        + `cannot approve it. Another approver on the step decides it; if the submitter holds the only slot, `
+        + `reassign it to someone else.`,
+      );
+    }
 
     // #3447 P2: decision outputs — validated BEFORE any write (audit included)
     // so an out-of-contract payload rejects atomically. The trust model is a
@@ -5507,6 +5618,7 @@ export class ApprovalService implements IApprovalService {
     // AFTER the authorization branches above, so a caller who may not move
     // this slot learns nothing about the directory from the answer.
     await this.assertReassignTargetResolves(to, raw.organization_id ?? null);
+    await this.assertReassignTargetIsNotSubmitter(raw, to);
     const now = this.clock.now().toISOString();
     // Audit first, then mutate — mirrors decideNode(), so a failed audit
     // write can never leave a moved slot without a trail.
@@ -5599,6 +5711,33 @@ export class ApprovalService implements IApprovalService {
       `VALIDATION_FAILED: cannot reassign to '${to}' — ${why} The request and its approvers are unchanged. `
       + `Reassign to the user id or email of a person in this request's organization, or to `
       + `'position:<name>' for a position someone in it holds.`,
+    );
+  }
+
+  /**
+   * [#25573] Refuse a reassign that hands a step setting `excludeSubmitter:
+   * true` back to its submitter: their own address, or a position only they
+   * hold in the request's organization. Either leaves a slot only the
+   * submitter can take, and `decideNode` refuses their approval, so the
+   * request would wait on a slot no one can approve. Asked after the
+   * authorization branches, like {@link assertReassignTargetResolves}.
+   */
+  private async assertReassignTargetIsNotSubmitter(raw: any, to: string): Promise<void> {
+    const submitterSlots = await this.excludedSubmitterSlots(
+      parseJson<{ excludeSubmitter?: unknown } | null>(raw.node_config_json, null), raw.submitter_id,
+    );
+    if (!submitterSlots.length) return;
+    const position = addressedPosition(to);
+    const handsBack = position !== undefined
+      ? (await this.expandPositionUsers(position, raw.organization_id ?? null))
+        .every((holder) => submitterSlots.includes(holder))
+      : submitterSlots.includes(to);
+    if (!handsBack) return;
+    throw new Error(
+      `VALIDATION_FAILED: cannot reassign to '${to}' — ${position !== undefined
+        ? `the only holder of position '${position}' in this request's organization is`
+        : 'it names'} the request's submitter, and this approval step sets excludeSubmitter, so the submitter `
+      + `cannot approve it. The request and its approvers are unchanged. Reassign to someone else.`,
     );
   }
 
@@ -7056,6 +7195,20 @@ export class ApprovalService implements IApprovalService {
       ? await this.reassignTargetRefusal(escalateTo!, raw.organization_id ?? null)
       : undefined;
     if (unresolved !== undefined) escalatees = [];
+    // [#25573] A step that sets `excludeSubmitter: true` is never escalated
+    // onto its submitter: they are left off the new slate (a position they
+    // hold with others hands the slot to the others), and a target that is
+    // the submitter alone hands it to no one, so the slate stays and is told
+    // the SLA lapsed, as for a target that resolves to no one.
+    let submitterLeftOff = false;
+    if (action === 'reassign' && escalatees.length) {
+      const submitterSlots = await this.excludedSubmitterSlots(
+        parseJson<{ excludeSubmitter?: unknown } | null>(raw.node_config_json, null), raw.submitter_id,
+      );
+      const kept = escalatees.filter((slot) => !submitterSlots.includes(slot));
+      submitterLeftOff = kept.length !== escalatees.length;
+      escalatees = kept;
+    }
     // The action this sweep TAKES: a reassign with no one to hand to notifies.
     const taken = action === 'reassign' && !escalatees.length ? 'notify' : action;
 
@@ -7070,7 +7223,13 @@ export class ApprovalService implements IApprovalService {
       step_name: raw.flow_node_id ?? raw.current_step ?? null, step_index: 0, action: 'escalate',
       actor_id: null,
       comment: `${action}${escalateTo ? ` → ${escalateTo}` : ''}`
-        + (unresolved !== undefined ? ` — not applied: ${unresolved} The pending approvers were kept and notified.` : ''),
+        + (unresolved !== undefined ? ` — not applied: ${unresolved} The pending approvers were kept and notified.` : '')
+        + (submitterLeftOff
+          ? escalatees.length
+            ? " — the request's submitter was left off the new slate: the step sets excludeSubmitter."
+            : " — not applied: the target is the request's submitter, whom the step's excludeSubmitter keeps off "
+              + 'the slate. The pending approvers were kept and notified.'
+          : ''),
       created_at: now,
     }), { context: SYSTEM_CTX });
 
@@ -8698,12 +8857,14 @@ export class ApprovalService implements IApprovalService {
       const toName = a.reassign_to ? names.get(String(a.reassign_to)) : undefined;
       if (toName) a.reassign_to_name = toName;
     }
-    await this.localizeAdminRescueNote(requestId, actions, context);
+    await this.localizeRoutingNotes(requestId, actions, context);
     return actions;
   }
 
   /**
-   * [#25576] The administrators' routing note, in the reader's language.
+   * [#25576] The administrators' routing note, in the reader's language —
+   * and [#25573] its sibling, the submitter exclusion note
+   * (`submitter-exclusion-note.ts`), read the same way.
    *
    * The note's code and parameters ride the request's node-config snapshot,
    * naming the timeline row they explain (`admin-rescue-note.ts`); that row's
@@ -8715,7 +8876,7 @@ export class ApprovalService implements IApprovalService {
    * administrators, or one opened before the note was stored as data), or
    * when the pack holds no note sentence.
    */
-  private async localizeAdminRescueNote(
+  private async localizeRoutingNotes(
     requestId: string,
     actions: ApprovalActionRow[],
     context: ExecutionContext,
@@ -8726,12 +8887,16 @@ export class ApprovalService implements IApprovalService {
     if (!labels) return;
     const tenantOrg = (context as any)?.organizationId ?? context?.tenantId;
     const raw = await findRequestRow(this.engine, requestId, tenantOrg ?? null);
-    const note = adminRescueNoteOf(parseJson<unknown>(raw?.node_config_json, undefined));
-    if (!note) return;
-    const row = actions.find((a) => a.id === note.action_id && a.action === 'comment' && !a.actor_id);
-    if (!row) return;
-    const text = adminRescueNoteText(note, labels.sentence);
-    if (text) row.comment = text;
+    const snapshot = parseJson<unknown>(raw?.node_config_json, undefined);
+    const overlay = (actionId: string, render: () => string | undefined): void => {
+      const row = actions.find((a) => a.id === actionId && a.action === 'comment' && !a.actor_id);
+      const text = row ? render() : undefined;
+      if (row && text) row.comment = text;
+    };
+    const rescue = adminRescueNoteOf(snapshot);
+    if (rescue) overlay(rescue.action_id, () => adminRescueNoteText(rescue, labels.sentence));
+    const exclusion = submitterExclusionNoteOf(snapshot);
+    if (exclusion) overlay(exclusion.action_id, () => submitterExclusionNoteText(exclusion, labels.sentence));
   }
 
   /**

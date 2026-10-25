@@ -356,6 +356,51 @@ there — write the value itself (`sourceObject: 'crm_case'`). A `{…}` token
 there is refused, since it would reach the messaging service with its braces,
 and so is an envelope. The node's `actionUrl` is a text slot (below).
 
+**A `notify` node mails a person who is not a user through an email field.**
+An applicant who came in through a public form has no account, so no user id
+reaches them. Write `recipients: { emailField: 'applicant_email' }` — the whole
+value, never a list entry — naming an `email`-typed field of the record that
+triggered the flow, with `channels: 'email'`:
+
+```ts
+{
+  id: 'tell_applicant', type: 'notify', label: 'Tell the applicant',
+  config: {
+    recipients: { emailField: 'applicant_email' },
+    channels: 'email',
+    title: 'We received your application, {{ record.company_name }}',
+    message: 'We will reply within five working days.',
+  },
+}
+```
+
+The address is read from the **stored** record when the node runs, and it
+must be exactly one plain ASCII mailbox (`name@example.com`): a list, a
+display name, a separator or a line break fails the node and nothing is sent,
+and so do an address the `email` field type accepts but this node does not (a
+non-ASCII character, a quoted local part, an IP-literal domain), an empty field
+and a run with no trigger record. The title and message are
+rendered as for any notify, the send goes through the deployment's outbound
+mail, and it is recorded like every notification: a `sys_notification` event
+and a `sys_notification_delivery` row whose recipient is the address. One
+address receives at most 5 such emails per hour, across every flow; a sixth
+fails the node, so a form a visitor fills in cannot mail one inbox without
+end. The limit is best-effort: when its counter in the kernel `cache` service
+faults, the send is admitted and a warning is logged once. `objectstack validate` refuses a field the object does not have, a field
+that is not `email`-typed, another channel, and a flow with no triggering
+record.
+
+In a node whose `channels` include `email`, an address a **value expression
+computes** must belong to a user, written bare or as `user:ADDRESS`: an
+envelope that evaluates to a user's address reaches that user, and one that
+evaluates to an address no user holds
+fails the node, pointing to `{ emailField }` — an expression over record text
+would otherwise let whoever typed that text choose who the flow mails. A node
+that does not name `email` (`inbox` alone, the default) mails nobody, so its
+computed recipients resolve as before. An address **written out** in the flow
+(`recipients: ['ops@example.com']`) is the author's constant and is sent as
+written.
+
 **A CRUD node's filter: each operand computes before the query, and the query
 placeholders stay.** In a `get_record`, `update_record` or `delete_record`
 `filter`, each **operand** — a field's value, an operator's comparand, each
@@ -515,7 +560,7 @@ the call, so a `durable` callout enqueues exactly the request the inline call
 would send.
 
 <Callout type="warn" title="Do not put a secret in an http node's url or headers">
-A flow definition, including an `http` node's `url` and `headers`, is served to every member who can read flows. A token, API key or signed webhook url written there is readable by all of them. Route an outbound credential by where it sits, and call the connector with a `connector_action` node instead — see [Connectors](/docs/automation/connectors#authentication). A credential in a header goes to a declarative connector with `bearer`, `basic` or `api-key` auth, whose `auth.credentialRef` names the secret. A key in the query string goes to `api-key` auth with `paramName`. No `credentialRef` variant carries a secret in the url path, so an incoming-webhook url (whose path is the secret) cannot be routed that way: call the service through a token-authenticated connector instead, such as the `slack` connector, whose bot token is supplied to the plugin by host code rather than written in the flow (it is registered by that plugin, not declared as a `connectors:` instance). Otherwise such a url is served with the definition. Only `signingSecret` and a start node's `secret` are kept out of a flow saved through the metadata API: the metadata save door stores each in a write-only, encrypted flow credential store, a read never returns it, and the engine reads it only to verify an inbound post or sign an outbound request. A packaged flow keeps its literal in its package source. The literal is withheld when the definition is served, and a credential store row for that flow, where one exists, wins when the engine verifies or signs. `url` and `headers` are stored and served as written.
+A flow definition, including an `http` node's `url` and `headers`, is served to every member who can read flows. A token, API key or signed webhook url written there is readable by all of them. Route an outbound credential by where it sits, and call the connector with a `connector_action` node instead — see [Connectors](/docs/automation/connectors#authentication). A credential in a header goes to a declarative connector with `bearer`, `basic` or `api-key` auth, whose `auth.credentialRef` names the secret. A key in the query string goes to `api-key` auth with `paramName`. No `credentialRef` variant carries a secret in the url path, so an incoming-webhook url (whose path is the secret) cannot be routed that way: call the service through a token-authenticated connector instead, such as the `slack` connector, whose bot token is supplied to the plugin by host code rather than written in the flow (it is registered by that plugin, not declared as a `connectors:` instance). Otherwise such a url is served with the definition. Only `signingSecret` and a start node's `secret` are kept out of a flow saved through the metadata API: the metadata save door stores each in a write-only, encrypted flow credential store, a read never returns it, and the engine reads it only to verify an inbound post or sign an outbound request. A flow that ships in a package names its inbound hook secret instead of carrying it: the start node's `config.secretRef` holds the name the deployment fills (an environment variable of that name in the open tier, resolved through the same credential resolver as a connector's `auth.credentialRef`), and the engine reads it at every post, so no credential is published with the package. A post that arrives while the name has no value is answered `503`, never verified. The reference is a name, not a credential: it is served as written, it may not sit beside a literal `secret`, and it may not name a variable in the platform's `OS_` namespace. A packaged flow that carries a literal keeps it in its package source; the literal is withheld when the definition is served, and a credential store row for that flow, where one exists, wins when the engine verifies or signs. `url` and `headers` are stored and served as written.
 </Callout>
 
 **Script:**

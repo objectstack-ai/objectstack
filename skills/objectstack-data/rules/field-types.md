@@ -113,8 +113,8 @@ Stored as JSON on the parent row — no separate table / FK:
 
 | Type | When to Use |
 |:-----|:------------|
-| `composite` | Single embedded sub-object with declared sub-fields |
-| `repeater` | Repeating embedded sub-object **array** |
+| `composite` | Single embedded JSON object, **untyped** — a field declares no sub-fields (`fields` / `subFields` are refused) |
+| `repeater` | Embedded JSON **array**, **untyped** — no sub-fields or `columns`; a typed list is a child object (`master_detail`, `inlineEdit: 'grid'`) |
 | `record` | Name-keyed **map** of embedded sub-objects (insertion order = display order; ADR-0007) |
 
 ## Calculated

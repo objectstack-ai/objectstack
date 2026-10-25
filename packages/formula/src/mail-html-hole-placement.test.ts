@@ -59,6 +59,8 @@ describe('the refused placements, by class', () => {
     ['<style>p { color: {{x}} }</style>', 'raw-text-element'],
     ['<noscript>{{x}}</noscript>', 'raw-text-element'],
     ['<plaintext>{{x}}', 'raw-text-element'],
+    // The script data double escaped state: an end tag there does not end the element.
+    ['<script><!--<script></script>{{x}}</script>', 'raw-text-element'],
     ['<!-- {{x}} -->', 'comment'],
     ['<!--[if mso]><p>{{x}}</p><![endif]-->', 'comment'],
     ['<!DOCTYPE {{x}}>', 'comment'],
@@ -68,6 +70,8 @@ describe('the refused placements, by class', () => {
     ['<p {{x}}>a</p>', 'tag'],
     ['<{{x}}>', 'tag'],
     ['</{{x}}>', 'tag'],
+    // The tag open state: a character that opens no tag is reconsumed in the data state.
+    ['<<p {{x}}>a</p>', 'tag'],
     ['<p title="a"{{x}}>a</p>', 'tag'],
     ['<p data-{{x}}="1">a</p>', 'tag'],
     ['<a href="{{x}}">a</a>', 'url-attribute'],

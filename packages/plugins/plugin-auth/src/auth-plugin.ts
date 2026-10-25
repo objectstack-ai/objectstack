@@ -76,6 +76,7 @@ import { runResendVerificationEmail } from './send-verification-email.js';
 import { runSysSessionRevoke, sysSessionRevokeDepsFor } from './sys-session-revoke.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import {
+  seedCreatedOrganizationCurrency,
   seedDevWorkspaceCurrency,
   withOrganizationDefaultCurrency,
   type CurrencySettingsDoor,
@@ -1421,6 +1422,33 @@ export class AuthPlugin implements Plugin {
             // created the platform admin, and the pass is serialized on its
             // own chain, which never rejects.
             void runBackfillOnDefaultOrg?.('default-org-created');
+          }
+          // [#25651] The Default Organization is created at boot with no
+          // creator, so it never reaches `onOrganizationCreated` (#25495). Its
+          // first owner stands in for the creator: when the owner is first
+          // bound (this call bound or promoted them, which the once-gate admits
+          // once), the organization takes that owner's default currency by the
+          // same rule and the same write — their stored `sys_user.locale`, else
+          // the binding request's `Accept-Language`. On a first sign-up this
+          // call runs inside that sign-up's request (the `sys_user` /
+          // `sys_user_permission_set` write middleware), so its headers are
+          // visible. Nothing derivable ⇒ nothing written; a value already set
+          // is kept. Never throws.
+          if ((res.memberCreated || res.ownerPromoted === true) && res.defaultOrgId && res.ownerUserId) {
+            await seedCreatedOrganizationCurrency(
+              { organizationId: res.defaultOrgId, userId: res.ownerUserId },
+              {
+                dataEngine: ql,
+                getSettings: () => {
+                  try {
+                    return ctx.getService<CurrencySettingsDoor>('settings');
+                  } catch {
+                    return undefined;
+                  }
+                },
+                logger: ctx.logger,
+              },
+            );
           }
         } catch (e) {
           ctx.logger.warn?.('[auth] ensureDefaultOrganization failed', {

@@ -481,12 +481,14 @@ describe('Storage REST Routes', () => {
       expect(authorizeFileRead).not.toHaveBeenCalled();
     });
 
-    it('never gates a file with neither an attachments scope nor a field owner', async () => {
+    it('[#25693] asks the authorizer about a file with neither an attachments scope nor a field owner, and answers its deny 403 FILE_DOWNLOAD_DENIED', async () => {
       const { server, store: s, authorizeFileRead } = serverWith('deny');
       await commit(s, { id: 'a5', scope: 'user', key: 'user/a5.png' });
       const res = await hit(server, '/api/v1/storage/files/:fileId', 'a5');
-      expect(res._status).toBe(302);
-      expect(authorizeFileRead).not.toHaveBeenCalled();
+      expect(res._status).toBe(403);
+      expect(res._json?.error?.code).toBe('FILE_DOWNLOAD_DENIED');
+      expect(res._headers.Location).toBeUndefined();
+      expect(authorizeFileRead).toHaveBeenCalledOnce();
     });
 
     it('stays open when no authorizer is wired (back-compat)', async () => {
@@ -542,34 +544,45 @@ describe('Storage REST Routes', () => {
         expect(authorizeFileRead).not.toHaveBeenCalled();
       });
 
+      /** Seconds of life the minted local capability URL carries. */
+      const ttlOf = (url: string) =>
+        adapter.verifyToken(url.split('/').pop()!, 'get').exp - Math.floor(Date.now() / 1000);
+
       /**
        * DUAL-MODE REGRESSION. A pre-cutover field holds an inline blob or an
-       * external URL, never a sys_file id — so no legacy file is ever claimed,
-       * `ref_object` stays unset, and this change gates nothing that used to
-       * be open. An unclaimed upload behaves the same way.
+       * external URL, never a sys_file id — so no legacy file is ever claimed
+       * and `ref_object` stays unset. Such a file is the UNCLAIMED class, not
+       * the field-owned one: [#25693] the authorizer judges it as unclaimed,
+       * and an allowed download keeps the presigned TTL that class was always
+       * minted with rather than the field-owned class's short one.
        */
-      it('does not gate an unclaimed file (no ref_object) — legacy fields keep working', async () => {
-        const { server, store: s, authorizeFileRead } = serverWith('deny');
+      it('judges an unclaimed file (no ref_object) as the unclaimed class, not the field-owned one', async () => {
+        const { server, store: s, authorizeFileRead } = serverWith('allow', { downloadTtl: 120, presignedTtl: 1800 });
         await commit(s, { id: 'fo5', scope: 'user', key: 'user/fo5.png' });
-        const res = await hit(server, '/api/v1/storage/files/:fileId', 'fo5');
-        expect(res._status).toBe(302);
-        expect(authorizeFileRead).not.toHaveBeenCalled();
+        const res = await hit(server, '/api/v1/storage/files/:fileId/url', 'fo5');
+        expect(res._status).toBe(200);
+        expect(ttlOf(res._json.data.url)).toBeGreaterThan(1700);
+        expect(authorizeFileRead).toHaveBeenCalledOnce();
       });
 
-      it('does not gate a file whose ownership was released', async () => {
-        const { server, store: s, authorizeFileRead } = serverWith('deny');
+      it('judges a file whose ownership was released as the unclaimed class', async () => {
+        const { server, store: s, authorizeFileRead } = serverWith('allow', { downloadTtl: 120, presignedTtl: 1800 });
         await commit(s, owned('fo6', { ref_object: null, ref_id: null, ref_field: null }));
-        const res = await hit(server, '/api/v1/storage/files/:fileId', 'fo6');
-        expect(res._status).toBe(302);
-        expect(authorizeFileRead).not.toHaveBeenCalled();
+        const res = await hit(server, '/api/v1/storage/files/:fileId/url', 'fo6');
+        expect(res._status).toBe(200);
+        expect(ttlOf(res._json.data.url)).toBeGreaterThan(1700);
+        expect(authorizeFileRead).toHaveBeenCalledOnce();
       });
     });
   });
 
   // ── [#22431] The unclaimed class: neither an attachments scope nor a field
   // owner. It has no parent record to derive access from, so the download
-  // asks for one thing only — a signed-in caller — unless the file declares
-  // `acl: 'public_read'` (ADR-0104's one anonymous download).
+  // asks for a signed-in caller first — unless the file declares
+  // `acl: 'public_read'` (ADR-0104's one anonymous download). [#25693] A
+  // signed-in caller is then judged by the authorizer, which serves such a
+  // file only within its organization (pinned on a real engine in
+  // `unclaimed-file-organization-scope.test.ts`).
   describe('a file with neither an attachments scope nor a field owner needs a signed-in caller (#22431)', () => {
     const DOORS = ['/api/v1/storage/files/:fileId/url', '/api/v1/storage/files/:fileId'] as const;
 
@@ -624,7 +637,7 @@ describe('Storage REST Routes', () => {
       }
       expect(minted).not.toHaveBeenCalled();
       expect(resolveSession).toHaveBeenCalledTimes(2);
-      // Not the parent-governed authorizer's file: there is no parent record.
+      // Refused at the session gate, before the authorizer is asked.
       expect(authorizeFileRead).not.toHaveBeenCalled();
       minted.mockRestore();
     });
@@ -656,8 +669,9 @@ describe('Storage REST Routes', () => {
       }
     });
 
-    it('serves a signed-in caller as before: a 302 and a URL carrying the presigned TTL', async () => {
-      const { server, store: s, authorizeFileRead } = serverWith(async () => ({ userId: 'user-7' }), { presignedTtl: 1800 });
+    it('serves a signed-in caller the authorizer allows: a 302 and a URL carrying the presigned TTL', async () => {
+      const authorizeFileRead = vi.fn(async () => 'allow' as const);
+      const { server, store: s } = serverWith(async () => ({ userId: 'user-7' }), { presignedTtl: 1800, authorizeFileRead });
       await commit(s, { id: 'u4' });
       const url = await hit(server, DOORS[0], 'u4');
       expect(url._status).toBe(200);
@@ -668,7 +682,26 @@ describe('Storage REST Routes', () => {
       const redirect = await hit(server, DOORS[1], 'u4');
       expect(redirect._status).toBe(302);
       expect(redirect._headers.Location).toContain('/_local/raw/');
-      expect(authorizeFileRead).not.toHaveBeenCalled();
+      // [#25693] Asked once per door, after the session gate passed.
+      expect(authorizeFileRead).toHaveBeenCalledTimes(2);
+    });
+
+    it('[#25693] refuses a signed-in caller the authorizer denies 403 FILE_DOWNLOAD_DENIED at both doors, minting no URL', async () => {
+      const resolveSession = vi.fn(async () => ({ userId: 'user-7', organizationId: 'org-2' }));
+      const { server, store: s, authorizeFileRead } = serverWith(resolveSession);
+      await commit(s, { id: 'u4d' });
+      const minted = vi.spyOn(adapter, 'getPresignedDownload');
+      for (const door of DOORS) {
+        const res = await hit(server, door, 'u4d');
+        expect(res._status, door).toBe(403);
+        expect(res._json?.success, door).toBe(false);
+        expect(res._json?.error?.code, door).toBe('FILE_DOWNLOAD_DENIED');
+        expect(res._headers.Location, door).toBeUndefined();
+      }
+      expect(minted).not.toHaveBeenCalled();
+      expect(resolveSession).toHaveBeenCalledTimes(2);
+      expect(authorizeFileRead).toHaveBeenCalledTimes(2);
+      minted.mockRestore();
     });
 
     it("keeps an acl: 'public_read' file anonymous without asking for a session", async () => {
@@ -705,7 +738,9 @@ describe('Storage REST Routes', () => {
     });
 
     it('keeps a kernel with no session resolver open, and says so once', async () => {
-      const { server, store: s, logger } = serverWith(undefined);
+      // A bare kernel: no auth service, so neither a session resolver nor an
+      // authorizer is bound (`composeStorageRoutes`).
+      const { server, store: s, logger } = serverWith(undefined, { authorizeFileRead: undefined });
       await commit(s, { id: 'u6' });
       expect((await hit(server, DOORS[1], 'u6'))._status).toBe(302);
       expect((await hit(server, DOORS[0], 'u6'))._status).toBe(200);

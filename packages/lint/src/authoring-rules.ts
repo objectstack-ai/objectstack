@@ -128,6 +128,7 @@ import { validateRecordTitle } from './validate-record-title.js';
 import { validateFieldConsumers } from './validate-field-consumers.js';
 import { validateSemanticRoles } from './validate-semantic-roles.js';
 import { validateFormLayout } from './validate-form-layout.js';
+import { validatePublicFormFileFields } from './validate-public-form-file-fields.js';
 import { validateSeedReplaySafety } from './validate-seed-replay-safety.js';
 import { validateSeedStateMachine } from './validate-seed-state-machine.js';
 import { validateVisibilityPredicates } from './validate-visibility-predicates.js';
@@ -758,9 +759,13 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // `runStackExpressionPasses` runs that pass alone, over the written page's
     // action rows and inline actions; an action or object write judges the
     // written action's own `confirmText` / `successMessage` in the same pass.
-    // Every finding is a `warning` (an advisory, never a refusal), because
-    // every such sentence parsed while the keys were plain strings; the
-    // refusal is its own card.
+    // #25680 makes each finding an `error`, so an action, object or page write
+    // carrying one is refused (a narrowing no conversion carries, shipped in
+    // 18.x as its own BREAKING minor, as #25205 did for the bulk slot). One
+    // stays a `warning`: a `${…}` token the console's runner still fills, in a
+    // sentence with no `{{ }}` hole. MEASURED first over the shipped corpus at
+    // `6021b5e837`: 0 findings across examples/**, platform-objects and
+    // plugin-approvals, against one for a planted unbound hole.
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['flow', 'action', 'hook', 'object', 'view', 'page'],
     run: (stack, ctx) =>
@@ -1564,6 +1569,26 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_ONLY,
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateFormLayout(stack),
+  },
+  // Ruling C on #25572 (#25650) — a form open to anonymous intake that
+  // declares a file field (a `FILE_REFERENCE_TYPES` type on the bound object)
+  // is refused: no visitor can upload a file, so the field can never be
+  // filled. The prescription is the ruled route: register and sign in, then
+  // fill a form that is not public. Gating, so all three commands run it.
+  //
+  // Runtime publish gate: a `view` write's snapshot carries `objects` as
+  // context, which is every input this rule reads, so the view's publish is
+  // refused at the key. `object` is deliberately not declared: an object
+  // write's snapshot carries no views, so the rule would judge nothing there.
+  {
+    name: 'validatePublicFormFileFields',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-public-form-file-fields.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['view'],
+    run: (stack) => validatePublicFormFileFields(stack),
   },
   // ADR-0078 Phase 3 (Tier-A `action-locations`) — an action that declares no
   // `locations` and that no view places by name renders on no surface at all.

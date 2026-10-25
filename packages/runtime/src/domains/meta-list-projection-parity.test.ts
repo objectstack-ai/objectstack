@@ -172,6 +172,9 @@ const STORE: Record<string, any[]> = {
         { name: 'sales_rep', label: 'Sales rep', permissionSets: ['crm_sales_user'] },
         { name: 'sales_manager', label: 'Sales manager', permissionSets: [] },
     ],
+    // [#25652] Translated by `translatePermissionSet`, as a position is by
+    // `translatePosition` — both are cells of the translatable-type axis.
+    permission: [{ name: 'crm_sales_user', label: 'Sales user', objects: {} }],
 };
 
 /**
@@ -218,6 +221,8 @@ const BUNDLE: Record<string, any> = {
         apps: { crm: { label: '客户管理' }, helpdesk: { label: '服务台' } },
         objects: { invoice: { label: '发票' } },
         pages: { home: { label: '首页' } },
+        positions: { sales_rep: { label: '销售代表' } },
+        permissions: { crm_sales_user: { label: '销售用户' } },
     },
 };
 
@@ -512,7 +517,7 @@ const PARAM_AXIS = new Set(PARAM_PROBES.map((p) => p.param).filter((p): p is str
 const TYPE_CELLS: readonly string[] = [
     'app', 'apps', 'view', 'views', 'doc', 'docs', 'book', 'books', 'api', 'apis',
     'object', 'objects', 'dashboard', 'dashboards', 'page', 'action', 'dataset', 'picklist', 'flow',
-    'position', 'positions',
+    'position', 'positions', 'permission', 'permissions',
     // [#20408] A segment that names no metadata type: `RestServer` refuses it
     // (`refuseUnknownMetaListType`) rather than listing an empty collection.
     'totally_invented_type',
@@ -672,6 +677,11 @@ describe('[#20320] row A: the reference moves — each probe changes RestServer\
         ]);
         expect(text(await read('/meta/positions'))).not.toContain('_holderCount');
         expect((await bootRest('non-holder').read('/meta/position', { include: 'grants' })).items?.[0]?._holderCount).toBeNull();
+        // [#25652] The security catalog is translated like every other translatable type.
+        const zhPositions = await read('/meta/positions', {}, { 'accept-language': 'zh-CN' });
+        expect(zhPositions.items?.find((p: any) => p.name === 'sales_rep')?.label).toBe('销售代表');
+        const zhSets = await read('/meta/permission', {}, { 'accept-language': 'zh-CN' });
+        expect(zhSets.items?.find((p: any) => p.name === 'crm_sales_user')?.label).toBe('销售用户');
     });
 });
 
@@ -842,6 +852,7 @@ const ITEM_CELLS: readonly string[] = [
     '/meta/object/invoice', '/meta/objects/invoice',
     '/meta/dashboard/ops', '/meta/dashboards/ops',
     '/meta/page/home', '/meta/action/close_case', '/meta/dataset/pipeline', '/meta/picklist/industry', '/meta/flow/on_lead', '/meta/api/crm_served',
+    '/meta/position/sales_rep', '/meta/permission/crm_sales_user',
 ];
 const ITEM_TYPE_AXIS = new Set(ITEM_CELLS.map((c) => singular(c.split('/')[2])));
 const ITEM_CALLERS = ['holder', 'non-holder', 'builder', 'author'] as const satisfies readonly CallerName[];
@@ -985,6 +996,8 @@ describe('[#20408] the item read: the reference moves — each probe changes Res
     it('translation, the doc locale, sortability, both draft switches in any case, and the object preview all move', async () => {
         const { read } = bootRest('holder');
         expect((await read('/meta/app/crm', {}, { 'accept-language': 'zh-CN' })).item?.label).toBe('客户管理');
+        expect((await read('/meta/position/sales_rep', {}, { 'accept-language': 'zh-CN' })).item?.label).toBe('销售代表');
+        expect((await read('/meta/permission/crm_sales_user', {}, { 'accept-language': 'zh-CN' })).item?.label).toBe('销售用户');
         const zhDoc = await read('/meta/doc/crm_intro', { locale: 'zh-CN' });
         expect(zhDoc.item?.label).toBe('入门');
         expect(text(zhDoc)).not.toContain('"translations"');

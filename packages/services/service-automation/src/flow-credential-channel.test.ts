@@ -200,6 +200,26 @@ describe('[#20790] the per-position write rule', () => {
         expect(await channelRows(ql)).toEqual([]);
     });
 
+    it('a start node that names its secret by config.secretRef loses the held row, and the gate is told nothing', async () => {
+        const ql = await boot();
+        const channel = new FlowCredentialChannel(() => ql as never);
+        await channel.store({ name: 'pin_inbound', state: 'active', body: inbound({ hook: HOOK, sign: SIGN }) });
+
+        const referenced: any = inbound();
+        startNodeOf(referenced).config.secretRef = 'PIN_INBOUND_HOOK_SECRET';
+        expect(await channel.heldPaths({ name: 'pin_inbound', state: 'active', item: referenced })).toEqual([
+            'nodes.1.config.signingSecret',
+        ]);
+        const stored = await channel.store({ name: 'pin_inbound', state: 'active', body: referenced });
+        // The reference is stored as written — it is a name, not a credential.
+        expect(startNodeOf(stored).config).toEqual({ triggerType: 'api', hookId: 'h1', secretRef: 'PIN_INBOUND_HOOK_SECRET' });
+        expect(channel.holds('pin_inbound', 'begin', 'secret')).toBe(false);
+        expect(await channel.resolve('pin_inbound', 'begin', 'secret')).toBeUndefined();
+        // The other credential is untouched.
+        expect(await channel.resolve('pin_inbound', 'callout', 'signingSecret')).toBe(SIGN);
+        expect((await channelRows(ql)).map((r) => r.credential_key)).toEqual(['signingSecret']);
+    });
+
     it('the runtime gate is told where a withheld credential is held — never where one is cleared', async () => {
         const ql = await boot();
         const channel = new FlowCredentialChannel(() => ql as never);

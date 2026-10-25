@@ -633,7 +633,20 @@ const WORKSPACE_PARENT_GLOBS = [
   'packages/triggers/*',
   'apps/*',
   'examples/*',
+  // The objectui tree's package roots (objectstack#25677); they match nothing
+  // until it is imported under ui/.
+  'ui/packages/*',
+  'ui/apps/*',
+  'ui/examples/*',
 ];
+
+/**
+ * Workspace members pnpm-workspace.yaml names as a BARE directory (no `/*`):
+ * the one package AT that directory, declared by its manifest path so the entry
+ * keeps the separator the dispatch deriver needs. `ui` is objectui's root
+ * manifest (objectstack#25677); absent until the import, like the globs above.
+ */
+const WORKSPACE_BARE_MEMBER_MANIFESTS = ['ui/package.json'];
 
 /** The parent directories those globs enumerate — each glob minus its leaf. */
 const WORKSPACE_PARENT_DIRS = WORKSPACE_PARENT_GLOBS.map((glob) => glob.replace(/\/\*$/, ''));
@@ -650,22 +663,24 @@ function readJson(file) {
 
 function listWorkspacePackages(root) {
   const out = [];
+  const candidates = [];
   for (const parent of WORKSPACE_PARENT_DIRS) {
     const abs = join(root, parent);
     if (!existsSync(abs)) continue;
-    for (const name of readdirSync(abs)) {
-      const dir = join(abs, name);
-      const manifest = join(dir, 'package.json');
-      if (!existsSync(manifest)) continue;
-      let json;
-      try {
-        json = readJson(manifest);
-      } catch {
-        continue;
-      }
-      if (!json.name) continue;
-      out.push({ name: json.name, dir, rel: relative(root, dir), json });
+    for (const name of readdirSync(abs)) candidates.push(join(abs, name));
+  }
+  for (const manifestPath of WORKSPACE_BARE_MEMBER_MANIFESTS) candidates.push(dirname(join(root, manifestPath)));
+  for (const dir of candidates) {
+    const manifest = join(dir, 'package.json');
+    if (!existsSync(manifest)) continue;
+    let json;
+    try {
+      json = readJson(manifest);
+    } catch {
+      continue;
     }
+    if (!json.name) continue;
+    out.push({ name: json.name, dir, rel: relative(root, dir), json });
   }
   return out;
 }
@@ -3322,7 +3337,7 @@ function selfTest() {
     // docblock (#9955). Asserted here rather than left to review because the
     // regression is a tidy-up nobody would flag.
     battery('the declared population must stay READABLE by the dispatch deriver');
-    for (const glob of WORKSPACE_PARENT_GLOBS) {
+    for (const glob of [...WORKSPACE_PARENT_GLOBS, ...WORKSPACE_BARE_MEMBER_MANIFESTS]) {
       expect(
         glob.replace(/^(?:\.\.?(?:\/|$))+/, '').includes('/'),
         `workspace parent ${glob} carries no path separator, so scripts/pm/dispatch-gates.mjs refuses it as too generic and every package under it drops out of the derived gate list`,
@@ -3346,7 +3361,12 @@ function selfTest() {
     // the declaration stays and the live parse becomes its CHECK, in both
     // directions, the shape check-published-files.mjs already uses.
     battery('the declaration must still BE the workspace (#11510)');
-    const declaredParents = WORKSPACE_PARENT_GLOBS.map((g) => g.replace(/\/\*+$/, ''));
+    // A bare-directory member is declared by its manifest path; both spellings
+    // reduce to the directory pnpm-workspace.yaml names.
+    const declaredParents = [
+      ...WORKSPACE_PARENT_GLOBS.map((g) => g.replace(/\/\*+$/, '')),
+      ...WORKSPACE_BARE_MEMBER_MANIFESTS.map((m) => m.replace(/\/package\.json$/, '')),
+    ];
     const liveParents = readWorkspaceGlobs(REPO_ROOT)
       .filter((g) => !isExclusionGlob(g))
       .map((g) => g.replace(/\/\*+$/, ''));

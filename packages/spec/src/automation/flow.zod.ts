@@ -26,6 +26,7 @@ import { strictObject } from '../shared/strict-object';
 import { collectFlowGraphs, parseFlowNodeRegions } from './control-flow.zod';
 import { predicateSlotRefusal, resolveFlowNodeExpressions } from './flow-node-expression-paths';
 import { flowNodeConfigRefusals } from './flow-node-config-refusals';
+import { apiTriggerSecretRefRefusals } from './api-trigger-secret-ref.zod';
 // [#23543 F3] The loose `config` keys of the two sibling-block node types — one
 // table, shared with the two D2 lifts that still run at rehydration.
 import { siblingBlockLooseConfigRefusals } from './flow-sibling-block-loose-keys';
@@ -1642,6 +1643,15 @@ export const FlowSchema = lazySchema(() => strictObject(
         });
       }
     });
+  }
+
+  // An inbound `api` hook's secret named by reference (`config.secretRef`)
+  // instead of carried as a literal — so an app package can ship an `api` flow
+  // without publishing its credential. A start node is top-level only, so the
+  // flow's own `nodes` is the whole walk; the three refusals and why each
+  // exists are `api-trigger-secret-ref.zod.ts`'s header.
+  for (const refusal of apiTriggerSecretRefRefusals(flow)) {
+    ctx.addIssue({ code: 'custom', path: [...refusal.path], message: refusal.message });
   }
 
   // An `assignment` node's targets are bindings (#22572), and the `$` names are

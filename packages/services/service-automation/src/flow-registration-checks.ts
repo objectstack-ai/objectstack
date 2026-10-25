@@ -355,8 +355,9 @@ export function validateApiTriggerSecret(this: Pick<RegistrationCheckHost, 'deri
     const why =
         `it binds the inbound \`api\` trigger (${asks.join(' and ')}) but its ` +
         `start node declares no \`config.secret\`. An inbound hook is armed only with a per-flow secret that ` +
-        `every post is HMAC-verified against (ADR-0041), so this flow could never be armed. Set a non-blank ` +
-        `\`config.secret\` on the start node. A flow that is only ever started explicitly and never receives ` +
+        `every post is HMAC-verified against (ADR-0041), so this flow could never be armed. Name the secret in ` +
+        `the start node's \`config.secretRef\` (the deployment fills that name; the engine reads it at every ` +
+        `post), or set a non-blank \`config.secret\`. A flow that is only ever started explicitly and never receives ` +
         `inbound posts is \`type: 'autolaunched'\`, with no \`triggerType: 'api'\` on its start node.`;
     // The site is the start node's `config.secret`, the key the author sets
     // (the flow itself when it has no start node). What was found there is

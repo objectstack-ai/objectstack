@@ -6,7 +6,8 @@
  * on the page action rows, `confirmText` and `successMessage` on
  * `ActionSchema`. These pins hold each slot's accept set — a bare string is
  * shorthand for the envelope, a holeless sentence still parses, a blank one
- * still parses (the widening keeps that arm), and `ActionSchema` keeps its
+ * still parses (the arm is kept so a stored one loads; the doors refuse it,
+ * #25680), and `ActionSchema` keeps its
  * inline locale map — and the roots the spec declares from the runner. The
  * holes are judged at the doors through `closedScopeTemplateRefusal`
  * (`automation/flow-text-slot-template.test.ts` pins the judge) and
@@ -16,6 +17,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ACTION_CONFIRM_PARAMS_ROOT,
+  ACTION_COPY_DOLLAR_TRANSITION_ROOTS,
   ACTION_COPY_RECORD_ROOT,
   ACTION_ERROR_TEMPLATE_ROOTS,
   ACTION_SUCCESS_RESULT_ROOT,
@@ -49,7 +51,7 @@ describe('the page action rows\' copy keys are template slots', () => {
         expect(ok('Delete {{ record.name }}?')).toEqual({ dialect: 'template', source: 'Delete {{ record.name }}?' });
         expect(ok({ dialect: 'template', source: 'Done' })).toEqual({ dialect: 'template', source: 'Done' });
         // A `${…}` sentence parsed while the key was a string, and still does:
-        // the doors name it with a warning.
+        // the doors judge it (a warning only while the runner still fills it).
         expect(ok('Delete ${record.name}?')).toEqual({ dialect: 'template', source: 'Delete ${record.name}?' });
         expect(ok('')).toBe('');
         expect(ok('  ')).toBe('  ');
@@ -111,5 +113,11 @@ describe('the roots are what the runner binds', () => {
     expect(ACTION_SUCCESS_RESULT_ROOT).toBe('result');
     expect([...ACTION_SUCCESS_TEMPLATE_ROOTS]).toEqual(['result', 'record']);
     expect([...ACTION_ERROR_TEMPLATE_ROOTS]).toEqual([]);
+  });
+
+  it('the `${…}` tokens the runner still fills: `${record.*}` in a confirmText, `${result.*}` in a successMessage', () => {
+    expect([...ACTION_COPY_DOLLAR_TRANSITION_ROOTS.confirmText]).toEqual(['record']);
+    expect([...ACTION_COPY_DOLLAR_TRANSITION_ROOTS.successMessage]).toEqual(['result']);
+    expect([...ACTION_COPY_DOLLAR_TRANSITION_ROOTS.errorMessage]).toEqual([]);
   });
 });

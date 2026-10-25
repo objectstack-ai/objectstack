@@ -260,6 +260,10 @@ export {
 } from './validate-form-layout.js';
 export type { FormLayoutFinding, FormLayoutSeverity } from './validate-form-layout.js';
 
+// A form open to anonymous intake that declares a file field (ruling C on #25572).
+export { validatePublicFormFileFields, PUBLIC_FORM_FILE_FIELD } from './validate-public-form-file-fields.js';
+export type { PublicFormFileFieldFinding } from './validate-public-form-file-fields.js';
+
 export {
   validateVisibilityPredicates,
   VISIBILITY_ROOT_MISLAYERED,
@@ -327,6 +331,7 @@ export {
   SECURITY_OWD_UNSET,
   SECURITY_OWD_ALIAS,
   SECURITY_WILDCARD_VAMA,
+  SECURITY_MODIFY_ALL_DELETE_WITHHELD,
   SECURITY_ANCHOR_HIGH_PRIVILEGE,
   SECURITY_ROLE_WORD,
   SECURITY_BOOK_AUDIENCE_UNKNOWN_SET,

@@ -112,7 +112,7 @@
  * (Prime Directive #2).
  */
 
-import { FLOW_REGION_SLOTS_BY_TYPE } from '@objectstack/spec/automation';
+import { API_TRIGGER_SECRET_REF_KEY, FLOW_REGION_SLOTS_BY_TYPE } from '@objectstack/spec/automation';
 import { registerMetadataTypeRedactor } from '@objectstack/spec/kernel';
 import type { MetadataRedactionResult, MetadataTypeRedactor } from '@objectstack/spec/kernel';
 
@@ -182,7 +182,11 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
  *  - `cleared`  — {@link FLOW_CREDENTIAL_CLEARED}: no credential, on purpose;
  *  - `value`    — a non-empty string: an explicit credential (a literal);
  *  - `unusable` — anything else: no credential a door can use, and the engine
- *                 refuses it where one is required.
+ *                 refuses it where one is required;
+ *  - `referenced` — the start node's secret is absent and NAMED instead
+ *                 (`config.secretRef`): the deployment fills the name and the
+ *                 engine resolves it per post, so the channel holds nothing
+ *                 here — a row it held is removed, like a cleared one.
  */
 export interface FlowCredentialPosition {
     /** Dotted, item-relative (`nodes.0.config.secret`) — the path spelling `redactedKeys` and the runtime gate use. */
@@ -190,7 +194,7 @@ export interface FlowCredentialPosition {
     readonly nodeId: string;
     readonly nodeType: string;
     readonly key: string;
-    readonly form: 'absent' | 'cleared' | 'value' | 'unusable';
+    readonly form: 'absent' | 'cleared' | 'value' | 'unusable' | 'referenced';
     /** The literal, for `form: 'value'` only. */
     readonly value?: string;
 }
@@ -213,7 +217,8 @@ function collectNodePosition(node: unknown, path: string, out: FlowCredentialPos
             const has = !!config && Object.prototype.hasOwnProperty.call(config, key);
             const raw = has ? config![key] : undefined;
             const form: FlowCredentialPosition['form'] = !has
-                ? 'absent'
+                ? (key === FLOW_HOOK_SECRET_KEY && !!config
+                    && Object.prototype.hasOwnProperty.call(config, API_TRIGGER_SECRET_REF_KEY) ? 'referenced' : 'absent')
                 : raw === FLOW_CREDENTIAL_CLEARED
                     ? 'cleared'
                     : typeof raw === 'string'

@@ -212,6 +212,10 @@ const EVENT_REASON =
   "job-level `if:` excludes the `labeled` / `unlabeled` / `edited` pull_request events; each such event is its own run on the same head, beside the `opened` / `synchronize` run that concluded";
 const CORE_REASON =
   "gated on ci.yml's `filter` job `core` output; a diff outside the core path set skips it on the PR head, and the merge-queue build widens every output to 'true' and runs it on the merged tree";
+const UI_GATE = Object.freeze({ kind: 'filter-output', outputs: ['ui_tree', 'ui'] });
+const UI_CONSUMERS_GATE = Object.freeze({ kind: 'filter-output', outputs: ['ui_tree', 'ui', 'ui_consumers'] });
+const UI_TREE_REASON =
+  "gated on ci.yml's `filter` job `ui_tree` output: it skips on every event while `ui/package.json` is absent (before the objectui import), and is not a required context";
 const FULL_BATTERY_REASON =
   "full battery only (ci.yml's THE TWO SPEEDS): its `if:` excludes `pull_request` and `merge_group`, so it skips on every PR head and every queue build and runs on main's push, hourly schedule and dispatch runs";
 
@@ -234,6 +238,10 @@ const FULL_BATTERY_REASON =
  * ⛔ Adding a row is a declaration that the skip is BY DESIGN, and the row must
  * name the mechanism — a row added to silence an exit 4 without one is the
  * finding written somewhere quieter.
+ *
+ * The four `* UI` rows were added with their jobs (objectstack#25697), not
+ * measured off landed heads: until objectui is imported under `ui/`, the
+ * `ui_tree` output skips them on EVERY head, so the skip is by construction.
  *
  * These are the LISTED rows. The judge reads them beside the DERIVED ones —
  * `deriveNonPrEventSkips` below, one exact `if:` shape read off the tree — and
@@ -306,7 +314,7 @@ export const EXPECTED_SKIPS = Object.freeze([
     reason: `${FULL_BATTERY_REASON}; on a push it also needs the \`filter\` job's \`core\` output`,
   },
   {
-    name: 'Test Core (${{ matrix.shard }}/6)',
+    name: 'Test Core (${{ matrix.shard }}/8)',
     workflow: 'ci.yml',
     job: 'test',
     gate: { kind: 'filter-output', outputs: ['core', 'crosspkg'] },
@@ -326,6 +334,34 @@ export const EXPECTED_SKIPS = Object.freeze([
     job: 'console-pin',
     gate: { kind: 'filter-output', outputs: ['console'] },
     reason: `${FULL_BATTERY_REASON}; on a push it also needs the \`filter\` job's \`console\` output (the \`.objectui-sha\` pin, the console build/probe scripts, and the spec's entry layout: \`packages/spec/package.json\` and \`packages/spec/tsup.config.ts\`)`,
+  },
+  {
+    name: 'Type Check UI',
+    workflow: 'ci.yml',
+    job: 'type-check-ui',
+    gate: UI_CONSUMERS_GATE,
+    reason: `${UI_TREE_REASON}; with ui/ present it runs on a ui/ path or one of the seven packages objectui consumes (the \`ui_consumers\` output)`,
+  },
+  {
+    name: 'Test UI (${{ matrix.shard }}/16)',
+    workflow: 'ci.yml',
+    job: 'test-ui',
+    gate: UI_GATE,
+    reason: `${UI_TREE_REASON}; with ui/ present it runs on a ui/ path; the raw matrix template is the pre-expansion name`,
+  },
+  {
+    name: 'Lint UI',
+    workflow: 'ci.yml',
+    job: 'lint-ui',
+    gate: UI_GATE,
+    reason: `${UI_TREE_REASON}; with ui/ present it runs on a ui/ path`,
+  },
+  {
+    name: 'Build & E2E UI',
+    workflow: 'ci.yml',
+    job: 'build-e2e-ui',
+    gate: UI_CONSUMERS_GATE,
+    reason: `${UI_TREE_REASON}; with ui/ present it runs on a ui/ path or one of the seven packages objectui consumes (the \`ui_consumers\` output)`,
   },
 ]);
 
@@ -1213,7 +1249,9 @@ function fixtureRun(name, conclusion, suite = 1, extra = {}) {
  * Measured 2026-09-16 on PR #18315's head `b671f83b` (the AGENTS.md-only
  * landing): 39 check-runs, 20 success / 19 skipped, four `PR Automation` runs
  * on one head. Names, conclusions and check-suite ids VERBATIM from the
- * listing. This is the real shape the roster must accept, kept here so the
+ * listing, but for one name: the Test Core matrix template read `/6` then and
+ * is re-spelled `/8` here, the matrix #25376 widened, because the roster
+ * grades the live name. This is the real shape the roster must accept, kept here so the
  * measured family and the declared family cannot drift apart unnoticed.
  */
 const MEASURED_18315 = [
@@ -1249,7 +1287,7 @@ const MEASURED_18315 = [
   ['Part-of PR must not also close its card', 'success', 94769267707],
   ['Temporal Conformance (live PG + MySQL)', 'skipped', 94769267631],
   ['Test Core', 'success', 94769267631],
-  ['Test Core (${{ matrix.shard }}/6)', 'skipped', 94769267631],
+  ['Test Core (${{ matrix.shard }}/8)', 'skipped', 94769267631],
   ['The card this PR closes must claim this branch', 'success', 94769267827],
   ['Type Check · consumer gates', 'success', 94769267736],
   ['Type Check · debt ledger', 'success', 94769267736],
@@ -1350,7 +1388,7 @@ export function selfTest() {
   t('roster: every row carries a reason', EXPECTED_SKIPS.every((r) => typeof r.reason === 'string' && r.reason.length > 20), true);
   t('roster: no duplicate names', new Set(EXPECTED_SKIPS.map((r) => r.name)).size, EXPECTED_SKIPS.length);
   t('roster: every gate kind is declared', EXPECTED_SKIPS.every((r) => GATE_KINDS.includes(r.gate.kind)), true);
-  t('roster: the two matrix templates are spelled raw, as the API reports them', EXPECTED_SKIPS.filter((r) => r.name.includes('${{ matrix.shard }}')).length, 2);
+  t('roster: the three matrix templates are spelled raw, as the API reports them', EXPECTED_SKIPS.filter((r) => r.name.includes('${{ matrix.shard }}')).length, 3);
   t('roster: the roster is frozen data', Object.isFrozen(EXPECTED_SKIPS), true);
   t('roster: a never-skipping required context is NOT in it (Lint & Repo Gates)', EXPECTED_SKIPS.some((r) => r.name === 'Lint & Repo Gates'), false);
   t('roster: …nor the ci.yml aggregates, which run if: always()', EXPECTED_SKIPS.some((r) => r.name === 'Test Core' || r.name === 'Dogfood Regression Gate'), false);
