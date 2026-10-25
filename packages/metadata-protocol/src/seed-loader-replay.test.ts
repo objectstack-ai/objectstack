@@ -1009,7 +1009,7 @@ describe('seed replay — a column declared applyOn: create is written on first 
 
     await load(engine, INSTALMENT, { columns: misspelt, logger });
 
-    const warnings = logger.warn.mock.calls.filter(([message]: [string]) => String(message).includes('stauts'));
+    const warnings = logger.warn.mock.calls.filter(([message]: any[]) => String(message).includes('stauts'));
     expect(warnings).toHaveLength(2); // once per dataset per load
     expect(warnings[0][1]).toMatchObject({ object: INSTALMENT.name, undeclaredColumns: ['stauts'] });
     expect(rowOf(store, INSTALMENT, 'inst-1').status).toBe('pending');
@@ -1019,6 +1019,6 @@ describe('seed replay — a column declared applyOn: create is written on first 
     const { engine } = createFaithfulEngine();
     const logger = createLogger();
     await load(engine, INSTALMENT, { columns: { owner_id: { applyOn: 'create' } }, logger });
-    expect(logger.warn.mock.calls.filter(([, meta]: [string, any]) => meta?.undeclaredColumns)).toEqual([]);
+    expect(logger.warn.mock.calls.filter(([, meta]: any[]) => meta?.undeclaredColumns)).toEqual([]);
   });
 });
