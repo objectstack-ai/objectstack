@@ -141,6 +141,12 @@ const walk = (schema: z.ZodType): z.ZodType => {
   // recursive form-field group under `ObjectFormPropsSchema.sections[].fields[]`,
   // reached from the `object-form` and `object-master-detail-form` rows, whose
   // `sections` take the page-block section shape since that release.
+  // objectstack#25748 then made the count FIVE: `@objectstack/spec` ships one
+  // module graph with shared chunks, so each schema is one object across its
+  // entries, and the lazy `FieldSchema` reaches (walked today as
+  // `FieldSchema.summaryOperations.filter`) is now the SAME object as the
+  // recursive filter clause above rather than a copy of it. The fifth is no
+  // longer a node of its own; nothing in the schemas changed.
   // Each sits inside a schema that carries a default anyway, so the exception
   // costs no extra rebuild. objectui#10872 batch 2 had ONE named exception,
   // `ElementDataSourceSchema` (the `element:number` arm's `dataSource`), whose

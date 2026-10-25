@@ -6353,7 +6353,9 @@ const UNNAMED_LAZY_SLOTS: readonly string[] = [
   // `FieldSchema` member by reference, and its optional `filter` is the spec's
   // recursive filter condition. That `z.lazy` sits inside an IMPORTED schema
   // (rebuilt by `stripImportedDefaults`), so no local const names it either.
-  'form.zod.ts#FormFieldSchema.summaryOperations',
+  // Retired by objectstack#25748: the spec's shared chunks make that lazy the
+  // same object as a named recursive mirror reached through another entry, so
+  // the walk no longer reports it as unnamed (the schema itself is unchanged).
   'objectql.zod.ts#ObjectViewSchema.form',
   'objectql.zod.ts#ObjectViewSchema.table',
 ];

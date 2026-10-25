@@ -492,17 +492,18 @@ describe('the import boundary strips every imported default (objectui#8317)', ()
     it('the walker docblock\'s `lazy` count is re-derived, not quoted', () => {
       // The `lazy` arm is the one place the identity property cannot hold: it
       // must rebuild without forcing the getter, so a clean subtree behind a
-      // `z.lazy` is rebuilt anyway. The module's docblock names SIX such
+      // `z.lazy` is rebuilt anyway. The module's docblock names FIVE such
       // nodes (the fourth, `ViewSchema`'s form-field group, since objectui#7928;
-      // the fifth, under `FieldSchema.relatedListFilter`, since objectui#11070;
-      // the sixth, the form-field group under the `object-form` row's
-      // `sections[].fields[]`, since the 17.7.0 bump, objectui#11717)
+      // the one under `FieldSchema`, added by objectui#11070, is the recursive
+      // filter clause's own object since objectstack#25748's shared chunks; the
+      // form-field group under the `object-form` row's `sections[].fields[]`,
+      // since the 17.7.0 bump, objectui#11717)
       // and says the exception costs nothing extra for every owner but the
       // ones `REBUILT_CLEAN` names (objectui#10872 batch 2), because each
       // other owner sits inside a schema that is being rebuilt regardless.
       // Both halves are measured here, so a spec bump or an import that moves
       // either one is red rather than quietly making the docblock false.
-      expect(walk(IMPORTED.map(([, s]) => s)).lazies).toBe(6);
+      expect(walk(IMPORTED.map(([, s]) => s)).lazies).toBe(5);
       const lazyOwners = IMPORTED.filter(([, s]) => walk([s]).lazies > 0);
       expect(lazyOwners.length, 'no schema owns a lazy — the count above found them elsewhere').toBeGreaterThan(0);
       // The clean owners are exactly the named set: rebuilt (so NOT the spec's
