@@ -65,7 +65,7 @@
  * nothing is written into the objectui build tree.
  */
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -105,6 +105,84 @@ function fail(msg) {
   process.exit(1);
 }
 
+/** The in-tree console this reads when the tree has no pin (#25712). */
+const UI_CONSOLE = 'ui/apps/console';
+
+/** Lines of `git status --porcelain` under `dirs` that the INDEX does not hold: unstaged edits and untracked files. */
+function unindexed(dirs) {
+  const status = execFileSync('git', ['-C', ROOT, 'status', '--porcelain', '--untracked-files=all', '--', ...dirs], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  return status.split('\n').filter((line) => line.length > 2 && line[1] !== ' ');
+}
+
+/**
+ * No pin — the merged layout (#25712): build the registry's packages from this
+ * tree's own sources, then read that build. Returns the `inTree` block's
+ * reading of the sources the build was made from.
+ *
+ * The build is THIS script's step here, not the caller's: the record names the
+ * sources by digest (`registrySourceDigest` in scripts/check-sdui-manifest.mjs,
+ * which the gate recomputes), and only a build of exactly those sources makes
+ * the artefact describe them — a run over a stale dist would stamp a fresh
+ * digest on a stale manifest. Turbo's input hashing makes an up-to-date build a
+ * cache hit. Refused before anything is built: no in-tree console, a registry
+ * list that disagrees with the gate's, unreadable sources, or bytes under them
+ * the index does not hold (the digest reads the index, the build the working
+ * tree). Refused after: a build that moved them.
+ */
+async function buildInTree() {
+  if (!existsSync(join(ROOT, ...UI_CONSOLE.split('/'), 'package.json'))) {
+    fail(
+      `.objectui-sha is missing and there is no in-tree console (${UI_CONSOLE}) either — nothing to generate from.\n` +
+        '  With the pin this reads objectui\'s build at that commit; without it, the console under ui/.',
+    );
+  }
+  const gate = await import(new URL('./check-sdui-manifest.mjs', import.meta.url).href);
+  if (JSON.stringify(gate.REGISTRY_MODULES) !== JSON.stringify(REGISTRY_MODULES)) {
+    fail(
+      'REGISTRY_MODULES here and in scripts/check-sdui-manifest.mjs disagree, so the digest the gate recomputes\n' +
+        '  would describe a different registry than the one enumerated here. Make the two lists equal.',
+    );
+  }
+  const before = gate.registrySourceDigest(ROOT);
+  if (before.problem) fail(`cannot digest the registry sources: ${before.problem}`);
+  const sources = before.packages.map((dir) => `${dir}/src`);
+  const notIndexed = unindexed(sources);
+  if (notIndexed.length > 0) {
+    fail(
+      'the registry sources carry bytes the index does not hold, so the build would read what the digest does not name:\n' +
+        notIndexed.slice(0, 20).map((line) => `    ${line}`).join('\n') +
+        (notIndexed.length > 20 ? `\n    … and ${notIndexed.length - 20} more` : '') +
+        '\n  Stage or discard them, then re-run.',
+    );
+  }
+
+  const turbo = join(ROOT, 'node_modules', '.bin', 'turbo');
+  if (!existsSync(turbo)) fail('no turbo at node_modules/.bin/turbo — run `pnpm install` first.');
+  const filters = ['@object-ui/core', ...REGISTRY_MODULES].map((name) => `--filter=${name}...`);
+  console.error(
+    `→ building the registry from this tree: ${before.packages.length} package(s), ${before.files} source(s), ` +
+      `sha256 ${before.sha256.slice(0, 12)}… (turbo — a cache hit when nothing moved)`,
+  );
+  const build = spawnSync(turbo, ['run', 'build', ...filters, '--filter=@objectstack/sdui-parser', '--output-logs=errors-only'], {
+    cwd: ROOT,
+    stdio: ['ignore', 2, 2],
+  });
+  if (build.status !== 0) fail(`the in-tree build exited ${build.status ?? build.signal}; its output is above.`);
+
+  const after = gate.registrySourceDigest(ROOT);
+  if (after.problem || after.sha256 !== before.sha256 || unindexed(sources).length > 0) {
+    fail('the build moved the registry sources it was meant to read (their digest or their untracked files changed). Nothing was written.');
+  }
+  if (!existsSync(join(ROOT, ...UI_CONSOLE.split('/'), 'node_modules', '@object-ui', 'core', 'dist', 'index.js'))) {
+    fail(`${UI_CONSOLE}/node_modules/@object-ui/core/dist/index.js is missing after the build, so ${UI_CONSOLE} does not resolve the registry the build made.`);
+  }
+  return { registryPackages: before.packages, registrySources: before.files, registrySourcesSha256: before.sha256 };
+}
+
 if (process.argv.length > 2) {
   fail(
     `takes no arguments (got: ${process.argv.slice(2).join(' ')}).\n` +
@@ -114,44 +192,53 @@ if (process.argv.length > 2) {
   );
 }
 
-if (!existsSync(PARSER_DIST)) {
-  fail(
-    `packages/sdui-parser/dist is missing — the adapter is consumed as production consumes it.\n` +
-      `  Run: pnpm --filter @objectstack/sdui-parser build`,
-  );
-}
+const PARSER_DIST_MISSING =
+  `packages/sdui-parser/dist is missing — the adapter is consumed as production consumes it.\n` +
+  `  Run: pnpm --filter @objectstack/sdui-parser build`;
 
 const pinPath = join(ROOT, '.objectui-sha');
-if (!existsSync(pinPath)) fail('.objectui-sha is missing — cannot derive the objectui build tree.');
-const pin = readFileSync(pinPath, 'utf8').trim();
-if (!/^[0-9a-f]{40}$/.test(pin)) fail(`.objectui-sha does not hold a 40-character commit sha (got ${JSON.stringify(pin)}).`);
+const pinned = existsSync(pinPath);
 
-// Repo-relative, POSIX-separated: this string is what the record carries.
-const BUILD_TREE_REL = `.cache/objectui-${pin.slice(0, 12)}`;
-const MODULES_ROOT_REL = `${BUILD_TREE_REL}/apps/console`;
-const BUILD_TREE = join(ROOT, ...BUILD_TREE_REL.split('/'));
+let pin = null;
+let MODULES_ROOT_REL;
+let inTree = null;
+if (pinned) {
+  if (!existsSync(PARSER_DIST)) fail(PARSER_DIST_MISSING);
+
+  pin = readFileSync(pinPath, 'utf8').trim();
+  if (!/^[0-9a-f]{40}$/.test(pin)) fail(`.objectui-sha does not hold a 40-character commit sha (got ${JSON.stringify(pin)}).`);
+
+  // Repo-relative, POSIX-separated: this string is what the record carries.
+  const BUILD_TREE_REL = `.cache/objectui-${pin.slice(0, 12)}`;
+  MODULES_ROOT_REL = `${BUILD_TREE_REL}/apps/console`;
+  const BUILD_TREE = join(ROOT, ...BUILD_TREE_REL.split('/'));
+  const BUILT_SENTINEL = join(ROOT, ...MODULES_ROOT_REL.split('/'), 'node_modules', '@object-ui', 'core', 'dist', 'index.js');
+  const REMEDY = '  Run `pnpm objectui:build` first — it builds objectui at the pin into that directory.';
+
+  if (!existsSync(BUILD_TREE)) {
+    fail(`no objectui build tree at ${BUILD_TREE_REL}/ for pin ${pin.slice(0, 12)}….\n${REMEDY}`);
+  }
+  let head = '';
+  try {
+    head = execFileSync('git', ['-C', BUILD_TREE, 'rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  } catch (e) {
+    fail(`${BUILD_TREE_REL}/ is not a git checkout (${String(e?.stderr || e?.message || e).trim().split('\n')[0]}).\n${REMEDY}`);
+  }
+  if (head !== pin) {
+    fail(`${BUILD_TREE_REL}/ is checked out at ${head.slice(0, 12)}…, not at the pin ${pin.slice(0, 12)}….\n${REMEDY}`);
+  }
+  if (!existsSync(BUILT_SENTINEL)) {
+    fail(
+      `objectui at ${pin.slice(0, 12)}… is checked out but NOT BUILT: ${MODULES_ROOT_REL}/node_modules/@object-ui/core/dist/index.js is missing.\n${REMEDY}`,
+    );
+  }
+} else {
+  inTree = await buildInTree();
+  if (!existsSync(PARSER_DIST)) fail(PARSER_DIST_MISSING);
+  MODULES_ROOT_REL = UI_CONSOLE;
+}
 const MODULES_ROOT = join(ROOT, ...MODULES_ROOT_REL.split('/'));
 const CORE_PKG = join(MODULES_ROOT, 'node_modules', '@object-ui', 'core', 'package.json');
-const BUILT_SENTINEL = join(MODULES_ROOT, 'node_modules', '@object-ui', 'core', 'dist', 'index.js');
-const REMEDY = '  Run `pnpm objectui:build` first — it builds objectui at the pin into that directory.';
-
-if (!existsSync(BUILD_TREE)) {
-  fail(`no objectui build tree at ${BUILD_TREE_REL}/ for pin ${pin.slice(0, 12)}….\n${REMEDY}`);
-}
-let head = '';
-try {
-  head = execFileSync('git', ['-C', BUILD_TREE, 'rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-} catch (e) {
-  fail(`${BUILD_TREE_REL}/ is not a git checkout (${String(e?.stderr || e?.message || e).trim().split('\n')[0]}).\n${REMEDY}`);
-}
-if (head !== pin) {
-  fail(`${BUILD_TREE_REL}/ is checked out at ${head.slice(0, 12)}…, not at the pin ${pin.slice(0, 12)}….\n${REMEDY}`);
-}
-if (!existsSync(BUILT_SENTINEL)) {
-  fail(
-    `objectui at ${pin.slice(0, 12)}… is checked out but NOT BUILT: ${MODULES_ROOT_REL}/node_modules/@object-ui/core/dist/index.js is missing.\n${REMEDY}`,
-  );
-}
 
 let workspaceVersion;
 try {
@@ -243,20 +330,36 @@ const manifest = JSON.parse(json);
 const count = Object.keys(manifest.components).length;
 writeFileSync(OUT_PATH, json);
 const sha256 = createHash('sha256').update(json).digest('hex');
+// Pinned, the record is exactly what it has always been. In-tree, the pin-keyed
+// fields describe an ARTEFACT, so they are carried only while the regenerated
+// one is byte-identical to the one they were written for (the same sha256) —
+// then they still say something true about these bytes — and dropped the
+// moment it is not. `undefined` keys are left out of the JSON.
+const carried = !pinned && record.sha256 === sha256 ? record : {};
 const nextRecord = {
   '//': record['//'] ?? [],
-  objectuiSha: pin,
+  objectuiSha: pinned ? pin : carried.objectuiSha,
   source: SOURCE,
-  modulesRoot: MODULES_ROOT_REL,
-  objectuiWorkspaceVersion: workspaceVersion,
+  modulesRoot: pinned ? MODULES_ROOT_REL : carried.modulesRoot,
+  objectuiWorkspaceVersion: pinned ? workspaceVersion : carried.objectuiWorkspaceVersion,
   generator: 'scripts/gen-sdui-manifest-node.mjs',
   generatedAt: new Date().toISOString().slice(0, 10),
   sha256,
   components: count,
+  inTree: pinned ? undefined : { modulesRoot: MODULES_ROOT_REL, objectuiWorkspaceVersion: workspaceVersion, ...inTree },
 };
 writeFileSync(RECORD_PATH, JSON.stringify(nextRecord, null, 2) + '\n');
 console.error(`✓ wrote sdui.manifest.json (${count} components, ${Buffer.byteLength(json)} bytes, sha256 ${sha256.slice(0, 12)}…)`);
-console.error(
-  `✓ re-recorded scripts/sdui-manifest.record.json at pin ${pin.slice(0, 12)} — ${SOURCE} ${MODULES_ROOT_REL}, ` +
-    `@object-ui/core workspace version ${workspaceVersion}`,
-);
+if (pinned) {
+  console.error(
+    `✓ re-recorded scripts/sdui-manifest.record.json at pin ${pin.slice(0, 12)} — ${SOURCE} ${MODULES_ROOT_REL}, ` +
+      `@object-ui/core workspace version ${workspaceVersion}`,
+  );
+} else {
+  console.error(
+    `✓ re-recorded scripts/sdui-manifest.record.json in-tree — ${SOURCE} ${MODULES_ROOT_REL}, registry sources ` +
+      `${inTree.registrySources} file(s) in ${inTree.registryPackages.length} package(s), sha256 ` +
+      `${inTree.registrySourcesSha256.slice(0, 12)}…, @object-ui/core workspace version ${workspaceVersion}; ` +
+      (carried.objectuiSha ? `pin fields kept (artefact unchanged since pin ${carried.objectuiSha.slice(0, 12)})` : 'no pin fields'),
+  );
+}

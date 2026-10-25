@@ -108,6 +108,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -123,11 +124,26 @@ import { isEntrypoint } from './invoked-as.mjs';
 
 const DEFAULT_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-/** The three files `checkTree` opens, repo-relative. */
+/** The directory objectui's tree is imported under (#25677), as a bare segment. */
+const UI_TREE = 'ui';
+
+/** The in-tree console the generator reads when the tree has no pin (#25712). */
+const UI_CONSOLE = 'ui/apps/console';
+
+/** Where the `@object-ui/*` workspace packages live in the merged layout. */
+const UI_PACKAGES = 'ui/packages';
+
+/**
+ * What `checkTree` reads, repo-relative: three files with a pin; without one,
+ * the same artefact and record plus the in-tree console's manifest (presence)
+ * and the registry packages (the digest).
+ */
 const READ_PATHS = {
   artefact: 'sdui.manifest.json',
   record: join('scripts', 'sdui-manifest.record.json'),
   pin: '.objectui-sha',
+  console: join(UI_CONSOLE, 'package.json'),
+  packages: UI_PACKAGES,
 };
 
 /**
@@ -154,6 +170,40 @@ const OBJECTUI_VERSION_FILE = 'packages/core/package.json';
  */
 const RECORD_FIELDS = ['objectuiSha', 'source', 'modulesRoot', 'objectuiWorkspaceVersion', 'sha256', 'components'];
 const RECORD_SOURCE = 'built-tree';
+
+/**
+ * The same, for the in-tree producer (no pin): the pin-keyed fields name a pin
+ * and are not required, the `inTree` block (`IN_TREE_FIELDS`) is. The pin-keyed
+ * fields survive an in-tree regeneration only while the artefact they describe
+ * is byte-identical — see the generator.
+ */
+const IN_TREE_RECORD_FIELDS = ['source', 'sha256', 'components', 'inTree'];
+const IN_TREE_FIELDS = ['modulesRoot', 'objectuiWorkspaceVersion', 'registryPackages', 'registrySources', 'registrySourcesSha256'];
+
+/** The one command that clears each mode's freshness reds. */
+const PIN_REGENERATE = 'pnpm objectui:build && node scripts/gen-sdui-manifest-node.mjs';
+const IN_TREE_REGENERATE = 'node scripts/gen-sdui-manifest-node.mjs';
+
+/** The registry the generator enumerates, besides `@object-ui/core` itself — its `REGISTRY_MODULES`, in its order. */
+const REGISTRY_CORE = '@object-ui/core';
+export const REGISTRY_MODULES = Object.freeze([
+  '@object-ui/components',
+  '@object-ui/plugin-grid',
+  '@object-ui/plugin-form',
+  '@object-ui/plugin-view',
+  '@object-ui/plugin-list',
+  '@object-ui/plugin-detail',
+  '@object-ui/plugin-dashboard',
+  '@object-ui/plugin-charts',
+  '@object-ui/plugin-kanban',
+  '@object-ui/plugin-calendar',
+  '@object-ui/plugin-gantt',
+  '@object-ui/plugin-timeline',
+  '@object-ui/plugin-map',
+  '@object-ui/plugin-markdown',
+  '@object-ui/plugin-report',
+  '@object-ui/plugin-tree',
+]);
 
 /**
  * The one producer, repo-relative. Read by the SELF-TEST only — copied into a
@@ -192,6 +242,8 @@ const ROOT_WATCH_HINTS = [
   'sdui.manifest.json/**',
   'scripts/sdui-manifest.record.json',
   '.objectui-sha/**',
+  'ui/apps/console/package.json',
+  'ui/packages/**',
 ];
 
 /**
@@ -261,81 +313,18 @@ export function readPinnedDeclaredVersion(pin, { root = DEFAULT_ROOT, objectuiRo
  * callers that hold a checkout.
  */
 export function checkTree(root, { objectuiRoot, requireObjectui = false, onVersionLeg } = {}) {
-  const problems = [];
-  const artefactPath = join(root, READ_PATHS.artefact);
-  const recordPath = join(root, READ_PATHS.record);
   const pinPath = join(root, READ_PATHS.pin);
+  if (!existsSync(pinPath)) return checkTreeWithoutPin(root);
 
-  if (!existsSync(artefactPath)) {
-    problems.push(
-      'sdui.manifest.json is MISSING at the repo root. `resolveSduiManifest()` degrades to parse-only\n' +
-        '  silently, so this gate is the thing that notices. Regenerate: pnpm objectui:build && node scripts/gen-sdui-manifest-node.mjs',
-    );
-    return problems; // every later check reads it
-  }
-  const raw = readFileSync(artefactPath, 'utf8');
+  const problems = [];
+  const read = checkArtefactAndRecord(root, problems, {
+    fields: RECORD_FIELDS,
+    producerReads: "objectui's built tree at the pin",
+    regenerate: PIN_REGENERATE,
+  });
+  if (read === null) return problems;
+  const { record } = read;
 
-  let manifest;
-  try {
-    manifest = JSON.parse(raw);
-  } catch (e) {
-    problems.push(`sdui.manifest.json does not parse as JSON: ${e.message}`);
-    return problems;
-  }
-  const components = manifest?.components;
-  if (!components || typeof components !== 'object' || Array.isArray(components)) {
-    problems.push('sdui.manifest.json has no `components` object — not a component manifest.');
-    return problems;
-  }
-  const keys = Object.keys(components);
-  if (keys.length === 0) problems.push('sdui.manifest.json declares 0 components — an empty whitelist would red every page.');
-  for (const k of keys) {
-    if (components[k]?.type !== k) {
-      problems.push(`components[${JSON.stringify(k)}].type is ${JSON.stringify(components[k]?.type)} — key/type disagree.`);
-      break; // one example is enough; this shape is generator-owned
-    }
-  }
-
-  if (!existsSync(recordPath)) {
-    problems.push('scripts/sdui-manifest.record.json is MISSING — provenance unknown. Regenerate to re-record.');
-    return problems;
-  }
-  let record;
-  try {
-    record = JSON.parse(readFileSync(recordPath, 'utf8'));
-  } catch (e) {
-    problems.push(`scripts/sdui-manifest.record.json does not parse: ${e.message}`);
-    return problems;
-  }
-  for (const field of RECORD_FIELDS) {
-    if (record[field] === undefined) problems.push(`record is missing \`${field}\`.`);
-  }
-  if (record.source !== undefined && record.source !== RECORD_SOURCE) {
-    problems.push(`record \`source\` is ${JSON.stringify(record.source)}, not ${JSON.stringify(RECORD_SOURCE)} — no producer in this repo writes that.`);
-  }
-  if (problems.length) {
-    problems.push(
-      '  The record is keyed to the one producer, which reads objectui\'s built tree at the pin. Regenerate:\n' +
-        '    pnpm objectui:build && node scripts/gen-sdui-manifest-node.mjs',
-    );
-    return problems;
-  }
-
-  const sha256 = createHash('sha256').update(raw).digest('hex');
-  if (sha256 !== record.sha256) {
-    problems.push(
-      `sdui.manifest.json sha256 ${sha256.slice(0, 12)}… does not match the record ${String(record.sha256).slice(0, 12)}…\n` +
-        '  The artefact is generator-owned — never hand-edit it. Regenerate: pnpm objectui:build && node scripts/gen-sdui-manifest-node.mjs',
-    );
-  }
-  if (keys.length !== record.components) {
-    problems.push(`artefact has ${keys.length} components, record says ${record.components}.`);
-  }
-
-  if (!existsSync(pinPath)) {
-    problems.push('.objectui-sha is MISSING — cannot judge freshness.');
-    return problems;
-  }
   const pin = readFileSync(pinPath, 'utf8').trim();
 
   // Check 4's oracle, read once, about the LIVE pin.
@@ -377,6 +366,221 @@ export function checkTree(root, { objectuiRoot, requireObjectui = false, onVersi
     );
   }
   return problems;
+}
+
+/**
+ * Checks 1–2, the same in both modes: the artefact exists, parses and is a
+ * component manifest; the record exists, parses, carries `fields` and the one
+ * producer's `source`; the artefact's sha256 and component count are the
+ * record's. Pushes onto `problems`; returns `null` where today's checks stop
+ * early, otherwise `{ record }` for the mode's own freshness leg.
+ */
+function checkArtefactAndRecord(root, problems, { fields, producerReads, regenerate }) {
+  const artefactPath = join(root, READ_PATHS.artefact);
+  const recordPath = join(root, READ_PATHS.record);
+
+  if (!existsSync(artefactPath)) {
+    problems.push(
+      'sdui.manifest.json is MISSING at the repo root. `resolveSduiManifest()` degrades to parse-only\n' +
+        `  silently, so this gate is the thing that notices. Regenerate: ${regenerate}`,
+    );
+    return null; // every later check reads it
+  }
+  const raw = readFileSync(artefactPath, 'utf8');
+
+  let manifest;
+  try {
+    manifest = JSON.parse(raw);
+  } catch (e) {
+    problems.push(`sdui.manifest.json does not parse as JSON: ${e.message}`);
+    return null;
+  }
+  const components = manifest?.components;
+  if (!components || typeof components !== 'object' || Array.isArray(components)) {
+    problems.push('sdui.manifest.json has no `components` object — not a component manifest.');
+    return null;
+  }
+  const keys = Object.keys(components);
+  if (keys.length === 0) problems.push('sdui.manifest.json declares 0 components — an empty whitelist would red every page.');
+  for (const k of keys) {
+    if (components[k]?.type !== k) {
+      problems.push(`components[${JSON.stringify(k)}].type is ${JSON.stringify(components[k]?.type)} — key/type disagree.`);
+      break; // one example is enough; this shape is generator-owned
+    }
+  }
+
+  if (!existsSync(recordPath)) {
+    problems.push('scripts/sdui-manifest.record.json is MISSING — provenance unknown. Regenerate to re-record.');
+    return null;
+  }
+  let record;
+  try {
+    record = JSON.parse(readFileSync(recordPath, 'utf8'));
+  } catch (e) {
+    problems.push(`scripts/sdui-manifest.record.json does not parse: ${e.message}`);
+    return null;
+  }
+  for (const field of fields) {
+    if (record[field] === undefined) problems.push(`record is missing \`${field}\`.`);
+  }
+  if (record.source !== undefined && record.source !== RECORD_SOURCE) {
+    problems.push(`record \`source\` is ${JSON.stringify(record.source)}, not ${JSON.stringify(RECORD_SOURCE)} — no producer in this repo writes that.`);
+  }
+  if (problems.length) {
+    problems.push(
+      `  The record is keyed to the one producer, which reads ${producerReads}. Regenerate:\n` +
+        `    ${regenerate}`,
+    );
+    return null;
+  }
+
+  const sha256 = createHash('sha256').update(raw).digest('hex');
+  if (sha256 !== record.sha256) {
+    problems.push(
+      `sdui.manifest.json sha256 ${sha256.slice(0, 12)}… does not match the record ${String(record.sha256).slice(0, 12)}…\n` +
+        `  The artefact is generator-owned — never hand-edit it. Regenerate: ${regenerate}`,
+    );
+  }
+  if (keys.length !== record.components) {
+    problems.push(`artefact has ${keys.length} components, record says ${record.components}.`);
+  }
+  return { record };
+}
+
+/**
+ * Gate a tree that has no pin (the merged layout, #25712). Checks 1–2 as
+ * above, keyed to the in-tree producer's record; check 3 becomes the registry
+ * sources' digest against `inTree.registrySourcesSha256`. There is no check 4
+ * here: the in-tree `@object-ui/core` version moves with every release of the
+ * fixed group while the registry does not, so the record carries it as
+ * provenance and the success line prints both. No pin and no in-tree console
+ * is RED, naming both.
+ */
+function checkTreeWithoutPin(root) {
+  const problems = [];
+  if (!existsSync(join(root, UI_CONSOLE, 'package.json'))) {
+    problems.push(
+      `.objectui-sha is MISSING and there is no in-tree console (${UI_CONSOLE}) either — no oracle to judge freshness\n` +
+        '  against. With the pin, the manifest is held to objectui\'s build at that commit; without it, to the\n' +
+        `  registry sources under ${UI_TREE}/. A tree with neither cannot be called fresh.`,
+    );
+    return problems;
+  }
+  const read = checkArtefactAndRecord(root, problems, {
+    fields: IN_TREE_RECORD_FIELDS,
+    producerReads: `the in-tree console build (${UI_CONSOLE})`,
+    regenerate: IN_TREE_REGENERATE,
+  });
+  if (read === null) return problems;
+  const { record } = read;
+
+  const missing = IN_TREE_FIELDS.filter((field) => record.inTree?.[field] === undefined);
+  if (missing.length > 0 || record.inTree?.modulesRoot !== UI_CONSOLE) {
+    for (const field of missing) problems.push(`record \`inTree\` is missing \`${field}\`.`);
+    if (!missing.includes('modulesRoot') && record.inTree?.modulesRoot !== UI_CONSOLE) {
+      problems.push(`record \`inTree.modulesRoot\` is ${JSON.stringify(record.inTree?.modulesRoot)}, not ${JSON.stringify(UI_CONSOLE)} — the in-tree producer reads only that.`);
+    }
+    problems.push(`  Regenerate in-tree — one command builds what the generator reads and re-records:\n    ${IN_TREE_REGENERATE}`);
+    return problems;
+  }
+
+  const now = registrySourceDigest(root);
+  if (now.problem) {
+    problems.push(`cannot digest the registry sources under ${UI_TREE}/: ${now.problem}`);
+    return problems;
+  }
+  const was = record.inTree;
+  if (
+    now.sha256 !== was.registrySourcesSha256
+    || now.files !== was.registrySources
+    || JSON.stringify(now.packages) !== JSON.stringify(was.registryPackages)
+  ) {
+    problems.push(
+      `the console registry sources under ${UI_TREE}/ have changed since sdui.manifest.json was generated:\n` +
+        `    now      ${now.packages.length} package(s), ${now.files} file(s), sha256 ${now.sha256.slice(0, 12)}…\n` +
+        `    recorded ${Array.isArray(was.registryPackages) ? was.registryPackages.length : '?'} package(s), ${was.registrySources} file(s), sha256 ${String(was.registrySourcesSha256).slice(0, 12)}…\n` +
+        '  A registry change can change which components and inputs the shipped console declares, so the manifest\n' +
+        '  must follow it (同步一次就烂). One command builds what the generator reads and regenerates:\n' +
+        `    ${IN_TREE_REGENERATE}`,
+    );
+  }
+  return problems;
+}
+
+/** Paths under a registry package's `src/` that never reach its build: tests and their mocks. */
+const TEST_SOURCE = /(^|\/)(__tests__|__mocks__)\/|\.(test|spec)\.[cm]?[jt]sx?$/;
+
+/**
+ * The in-tree freshness oracle: one sha256 over the registry's SOURCES as git
+ * has them. Which packages: every `@object-ui/*` workspace package under
+ * `ui/packages/` that `@object-ui/core` and the generator's `REGISTRY_MODULES`
+ * reach through `dependencies`, `peerDependencies` or `optionalDependencies`
+ * naming another member. Which files: each one's `src/`, tests excluded
+ * (`TEST_SOURCE`). Which bytes: the INDEX — `git ls-files -s` gives the
+ * path-sorted list and each file's blob id, so the reading is the committed
+ * content, never a working-tree edit, an untracked file or a build output.
+ *
+ * `{ packages, files, sha256 }`, or `{ problem }` naming what could not be
+ * read — a registry module that is not a package here, an unreadable manifest,
+ * a failed listing, or an empty one (zero sources is a broken read, not a
+ * fresh one).
+ */
+export function registrySourceDigest(root) {
+  const base = join(root, UI_PACKAGES);
+  if (!existsSync(base)) return { problem: `${UI_PACKAGES}/ does not exist` };
+  const byName = new Map();
+  for (const dir of readdirSync(base).sort()) {
+    const manifestPath = join(base, dir, 'package.json');
+    if (!existsSync(manifestPath)) continue;
+    let manifest;
+    try {
+      manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    } catch (e) {
+      return { problem: `${UI_PACKAGES}/${dir}/package.json does not parse: ${e.message}` };
+    }
+    if (typeof manifest?.name === 'string') byName.set(manifest.name, { dir: `${UI_PACKAGES}/${dir}`, manifest });
+  }
+
+  const seeds = [REGISTRY_CORE, ...REGISTRY_MODULES];
+  const missing = seeds.filter((name) => !byName.has(name));
+  if (missing.length > 0) return { problem: `registry module(s) ${missing.join(', ')} are not packages under ${UI_PACKAGES}/` };
+  const reached = new Set();
+  const queue = [...seeds];
+  while (queue.length > 0) {
+    const name = queue.shift();
+    if (reached.has(name)) continue;
+    reached.add(name);
+    const { manifest } = byName.get(name);
+    for (const field of ['dependencies', 'peerDependencies', 'optionalDependencies']) {
+      for (const dep of Object.keys(manifest[field] ?? {})) if (byName.has(dep)) queue.push(dep);
+    }
+  }
+  const packages = [...reached].map((name) => byName.get(name).dir).sort();
+
+  let listing;
+  try {
+    listing = execFileSync('git', ['-C', root, 'ls-files', '-s', '-z', '--', ...packages.map((dir) => `${dir}/src`)], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      maxBuffer: 64 * 1024 * 1024,
+    });
+  } catch (e) {
+    return { problem: `git ls-files over ${packages.length} package src/ trees failed: ${String(e?.stderr || e?.message || e).trim().split('\n')[0]}` };
+  }
+  const entries = listing
+    .split('\0')
+    .filter(Boolean)
+    .map((line) => {
+      const tab = line.indexOf('\t');
+      return { path: line.slice(tab + 1), blob: line.slice(0, tab).split(' ')[1] };
+    })
+    .filter(({ path }) => !TEST_SOURCE.test(path));
+  if (entries.length === 0) {
+    return { problem: `git lists no registry source under the ${packages.length} package src/ trees — zero sources is a broken read, not a fresh one` };
+  }
+  const hash = createHash('sha256');
+  for (const { path, blob } of entries) hash.update(`${blob} ${path}\n`);
+  return { packages, files: entries.length, sha256: hash.digest('hex') };
 }
 
 // Returned by `selfTest()` only after its verdict is printed. The dispatch
@@ -750,24 +954,45 @@ if (isEntrypoint(import.meta.url)) {
       process.exit(1);
     }
     const record = JSON.parse(readFileSync(join(DEFAULT_ROOT, 'scripts', 'sdui-manifest.record.json'), 'utf8'));
-    console.log(
-      `✓ check-sdui-manifest: sdui.manifest.json is present, intact (sha256 ${String(record.sha256).slice(0, 12)}…, ` +
-        `${record.components} components) and recorded at the live objectui pin ${String(record.objectuiSha).slice(0, 12)}….`,
-    );
-    // The claim is only ever as wide as the leg that ran (#18611): a run without
-    // an objectui checkout says so, in the same breath, rather than letting the
-    // line above be read as "fresh at the pin" in every sense.
-    if (versionLeg?.status === 'resolved') {
+    if (!existsSync(join(DEFAULT_ROOT, READ_PATHS.pin))) {
+      // No pin: checkTree ran the in-tree leg, which has no check 4 to report.
+      const { inTree } = record;
+      let declared = 'unreadable';
+      try {
+        declared = JSON.stringify(JSON.parse(readFileSync(join(DEFAULT_ROOT, UI_PACKAGES, 'core', 'package.json'), 'utf8')).version);
+      } catch {
+        // display only — the verdict above did not read it
+      }
       console.log(
-        `  @object-ui ${record.objectuiWorkspaceVersion} is the version objectui ${String(record.objectuiSha).slice(0, 12)}… declares ` +
-          `in ${OBJECTUI_VERSION_FILE} (read from ${versionLeg.where}).`,
+        `✓ check-sdui-manifest: sdui.manifest.json is present, intact (sha256 ${String(record.sha256).slice(0, 12)}…, ` +
+          `${record.components} components) and generated from the in-tree registry as it stands: ${inTree.registrySources} ` +
+          `source(s) in ${inTree.registryPackages.length} package(s) under ${UI_PACKAGES}/, sha256 ${String(inTree.registrySourcesSha256).slice(0, 12)}… ` +
+          '(no .objectui-sha in this tree).',
+      );
+      console.log(
+        `  Provenance, not a verdict: the generator read @object-ui/core ${JSON.stringify(inTree.objectuiWorkspaceVersion)}; ` +
+          `${UI_PACKAGES}/core declares ${declared} now — a release of the fixed group moves that without moving the registry.`,
       );
     } else {
       console.log(
-        `  NOT CHECKED — objectuiWorkspaceVersion ${JSON.stringify(record.objectuiWorkspaceVersion)} was not compared with what the pin declares: ` +
-          `${versionLeg?.reason ?? 'the version leg did not run.'}\n` +
-          '  Re-run with an objectui checkout (OBJECTUI_ROOT=… or a ../objectui sibling); add --require-objectui to make this gap an exit 1.',
+        `✓ check-sdui-manifest: sdui.manifest.json is present, intact (sha256 ${String(record.sha256).slice(0, 12)}…, ` +
+          `${record.components} components) and recorded at the live objectui pin ${String(record.objectuiSha).slice(0, 12)}….`,
       );
+      // The claim is only ever as wide as the leg that ran (#18611): a run without
+      // an objectui checkout says so, in the same breath, rather than letting the
+      // line above be read as "fresh at the pin" in every sense.
+      if (versionLeg?.status === 'resolved') {
+        console.log(
+          `  @object-ui ${record.objectuiWorkspaceVersion} is the version objectui ${String(record.objectuiSha).slice(0, 12)}… declares ` +
+            `in ${OBJECTUI_VERSION_FILE} (read from ${versionLeg.where}).`,
+        );
+      } else {
+        console.log(
+          `  NOT CHECKED — objectuiWorkspaceVersion ${JSON.stringify(record.objectuiWorkspaceVersion)} was not compared with what the pin declares: ` +
+            `${versionLeg?.reason ?? 'the version leg did not run.'}\n` +
+            '  Re-run with an objectui checkout (OBJECTUI_ROOT=… or a ../objectui sibling); add --require-objectui to make this gap an exit 1.',
+        );
+      }
     }
   }
 }
