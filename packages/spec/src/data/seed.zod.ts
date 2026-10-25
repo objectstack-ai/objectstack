@@ -12,6 +12,7 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { LocaleSchema } from '../system/translation.zod';
 import { findClosestMatches, formatSuggestion } from '../shared/suggestions.zod';
 import { resolveInjectedSystemColumns, type InjectedSystemColumnName } from './injected-system-columns';
+import { ColumnApplyOnSchema } from './column-apply-on.zod';
 export const SeedMode = z.enum([
   'insert',    // Try to insert, fail on duplicate
   'update',    // Only update found records, ignore new
@@ -19,6 +20,50 @@ export const SeedMode = z.enum([
   'replace',   // Delete ALL records in object then insert (Dangerous - use for cache tables)
   'ignore'     // Try to insert, silently skip duplicates
 ]);
+
+/**
+ * Seed Column — the write policy a seed dataset declares for one of its
+ * columns, under {@link SeedSchema.shape.columns}.
+ */
+export const SeedColumnSchema = lazySchema(() => strictObject({
+  surface: 'this seed column',
+  history: 'Declared closed from its first day: an unrecognized key is refused, never dropped.',
+}, {
+  /**
+   * When a load writes this column (#25761, ruled on hotclm#41: "job-written
+   * columns are written on first seed only — via the platform").
+   *
+   * `create` takes the column out of every write to a row the load MATCHED by
+   * the dataset's `externalId`: an `upsert` replay over an existing row, and
+   * every row of an `update` dataset. The column is not compared for the
+   * replay's no-op check, not written, and — a reference column — not
+   * resolved and not deferred to pass 2, so nothing the load does afterwards
+   * writes it back. A row the load creates gets it like any other column.
+   * `insert`, `ignore` and `replace` never update a matched row, so the policy
+   * changes nothing on those modes.
+   *
+   * A column of the dataset's `externalId` is the key the row was matched by:
+   * it stays in the matched row's update whatever it declares, as an import's
+   * match key does.
+   *
+   * Same values, same default and same meaning as the import door's
+   * `FieldMappingEntry.applyOn` ({@link ColumnApplyOnSchema}).
+   */
+  applyOn: ColumnApplyOnSchema.default('always')
+    .describe(
+      'When a seed load writes this column. `always` (default) writes it on every row the load ' +
+      'creates or updates. `create` writes it only when the load creates the row: an `upsert` ' +
+      'replay that matches an existing row leaves the row\'s value as it is, and an `update` ' +
+      'dataset never writes it, so replaying the seed refreshes the `always` columns without ' +
+      'reverting state the app wrote since the first load. A column of the dataset\'s ' +
+      '`externalId` is still matched on and stays in the matched row\'s update. The same values ' +
+      'and meaning as an import mapping entry\'s `applyOn`.',
+    ),
+}));
+/** Author-time shape of {@link SeedColumnSchema}. */
+export type SeedColumn = z.input<typeof SeedColumnSchema>;
+/** Post-parse shape of {@link SeedColumn} — defaults applied, transforms run (ADR-0122). */
+export type SeedColumnParsed = z.infer<typeof SeedColumnSchema>;
 
 /**
  * Seed Schema (Seed Data / Fixtures)
@@ -55,6 +100,11 @@ export const SeedSchema = lazySchema(() => strictObject({
     language: 'locale',
     languages: 'locale',
   },
+  guidance: {
+    applyOn:
+      '`applyOn` is a per-column policy, not a dataset key — declare it under `columns`, keyed by the '
+      + "field it governs: `columns: { status: { applyOn: 'create' } }`.",
+  },
 }, {
   /**
    * Target Object
@@ -86,6 +136,32 @@ export const SeedSchema = lazySchema(() => strictObject({
    * Import Strategy
    */
   mode: SeedMode.default('upsert').describe('Conflict resolution strategy'),
+
+  /**
+   * Column Policies
+   *
+   * Per-column write policy, keyed by the field a record writes; a column the
+   * map does not name keeps every default. Today one policy,
+   * {@link SeedColumnSchema.shape.applyOn}.
+   *
+   * A seed is replayed — every dev-server boot, every package re-publish — and
+   * an `upsert` replay re-asserts every column a record declares on the row it
+   * matched. That is right for master data and wrong for a column the app owns
+   * after the first write: a status a scheduled job advances, a flag a job sets
+   * once its notice is sent. Declared `applyOn: 'create'`, such a column is
+   * written when the seed creates the row and left as the row holds it on every
+   * replay after.
+   *
+   * Each key must name a column the target object has — a declared field or a
+   * system column the platform injects on it. `defineSeed` refuses one that
+   * does not when it runs, and the loader warns, naming the column, when it
+   * loads a dataset whose map names one.
+   */
+  columns: z.record(z.string(), SeedColumnSchema).optional()
+    .describe(
+      'Per-column write policy, keyed by field name: `{ status: { applyOn: \'create\' } }` writes ' +
+      '`status` only when the seed creates the row. Omitted, every column is written on create and update.',
+    ),
 
   /**
    * Environment Scope
@@ -205,8 +281,18 @@ type SeedRecord<TFields> = {
 };
 
 /**
+ * Shape of a seed's {@link SeedSchema.shape.columns} map for one object: the
+ * same key set as {@link SeedRecord} (the object's declared `fields` plus the
+ * injectable system columns), each taking a {@link SeedColumn}.
+ */
+type SeedColumns<TFields> = {
+  [K in keyof TFields | InjectedSystemColumnName]?: SeedColumn;
+};
+
+/**
  * The call-time half of {@link defineSeed}'s key check: every key of every
- * record must name a column the target object has, which is a field it
+ * record, and every key of the `columns` map, must name a column the target
+ * object has, which is a field it
  * declares or a system column the platform injects on THIS object. The injected
  * set is {@link resolveInjectedSystemColumns}, the per-object answer the
  * registry's own injection consumes, so a seed may write `created_at` (the
@@ -226,9 +312,10 @@ type SeedRecord<TFields> = {
  * No opinion without a field map: a caller outside the type that passes no
  * `fields` object is not judged here.
  */
-function assertSeedRecordKeysDeclared(
+function assertSeedKeysDeclared(
   objectDef: { name: string; fields: unknown },
   records: ReadonlyArray<Record<string, unknown>>,
+  columns: Readonly<Record<string, unknown>> | undefined,
 ): void {
   const { fields } = objectDef;
   if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return;
@@ -236,26 +323,32 @@ function assertSeedRecordKeysDeclared(
   const knownSet = new Set(known);
   const lines: string[] = [];
   const unknownKeys = new Set<string>();
+  const surfaces = new Set<'records' | 'columns'>();
+  const judge = (key: string, where: string, surface: 'records' | 'columns'): void => {
+    if (knownSet.has(key)) return;
+    unknownKeys.add(key);
+    surfaces.add(surface);
+    const suggestion = formatSuggestion(
+      findClosestMatches(key, known, Math.max(2, Math.floor(key.length / 3)), 1),
+    );
+    lines.push(
+      `  • ${where}: \`${key}\` is not a field of \`${objectDef.name}\`.`
+      + (suggestion ? ` ${suggestion}` : ''),
+    );
+  };
   records.forEach((record, index) => {
-    for (const key of Object.keys(record)) {
-      if (knownSet.has(key)) continue;
-      unknownKeys.add(key);
-      const suggestion = formatSuggestion(
-        findClosestMatches(key, known, Math.max(2, Math.floor(key.length / 3)), 1),
-      );
-      lines.push(
-        `  • records[${index}]: \`${key}\` is not a field of \`${objectDef.name}\`.`
-        + (suggestion ? ` ${suggestion}` : ''),
-      );
-    }
+    for (const key of Object.keys(record)) judge(key, `records[${index}]`, 'records');
   });
+  // [#25761] A policy on a column the object does not have governs nothing:
+  // the column it was meant for (a misspelt `status`) stays `always`.
+  for (const key of Object.keys(columns ?? {})) judge(key, 'columns', 'columns');
   if (lines.length === 0) return;
   throw new Error(
-    `defineSeed('${objectDef.name}'): unknown field(s) in records — ${[...unknownKeys].join(', ')}.\n`
-    + `A seed record key must name a field \`${objectDef.name}\` declares or a system column the platform `
-    + 'injects on it (`created_at`, `owner_id` and the rest, unless the object opts out of them).\n\n'
+    `defineSeed('${objectDef.name}'): unknown field(s) in ${[...surfaces].join(' and ')} — ${[...unknownKeys].join(', ')}.\n`
+    + `A seed record key, and a \`columns\` key, must name a field \`${objectDef.name}\` declares or a system `
+    + 'column the platform injects on it (`created_at`, `owner_id` and the rest, unless the object opts out of them).\n\n'
     + `${lines.join('\n')}\n\n`
-    + `Fix the key's spelling, declare the field on \`${objectDef.name}\`, or remove the key from the record.`,
+    + `Fix the key's spelling, declare the field on \`${objectDef.name}\`, or remove the key.`,
   );
 }
 
@@ -278,10 +371,14 @@ function assertSeedRecordKeysDeclared(
  *   ({@link resolveInjectedSystemColumns}). A key that is neither is refused,
  *   naming the object, the record and the key, with a near-miss suggestion.
  *
+ * The keys of {@link SeedSchema.shape.columns} are held to the same set, both
+ * times ({@link SeedColumns}).
+ *
  * @example
  * ```ts
  * export const leadSeed = defineSeed(Lead, {
  *   externalId: 'email',
+ *   columns: { lead_source: { applyOn: 'create' } }, // ✅ written when the row is created, kept on replay
  *   records: [
  *     { first_name: 'Alice', lead_source: 'web' },   // ✅ type-checked
  *     { source: 'web' },                              // ❌ compile error (unknown field), and refused when it runs
@@ -296,11 +393,12 @@ export function defineSeed<
   const TObj extends { name: string; fields: Record<string, unknown> }
 >(
   objectDef: TObj,
-  config: Omit<Seed, 'object' | 'records'> & {
+  config: Omit<Seed, 'object' | 'records' | 'columns'> & {
     records: Array<SeedRecord<TObj['fields']>>;
+    columns?: SeedColumns<TObj['fields']>;
   }
 ): Seed {
   const seed = SeedSchema.parse({ ...config, object: objectDef.name });
-  assertSeedRecordKeysDeclared(objectDef, seed.records);
+  assertSeedKeysDeclared(objectDef, seed.records, seed.columns);
   return seed;
 }
