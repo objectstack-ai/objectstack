@@ -2085,6 +2085,13 @@ async function selfTest() {
   // ── #22653: the per-shard cause read itself, offline ─────────────────────
   battery('#22653 the cause read, offline: one jobs list, then one annotations read per unattested shard');
   const CI_TEXT = readFileSync(join(scriptRepoRoot(), '.github', 'workflows', 'ci.yml'), 'utf8');
+  // The runs replayed below (38036705318, 34007386254) ran the SIX-shard matrix,
+  // which #25376 widened to eight, so they are read against the live workflow
+  // with the shard name as it stood then. The live names are pinned on their own
+  // at the end of this battery.
+  const LIVE_TEST_NAME = 'name: Test Core (${{ matrix.shard }}/8)';
+  const CI_TEXT_SIX_SHARDS = CI_TEXT.replace(LIVE_TEST_NAME, 'name: Test Core (${{ matrix.shard }}/6)');
+  assert(CI_TEXT_SIX_SHARDS !== CI_TEXT, `#22653: the live ci.yml no longer carries \`${LIVE_TEST_NAME}\` — the six-shard replays below would read the live roster`);
   const PARTIAL_JOBS = /\/repos\/o\/r\/actions\/runs\/38036705318\/attempts\/1\/jobs\?per_page=100&page=1$/;
   const ANY_ANNOTATIONS = /\/check-runs\/\d+\/annotations\?per_page=100$/;
   const shardCheckRun = (n) => 114168570850 + n;
@@ -2109,7 +2116,7 @@ async function selfTest() {
       apiUrl: API,
       token: 'not-a-real-token',
       fetchJson,
-      workflowText: CI_TEXT,
+      workflowText: CI_TEXT_SIX_SHARDS,
       ...over,
     });
 
@@ -2177,7 +2184,7 @@ async function selfTest() {
     '#22653: a matrix name with no shard expression cannot locate a shard ⇒ unreadable, naming the shard',
   );
 
-  assert([1, 2, 3, 4, 5, 6].every((n) => workflowJobDisplayName(CI_TEXT, 'test', n) === `Test Core (${n}/6)`), '#22653: the real ci.yml names each Test Core shard as the jobs API lists it');
+  assert([1, 2, 3, 4, 5, 6, 7, 8].every((n) => workflowJobDisplayName(CI_TEXT, 'test', n) === `Test Core (${n}/8)`), '#22653: the real ci.yml names each Test Core shard as the jobs API lists it');
   assert([1, 2, 3].every((n) => workflowJobDisplayName(CI_TEXT, 'dogfood', n) === `Dogfood Regression Gate (${n}/3)`), '#22653: …and each dogfood shard');
   assert(workflowJobDisplayName(CI_TEXT, 'dogfood-verify') === 'Dogfood Verify CLI', "#22653 control: the single leg's literal name reads as before");
   assert(workflowJobDisplayName(CI_TEXT, 'test') === undefined, '#22653: a matrix template asked WITHOUT a shard is still unresolvable ⇒ undefined');
@@ -2480,8 +2487,8 @@ async function selfTest() {
     // `String.replace` takes the first match. A short anchor would silently
     // start mutating dogfood's matrix instead — still red, still for a
     // plausible-looking reason, and no longer the assertion written here.
-    assert((await fixture('grow the matrix', (s) => s.replace('shard: [1, 2, 3, 4, 5, 6]', 'shard: [1, 2, 3, 4, 5, 6, 7]'))).problems.some((p) => p.includes('declares 7 shard')), 'growing the matrix without the gate ⇒ red');
-    assert((await fixture('shrink the roster', (s) => s.replace('--leg "test/6', '--leg "test/2'))).problems.some((p) => p.includes('expects 2 attestation')), 'shrinking the gate roster without the matrix ⇒ red');
+    assert((await fixture('grow the matrix', (s) => s.replace('shard: [1, 2, 3, 4, 5, 6, 7, 8]', 'shard: [1, 2, 3, 4, 5, 6, 7, 8, 9]'))).problems.some((p) => p.includes('declares 9 shard')), 'growing the matrix without the gate ⇒ red');
+    assert((await fixture('shrink the roster', (s) => s.replace('--leg "test/8', '--leg "test/2'))).problems.some((p) => p.includes('expects 2 attestation')), 'shrinking the gate roster without the matrix ⇒ red');
     assert((await fixture('uncounted intruder', (s) => s.replace(/^jobs:$/m, 'jobs:\n  intruder:\n    runs-on: ubuntu-latest\n    steps:\n      - run: node scripts/check-shard-attestation.mjs --emit'))).problems.some((p) => p.includes('no gate counts')), 'an attestation no gate counts ⇒ red');
     assert((await fixture('rename test-gate', (s) => s.replace('  test-gate:', '  test-gate-renamed:'))).problems.some((p) => p.includes("'test-gate'")), 'losing a required-context gate ⇒ red');
     assert((await fixture('typo the artifact name', (s) => s.replace('name: shard-attest-test-', 'name: shard-attest-typo-'))).problems.some((p) => p.includes('cannot count')), 'an artifact name the gate cannot match ⇒ red');
@@ -2573,13 +2580,13 @@ async function selfTest() {
       hasProblem(await fixture('drop the token (test-gate)', inJob('test-gate', TOKEN_LINE, '')), "gate 'test-gate'", 'GITHUB_TOKEN'),
       "#22653: test-gate's verify step without GITHUB_TOKEN ⇒ red",
     );
-    const TEST_NAME = '    name: Test Core (${{ matrix.shard }}/6)\n';
+    const TEST_NAME = '    name: Test Core (${{ matrix.shard }}/8)\n';
     assert(
       hasProblem(await fixture('a matrix name without the shard expression', (s) => s.replace(TEST_NAME, '    name: Test Core shards\n')), '#22653', "job 'test' is named"),
       '#22653: a matrix name with no `${{ matrix.shard }}` ⇒ red — the platform would append the values itself, a name the reader cannot rebuild',
     );
     assert(
-      hasProblem(await fixture('a matrix name with a second expression', (s) => s.replace(TEST_NAME, '    name: Test Core (${{ matrix.shard }}/6) ${{ github.event_name }}\n')), '#22653', "job 'test' is named"),
+      hasProblem(await fixture('a matrix name with a second expression', (s) => s.replace(TEST_NAME, '    name: Test Core (${{ matrix.shard }}/8) ${{ github.event_name }}\n')), '#22653', "job 'test' is named"),
       '#22653: any expression besides the shard ⇒ red — the text reading cannot evaluate it',
     );
     assert(
@@ -2591,11 +2598,11 @@ async function selfTest() {
       "#22653: dogfood's matrix leg is held to the same name rule — it is asked on a partial cancel too",
     );
     assert(
-      (await fixture('the matrix name double-quoted', (s) => s.replace(TEST_NAME, '    name: "Test Core (${{ matrix.shard }}/6)"\n'))).problems.length === 0,
+      (await fixture('the matrix name double-quoted', (s) => s.replace(TEST_NAME, '    name: "Test Core (${{ matrix.shard }}/8)"\n'))).problems.length === 0,
       '#22653 positive limb: a quoted template reads the same from text and from YAML ⇒ green',
     );
     assert(
-      (await fixture('the shard expression without inner spaces', (s) => s.replace(TEST_NAME, '    name: Test Core (${{matrix.shard}}/6)\n'))).problems.length === 0,
+      (await fixture('the shard expression without inner spaces', (s) => s.replace(TEST_NAME, '    name: Test Core (${{matrix.shard}}/8)\n'))).problems.length === 0,
       '#22653 positive limb: `${{matrix.shard}}` is the same expression ⇒ green',
     );
     assert(baseline.problems.length === 0 && baseline.gateIds.includes('test-gate'), '#22653: the checked-in test-gate carries every prerequisite — the baseline is green with it counted as a gate');

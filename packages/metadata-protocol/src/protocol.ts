@@ -195,11 +195,7 @@ export type { FormFieldInput };
 import { METADATA_FORM_REGISTRY, CORE_SERVICE_PROVIDER, serviceUnavailableMessage, inProcessServiceMessage } from '@objectstack/spec/system';
 import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataTypeSchema, getMetadataTypeActions, getMetadataCreateSeed, PROTOCOL_VERSION } from '@objectstack/spec/kernel';
 import {
-    extractProtection,
-    evaluateLockForWrite,
-    evaluateLockForDelete,
     resolveLockState,
-    MetadataLockSchema,
     type MetadataLock,
     type MetadataLockSource,
     type MetadataProvenance,
@@ -381,6 +377,22 @@ import {
     restoredCredentialPathsFor,
     storedBodyForCarryForward,
 } from './protocol-credential-carry-forward.js';
+// [#25467 cut 10] The served lock state and the stored-row decline.
+import {
+    declinesStoredRow,
+    isShippedFlowName,
+    isStoredEntryOfDeclinedName,
+    isStoredFlowEntryOfShippedName,
+    isUnservedSealedOverlay,
+    servedLockState,
+} from './protocol-lock-state.js';
+// [#25467 cut 11] The registry materialize/strip pair of the served object document.
+import {
+    governServedObject,
+    materializeFromRegistry,
+    stripMaterializedFromRegistry,
+    stripServedObjectColumns,
+} from './protocol-registry-materialize.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -555,7 +567,7 @@ function canonicalizeMetaRequestType<T extends { type: string }>(request: T): T 
  * PUT round-trip would persist the injected columns into `sys_metadata`, and the
  * #4326 byte-identical invariant would break the day this shipped.
  */
-function governServedItem<T>(type: string, item: T): T {
+export function governServedItem<T>(type: string, item: T): T {
     if (canonicalMetaType(type) !== 'object') return item;
     return applyInjectedSystemColumns(applyAuditFieldGovernance(item));
 }
@@ -578,7 +590,7 @@ function governServedItem<T>(type: string, item: T): T {
  * the platform's own definition, and a declared `owner_id` carrying the author's
  * own label survives untouched.
  */
-function stripServedSystemColumns<T>(type: string, item: T): T {
+export function stripServedSystemColumns<T>(type: string, item: T): T {
     return canonicalMetaType(type) === 'object' ? stripInjectedSystemColumns(item) : item;
 }
 
@@ -9064,32 +9076,12 @@ export class ObjectStackProtocolImplementation implements
      * which is the majority path this converges the minority onto).
      */
     private materializeFromRegistry<T>(type: string, body: T): T {
-        if (canonicalMetaType(type) !== 'object') return body;
-        if (body === null || typeof body !== 'object') return body;
-        const registry = (this.engine as any)?.registry;
-        // Partial registry doubles in tests predate this method; a host that
-        // cannot answer the gate answers exactly as it did before. The
-        // `provisionSearchCompanionOnto` fallback keeps a double that was
-        // written against #8038's narrower seam serving what it served then,
-        // rather than silently losing the companion convergence to a rename.
-        if (registry && typeof registry.materializeServedObjectOnto === 'function') {
-            try {
-                return registry.materializeServedObjectOnto(body) as T;
-            } catch {
-                // A read over an in-memory flag, the registry's own resolved
-                // answer and the body's own fields; a failure here must not turn
-                // a served schema into a 5xx.
-                return body;
-            }
-        }
-        if (registry && typeof registry.provisionSearchCompanionOnto === 'function') {
-            try {
-                return registry.provisionSearchCompanionOnto(body) as T;
-            } catch {
-                return body;
-            }
-        }
-        return body;
+        // [#25467 cut 11] The body moved to `protocol-registry-materialize.ts` (see `RegistryMaterializeHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof materializeFromRegistry> = {
+            get engine() { return readEngine(); },
+        };
+        return (materializeFromRegistry<T>).call(host, type, body);
     }
 
     /**
@@ -9102,7 +9094,11 @@ export class ObjectStackProtocolImplementation implements
      * #7556's boundary).
      */
     private governServedObject<T>(type: string, item: T): T {
-        return this.materializeFromRegistry(type, governServedItem(type, item));
+        // [#25467 cut 11] The body moved to `protocol-registry-materialize.ts` (see `RegistryMaterializeHost`).
+        const host: ThisParameterType<typeof governServedObject> = {
+            materializeFromRegistry: (...a) => this.materializeFromRegistry(...a),
+        };
+        return (governServedObject<T>).call(host, type, item);
     }
 
     /**
@@ -9127,29 +9123,12 @@ export class ObjectStackProtocolImplementation implements
      * named stamp — the same reason {@link materializeFromRegistry} does.
      */
     private stripMaterializedFromRegistry<T>(type: string, item: T): T {
-        if (canonicalMetaType(type) !== 'object') return item;
-        if (item === null || typeof item !== 'object') return item;
-        const registry = (this.engine as any)?.registry;
-        // Partial registry doubles in tests predate this method; the narrower
-        // #8038 spelling keeps such a host stripping what it stripped before
-        // rather than silently losing the companion strip to a rename.
-        if (registry && typeof registry.stripMaterializedStampsFrom === 'function') {
-            try {
-                return registry.stripMaterializedStampsFrom(item) as T;
-            } catch {
-                // A read over the body's own fields; a failure here must not
-                // turn a save into a 5xx.
-                return item;
-            }
-        }
-        if (registry && typeof registry.stripProvisionedSearchCompanionFrom === 'function') {
-            try {
-                return registry.stripProvisionedSearchCompanionFrom(item) as T;
-            } catch {
-                return item;
-            }
-        }
-        return item;
+        // [#25467 cut 11] The body moved to `protocol-registry-materialize.ts` (see `RegistryMaterializeHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof stripMaterializedFromRegistry> = {
+            get engine() { return readEngine(); },
+        };
+        return (stripMaterializedFromRegistry<T>).call(host, type, item);
     }
 
     /**
@@ -9158,7 +9137,11 @@ export class ObjectStackProtocolImplementation implements
      * path owes {@link governServedObject}.
      */
     private stripServedObjectColumns<T>(type: string, item: T): T {
-        return this.stripMaterializedFromRegistry(type, stripServedSystemColumns(type, item));
+        // [#25467 cut 11] The body moved to `protocol-registry-materialize.ts` (see `RegistryMaterializeHost`).
+        const host: ThisParameterType<typeof stripServedObjectColumns> = {
+            stripMaterializedFromRegistry: (...a) => this.stripMaterializedFromRegistry(...a),
+        };
+        return (stripServedObjectColumns<T>).call(host, type, item);
     }
 
     /**
@@ -15898,35 +15881,11 @@ export class ObjectStackProtocolImplementation implements
         itemLock: ItemLock,
         storedRowServed = false,
     ): ReturnType<typeof resolveLockState> {
-        const { provenance, packageId, packageVersion } = extractProtection(document);
-        const editable = evaluateLockForWrite(itemLock.lock) === null
-            && this.packagedBaseRefusal({ type, name, operation: 'save' }) === null;
-        const removalRefusal = this.packagedBaseRefusal({ type, name, operation: 'delete' });
-        const deletable = evaluateLockForDelete(itemLock.lock) === null
-            && (removalRefusal === null || (storedRowServed && isOriginGatedType(type)));
-        const lock = MetadataLockSchema.options.find((state) =>
-            (evaluateLockForWrite(state) === null) === editable
-            && (evaluateLockForDelete(state) === null) === deletable);
-        if (lock === undefined) {
-            // Unreachable while the lock algebra covers all four verdict pairs;
-            // a state added to it without a write/delete answer must fail here,
-            // loudly, not publish a guessed lock.
-            throw new Error(
-                `No ADR-0010 lock state answers editable=${editable}, deletable=${deletable}.`,
-            );
-        }
-        return {
-            lock,
-            lockReason: itemLock.lockReason,
-            lockSource: itemLock.lockSource,
-            lockDocsUrl: itemLock.lockDocsUrl,
-            provenance,
-            packageId,
-            packageVersion,
-            editable,
-            deletable,
-            resettable: artifactBacked,
+        // [#25467 cut 10] The body moved to `protocol-lock-state.ts` (see `LockStateHost`).
+        const host: ThisParameterType<typeof servedLockState> = {
+            packagedBaseRefusal: (...a) => this.packagedBaseRefusal(...a),
         };
+        return servedLockState.call(host, type, name, document, artifactBacked, itemLock, storedRowServed);
     }
 
     /**
@@ -15970,9 +15929,11 @@ export class ObjectStackProtocolImplementation implements
      * the code definition too.
      */
     isShippedFlowName(type: string, name: unknown): boolean {
-        if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'flow') return false;
-        if (typeof name !== 'string' || name === '') return false;
-        return this.packagedArtifactOwner({ type: 'flow', name }) !== undefined;
+        // [#25467 cut 10] The body moved to `protocol-lock-state.ts` (see `LockStateHost`).
+        const host: ThisParameterType<typeof isShippedFlowName> = {
+            packagedArtifactOwner: (...a) => this.packagedArtifactOwner(...a),
+        };
+        return isShippedFlowName.call(host, type, name);
     }
 
     /**
@@ -15985,8 +15946,11 @@ export class ObjectStackProtocolImplementation implements
      * envelope ({@link hydrateOverlayIntoRegistry}), so it never passes it.
      */
     private isStoredFlowEntryOfShippedName(type: string, item: unknown): boolean {
-        return this.isShippedFlowName(type, (item as { name?: unknown } | null | undefined)?.name)
-            && !isCodeArtifactBody(item);
+        // [#25467 cut 10] The body moved to `protocol-lock-state.ts` (see `LockStateHost`).
+        const host: ThisParameterType<typeof isStoredFlowEntryOfShippedName> = {
+            isShippedFlowName: (...a) => this.isShippedFlowName(...a),
+        };
+        return isStoredFlowEntryOfShippedName.call(host, type, item);
     }
 
     /**
@@ -16046,9 +16010,13 @@ export class ObjectStackProtocolImplementation implements
      * ask it; the writes keep their own refusals.
      */
     declinesStoredRow(type: string, name: unknown): boolean {
-        if (this.isShippedFlowName(type, name)) return true;
-        if (typeof name !== 'string' || name === '') return false;
-        return this.isDeclaredCodeDatasource(type, name) || this.isUnservedSealedOverlay(type, name);
+        // [#25467 cut 10] The body moved to `protocol-lock-state.ts` (see `LockStateHost`).
+        const host: ThisParameterType<typeof declinesStoredRow> = {
+            isDeclaredCodeDatasource: (...a) => this.isDeclaredCodeDatasource(...a),
+            isShippedFlowName: (...a) => this.isShippedFlowName(...a),
+            isUnservedSealedOverlay: (...a) => this.isUnservedSealedOverlay(...a),
+        };
+        return declinesStoredRow.call(host, type, name);
     }
 
     /**
@@ -16068,8 +16036,11 @@ export class ObjectStackProtocolImplementation implements
      * operator's act, so it keeps that ruling's disposition.
      */
     private isUnservedSealedOverlay(type: string, name: string): boolean {
-        if (canonicalMetaType(type) === 'permission') return false;
-        return this.isSealedManagedItem(type, name);
+        // [#25467 cut 10] The body moved to `protocol-lock-state.ts` (see `LockStateHost`).
+        const host: ThisParameterType<typeof isUnservedSealedOverlay> = {
+            isSealedManagedItem: (...a) => this.isSealedManagedItem(...a),
+        };
+        return isUnservedSealedOverlay.call(host, type, name);
     }
 
     /**
@@ -16082,8 +16053,11 @@ export class ObjectStackProtocolImplementation implements
      * MetadataService's), so every entry it matches is a hydrated row.
      */
     private isStoredEntryOfDeclinedName(type: string, item: unknown): boolean {
-        return this.declinesStoredRow(type, (item as { name?: unknown } | null | undefined)?.name)
-            && !isCodeArtifactBody(item);
+        // [#25467 cut 10] The body moved to `protocol-lock-state.ts` (see `LockStateHost`).
+        const host: ThisParameterType<typeof isStoredEntryOfDeclinedName> = {
+            declinesStoredRow: (...a) => this.declinesStoredRow(...a),
+        };
+        return isStoredEntryOfDeclinedName.call(host, type, item);
     }
 
     /**

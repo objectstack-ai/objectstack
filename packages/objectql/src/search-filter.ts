@@ -92,8 +92,20 @@ export {
 } from '@objectstack/spec/data';
 export type { SearchFieldMeta } from '@objectstack/spec/data';
 
-/** Historical name for {@link SearchFieldResolutionOptions} — same shape. */
-export type ExpandSearchOptions = SearchFieldResolutionOptions;
+/** {@link SearchFieldResolutionOptions}, plus the caller's queryable-field answer. */
+export interface ExpandSearchOptions extends SearchFieldResolutionOptions {
+  /**
+   * [#25672] The fields the CALLER may query on — the security service's
+   * `getQueryableFields` answer, the exact complement of what the engine's
+   * field-read predicate guard refuses. When present, a field the server
+   * RESOLVED into the search set that is not in it is withheld, so the
+   * expansion never names a column the guard would refuse as a filter oracle.
+   * A field the caller named in `requestedFields` is never withheld: an
+   * explicit narrowing to a hidden field reaches the guard and is refused
+   * loudly there. Absent = no answer, nothing withheld.
+   */
+  queryableFields?: ReadonlySet<string>;
+}
 
 export interface NormalizedSearch {
   query: string;
@@ -198,6 +210,31 @@ function companionWithinSearchFields(searchFields: readonly string[], opts: Expa
 }
 
 /**
+ * [#25672] Withhold from the resolved search set every field the caller may
+ * not query, except one the caller named itself. The resolved set is the
+ * server's choice (declared `searchableFields` → auto-default), so a hidden
+ * column in it is the server widening the caller's predicate past what the
+ * caller could write — and the predicate guard refused the WHOLE search for
+ * it (`sys_user`'s `role` / `ban_reason` / `last_login_ip` broke every user
+ * picker for members). Narrowing happens AFTER resolution, never on the field
+ * map going in: a declaration whose fields are all hidden must stay empty,
+ * not fall through to the auto-default and search different columns.
+ */
+function withholdUnqueryable(
+  searchFields: string[],
+  requestedFields: string | string[] | undefined,
+  queryable: ReadonlySet<string> | undefined,
+): string[] {
+  if (!queryable) return searchFields;
+  const named = new Set(
+    typeof requestedFields === 'string'
+      ? requestedFields.split(',').map((f) => f.trim())
+      : requestedFields ?? [],
+  );
+  return searchFields.filter((f) => queryable.has(f) || named.has(f));
+}
+
+/**
  * Expand a `$search` term into a `{ $or: [...] }` (single term) or
  * `{ $and: [{ $or: [...] }, ...] }` (multi-term) filter. Returns `null` in
  * two cases, and they are NOT the same answer one layer up:
@@ -209,15 +246,19 @@ function companionWithinSearchFields(searchFields: readonly string[], opts: Expa
  *   that with `400 INVALID_FIELD` rather than leaving `where` untouched, which
  *   would answer the search with every row. This function stays pure and
  *   non-throwing; the judgement lives at the call site every verb reaches.
+ *   [#25672] A set that `queryableFields` withheld down to nothing is this
+ *   case too.
  */
 export function expandSearchToFilter(raw: unknown, opts: ExpandSearchOptions): any | null {
   const { query, fields: requested } = normalizeSearch(raw);
   if (!query || !query.trim()) return null;
 
-  const searchFields = resolveSearchFields({
-    ...opts,
-    requestedFields: requested ?? opts.requestedFields,
-  });
+  const requestedFields = requested ?? opts.requestedFields;
+  const searchFields = withholdUnqueryable(
+    resolveSearchFields({ ...opts, requestedFields }),
+    requestedFields,
+    opts.queryableFields,
+  );
   if (searchFields.length === 0) return null;
 
   const terms = query.trim().split(/\s+/).filter(Boolean);

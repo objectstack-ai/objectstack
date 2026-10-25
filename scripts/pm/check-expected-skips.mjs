@@ -314,7 +314,7 @@ export const EXPECTED_SKIPS = Object.freeze([
     reason: `${FULL_BATTERY_REASON}; on a push it also needs the \`filter\` job's \`core\` output`,
   },
   {
-    name: 'Test Core (${{ matrix.shard }}/6)',
+    name: 'Test Core (${{ matrix.shard }}/8)',
     workflow: 'ci.yml',
     job: 'test',
     gate: { kind: 'filter-output', outputs: ['core', 'crosspkg'] },
@@ -1249,7 +1249,9 @@ function fixtureRun(name, conclusion, suite = 1, extra = {}) {
  * Measured 2026-09-16 on PR #18315's head `b671f83b` (the AGENTS.md-only
  * landing): 39 check-runs, 20 success / 19 skipped, four `PR Automation` runs
  * on one head. Names, conclusions and check-suite ids VERBATIM from the
- * listing. This is the real shape the roster must accept, kept here so the
+ * listing, but for one name: the Test Core matrix template read `/6` then and
+ * is re-spelled `/8` here, the matrix #25376 widened, because the roster
+ * grades the live name. This is the real shape the roster must accept, kept here so the
  * measured family and the declared family cannot drift apart unnoticed.
  */
 const MEASURED_18315 = [
@@ -1285,7 +1287,7 @@ const MEASURED_18315 = [
   ['Part-of PR must not also close its card', 'success', 94769267707],
   ['Temporal Conformance (live PG + MySQL)', 'skipped', 94769267631],
   ['Test Core', 'success', 94769267631],
-  ['Test Core (${{ matrix.shard }}/6)', 'skipped', 94769267631],
+  ['Test Core (${{ matrix.shard }}/8)', 'skipped', 94769267631],
   ['The card this PR closes must claim this branch', 'success', 94769267827],
   ['Type Check · consumer gates', 'success', 94769267736],
   ['Type Check · debt ledger', 'success', 94769267736],

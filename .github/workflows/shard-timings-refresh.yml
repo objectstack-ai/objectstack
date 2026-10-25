@@ -7,8 +7,8 @@
 #
 # scripts/test-shard-timings.json is the per-package duration dataset the Test
 # Core split is binned from. It is GENERATED — scripts/measure-test-shard-
-# timings.mjs turns a green run's six turbo summaries into it — but until now it
-# was generated only when a person remembered to. It went 13 days without a
+# timings.mjs turns a green run's per-shard turbo summaries into it — but until
+# now it was generated only when a person remembered to. It went 13 days without a
 # refresh while ~700 test files were added, and the shard it mis-weighted was
 # killed by the job wall twelve times in one day and ejected from the merge queue
 # twice (#16173).
@@ -46,8 +46,11 @@
 #
 # HOW IT GETS ITS INPUTS, AND WHY IT RUNS HERE RATHER THAN IN AN AGENT WORKTREE
 # ----------------------------------------------------------------------------
-# The documented refresh path downloads the six `test-core-run-summary-N-of-6`
-# artifacts of a green run. `GET /actions/artifacts/{id}/zip` redirects to
+# The documented refresh path downloads the `test-core-run-summary-N-of-M`
+# artifacts of a green run, one per Test Core shard. M is the RUN's own width,
+# read from its `Test Core (N/M)` job names, so runs from before and after a
+# matrix resize both read (#25376).
+# `GET /actions/artifacts/{id}/zip` redirects to
 # `productionresultssa*.blob.core.windows.net`, and every agent container's
 # egress policy answers 403 to CONNECT for that host — reproduced four ways, on
 # two artifacts across two runs, on the pre-signed URL as well as the API one, on
@@ -71,8 +74,8 @@
 # Until #16467 a push to `main` re-ran the FULL Test Core battery, so "a green
 # push run on main" and "a measurement of the workspace" were the same thing.
 # They are not any more: a push run computes its package set with `--affected`
-# against `github.event.before`. Its six shards still conclude `success` and
-# still upload six run summaries, so NOTHING in the eligibility test would have
+# against `github.event.before`. Its shards still conclude `success` and
+# still upload every run summary, so NOTHING in the eligibility test would have
 # noticed — this lane would have kept regenerating the balancing dataset from
 # measurements of whatever the last merge happened to touch, and the coverage
 # check would not have caught it either (a package the affected set skipped is a
@@ -96,8 +99,8 @@
 # follows from the cache design rather than from luck — turbo's key is
 # namespaced per shard and only main pushes write it, so a package whose inputs
 # have not changed is a HIT, and the generator refuses hits rather than
-# recording a replayed ~0.1s window as a suite's cost. "Download six artifacts
-# from any green run" therefore measures a SLICE of the workspace. That number
+# recording a replayed ~0.1s window as a suite's cost. "Download the shard
+# artifacts from any green run" therefore measures a SLICE of the workspace. That number
 # should IMPROVE under the hourly run, because a push no longer seeds the whole
 # workspace's entries — but it is quoted as it was measured, and the next live
 # run is what re-measures it.
@@ -178,7 +181,7 @@
 #   - DOWNS, in one line.
 #   - FILES OVER BUDGET: every test file over 10 s of wall in the window, with
 #     its package and its slowest run (#22998). The dataset holds no per-file
-#     reading; the window's runs do, in the per-shard `test-core-timings-N-of-6`
+#     reading; the window's runs do, in the per-shard `test-core-timings-N-of-M`
 #     captures, which a step before the body downloads: the same runs, retained
 #     exactly as long as their run summaries.
 #
@@ -432,14 +435,14 @@ jobs:
       # not bad luck, it is the cache design: turbo's key is namespaced per shard
       # and only main pushes write it, so a package whose inputs have not changed
       # is a HIT — and the generator refuses hits rather than recording a
-      # replayed ~0.1s window as a suite's cost. "Download six artifacts from any
-      # green run" therefore measures a SLICE of the workspace, never all of it.
+      # replayed ~0.1s window as a suite's cost. "Download the shard artifacts
+      # from any green run" therefore measures a SLICE of the workspace, never all of it.
       # Since #16467 the runs read here are the HOURLY `schedule` runs, which are
       # the full battery; the accumulation stays because the cache argument above
       # is unchanged by which event ran the suite.
       #
-      # So runs are accumulated. Each contributes its six summaries under its own
-      # `--run <id>` group, which is exactly the grouping #16473 added: slices are
+      # So runs are accumulated. Each contributes its shards' summaries under its
+      # own `--run <id>` group, which is exactly the grouping #16473 added: slices are
       # summed within a run and the per-run sums are medianed across runs, so a
       # package measured by three of these runs gets a median of three
       # observations rather than whichever run happened to be read last. Feeding
@@ -482,7 +485,13 @@ jobs:
             rm -rf "$SUMDIR"; mkdir -p "$SUMDIR"
 
             OK=1
-            for N in 1 2 3 4 5 6; do
+            # One summary per shard the selector found: it admits a run only when
+            # every shard OF THAT RUN concluded success with its artifact
+            # retained, at the run's own width (select-shard-timings-run.mjs,
+            # runShardWidth), so these keys ARE that run's roster. A count
+            # spelled here would break the first refresh after a resize (#25376).
+            SHARD_NS=$(node -e 'const r=JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP+"/candidates.json","utf8"))[Number(process.argv[1])];console.log(Object.keys(r.artifact_ids).map(Number).sort((a,b)=>a-b).join(" "))' "$i")
+            for N in $SHARD_NS; do
               ART=$(node -e 'const r=JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP+"/candidates.json","utf8"))[Number(process.argv[1])];console.log(r.artifact_ids[process.argv[2]])' "$i" "$N")
               # curl drops the Authorization header across the redirect to the
               # blob host, which is correct: that URL is pre-signed and the
@@ -636,7 +645,7 @@ jobs:
       # The per-file half of the regression readings (#22949 ruling E, item 3).
       # The dataset holds no per-file durations; the window's runs do, in the
       # per-shard captures `report-test-timings.mjs --capture` uploads as
-      # `test-core-timings-N-of-6`, retained 1 day like the run summaries the
+      # `test-core-timings-N-of-M`, retained 1 day like the run summaries the
       # generator read. The selector listed their ids beside the summaries'
       # (`timing_artifact_ids`), so this is a read of the SAME runs, never a new
       # measurement, and it feeds the PR body alone.
@@ -822,7 +831,8 @@ jobs:
             const rs = JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP + "/candidates.json", "utf8"));
             const r = rs.find((x) => String(x.run_id) === process.env.RUN_ID);
             const s = r.shard_seconds ?? {};
-            console.log([1,2,3,4,5,6].map((n) => (s[n] == null ? "?" : `${n}: ${s[n]}s`)).join("  |  "));
+            const ns = Object.keys(r.artifact_ids ?? {}).map(Number).sort((a, b) => a - b);
+            console.log(ns.map((n) => (s[n] == null ? "?" : `${n}: ${s[n]}s`)).join("  |  "));
           ')
 
           {
@@ -851,8 +861,8 @@ jobs:
             done
             echo
             echo "- Newest run in the set: \`$RUN_ID\`, commit \`$HEAD_SHA\` — the date this refresh carries."
-            echo "- Every run above had all six \`Test Core (N/6)\` jobs conclude \`success\` with its six"
-            echo "  run-summary artifacts still retained; runs that were cancelled, failed or had lost"
+            echo "- Every run above had every \`Test Core (N/M)\` shard job conclude \`success\` with its"
+            echo "  run-summary artifact still retained; runs that were cancelled, failed or had lost"
             echo "  their artifacts were rejected by name in the log before any of these were used."
             echo
             echo "$CARRY_LINE"
@@ -886,7 +896,7 @@ jobs:
               echo "## The partitioner's own pins RED on this refresh — read this before merging"
               echo
               echo "This is the designed behaviour, not a defect in the refresh: the acceptance bound is"
-              echo "a ratio, and a package that has grown past what any six-way split can bin makes the"
+              echo "a ratio, and a package that has grown past what the Test Core split can bin makes the"
               echo "pins fail with the arithmetic in the message. The remedy the partitioner names is to"
               echo "raise the file-level slice count for that package — ⛔ never to raise the bound, and"
               echo "⛔ never to hand-edit this dataset. This workflow deliberately does neither: it"
