@@ -1289,6 +1289,10 @@ function checkGroupingFieldName(raw: string): string | undefined {
  * `pattern` instead of adding an `x-dropped-refinements` site (#18670). The
  * empty string is the key's `min(1)` and the compiler's
  * `grouping_order_by_blank`, not this.
+ *
+ * Why `field` does not do the same: its refusal has shipped as zod issue code
+ * `custom`, and a `.regex()` answers `invalid_format`. Moving it is a change
+ * a consumer can see, so it is a card of its own, not a tidy-up here.
  */
 function groupingOrderByPaddedRefusal(input: unknown): string {
   const raw = String(input);
