@@ -8,6 +8,8 @@
 
 import { defineConfig } from 'tsup';
 
+import { dropSourcesContent } from '../../../scripts/tsup-drop-sources-content.mjs';
+
 export default defineConfig({
   entry: {
     cli: 'src/cli.ts',
@@ -18,4 +20,5 @@ export default defineConfig({
   clean: true,
   sourcemap: true,
   shims: false,
+  esbuildOptions: dropSourcesContent,
 });
