@@ -6,8 +6,8 @@
   "homepage": "https://www.objectui.org/docs/utilities/cli",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/objectstack-ai/objectui.git",
-    "directory": "packages/cli"
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
+    "directory": "ui/packages/cli"
   },
   "bugs": {
     "url": "https://github.com/objectstack-ai/objectui/issues"

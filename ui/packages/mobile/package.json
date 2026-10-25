@@ -7,8 +7,8 @@
   "homepage": "https://www.objectui.org/docs/packages/mobile",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/objectstack-ai/objectui.git",
-    "directory": "packages/mobile"
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
+    "directory": "ui/packages/mobile"
   },
   "main": "./dist/index.js",
   "module": "./dist/index.js",

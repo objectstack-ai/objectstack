@@ -34,8 +34,8 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/objectstack-ai/objectui.git",
-    "directory": "packages/vscode-extension"
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
+    "directory": "ui/packages/vscode-extension"
   },
   "license": "MIT",
   "main": "./dist/extension.js",

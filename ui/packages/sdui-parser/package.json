@@ -8,8 +8,8 @@
   "homepage": "https://www.objectui.org/docs/sdui-parser",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/objectstack-ai/objectui.git",
-    "directory": "packages/sdui-parser"
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
+    "directory": "ui/packages/sdui-parser"
   },
   "main": "./dist/index.js",
   "module": "./dist/index.js",

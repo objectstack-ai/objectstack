@@ -7,8 +7,8 @@
   "homepage": "https://www.objectui.org/docs/plugins/plugin-detail",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/objectstack-ai/objectui.git",
-    "directory": "packages/plugin-detail"
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
+    "directory": "ui/packages/plugin-detail"
   },
   "bugs": {
     "url": "https://github.com/objectstack-ai/objectui/issues"

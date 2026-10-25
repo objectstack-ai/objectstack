@@ -7,8 +7,8 @@
   "homepage": "https://www.objectui.org/docs/utilities/runner",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/objectstack-ai/objectui.git",
-    "directory": "packages/runner"
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
+    "directory": "ui/packages/runner"
   },
   "bugs": {
     "url": "https://github.com/objectstack-ai/objectui/issues"

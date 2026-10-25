@@ -8,8 +8,8 @@
   "homepage": "https://www.objectui.org/docs/core",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/objectstack-ai/objectui.git",
-    "directory": "packages/core"
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
+    "directory": "ui/packages/core"
   },
   "bugs": {
     "url": "https://github.com/objectstack-ai/objectui/issues"

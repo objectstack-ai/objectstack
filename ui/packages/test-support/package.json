@@ -29,8 +29,8 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/objectstack-ai/objectui.git",
-    "directory": "packages/test-support"
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
+    "directory": "ui/packages/test-support"
   },
   "bugs": {
     "url": "https://github.com/objectstack-ai/objectui/issues"

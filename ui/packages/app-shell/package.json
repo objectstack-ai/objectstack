@@ -46,8 +46,8 @@
   "homepage": "https://www.objectui.org/docs/layout/app-shell",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/objectstack-ai/objectui.git",
-    "directory": "packages/app-shell"
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
+    "directory": "ui/packages/app-shell"
   },
   "bugs": {
     "url": "https://github.com/objectstack-ai/objectui/issues"

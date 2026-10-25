@@ -7,8 +7,8 @@
   "homepage": "https://www.objectui.org/docs/plugins/plugin-timeline",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/objectstack-ai/objectui.git",
-    "directory": "packages/plugin-timeline"
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
+    "directory": "ui/packages/plugin-timeline"
   },
   "bugs": {
     "url": "https://github.com/objectstack-ai/objectui/issues"

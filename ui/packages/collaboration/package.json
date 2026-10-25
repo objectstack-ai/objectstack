@@ -7,8 +7,8 @@
   "homepage": "https://www.objectui.org/docs/packages/collaboration",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/objectstack-ai/objectui.git",
-    "directory": "packages/collaboration"
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
+    "directory": "ui/packages/collaboration"
   },
   "main": "./dist/index.js",
   "module": "./dist/index.js",

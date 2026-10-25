@@ -5,6 +5,11 @@
   "sideEffects": false,
   "license": "MIT",
   "description": "Trusted runtime React execution for kind:'react' pages — vendored react-runner (Sucrase transpile + scope-eval, no sandbox). Enterprise/private-deploy tier.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
+    "directory": "ui/packages/react-runtime"
+  },
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",

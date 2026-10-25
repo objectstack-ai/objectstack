@@ -7,8 +7,8 @@
   "homepage": "https://www.objectui.org/docs/guide/console",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/objectstack-ai/objectui.git",
-    "directory": "apps/console"
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
+    "directory": "ui/apps/console"
   },
   "bugs": {
     "url": "https://github.com/objectstack-ai/objectui/issues"

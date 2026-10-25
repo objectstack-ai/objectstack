@@ -7,8 +7,8 @@
   "homepage": "https://www.objectui.org/docs/packages/react",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/objectstack-ai/objectui.git",
-    "directory": "packages/react"
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
+    "directory": "ui/packages/react"
   },
   "bugs": {
     "url": "https://github.com/objectstack-ai/objectui/issues"

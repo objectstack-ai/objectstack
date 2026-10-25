@@ -8,8 +8,8 @@
   "homepage": "https://www.objectui.org/docs/packages/i18n",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/objectstack-ai/objectui.git",
-    "directory": "packages/i18n"
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
+    "directory": "ui/packages/i18n"
   },
   "bugs": {
     "url": "https://github.com/objectstack-ai/objectui/issues"

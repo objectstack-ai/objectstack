@@ -66,8 +66,8 @@
   "author": "ObjectStack Team <team@objectstack.ai>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/objectstack-ai/objectui.git",
-    "directory": "packages/plugin-ai"
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
+    "directory": "ui/packages/plugin-ai"
   },
   "bugs": {
     "url": "https://github.com/objectstack-ai/objectui/issues"
