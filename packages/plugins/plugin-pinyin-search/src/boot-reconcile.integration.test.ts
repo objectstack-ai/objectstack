@@ -179,7 +179,12 @@ function history(): Array<Record<string, unknown>> {
   }));
 }
 
-describe('#25634 the boot reconcile reads what changed since its last completed walk', () => {
+// [#25749] Each case pays for real-kernel boots over a SQLite file (two in
+// most) and at least one full 2,500-row reconcile walk; the forced-rebuild
+// case walks twice. Idle, the slowest case takes about 1 s. On a 4-core box
+// with 20 busy loops the boots and walks alone took 6.8 s and 9.9 s (seed
+// excluded), past vitest's 5 s default, so the suite carries its own budget.
+describe('#25634 the boot reconcile reads what changed since its last completed walk', { timeout: 30_000 }, () => {
   it('a first boot walks every row; an unchanged second boot reads none — and a receipt sits in sys_migration', async () => {
     const first = await boot({ before: (f) => f.directInsert(history()) });
     await first.plugin.whenReconciled();
