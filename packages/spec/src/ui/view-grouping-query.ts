@@ -114,6 +114,40 @@
  * with `depth` — the same query over the first `depth` grouping fields —
  * rather than folding. This is still one query shape.
  *
+ * ## Ordering a level by another field (#25786)
+ *
+ * A level's groups are ordered by their own key unless the level names an
+ * `orderBy` — a period label grouped in time order by its period start. The
+ * consumer still sorts the header rows; a header row did not carry the value
+ * to sort by, so the header query does now: per ordered level, ONE node over
+ * `orderBy` — `min` for `order: 'asc'`, `max` for `'desc'` — under
+ * {@link columnSummaryAlias} (`min_period_start`), named for the consumer by
+ * {@link listViewGroupOrderColumn}. `min` ascending and `max` descending is
+ * one rule: each group sits where its FIRST row would sit if the rows were
+ * sorted by `orderBy` in `order`. When `orderBy` is a function of the group
+ * key (one period start per label) the two nodes are the same number; when
+ * it is not, the rule still names one answer, and the grouping-field key never
+ * leaves `groupBy` — a second `groupBy` column would split a label into one
+ * header per distinct order value, which is the two-level workaround this
+ * key retires.
+ *
+ *   * **Dedup and collision** are the summaries' rules: a column summary
+ *     `min` over the same field is the same node and the same column; an
+ *     alias landing on a grouped field's own column is refused
+ *     (`alias_collision`).
+ *   * **Multi-level** folds exactly — `min` of the leaves' mins, `max` of
+ *     their maxes — so an outer level's order value is derived from the
+ *     leaf rows like its `count`.
+ *   * **The operand's type** is the aggregate × field-type table's: `min` /
+ *     `max` accept the numeric, temporal and boolean classes and refuse the
+ *     string classes (collation-dependent order). The engine's aggregate door
+ *     refuses a refused pair with `INVALID_FIELD` / 400; `os validate` refuses
+ *     it at authoring (`list-view-group-order-unorderable`). This module has
+ *     no field types and judges nothing about them.
+ *   * **What the consumer owes** is stated on `GroupingFieldSchema.orderBy`: a
+ *     group whose order value is `null` (every row empty there) sorts last
+ *     in both directions, and equal values fall back to the group key.
+ *
  * ## The door — existing, not new
  *
  * Both compiled queries ride the data endpoint's EXISTING query door:
@@ -141,7 +175,9 @@
  *     objectui's `filter-converter` on the client.
  *   * **Ordering the groups.** `EngineAggregateOptions` carries no `orderBy`;
  *     `GroupingField.order` is applied by the consumer over the header rows,
- *     a set the size of the group count.
+ *     a set the size of the group count. What the header query DOES carry for
+ *     it is the value to sort by when a level orders by another field — see
+ *     "Ordering a level by another field" above.
  *
  * ## No business logic here (Prime Directive #2)
  *
@@ -279,6 +315,7 @@ export type ListViewGroupQueryRefusal =
   | 'alias_collision'
   | 'grouping_empty'
   | 'grouping_field_blank'
+  | 'grouping_order_by_blank'
   | 'depth_out_of_range'
   | 'group_key_not_a_prefix'
   | 'group_key_not_scalar';
@@ -348,6 +385,93 @@ function groupingFieldNames(grouping: GroupingConfig | undefined): string[] {
     }
     return name;
   });
+}
+
+/** One grouping level, as `grouping.fields[]` declares it. */
+type GroupingLevel = GroupingConfig['fields'][number];
+
+/**
+ * The order node of one grouping level (#25786), validated, or `undefined`
+ * when the level orders by its own key — `orderBy` absent, or naming the
+ * grouping field itself. `index` is the level's position, for the refusal's
+ * path. See "Ordering a level by another field" in the module note.
+ */
+function groupOrderNode(level: GroupingLevel, index: number): AggregationNode | undefined {
+  const orderBy: unknown = (level as { orderBy?: unknown }).orderBy;
+  if (orderBy === undefined) return undefined;
+  if (typeof orderBy !== 'string' || orderBy.trim() === '') {
+    throw new ListViewGroupQueryError(
+      'grouping_order_by_blank',
+      ['grouping', 'fields', index, 'orderBy'],
+      `grouping.fields[${index}].orderBy is not a field name, so the header query has no value to order `
+        + 'this level\'s groups by. Name the field whose value orders the groups, or remove `orderBy` to '
+        + 'order them by the grouping field itself.',
+    );
+  }
+  if (orderBy === level.field) return undefined;
+  const fn: AggregationFunction = level.order === 'desc' ? 'max' : 'min';
+  return { function: fn, field: orderBy, alias: columnSummaryAlias(fn, orderBy) };
+}
+
+/**
+ * The header-row column a grouping level's groups are SORTED by (#25786) —
+ * the one name both ends read, so the consumer never re-derives the alias the
+ * compiler minted:
+ *
+ *   * the level's own grouping field when it orders by its key (no `orderBy`,
+ *     or `orderBy` naming the grouping field itself);
+ *   * otherwise the column the header query carries the order value under —
+ *     `min_<orderBy>` for `order: 'asc'`, `max_<orderBy>` for `'desc'`.
+ *
+ * At an outer level of a multi-level header set, the value folds exactly from
+ * the leaf rows sharing its prefix — the `min` of their mins, the `max` of
+ * their maxes. `level` is the level's index in `grouping.fields`.
+ *
+ * @throws {ListViewGroupQueryError} `grouping_empty` / `grouping_field_blank`
+ *   as {@link compileListViewGroupQuery} refuses them, `grouping_order_by_blank`
+ *   for a blank `orderBy`, and `depth_out_of_range` for a `level` that is not
+ *   an index of `grouping.fields` (all `INVALID_QUERY` / 400)
+ */
+export function listViewGroupOrderColumn(grouping: GroupingConfig, level: number): string {
+  const names = groupingFieldNames(grouping);
+  if (!Number.isInteger(level) || level < 0 || level >= names.length) {
+    throw new ListViewGroupQueryError(
+      'depth_out_of_range',
+      ['grouping', 'fields'],
+      `level ${String(level)} is outside 0..${names.length - 1}: it names one of the ${names.length} declared `
+        + 'grouping level(s), from the outermost (0).',
+    );
+  }
+  return groupOrderNode(grouping.fields[level], level)?.alias ?? names[level];
+}
+
+/**
+ * The order nodes of the first `depth` levels (#25786), in nesting order —
+ * every level's `orderBy` is validated, only the grouped levels contribute.
+ * Refuses an alias landing on a grouped field's column, as the summaries do.
+ */
+function groupOrderNodes(
+  grouping: GroupingConfig,
+  depth: number,
+  groupByNames: readonly string[],
+): AggregationNode[] {
+  const grouped = new Set<string>(groupByNames);
+  const nodes: AggregationNode[] = [];
+  grouping.fields.forEach((level, index) => {
+    const node = groupOrderNode(level, index);
+    if (!node || index >= depth) return;
+    if (grouped.has(node.alias)) {
+      throw new ListViewGroupQueryError(
+        'alias_collision',
+        ['grouping', 'fields', index, 'orderBy'],
+        `grouping.fields[${index}] orders its groups by "${node.field}", whose order value lands under `
+          + `"${node.alias}", which is also a grouped field's own column on the header row — one column cannot `
+          + 'carry both the group key and the order value. Rename the field.',
+      );
+    }
+    nodes.push(node);
+  });
+  return nodes;
 }
 
 /**
@@ -495,11 +619,14 @@ export function deriveColumnSummary(
  *   * `aggregations` — the `count` node first
  *     ({@link LIST_VIEW_GROUP_COUNT_ALIAS}), then one node per declared
  *     column summary ({@link COLUMN_SUMMARY_AGGREGATION},
- *     {@link columnSummaryAlias}), in column order, deduplicated.
+ *     {@link columnSummaryAlias}), in column order, deduplicated, then one
+ *     order node per grouped level that orders by another field (`min` /
+ *     `max` over its `orderBy`, {@link listViewGroupOrderColumn}), in nesting
+ *     order, unless a summary already carries it.
  *
  * @throws {ListViewGroupQueryError} on an unmapped summary (fork i —
  *   `NOT_IMPLEMENTED` / 501), an alias colliding with a grouped field, an
- *   empty grouping, a blank grouping field, or a `depth` outside
+ *   empty grouping, a blank grouping field or `orderBy`, or a `depth` outside
  *   `1..fields.length` (all `INVALID_QUERY` / 400).
  */
 export function compileListViewGroupQuery(
@@ -527,9 +654,19 @@ export function compileListViewGroupQuery(
         + 'Rename the field.',
     );
   }
+  const summaries = summaryAggregationNodes(view.columns, groupBy);
+  // [#25786] An order node a column summary already declares (`min` over the
+  // same field) is that summary's node and column — one number, one column.
+  const declared = new Set(summaries.map((node) => node.alias));
+  const orders = groupOrderNodes(view.grouping, depth, groupBy).filter((node) => {
+    if (declared.has(node.alias)) return false;
+    declared.add(node.alias);
+    return true;
+  });
   const aggregations: AggregationNode[] = [
     { function: 'count', alias: LIST_VIEW_GROUP_COUNT_ALIAS },
-    ...summaryAggregationNodes(view.columns, groupBy),
+    ...summaries,
+    ...orders,
   ];
   const query: EngineAggregateOptions = { groupBy, aggregations };
   if (options.where !== undefined) query.where = options.where;

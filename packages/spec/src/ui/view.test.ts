@@ -2273,6 +2273,34 @@ describe('GroupingFieldSchema', () => {
   });
 
   // ==========================================================================
+  // [#25786] `orderBy` — order a level's groups by another field's value
+  // ==========================================================================
+
+  it('accepts `orderBy` as an authorable key, with no `unrecognized_keys` and no default', () => {
+    const result = GroupingFieldSchema.safeParse({ field: 'period_label', orderBy: 'period_start', order: 'desc' });
+    expect(result.success).toBe(true);
+    expect(result.data!.orderBy).toBe('period_start');
+    // Absent means "order by the group key" — nothing is defaulted in.
+    expect(GroupingFieldSchema.parse({ field: 'period_label' })).not.toHaveProperty('orderBy');
+    // …and the whole list view accepts it, one level down.
+    const view = ListViewSchema.safeParse({
+      columns: ['name'],
+      grouping: { fields: [{ field: 'period_label', orderBy: 'period_start' }] },
+    });
+    expect(view.success, JSON.stringify(view.error?.issues)).toBe(true);
+  });
+
+  it.each([
+    ['an empty name', '', 'too_small'],
+    ['a sort node list', [{ field: 'period_start', order: 'desc' }], 'invalid_type'],
+    ['a number', 1, 'invalid_type'],
+  ])('refuses %s at `orderBy`', (_label, value, code) => {
+    const result = GroupingFieldSchema.safeParse({ field: 'period_label', orderBy: value });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.map((i) => [i.path.join('.'), i.code])).toEqual([['orderBy', code]]);
+  });
+
+  // ==========================================================================
   // [#17360] A padded `field` is REFUSED, not trimmed
   // (objectui#7347 ruling C, decision batch #110 item 5 — refuse at the producer)
   // ==========================================================================
