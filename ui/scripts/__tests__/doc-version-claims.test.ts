@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { labelPath, skillBundleBase, skillsWalk } from '../skill-bundle-root.mjs';
+
 /**
  * objectui#3697: nothing in this repository looks at a version literal written
  * into documentation prose.
@@ -626,6 +628,15 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
  */
 const SCAN_ROOTS = ['content/docs', 'packages/*/README.md', 'skills'] as const;
 
+/**
+ * The `skills` root is the published bundle, which the cutover moved into the
+ * objectstack monorepo's catalog one level up (decision C, `skill-bundle-root.mjs`).
+ * Its files keep their `skills/objectui/...` labels, read from there.
+ */
+const skillsBase = skillBundleBase(repoRoot);
+const relOf = (file: string): string =>
+  path.relative(file.startsWith(path.join(skillsBase, 'skills') + path.sep) ? skillsBase : repoRoot, file);
+
 const UNSCANNED_DIRS = new Set(['node_modules', 'dist', 'build', '.next', '.turbo', '.git']);
 
 /**
@@ -781,7 +792,7 @@ function walk(dir: string, out: string[] = []): string[] {
 
 /** Expands one scan root. The only glob syntax is a whole segment that is `*`. */
 function collectFiles(root: string): string[] {
-  const abs = path.join(repoRoot, root);
+  const abs = root === 'skills' ? skillsWalk(repoRoot).dir : path.join(repoRoot, root);
   if (!root.includes('*')) {
     try {
       if (fs.statSync(abs).isFile()) return [abs];
@@ -811,7 +822,7 @@ function collectFiles(root: string): string[] {
  * lines are not, because ```ts is not a claim.
  */
 function claimsIn(file: string): Claim[] {
-  const rel = path.relative(repoRoot, file);
+  const rel = relOf(file);
   const lines = fs.readFileSync(file, 'utf8').split('\n');
   const found: Claim[] = [];
   const headings: { level: number; text: string }[] = [];
@@ -1149,6 +1160,12 @@ const KNOWN_CLAIMS: KnownClaim[] = [
   // the measurement and for why two of these blocks anchor and one does not.
   {
     file: 'skills/objectui/SKILL.md',
+    claim: '@objectstack/spec 18.x',
+    kind: 'anchored',
+    why: 'The `compatibility:` pin of the frontmatter. The bundle moved into the objectstack monorepo\'s published `skills/` catalog at the cutover (decision C, objectstack#25803), and that catalog REQUIRES the pin: the repo root\'s `scripts/check-skill-compatibility-version.mjs` reds a skill that declares none and reds this one when its major differs from `packages/spec/package.json`, whose `--fix` derives it. That gate is the anchor, run outside this tree, so no field here can name it. The sentence this replaced stated no version for the reason this file exists; it now states one that a gate re-derives.',
+  },
+  {
+    file: 'skills/objectui/SKILL.md',
     claim: 'TypeScript 5.0',
     kind: 'unanchored',
     why: 'The second half of the Tech Stack sentence this file mirrors verbatim from AGENTS.md section 2, and a FLOOR ("5.0+") rather than a statement of what this repo builds with - 40 manifests declare typescript ^6.0.3, which satisfies it, and would still satisfy it after another major. Deliberately not "corrected" to 6.0 here: the sentence is copied from AGENTS.md section 2, and editing the skills copy alone would desync the two agent-facing texts. What this gate cannot measure, stated so it is not mistaken for checked: whether 5.0 is still a true floor for a CONSUMER, given the published declarations are emitted by TypeScript 6.',
@@ -1377,7 +1394,7 @@ const readmeLines = new Map<string, string[]>();
 function linesOf(rel: string): string[] {
   let cached = readmeLines.get(rel);
   if (cached === undefined) {
-    cached = fs.readFileSync(path.join(repoRoot, rel), 'utf8').split('\n');
+    cached = fs.readFileSync(labelPath(repoRoot, rel), 'utf8').split('\n');
     readmeLines.set(rel, cached);
   }
   return cached;
@@ -1468,7 +1485,7 @@ interface PeerBlock {
  * statements these blocks make, and nine of the other 16 were wrong.
  */
 const peerBlocks: PeerBlock[] = scannedFiles
-  .map((abs) => path.relative(repoRoot, abs).split(path.sep).join('/'))
+  .map((abs) => relOf(abs).split(path.sep).join('/'))
   .flatMap((rel) => {
     const pkgDir = PACKAGE_README.exec(rel)?.[1];
     if (pkgDir === undefined) return [];

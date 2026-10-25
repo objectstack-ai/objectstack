@@ -43,6 +43,7 @@ import {
   rootDeclaredSpecifiers,
   specifierRoot,
 } from '../check-doc-snippet-types.mjs';
+import { labelPath } from '../skill-bundle-root.mjs';
 
 /**
  * objectui#7359 — the test for `scripts/check-skill-examples.mjs`.
@@ -309,7 +310,7 @@ describe('the corpus this gate governs', () => {
   const guides = listGuides(repoRoot) as string[];
   const scans = guides.map((g) => ({
     guide: g,
-    scan: scanSkillFences(fs.readFileSync(path.join(repoRoot, g), 'utf8')) as Scan,
+    scan: scanSkillFences(fs.readFileSync(labelPath(repoRoot, g), 'utf8')) as Scan,
   }));
 
   it('carries no orphan marker', () => {
@@ -351,7 +352,7 @@ describe('the corpus this gate governs', () => {
     // reads as a marker and claims nothing. It would surface as an orphan only
     // if it matched the orphan scan's own literal — which it does not.
     for (const guide of guides) {
-      const source = fs.readFileSync(path.join(repoRoot, guide), 'utf8');
+      const source = fs.readFileSync(labelPath(repoRoot, guide), 'utf8');
       for (const [index, line] of source.split('\n').entries()) {
         if (!/os:check/.test(line)) continue;
         expect(line, `${guide}:${index + 1} carries a near-spelling of the marker`).toBe(MARKER);
@@ -377,7 +378,7 @@ describe('the shrink-only floor on the marked population', () => {
   type Breach = { category: string; count: number; floor: number };
   const corpusMarked = (listGuides(repoRoot) as string[]).flatMap(
     (guide) =>
-      (scanSkillFences(fs.readFileSync(path.join(repoRoot, guide), 'utf8')) as Scan).fences.filter(
+      (scanSkillFences(fs.readFileSync(labelPath(repoRoot, guide), 'utf8')) as Scan).fences.filter(
         (f) => f.marked,
       ),
   );
@@ -898,7 +899,7 @@ describe('the ROOT BOUND, and its declared debt (objectui#7463 item 2)', () => {
       const lastColon = site.lastIndexOf(':');
       const guide = site.slice(0, lastColon);
       const line = Number(site.slice(lastColon + 1));
-      const source = fs.readFileSync(path.join(repoRoot, guide), 'utf8');
+      const source = fs.readFileSync(labelPath(repoRoot, guide), 'utf8');
       const { fences: all } = scanSkillFences(source) as {
         fences: { fenceLine: number; marked: boolean }[];
       };
@@ -1342,7 +1343,7 @@ describe('the shadowed-published-type assertion (objectui#7646)', () => {
       const guides = new Map(
         (listGuides(repoRoot) as string[]).map((g) => [
           g,
-          scanSkillFences(fs.readFileSync(path.join(repoRoot, g), 'utf8')) as Scan,
+          scanSkillFences(fs.readFileSync(labelPath(repoRoot, g), 'utf8')) as Scan,
         ]),
       );
       for (const row of (KNOWN_SHADOWED_PUBLISHED_TYPES as Map<string, string>).keys()) {

@@ -13,6 +13,7 @@ import {
   GOVERNED_SURFACES,
   governedPathsIn,
 } from '../check-governed-queue-guard.mjs';
+import { skillBundleBase } from '../skill-bundle-root.mjs';
 
 import { selfTestCases, stripAnsi } from './helpers/child-verdict';
 
@@ -168,8 +169,11 @@ describe('the governed surface is the ruled definition, and it is real', () => {
       // these types from the `.mjs` (allowJs, checkJs off), so the optional-chain
       // spelling is a real type error here rather than a stylistic preference.
       const target = 'prefix' in surface ? surface.prefix : surface.exact;
+      // The published `skills/` catalog is the monorepo root's since the cutover
+      // (decision C, `scripts/skill-bundle-root.mjs`), so that row is read from there.
+      const base = surface.id === 'skills-catalog' ? skillBundleBase(ROOT) : ROOT;
       expect(
-        fs.existsSync(path.join(ROOT, target)),
+        fs.existsSync(path.join(base, target)),
         `GOVERNED_SURFACES declares ${target}, which does not exist. A governed path nobody can ` +
           `edit is a rule about nothing; either the surface moved (update the register) or the ` +
           `entry was speculative (drop it).`,
