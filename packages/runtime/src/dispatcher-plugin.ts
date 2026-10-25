@@ -1349,6 +1349,13 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             mountMcp('POST');
             mountMcp('GET');
             mountMcp('DELETE');
+            // [#25759] `PUT`, `PATCH` and every verb the transport cannot route
+            // reach the same `dispatch()` through the fallback seam (#24228):
+            // the anonymous 401 first, then the transport's own `405 Allow:
+            // POST`, as on a `createHonoApp` host. Without it the adapter
+            // answered them `405` with the mounted verbs in `Allow`, before
+            // the domain could refuse an anonymous caller.
+            domainDecidesEveryVerb('POST', `${prefix}/mcp`);
 
             // Public SKILL.md download (env-customized portable Agent Skill).
             // Separate registration: `/mcp` above is an exact-path mount, so
@@ -2144,7 +2151,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 if (!resolveMountedRoute) {
                     ctx.logger.warn(
                         '[dispatcher] http.server exposes no `resolveMountedRoute`: on /actions, /keys, '
-                        + '/notifications and /mcp/skill a verb the transport cannot route is answered by the '
+                        + '/notifications, /mcp and /mcp/skill a verb the transport cannot route is answered by the '
                         + 'transport\'s own 405, not by the domain — an anonymous caller is told the route\'s '
                         + 'shape instead of 401, and `Allow` names verbs mounted only to be refused. '
                         + 'Fix: compose an HTTP adapter that implements `resolveMountedRoute` '

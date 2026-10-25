@@ -9,15 +9,21 @@
  * server in `finally`, so it can hold no GET stream and has no session to end.
  * Before the change a GET answered `200 text/event-stream` with a stream that
  * ended at once, and claude-code re-opened it 2–3 times a second (cloud#3103).
- * The hosts add no verb logic of their own on `/mcp`: the standalone server
- * mounts GET, POST and DELETE and hands each to `dispatch()`, and a
- * `createHonoApp` host's catch-all does the same. What this file pins is that
- * the transport's answer reaches the wire on both, `Allow` header included.
+ * A `createHonoApp` host's catch-all hands every verb on `/mcp` to
+ * `dispatch()`. The standalone server mounts GET, POST and DELETE, and declares
+ * `/mcp` with `domainDecidesEveryVerb` (#24228) so the verbs it does not mount
+ * (`PUT`, `PATCH`, `OPTIONS` with CORS off) reach `dispatch()` too. Without that
+ * declaration the adapter answered them itself: `405` with the mounted verbs
+ * in `Allow`, to an anonymous caller as well. What this file pins is that the
+ * transport's answer reaches the wire on both doors, `Allow` header included.
  *
- *  1. Signed in, `GET` and `DELETE` answer `405`, `Allow: POST`, on each door.
+ *  1. Signed in, `GET`, `DELETE`, `PUT`, `PATCH` and `OPTIONS` answer `405`,
+ *     `Allow: POST`, on each door.
  *  2. Signed in, `POST initialize` and `POST tools/list` answer `200`.
- *  3. Anonymous, `GET` is still `401`: the anonymous decision comes first
- *     (ADR-0138 D2), ahead of the transport's verb answer.
+ *  3. Anonymous, `GET`, `PUT`, `PATCH` and `OPTIONS` are still `401`: the
+ *     anonymous decision comes first (ADR-0138 D2), ahead of the transport's
+ *     verb answer, on a verb the standalone router mounts and on ones it does
+ *     not.
  *  4. The two doors answer each row with the same status and `Allow`.
  *
  * `LiteKernel` with a fake `auth` slot (a session only for a request carrying
@@ -109,9 +115,13 @@ describe('[#25759] the stateless /api/v1/mcp answers GET and DELETE with 405 All
     }, 30_000);
 
     const DOORS = ['hosted (createHonoApp)', 'standalone (HonoServerPlugin + dispatcher)'];
+    /** Every verb but POST. GET and DELETE are mounted on the standalone router; the rest are not. */
+    const REFUSED = ['GET', 'DELETE', 'PUT', 'PATCH', 'OPTIONS'];
+    /** An anonymous caller is refused 401 on a mounted verb and on unmounted ones. */
+    const ANONYMOUS = ['GET', 'PUT', 'PATCH', 'OPTIONS'];
 
     for (const door of DOORS) {
-        for (const method of ['GET', 'DELETE']) {
+        for (const method of REFUSED) {
             it(`${door}: signed-in ${method} /mcp → 405, Allow: POST, never an event stream`, async () => {
                 const res = await doors.get(door)!(request(method, true));
                 const body = await res.text();
@@ -139,13 +149,21 @@ describe('[#25759] the stateless /api/v1/mcp answers GET and DELETE with 405 All
             expect(listJson.result.tools.map((t: any) => t.name)).toContain('query_records');
         });
 
-        it(`${door}: anonymous GET /mcp is still 401 — the anonymous decision comes before the verb`, async () => {
-            const res = await doors.get(door)!(request('GET', false));
-            expect(res.status).toBe(401);
-        });
+        for (const method of ANONYMOUS) {
+            it(`${door}: anonymous ${method} /mcp is still 401 — the anonymous decision comes before the verb`, async () => {
+                const res = await doors.get(door)!(request(method, false));
+                await res.arrayBuffer();
+                expect(res.status).toBe(401);
+                expect(res.headers.get('allow'), 'an anonymous caller is not told the route shape').toBeNull();
+            });
+        }
     }
 
-    for (const [method, signedIn] of [['GET', true], ['DELETE', true], ['GET', false]] as const) {
+    const PARITY: Array<[string, boolean]> = [
+        ...REFUSED.map((m): [string, boolean] => [m, true]),
+        ...ANONYMOUS.map((m): [string, boolean] => [m, false]),
+    ];
+    for (const [method, signedIn] of PARITY) {
         it(`both doors answer ${signedIn ? 'signed-in' : 'anonymous'} ${method} /mcp the same`, async () => {
             const readings = await Promise.all(
                 DOORS.map(async (door) => {

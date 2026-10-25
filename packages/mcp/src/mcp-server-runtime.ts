@@ -989,6 +989,8 @@ const MCP_HTTP_ALLOWED_METHODS = 'POST';
  */
 function methodNotAllowedResponse(): Response {
   return new Response(
+    // Mirrors `handleUnsupportedRequest` in the SDK's
+    // `server/webStandardStreamableHttp.js`, `Allow` aside.
     JSON.stringify({
       jsonrpc: '2.0',
       error: { code: -32000, message: 'Method not allowed.' },
