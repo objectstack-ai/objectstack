@@ -391,9 +391,11 @@ application-level emptiness check is needed.
 ## Embedded Structured Types
 
 These types store structured values as JSON on the parent row — no separate table and no
-foreign key. Sub-field shapes are declared on the field, and the stored value is validated
-as an open object map (`valueSchemaFor`), so sub-keys are not constrained by the field type
-itself.
+foreign key. A `composite` / `repeater` field declares no sub-fields (`fields`, `subFields` and
+`columns` are refused on it), and the stored value is validated as an open object map
+(`valueSchemaFor`), so sub-keys are not constrained at all. A list that needs typed, validated
+columns is a child object with a `master_detail` field — see
+[Embedded Structured Types](/docs/data-modeling/field-types#embedded-structured-types).
 
 ### `composite`
 

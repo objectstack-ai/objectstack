@@ -602,6 +602,11 @@ export const ERROR_CODE_LEDGER = {
     // can tell an expiry from a reset an administrator asked for.
     'PASSWORD_RESET_REQUIRED',
     'PASSWORD_REUSE',
+    // ADR-0093 D3 amendment — 400 on /admin/create-user under a walled posture:
+    // the calling administrator has no current organization for the new user
+    // to join, so no account is created. better-auth's own code for the same
+    // condition on Add Member, so both doors answer it alike.
+    'NO_ACTIVE_ORGANIZATION',
     'OAUTH_REGISTER_FAILED',       // better-auth rejected the client registration
     'PHONE_NOT_ENABLED',
     'ROLE_NOT_FOUND',             // [#24750] 400 on /organization/invite-member and /organization/update-member-role: the requested membership role is outside the closed vocabulary, refused before any invitation or membership row is written; better-auth's code, stamped by plugin-auth on the invite door (`invite-role-not-found-code.ts`), pass-through from better-auth on update-member-role

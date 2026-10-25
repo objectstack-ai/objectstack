@@ -56,7 +56,14 @@ export * from './metadata-authoring-lint';
 export type { UnknownAuthoringKeyFinding } from '../data/authoring-key-lint';
 export * from './package-artifact.zod';
 export * from './package-registry.zod';
-export * from './package-upgrade.zod';
+// package-upgrade.zod (UpgradePlanSchema / MetadataDiffItemSchema /
+// MetadataChangeTypeSchema / UpgradeImpactLevelSchema / UpgradeSnapshotSchema /
+// UpgradePackageRequestSchema / UpgradePhaseSchema / UpgradePackageResponseSchema /
+// RollbackPackageRequestSchema / RollbackPackageResponseSchema) RETIRED whole
+// (#25608, ADR-0049 enforce-or-remove; ruling 6259332195 item 3): the upgrade
+// plan / diff / conflict / snapshot / rollback model had zero runtime consumers.
+// The declaration is RETIRED_DEFS_BY_MAJOR[18] plus the D3 semantic entry
+// `kernel-package-upgrade-family-retired`.
 // [ADR-0131 D6] What an `unmanaged` install can copy: the one key
 // classification `defineStack` and the install door's import planner read.
 export * from './unmanaged-install';

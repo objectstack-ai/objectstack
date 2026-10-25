@@ -1009,6 +1009,7 @@ export {
   RELATIONSHIP_MASTER_DETAIL_REQUIRED,
   RELATIONSHIP_DELETE_BEHAVIOR,
   ROLLUP_NON_NUMERIC_AGGREGAND,
+  FIELD_EMBEDDED_SUB_FIELDS,
 } from './data-model-rules.js';
 export type { LintIssue, LocatedLintIssue, Severity } from './data-model-rules.js';
 

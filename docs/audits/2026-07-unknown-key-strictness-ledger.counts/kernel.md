@@ -19,4 +19,4 @@ hand-patch a number here** — fix the code or the verdict and regenerate.
 
 | Dir | Sites |
 |---|---|
-| `kernel/` | 247 |
+| `kernel/` | 237 |

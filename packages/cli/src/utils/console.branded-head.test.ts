@@ -250,25 +250,34 @@ describe('the branding read is the visitor\'s own request, re-addressed', () => 
 });
 
 describe('with no branding to read, the document is served as before', () => {
-  /** The shell as it was served before this change: the base tag added, nothing else. */
-  const BEFORE = SHELL.replace('<head>', '<head>\n    <base href="/_console/">');
+  /**
+   * The shell as it was served before this change: the base tag and the
+   * react-pages capability script added (off by default), nothing else. The
+   * script's per-response nonce is read off by `served`.
+   */
+  const BEFORE = SHELL.replace(
+    '<head>',
+    '<head>\n    <script>window.__OBJECTUI_CAPABILITIES_DISABLED__=(window.__OBJECTUI_CAPABILITIES_DISABLED__||[]).concat(\'react-pages\');</script>'
+      + '\n    <base href="/_console/">',
+  );
+  const served = async (res: Response) => (await res.text()).replace(/ nonce="[^"]*"/g, '');
 
   it('a composition with no branding door serves the shell unchanged, and says nothing', async () => {
     const app = await mount({});
-    const html = await (await app.request('/_console/')).text();
+    const html = await served(await app.request('/_console/'));
     expect(html).toBe(BEFORE);
     expect(app.warnings).toEqual([]);
   });
 
   it('a door that answers no branding block serves the shell unchanged', async () => {
     const app = await mount({ stub: { kind: 'json', body: { cloudUrl: '' } } });
-    expect(await (await app.request('/_console/')).text()).toBe(BEFORE);
+    expect(await served(await app.request('/_console/'))).toBe(BEFORE);
   });
 
   it('a door that fails serves the shell unchanged and warns once', async () => {
     const app = await mount({ stub: { kind: 'status', status: 500 } });
-    expect(await (await app.request('/_console/')).text()).toBe(BEFORE);
-    expect(await (await app.request('/_console/apps/x')).text()).toBe(BEFORE);
+    expect(await served(await app.request('/_console/'))).toBe(BEFORE);
+    expect(await served(await app.request('/_console/apps/x'))).toBe(BEFORE);
     expect(app.warnings).toHaveLength(1);
     expect(app.warnings[0]).toContain('/api/v1/runtime/config');
     expect(app.warnings[0]).toContain('500');
@@ -278,7 +287,7 @@ describe('with no branding to read, the document is served as before', () => {
     const app = await mount({ stub: { kind: 'throw' } });
     const res = await app.request('/_console/');
     expect(res.status).toBe(200);
-    expect(await res.text()).toBe(BEFORE);
+    expect(await served(res)).toBe(BEFORE);
     expect(app.warnings).toHaveLength(1);
   });
 });
