@@ -37,6 +37,8 @@ const SYSTEM = { isSystem: true } as const;
 const HISTORIC = '2026-01-01T00:00:00.000Z';
 const ROWS = 2_500;
 const PAGE = 1_000;
+/** SQLite's compound-SELECT ceiling: the most rows one `bulkCreate` can carry. */
+const INSERT_BATCH = 500;
 
 const PROBE_OBJECT = {
   name: PROBE,
@@ -98,9 +100,19 @@ class FixturePlugin implements Plugin {
     };
   }
 
-  /** A write that bypasses every hook and the audit stamp: an import, a migration. */
+  /**
+   * A write that bypasses every hook and the audit stamp: an import, a migration.
+   * Batched `bulkCreate`, not one awaited `create` per row (#25749): 2,500
+   * single-row autocommit inserts timed these cases out under CI load. A batch
+   * is one `… UNION ALL SELECT …` statement on SQLite, which refuses more than
+   * 500 terms ("too many terms in compound SELECT"), hence the slices. The
+   * driver keeps the given `created_at`/`updated_at`, so the history stays older
+   * than any watermark.
+   */
   async directInsert(rows: Array<Record<string, unknown>>): Promise<void> {
-    for (const row of rows) await this.driver.create(PROBE, row);
+    for (let i = 0; i < rows.length; i += INSERT_BATCH) {
+      await this.driver.bulkCreate(PROBE, rows.slice(i, i + INSERT_BATCH));
+    }
   }
 
   async row(id: string): Promise<Record<string, any> | null> {
