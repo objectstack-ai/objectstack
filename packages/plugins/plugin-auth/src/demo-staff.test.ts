@@ -16,6 +16,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { assertEngineUpdateDispatch } from '@objectstack/objectql';
 
 import {
   decideDemoStaffEnvironmentGate,
@@ -198,7 +199,11 @@ describe('provisioning — a failure after sign-up says the account exists', () 
         const matched = object === 'sys_user' ? selectRows(users, (query.where ?? {}) as Record<string, unknown>) : [];
         return typeof query.limit === 'number' ? matched.slice(0, query.limit) : matched;
       },
-      async update() {
+      async update(_object, data, options) {
+        // Pinned to ObjectQL.update's dispatch predicate: the verification stamp
+        // is a by-id update, and a fake looser than the engine would pass one
+        // the engine refuses.
+        assertEngineUpdateDispatch(data, options as Parameters<typeof assertEngineUpdateDispatch>[1]);
         return undefined;
       },
       async insert() {
