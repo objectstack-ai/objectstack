@@ -155,7 +155,7 @@
     "DatasetDimension (type)",
     "DatasetDimensionSchema (const)",
     "DatasetDurationUnit (const)",
-    "DatasetDurationUnitValue (type)",
+    "DatasetDurationUnit (type)",
     "DatasetMeasure (type)",
     "DatasetMeasureDuration (type)",
     "DatasetMeasureDurationSchema (const)",
