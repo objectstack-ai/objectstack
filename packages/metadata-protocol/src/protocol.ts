@@ -386,6 +386,13 @@ import {
     isUnservedSealedOverlay,
     servedLockState,
 } from './protocol-lock-state.js';
+// [#25467 cut 11] The registry materialize/strip pair of the served object document.
+import {
+    governServedObject,
+    materializeFromRegistry,
+    stripMaterializedFromRegistry,
+    stripServedObjectColumns,
+} from './protocol-registry-materialize.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -560,7 +567,7 @@ function canonicalizeMetaRequestType<T extends { type: string }>(request: T): T 
  * PUT round-trip would persist the injected columns into `sys_metadata`, and the
  * #4326 byte-identical invariant would break the day this shipped.
  */
-function governServedItem<T>(type: string, item: T): T {
+export function governServedItem<T>(type: string, item: T): T {
     if (canonicalMetaType(type) !== 'object') return item;
     return applyInjectedSystemColumns(applyAuditFieldGovernance(item));
 }
@@ -583,7 +590,7 @@ function governServedItem<T>(type: string, item: T): T {
  * the platform's own definition, and a declared `owner_id` carrying the author's
  * own label survives untouched.
  */
-function stripServedSystemColumns<T>(type: string, item: T): T {
+export function stripServedSystemColumns<T>(type: string, item: T): T {
     return canonicalMetaType(type) === 'object' ? stripInjectedSystemColumns(item) : item;
 }
 
@@ -9069,32 +9076,12 @@ export class ObjectStackProtocolImplementation implements
      * which is the majority path this converges the minority onto).
      */
     private materializeFromRegistry<T>(type: string, body: T): T {
-        if (canonicalMetaType(type) !== 'object') return body;
-        if (body === null || typeof body !== 'object') return body;
-        const registry = (this.engine as any)?.registry;
-        // Partial registry doubles in tests predate this method; a host that
-        // cannot answer the gate answers exactly as it did before. The
-        // `provisionSearchCompanionOnto` fallback keeps a double that was
-        // written against #8038's narrower seam serving what it served then,
-        // rather than silently losing the companion convergence to a rename.
-        if (registry && typeof registry.materializeServedObjectOnto === 'function') {
-            try {
-                return registry.materializeServedObjectOnto(body) as T;
-            } catch {
-                // A read over an in-memory flag, the registry's own resolved
-                // answer and the body's own fields; a failure here must not turn
-                // a served schema into a 5xx.
-                return body;
-            }
-        }
-        if (registry && typeof registry.provisionSearchCompanionOnto === 'function') {
-            try {
-                return registry.provisionSearchCompanionOnto(body) as T;
-            } catch {
-                return body;
-            }
-        }
-        return body;
+        // [#25467 cut 11] The body moved to `protocol-registry-materialize.ts` (see `RegistryMaterializeHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof materializeFromRegistry> = {
+            get engine() { return readEngine(); },
+        };
+        return (materializeFromRegistry<T>).call(host, type, body);
     }
 
     /**
@@ -9107,7 +9094,11 @@ export class ObjectStackProtocolImplementation implements
      * #7556's boundary).
      */
     private governServedObject<T>(type: string, item: T): T {
-        return this.materializeFromRegistry(type, governServedItem(type, item));
+        // [#25467 cut 11] The body moved to `protocol-registry-materialize.ts` (see `RegistryMaterializeHost`).
+        const host: ThisParameterType<typeof governServedObject> = {
+            materializeFromRegistry: (...a) => this.materializeFromRegistry(...a),
+        };
+        return (governServedObject<T>).call(host, type, item);
     }
 
     /**
@@ -9132,29 +9123,12 @@ export class ObjectStackProtocolImplementation implements
      * named stamp — the same reason {@link materializeFromRegistry} does.
      */
     private stripMaterializedFromRegistry<T>(type: string, item: T): T {
-        if (canonicalMetaType(type) !== 'object') return item;
-        if (item === null || typeof item !== 'object') return item;
-        const registry = (this.engine as any)?.registry;
-        // Partial registry doubles in tests predate this method; the narrower
-        // #8038 spelling keeps such a host stripping what it stripped before
-        // rather than silently losing the companion strip to a rename.
-        if (registry && typeof registry.stripMaterializedStampsFrom === 'function') {
-            try {
-                return registry.stripMaterializedStampsFrom(item) as T;
-            } catch {
-                // A read over the body's own fields; a failure here must not
-                // turn a save into a 5xx.
-                return item;
-            }
-        }
-        if (registry && typeof registry.stripProvisionedSearchCompanionFrom === 'function') {
-            try {
-                return registry.stripProvisionedSearchCompanionFrom(item) as T;
-            } catch {
-                return item;
-            }
-        }
-        return item;
+        // [#25467 cut 11] The body moved to `protocol-registry-materialize.ts` (see `RegistryMaterializeHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof stripMaterializedFromRegistry> = {
+            get engine() { return readEngine(); },
+        };
+        return (stripMaterializedFromRegistry<T>).call(host, type, item);
     }
 
     /**
@@ -9163,7 +9137,11 @@ export class ObjectStackProtocolImplementation implements
      * path owes {@link governServedObject}.
      */
     private stripServedObjectColumns<T>(type: string, item: T): T {
-        return this.stripMaterializedFromRegistry(type, stripServedSystemColumns(type, item));
+        // [#25467 cut 11] The body moved to `protocol-registry-materialize.ts` (see `RegistryMaterializeHost`).
+        const host: ThisParameterType<typeof stripServedObjectColumns> = {
+            stripMaterializedFromRegistry: (...a) => this.stripMaterializedFromRegistry(...a),
+        };
+        return (stripServedObjectColumns<T>).call(host, type, item);
     }
 
     /**
