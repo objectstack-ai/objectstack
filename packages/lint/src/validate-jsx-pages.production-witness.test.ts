@@ -58,7 +58,12 @@ describe('production witness: the checked-in manifest reaches validateTree', () 
     // regeneration legitimately changes them, re-check the shipped pages in the
     // same PR.
     expect(keys).toContain('flex');
-    expect(keys).toContain('html');
+    // The html tier's intrinsic tags. The raw `html` component itself was
+    // retired by objectui#13449 and left the manifest when it was regenerated
+    // from the in-tree ui/ (107 -> 106, objectstack#25711); the shipped pages
+    // below never used it, which the clean-run witness re-checks.
+    expect(keys).toContain('a');
+    expect(keys).toContain('p');
     expect(keys).not.toContain('div');
   });
 
