@@ -199,7 +199,11 @@ ADR-0131 D3 states the split this record reuses: *"Assignments are organization 
 method (`packages/spec/src/contracts/data-driver.ts`) with a declaration site in `driver-memory`, `driver-mongodb`,
 `driver-sql` and `driver-turso`; `driver-sqlite-wasm` declares none of its own and its tests call the one it is built on.
 Every shipped driver therefore answers it, and the contract still allows a driver that does not. A conditional update —
-"set the cursor to N+1 where it still reads N" — is expressible with it; no atomic increment exists.
+"set the cursor to N+1 where it still reads N" — is expressible with it; no atomic increment exists. The data path has one
+conditional-update contract already: `PATCH` and `DELETE` take an opt-in `If-Match` header or `expectedVersion` token
+(`packages/spec/src/api/protocol.zod.ts`, `packages/rest/src/crud-routes.ts`) and answer **409 `CONCURRENT_UPDATE`** when
+it differs from the row's `updated_at` (`packages/metadata-protocol/src/protocol.ts#ConcurrentUpdateError`) — compared in
+`updateData` over the existence probe, before `engine.update`, so it is compare-then-write, not atomic.
 
 ### 2. The pull — HotCRM at `8f52859`
 
@@ -391,8 +395,10 @@ claim (`{ owner_id: null }`, set by
 the gate on the operation context as it sets the depth today) and D5's cursor (`{ version }`). The engine lowers the
 write to the driver's conditional `updateMany(object, { where: { id, ...expect } }, data)` where the driver has it; one
 affected row is re-read by id and the by-id branch continues unchanged — hooks, formulas, the per-record event, the
-roll-up, the response — at the cost of one read; zero rows answer **409 `RESOURCE_CONFLICT`** ("the record was taken"),
-the distinction the engine already draws between a by-id miss and a predicate update that matched nothing. Where the
+roll-up, the response — at the cost of one read; zero rows answer **409 `CONCURRENT_UPDATE`** — the data path's existing
+code for "another writer got there first", with "the record was taken" as its message — the distinction the engine
+already draws between a by-id miss and a predicate update that matched nothing. The existing `expectedVersion` check is
+untouched by the PR (merge question 16). Where the
 driver has no `updateMany`, the precondition degrades to the pre-image check and the write goes through unconditionally,
 logged once per process at `warn`; every shipped driver has it (Context §1).
 
@@ -566,7 +572,8 @@ at merge (the card's own words; HotCRM `AGENTS.md` rule 2: *merged is not availa
   `sys_job_queue` are a different noun — a work queue of jobs, not of people — and nothing here touches them; the two
   words co-exist as `sys_team` and `team` do.
 - **Codes** (ADR-0112 D1, D3 — registered in the ledger by the PR): `PERMISSION_DENIED` 403 for a refused claim, release,
-  move or supplied queue; `RESOURCE_CONFLICT` 409 for a lost claim race; one new code, `QUEUE_NOT_FOUND` 422, only for a
+  move or supplied queue; `CONCURRENT_UPDATE` 409 for a lost claim race — the ledger's existing code for a write another
+  writer beat, so the verb carries one 409, not two (ADR-0112 D1); one new code, `QUEUE_NOT_FOUND` 422, only for a
   caller-supplied `queue` that resolves nowhere in the row's organization. A rule's unresolved target is never a refusal
   (D5). D3's registration refusal is thrown at `registerObject`, a door Studio and the metadata API reach at request
   time, so it carries the ADR-0112 envelope the registry's other field refusals carry — `INVALID_METADATA`, 422, as
@@ -724,15 +731,19 @@ objection names the number.
     absent and every admission inapplicable (ADR-0078); a suffixed name (`owner_queue`) avoids the collision at the price
     of a less legible column whose name differs from the type's. The recommendation is loud and names the fix; its cost
     is an upgrade-time refusal for an app that already has the field.
-16. **The by-id write precondition (`expect`) is engine-internal: set by the gate for a claim and by the assignment seam
-    for the cursor, reachable from no data door.** Exposing it on the data API (a conditional update, `If-Match`-like,
-    through REST and the SDK) would give every app optimistic concurrency — a real want — at the price of a new request
-    vocabulary through every door, a 409 every client must learn to handle, a spec key and ledger entry of its own, and
-    a platform-wide contract decided on a queue card. The recommendation keeps the primitive private to D4's two users;
-    exposing it later is additive and needs no undo.
+16. **The by-id write precondition (`expect`) is engine-internal — set by the gate for a claim and by the assignment seam
+    for the cursor, reachable from no data door — and the data API's existing optimistic concurrency stays where it is.**
+    `PATCH` and `DELETE` already take `If-Match` / `expectedVersion` and answer 409 `CONCURRENT_UPDATE`, compared in
+    `updateData` before `engine.update` (Context §1): compare-then-write. The alternative lowers that check onto the same
+    precondition (`expect: { updated_at: <token> }`), making today's optimistic concurrency atomic for every client
+    already sending the token; its cost is moving the comparison into the write while preserving what the protocol
+    layer settles around it — the probe-first ordering (404 before 409), the token normalisation, and the conflict's
+    re-read of the row under the caller's context for `currentVersion` / `currentRecord` — on a queue card. The
+    recommendation leaves the data path's shape alone; its cost is that the existing check stays non-atomic. Lowering
+    it later is additive.
 17. **A stack that declares `queues` or `assignmentRules` with no queue service registered is refused at boot, not
-    warned about.** AGENTS.md puts a functional degradation at `warn`, and a loud warning would keep a lean composition
-    booting; but this degraded state is not cosmetic — every insert the rules cover parks nowhere and every claim fails
+    warned about.** AGENTS.md says *"An `if (!service)` composition branch is usually functional and belongs at
+    `warn`"*, and a loud warning would keep a lean composition booting; but this degraded state is not cosmetic — every insert the rules cover parks nowhere and every claim fails
     closed, with the declaring package none the wiser — and ADR-0093 D5 is the precedent for failing fast on a degraded
     middle state. Cost of the recommendation: a composition that ships such a package and deliberately omits
     `plugin-sharing` cannot boot until it drops the keys or adds the plugin. Cost of the warning: ADR-0078's inert
