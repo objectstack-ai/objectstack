@@ -67,6 +67,7 @@ export interface CoverageIssue {
     | 'dashboard'
     | 'widget'
     | 'dataset'
+    | 'report'
     | 'picklist'
     | 'page'
     | 'flow'
@@ -352,6 +353,11 @@ const COVERAGE_SOURCE: Record<ExpectedEntry['source'], CoverageIssue['source']> 
   // the `dashboard` bucket: the string is defined once, not once per
   // presentation.
   dataset: 'dataset',
+  // Report copy (`reports.<r>.label` / `.description`) — the author's own
+  // reports, listed by these two strings on the app's report index and headed
+  // by the label on the report page, so it keeps its own bucket and reports as
+  // `i18n/missing-report` rather than folding into `dashboard`.
+  report: 'report',
   // Shared option-list copy (`picklists.<p>.label`, `.options.<value>`) — the
   // author's own vocabulary, translated once for every field that references
   // it, so it keeps its own bucket and reports as `i18n/missing-picklist`.
@@ -396,6 +402,7 @@ const SOURCE_NOUN: Record<CoverageIssue['source'], string> = {
   dashboard: 'Dashboard',
   widget: 'Widget',
   dataset: 'Dataset',
+  report: 'Report',
   picklist: 'Picklist',
   page: 'Page',
   flow: 'Flow',
@@ -440,6 +447,7 @@ const SOURCE_SURFACE: Record<CoverageIssue['source'], string> = {
   dashboard: 'dashboards',
   widget: 'widgets',
   dataset: 'datasets',
+  report: 'reports',
   picklist: 'picklists',
   page: 'pages',
   flow: 'flow screens, approval steps, toasts and refusals',

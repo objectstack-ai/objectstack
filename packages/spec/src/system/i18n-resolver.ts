@@ -1505,6 +1505,9 @@ const METADATA_DOCUMENT_TRANSLATORS: Record<
   // `GET /meta/permission`, so registering here is the whole wiring.
   position: translatePosition,
   permission: translatePermissionSet,
+  // The console's report index and report page both read `GET /meta/report`,
+  // so registering here is the whole wiring.
+  report: translateReport,
 };
 
 /**
@@ -2217,6 +2220,84 @@ export function translatePermissionSet<T extends SecurityCatalogItemLike>(
   opts?: ResolveOptions,
 ): T {
   return translateSecurityCatalogItem('permissions', doc, bundle, opts);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Report metadata resolver (label + description)
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Minimal shape of a report document consumed by {@link translateReport}. */
+export interface ReportLike {
+  name: string;
+  label?: unknown;
+  description?: unknown;
+  [key: string]: any;
+}
+
+function lookupReportAttr(
+  bundle: TranslationBundle | undefined,
+  name: string,
+  attr: 'label' | 'description',
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    const candidate = pickData(bundle, code)?.reports?.[name]?.[attr];
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * Apply the active locale to a report metadata document — its `label` and
+ * `description` against `reports.<name>.label` / `.description`. The input
+ * document is not mutated, and it comes back as the same reference when the
+ * bundle carries neither key (or the served value overrides both).
+ *
+ * These are the two strings the console lists a report by on the app's report
+ * index, and the report page's heading. Registered in
+ * {@link METADATA_DOCUMENT_TRANSLATORS}, so the REST boundary localizes every
+ * served report (`GET /meta/report`, list and item) with nothing else to
+ * remember.
+ *
+ * ## The catalog loses to an explicit override — ADR-0029 D9.2a
+ *
+ * A report is overlay-editable (ADR-0126 Regime O, beside view and
+ * dashboard): an org may re-author a packaged report's `label`, and that
+ * overlay is what every read serves. The catalog is the packaged translation
+ * of the PACKAGED declaration, so each string here follows the rule
+ * {@link translateDashboard} follows: it applies only while the served value
+ * still equals the one in {@link TranslateDocumentOptions.packagedBase}, which
+ * the serving layer supplies (`getPackagedReportBase` on the metadata
+ * protocol). No base supplied — a runtime-authored report, or a caller that
+ * cannot see one — means the catalog applies.
+ *
+ * `label` and `description` are `I18nLabelSchema` at the authoring site, so
+ * either may be an inline locale map; a key the bundle does not carry leaves
+ * that map intact rather than flattening it to one language.
+ */
+export function translateReport<T extends ReportLike>(
+  doc: T,
+  bundle: TranslationBundle | undefined,
+  opts?: TranslateDocumentOptions,
+): T {
+  if (!doc || typeof doc !== 'object') return doc;
+  const name = doc.name;
+  if (typeof name !== 'string' || name.length === 0 || !bundle) return doc;
+
+  const base = asRecord(opts?.packagedBase);
+  const label = valueOverridesPackagedBase(base, 'label', doc.label)
+    ? undefined
+    : lookupReportAttr(bundle, name, 'label', opts);
+  const description = valueOverridesPackagedBase(base, 'description', doc.description)
+    ? undefined
+    : lookupReportAttr(bundle, name, 'description', opts);
+  if (label === undefined && description === undefined) return doc;
+  return {
+    ...doc,
+    ...(label !== undefined ? { label } : {}),
+    ...(description !== undefined ? { description } : {}),
+  };
 }
 
 // ────────────────────────────────────────────────────────────────────────────

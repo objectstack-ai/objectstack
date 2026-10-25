@@ -2800,11 +2800,12 @@ export function metaTranslateOptions(
  *
  *  - `object` — a code `objectExtensions` scalar or a tenant rename folds onto
  *    the owner's declaration (`getPackagedObjectBase`, pre-fold);
- *  - `dashboard` and `view` — ADR-0126 Regime O: a packaged item is
- *    overlay-editable, and a published org overlay is what every read serves
- *    (`getPackagedDashboardBase`, `getPackagedViewBase`). A view is looked up
- *    by the served item's registry name, the qualified `<object>.<viewKey>` —
- *    never the bare key the catalog addresses it by under its object.
+ *  - `dashboard`, `view` and `report` — ADR-0126 Regime O: a packaged item
+ *    is overlay-editable, and a published org overlay is what every read
+ *    serves (`getPackagedDashboardBase`, `getPackagedViewBase`,
+ *    `getPackagedReportBase`). A view is looked up by the served item's
+ *    registry name, the qualified `<object>.<viewKey>` — never the bare key
+ *    the catalog addresses it by under its object.
  *
  * A translatable type without a row (`action`, `app`, `dataset`, `page`) is
  * ADR-0126 tier B — a write against its packaged item answers
@@ -2818,14 +2819,16 @@ const PACKAGED_BASE_ACCESSORS: ReadonlyMap<string, string> = new Map<string, str
     ['object', 'getPackagedObjectBase'],
     ['dashboard', 'getPackagedDashboardBase'],
     ['view', 'getPackagedViewBase'],
+    ['report', 'getPackagedReportBase'],
 ]);
 
 /**
  * [#8284 · #20730] The packaged (code-layer) base declaration of one served
  * metadata document, for `translateMetadataDocument`'s `packagedBase` — the
  * per-type resolver over {@link PACKAGED_BASE_ACCESSORS}: an `object` answers
- * `getPackagedObjectBase(name)`, a `dashboard` `getPackagedDashboardBase(name)`
- * and a `view` `getPackagedViewBase(name)`.
+ * `getPackagedObjectBase(name)`, a `dashboard` `getPackagedDashboardBase(name)`,
+ * a `view` `getPackagedViewBase(name)` and a `report`
+ * `getPackagedReportBase(name)`.
  *
  * `undefined` on every uncertainty — a type with no row, an empty name, a
  * protocol without the accessor (they are server-only extensions, so
@@ -2852,8 +2855,8 @@ export interface MetaListTranslationSources {
     /** This request's i18n service, or `undefined` when the deployment has none. */
     resolveI18nService(): Promise<unknown>;
     /**
-     * This request's protocol, for the packaged base of an object, dashboard
-     * or view ({@link packagedObjectBaseOf}); `undefined` when unreachable.
+     * This request's protocol, for the packaged base of an object, dashboard,
+     * view or report ({@link packagedObjectBaseOf}); `undefined` when unreachable.
      */
     resolveProtocol(): Promise<unknown>;
     /**

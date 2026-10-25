@@ -4474,3 +4474,41 @@ describe('validateTranslationReferences — the security catalog (positions, per
       .toEqual([]);
   });
 });
+
+describe('validateTranslationReferences — reports', () => {
+  const stack = (data: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+    reports: [{ name: 'opps_by_stage', label: 'Opportunities by Stage', type: 'summary', dataset: 'pipeline', values: ['amount'] }],
+    ...extra,
+    translations: [{ en: data }],
+  });
+
+  it('a declared name is clean', () => {
+    expect(validateTranslationReferences(stack({
+      reports: { opps_by_stage: { label: 'Opportunities by Stage', description: 'Pipeline grouped by stage' } },
+    }))).toEqual([]);
+  });
+
+  it('a name no package declares is translation-target-unknown, at the named-item groups\' error', () => {
+    const findings = validateTranslationReferences(stack({ reports: { opps_by_stgae: { label: 'x' } } }));
+    expect(findings.map((f) => [f.rule, f.severity, f.path, f.where])).toEqual([
+      [TRANSLATION_TARGET_UNKNOWN, 'error', 'translations[0].en.reports.opps_by_stgae', 'locale "en" · report "opps_by_stgae"'],
+    ]);
+    expect(findings[0].message).toContain('Did you mean "opps_by_stage"?');
+  });
+
+  it('judges the group against its own collection — a dashboard name under `reports` is an orphan', () => {
+    const findings = validateTranslationReferences(stack(
+      { reports: { ops: { label: 'x' } } },
+      { dashboards: [{ name: 'ops', label: 'Operations', widgets: [] }] },
+    ));
+    expect(findings.map((f) => f.path)).toEqual(['translations[0].en.reports.ops']);
+  });
+
+  it('resolves a name a sibling package of the artifact declares', () => {
+    const findings = validateTranslationReferences(stack(
+      { reports: { leads_by_source: { label: 'Leads by Source' } } },
+      { packages: [{ manifest: { reports: [{ name: 'leads_by_source', label: '线索来源', type: 'summary', dataset: 'leads', values: ['n'] }] } }] },
+    ));
+    expect(findings).toEqual([]);
+  });
+});

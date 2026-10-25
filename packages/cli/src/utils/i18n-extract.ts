@@ -102,6 +102,7 @@
  *   datasets.<dataset>.label / .description
  *   datasets.<dataset>.dimensions.<dim>.label
  *   datasets.<dataset>.measures.<measure>.label
+ *   reports.<report>.label / .description
  *   picklists.<picklist>.label
  *   picklists.<picklist>.options.<value>   (a `picklistExtensions` entry's options too)
  *   pages.<page>.label / .description
@@ -223,6 +224,7 @@ export interface ExpectedEntry {
     | 'dashboard'
     | 'widget'
     | 'dataset'
+    | 'report'
     | 'picklist'
     | 'page'
     | 'flow'
@@ -1617,6 +1619,9 @@ export function collectExpectedEntries(
   // ── Analytics datasets (`datasets.<name>.…`) ─────────────────────
   walkDatasets(config, out);
 
+  // ── Reports (`reports.<name>.…`) ─────────────────────────────────
+  walkReports(config, out);
+
   // ── Shared option lists (`picklists.<name>.…`) ────────────────────
   walkPicklists(config, out);
 
@@ -1857,6 +1862,36 @@ function walkPicklists(config: any, out: ExpectedEntry[]): void {
     const name = extension.extend;
     if (typeof name !== 'string' || name.length === 0) continue;
     walkOptions(name, extension.options);
+  }
+}
+
+// ─── Reports (`reports.<name>.…`) ──────────────────────────────────────
+
+/**
+ * Emit the report copy surface:
+ *
+ *   reports.<name>.label / .description
+ *
+ * Read off the stack's `reports[]`. Served through `translateReport`,
+ * registered in `METADATA_DOCUMENT_TRANSLATORS`, so the REST boundary
+ * localizes `GET /meta/report` (the list the console's report index and report
+ * page read); this pass is the half that writes the skeleton and lets
+ * `os i18n check` see the gap.
+ *
+ * `pushOptional` for both keys: a report's `description` is optional at the
+ * authoring site, so a string nobody wrote is recorded without an `inline` and
+ * never demanded as a translation. A report's `label` is required, so it is
+ * always authored text. A joined report's block labels and the embedded
+ * chart's copy are not on this face.
+ */
+function walkReports(config: any, out: ExpectedEntry[]): void {
+  const reports: any[] = Array.isArray(config?.reports) ? config.reports : [];
+  for (const report of reports) {
+    if (!report || typeof report !== 'object') continue;
+    const name = report.name;
+    if (typeof name !== 'string' || name.length === 0) continue;
+    pushOptional(out, ['reports', name, 'label'], report.label, 'report');
+    pushOptional(out, ['reports', name, 'description'], report.description, 'report');
   }
 }
 
