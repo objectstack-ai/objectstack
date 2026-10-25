@@ -277,12 +277,17 @@ const OBJECT_PERMISSION_RETIRED_KEY_RESIDUE = {
  * semantics of ADR-0090, not a contradictory declaration, and is not judged
  * here.
  *
+ * [#25575] It also refuses an explicit `allowDelete: false` beside
+ * `modifyAllRecords: true`, for the same reason: the evaluator grants delete
+ * on the bypass bit and never reads the `false`. See the arm at the end.
+ *
  * Module-private on purpose: it has exactly one consumer, the schema below.
  * Exporting it would put a refinement helper on the published API surface (the
  * `security` barrel re-exports this module with `export *`) for no caller.
  */
 function checkScopeAgainstSuperUserBits(
   value: {
+    allowDelete?: boolean;
     viewAllRecords?: boolean;
     modifyAllRecords?: boolean;
     readScope?: string;
@@ -318,6 +323,60 @@ function checkScopeAgainstSuperUserBits(
         'is a DIFFERENT shape and stays accepted — viewAllRecords does not bypass write.)',
     });
   }
+  // [#25575] An explicit `allowDelete: false` beside `modifyAllRecords: true`.
+  // Only an AUTHORED false reaches here: the stage in front of this schema
+  // ({@link materializeModifyAllDelete}) writes `allowDelete: true` into an
+  // entry that sets `modifyAllRecords: true` and omits the key, before the
+  // `.default(false)` could fill it.
+  if (value.modifyAllRecords === true && value.allowDelete === false) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['allowDelete'],
+      message: MODIFY_ALL_ALLOW_DELETE_FALSE_MESSAGE,
+    });
+  }
+}
+
+/**
+ * The refusal of `allowDelete: false` beside `modifyAllRecords: true`
+ * (#25575). The text names the route the author is looking for, because the
+ * author who writes this pair wants "edit every record, delete none", and
+ * Modify All cannot say that.
+ */
+const MODIFY_ALL_ALLOW_DELETE_FALSE_MESSAGE =
+  'allowDelete: false is refused beside modifyAllRecords: true since @objectstack/spec 18 (ADR-0049): ' +
+  'Modify All Records is the write bypass for edit, delete and transfer, and the permission evaluator ' +
+  'grants delete on the bypass bit before it reads allowDelete, so this false is never enforced. If the set should delete every record, delete allowDelete (or set it to true). If it ' +
+  'should edit records it does not own but delete none, remove modifyAllRecords, keep allowEdit: true ' +
+  "and allowDelete: false, and grant the edit with a sharing rule: a `criteria` rule with accessLevel: 'edit', " +
+  "a condition every row satisfies (record.id != ''), shared with the position that holds this set. An edit " +
+  'share opens update and never delete; delete stays ' +
+  'with the record owner. The object needs an owner field and an owner-write default (`private` or ' +
+  '`public_read`).';
+
+/**
+ * [#25575] The stage in front of the object-permission schema that writes
+ * `allowDelete: true` into an entry that sets `modifyAllRecords: true` and
+ * omits `allowDelete`.
+ *
+ * `allowDelete` carries `.default(false)`, and a refinement only sees the
+ * parsed value, so without this stage `{ modifyAllRecords: true }` would parse
+ * to `{ allowDelete: false, modifyAllRecords: true }`. That output is the
+ * refused pair: parsing it again (the `definePermissionSet` result passed to
+ * `defineStack`, a built artifact read at boot, a stored row saved again)
+ * would refuse a set its author wrote correctly. Writing `true` makes the
+ * parsed entry say what the evaluator grants (`objectPermissionGrants` folds
+ * delete into Modify All), and makes the parse idempotent.
+ *
+ * Only an ABSENT key is written. An explicit `false` passes through and is
+ * refused by the refinement; an explicit `true` is already the answer. The
+ * input type is unchanged, so `allowDelete` stays optional to author.
+ */
+function materializeModifyAllDelete(body: unknown): unknown {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return body;
+  const entry = body as Record<string, unknown>;
+  if (entry.modifyAllRecords !== true || Object.prototype.hasOwnProperty.call(entry, 'allowDelete')) return body;
+  return { ...entry, allowDelete: true };
 }
 
 /**
@@ -504,8 +563,14 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
    * RUNTIME change in `plugin-sharing` (option B on #6698) and is deliberately
    * not taken — what moved here is only the declaration, so that it stops
    * over-claiming (ADR-0049 `declared ≠ enforced`).
+   *
+   * [#25575] It includes DELETE (and transfer), as Salesforce's "Modify All"
+   * does. An entry that omits `allowDelete` parses to `allowDelete: true`, and
+   * an explicit `allowDelete: false` beside it is refused, because the
+   * evaluator never reads it. "Edit every record, delete none" is a `criteria`
+   * sharing rule with `accessLevel: 'edit'`, not this bit.
    */
-  modifyAllRecords: z.boolean().default(false).describe('Modify All Data (Bypass Sharing) — bypasses sharing rules and ownership on the objects record sharing enforces on; on an object with NO owner field sharing abstains, so the platform created_by write floor still applies.'),
+  modifyAllRecords: z.boolean().default(false).describe('Modify All Data (Bypass Sharing) — bypasses sharing rules and ownership on the objects record sharing enforces on; on an object with NO owner field sharing abstains, so the platform created_by write floor still applies. Includes delete: an omitted allowDelete parses to true, and an explicit allowDelete: false beside it is refused.'),
 
   /**
    * [ADR-0057 D1] Read access DEPTH (Dataverse-style access level), layered on
@@ -561,7 +626,9 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
  * them, and the same check on parsed output measures nothing at all.
  */
 export const ObjectPermissionSchema = lazySchema(() =>
-  acceptRetiredDefaultResidue(
+  // [#25575] The outermost stage sees the RAW entry, so it is the one place an
+  // omitted `allowDelete` is still distinguishable from an authored `false`.
+  withModifyAllDeleteMaterialized(acceptRetiredDefaultResidue(
     // [#16870] The contradictory-pair refusal rides on the BASE, inside the
     // residue stage, for two measured reasons. (1) In zod 4 `.superRefine()`
     // on a `ZodObject` returns a `ZodObject` that keeps `.shape`, while the
@@ -574,8 +641,27 @@ export const ObjectPermissionSchema = lazySchema(() =>
     // effective-permission response, and an older client must not crash on it.
     ObjectPermissionBaseSchema.superRefine(checkScopeAgainstSuperUserBits),
     OBJECT_PERMISSION_RETIRED_KEY_RESIDUE,
-  ),
+  )),
 );
+
+/**
+ * [#25575] Put {@link materializeModifyAllDelete} in front of the authoring
+ * schema, keeping the read-through `shape` the residue stage gives it (the
+ * schema walkers duck-test `shape`, and a `z.preprocess` pipe has none of its
+ * own). Only the authoring schema takes this stage:
+ * {@link EffectiveObjectPermissionSchema} is the tolerant wire surface and
+ * extends the unrefined base.
+ */
+function withModifyAllDeleteMaterialized<S extends z.ZodType & { readonly shape: z.ZodRawShape }>(
+  schema: S,
+): z.ZodType<z.output<S>, z.input<S>> & { readonly shape: S['shape'] } {
+  const pipe = z.preprocess(materializeModifyAllDelete, schema);
+  Object.defineProperty(pipe, 'shape', {
+    configurable: true,
+    get: () => schema.shape,
+  });
+  return pipe as unknown as z.ZodType<z.output<S>, z.input<S>> & { readonly shape: S['shape'] };
+}
 
 /**
  * RESPONSE-side extension of {@link ObjectPermissionSchema} carrying the

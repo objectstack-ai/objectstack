@@ -426,7 +426,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // turbo.json declares, one per recognised name -- so the pin moves when either
   // set does. That is the point: a directory dropping out of turbo.json is a
   // declaration disappearing, which is worth a red.
-  'the TOP-LEVEL WHITELIST, reconciled against turbo.json (#18342)': 26,
+  'the TOP-LEVEL WHITELIST, reconciled against turbo.json (#18342)': 30,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1433,6 +1433,22 @@ export const RECOGNISED_TOP_LEVEL_DIRECTORIES = Object.freeze([
  */
 export const TOP_LEVEL_DIRECTORIES_PENDING = Object.freeze({
   '.github': 'over-collection census (#18342): two literals, both non-reads; disposition reserved to the seat',
+});
+
+/**
+ * Top-level directories a `$TURBO_ROOT$` input declares AHEAD of their arrival in
+ * the tree, each with the reason. A name here is excused from the "tracked as
+ * neither file nor directory" case ONLY while git tracks nothing under it; the
+ * moment it is tracked it lands in `directories` and owes a place in
+ * `RECOGNISED_TOP_LEVEL_DIRECTORIES` or `TOP_LEVEL_DIRECTORIES_PENDING` like any
+ * other, so the import commit decides how this collector treats it.
+ *
+ * `ui`: the objectui tree, imported under `ui/` (objectstack#25677). turbo.json's
+ * `type-check` and `lint` tasks carry objectui's repo-root inputs re-rooted there.
+ * Retire the entry with the import.
+ */
+export const TOP_LEVEL_DIRECTORIES_AWAITING_IMPORT = Object.freeze({
+  ui: 'the objectui import (objectstack#25677): turbo.json declares its type-check and lint inputs ahead of the tree',
 });
 
 /** Repo-root FILES declared as `$TURBO_ROOT$` inputs -- the fourth shape, pinned, not collected. */
@@ -4353,7 +4369,27 @@ function selfTest() {
     // Non-vacuity first: a reading of zero would green every per-directory case
     // below by having none of them run.
     ok('turbo.json still declares $TURBO_ROOT$ inputs at all', live.directories.size > 0);
-    ok('no declared top-level segment is tracked as neither file nor directory', live.unknown.size === 0);
+    const awaitingImport = new Set(Object.keys(TOP_LEVEL_DIRECTORIES_AWAITING_IMPORT));
+    const unexcused = [...live.unknown].filter((name) => !awaitingImport.has(name));
+    ok(
+      `no declared top-level segment is tracked as neither file nor directory (unexcused: ${unexcused.join(', ') || 'none'})`,
+      unexcused.length === 0,
+    );
+    // The excuse is narrow in both directions: it covers only the names it lists,
+    // and only while git tracks nothing under them.
+    ok(
+      'an unknown segment the awaiting-import map does not list is still unexcused',
+      [...new Set(['zzqq-25697', ...live.unknown])].filter((name) => !awaitingImport.has(name)).includes('zzqq-25697'),
+    );
+    ok(
+      'an awaiting-import name git already tracks is NOT excused here (it must be recognised or pending)',
+      [...awaitingImport].every((name) => !live.directories.has(name) || recognised.has(name) || pending.has(name)),
+    );
+    ok('the awaiting-import map holds exactly the measured arrivals', [...awaitingImport].sort().join() === 'ui');
+    ok(
+      'every awaiting-import entry carries a reason',
+      Object.values(TOP_LEVEL_DIRECTORIES_AWAITING_IMPORT).every((r) => typeof r === 'string' && r.length > 0),
+    );
     for (const dir of [...live.directories].sort()) {
       ok(
         `turbo.json declares "${dir}/" and the collector accounts for it (recognised, or pending with a reason)`,

@@ -244,6 +244,13 @@ describe('ApiTrigger — a secret read at verification time', () => {
         }
     });
 
+    it('a secret named by config.secretRef arms only through the engine\'s reader — the trigger never reads the name', () => {
+        const t = new ApiTrigger(() => makeFakeQueue(), logger as any);
+        expect(() => t.start({ flowName: 'ref_only', config: { secretRef: 'PIN_TRIGGER_REF' } }, async () => {}))
+            .toThrow(/config\.secretRef/);
+        expect(t.listHooks()).toEqual([]);
+    });
+
     it('a wrong hook id is refused before any secret is read', async () => {
         let reads = 0;
         const { t } = armWith(async () => { reads += 1; return HELD; });

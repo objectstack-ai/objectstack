@@ -288,7 +288,8 @@
  *     accept set, deliberately not taken here.
  */
 
-import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 // [#15487] The SHARED half of the regex-literal recogniser: the 14-word
 // `REGEX_AFTER_KEYWORD` set, `IDENT_CHAR`, and the literal WALK (character
 // class, backslash sequences, line-terminator refusal, flags) live ONCE, in
@@ -493,10 +494,44 @@ function expandWorkspaceMembers(root, glob) {
  * passes {@link expandWorkspaceMembers} — production and `--self-test` reading
  * two different populations is the defect #17145 carded, not a spare knob.
  */
-export function emptyWorkspaceGlobs({ readGlobs, expand }) {
+export function emptyWorkspaceGlobs({ readGlobs, expand, awaiting = new Set() }) {
   return readGlobs()
     .filter((glob) => !isExclusionGlob(glob))
+    .filter((glob) => !awaiting.has(glob))
     .filter((glob) => expand(glob).length === 0);
+}
+
+/**
+ * Workspace globs `pnpm-workspace.yaml` declares AHEAD of the tree they match:
+ * the objectui import under `ui/` (objectstack#25677, wired by #25697). Each
+ * is excused from the empty-glob refusal above ONLY while
+ * {@link AWAITING_IMPORT_MARKER} is absent; the moment the import lands, every
+ * one of them must expand to members or it is the finding it always was. The
+ * self-test holds the map against the live workspace (every key is a declared
+ * glob) and against both states of the marker. Retire the map with the import.
+ */
+export const WORKSPACE_GLOBS_AWAITING_IMPORT = Object.freeze({
+  ui: 'objectui import (objectstack#25677): the `ui` root manifest itself (`object-ui-monorepo`)',
+  'ui/packages/*': 'objectui import (objectstack#25677): the @object-ui/* packages',
+  'ui/apps/*': 'objectui import (objectstack#25677): the Console and the docs site',
+  'ui/examples/*': 'objectui import (objectstack#25677): objectui example apps',
+});
+
+/** The file whose presence ends the excuse: the imported tree's root manifest. */
+export const AWAITING_IMPORT_MARKER = 'ui/package.json';
+
+/**
+ * The globs excused from the empty-glob refusal on the tree at `root`: the
+ * whole {@link WORKSPACE_GLOBS_AWAITING_IMPORT} key set while the marker is
+ * absent, nothing once it exists.
+ *
+ * @param {string} root
+ * @returns {Set<string>}
+ */
+export function awaitingImportGlobs(root) {
+  return existsSync(join(root, AWAITING_IMPORT_MARKER))
+    ? new Set()
+    : new Set(Object.keys(WORKSPACE_GLOBS_AWAITING_IMPORT));
 }
 
 /**
@@ -6145,8 +6180,50 @@ function selfTest() {
     ok(emptyWorkspaceGlobs({
       readGlobs: () => readWorkspaceGlobs(ROOT),
       expand: (g) => expandWorkspaceMembers(ROOT, g),
+      awaiting: awaitingImportGlobs(ROOT),
     }).length === 0,
       'the LIVE workspace has a glob that expands to nothing — the production run refuses on this too');
+    // [#25697] The awaiting-import excuse, narrow in every direction: only the
+    // globs it names, only while the marker is absent, and only globs the live
+    // workspace really declares (so the map cannot outlive the import unnoticed).
+    ok(emptyWorkspaceGlobs({
+      readGlobs: () => ['packages/*', 'ui/packages/*', 'zz-gone/*'],
+      expand: (g) => (g === 'packages/*' ? ['a'] : []),
+      awaiting: new Set(['ui/packages/*']),
+    }).join(',') === 'zz-gone/*',
+      'an empty glob the awaiting set names is excused; an empty glob it does not name is still reported by name');
+    ok(emptyWorkspaceGlobs({
+      readGlobs: () => ['ui/packages/*'],
+      expand: () => [],
+    }).join(',') === 'ui/packages/*',
+      'with no awaiting set the same empty glob is a finding — the excuse is opt-in at the call site, never a default');
+    {
+      const liveGlobs = new Set(readWorkspaceGlobs(ROOT));
+      const keys = Object.keys(WORKSPACE_GLOBS_AWAITING_IMPORT);
+      ok(keys.every((g) => liveGlobs.has(g)),
+        `every awaiting-import glob is one pnpm-workspace.yaml declares — stale keys: ` +
+          `${keys.filter((g) => !liveGlobs.has(g)).join(', ') || 'none'}`);
+      ok(keys.every((g) => typeof WORKSPACE_GLOBS_AWAITING_IMPORT[g] === 'string' && WORKSPACE_GLOBS_AWAITING_IMPORT[g].length > 0),
+        'every awaiting-import entry carries a reason');
+      ok(keys.sort().join() === 'ui,ui/apps/*,ui/examples/*,ui/packages/*',
+        'the awaiting-import map holds exactly the four ui roots and nothing else');
+      // Both states of the marker, on a scratch root: absent → the whole key
+      // set is excused; present → nothing is, and the import commit meets the
+      // refusal with no further edit here.
+      const scratch = mkdtempSync(join(tmpdir(), 'dispatcher-awaiting-'));
+      try {
+        ok(awaitingImportGlobs(scratch).size === keys.length,
+          'with the marker absent, every awaiting-import glob is excused');
+        mkdirSync(join(scratch, 'ui'), { recursive: true });
+        writeFileSync(join(scratch, 'ui', 'package.json'), '{"name":"object-ui-monorepo","private":true}\n');
+        ok(awaitingImportGlobs(scratch).size === 0,
+          'with the marker present, nothing is excused — the excuse voids itself at the import');
+      } finally {
+        rmSync(scratch, { recursive: true, force: true });
+      }
+      ok(existsSync(join(ROOT, AWAITING_IMPORT_MARKER)) === (awaitingImportGlobs(ROOT).size === 0),
+        'the live reading agrees with the live marker');
+    }
     // [#17145] The same expansion, shown to be the MANIFEST-filtered one and not
     // the raw directory listing. Without this the two could drift apart again
     // silently, which is the whole defect: a glob resolving only to category
@@ -6516,6 +6593,7 @@ function main() {
   const emptyGlobs = emptyWorkspaceGlobs({
     readGlobs: () => readWorkspaceGlobs(ROOT),
     expand: (glob) => expandWorkspaceMembers(ROOT, glob),
+    awaiting: awaitingImportGlobs(ROOT),
   });
   if (emptyGlobs.length > 0) {
     throw new Error(

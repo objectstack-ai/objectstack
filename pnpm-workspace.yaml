@@ -10,7 +10,23 @@ packages:
   - packages/connectors/*
   - apps/*
   - examples/*
+  # The objectui tree, once it is imported under ui/ (objectstack#25677). Until
+  # then these globs match no directory and pnpm resolves exactly the workspace
+  # above: the lockfile, `pnpm install` and `pnpm -r ls` are unchanged. `ui`
+  # itself is a member because objectui's root package.json carries the scripts
+  # its CI runs (`lint:root`, `type-check:e2e`, the `check:*` gates). objectui's
+  # own `docs` workspace entry is not carried: it names no package.
+  # objectui's pnpm overrides and its patchedDependencies entry arrive with the
+  # import, not here: an unused patch fails `pnpm install` and an override
+  # rewrites this lockfile.
+  - ui
+  - ui/packages/*
+  - ui/apps/*
+  - ui/examples/*
 
+# objectui declares no onlyBuiltDependencies of its own (neither in its
+# pnpm-workspace.yaml nor in its package.json `pnpm` field), so the union of
+# the two allowlists is this list unchanged.
 onlyBuiltDependencies:
   - better-sqlite3
   - esbuild

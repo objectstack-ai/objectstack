@@ -172,7 +172,9 @@
 // round trip is not.
 
 import {
+  API_TRIGGER_SECRET_REF_KEY,
   TimeRelativeTriggerSchema,
+  apiTriggerSecretRefOf,
   resolveFlowTriggerKind,
 } from '@objectstack/spec/automation';
 import { recordsOf, suggestName } from './object-graph.js';
@@ -274,6 +276,11 @@ export const FLOW_TRIGGER_UNROUTABLE = 'flow-trigger-unroutable';
  * the one-line judgement — a string, non-empty after `trim()`, on the start
  * node's `config` — and a spec-level predicate all three could share would be
  * its own change, editing both runtime copies to read it.
+ *
+ * A secret NAMED instead of carried — `config.secretRef`, which the deployment
+ * fills and the engine resolves at every post — is usable too, and that half
+ * IS the spec's: `apiTriggerSecretRefOf` is the one reader of the name, shared
+ * with the engine, so this rule restates no grammar for it.
  */
 export const FLOW_API_TRIGGER_SECRET_MISSING = 'flow-api-trigger-secret-missing';
 
@@ -344,6 +351,14 @@ function renderTriggerToken(v: unknown): string {
  */
 function describeUnusableSecret(start: { node: AnyRec } | undefined, config: AnyRec): string | undefined {
   if (!start) return 'it has no start node, so nothing declares a config.secret';
+  // A secret named by reference (`config.secretRef`) is usable when the spec's
+  // own reader accepts the name: the deployment fills it and the engine reads
+  // it per post. A malformed one is the schema's refusal, and still no secret.
+  if (Object.prototype.hasOwnProperty.call(config, API_TRIGGER_SECRET_REF_KEY) && config.secret === undefined) {
+    return apiTriggerSecretRefOf(config) !== undefined
+      ? undefined
+      : `its start node's config.secretRef is not a usable name`;
+  }
   const secret = config.secret;
   if (typeof secret === 'string') {
     return secret.trim() !== '' ? undefined : `its start node's config.secret is blank`;
@@ -1013,8 +1028,8 @@ export function validateFlowApiTriggerSecret(
       // [#22161] One remedy line; the signature format and the 300-second
       // window are `os explain flow-api-trigger-secret-missing`.
       hint:
-        `Set a non-blank string config.secret on the start node and sign each post with it, or make a flow ` +
-        `that never receives posts type: 'autolaunched' with no triggerType: 'api'`,
+        `Name the secret in the start node's config.secretRef (the deployment fills it) and sign each post, or ` +
+        `make a flow that never receives posts type: 'autolaunched'`,
     });
   });
   return findings;

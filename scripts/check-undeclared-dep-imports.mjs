@@ -238,7 +238,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the detector STAYS SILENT where it must': 6,
   'the comment mask, in both directions': 3,
   'tsconfig exclusions are honoured, and only where declared': 2,
-  'refusals': 8,
+  'refusals': 10,
   'provenance: the record must stay reproducible, and visibly so': 8,
   'ledger reconciliation, in both directions': 10,
   'the declared watch hints stay equal to the real population': 2,
@@ -276,7 +276,7 @@ const REPO_ROOT = resolve(HERE, '..');
  * root reds here instead of quietly leaving part of the tree unswept and this
  * gate unnameable.
  */
-const ROOT_DIR_WATCH_HINTS = ['packages/**', 'apps/**', 'examples/**'];
+const ROOT_DIR_WATCH_HINTS = ['packages/**', 'apps/**', 'examples/**', 'ui/**'];
 
 // ---------------------------------------------------------------------------
 // Refusal floors, and the provenance of the census they were derived from --
@@ -331,8 +331,10 @@ const LEDGER_KINDS = new Set(['optional-runtime-probe', 'type-only']);
 // Workspace discovery
 
 /**
- * The `packages:` globs from pnpm-workspace.yaml. Only the `<dir>/*` shape this
- * repo uses is understood; anything else REFUSES rather than being skipped, so
+ * The `packages:` globs from pnpm-workspace.yaml. Two shapes are understood:
+ * `<dir>/*` (every package one level under `<dir>`) and a bare `<dir>` with no
+ * wildcard at all (the one package AT `<dir>` -- the objectui root manifest,
+ * `ui`, objectstack#25677). Anything else REFUSES rather than being skipped, so
  * a new glob shape cannot silently shrink the population.
  */
 export function workspaceGlobs(yamlText) {
@@ -354,12 +356,16 @@ function discoverPackages(root, globs) {
   const found = [];
   const bad = [];
   for (const glob of globs) {
-    if (!glob.endsWith('/*') || glob.slice(0, -2).includes('*')) { bad.push(glob); continue; }
-    const parent = join(root, glob.slice(0, -2));
+    const bare = !glob.includes('*');
+    if (!bare && (!glob.endsWith('/*') || glob.slice(0, -2).includes('*'))) { bad.push(glob); continue; }
+    const parent = join(root, bare ? glob : glob.slice(0, -2));
+    // An absent root contributes nothing, in both shapes: a workspace glob that
+    // matches no directory is legal pnpm and this gate walks what pnpm walks.
     if (!existsSync(parent)) continue;
-    for (const entry of readdirSync(parent, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      const dir = join(parent, entry.name);
+    const candidates = bare
+      ? [parent]
+      : readdirSync(parent, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => join(parent, e.name));
+    for (const dir of candidates) {
       const manifestPath = join(dir, 'package.json');
       if (!existsSync(manifestPath)) continue;
       let manifest;
@@ -913,6 +919,22 @@ function selfTest() {
     const badGlob = run({ manifest: baseManifest, files: { 'src/a.ts': 'export const ok = 1;\n' }, workspace: 'packages:\n  - "packages/**/*"\n' });
     t('REFUSAL — a glob shape this parser does not understand is fatal, not skipped',
       typeof badGlob.fatal === 'string');
+
+    // The bare `<dir>` shape, both directions: present, its one package is
+    // swept like any other; absent, it contributes nothing and is not fatal.
+    const bareDir = mkdtempSync(join(tmp, 'baredir-'));
+    fixture(bareDir, 'pnpm-workspace.yaml', 'packages:\n  - packages/*\n  - ui\n');
+    fixture(bareDir, 'packages/subject/package.json', JSON.stringify(baseManifest, null, 2));
+    fixture(bareDir, 'packages/subject/src/a.ts', 'export const ok = 1;\n');
+    fixture(bareDir, 'ui/package.json', JSON.stringify({ name: 'ui-root' }, null, 2));
+    fixture(bareDir, 'ui/src/a.ts', "import { x } from '@objectstack/undeclared';\n");
+    const bareSwept = sweep(bareDir);
+    t('a bare `<dir>` workspace entry sweeps the one package at that directory',
+      bareSwept.fatal === undefined
+      && bareSwept.findings.length === 1 && bareSwept.findings[0].dep === '@objectstack/undeclared');
+    const bareAbsent = run({ manifest: baseManifest, files: { 'src/a.ts': 'export const ok = 1;\n' }, workspace: 'packages:\n  - packages/*\n  - ui\n' });
+    t('an ABSENT bare `<dir>` entry contributes nothing and is not fatal',
+      bareAbsent.fatal === undefined && bareAbsent.findings.length === 0);
 
     t('FLOOR — an empty population trips the package floor rather than passing',
       floorProblems({ packages: [], scannedFiles: 99999, specifiers: 99999 }) !== null);

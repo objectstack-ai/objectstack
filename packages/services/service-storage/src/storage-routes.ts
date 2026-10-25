@@ -292,9 +292,12 @@ export interface StorageRoutesOptions {
    * with neither an attachments scope nor a field owner (an upload no record
    * has claimed — an avatar or an organization logo stored as a URL, a pick
    * not yet saved, a released file). Such a file has no parent record to
-   * derive access from, so the one thing its download requires is a
-   * signed-in caller; none ⇒ `401 AUTH_REQUIRED`, the answer the upload
-   * routes give. A file marked `acl: 'public_read'` stays anonymous
+   * derive access from, so its download first requires a signed-in caller;
+   * none ⇒ `401 AUTH_REQUIRED`, the answer the upload routes give. [#25693]
+   * A signed-in caller is then judged by
+   * {@link StorageRoutesOptions.authorizeFileRead} when one is wired: the
+   * file is served only within its organization. A file marked
+   * `acl: 'public_read'` stays anonymous
    * (ADR-0104). A browser's `<img src>` / `<a href>` reaches this resolver
    * with the session cookie its sign-in set, which reads the same as a bearer
    * header, so a signed-in page keeps rendering these files. Absent: these
@@ -302,11 +305,11 @@ export interface StorageRoutesOptions {
    */
   resolveSession?: (req: IHttpRequest) => Promise<StorageUploadSession | null | undefined>;
    /**
-   * Authorize a DOWNLOAD of a parent-governed file (#2970 item 2, extended by
-   * ADR-0104 D3 wave 2). When wired, the download endpoints
+   * Authorize a DOWNLOAD of a private file (#2970 item 2, extended by
+   * ADR-0104 D3 wave 2 and #25693). When wired, the download endpoints
    * (`/files/:fileId` and `/files/:fileId/url`) consult this for
-   * `scope==='attachments'` files AND for field-owned files (`ref_object` set),
-   * excluding `public_read` ones:
+   * `scope==='attachments'` files, for field-owned files (`ref_object` set)
+   * AND for the unclaimed files below, excluding `public_read` ones:
    *   - `unauthenticated` → 401 (no session)
    *   - `deny` → 403 (session, but cannot read the parent record the file
    *     belongs to / is attached to, and is not the owner)
@@ -316,14 +319,17 @@ export interface StorageRoutesOptions {
    * `SERVICE_UNAVAILABLE` rather than flattened into the `deny` 403 — the
    * store was unreadable, so no verdict was ever reached. Every other throw
    * still fails closed to `deny`.
-   * A file with neither an attachments scope nor a field owner is not this
-   * authorizer's to judge — it has no parent record — and needs only a
-   * signed-in caller ({@link StorageRoutesOptions.resolveSession}, #22431).
+   * [#25693] A file with neither an attachments scope nor a field owner has
+   * no parent record. It first needs a signed-in caller
+   * ({@link StorageRoutesOptions.resolveSession}, #22431), and then this
+   * authorizer judges it too: such a file is served only within its
+   * organization, as every other organization-scoped row is read. Its
+   * `deny` answers `403 FILE_DOWNLOAD_DENIED`, naming no record.
    * Any file explicitly marked `acl: 'public_read'` keeps the stable
    * anonymous capability URL (ADR-0104: the opt-in for genuinely public
    * embedding, which no sign-in precedes).
    * When absent (bare kernels, tests), parent-governed downloads stay open
-   * (back-compat).
+   * (back-compat), and an unclaimed file needs only the signed-in caller.
    */
   authorizeFileRead?: (file: FileRecord, req: IHttpRequest) => Promise<FileReadVerdict>;
   /**
@@ -505,9 +511,11 @@ export function registerStorageFamily(
   //     (`ref_object`/`ref_id`, ADR-0104 D3 wave 2).
   // [#22431] Every OTHER file — neither an attachments scope nor a field
   // owner: an upload no record has claimed — has no parent record to derive
-  // access from, and needs a signed-in caller instead
+  // access from, and needs a signed-in caller first
   // (`requireDownloadSession` below). It used to be the one class still
-  // served as an anonymous capability URL by default.
+  // served as an anonymous capability URL by default. [#25693] The same
+  // authorizer then judges it within its organization, as every other
+  // organization-scoped row is read (`StorageRoutesOptions.authorizeFileRead`).
   // `acl: 'public_read'` opts any file back out to the stable anonymous
   // capability URL — the explicit declaration for genuinely public
   // embedding, which no sign-in precedes (ADR-0104). A signed-in browser
@@ -528,10 +536,12 @@ export function registerStorageFamily(
     if (file.acl === 'public_read') return currentLimits().presignedTtl;
     const fieldOwned = !!file.ref_object && file.ref_id != null && file.ref_id !== '';
     const gated = file.scope === 'attachments' || fieldOwned;
-    if (!gated) {
-      if (!(await requireDownloadSession(req, res))) return false;
-      return currentLimits().presignedTtl;
-    }
+    // [#22431] The unclaimed class asks for a signed-in caller first, with the
+    // session gate's own 401. [#25693] Then, like every other private file, it
+    // is judged by the download authorizer below: it is served only within its
+    // organization (see `StorageRoutesOptions.authorizeFileRead`). It keeps the
+    // presigned TTL it was always minted with.
+    if (!gated && !(await requireDownloadSession(req, res))) return false;
     if (!opts.authorizeFileRead) {
       return currentLimits().presignedTtl;
     }
@@ -581,12 +591,17 @@ export function registerStorageFamily(
     if (verdict === 'deny') {
       if (fieldOwned) {
         sendError(res, 403, 'FILE_DOWNLOAD_DENIED', 'You do not have access to the record this file belongs to');
-      } else {
+      } else if (gated) {
         sendError(res, 403, 'ATTACHMENT_DOWNLOAD_DENIED', 'You do not have access to a record this file is attached to');
+      } else {
+        // [#25693] An unclaimed file belongs to no record, so the refusal names
+        // none: the status and code the door gives every other file the caller
+        // may not read, and nothing about whose file it is.
+        sendError(res, 403, 'FILE_DOWNLOAD_DENIED', 'You do not have access to this file');
       }
       return false;
     }
-    return downloadTtl;
+    return gated ? downloadTtl : currentLimits().presignedTtl;
   };
 
   // ── Download servability (#10246) ────────────────────────────────────

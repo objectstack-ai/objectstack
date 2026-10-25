@@ -4386,6 +4386,142 @@ describe('runtime authoring gate on VIEW writes — a bulk confirmText template 
     }
 });
 
+// #25680 — an action's person-facing copy (`confirmText`, `successMessage`,
+// `errorMessage` on a page action row; `confirmText` / `successMessage` on a
+// registered action) is an ADR-0032 `template` slot over the roots the
+// console's runner binds (#24814). #24814 shipped its findings as advisories;
+// this card refuses them at the runtime save door, as `os build` refuses them,
+// all but one: a `${…}` token the runner still fills in a sentence with no
+// `{{ }}` hole stays an advisory. Pinned through the REAL `saveMetaItem`:
+//
+//  (a) an active page save carrying a refused sentence is refused — 422
+//      `INVALID_METADATA` — naming the slot, and nothing lands; an action
+//      write is refused the same way; the draft promotion is refused too;
+//  (b) the door's finding IS the build's;
+//  (c) control: the transitional `${…}` sentence saves with one advisory;
+//  (d) the parse is not narrowed: a stored page carrying a blank or an
+//      unbound sentence keeps loading, and its next save is judged.
+//
+// ⚠️ As above: this package reaches `@objectstack/lint` through its built
+// `dist/`, so a rule edit is invisible here until
+// `pnpm --filter @objectstack/lint build` has run.
+describe('runtime authoring gate on PAGE and ACTION writes — an action\'s copy template (#25680)', () => {
+    const NAME = 'deals_home';
+    const UNBOUND = 'Delete {{ result.name }}?';
+    const page = (confirmText: string) => ({
+        name: NAME,
+        label: 'Deals',
+        type: 'app',
+        regions: [{ name: 'main', components: [
+            { type: 'action:button', properties: { label: 'Run', actionType: 'script', target: 'run', confirmText } },
+        ] }],
+    });
+    const savePage = (protocol: any, item: unknown, extra: Record<string, unknown> = {}) =>
+        protocol.saveMetaItem({ type: 'page', name: NAME, item, ...extra });
+    const activePageRows = (rows: Map<string, Row>) =>
+        Array.from(rows.values()).filter((r) => r.type === 'page' && r.state === 'active');
+    const copyIssues = (issues: any[] | undefined) =>
+        (issues ?? []).filter((i: any) => /confirmText|successMessage|errorMessage/.test(String(i.where)));
+
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+
+    for (const [label, text] of [
+        ['a hole over an unbound root', UNBOUND],
+        ['a single-brace token', 'Delete {record.name}?'],
+        ['a hole holding logic', 'Delete {{ record.count * 2 }}?'],
+        ['a blank sentence', ''],
+    ] as const) {
+        it(`(a) REFUSES an active page save of ${label}; nothing stored`, async () => {
+            const { protocol, rows } = makeProtocol();
+
+            const err = await savePage(protocol, page(text)).catch((e: any) => e);
+
+            expect(err, 'the save resolved — the door still admits the sentence').toBeInstanceOf(Error);
+            expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+            const issues = copyIssues(err.issues);
+            expect(issues, `issues: ${JSON.stringify(err.issues)}`).toHaveLength(1);
+            expect(issues[0]).toMatchObject({ rule: EXPRESSION_INVALID, severity: 'error' });
+            expect(activePageRows(rows)).toEqual([]);
+        });
+    }
+
+    it('(a) REFUSES an active action save whose successMessage names an unbound root', async () => {
+        const { protocol, rows } = makeProtocol();
+        const action = { name: 'invite', label: 'Invite', type: 'api', target: '/api/v1/invite', successMessage: 'Sent to {{ owner.email }}' };
+
+        const err = await protocol.saveMetaItem({ type: 'action', name: 'invite', item: action }).catch((e: any) => e);
+
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(copyIssues(err.issues)).toHaveLength(1);
+        expect(Array.from(rows.values()).filter((r) => r.type === 'action' && r.state === 'active')).toEqual([]);
+    });
+
+    it('(a) gates the draft → active promotion of the same page', async () => {
+        const { protocol, rows } = makeProtocol();
+        await expect(savePage(protocol, page(UNBOUND), { mode: 'draft' })).resolves.toMatchObject({ success: true });
+
+        const err = await protocol.publishMetaItem({ type: 'page', name: NAME }).catch((e: any) => e);
+
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(copyIssues(err.issues)).toHaveLength(1);
+        expect(activePageRows(rows)).toEqual([]);
+    });
+
+    it('(b) the door and `os build` give the SAME finding', async () => {
+        const { protocol } = makeProtocol();
+        const err = await savePage(protocol, page(UNBOUND)).catch((e: any) => e);
+        const atDoor = copyIssues(err?.issues);
+
+        const stack = { pages: [page(UNBOUND)] };
+        const atBuild = copyIssues(runAuthoringRules('build', { normalized: stack, parsed: stack })
+            .filter((f) => f.severity === 'error'));
+
+        expect(atBuild).toHaveLength(1);
+        expect(atDoor).toHaveLength(1);
+        for (const k of ['rule', 'where', 'message'] as const) {
+            expect(atDoor[0][k], `door and build disagree on '${k}'`).toBe(atBuild[0]![k]);
+        }
+    });
+
+    it('(c) CONTROL — the transitional `${record.*}` sentence saves with one advisory, and the row lands', async () => {
+        const { protocol, rows } = makeProtocol();
+
+        const res = await savePage(protocol, page('Delete ${record.name}?'));
+
+        expect(res).toMatchObject({ success: true });
+        expect(copyIssues(res.advisories)).toHaveLength(1);
+        expect(activePageRows(rows)).toHaveLength(1);
+    });
+
+    for (const [label, text] of [['an unbound hole', UNBOUND], ['a blank sentence', '']] as const) {
+        it(`(d) a stored page with ${label} keeps loading; its next save is refused, the row untouched`, async () => {
+            const { protocol, rows } = makeProtocol();
+            // Stored before the crossing, seeded straight into the store because
+            // the save door now refuses this body.
+            const stored = page(text);
+            rows.set(keyOf({ type: 'page', name: NAME, organization_id: null, state: 'active' }), {
+                id: 'r_seed', type: 'page', name: NAME, organization_id: null, state: 'active',
+                metadata: JSON.stringify(stored),
+            });
+
+            // The boot path runs no authoring rule, and the parse still accepts the text.
+            await expect(protocol.loadMetaFromDb()).resolves.toMatchObject({ loaded: 1, errors: 0, invalid: 0 });
+
+            const err = await savePage(protocol, stored).catch((e: any) => e);
+            expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+            expect(JSON.parse(activePageRows(rows)[0]!.metadata)).toEqual(stored);
+        });
+    }
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // #25234 refusal 12 — the HOST fact the door judges membership-key ownership
 // with. `assertRuntimeAuthoringRules` reads the registered membership

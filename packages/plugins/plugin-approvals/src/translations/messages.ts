@@ -43,7 +43,17 @@
  * clause per approver entry that resolved to no one (`{{type}}` is the
  * approver type's machine token, `{{value}}` its configured value), joined by
  * `approvalAdminRescueReasonSeparator`. The `en` note, rendered, is the
- * `comment` the row stores.
+ * `comment` the row stores. `approvalAdminRescueSubmitterExcluded` is the
+ * clause for a slate that named only the submitter of a node that sets
+ * `excludeSubmitter`.
+ *
+ * ## The submitter exclusion note
+ *
+ * [#25573] `approvalSubmitterExcluded*` are the system note a request writes
+ * when an approval node's `excludeSubmitter: true` took the submitter off a
+ * slate: one whole sentence per route the request then took
+ * (`submitter-exclusion-note.ts`), with no holes. Rendered the same way as the
+ * administrators' note.
  */
 
 import type { TranslationData } from '@objectstack/spec/system';
@@ -87,6 +97,11 @@ export const enMessages = {
   approvalAdminRescueFallbackUnresolved: 'the declared fallbackApprovers resolved to no one either',
   approvalAdminRescueFallbackUndeclared: "onEmptyApprovers is 'fallback' but no fallbackApprovers are declared",
   approvalAdminRescueReasonSeparator: '; ',
+  approvalAdminRescueSubmitterExcluded: "the only approver it resolved to was the request's submitter, whom excludeSubmitter removes",
+  approvalSubmitterExcludedRemaining: "The request's submitter was removed from its approvers because this step sets excludeSubmitter; the remaining approvers decide it.",
+  approvalSubmitterExcludedFallback: "The request's submitter was removed from its approvers because this step sets excludeSubmitter; the declared fallbackApprovers decide it.",
+  approvalSubmitterExcludedAdministrators: "The request's submitter was removed from its approvers because this step sets excludeSubmitter; this organization's administrators decide it.",
+  approvalSubmitterExcludedNoOne: "The request's submitter was removed from its approvers because this step sets excludeSubmitter; no one else could take it, so only a privileged override can decide it.",
 } as const satisfies Messages;
 
 /** One approval notification sentence's id. */
@@ -130,6 +145,11 @@ export const zhCNMessages: ApprovalMessages = {
   approvalAdminRescueFallbackUnresolved: '声明的 fallbackApprovers 也未解析到任何人',
   approvalAdminRescueFallbackUndeclared: "onEmptyApprovers 为 'fallback'，但未声明 fallbackApprovers",
   approvalAdminRescueReasonSeparator: '；',
+  approvalAdminRescueSubmitterExcluded: '唯一解析到的审批人是本请求的提交人，而 excludeSubmitter 会将其排除',
+  approvalSubmitterExcludedRemaining: '本步骤设置了 excludeSubmitter，提交人已从审批人中移除；由其余审批人决定。',
+  approvalSubmitterExcludedFallback: '本步骤设置了 excludeSubmitter，提交人已从审批人中移除；由声明的 fallbackApprovers 决定。',
+  approvalSubmitterExcludedAdministrators: '本步骤设置了 excludeSubmitter，提交人已从审批人中移除；由本组织管理员决定。',
+  approvalSubmitterExcludedNoOne: '本步骤设置了 excludeSubmitter，提交人已从审批人中移除；没有其他人可以处理，只有特权管理员的强制处理才能决定此请求。',
 };
 
 export const jaJPMessages: ApprovalMessages = {
@@ -168,6 +188,11 @@ export const jaJPMessages: ApprovalMessages = {
   approvalAdminRescueFallbackUnresolved: '宣言された fallbackApprovers も誰にも解決されませんでした',
   approvalAdminRescueFallbackUndeclared: "onEmptyApprovers は 'fallback' ですが、fallbackApprovers が宣言されていません",
   approvalAdminRescueReasonSeparator: '；',
+  approvalAdminRescueSubmitterExcluded: '解決された唯一の承認者はこの申請の申請者で、excludeSubmitter により除外されます',
+  approvalSubmitterExcludedRemaining: 'このステップは excludeSubmitter を設定しているため、申請者は承認者から除外されました。他の承認者が判断します。',
+  approvalSubmitterExcludedFallback: 'このステップは excludeSubmitter を設定しているため、申請者は承認者から除外されました。宣言された fallbackApprovers が判断します。',
+  approvalSubmitterExcludedAdministrators: 'このステップは excludeSubmitter を設定しているため、申請者は承認者から除外されました。この組織の管理者が判断します。',
+  approvalSubmitterExcludedNoOne: 'このステップは excludeSubmitter を設定しているため、申請者は承認者から除外されました。他に引き受けられる人がいないため、特権管理者のオーバーライドでのみ判断できます。',
 };
 
 export const esESMessages: ApprovalMessages = {
@@ -206,6 +231,11 @@ export const esESMessages: ApprovalMessages = {
   approvalAdminRescueFallbackUnresolved: 'los fallbackApprovers declarados tampoco se resolvieron a nadie',
   approvalAdminRescueFallbackUndeclared: "onEmptyApprovers es 'fallback' pero no se han declarado fallbackApprovers",
   approvalAdminRescueReasonSeparator: '; ',
+  approvalAdminRescueSubmitterExcluded: 'el único aprobador resuelto era el solicitante, a quien excludeSubmitter excluye',
+  approvalSubmitterExcludedRemaining: 'El solicitante se quitó de los aprobadores de este paso porque el paso define excludeSubmitter; la deciden los demás aprobadores.',
+  approvalSubmitterExcludedFallback: 'El solicitante se quitó de los aprobadores de este paso porque el paso define excludeSubmitter; la deciden los fallbackApprovers declarados.',
+  approvalSubmitterExcludedAdministrators: 'El solicitante se quitó de los aprobadores de este paso porque el paso define excludeSubmitter; la deciden los administradores de esta organización.',
+  approvalSubmitterExcludedNoOne: 'El solicitante se quitó de los aprobadores de este paso porque el paso define excludeSubmitter; nadie más puede tomarla, así que solo una anulación privilegiada puede decidirla.',
 };
 
 /** The four shipped locales, keyed as the bundle beside this file keys them. */

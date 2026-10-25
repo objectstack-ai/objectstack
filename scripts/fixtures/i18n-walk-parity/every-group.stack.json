@@ -169,5 +169,11 @@
         }
       ]
     }
+  ],
+  "positions": [
+    { "name": "parity_reviewer", "label": "Parity Reviewer", "description": "Reviews parity findings" }
+  ],
+  "permissions": [
+    { "name": "parity_auditor", "label": "Parity Auditor", "description": "Reads parity findings" }
   ]
 }
