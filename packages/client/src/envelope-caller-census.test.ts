@@ -104,9 +104,12 @@
  *  - **Published npm consumers outside these repos — UNMEASURABLE.** The SDK
  *    ships to consumers no repo sweep can see; the changeset carries their
  *    migration. This census bounds the first-party population only.
- *  - **`objectui` is a RECORDED constant, not a live scan.** A test in this
- *    repo cannot read that checkout. `OBJECTUI_CENSUS` carries the revision it
- *    was measured at and the command that reproduces it.
+ *  - **`objectui` is a LIVE scan now, no longer a recorded constant.**
+ *    [#25803] It used to be `OBJECTUI_CENSUS`, a reading taken in an objectui
+ *    checkout this repo could not see. Since objectui was imported under `ui/`
+ *    the walk reaches it, and its one call site -- the data adapter's
+ *    `aggregate()`, the first-party PRODUCTION consumer the convergence was
+ *    for -- is a `LEDGER` row like any other.
  *  - **The ratchet in section 3 is only as live as turbo's cache — for the
  *    trees still undeclared.** This suite walks the whole workspace, while
  *    `@objectstack/client#test` declares as inputs its own package plus the
@@ -119,7 +122,10 @@
  *    client suite on virtually every commit, so it stays a recorded bound
  *    rather than one bought at that price — a new call site added in another
  *    PACKAGE can still leave this suite cached-green until something else
- *    invalidates it. On a cold cache and in CI's full run the count is exact,
+ *    invalidates it. `ui/**` is undeclared for the same reason [#25803], so a
+ *    new objectui call site is bounded the same way; the one ledgered there,
+ *    `ui/packages/data-objectstack/src/index.ts`, is declared by name, as the
+ *    ledgered `packages/**` files are. On a cold cache and in CI's full run the count is exact,
  *    and a call site added inside `packages/client` — where every site lives
  *    today — invalidates normally.
  */
@@ -433,6 +439,8 @@ interface LedgerRow {
     count: number;
     verdict: Verdict;
     why: string;
+    /** [#25803] A production call site, not a test pin. §3 holds these to the ones listed. */
+    production?: true;
 }
 
 /**
@@ -563,44 +571,21 @@ const LEDGER: readonly LedgerRow[] = [
         method: 'analytics.explain', receiver: 'sdk', count: 1, verdict: 'RESULT_INSENSITIVE',
         why: 'asserts POST /analytics/sql and the body; the resolved value is discarded',
     },
+    // ── the one PRODUCTION consumer: objectui's data adapter, live since the import ──
+    // [#25803] Was `OBJECTUI_CENSUS`, recorded at objectui b84dc18549 when this
+    // repo could not read that checkout. objectui#7028, the tightening that
+    // record's owner field named, has landed: the tolerant chain is gone.
+    {
+        file: 'ui/packages/data-objectstack/src/index.ts',
+        method: 'analytics.query', receiver: 'sdk', count: 1, verdict: 'PAYLOAD_DEPENDENT', production: true,
+        why: '`aggregate()` reads `rows` off the post-unwrap AnalyticsResult and throws AnalyticsResultShapeError on any other shape (objectui#7028)',
+    },
 ];
 
-/**
- * `objectui` @ b84dc1854922c266850d6e573daf3ad59cbd0623 (origin/main,
- * 2026-08-31). Recorded, not live-scanned — a test here cannot read that
- * checkout. Reproduce with `OBJECTUI_CENSUS_COMMAND`.
- *
- * ⭐ The single production call site in either reachable repo, and it SURVIVES
- * the convergence untouched. `aggregate()` feeds the resolved value through a
- * tolerant chain that accepts both spellings:
- *
- *     const rawRows = Array.isArray(data) ? data
- *       : data?.rows        && Array.isArray(data.rows)        ? data.rows        // post-#13079: this branch
- *       : data?.data        && Array.isArray(data.data)        ? data.data
- *       : data?.data?.rows  && Array.isArray(data.data.rows)   ? data.data.rows   // pre-#13079: this branch
- *       : data?.results     && Array.isArray(data.results)     ? data.results
- *       : [];
- *
- * Before #13079 branch 4 matched; after it branch 2 matches. ⚠️ It survives
- * by DEFENSIVE CODING, not by a designed migration path — the adapter was
- * written tolerant because the producer was ambiguous, which is the shape a
- * contract-first fix removes rather than relies on. Ruling item 3: objectui#7028
- * tightens the chain to the single post-unwrap spelling, time-gated behind
- * this convergence landing and objectui taking the SDK version — the chain is
- * load-bearing until then, so it is deliberately NOT part of this change.
- */
-const OBJECTUI_CENSUS = {
-    revision: 'b84dc1854922c266850d6e573daf3ad59cbd0623',
-    filesScanned: 4024,
-    sdkCallSites: 1,
-    productionCallSites: 1,
-    wouldBreak: 0,
-    site: 'packages/data-objectstack/src/index.ts:4846 (analytics.query, via this.client)',
-    tighteningOwner: 'objectui#7028',
-} as const;
-
-const OBJECTUI_CENSUS_COMMAND =
-    "git -C <objectui> grep -nE 'analytics\\s*\\.\\s*(query|meta|explain)\\s*\\(|automation\\s*\\.\\s*trigger\\s*\\(' origin/main -- '*.ts' '*.tsx' '*.js'";
+// [#25803] `OBJECTUI_CENSUS` and `OBJECTUI_CENSUS_COMMAND` retired with the
+// objectui import: the recorded constant (objectui b84dc18549, one production
+// site, 0 would break, tightening owned by objectui#7028) is the live `LEDGER`
+// row above, and the walk that reads it is this file's own.
 
 /**
  * ⛔ `objectstack-ai/cloud` is NOT MEASURED — see the header. Post-#13079
@@ -794,31 +779,38 @@ describe('#13079 §3 — every call site is classified', () => {
         expect(ledgerTotal, literalNote()).toBe(CENSUS.sites.length);
     });
 
-    it('⭐ THE NUMBER, post-convergence: ZERO call sites still read the envelope, and none is production code', () => {
+    it('⭐ THE NUMBER, post-convergence: ZERO call sites still read the envelope, and the only production site is the ledgered consumer', () => {
         // The ratchet the convergence leaves behind. A site that reads `.data`
         // or the envelope's `success` off these four now reads `undefined`
         // (or fails to compile); the only legal way to add one is to classify
         // it here — and this line refuses the classification.
         expect(verdictTotal('ENVELOPE_DEPENDENT')).toBe(0);
-        // Every site is a test pin. There is still no production call site in
-        // this repo, so the migration in-repo was exactly this change's diff.
+        // Every other site is a test pin. [#25803] The one production call site
+        // is objectui's data adapter, ledgered `production` and read as the
+        // payload; a second one, or the first reading the envelope, reds here.
         // [#13874] A refusal string that quotes `client.` + the method inside a
         // `.mjs` gate script reads as a PRODUCTION SDK call site and breaks
         // exactly here — the loudest possible wrong conclusion this file can
         // reach, so the note travels with it.
         const production = sdkSites.filter((s) => !/\.test\.tsx?$/.test(s.file));
-        expect(production, literalNote()).toEqual([]);
+        const ledgeredProduction = LEDGER.filter((r) => r.production);
+        expect(production.map((s) => `${s.file}|${s.method}`), literalNote()).toEqual(
+            ledgeredProduction.flatMap((r) => Array.from({ length: r.count }, () => `${r.file}|${r.method}`)),
+        );
+        expect(ledgeredProduction.filter((r) => r.verdict === 'ENVELOPE_DEPENDENT')).toEqual([]);
     });
 
-    it('records the split: 18 payload pins, 10 result-insensitive, 11 not-SDK', () => {
-        expect(verdictTotal('PAYLOAD_DEPENDENT')).toBe(18);
+    it('records the split: 18 payload pins plus the production consumer, 10 result-insensitive, 11 not-SDK', () => {
+        // [#25803] 18 -> 19: the objectui data adapter reads the payload too.
+        expect(verdictTotal('PAYLOAD_DEPENDENT')).toBe(19);
         expect(verdictTotal('RESULT_INSENSITIVE')).toBe(10);
         // [#21441] 8 -> 9: the date-bucket echo pin's producer call (§2).
         // [#21647] 9 -> 11: the bucket echo enumeration's two producer calls (§2).
         expect(verdictTotal('NOT_SDK')).toBe(11);
         // The three above are LEDGER sums and cannot move on a census reading;
         // this one is census-derived, so it carries the note. [#13874]
-        expect(sdkSites.length, literalNote()).toBe(28);
+        // [#25803] 28 -> 29: the walk reaches ui/ since the objectui import.
+        expect(sdkSites.length, literalNote()).toBe(29);
     });
 });
 
@@ -854,12 +846,10 @@ describe('#13079 §4 — the four end in `unwrapResponse`; `analytics.queryDatas
 });
 
 describe('#13079 §5 — what was NOT measured', () => {
-    it('objectui is recorded with its revision, its one production site survives, and its tightening has an owner', () => {
-        expect(OBJECTUI_CENSUS.productionCallSites).toBe(1);
-        expect(OBJECTUI_CENSUS.wouldBreak).toBe(0);
-        expect(OBJECTUI_CENSUS.revision).toMatch(/^[0-9a-f]{40}$/);
-        expect(OBJECTUI_CENSUS.tighteningOwner).toBe('objectui#7028');
-        expect(OBJECTUI_CENSUS_COMMAND).toContain('origin/main');
+    it('[#25803] objectui is MEASURED now: its one production site is found by the walk, not recorded', () => {
+        const objectui = sdkSites.filter((s) => s.file.startsWith('ui/'));
+        expect(objectui.map((s) => `${s.file}|${s.method}`)).toEqual(['ui/packages/data-objectstack/src/index.ts|analytics.query']);
+        expect(LEDGER.filter((r) => r.file.startsWith('ui/')).map((r) => [r.verdict, r.production])).toEqual([['PAYLOAD_DEPENDENT', true]]);
     });
 
     it('⛔ cloud is NOT MEASURED, ruled so, and must not be read as clean', () => {
