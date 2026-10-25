@@ -848,8 +848,6 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // (receiver `service`). A call added to or removed from that file moves
       // the census verdict, so a change to it has to re-run this suite.
       'packages/services/service-analytics/src/__tests__/objectql-echo-bucket-enumeration.test.ts',
-      // [#25803] the census LEDGER row for objectui's data adapter, the one call site under ui/.
-      'ui/packages/data-objectstack/src/index.ts',
     ],
     heldBy: {
       // `scripts/**` is rostered TODAY through the census's own
