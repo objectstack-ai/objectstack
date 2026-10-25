@@ -270,10 +270,11 @@ path. The 2026-08-20 ruling removed it (#10134): the workflow, the script and th
 *everything shipped is covered by the changeset record* — is delivered by step 3
 above, at bump time, which is where the decision is actually taken.
 
-**What still checks the pin, and what it checks.** `ci.yml`'s **Console Pin Gate**
-(#4290) clones objectui at the pin and builds the SPA, so it proves the pinned SHA
-still **builds**. It has never had an opinion about whether the pin is current, and
-that is now the only question anyone asks about the pin automatically.
+**What used to check the pin.** `ci.yml`'s **Console Pin Gate** (#4290) cloned
+objectui at the pin and built the SPA, so it proved the pinned SHA still
+**built**; it never had an opinion about whether the pin was current. It retired
+with the objectui import (#25697): `Type Check UI` and `Build & E2E UI` in
+`ci.yml` build the Console from `ui/` in the pull request that changes it.
 
 ## Rehearsing the version pass (throwaway clone)
 
@@ -472,7 +473,7 @@ is changed by where the refresh came from.
 **Then, before approving, check that no nearer `CI` run is still in flight** (#24889).
 Open the Release run's **`Full battery green at the version commit`** job, step *Read
 the full battery at or before the version commit*. It prints one line per workflow it
-reads (`CI`, `Lint & Type Check`, `Spec Shape Gate`), each naming the run it chose and
+reads (`CI`, `Lint & Type Check`), each naming the run it chose and
 how many first-parent commits before the version commit that run's head sits. The
 gate reads only *completed* runs and never waits (by design: `selectFullBatteryRun`
 in `scripts/ci/scheduled-full-run.mjs`), so a run still in progress is invisible to
