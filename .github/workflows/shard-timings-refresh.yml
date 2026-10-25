@@ -47,7 +47,9 @@
 # HOW IT GETS ITS INPUTS, AND WHY IT RUNS HERE RATHER THAN IN AN AGENT WORKTREE
 # ----------------------------------------------------------------------------
 # The documented refresh path downloads the `test-core-run-summary-N-of-M`
-# artifacts of a green run, one per Test Core shard (M = SHARD_COUNT).
+# artifacts of a green run, one per Test Core shard. M is the RUN's own width,
+# read from its `Test Core (N/M)` job names, so runs from before and after a
+# matrix resize both read (#25376).
 # `GET /actions/artifacts/{id}/zip` redirects to
 # `productionresultssa*.blob.core.windows.net`, and every agent container's
 # egress policy answers 403 to CONNECT for that host — reproduced four ways, on
@@ -484,9 +486,10 @@ jobs:
 
             OK=1
             # One summary per shard the selector found: it admits a run only when
-            # every one of SHARD_COUNT (select-shard-timings-run.mjs) shards
-            # concluded success with its artifact retained, so these keys ARE the
-            # roster. A count spelled here would be a third copy of it (#25376).
+            # every shard OF THAT RUN concluded success with its artifact
+            # retained, at the run's own width (select-shard-timings-run.mjs,
+            # runShardWidth), so these keys ARE that run's roster. A count
+            # spelled here would break the first refresh after a resize (#25376).
             SHARD_NS=$(node -e 'const r=JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP+"/candidates.json","utf8"))[Number(process.argv[1])];console.log(Object.keys(r.artifact_ids).map(Number).sort((a,b)=>a-b).join(" "))' "$i")
             for N in $SHARD_NS; do
               ART=$(node -e 'const r=JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP+"/candidates.json","utf8"))[Number(process.argv[1])];console.log(r.artifact_ids[process.argv[2]])' "$i" "$N")

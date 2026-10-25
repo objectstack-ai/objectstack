@@ -126,8 +126,10 @@ const TIMINGS_PATH = path.join(REPO_ROOT, 'scripts', 'test-shard-timings.json');
 // N/8`); the self-test below reads that workflow back and fails on drift,
 // because a partitioner splitting into a different number of bins than the
 // matrix declares is not a red step anywhere -- it is packages that no shard
-// runs. scripts/ci/select-shard-timings-run.mjs spells it once more, as the
-// number of jobs and artifacts a complete run presents to the timings refresh.
+// runs. scripts/ci/select-shard-timings-run.mjs spells it once more, but only
+// as its matchers' default: the timings refresh judges each run at the width
+// that run's own `Test Core (N/M)` jobs carry, so a resize leaves the runs
+// from before it readable (#25376).
 //
 // WHY EIGHT (#25376, 6 -> 8). On the committed dataset (the 2026-10-23
 // refresh), bins of predicted test windows, the CLI cut into its 3 slices:

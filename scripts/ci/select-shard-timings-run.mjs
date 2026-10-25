@@ -18,12 +18,12 @@
 //      next run in its concurrency group starts, and merges arrive faster than
 //      Test Core finishes: 36 of the last 60 push runs were censored that way.
 //      Such a run leaves SOME artifacts, so "the artifacts exist" is not the
-//      test -- every one of the six Test Core jobs must have concluded
+//      test -- every one of the run's Test Core jobs must have concluded
 //      `success`. The hourly run this now reads has its OWN concurrency group
 //      (#16467, `github.event_name` is in ci.yml's key), so a merge cannot
 //      censor it -- but a second hourly run can, which is why this test stays.
 //
-//   2. CACHE REPLAYS. A run whose six jobs all concluded `success` can still
+//   2. CACHE REPLAYS. A run whose shard jobs all concluded `success` can still
 //      have replayed most of the workspace from the turbo cache: shards were
 //      measured at 7s and 98s against a 672s prediction (0.01x, 0.15x). The
 //      generator REFUSES cached tasks, so those packages simply are not in the
@@ -51,8 +51,8 @@
 // push to `main` computes its package set with `--affected` against
 // `github.event.before`, so a push run measures the packages that merge
 // touched and NOTHING ELSE. Nothing in the eligibility test below would have
-// noticed. Six shard jobs still conclude `success`, six run-summary artifacts
-// are still uploaded, and every guard reads green -- over a measurement of a
+// noticed. Every shard job still concludes `success`, every run-summary artifact
+// is still uploaded, and every guard reads green -- over a measurement of a
 // slice of the workspace that nobody asked for.
 //
 // `coverageReport` is not the backstop for that either. It refuses a package
@@ -108,10 +108,11 @@ import { fileURLToPath } from 'node:url';
 import { EXIT_FINDINGS, EXIT_PREREQUISITE_NOT_MET } from '../import-prerequisite.mjs';
 import { isEntrypoint } from '../invoked-as.mjs';
 
-// The Test Core shard count. Spelled here as the number of jobs and artifacts a
-// complete run must present; partition-test-shards.mjs owns the split itself and
-// its own self-test reads ci.yml back, so this is a reader's expectation rather
-// than a second declaration of the split.
+// The Test Core shard count of the LIVE matrix. partition-test-shards.mjs owns
+// the split itself and its own self-test reads ci.yml back, so this is a
+// reader's default rather than a second declaration of the split -- and since
+// #25376 it is NOT what a candidate run is judged against. See "A RUN IS
+// COMPLETE AT ITS OWN WIDTH" below.
 export const SHARD_COUNT = 8;
 
 const API = 'https://api.github.com';
@@ -168,6 +169,42 @@ export function testStepSeconds(job, stepName = TEST_STEP_NAME) {
   return Number.isFinite(seconds) && seconds >= 0 ? seconds : null;
 }
 
+// ---------------------------------------------------------------------------
+// A RUN IS COMPLETE AT ITS OWN WIDTH (#25376)
+// ---------------------------------------------------------------------------
+//
+// Measured on #25376's own PR, job 121075952437: the matrix went 6 -> 8 and
+// this lane, still judging every candidate against the LIVE count, rejected all
+// 24 recent schedule runs -- each one a whole, green 6-shard run -- as "missing
+// Test Core 7/8, 8/8", and exited 1. Every refresh would have read the same
+// until an 8-shard schedule run existed with its artifacts still retained.
+//
+// The dataset is PER PACKAGE. Which shard a package ran on, and how many shards
+// there were, is not an input to its weight. So a run is a complete
+// measurement when every shard OF THAT RUN concluded success and every one of
+// THAT RUN's summaries is retained, and the width is read from the run itself:
+// the `M` of its `Test Core (N/M)` job names. A width change then has no
+// transition window at all -- the runs before it stay readable, the runs after
+// it are readable -- rather than a window this lane would have to report as
+// NOT MEASURED.
+//
+// ⛔ A run whose Test Core jobs disagree on `M` is REJECTED, by name. That is
+// not a run of any width; reading it at either one would admit a run that
+// never ran a whole matrix. A run with no Test Core job at all is rejected too.
+export function runShardWidth(jobs) {
+  const widths = new Set();
+  for (const job of jobs ?? []) {
+    const m = /^Test Core \((\d+)\/(\d+)\)$/.exec(String(job?.name ?? '').trim());
+    if (m && Number(m[2]) >= 1) widths.add(Number(m[2]));
+  }
+  if (widths.size === 1) return { width: [...widths][0], reason: null };
+  if (widths.size === 0) return { width: null, reason: 'no `Test Core (N/M)` job in the run' };
+  return {
+    width: null,
+    reason: `its Test Core jobs disagree on the shard count (${[...widths].sort((a, b) => a - b).join(' vs ')})`,
+  };
+}
+
 // Is this run a complete, uncensored measurement? Both halves are required and
 // they fail for different reasons, so both are named separately.
 //
@@ -176,8 +213,18 @@ export function testStepSeconds(job, stepName = TEST_STEP_NAME) {
 // censored run this refuses. A job that is still running is likewise not a
 // success -- it may yet fail -- so anything other than the literal string is a
 // rejection.
-export function runIsEligible({ jobs, artifacts }, shardCount = SHARD_COUNT) {
+//
+// `shardCount` defaults to the run's OWN width (runShardWidth above); passing
+// one pins the reading to that width, which only a test does.
+export function runIsEligible({ jobs, artifacts }, shardCount) {
   const reasons = [];
+  if (shardCount === undefined) {
+    const read = runShardWidth(jobs);
+    if (read.width === null) {
+      return { eligible: false, reasons: [read.reason], shardCount: null, artifactIds: {}, timingArtifactIds: {}, shardSeconds: {} };
+    }
+    shardCount = read.width;
+  }
 
   const byShard = new Map();
   for (const job of jobs ?? []) {
@@ -224,6 +271,7 @@ export function runIsEligible({ jobs, artifacts }, shardCount = SHARD_COUNT) {
   return {
     eligible: reasons.length === 0,
     reasons,
+    shardCount,
     artifactIds: Object.fromEntries([...artifactByShard.entries()].sort((a, b) => a[0] - b[0])),
     timingArtifactIds: Object.fromEntries([...timingByShard.entries()].sort((a, b) => a[0] - b[0])),
     shardSeconds,
@@ -340,7 +388,8 @@ export async function listCandidates({
   repo,
   token,
   workflow = 'ci.yml',
-  shardCount = SHARD_COUNT,
+  // Unset: each run is judged at its own width (#25376). Set only by a test.
+  shardCount,
   limit = 12,
   event = DEFAULT_RUN_EVENT,
   fetchImpl = fetch,
@@ -367,6 +416,7 @@ export async function listCandidates({
       html_url: run.html_url,
       eligible: verdict.eligible,
       reasons: verdict.reasons,
+      shard_count: verdict.shardCount,
       artifact_ids: verdict.artifactIds,
       timing_artifact_ids: verdict.timingArtifactIds,
       shard_seconds: verdict.shardSeconds,
@@ -458,7 +508,7 @@ export async function runCandidates({ repo, token, limit, event, workflow = 'ci.
   for (const run of examined) {
     notes.push(
       run.eligible
-        ? `  ELIGIBLE  ${run.run_id}  ${run.created_at}  ${String(run.head_sha).slice(0, 10)}`
+        ? `  ELIGIBLE  ${run.run_id}  ${run.created_at}  ${String(run.head_sha).slice(0, 10)}  (${run.shard_count} shards)`
         : `  rejected  ${run.run_id}  ${run.created_at}  ${run.reasons.join('; ')}`
     );
   }
@@ -537,6 +587,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // reports a battery that registered zero cases by name, and a battery folded
   // into another only makes a number smaller.
   'select-shard-timings-run candidate selection': 13,
+  // #25376. A run is judged at its OWN width, so a matrix resize has no
+  // transition window. Its own battery so that "an old-width run stopped
+  // reading" is a NAMED breach.
+  'select-shard-timings-run width change (#25376)': 9,
   // #16467, patch round. Its own battery so that "the empty/ineligible
   // distinction stopped being tested" is a NAMED breach rather than a smaller
   // number folded into a neighbour.
@@ -549,12 +603,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // it must stop at the minimum depth rather than at the first covering run,
   // count executed runs rather than runs, and keep a short refresh as
   // PROVISIONAL rather than refusing it.
-  'shard-timings-refresh accumulation depth': 11,
+  'shard-timings-refresh accumulation depth': 13,
   // #22949 ruling E. The per-file capture download step, driven like the
   // battery above, and the real `--diff` reading what it laid out.
   'shard-timings-refresh per-file captures (#22949 E)': 5,
 });
-const SELF_TEST_BATTERY_FLOOR = 6;
+const SELF_TEST_BATTERY_FLOOR = 7;
 const UNATTRIBUTED_BATTERY = '(no battery open)';
 
 // Returned by `selfTest()` only after its verdict is printed, so a `return` that
@@ -853,6 +907,99 @@ async function selfTest() {
   check(() => {
     if (!threw(() => workspaceNames({ packages: { items: [] } }))) throw new Error('workspace: an EMPTY package list was accepted');
   });
+
+  // -------------------------------------------------------------------------
+  battery('select-shard-timings-run width change (#25376)');
+  // -------------------------------------------------------------------------
+  // Measured on #25376's own PR: with the live count at 8, all 24 candidate
+  // schedule runs -- whole, green 6-shard runs -- were rejected as incomplete
+  // and the lane exited 1. A run is judged at ITS OWN width now; these pin
+  // both directions: an old-width run reads, and a run that is not whole at
+  // any width still does not.
+  const jobsAt = (width, conclusion = 'success') =>
+    Array.from({ length: width }, (_, i) => ({ name: `Test Core (${i + 1}/${width})`, conclusion, status: 'completed' }));
+  const artifactsAt = (width, present = Array.from({ length: width }, (_, i) => i + 1)) =>
+    present.map((n) => ({ id: 3000 + n, name: `test-core-run-summary-${n}-of-${width}`, expired: false }));
+  const sixShardRun = { jobs: jobsAt(6), artifacts: artifactsAt(6) };
+
+  check(() => {
+    const v = runIsEligible(sixShardRun);
+    if (!v.eligible) throw new Error(`width: a whole 6-shard run was rejected under an 8-shard matrix (${v.reasons.join('; ')})`);
+    if (v.shardCount !== 6) throw new Error(`width: the run's own width read as ${v.shardCount}, not 6`);
+    if (Object.keys(v.artifactIds).join(',') !== '1,2,3,4,5,6') {
+      throw new Error(`width: the 6-shard run's artifacts read as ${JSON.stringify(v.artifactIds)}`);
+    }
+  });
+  check(() => {
+    // FIRING CONTROL: pinned to the live count, the same run is the rejection
+    // job 121075952437 printed -- so the pass above is the width reading, not a
+    // fixture that would pass anyway.
+    const v = runIsEligible(sixShardRun, SHARD_COUNT);
+    if (SHARD_COUNT === 6) return;
+    if (v.eligible || !v.reasons.some((r) => r.includes(`${SHARD_COUNT}/${SHARD_COUNT}`))) {
+      throw new Error(`width: pinned to ${SHARD_COUNT}, the 6-shard run was not rejected as the live lane rejected it (${v.reasons.join('; ')})`);
+    }
+  });
+  check(() => {
+    const v = runIsEligible({ jobs: jobsAt(6), artifacts: artifactsAt(6, [1, 2, 3, 4, 5]) });
+    if (v.eligible || !v.reasons.some((r) => r.includes('6-of-6'))) {
+      throw new Error(`width: an old-width run missing its last summary was not refused by name (${v.reasons.join('; ')})`);
+    }
+  });
+  check(() => {
+    const cancelled = jobsAt(6);
+    cancelled[5].conclusion = 'cancelled';
+    const v = runIsEligible({ jobs: cancelled, artifacts: artifactsAt(6) });
+    if (v.eligible || !v.reasons.some((r) => r.includes('6/6'))) {
+      throw new Error(`width: a censored old-width run was accepted (${v.reasons.join('; ')})`);
+    }
+  });
+  check(() => {
+    // Jobs at one width, summaries at another: not a whole run at either.
+    const v = runIsEligible({ jobs: jobsAt(6), artifacts: artifactsAt(8) });
+    if (v.eligible) throw new Error('width: 6 shard jobs with 8-shard summaries were accepted');
+  });
+  check(() => {
+    const v = runIsEligible({ jobs: [...jobsAt(6), ...jobsAt(8)], artifacts: [...artifactsAt(6), ...artifactsAt(8)] });
+    if (v.eligible || v.shardCount !== null || !v.reasons.some((r) => r.includes('disagree') && r.includes('6 vs 8'))) {
+      throw new Error(`width: a run whose Test Core jobs disagree on the count was not refused by name (${v.reasons.join('; ')})`);
+    }
+  });
+  check(() => {
+    const v = runIsEligible({ jobs: [{ name: 'Lint', conclusion: 'success' }], artifacts: artifactsAt(8) });
+    if (v.eligible || !v.reasons.some((r) => r.includes('no `Test Core (N/M)` job'))) {
+      throw new Error(`width: a run with no Test Core job was not refused by name (${v.reasons.join('; ')})`);
+    }
+  });
+  check(() => {
+    // The width reader is anchored like the shard matcher: a job merely
+    // containing the shape is not a shard of any width.
+    const read = runShardWidth([...jobsAt(6), { name: 'Test Core (3/8) rerun', conclusion: 'success' }]);
+    if (read.width !== 6) throw new Error(`width: an unanchored job name moved the width (${JSON.stringify(read)})`);
+  });
+  await (async () => {
+    // Through listCandidates: one 8-wide and one 6-wide run, both eligible,
+    // each reported with its own width for the download loop to iterate.
+    const byRun = {
+      801: { jobs: jobsAt(8), artifacts: artifactsAt(8) },
+      802: { jobs: jobsAt(6), artifacts: artifactsAt(6) },
+    };
+    const fetchImpl = async (url) => {
+      const { pathname } = new URL(String(url));
+      if (/\/actions\/workflows\/[^/]+\/runs$/.test(pathname)) {
+        const workflow_runs = [801, 802].map((id) => ({ id, head_sha: `${id}`.padStart(40, 'a'), created_at: '2026-10-25T00:00:00Z' }));
+        return { ok: true, status: 200, statusText: 'OK', json: async () => ({ workflow_runs }) };
+      }
+      const m = /\/actions\/runs\/(\d+)\/(jobs|artifacts)$/.exec(pathname);
+      if (m) return { ok: true, status: 200, statusText: 'OK', json: async () => ({ [m[2]]: byRun[m[1]][m[2]] }) };
+      return { ok: false, status: 404, statusText: 'Not Found', json: async () => ({}) };
+    };
+    const examined = await listCandidates({ repo: 'o/r', token: 't', fetchImpl });
+    check(() => {
+      const shape = examined.map((r) => `${r.run_id}:${r.eligible}:${r.shard_count}:${Object.keys(r.artifact_ids).length}`).join(' ');
+      if (shape !== '801:true:8:8 802:true:6:6') throw new Error(`width: listCandidates read mixed widths as ${shape}`);
+    });
+  })();
 
   // -------------------------------------------------------------------------
   battery('select-shard-timings-run candidate selection');
@@ -1284,9 +1431,12 @@ async function selfTest() {
   const TYPES = '@objectstack/types';
   const toolPath = (rel) => fileURLToPath(new URL(rel, import.meta.url));
 
-  // runs: newest first, each { id, tasks: [[package, seconds, cacheStatus]] }.
-  // Every task lands in shard 1's summary; shards 2-8 carry an empty task list,
-  // which is a valid summary that measures nothing.
+  // runs: newest first, each { id, tasks: [[package, seconds, cacheStatus]] },
+  // optionally `width` (default 8) and `lastShardTasks`. `tasks` land in shard
+  // 1's summary and `lastShardTasks` in the run's LAST shard's; every other
+  // shard carries an empty task list, which is a valid summary that measures
+  // nothing.
+  const shardsOf = (r) => Array.from({ length: r.width ?? 8 }, (_, i) => i + 1);
   const driveGenerate = (runs, committedPackages, workspace = Object.keys(committedPackages)) => {
     const dir = mkdtempSync(join(tmpdir(), 'os-timings-generate-'));
     try {
@@ -1306,21 +1456,21 @@ async function selfTest() {
         run_id: r.id,
         head_sha: String(r.id).padStart(40, 'c'),
         created_at: '2026-10-06T00:00:00Z',
-        artifact_ids: Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8].map((n) => [n, Number(`${r.id}${n}`)])),
+        artifact_ids: Object.fromEntries(shardsOf(r).map((n) => [n, Number(`${r.id}${n}`)])),
       }));
       writeFileSync(join(runnerTemp, 'candidates.json'), JSON.stringify(candidatesList));
       for (const r of runs) {
-        for (const n of [1, 2, 3, 4, 5, 6, 7, 8]) {
-          const tasks =
-            n !== 1
-              ? []
-              : r.tasks.map(([pkg, seconds, status = 'MISS']) => ({
-                  taskId: `${pkg}#test`,
-                  task: 'test',
-                  package: pkg,
-                  cache: { status },
-                  execution: { startTime: 0, endTime: status === 'MISS' ? seconds * 1000 : 90, exitCode: 0 },
-                }));
+        const last = shardsOf(r).length;
+        for (const n of shardsOf(r)) {
+          const tasks = [...(n === 1 ? r.tasks : []), ...(n === last ? r.lastShardTasks ?? [] : [])].map(
+            ([pkg, seconds, status = 'MISS']) => ({
+              taskId: `${pkg}#test`,
+              task: 'test',
+              package: pkg,
+              cache: { status },
+              execution: { startTime: 0, endTime: status === 'MISS' ? seconds * 1000 : 90, exitCode: 0 },
+            })
+          );
           writeFileSync(join(fixtures, `${r.id}${n}.json`), JSON.stringify({ tasks }));
         }
       }
@@ -1429,6 +1579,30 @@ async function selfTest() {
   await check(() => {
     if (!deep.spread?.includes(`| \`${SPEC}\` | 3 | 1500.00 | 1600.00 | 1700.00 |`)) {
       throw new Error(`depth leg: the spread table for the PR body is missing or wrong:\n${deep.spread}`);
+    }
+  });
+
+  // LEG 1b -- A WIDTH CHANGE (#25376). The newest run is 8 shards wide, the two
+  // before it 6, as on the first refresh after the matrix grew. Types is
+  // measured ONLY in each run's last shard, so the loop must download that
+  // run's own shards -- 8 for one, 6 for the others -- and no more: a fixed
+  // 1..8 loop asks for a 6-wide run's shard 7, which has no artifact.
+  const widened = driveGenerate(
+    [
+      { id: 921, width: 8, tasks: [[SPEC, 1600]], lastShardTasks: [[TYPES, 60]] },
+      { id: 922, width: 6, tasks: [[SPEC, 1500]], lastShardTasks: [[TYPES, 62]] },
+      { id: 923, width: 6, tasks: [[SPEC, 1700]], lastShardTasks: [[TYPES, 61]] },
+    ],
+    committedTwo
+  );
+  await check(() => {
+    if (widened.status !== 0 || widened.runCount !== '3') {
+      throw new Error(`width leg: runs of two widths did not accumulate to 3 (got ${widened.runCount}, exit ${widened.status}):\n${widened.log}`);
+    }
+  });
+  await check(() => {
+    if (widened.refreshed?.packages?.[SPEC] !== 1600 || widened.refreshed?.packages?.[TYPES] !== 61) {
+      throw new Error(`width leg: a run's last shard was not read at its own width (${JSON.stringify(widened.refreshed?.packages)})`);
     }
   });
 
