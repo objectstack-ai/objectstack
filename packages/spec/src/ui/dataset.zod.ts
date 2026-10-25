@@ -298,16 +298,6 @@ export const DatasetMeasureDurationSchema = lazySchema(() => strictObject({
   unit: DatasetDurationUnit
     .describe('Unit of the result: the measure answers a number of these (1.5 with "days" is a day and a half).')
     .meta({ title: 'Unit' }),
-}).superRefine((duration, ctx) => {
-  if (duration.from === duration.to) {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['to'],
-      message:
-        `\`from\` and \`to\` both name "${duration.from}", so every record's duration is zero. `
-        + 'Name the two instants the duration spans — e.g. `from: \'submitted_at\'`, `to: \'activated_at\'`.',
-    });
-  }
 }));
 
 /**
@@ -520,6 +510,17 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
           + `"${measure.aggregate}": the per-record duration is a number to average, add up or pick the least or `
           + 'greatest of. To count records, declare a `count` measure (with a `filter` for the records whose '
           + 'two instants are set).',
+      });
+    }
+    // Judged here rather than on the duration spec itself, so the published
+    // JSON Schema keeps ONE dropped-refinement site for the measure.
+    if (measure.duration.from === measure.duration.to) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['duration', 'to'],
+        message:
+          `\`duration.from\` and \`duration.to\` both name "${measure.duration.from}", so every record's duration `
+          + 'is zero. Name the two instants the duration spans — e.g. `from: \'submitted_at\'`, `to: \'activated_at\'`.',
       });
     }
     if (measure.currency !== undefined) {
