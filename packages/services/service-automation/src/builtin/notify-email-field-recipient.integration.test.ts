@@ -282,4 +282,37 @@ describe('#25647 — a computed recipient address must be a user', () => {
         expect(run.success).toBe(false);
         expect(emitted).toHaveLength(0);
     });
+
+    /** A notify node over a messaging double and NO data engine, so any user lookup would fail the node. */
+    function bootUnchecked() {
+        const emitted: Array<{ audience?: unknown }> = [];
+        const engine = new AutomationEngine(silentLogger());
+        registerNotifyNode(engine, {
+            logger: silentLogger(),
+            getService: (name: string) => (name === 'messaging'
+                ? { async emit(n: any) { emitted.push(n); return { notificationId: 'evt_1', delivered: 1, failed: 0 }; } }
+                : undefined),
+        } as any);
+        return { engine, emitted };
+    }
+
+    it.each([
+        ['names no channel (inbox, the default)', undefined],
+        ['names inbox only', ['inbox']],
+    ])('E5: a node that %s mails nobody, so its computed address goes to messaging as before', async (_label, channels) => {
+        const { engine, emitted } = bootUnchecked();
+        engine.registerFlow('applicant_notice', notifyFlow({ recipients: [CEL('record.contact_text')], channels }));
+        const run = await engine.execute('applicant_notice', onCreate('lead_1', LEAD));
+        expect(run.success).toBe(true);
+        expect(emitted).toHaveLength(1);
+        expect(emitted[0].audience).toEqual(['stranger@outside.example']);
+    });
+
+    it('E6: a node whose channel list includes email screens its computed address', async () => {
+        const { engine, emitted } = bootUnchecked();
+        engine.registerFlow('applicant_notice', notifyFlow({ recipients: [CEL('record.contact_text')], channels: ['inbox', 'email'] }));
+        const run = await engine.execute('applicant_notice', onCreate('lead_1', LEAD));
+        expect(run.success).toBe(false);
+        expect(emitted).toHaveLength(0);
+    });
 });

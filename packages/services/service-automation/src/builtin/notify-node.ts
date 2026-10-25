@@ -304,6 +304,11 @@ function readsAsAddress(recipient: string): boolean {
  * who is not a user is the email-field recipient, which reads an `email`-typed
  * field and carries the per-address limit ({@link registerNotifyNode}).
  *
+ * So the screen runs only for a node whose `channels` name `email`, the one
+ * channel that sends to the address itself. Any other node (`inbox` alone,
+ * the messaging default) mails nobody, and its recipients go to the messaging
+ * resolver as before, which maps an address a user holds to that user.
+ *
  * The lookup is the one the messaging resolver makes (`sys_user` by `email`,
  * the id projected), so "a user holds it" means here what it means there. No
  * data engine, or a lookup that fails, fails the node: an address that could
@@ -605,7 +610,7 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                     // Studio form keeps its recipients picker, and the marker
                     // rides `NotifyConfigSchema` (`LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`).
                     recipients: {
-                        description: 'Who the notification goes to: a user id or an audience selector (such as team:ID) as a string, or a list of them — each entry a string or a CEL value envelope { dialect: \'cel\', source } evaluated per run; an entry that evaluates to a list adds each of its recipients, and an address it evaluates to must be a user\'s. A single-brace {token} is refused. To mail a person who is not a user, use { emailField: \'FIELD\' } as the whole value, naming an email field of the record that triggered the flow, with channels: email; at most 5 such emails go to one address per hour.',
+                        description: 'Who the notification goes to: a user id or an audience selector (such as team:ID) as a string, or a list of them — each entry a string or a CEL value envelope { dialect: \'cel\', source } evaluated per run; an entry that evaluates to a list adds each of its recipients, and with channels: email an address it evaluates to must be a user\'s. A single-brace {token} is refused. To mail a person who is not a user, use { emailField: \'FIELD\' } as the whole value, naming an email field of the record that triggered the flow, with channels: email; at most 5 such emails go to one address per hour.',
                     },
                     // The form edits the bare-string spelling of these two
                     // template slots; the contract (`NotifyConfigSchema`) also
@@ -710,7 +715,7 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
             // [#25571] An email-field recipient, `{ emailField }`, is the whole
             // value: the address in that field of the trigger record. [#25647]
             // Any other recipient an envelope computed that reads as an address
-            // must be a user's (`screenComputedAddresses`).
+            // must be a user's when the node mails (`screenComputedAddresses`).
             const emailField = isEmailFieldRecipient(cfg.recipients) ? cfg.recipients.emailField : undefined;
             let recipients: string[];
             let emptyRecipients: string[] = [];
@@ -721,7 +726,10 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
             } else {
                 const audience = resolveRecipients(engine, cfg.recipients, variables, context);
                 if (!audience.ok) return { success: false, error: audience.error };
-                const screened = await screenComputedAddresses(getData(), audience.value.recipients, audience.value.computed);
+                const mails = toStringList(cfg.channels).includes('email');
+                const screened = mails
+                    ? await screenComputedAddresses(getData(), audience.value.recipients, audience.value.computed)
+                    : { ok: true as const, value: audience.value.recipients };
                 if (!screened.ok) return { success: false, error: screened.error };
                 recipients = screened.value;
                 emptyRecipients = audience.value.empty;

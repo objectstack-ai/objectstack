@@ -387,13 +387,15 @@ end. `objectstack validate` refuses a field the object does not have, a field
 that is not `email`-typed, another channel, and a flow with no triggering
 record.
 
-An address a **value expression computes** must belong to a user: an
-envelope that evaluates to a user's address reaches that user, and one that
-evaluates to an address no user holds fails the node, pointing to
-`{ emailField }` — an expression over record text would otherwise let whoever
-typed that text choose who the flow mails. An address **written out** in the
-flow (`recipients: ['ops@example.com']`) is the author's constant and is sent
-as written.
+In a node whose `channels` include `email`, an address a **value expression
+computes** must belong to a user: an envelope that evaluates to a user's
+address reaches that user, and one that evaluates to an address no user holds
+fails the node, pointing to `{ emailField }` — an expression over record text
+would otherwise let whoever typed that text choose who the flow mails. A node
+that does not name `email` (`inbox` alone, the default) mails nobody, so its
+computed recipients resolve as before. An address **written out** in the flow
+(`recipients: ['ops@example.com']`) is the author's constant and is sent as
+written.
 
 **A CRUD node's filter: each operand computes before the query, and the query
 placeholders stay.** In a `get_record`, `update_record` or `delete_record`
