@@ -1,0 +1,36 @@
+{
+  "number": 25759,
+  "kind": "issue",
+  "title": "mcp: the stateless /api/v1/mcp route answers GET with an SSE stream that ends at once, so claude-code reconnects 2–3×/s and loads the environment's shard — answer GET with 405",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "area:ai",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T09:17:25Z",
+  "updated_at": "2026-10-25T11:55:30Z",
+  "closed_at": "2026-10-25T11:55:30Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25759",
+  "body": "Filing gate: ③ a maintainer-directed task. Maintainer, 2026-10-25, verbatim, in the cloud ops seat's chat: 「可以：在 objectstack 立一张卡：无状态 MCP 路由对 GET 返回空 SSE 流导致 claude-code 客户端每秒 2–3 次重连，压到同分片的其他租户；建议 GET 返回 405。证据引 cloud#3103，按立卡门查重。」\nReader: the MCP / `domain:server` execution seat, dispatch step: one PR in `packages/mcp`.\nDedupe:\n- REST `search/issues`, `repo:objectstack-ai/objectstack mcp SSE stream GET`: 12 hits including closed. `repo:objectstack-ai/objectstack mcp reconnect`: 14 hits. Neither has a card about the `/api/v1/mcp` GET answering a stream that ends at once.\n- The nearest are #24287 and #24319 (closed). Those are about `GET /api/v1/mcp/skill` answering an SSE frame on a `createHonoApp` host: a different route and a different defect.\n\n## 维护者速读\n\n无状态 MCP 路由（`sessionIdGenerator: undefined`、`enableJsonResponse: true`）对 `GET /api/v1/mcp` 回一个立刻结束的 SSE 流。claude-code 客户端认为流断了，每秒重连 2–3 次。只要本机有 Claude Code 会话开着，就会持续打到该环境所在的分片上。生产上它和同分片其他租户的变慢同时出现（cloud#3103）。建议：无状态模式下 `GET` 直接回 **405 Method Not Allowed**，这是 MCP Streamable HTTP 规范给不提供 SSE 流的服务端留的答法，客户端收到后就不再重连。\n\n## Measured (production, cloud#3103 comment 2026-10-25T09:14Z)\n\n- **The requests:** user-agent `claude-code`, headers `x-api-key` and `mcp-protocol-version`. Every answer is 200 in about 200 ms.\n- **The rate:** about 183 `GET /api/v1/mcp` per minute on one environment (`huayan.objectos.ai`), for as long as Claude Code sessions are open on one machine. That machine's user-level `~/.claude.json` declares `mcpServers.huayan` (`http`, `…/api/v1/mcp`), so every session connects.\n- **The route** (`packages/mcp/src/mcp-server-runtime.ts` at `f0fdd45b`, around line 1708): stateless transport (`sessionIdGenerator: undefined`, `enableJsonResponse: true`), with a per-request server closed in `finally`. The GET's SSE stream therefore ends at once, and the client re-opens it.\n- **The impact:**\n  - the environment shares a container shard with others (FNV-1a over the environment id);\n  - in the 2026-10-25 07:55–08:20Z window the hot environment took 4,198 requests: the MCP loop, plus a browser's analytics queries;\n  - a co-tenant on the same shard (`jack`) read `get-session` / `meta/app` server medians of 1182 / 2343 ms, against 480 / 563 ms when the load was absent;\n  - the analytics queries are the heavier part, but the MCP loop is constant background load, and the P0-c baseline was itself taken under it.\n\n## Change\n\n1. In stateless mode, answer `GET /api/v1/mcp` (and the same route on every host that mounts it) with **405** and an `Allow: POST` header, instead of opening an SSE stream that closes at once. Per the MCP Streamable HTTP transport, a server that offers no server-initiated stream returns 405 to GET, and the client then stops opening one.\n2. Keep `POST` exactly as it is.\n3. Test: a stateless-mode GET answers 405 with `Allow`, and a POST round trip is unchanged.\n4. If a client is known to need the GET stream, name it in the PR and choose a real long-lived stream instead. Don't keep the zero-length one.\n\n## Acceptance\n\n- The test above.\n- After the pin reaches cloud production: with one Claude Code session connected to an environment, the environment's `GET /api/v1/mcp` count over 10 minutes drops from ~1,800 to roughly the connect count. Read it in Workers observability per host, the same way cloud#3103 did.\n\nClause-②: probably `yes (narrowing)`: a verb that answered 200 now answers 405. The seat decides.\nMetadata-protocol: none\n\nEvidence: objectstack-ai/cloud#3103 (the P8 investigation comment).\n"
+}

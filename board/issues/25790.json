@@ -1,0 +1,35 @@
+{
+  "number": 25790,
+  "kind": "issue",
+  "title": "cutover-prep(ui-merge): `check:liveness` is red on `main` — ledger rows cite `service-automation/src/engine.ts` bodies that #25734 / #25725 moved into seam modules; Test Core 1/8 fails on every PR built on main (parent #25677)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:epic"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T11:36:27Z",
+  "updated_at": "2026-10-25T13:51:03Z",
+  "closed_at": "2026-10-25T13:51:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25790",
+  "body": "Filing gate ③ + ④: pre-freeze prep card of the epic #25677 (`pm:epic`; epic PM `session_01RSDL3SFtJaKzcymvCD8RsU`). Part of #25677. Lands in **objectstack-ai/objectstack** `main` before the cutover freeze (#25752 step 2): the cutover PR's acceptance reads \"CI green on the merged tree\", and that reading is impossible while `main` itself carries a red Test Core shard.\n\n**谁付代价(业务筛):** `main`'s scheduled CI run 40187126172 on 5612dd931b fails **Test Core 1/8** — 23 failures, all in `packages/spec/scripts/liveness/check-liveness.test.ts`, which runs against the shipped liveness ledgers — and 8/8 (plugin-pinyin-search, the 5 s boot-reconcile timing class already on the cutover bill as item 26; passes locally). Every PR branch rebased onto `main` inherits the 1/8 red, so (a) the cutover PR (#25752 step 4) and the Tier H landings behind it (4a #25745, PR B #25697, 4b PR 2 #25712) cannot show a clean reading, (b) the sharded Test Core attribution the epic relies on (one failed task per red shard) is polluted by a known red, and (c) a real liveness regression in a PR is invisible. Measured by the 4a thread at 11:33Z and commented on #25745 as \"not this PR's\".\n\n## 维护者速读\n\nmain 上 `check:liveness` 红了:存活台账(`packages/spec/liveness/*.json`,共 23 行)引用 `service-automation/src/engine.ts` 里的函数体做证据,#25734/#25725 把这些函数体搬进了 seam 模块(`run-resume.ts` 等),engine.ts 只剩一跳委托。本卡把台账行指回新位置(或让读取器跟随这一跳),⛔ 不删行、不放宽基线。切换 PR 需要 main 绿。\n\n## Cause (read on 5612dd931b)\n\n- `git grep -c \"service-automation/src/engine.ts#\" -- packages/spec/liveness/*.json`: connector.json 12, flow.json 4, job.json 1, translation.json 6 — 23 rows, matching the 23 failures.\n- The cited symbols still exist by name in `engine.ts` (`AutomationEngine`, `renderRefusalMessage`, `translatedFlowTemplate`, `flowRefusalMessageKey`), but since `0189524a41` (#25734, slice 8b) and `f3fea0a03d` (#25725) they are one-hop wrappers (`return renderRefusalMessage.call(host, …)`) whose bodies live in the seam modules; the evidence text the ledger rows describe is no longer in the cited body. Confirm which assertion each of the 23 rows fails before changing anything.\n\n## What to change (objectstack, one draft PR to `main`)\n\n1. Reproduce: `pnpm check:liveness` (root) and `pnpm --filter @objectstack/spec exec vitest run scripts/liveness/check-liveness.test.ts` on `main`; list the 23 failing rows with the assertion each fails.\n2. Re-point each row's `producer` / `evidence` citation at the seam module and symbol that now holds the body (e.g. `packages/services/service-automation/src/run-resume.ts#…`), keeping the row's prose accurate; where the reader could instead follow a one-hop delegation (as `check:test-source-alias` does for a same-package helper, #17658), prefer the ledger edit — it is the measured state, and the reader's rule should not loosen.\n3. ⛔ Do not delete rows, do not add them to `undrilled-containers.baseline.json`, do not widen any baseline. ⛔ Do not touch `engine.ts` or the seam modules (the refactor series #25222 owns them).\n4. Also read the 8/8 pinyin failure on that run: if it is the bill-26 timing class, say so in the PR body and leave it; if not, report.\n\n## Acceptance\n\n- `pnpm check:liveness` exit 0 on `main` + your diff; `check-liveness.test.ts` 0 failures; the next `main` CI run after merge shows Test Core 1/8 green.\n- Row count unchanged (23 rows re-pointed, none deleted); `gen:*` outputs that read the ledgers (skills references, if any) regenerated and committed if they change.\n- PR body: the 23-row table (row → old citation → new citation → failing assertion), `Fixes #<this card>`, `Part of #25677`.\n\n**Size:** S–M (mechanical over 23 rows; judgment only on where each body landed). **Clause-②:** no. **Metadata-protocol:** none. **Responsibility:** defect introduced by the #25222 refactor series (#25734 slice 8b, #25725) — the ledger was not moved with the bodies; not a seat defect of this epic.\n\n## 风险\n\n- A row may cite a body that was split across two seam modules; cite the one holding the evidence text, and say so.\n- If the liveness reader has its own \"symbol exists\" check that passes while the evidence-text check fails, the fix is still the ledger, not the reader.\n\n## Dedupe\n\n`search_issues` 2026-10-25 11:36Z 「check:liveness engine.ts seam liveness ledger red main」 and the #25222 slice PRs: no open card names the ledger drift; #25734 and #25725 are merged refactor PRs with no follow-up. **New.**"
+}

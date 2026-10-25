@@ -1,0 +1,36 @@
+{
+  "number": 25775,
+  "kind": "pull_request",
+  "title": "test(plugin-pinyin-search): seed the boot-reconcile history in batches and give the kernel suite a 30 s budget",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T10:00:42Z",
+  "updated_at": "2026-10-25T11:47:33Z",
+  "closed_at": "2026-10-25T11:47:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-25T11:47:31Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25775",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XWP2L6oD6QXq7uAFXPnHfYb)_\n\nFixes #25749\nFixes #25750\n\nThe anchor #25750 closes with this fix (triage 6394128781); the seat claim on it, 6396273722, names this branch.\n\nClause-②: no\nMetadata-protocol: none\n\n## What changed\n\nOne file, test-only: `packages/plugins/plugin-pinyin-search/src/boot-reconcile.integration.test.ts`. Production source and `vitest.config.ts` are untouched.\n\n1. **Route (a), the seed.** `FixturePlugin.directInsert` wrote the 2,500-row history with one awaited `driver.create` per row. It now calls `driver.bulkCreate` in slices of 500 rows, five statements in all.\n   - A single 2,500-row `bulkCreate` does not work on SQLite. Measured: all 7 seeded cases fail in boot with `SQLITE_ERROR: too many terms in compound SELECT`. `driver-sql` sends a batch as one `insert … select … union all select …` statement, and SQLite's default compound-SELECT ceiling is 500 terms. Hence the slices (`INSERT_BATCH = 500`).\n   - `bulkCreate` keeps the given `created_at` / `updated_at`. `stampInsertTimestamps` only fills a null or missing column, the same function `create()` calls, so the `HISTORIC` stamps the watermark cases rely on are unchanged. Every assertion is unchanged too, and they still pass.\n2. **Route (b), the budget, added on measured evidence.** With the seed batched, 2 of 8 cases still went past 5 s under load. A timing probe (one-off, not committed) showed the seed costs only 0.2 to 0.6 s under 20 busy loops. The rest of the time is the real-kernel boots and the 2,500-row reconcile walks the cases exist to measure: 6.8 s for the first-boot/second-boot case and 10.1 s for the forced rebuild, seed excluded. So the kernel-booting `describe` gets `{ timeout: 30_000 }` (the `packages/runtime/*integration.test.ts` precedent), with a comment that names the boots and walks it pays for. The fake-engine `describe` stays on the default.\n\n## Measurements\n\n4-core container, `pnpm --filter @objectstack/plugin-pinyin-search exec vitest run --maxWorkers=2 --reporter=verbose src/boot-reconcile.integration.test.ts`. \"Load\" means 20 busy loops (`while :; do :; done`), the load used in reproduction 6394530515. Each run held `scripts/pm/os-verify-lock.sh`. Times are per test in ms; ✗ means `Test timed out in 5000ms`.\n\n| case | main idle (2 runs) | main load (2 runs) | head idle | head load (2 runs) |\n|---|---|---|---|---|\n| first boot walks every row; unchanged second boot reads none | 1474 / 1578 | 8125 ✗ / 8450 ✗ | 1335 | 6744 / 7884 |\n| second boot fills a row a hook-bypassing writer added | 985 / 974 | 6752 ✗ / 5720 ✗ | 585 | 3834 / 4142 |\n| control: hook write stamps `__search`, reconcile off the boot path | 789 / 865 | 6270 ✗ / 6720 ✗ | 446 | 3868 / 3502 |\n| control: forced rebuild walks every row | 1473 / 1502 | 10363 ✗ / 11576 ✗ | 1139 | 8373 / 8543 |\n| readiness does not wait for the reconcile | 897 / 880 | 7207 ✗ / 4676 | 454 | 3078 / 3638 |\n| shutdown stops the reconcile between pages | 901 / 864 | 5745 ✗ / 5420 ✗ | 577 | 3164 / 3661 |\n| without the ledger every boot walks every row | 874 / 793 | 5201 ✗ / 6187 ✗ | 454 | 3008 / 2816 |\n| a failing reconcile is logged (fake engine) | 4 / 5 | 53 / 24 | 5 | 30 / 34 |\n| **result** | 8/8, 8/8 | **1/8, 2/8** | 8/8 | **8/8, 8/8** |\n\nThe intermediate commit, with the seed batched and no budget (`11d10c22`), ran 8/8 idle twice (slowest 1094 ms). Under load it ran 6/8: first-boot 6899 ✗ and forced rebuild 9482 ✗. That is the measurement behind route (b).\n\nThe secondary error `Cannot open database because the directory does not exist` shows up 10 and 6 times in the two `main` load logs and 0 times in the three head logs. It was fallout from `afterEach` removing the temp directory under a timed-out body, and it goes away with the fix, as the order expected. It was not patched separately.\n\n## Verification at head `d1f610e4d1`\n\n- `pnpm --filter @objectstack/plugin-pinyin-search typecheck`: exit 0 (`check:test-typecheck: OK`, 0 errors).\n- `pnpm --filter @objectstack/plugin-pinyin-search test`: Test Files 4 passed (4), Tests 39 passed (39). Lock verdict `command-exit 0`.\n- `eslint packages/plugins/plugin-pinyin-search --no-inline-config`: exit 0.\n- Derived gate families (`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`, 57 commands): 56 exit 0. `pnpm check:dual-build-cjs-loads` exited 3 (PREREQUISITE NOT MET: no `dist/` for about 53 packages without a full workspace build), so it is NOT MEASURED locally and CI's run is the measurement. `--ran` reconciliation, with exit codes recorded: `57 derived, 56 run, 1 NOT-MEASURED, 0 UNRUN`. `node scripts/check-plugin-teardown-shape.mjs --self-test` exited 3 on the first pass from a shallow clone, then 0 after `git fetch --unshallow`. The final pass at this head recorded 0.\n- No ablation. The diff changes a fixture's write path and a timeout. It changes no behaviour the tests pin, and every assertion is byte-identical.\n\n## Acceptance notes\n\n- `SqlDriver.bulkCreate` on SQLite refuses a batch of more than 500 rows (`too many terms in compound SELECT`). The in-tree batch callers stay under that limit: `seed-loader.ts` `BULK_BATCH_SIZE = 200`, `core/src/utils/bulk-write.ts` `DEFAULT_BATCH_SIZE = 200`, `import-runner.ts` `MAX_CREATE_BATCH_SIZE = 200`. I measured no public door that reaches it, so this is an observation, not a filed card. Carrier: none.\n- The second commit's message says the forced-rebuild walk took 9.9 s. The probe measured 10,288 ms with a 222 ms seed, which is 10.1 s. The third commit corrects the code comment. The pushed message is left as it is, with no history rewrite.\n- `skip-changeset`: test-only. A `*.test.ts` file is outside the package's `files[]` (`dist` only), so nothing published changes.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01T5digj2EfFsbXihqJEo1ix\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01T5digj2EfFsbXihqJEo1ix)_\n"
+}

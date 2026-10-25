@@ -1,0 +1,34 @@
+{
+  "number": 25761,
+  "kind": "issue",
+  "title": "Seed datasets: extend the import door's `applyOn: 'create'` (#25577 / PR #25664) to seed-dataset columns — a re-run of an app's seed reverts columns its own jobs wrote",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "area:records",
+    "domain:spec",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T09:18:04Z",
+  "updated_at": "2026-10-25T13:33:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25761",
+  "body": "Filing class: ③ platform gap, filed at destination from an app ruling. Reader: `domain:server` / `area:records` triage. Unlabelled, no assignee. Origin: objectstack-ai/hotclm#41, ruled **A** by the maintainer on 2026-10-25 (ruling comment https://github.com/objectstack-ai/hotclm/issues/41#issuecomment-6395830052): \"job-written columns are written on first seed only — via the platform\".\n\n## Context\n\nhotclm's demo corpus (`src/data`, 820 rows, every dataset `mode: 'upsert'`) is documented as re-runnable: \"create the accounts and run `pnpm demo` again and their contracts are handed over\". Its daily jobs (F11 `payment_overdue`, F12 renewal notice, F13 `expiration_sweep`) are the declared single writers of `status`, `is_expiring` and the stage timestamps.\n\n## Measured (17.7.0, hotclm#41 comments 6092962474 / 6093795791, hotclm#50)\n\nA re-seed after the jobs have run:\n\n- silently moves 18 instalments `overdue → partial` (a legal edge, so `0 errors`) — the jobs' work is undone with nothing in the log;\n- resets `is_expiring` to `0`, so the next F12 run sends the same renewal notice **again**;\n- is refused by the state machines for `terminated → active` and `expired → active` (1 row each, loud) — and a refused seed row is **dropped whole**, every other column of that row with it.\n\n## The gap\n\nThe maintainer already ruled this need for the **import** door: #25577 → letter B, `FieldMappingEntry.applyOn: 'create' | 'always'`, shipped in PR #25664 (`packages/core/src/utils/import-runner.ts`, `packages/rest/src/import-prepare.ts`). The **seed loader** (`packages/runtime/src/seed-loader.ts`) has no per-column policy: a seed dataset's `upsert` re-asserts every column on every boot, and the only modes are upsert / insert / ignore (row-level, not column-level). An app that seeds a lifecycle it also automates has no declarative way to say \"this column is the job's after the first write\".\n\n## What is asked\n\nThe same `applyOn: 'create' | 'always'` (default `always`) on a seed dataset's column declaration, honoured by the seed loader's upsert path exactly as the import runner honours it: on an existing row, columns marked `'create'` are left out of the merge set. Same name, same semantics, same ruling — one concept for both doors.\n\nApp side after it ships: hotclm marks `status`, `is_expiring` and the job-stamped timestamps `applyOn: 'create'` and restores the README's re-run promise. Until then its README states the current truth.\n\n## Dedupe\n\n`search_issues` on this repo: #25577 / #25475 (closed completed — import door only), #24562 (seed replay rewrites unchanged rows; a different problem, equality not ownership), #8740 (open; driver `upsert` merge-set fallback internals — adjacent, not this), #21646 (seed `created_at`). **0** cards about a column-level create-only policy for seed datasets.\n\n## Not asked\n\n- No row-level \"skip existing\" mode (rejected in #25577's ruling for the same reason: it would need two datasets to also refresh master data).\n- No app-side reset or second writer on the jobs' columns (hotclm#41 option C, rejected by the maintainer)."
+}

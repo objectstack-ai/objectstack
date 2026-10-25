@@ -1,0 +1,36 @@
+{
+  "number": 25780,
+  "kind": "pull_request",
+  "title": "chore(pm-dispatch): ADR cards dispatch at the contract-review tier, effort floor xhigh",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T10:13:48Z",
+  "updated_at": "2026-10-25T11:55:30Z",
+  "closed_at": "2026-10-25T11:55:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-25T11:55:28Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25780",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1X5YusjSEHT8KRnVbiKjJ22B)_\n\nFixes #25729\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\nThe order quoted in the card body, verbatim (田騏, 2026-10-25T01:40:25Z): 「adr 这种任务都需要 fable extra，重新处理并立skills 卡片」.\n\n1. **Tier row** — `MANDATORY_TIER_GLOB_ROWS` (`scripts/pm/dispatch-gates.data.mjs`) gains `docs/adr/**` → `CONTRACT_REVIEW_TIER`, a `why:` quoting the order, and `oneLineExit: false` (「都需要」 closes the one-line exit by path, the same shape as the `skills/**` row). The table docblock's provenance sentence and its one-line-exit paragraph name the new row.\n2. **Effort floor** — carried in skill text, not by a printed line: the clause-① line of `references/execution-duties.md` (dispatch section, where tier and effort are chosen) now reads `凡改协议语义面或 docs/adr/** 的卡一律契约复审档;后者 effort 下限 xhigh`. A floor: difficulty may raise it, never lower it.\n3. **Policy text** — the same clause-① line is the predicate the table copies, so the table stays a copy; the no-one-line-exemption line beside it now names `docs/adr/**` beside `skills/**`.\n4. **Reason wording in `tierLines`** (`scripts/pm/dispatch-gates.mjs`) — the refusal of the one-line exit hard-coded \"(the published catalog, 2026-09-10 ruling)\" as the reason for EVERY `oneLineExit: false` glob, which would have printed the catalog's ruling for an ADR card. The existing line now points at the row's own `why`, already printed on the hit line above it. The comment above it is updated to match.\n5. **Self-test** (`scripts/pm/dispatch-gates.self-test.mjs`) — the pin \"every entry except `skills/**` keeps `oneLineExit` undefined\" is widened to the two barred globs; new cases: the `docs/adr/**` row's shape, an ADR file mandated by that row alone, `docs/NORTH-STAR.md` and a `docs/adr-notes.md` prefix sibling NOT mandated, and the ADR rendering refusing the exit by name without borrowing the catalog's reason.\n\n`node scripts/pm/dispatch-gates.mjs --tier docs/adr/0028-metadata-naming-and-namespace-isolation.md` now answers `Model tier — MANDATORY: … ⇢ 'docs/adr/**'` with the one-line exit marked NOT available (on `origin/main` `f0cf3383` it answered \"no path-derived mandate\").\n\n## Which side of the instrument freeze\n\n`references/instrument-discipline.md` freezes `dispatch-gates.mjs`: no new gate, derivation line, ratchet, `--tier` mandated tier or constant.\n\n- Item 1 is a data row in the existing table in `dispatch-gates.data.mjs`, mandating the EXISTING `CONTRACT_REVIEW_TIER`; no new constant, no new tier, no new printed line. Whether a new path row counts as a new \"`--tier` 强制档\" under that wording is flagged for the reviewer below; the freeze also admits additions that quote the maintainer verbatim on the card, which the card body does.\n- Item 2 deliberately takes the skill-text carrier, so no effort line is added to `--tier`.\n- Item 4 edits an existing line's wording in place (no line added): it is the freeze's own exception, a derivation that would otherwise print a wrong reason.\n\n## Line budget\n\n- `references/execution-duties.md`: 188 → 188 lines (ceiling 188). Both edits are in-place line rewrites, each ≤120 bytes (116 B and 110 B). Paid by deletion, not re-wrap: the line naming `skills/**` dropped the descriptors 「发布的」 and 「整根」 (the glob `skills/**` already spells the whole root; the publish reason `随 npx skills add 发运` stays on the line and in the `skills/**` row's `why`).\n- `SKILL.md`: untouched (319/319). The claim template's `effort: …按卡难度定` slot is not edited; the floor lives where effort is chosen.\n\n## Gates (local, at `76ffcc7`)\n\nDerived with `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 39 commands, all run, all exit 0; `--ran` reconciliation: `39 derived famil(ies) accounted for — 39 run, 0 NOT-MEASURED`. Includes `pnpm check:pm-dispatch-gates` (fast tier, 1917 cases pass), `check:pm-skill-ratchet`, `check:pm-skill-id-lint`, `check:skill-frame-sync`, `check:pm-governed-merges`, `check:doc-authoring`, `check:nul-bytes`. `check:doc-formula-expressions` first answered exit 3 (prerequisite: `@objectstack/lint` unbuilt), re-run after building it: exit 0. Both-tier self-test result: see the report comment on the card. No changeset: the diff is `.claude/**` + `scripts/pm/**`, which publish nothing (`skip-changeset`).\n\n## 维护者速读(草稿)\n\n- **改了什么:** 凡是改 `docs/adr/**`(写 ADR)的卡,派发时一律用最高档模型(契约复审档),effort 至少 `xhigh`,且不再有\"一行级小改可降档\"的例外。派发工具 `--tier` 对 ADR 路径会直接印出\"强制档\"。\n- **为什么改:** 执行田騏的指令「adr 这种任务都需要 fable extra」。ADR 是后续实现卡的依据,写错要付两次代价(维护者审一次,每张据此拆出的实现卡再付一次);此前 ADR 卡按默认档派发,工具无法提示。\n- **风险与代价(含回滚):** ADR 卡的派发成本上升(最高档 + xhigh)。不新增 CI 门禁、不拒任何 PR。回滚 = 撤回本 PR 一次提交。\n- **席位意见:**\n- **你要做的:** 本 PR 触及 `.claude/**`(受管面 Tier S),需契约复审档复核 PASS 在案后由席位落地;如认为调整派发档位规则需要您本人点头,请在此答复。\n\n## Acceptance notes\n\n- Open for the reviewer: does a new path row in `MANDATORY_TIER_GLOB_ROWS` count as a new \"`--tier` 强制档\" under `instrument-discipline.md`'s freeze? The freeze admits additions that quote the maintainer verbatim on the card; whether 田騏's order is that word is triage's / the director seat's call, as the card's Boundary section says.\n- `max` stays 「凭维护者点名」 (the effort line right below clause ①); the ADR floor only raises the minimum to `xhigh`, it does not open `max` without that word.\n- #25765 (review depth for spec/skills/ADR) is out of scope here and remains open; re-dispatching already-merged ADR cards is out of scope.\n\nImplemented in the card thread, session `session_01X6Y7QshYEp9SD3ruEazFRS`; claim 6396126096.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01X6Y7QshYEp9SD3ruEazFRS)_\n\n\n"
+}

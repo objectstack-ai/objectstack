@@ -10,16 +10,21 @@
     "id": 41898282,
     "type": "Bot"
   },
-  "labels": [],
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tooling"
+  ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-24T12:12:33Z",
-  "updated_at": "2026-10-25T06:15:03Z",
+  "updated_at": "2026-10-25T14:07:59Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/25640",
   "body": "This PR was opened by the [Changesets release](https://github.com/changesets/action) GitHub action. When you're ready to do a release, you can merge this and publish to npm yourself or [setup this action to publish automatically](https://github.com/changesets/action#with-publishing). If you're not ready to do a release yet, that's fine, whenever you add more changesets to main, this PR will be updated.\n\n\n# Releases\n\n> The changelog information of each package has been omitted from this message, as the content exceeds the size limit.\n\n## @objectstack/cli@18.2.0\n\n\n## @objectstack/core@18.2.0\n\n\n## @objectstack/lint@18.2.0\n\n\n## @objectstack/platform-objects@18.2.0\n\n\n## @objectstack/plugin-approvals@18.2.0\n\n\n## @objectstack/rest@18.2.0\n\n\n## @objectstack/runtime@18.2.0\n\n\n## @objectstack/service-automation@18.2.0\n\n\n## @objectstack/spec@18.2.0\n\n\n## @objectstack/trigger-api@18.2.0\n\n\n## @objectstack/hono@18.2.0\n\n\n## @objectstack/account@18.2.0\n\n\n## @objectstack/setup@18.2.0\n\n\n## @objectstack/studio@18.2.0\n\n\n## @objectstack/client@18.2.0\n\n\n## @objectstack/client-react@18.2.0\n\n\n## @objectstack/cloud-connection@18.2.0\n\n\n## @objectstack/connector-mcp@18.2.0\n\n\n## @objectstack/connector-openapi@18.2.0\n\n\n## @objectstack/connector-rest@18.2.0\n\n\n## @objectstack/connector-slack@18.2.0\n\n\n## @objectstack/console@18.2.0\n\n\n## create-objectstack@18.2.0\n\n\n## @objectstack/driver-memory@18.2.0\n\n\n## @objectstack/driver-mongodb@18.2.0\n\n\n## @objectstack/driver-sql@18.2.0\n\n\n## @objectstack/driver-sqlite-wasm@18.2.0\n\n\n## @objectstack/driver-turso@18.2.0\n\n\n## @objectstack/formula@18.2.0\n\n\n## @objectstack/mcp@18.2.0\n\n\n## @objectstack/metadata@18.2.0\n\n\n## @objectstack/metadata-core@18.2.0\n\n\n## @objectstack/metadata-fs@18.2.0\n\n\n## @objectstack/metadata-protocol@18.2.0\n\n\n## @objectstack/objectql@18.2.0\n\n\n## @objectstack/observability@18.2.0\n\n\n## @objectstack/embedder-openai@18.2.0\n\n\n## @objectstack/knowledge-memory@18.2.0\n\n\n## @objectstack/knowledge-ragflow@18.2.0\n\n\n## @objectstack/organizations@18.2.0\n\n\n## @objectstack/plugin-audit@18.2.0\n\n\n## @objectstack/plugin-auth@18.2.0\n\n\n## @objectstack/plugin-dev@18.2.0\n\n\n## @objectstack/plugin-email@18.2.0\n\n\n## @objectstack/plugin-hono-server@18.2.0\n\n\n## @objectstack/plugin-pinyin-search@18.2.0\n\n\n## @objectstack/plugin-security@18.2.0\n\n\n## @objectstack/plugin-sharing@18.2.0\n\n\n## @objectstack/plugin-webhooks@18.2.0\n\n\n## @objectstack/service-analytics@18.2.0\n\n\n## @objectstack/service-cache@18.2.0\n\n\n## @objectstack/service-cluster@18.2.0\n\n\n## @objectstack/service-cluster-redis@18.2.0\n\n\n## @objectstack/service-datasource@18.2.0\n\n\n## @objectstack/service-i18n@18.2.0\n\n\n## @objectstack/service-job@18.2.0\n\n\n## @objectstack/service-knowledge@18.2.0\n\n\n## @objectstack/service-mailbox@18.2.0\n\n\n## @objectstack/service-messaging@18.2.0\n\n\n## @objectstack/service-package@18.2.0\n\n\n## @objectstack/service-print@18.2.0\n\n\n## @objectstack/service-queue@18.2.0\n\n\n## @objectstack/service-realtime@18.2.0\n\n\n## @objectstack/service-settings@18.2.0\n\n\n## @objectstack/service-sms@18.2.0\n\n\n## @objectstack/service-storage@18.2.0\n\n\n## @objectstack/skills@18.2.0\n\n\n## @objectstack/trigger-record-change@18.2.0\n\n\n## @objectstack/trigger-schedule@18.2.0\n\n\n## @objectstack/types@18.2.0\n\n\n## @objectstack/verify@18.2.0\n\n\n## @objectstack/connector-imap@18.2.0\n\n\n## @objectstack/sdui-parser@18.2.0\n\n\n## @objectstack/example-crm@4.0.102\n\n\n## @objectstack/example-multi-package@0.0.9\n\n\n## @objectstack/example-showcase@0.3.24\n\n\n## @objectstack/example-todo@4.0.102\n\n\n## @objectstack/example-embed-objectql@0.0.42\n\n\n## @objectstack/dogfood@0.0.50\n\n\n## @objectstack/downstream-contract@0.0.48\n\n\n## @objectstack/http-conformance@0.1.10\n\n"

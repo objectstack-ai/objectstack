@@ -1,0 +1,35 @@
+{
+  "number": 25766,
+  "kind": "issue",
+  "title": "cutover-prep(ui-merge): `check:test-source-alias` reads type-position and string-content `import('x')` as clocked loads — 7 false positives under `ui/` on the merged layout (parent #25677, decision F residual)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:epic"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T09:33:33Z",
+  "updated_at": "2026-10-25T10:38:25Z",
+  "closed_at": "2026-10-25T10:38:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25766",
+  "body": "Filing gate ③ + ④: pre-freeze prep card of the epic #25677 (`pm:epic`; epic PM `session_01RSDL3SFtJaKzcymvCD8RsU`). Residual of cutover decision **F** (#25763): the objectui seat measured that 7 of the 37 function-body-import findings `check:test-source-alias` reports under `ui/` are not runtime loads at all, so #25763's \"0 findings\" acceptance cannot be met from the test-file side without adding module loads those files do not pay today. This card is the gate half. Part of #25677. Lands in **objectstack-ai/objectstack** `main` before the cutover freeze (#25752 step 2).\n\n**谁付代价(业务筛):** after the cutover `check:test-source-alias` runs on `ui/` too. On the merged layout (verify branch `claude/project-thread-dwhq6r-25697-verify`, head 9e37acd126, no patch) it prints these 7 findings that no test-file edit can honestly clear:\n\n| file | line | what the gate matched |\n|---|---|---|\n| `ui/packages/plugin-calendar/src/__tests__/spec-symbol-4650.test.ts` | 58 | `type _NewNameIsFree = import('@objectstack/spec/ui').X` under a `@ts-expect-error` tripwire whose header says the inline type-level form is deliberate (a namespace import would bind the eslint-restricted `FormField`) |\n| `ui/packages/plugin-form/src/__tests__/spec-symbol-4650.test.ts` | 50 | same tripwire shape |\n| `ui/packages/plugin-grid/src/__tests__/spec-symbol-4650.test.ts` | 73 | same tripwire shape |\n| `ui/packages/plugin-kanban/src/__tests__/spec-symbol-4650.test.ts` | 50 | same tripwire shape |\n| `ui/packages/types/src/__tests__/dashboard-global-filters-spec-binding.test.ts` | 102 | `type SpecGlobalFilter = import('@objectstack/spec/ui').GlobalFilter` type alias |\n| `ui/packages/components/src/renderers/complex/__tests__/data-table.test.ts` | 66 | `const testSchema: import('@object-ui/types').DataTableSchema = {` type annotation |\n| `ui/scripts/__tests__/check-spec-range-floors.test.ts` | 286 | `type X = import('@objectstack/spec/data').FeedFilterMode;` as TEXT inside a template-literal fixture fed to the scanner under test |\n\nEach is erased by `tsc` (or is string content) and resolves nothing at run time. Left as is, the cutover PR and every later `ui/` PR is red on this gate for files that are correct, and the only \"fix\" available to a ui developer is a side-effect import that adds a real module load the file did not pay, and that in the four tripwires contradicts their stated design. The gate's own words (header, \"`typeof import(…)` queries appear in neither: they never resolve\") already claim the right behaviour; the implementation does not reach it.\n\n## 维护者速读\n\nobjectstack 的 `check:test-source-alias` 把 `type X = import('p').T`、`const x: import('p').T` 和模板字符串里的文本当成函数体内的运行时 `import()`,合并布局下 ui/ 有 7 处误报。F 卡(#25763)修 30 处真实的;本卡修闸门,让这 7 处不再报。非治理面(`scripts/`),不需要 Tier H 审批。\n\n## Cause (read on 9e37acd126, `scripts/check-test-source-alias.mjs`)\n\n- `moduleLoadSites` runs `IMPORT_PATTERNS` over the `commentsOnly` projection (strings kept so the specifier can be read) and the only type-position guard is `TYPE_QUERY_BEFORE = /\\btypeof\\s*$/` tested on `codeOnly` before the keyword. A `type Name =` alias head and a `:` annotation head are not recognised; a match whose keyword sits inside masked string content (blank in `codeOnly`) is not rejected.\n\n## What to change (objectstack, one draft PR to `main`)\n\n1. In `moduleLoadSites`, reject a dynamic match when `codeOnly` at `head` does not spell the keyword (`import` / `require`) — that is the string-content case; the specifier can still be read from `commentsOnly` exactly as today.\n2. Recognise type positions in front of `import(`: the `type Name<…>? =` alias head (and `export type`), and the annotation head (`: import(…).Member` on a declaration or parameter). Keep `typeof` as is. Design the annotation rule so a real `{ key: import('p') }` object-property load and `const p = import('p')` are still counted — measurement wins; one safe discriminator is that a type query is always followed by `.Identifier` that is NOT then called, while a runtime `import()` is awaited, assigned, or `.then`-chained.\n3. Self-test: add fixtures for the three shapes (type alias, annotation, string content) as negatives, and keep a positive fixture for `{ key: import('p') }` and `const p = import('p')` in a function body. Remember #12555's lesson: the clause scan must not swallow a neighbouring runtime import while erasing a type position.\n4. ⛔ Do not add the 7 files to `KNOWN_UNALIASED_TEST_IMPORTS` or any allowlist; the gate must read them correctly. ⛔ No edit to the `ui/` files (they are #25763's and objectui's).\n\n## Acceptance\n\n- `pnpm check:test-source-alias` (self-test and run) green on objectstack `main`.\n- On the merged layout (verify head 9e37acd126 + your diff applied at the root), the 7 findings above are gone and the remaining function-body findings under `ui/` are exactly #25763's 30 real ones (or fewer once #25763 lands). Post the before/after counts on this card.\n- No change to the gate's reading of objectstack's own packages: the `KNOWN_UNALIASED_TEST_IMPORTS` ledger recompute reports no diff.\n\n**Size:** S. **Clause-②:** no. **Metadata-protocol:** none. **Responsibility:** gate defect, pre-existing on `main` (not caused by a seat PR); not a defect card against a seat.\n\n## 风险\n\n- Over-broad type-position rules hide a real load; the positive fixtures in step 3 are the guard. If the discriminator cannot be made safe, keep only the `type … =` and string-content rejections (6 of the 7) and report the annotation case as residual.\n\n## Dedupe\n\n`search_issues` 2026-10-25 09:31Z 「check-test-source-alias import type query typeof annotation string literal false positive」: 7 hits, all closed (#16299 codeOnly-projection pin, #8020/#8108 alias-replacement reading, #8180 TYPE axis of the vitest alias, #9955 dispatch-gates naming, #12472, #17304); none covers type-position or string-content `import(…)` matches. **New.**"
+}

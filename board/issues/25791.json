@@ -1,0 +1,33 @@
+{
+  "number": 25791,
+  "kind": "issue",
+  "title": "Closing-target claim guard reads a yielded claim as the newest claim and reds the winning branch",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:skills",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T11:39:35Z",
+  "updated_at": "2026-10-25T12:00:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25791",
+  "body": "Filing gate: ① a defect measured on a live PR.\nReader: `domain:skills` seat, the next PR on `scripts/check-closing-target-claim.mjs` and the claim reader it imports (`claimGovernance` / `h46ClaimNamesBranch` in `scripts/pm/check-half-states.mjs`).\nDedupe (open AND closed, the 300 newest issues by title, local grep for yield / closing-target / claim guard / 让行 / already claimed): 0 hits. `/search` is refused by the egress proxy, so the dedupe is title-only over that window.\n\n## What happened (PR #25780, card #25729, 2026-10-25)\n\n- Seat 1 claimed the card at 09:47Z (comment 6396126096, `Branch: claude/project-thread-biervl`).\n- Seat 2 claimed the same card at 09:54Z (6396193561, `Branch: claude/issue-25729-adr-tier-row`), read the thread again, and yielded at 10:01Z (6396249639, first line `already claimed — yielding`), exactly as `execution-duties.md` 〈认领〉 ③ prescribes. The branch it named was never created.\n- The PR's \"The card this PR closes must claim this branch\" check failed (run 40183909709): the guard reads the NEWEST `Claim:` comment, which was seat 2's yielded one, and judged the card claimed on another branch.\n- It went green only after seat 1 re-posted an identical claim (6396460178) and edited the PR body to re-run the guard.\n\n## Why it matters\n\nThe race re-read rule makes the loser yield in a comment, never by deleting its claim. So every lawful two-seat race on one card leaves the winner's PR red until a human or the seat notices and re-posts. That costs a cycle on exactly the cards where two seats were both live.\n\n## Wanted\n\nA `Claim:` comment that is answered later on the same thread by a yield from the same session (the protocol's `already claimed — yielding` line, which names that session) is not the card's current claim. The guard skips it and reads the newest claim that is not yielded. A yield that names no session, or a later `Claim:` from the yielding session, keeps today's behaviour. If the yield spelling is not machine-readable enough to key on, the fix may instead define one fixed first line for the yield and teach that line in `execution-duties.md` 〈认领〉 ③ in the same PR.\n\n## Acceptance\n\n- A self-test fixture reproduces this thread (claim A → claim B → B yields) and the guard passes for branch A and fails for branch B.\n- The existing fixtures stay green; `pnpm check:pm-skill-ratchet` and `check:pm-skill-id-lint` stay green if skill text moves.\n- Writes: PR only through the relay's `pr_create`; ⛔ GitHub MCP writes.\n\nSession: `session_014FZ3TJucS1L7BdMe5DAzXC` (`domain:skills#1`, seat post #7623)"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 25795,
+  "kind": "pull_request",
+  "title": "chore(pm-dispatch): tooling cap per dispatch round, pm-rule cards on the maintainer's naming, two round-report readings, spec key lands with its first reader (D3 = A, D5 = A)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T12:26:45Z",
+  "updated_at": "2026-10-25T12:58:42Z",
+  "closed_at": "2026-10-25T12:58:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-25T12:58:40Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25795",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XDHT9sSVf8qP2xerGBcJSAC)_\n\nFixes #25768\nClause-②: no\nMetadata-protocol: none\n\nWrites the maintainer's rulings D3 = A and D5 = A into the pm-dispatch rule text. `.claude/**` only (Tier S); no package, no changeset (`skip-changeset`), no gate and no script.\n\n## The ruling (verbatim, untranslated)\n\nTesla, 2026-10-25T09:23Z, director thread, answering the assessment's option lists:\n\n> 「D4 · 固定发版日 没必要；其他同意 ，npm dist-tag 手工清理 应该立一张管理者维护的卡」\n\n\"其他同意\" = D3 A and D5 A as the card spells them. Triage record 6396195056: the cap is reported, not enforced (「不做门禁」). D4 and the npm dist-tag card are out of scope here.\n\n## What changed, rule by rule (each rule has one home)\n\n| Ruling part | Home | Text |\n|---|---|---|\n| D3 ≤10% `tooling` per dispatch round, overflow stays in backlog, no gate | `references/execution-duties.md` 〈候选与批次〉, right under the candidate line | new line; ⛔ no gate, no script |\n| D3 the `tooling` label gains a reader | `SKILL.md` label glossary row | 三具名读者 → 四具名读者 (adds 每轮派发 ≤10%); this is the row the retired fleet one-slot reader used to sit in, so the cap folds there instead of a parallel rule |\n| D3 a pm-rule card is filed only when the maintainer names it, quoting the naming | `references/filing-gate.md` 〈立卡门〉, under ③ | new line: files as ③, body quotes the naming; ⛔ a seat's own proposal is not filed |\n| D3 consequence for handover reports | `references/seat-lifecycle.md` 〈座位贴协议〉 | 「原则错/缺 → skills 席专题」 becomes 「只进简报,维护者点名才立卡」; 「三类以 finding 入」 becomes 「后两类」 (in place) |\n| D3 two round-report readings | `references/seat-lifecycle.md` 〈轮次报告与节奏〉 | follow-up PRs opened within 48h of a landed PR; product-commit share = merged commits touching none of `.claude/`, `AGENTS.md`, `scripts/pm`, gate scripts, `.github/workflows` |\n| D5 a new spec key lands with its first reader; no `planned` row alone; hotcrm readers use the same merge batch; effective once `ui/` exists on `main` | `references/cross-repo-coordination.md` rule 2 | new line right under rule 2; it carries the cutover condition in words a seat can check (`ui/` on `main` — absent on `0790d0a4`), and until then rule 2's spec/后端先行 stands |\n\n## Line budget (ratchet: paid by deletion, no ceiling raised)\n\n| File | Before / ceiling | After | Paid by |\n|---|---|---|---|\n| `SKILL.md` | 319 / 319 | 319 | in-place row edit (table row, length-exempt; widest row 341 = pin) |\n| `execution-duties.md` | 188 / 188 | 188 | deleted 「dev `pr_create` 带 `assignees: [LOGIN]`,同笔指派;席位自有 PR 指派自己」: the dev half is `os-dev.md` rule 2 verbatim (and this file's own 「无条件条款只住角色文件」), the seat half follows from the line above it (「PR assignee = 卡的」; a seat's card names the seat as assignee) |\n| `filing-gate.md` | 68 / 68 | 67 | deleted the back-pointer 「见 triage-duties.md 与 reading-discipline.md 的指针行」 and its blank line: both files already point here, and the line carried no rule. Headroom 1: lowering the row in `check-skill-line-ratchet.mjs` is outside this card's file surface |\n| `seat-lifecycle.md` | 95 / 96 | 96 | used the 1 line of headroom, and deleted 「awaiting a human merge 项」 from the round-report line, which `SKILL.md` already carries (「④ 轮次报告单列 awaiting a human merge」); the freed bytes carry the follow-up-PR reading |\n| `cross-repo-coordination.md` | 51 / 51 | 51 | deleted 「objectui 构建产物经 `pnpm objectui:refresh` 回流」, which AGENTS.md (Frontend section) carries; `lanes/ui.md`'s pointer moves from this file to AGENTS.md in place |\n| `lanes/ui.md` | 38 / 38 | 38 | pointer edit only |\n\nCorpus total over the six files: 759 → 759. No re-wrap: every freed line or byte comes from deleted text, named above.\n\n## Gates (local, at `da43591c`)\n\nRe-derived on the rework head `da43591c` (cross-repo-coordination.md L28/L30 only): same 20 families, all 20 exit 0, `--ran` reconcile 20 run, 0 NOT-MEASURED. The first round below ran at `51664dd2`.\n\nDerived with `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`; each run with its exit captured before any pipe; reconciled with `--ran`: `✓ dispatch-gates --ran: 20 derived famil(ies) accounted for — 20 run, 0 NOT-MEASURED`.\n\nAll 20 exit 0, among them `pnpm check:pm-skill-ratchet`, `pnpm check:pm-skill-id-lint` (`87 file(s) clean`), `pnpm check:skill-frame-sync`, `pnpm check:pm-governed-merges`, `pnpm check:pm-governed-prose`, `pnpm check:nul-bytes`, `pnpm check:doc-authoring`. A first pass before `pnpm install` answered exit 3 (PREREQUISITE NOT MET) on eight families and exit 1 with `ERR_MODULE_NOT_FOUND` on `check:pm-expected-skips` (nothing measured); after install only `check:doc-formula-expressions` still answered 3, until `@objectstack/formula` and `@objectstack/lint` were built. Every family was re-run and recorded 0. CI runs the full set on the PR.\n\n## Acceptance notes\n\n- `references/lanes/skills.md` points 「fold-or-serial 必答与家族派发五门」 at 「SKILL.md 批次独立性段」, but both live in `references/execution-duties.md` 〈候选与批次〉. A stale pointer; carrier: none; not filed.\n- The cap is worded as the ruling gives it (「一轮派发的 10%」). At this fleet's round sizes (batch 1 to 3) a literal per-round 10% rounds to zero tooling cards; see the open question in the report on the card.\n- D5's \"same merge batch\" for hotcrm readers meets `lanes/hotcrm.md` (a hotcrm reader unlocks on PUBLISHED, not merged) and rule 2's `Blocked-by:` / never-same-batch lines. The new line is inert until `ui/` exists on `main`, so nothing conflicts today; the reading to adopt at cutover is an open question in the report.\n\n## 维护者速读(草稿)\n\n**改了什么**:把 D3、D5 两条裁决写进 pm-dispatch 技能。D3:每轮派发里工具类卡最多占一成,超出的留在积压;改动 pm 规则的卡只有你点名才立;每轮报告多报两个数(产品提交占比、落地后 48 小时内的跟进 PR 数)。D5:objectui 并入本仓(`main` 上出现 `ui/`)之后,新的 spec 键必须和它的第一个读者同一个 PR 落地,hotcrm 的读者走同一合并批,不再出现只声明没人读的 `planned` 行。\n\n**为什么改**:过去 14 天 17% 的合入提交在服务流程本身,新卡里三成多是工具/技能/流程;一个 spec 键曾拖成四个 PR、三次落地。这两条把精力拉回产品。\n\n**风险与代价(含回滚)**:不加门禁、不加脚本,只改规则文字,六个文件行数都不超上限。风险在解读:一成上限在一轮只派 1–3 张卡时按字面会变成零;hotcrm 依赖已发布的包,「同合并批」要在并仓时再定义。回滚 = revert 本 PR。\n\n**席位意见**:\n\n**你要做的**:无需操作;小轮次的一成怎么算、hotcrm 同合并批的含义,席位会在需要时单独请你裁。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Fx58tcuqmi5bveQGdRYq8r)_\n\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 25793,
+  "kind": "issue",
+  "title": "ADR-0141 author side: `os lint` / `os validate` report a `dependencies` range outside the stated grammar and an in-artifact co-delivered range mismatch",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:spec",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T12:02:06Z",
+  "updated_at": "2026-10-25T13:53:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25793",
+  "body": "Filing gate: ③ maintainer-directed — the author-side card ADR-0141 §Execution plan item 2 names, owed by landed work (PR #25717, merge `afe6ab9ccc`)\nRuling: #25403 comment 6369704387 (B′, maintainer 「同意」 2026-10-23T16:28:30Z) — the pre-install check refuses \"with a clear message\"; ADR-0141 D2 records that the install refusal is the backstop, not the place an author first learns the range grammar\nBusiness reason: an app author splitting a product into modules (HotCRM first, hotcrm#2271) should hear about an unreadable `dependencies` range, or a module whose declared range its sibling's version does not meet, at build — not from a tenant administrator whose install was refused. Without this card the first signal is a 422 in someone else's environment, and an in-artifact mismatch is never reported at all (D2 judges a co-delivered dependency for presence only).\nReader: the `packages/cli` / `packages/lint` lane, one PR beside `packages/cli/src/utils/protocol-version-gap.ts#checkProtocolVersionGap` (the `engines.protocol` reading `os validate` already performs)\nDedupe (open AND closed): \"dependencies range lint os validate semver range manifest dependencies\" → 5, none on a `dependencies` range (#22189 `requires`, #17069 empty stack, #15986 / #5032 / #4965 npm deps); \"pre-install dependency check dependency_missing install refuse missing dependency\" → 0\nSize: XS. Order: released with or before the runtime card #25792 (ADR-0141 item 1), so the first refusal an author meets is at build. It reads the range with the runtime card's reader; if this card goes first, it lands that reader (the sibling function in `packages/metadata-core/src/protocol-handshake.ts`) and the runtime card reuses it — ⛔ never a second reader.\n\n## What to build (ADR-0141 D2, last paragraph of \"The range reader, and the grammar it must state\")\n\n1. A rule that reports a `manifest.dependencies` value outside the stated grammar (at least `^`, `~`, `>=`, an `x` wildcard, `||` and the space intersection), naming the entry and what was unreadable.\n2. Inside one artifact (ADR-0130 multi-package), a rule that reports a co-delivered entry whose range the sibling package's declared `manifest.version` does not satisfy (e.g. core bumped to `2.0.0` while a module still declares `^1.0.0`). The install never reports this one (D2: presence only), so this is its only reporter.\n3. Both under `os lint` and `os validate` on the ADR-0130 D4 union fold (the multi-package stack, not the top level alone; #17069 is the precedent for that trap).\n\n## Out of scope\n\nJudging whether an out-of-artifact dependency is installed or in range — `os validate` cannot see the target environment (ADR-0141 §Consequences); that is #25792's install check."
+}

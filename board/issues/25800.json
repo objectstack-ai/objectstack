@@ -1,0 +1,32 @@
+{
+  "number": 25800,
+  "kind": "issue",
+  "title": "Flow actions: a `type: 'flow'` action cannot navigate to the record its run created — `onSuccess` is refused on flow actions and the run's response carries `output: {}`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "area:workflow",
+    "domain:spec",
+    "enhancement",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T13:30:47Z",
+  "updated_at": "2026-10-25T13:55:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25800",
+  "body": "Filing class: ③ capability gap, filed at destination by the hotclm director seat under the maintainer's ruling on objectstack-ai/hotclm#99 item 3 (batch 5, letter B, 2026-10-25). Unlabelled, no assignee; the objectstack seat triages.\n\n## Symptom (hotclm, `@objectstack/*` 18.1.0 and 17.7.0)\n\n`clm_contract` has a `type: 'flow'` header action `start_renewal` (target flow `renewal_start`, F12). Pressing it creates the renewal draft (`renewed_from` set) and toasts the `successMessage`, but the user stays on the old contract's record page with nothing to click: no link in the toast, no navigation. A second press is refused by the flow (\"already has a renewal draft MSA-2026-0018\"), so the only way to the draft is the list view.\n\n## Why the app cannot declare it\n\n- `onSuccess.navigate` exists and can read `${result.id}`, but `ON_SUCCESS_EXECUTORS = new Set(['api', 'script'])` (`packages/spec/src/ui/action-on-success-executor.ts:64`): `ActionSchema` refuses `onSuccess` on a `flow` action. 17.7.0 refused at parse (\"if that capability is needed, it is a spec proposal\"); 18.1.0 refuses with the flow-specific message (\"would follow the flow's start, not a result … move the hop onto an `api` or `script` action\").\n- Even the response has nothing to navigate to: both `POST /api/v1/automation/renewal_start/trigger` (what the console sends) and `POST /api/v1/actions/clm_contract/start_renewal` answer `{ success: true, output: {}, successMessage }`. The `create_record` node's `outputVariable` is not an `isOutput` flow variable, so the new record's id never reaches the caller.\n- The console (`ActionRunner.handlePostExecution`) would perform `onSuccess` after any executor, but no validated flow action can carry the key; `judgeFlowLaunch`'s done arm returns `{ success, data, reload }` only.\n- Re-authoring the flow as a `script`/`api` action would reshape app metadata to dodge the gap, which the hotclm maintainer's standing rule forbids (「平台的问题就等平台」).\n\nMeasured by the hotclm dev on `origin/main e798190` (17.7.0) and read in the 18.1.0 spec dist; report: https://github.com/objectstack-ai/hotclm/issues/99#issuecomment-6392790257, seat analysis https://github.com/objectstack-ai/hotclm/issues/99#issuecomment-6392812609.\n\n## Expected capability\n\nAn autolaunched flow started from a record action should be able to hand a record back to the console, and the action should be able to navigate to it. One shape that fits the existing pieces:\n\n1. The flow run's response carries the flow's `isOutput` variables under `output` (today it is `{}` even when the flow declares outputs; if that is a flow-authoring gap rather than a runtime one, say which).\n2. `ON_SUCCESS_EXECUTORS` admits `flow` when the flow completes synchronously (no screen, no pause), with `${result.output.<var>}` interpolation, so `onSuccess: { navigate: '/apps/clm/clm_contract/record/${result.output.renewal_id}' }` is declarable.\n\nEither half alone is enough for a related-list fallback to become a link; both are needed for the \"press, land on the draft\" experience.\n\n## Dedupe\n\nSearched objectstack issues for flow action post-success navigation / onSuccess on flow / flow output in the action response: #25458 is about the `navigate` path form on api/script actions, #20296 is the liveness grading of `onSuccess.navigate`, #14244 is `recordLoadDenied` on flow actions. None asks for a flow action to navigate to a record the run produced."
+}

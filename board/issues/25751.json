@@ -2,9 +2,9 @@
   "number": 25751,
   "kind": "pull_request",
   "title": "fix(spec/liveness): drop the comment-only engine.ts pointer from the translation/flows.screens row",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -21,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-25T05:23:09Z",
-  "updated_at": "2026-10-25T06:48:19Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-25T14:02:52Z",
+  "closed_at": "2026-10-25T14:02:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/25751",
   "body": "Fixes #25742\n\nClause-②: no\nMetadata-protocol: none\n\n## What\n\n`packages/spec/liveness/translation.json`, row `flows.screens`: the `evidence` pointer at `packages/services/service-automation/src/engine.ts#renderFlowTextSlot` is dropped. This is proposal (a) on the card. One dated sentence is added to the end of the row's `note` to record why. The status (`live`), `verifiedAt`, the `producer` field and every other pointer are unchanged. The diff also adds a `patch` changeset (see below).\n\n## Why\n\n`check:liveness` (the `Spec property liveness` workflow) was red on `main`, and so was `scripts/liveness/check-liveness.test.ts`, which `Test Core` runs on every PR that reaches `packages/spec`. The key-mention check reported `translation/flows.screens → packages/services/service-automation/src/engine.ts`: a cited file that never names `screens`. That pair only ever anchored through a comment (\"states two screens down\"). #25734 moved that comment into `run-resume.ts` when it extracted the body of `resumeInternal`. `engine.ts` now keeps only a `renderFlowTextSlot` method that delegates to `node-text-rendering.ts`, so the pointer told a reader nothing about the key.\n\nThe row's other in-repo pointer, `builtin/screen-nodes.ts#registerScreenNodes`, names the key and anchors: the gate counts that pair as anchored, and its `#registerScreenNodes` symbol anchor resolves. There is no gate edit and no `key-mention.baseline.json` row.\n\n## Verification\n\nRed first, on `origin/main` c61f75d10f, before the edit:\n\n- `pnpm --filter @objectstack/spec check:liveness` exited 1 with `key-mention anchoring: 762 (entry, cited file) pair(s) asked, 760 anchored, 1 exempt, 1 UNANCHORED.`, naming `translation/flows.screens → packages/services/service-automation/src/engine.ts`.\n- `pnpm --filter @objectstack/spec exec vitest run --project local --maxWorkers=2 scripts/liveness/check-liveness.test.ts` gave `Tests 23 failed | 48 passed (71)`, with the lock printing `VERDICT command-exit 1`.\n\nGreen on the final head fcee225b53, which is the branch merged with `origin/main` d1e329e96d:\n\n- `check:liveness` exited 0 with `761 (entry, cited file) pair(s) asked, 760 anchored, 1 exempt.` It also printed `state-counts/ is current`. No shard was regenerated because no status moved: `1049 live · 1 experimental · 1 live-elsewhere · 113 dead · 23 planned = 1187 classified`.\n- `check-liveness.test.ts` gave `Tests 71 passed (71)`, `VERDICT command-exit 0`.\n- `pnpm --filter @objectstack/spec test` gave `Test Files 720 passed | 1 skipped (721)` and `Tests 21831 passed | 1 skipped | 1 todo (21833)`, `VERDICT command-exit 0`.\n- `pnpm --filter @objectstack/spec test:repo` gave `Test Files 79 passed (79)` and `Tests 1269 passed (1269)`, `VERDICT command-exit 0`.\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 65 commands, and all 65 were run. 61 exited 0. 4 exited 3 with PREREQUISITE NOT MET: `check:dts-closure`, `check:dual-build-cjs-loads`, `check:lean-entry-closure` and `check:sourcemap-no-sources-content`. Each of those needs every package's `dist/`. No build reads the ledger JSON (only code comments mention it), so these four are NOT MEASURED locally and are left to CI. The `--ran` check printed `65 derived famil(ies) accounted for — 61 run, 4 NOT-MEASURED`.\n- The three roster gates that the derivation flags under `packages/` (`check:authz-resolver`, `check:error-code-casing`, `check:filter-alias-parity`) each exited 0.\n- Not run locally: `pnpm --filter @objectstack/spec typecheck`. The diff is one JSON ledger and one changeset, and no tsc program in the package includes either (`tsconfig.json` includes only `src/**/*`). CI's `TypeScript Type Check` covers it. There is no ablation because the diff changes ledger data, not a tested behaviour.\n\n## Changeset\n\nThis PR adds a `patch` changeset for `@objectstack/spec`. The dispatch planned a `skip-changeset` label, on the reading that a ledger-only change publishes nothing. Measured, it does publish. `liveness` is in the `files[]` of `@objectstack/spec`, and `npm pack --dry-run` lists `liveness/translation.json` (positive control: `README.md` is listed too). Ledger-only changes since 2026-08-24 carry a `patch` changeset for the same reason, for example 2ee5861b0f and 3fed1eb00a. So this PR has no `skip-changeset` label.\n\n## Acceptance notes\n\n- The surviving in-repo pointer also anchors only through a comment. `screen-nodes.ts` names `screens` once, in the comment at line 202 that spells the key as `flows.FLOW.screens.NODE_ID.{title,description}`. The code builds the key through `flowScreenCopyKey` (`packages/spec/src/system/i18n-resolver.ts`), so a later rewording of that comment would turn this row red in the same way. This is an observation only and is not filed. Carrier: none.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01PC4NPXPgPmpDRG9DdDnyXT)_\n"

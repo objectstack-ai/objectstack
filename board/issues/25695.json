@@ -2,8 +2,8 @@
   "number": 25695,
   "kind": "issue",
   "title": "pm-dispatch: 决策卡 `Brief-claimed-by:` 标记，防两个总监席对同一张 needs-user-decision 卡并行出批（双裁撞车）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-elon-musk",
@@ -13,18 +13,21 @@
   "labels": [
     "domain:skills",
     "enhancement",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-24T16:40:39Z",
-  "updated_at": "2026-10-24T16:40:39Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-25T13:59:51Z",
+  "closed_at": "2026-10-25T13:58:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25695",
   "body": "Filing gate: ③ 维护者直派。维护者 2026-10-24T16:30:45Z 在「待决策汇总」总监席线程原话：「skills 立」，针对本席 2026-10-24 02:3xZ 的提案「立一张 skills S 卡：决策卡上加 `Brief-claimed-by:` 标记」。\nReader who acts: `domain:skills` 席（席位贴 #19287，现空席；下一任接任时从队列取）。改 `.claude/skills/pm-dispatch/references/decision-analysis.md`、`references/lanes/director.md`、`references/triage-duties.md`（总监扫 `needs-user-decision` 的那条）。\nDedupe: `repo:objectstack-ai/objectstack \"Brief-claimed-by\"` → 1 hit（#18831，closed，认领拼写 finding，不同题）；无同题卡（open + closed）。\n立卡人：总监席（维护者账户，`session_01Bf4vhia9fHNXpqC1PCfxie`）；自贴 `domain:skills`，按 SKILL.md 例外二执行席可直接认领。\n\n## 背景（实测）\n\n2026-10-24 00:43:45Z 本线程（总监决裁批 #9）与 os-zhuang 账户召唤的总监席（其批 #388，维护者 00:47Z 「同意」）对同一张 #25496 束各出一批，相隔 4 分钟。两批字母不同：#25442 一边记 D 一边记 B，#25447 一边 hold 一边 now。线程先后顺序让 B / now 生效，直到 05:17Z（#25442 → D，#25570 关闭）与 16:06Z（#25447 → A）改裁。两席都没有办法看到对方正在写批：账号不同，项目互不可见，GitHub 是唯一公共总线。\n\n## 要改什么（S，最轻形态）\n\n- 总监席把一张 `needs-user-decision` 卡纳入批前，在该卡留一条评论，首行 `Brief-claimed-by: session_… · batch #N · 2026-10-24T00:40Z`。只认会话 id，不认账号（维护者的账号会轮换）。\n- 另一总监席扫 `needs-user-decision` 时，读到该行且距今不足 24 小时的卡跳过：不出批、不裁、不改标签。超过 24 小时且卡上无 `Ruling:` 行的视为失效，可接管，接管时再写一行 `Brief-claimed-by:`。\n- `Ruling:` 行落下即解除；卡关闭即解除；不需要显式撤销。\n- 分诊 `triage-duties.md` 的「有 `Ruling:`/RULED 的卡再入箱」规则不变。\n- ⛔ 不做：新标签、新脚本、跨账号同步、Project 字段。一行评论即标记：既有卡一条评论能承载的事不另立机制。\n\n## 验收\n\n- `decision-analysis.md` 与 `lanes/director.md` 各增一到两行规则，`triage-duties.md` 的总监扫描条引用它。\n- 演练：同一张卡两席先后扫描，第二席读到未过期的标记即跳过；读到过期且无 `Ruling:` 的标记即接管并覆写。\n\n## 范围外\n\nobjectui / hotcrm 的 app 项目总监（#25558 裁 D）同规则，由它们各自的 AGENTS / skills 镜像；本卡只改 objectstack 的 pm-dispatch。"

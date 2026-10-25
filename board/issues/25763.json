@@ -1,0 +1,39 @@
+{
+  "number": 25763,
+  "kind": "issue",
+  "title": "cutover-prep(ui-merge): warm the function-body `import()` of `@objectstack/*` / `@object-ui/*` in the ui test files `check:test-source-alias` names, so the merged tree's Test UI stops clocking out (parent #25677, decision F)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:epic",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T09:18:46Z",
+  "updated_at": "2026-10-25T10:33:15Z",
+  "closed_at": "2026-10-25T10:33:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25763",
+  "body": "Filing gate ③ + ④: pre-freeze prep card of the epic #25677 (`pm:epic`; epic PM `session_01RSDL3SFtJaKzcymvCD8RsU`), decided by the maintainer as cutover decision **F** (director thread, 2026-10-25 09:06Z: 「17f · 同意」: adopt for the function-body half; the vitest-alias half of the gate is scoped to non-`ui/` members in the cutover adaptation commit, not here). Part of #25677. Lands in **objectstack-ai/objectui** `main` before the cutover freeze (#25752 step 2).\n\n**谁付代价(业务筛):** in the merged tree a ui test that does `await import('@objectstack/lint')` (or `@objectstack/spec`, `@object-ui/*`) inside a function body resolves to the workspace package's `dist` and pays its first transform inside the test's own clock. Verify runs 8 and 11 measured the cost: `app-shell/src/preview/__tests__/DraftChangesPanel.securityProblems.test.tsx` fails 2 of 3 because a 385-export `@objectstack/lint` transform exceeds the 1000 ms `findBy*` window (bill item 24); with a 1.5 s pre-wait it passes. Left as is, every Test UI shard carrying one of these files is a coin flip after the cutover, and each flip costs a re-run of a 12-minute shard.\n\n## 维护者速读\n\nobjectstack 的 `check:test-source-alias` 在合并树上点名约 25 个 ui 测试文件:它们在函数体内 `import()` workspace 包,首个转换落在测试自己的计时窗里。验证分支第 8/11 轮已有一个真实失败(DraftChangesPanel)。你裁定「采纳」(F):本卡在冻结前把这些 import 热化(模块顶层预先导入,或 vitest 别名到源码),让合并后的 Test UI 不再靠运行时机运气。\n\n## What to change (objectui, one draft PR to `main`)\n\n1. Re-measure the list on the merged layout (recipe below): run objectstack's `pnpm check:test-source-alias` and keep only the **function-body import** findings under `ui/` (the vitest-alias findings — \"tests import workspace packages resolving to dist with no source alias\" — are out of scope here). The epic seat measured 99 items in total on verify run 8 of which roughly 25 are this class (`scratchpad` log `run8-test-source-alias.log`; the seat posts the file list on this card as a comment).\n2. For each file: a module-scope warm import of the same specifier (or the vitest alias to source, where the package already aliases), so the first transform happens before the test's clock starts. The `DraftChangesPanel.securityProblems` file is handled by 2c round 2 (a) on #25727 — skip it, do not conflict.\n3. ⛔ No timeout widening, no `vi.setConfig`, no skipping: the fix is the import shape.\n\n## Acceptance\n\n- On the merged layout (verify branch `claude/project-thread-dwhq6r-25697-verify` head 9e37acd126 + your diff via `git apply --directory=ui`), `pnpm check:test-source-alias` reports **0** function-body-import findings under `ui/` (alias findings may remain; they are the adaptation commit's).\n- objectui standalone: the touched test files pass `pnpm exec vitest run --root . <files>` from the ui root; `pnpm type-check` green; CI green on the draft PR.\n- PR body: the file list with before/after finding counts.\n\n**Size:** M (mechanical over ~24 files; judgment only where a package needs an alias). **Clause-②:** no. **Metadata-protocol:** none. **Responsibility:** n/a — not a defect card.\n\n## 风险\n\n- A warm import can itself be slow in objectui's standalone tree (it pays the same transform earlier); measure the shard time before/after and report it.\n- Files that import a package which is not yet built in the standalone tree: use the alias-to-source form there.\n\n## Dedupe\n\n`search_issues` 2026-10-25 09:12Z 「test-source-alias function-body import ui tests」: 6 hits, all closed objectstack-side gate defects or service-package alias cards (#8020, #8104, #8108, #8180, #9955, #22047); none covers `ui/`. **New.**"
+}

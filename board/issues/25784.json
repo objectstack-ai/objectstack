@@ -1,0 +1,36 @@
+{
+  "number": 25784,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): a seat reads requested_reviewers itself before a Tier H handoff; the per-author request rule is spelled out",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T10:40:10Z",
+  "updated_at": "2026-10-25T13:58:37Z",
+  "closed_at": "2026-10-25T13:58:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-25T13:58:35Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25784",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-zhuang\"} -->\n_Requested by **Sam** · [project thread](https://claude.ai/code/project/chan_01GsBogozeZG5sdpAARrN7HP?thread=cmsg_01GsBogozeZG5sdpAARrN7HPBs5QrGLs3ZTy5kKBVVxwzi)_\n\nRefs #25782 (not `Fixes` yet: the card has no claim. The `domain:skills` seat that claims it names this branch in its `Claim:` and switches this line to `Fixes`.)\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\n`.claude/skills/pm-dispatch/SKILL.md`, section 〈路径分叉〉, rule ③ (lines 198–201 on `origin/main` `f0cf3383`). Four lines rewritten in place, net 0 lines.\n\nBefore:\n\n```text\n- ③ 请审是中继 op:`pr_create`/`pr_ready` 命中 Tier H 即向 `GOVERNED_APPROVERS` 全员请审。\n- 已请审/已指派/已评审者跳过(零写);PR 作者即其一时请审必 422,op 改为 assign 该账户替代。\n- 席位只核对 run 摘要 governed review 行,缺口才手补(免碰 draft 位 REST 路)并在轮次报告点名。\n- ready/draft 走中继 op;MCP 兜底已拒;端点见 rest-channel。\n```\n\nAfter:\n\n```text\n- ③ 中继 `pr_create`/`pr_ready` 命中 Tier H 即向 `GOVERNED_APPROVERS` 中未请/派/审者请审。\n- 作者是审批人 ⇒ 指派它、请其余(请它必 422),否则请全员;速读只点非作者审批人去批。\n- 脱中继开的 PR 无 run 行:交速读前席位恒自读 `requested_reviewers`/`assignees`,⛔ 不只看 run 行。\n- 缺口经中继 `pr_request_reviewers`/`assign` 补,⛔ 不碰 draft 位;ACCEPT 与轮报点名脱中继作者。\n```\n\n- **Card item 1 (backstop).** The seat reads the PR's own `requested_reviewers` and `assignees` before the speed-read, instead of only the run row; a PR opened outside the relay has no run row by construction. Gaps are filled with the relay ops `pr_request_reviewers` (a missing request) and `assign` (an approver-author missing its assignment; added on the contract review's note), and the off-relay author is named in the ACCEPT and the round report. This extends `contract-review.md`'s 「另记作者」 note from contract reviews to every Tier H handoff.\n- **Card item 2 (per-author rule).** Stated in role words, exactly what `governedReviewPlan` (`scripts/pm/fleet-write/execute.mjs:430`) computes: covered = requested ∪ assigned ∪ submitted-review; `toRequest` = uncovered approvers minus the author; `toAssign` = the author when it is an uncovered approver; a non-approver author (the fleet bot, any other login) gets every uncovered approver requested. Its self-test rows at `execute.mjs:1387–1390` pin the same cases.\n- **Card item 3 (speed-read).** 「你要做的」 names only a non-author approver, because GitHub refuses a self-approval.\n\n### Deviation: prose, not the card's table\n\nThe card asks for the rule \"as a table\". It is written as one prose line instead, because:\n\n- `SKILL.md` is at its 319-line ceiling (`check-skill-line-ratchet.mjs`), and a four-row table costs six lines. A raise needs a ruling of record that orders the text; none exists for this card.\n- Every `references/*.md` that could host it carries a `MAX_TABLE_ROW_BYTES` pin of 0, which also needs a maintainer ruling to raise.\n- `project-forms.md` keeps rules in role words and logins out of rules text; the rule in role words covers all four of the card's rows. For reference, with today's `GOVERNED_APPROVERS` (`os-zhuang`, `hotlong`) it reads:\n\n| PR author | requested | assigned | can approve |\n|---|---|---|---|\n| `objectstack-fleet[bot]` | `os-zhuang`, `hotlong` | — | either |\n| `os-zhuang` | `hotlong` | `os-zhuang` | `hotlong` |\n| `hotlong` | `os-zhuang` | `hotlong` | `os-zhuang` |\n| any other login | `os-zhuang`, `hotlong` | — | either |\n\nA direct human merge stays open in every row (rule ②).\n\n### Survival of the dropped clauses\n\nThe old line 201 is gone; each clause still has a home:\n\n- 「ready/draft 走中继 op」 and 「MCP 兜底已拒」: `references/platform-readings.md:47–48` (「请审恒走它;MCP 兜底已拒」, 「undraft 与挂载走中继 op … MCP 兜底已拒」), and SKILL.md 全体座位的不变量 「内容写只走 REST 代理,⛔ 无 MCP 写」.\n- 「端点见 rest-channel」: `references/rest-channel.md` spells `pr_ready`/`pr_draft`, and `landing-operations.md` B points there (「拼写见 `rest-channel.md`」).\n- 「(零写)」 and 「免碰 draft 位」: carried as 「未请/派/审者」 and 「⛔ 不碰 draft 位」 in the new lines.\n\n### Not changed: the `Writes:` line\n\nThe dispatch order's `Writes:` line (PR only through relay `pr_create`) is already mandatory at `references/execution-duties.md:129` (「派发令恒带 `Writes:` 行」) and `references/dispatch-runbook.md:140`. The cloud-side miss behind this card was a seat not following that line; no text change is owed.\n\nThe maintainer's words (2026-10-25, Claude Code project \"cloud\", verbatim, as quoted in the card):\n\n> 等我手工合并的，为什么没有按照 pm-dispatch 技能请求审核\n>\n> 我说的需要更新 github 上的项目吗\n>\n> 这个还识别账户的吗？hotlong 开发的会自动请审吗？\n\n## 维护者速读(草稿)\n\n- 改了什么:pm-dispatch 的 Tier H 请审规则改两点。一是席位在交速读前自己读 PR 的 `requested_reviewers`/`assignees`,有缺口就经中继补请审,不再只看中继的 run 行。二是把按作者请审的规则写明:作者是审批人就指派他本人、请另一位;其他作者两位都请;速读只请非作者那位批。\n- 为什么改:直接用账户开的 Tier H PR(不经中继)没有自动请审,也没有 run 行可核,cloud 上两张 PR 因此一直没人被请审。\n- 风险与代价(含回滚):只改技能文本,行数不变,删掉的一行在 platform-readings 和 rest-channel 里都还有。回滚即还原这四行。\n- 席位意见:\n- 你要做的:PR 是受管面(`.claude/**`,Tier S),达档复核在案后由 skills 车道席位落地。\n\n## Acceptance notes\n\n- Lane: this PR was written from the cloud project (account `os-zhuang`), which holds no `domain:skills` seat; the card is not claimed and carries no triage labels yet. Claim, ACCEPT and landing belong to a `domain:skills` seat (#7623, #19287).\n- Hot file: `SKILL.md` is also touched by open PR #25776 (hunks at 〈红线〉 and 〈阶段细则索引〉); no overlap with this hunk at 〈路径分叉〉, so either order merges cleanly.\n- Line ceiling: 319/319 before and after; the new lines are 107, 117, 119 and 115 bytes (cap 120).\n- No changeset: `.claude/**` publishes nothing.\n- Branch name is the session's designated branch, not `claude/issue-<n>-<slug>`: the platform lets this thread push only that branch.\n\n## Gates (local)\n\nOn head `c79e2346` (the one-line `assign` delta): `pnpm check:pm-skill-ratchet`, `check:pm-skill-id-lint`, `check:pm-governed-prose`, `check:skill-frame-sync`, each exit 0.\n\nOn head `bc491118`: Derived by `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 20 commands, every one exit 0 after `pnpm install`. `pnpm --filter @objectstack/lint run check:doc-formula-expressions` first exited 3 (prerequisite: `@objectstack/formula` / `@objectstack/lint` unbuilt) and exited 0 after `turbo run build` of those two. 20 derived, 20 run, each with its exit code recorded before any pipe.\n\nSession: `session_01FiwXn7nJjWeZrtvzYraPVj`\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01FiwXn7nJjWeZrtvzYraPVj\n"
+}

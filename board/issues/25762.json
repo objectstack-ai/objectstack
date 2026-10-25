@@ -1,0 +1,39 @@
+{
+  "number": 25762,
+  "kind": "issue",
+  "title": "cutover-prep(ui-merge): the 9 `@object-ui/types` duration keys carry their unit in the key name, with ADR-0087 conversions, before the freeze (parent #25677, decision E)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:epic",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T09:18:10Z",
+  "updated_at": "2026-10-25T12:13:59Z",
+  "closed_at": "2026-10-25T12:13:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25762",
+  "body": "Filing gate ③ + ④: pre-freeze prep card of the epic #25677 (`pm:epic`; epic PM `session_01RSDL3SFtJaKzcymvCD8RsU`), decided by the maintainer as cutover decision **E** (director thread, 2026-10-25 09:06Z: 「17e · 同意」). Part of #25677. Lands in **objectstack-ai/objectui** `main` before the cutover freeze (#25752 step 2); the objectstack side needs no change.\n\n**谁付代价(业务筛):** after the cutover, objectstack's spec gate `check:duration-unit-keys` runs over `ui/packages/types/src/zod` and refuses 9 keys whose description names a unit the key name lacks. Either every ui author keeps reading `timeout: 300` without knowing whether it is ms or s (the defect ADR-0087 retired on the objectstack side in #15679/#15680), or the gate is exempted for `ui/`, which keeps two vocabularies in one repo. The maintainer chose the rename.\n\n## 维护者速读\n\nobjectui 的 `@object-ui/types` 里 9 个时长键(autoPlay、autoResponseDelay、timeout、delay、duration、delayDuration、openDelay、closeDelay、refreshInterval)只在描述里写单位,键名没有。合并后 objectstack 的 `check:duration-unit-keys` 会把它们判红。你裁定改名(E),本卡在冻结前于 objectui 完成:键名带单位、旧拼写按 ADR-0087 的方式退役(拒绝并给出修法)、附转换项与 `major` changeset。\n\n## What to change (objectui, one draft PR to `main`)\n\n1. The 9 keys, as the gate names them on the merged tree (verify run 8 head 3b0be7ca98, `pnpm --filter @objectstack/spec check:duration-unit-keys`): `autoPlay`, `autoResponseDelay`, `timeout`, `delay`, `duration`, `delayDuration`, `openDelay`, `closeDelay`, `refreshInterval` — all under `ui/packages/types/src/zod/**`. Re-measure on the merged layout first (recipe below); the list is a lead, the gate's output is the spec.\n2. Each key is renamed so the name carries the unit its description states (the objectstack precedent is #15679/#15680: `…Ms` / `…Seconds` as the description says; read the description, do not assume ms).\n3. The old spelling is retired the way ADR-0087 prescribes, adapted to objectui: an author who still writes the old key gets a refusal that names the new key (objectui's retired-key / guidance mechanism if it has one — measure: `grep -rn \"retiredKey\\|UNKNOWN_KEY_GUIDANCE\\|spec-changes\" ui/packages/types ui/scripts` — otherwise a `.strict()` refusal with the guidance in the error text), plus a conversion entry where objectui keeps a conversion registry, plus a `major` changeset carrying the FROM → TO mapping for every key.\n4. Every reader of the 9 keys inside objectui (renderers, plugins, tests, docs snippets, examples, QUICK_REFERENCE rows) follows the rename in the same PR; `pnpm type-check`, the affected `pnpm test`, `pnpm check:spec-symbols` and the docs/snippet gates stay green.\n\n## Acceptance\n\n- On the merged layout (verify branch `claude/project-thread-dwhq6r-25697-verify` head 9e37acd126 + your diff applied with `git apply --directory=ui`), `pnpm --filter @objectstack/spec check:duration-unit-keys` reports **0** `ui/` findings and the objectstack-side findings are unchanged.\n- objectui standalone: `pnpm type-check`, affected `pnpm test`, `pnpm check:spec-symbols`, docs gates green; CI green on the draft PR.\n- The PR body lists the 9 FROM → TO pairs, the retirement mechanism used, and the changeset.\n\n**Size:** M. **Clause-②:** yes (new authorable keys enter `@object-ui/types`'s published zod; old ones are refused with guidance). **Metadata-protocol:** added (new unit-bearing keys) + the old spellings refused. **Responsibility:** n/a — not a defect card.\n\n## 风险\n\n- Consumers outside objectui (customer apps on `@object-ui/types`) see a `major` for 9 renames; the conversion + guidance is the mitigation, and 18.x is the version line that already carries the merge.\n- If objectui has no conversion registry, the card's deliverable for \"conversions\" is the `major` changeset + the refusal guidance; say so in the PR body rather than inventing a registry.\n\n## Dedupe\n\n`search_issues` 2026-10-25 09:12Z 「duration-unit-keys ui zod rename」: 7 hits, all closed objectstack-side ADR-0087 remediations (#15679, #15680, #17780–#17785, #18075); none covers `@object-ui/types`. **New.**"
+}
