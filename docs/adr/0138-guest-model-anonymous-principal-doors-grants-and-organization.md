@@ -475,6 +475,9 @@ enforcer in the same change. The measured demand at `7b926f7600` is none: the re
 apps open public forms on a single organization, and the measurement round found the same in the
 hotcrm tree. The trigger is a named deployment that needs it.
 
+If this is built later, the binding is opened by the organization administrator inside their own
+organization, never declared by the package (ruling A `6386464761`: 「若将来建，绑定由组织管理员开，不由包声明」).
+
 ### D6 — Disclosure and explain: unchanged
 
 *Ruled: Q6 A.* ADR-0106 D7 stands: a caller resolving no set takes the configured fallback set on

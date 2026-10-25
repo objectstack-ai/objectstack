@@ -2126,6 +2126,30 @@ jobs:
         # not by two runs agreeing.
         run: bash scripts/release-spec-changes.sh --attach
 
+      # #25581: a stable release moves `latest` and nothing else, so the `next`
+      # and `rc` tags a pre-release cycle left behind keep resolving to versions
+      # older than it (`npx create-objectstack@next` → 18.0.0-next.5 after
+      # 18.0.0 shipped). This moves every pre-release tag that the release has
+      # overtaken up to it; a tag AHEAD of it (a cycle in progress) and a tag on
+      # a stable version are left alone. A pre-release publish is a no-op. Rule,
+      # refusals and the one-time cleanup command: the script's header.
+      #
+      # ⚠️ After the publish, and outside its gating: this step mints nothing
+      # and moves no tag to a version that is not already `latest`. Its
+      # credential is the `$HOME/.npmrc` the publish step wrote — no secret is
+      # handed to it here.
+      #
+      # Non-blocking by design: npm already has the whole group, so a tag left
+      # stale warns (`::warning::` per package, step marked failed) and never
+      # fails the job — the runtime image below `needs` this job's success.
+      - name: Move stale pre-release dist-tags up to latest
+        if: ${{ !cancelled() && steps.publish.outputs.published == 'true' }}
+        continue-on-error: true
+        timeout-minutes: 15
+        env:
+          RELEASE_VERSION: ${{ steps.guards.outputs.version }}
+        run: node scripts/release-dist-tags.mjs --apply
+
   # ══════════════════════════════════════════════════════════════════════════
   # Runtime image — fed by either lane. Building an image for a version that is
   # already on npm cannot mint anything, so the push lane may request it.

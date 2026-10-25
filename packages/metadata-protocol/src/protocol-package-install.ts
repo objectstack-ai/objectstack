@@ -1,6 +1,47 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-/** [#25467 cut 7] HEADER PLACEHOLDER */
+/**
+ * [#25467 cut 7] Package install and update of `ObjectStackProtocolImplementation`
+ * — the install primitive (`installPackage`), the manifest edit behind
+ * `PATCH /packages/:id` (`updatePackage`), the `package` service's write half
+ * both of them persist through (`packagePersistService`) and the undo a failed
+ * install runs (`packageInstallUndo`) — moved out of `protocol.ts` whole. They
+ * were the tail of the class.
+ *
+ * A MOVE, not a redesign. Each function below is the body of the
+ * `ObjectStackProtocolImplementation` method of the same name as it stood,
+ * re-indented one level and otherwise unedited: the same parses, writes and
+ * undo, refusing exactly where they did with the same codes and messages. The
+ * module-level declarations only these bodies read (`persistPackageManifest`,
+ * `snapshotPackageRow`, `restorePackageRow`) moved with them, also unedited.
+ *
+ * ## How the moved bodies reach the class
+ *
+ * The shape #23050 set for `rest-server.ts` (its `data-action-routes.ts`
+ * header carries the full reasoning), as `protocol-batch-data.ts` applies it.
+ * The class keeps every method — the published `dist/*.d.ts` lists each one's
+ * name, docblock and declared signature — and each body is one literal of
+ * exactly the {@link PackageInstallHost} members that method reads, plus a
+ * `.call`. A method is handed over as a closure that calls it on the protocol
+ * at call time, so a test double or spy set on the instance is still the one
+ * the body reaches, and the moved bodies that call one another
+ * (`packagePersistService`, `packageInstallUndo`) do so through the protocol,
+ * exactly as before.
+ *
+ * The fields the bodies read, `engine` and `getServicesRegistry`, go as
+ * GETTERS, so each read happens when the body makes it: tests replace them on
+ * a constructed protocol.
+ *
+ * The other module-level declarations the bodies read stay in `protocol.ts`,
+ * where code that did not move reads them too, and are imported from there:
+ * `packagePersistFailureError`, which the package delete also throws, and the
+ * type `PackagePersistService`, which the class's own signatures name. The
+ * module cycle is evaluation-safe because the one runtime import is read only
+ * inside a function body, never while the two modules are first evaluated.
+ * `index.ts` names what it publishes from `protocol.ts` one by one, so the
+ * `export` they gained for this keeps them off the published surface, and
+ * nothing re-exports this module, so the published surface does not move.
+ */
 
 import type { ObjectStackProtocolImplementation, PackagePersistService } from './protocol.js';
 import { packagePersistFailureError } from './protocol.js';

@@ -34,6 +34,39 @@
       "outputs": [],
       "inputs": ["$TURBO_DEFAULT$", "!dist/**", "!coverage/**", "!.turbo/**"]
     },
+    "type-check": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "cache": true,
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/ui/scripts/vite-*.ts",
+        "$TURBO_ROOT$/ui/vitest.config.mts",
+        "$TURBO_ROOT$/ui/tsconfig.json",
+        "$TURBO_ROOT$/ui/tsconfig.tier-base.json",
+        "$TURBO_ROOT$/ui/apps/console/src/lib/auth-preflight.ts",
+        "$TURBO_ROOT$/ui/eslint-rules/no-unprefixed-query-params.js",
+        "$TURBO_ROOT$/ui/packages/cli/src/commands/generate.ts",
+        "$TURBO_ROOT$/ui/packages/cli/src/utils/authoring-face.ts",
+        "$TURBO_ROOT$/ui/packages/cli/src/utils/issue-path.ts",
+        "$TURBO_ROOT$/ui/packages/cli/src/utils/union-arm-diagnostics.ts",
+        "$TURBO_ROOT$/ui/scripts/check-doc-component-types.mjs",
+        "$TURBO_ROOT$/ui/scripts/markdown-fence-scan.mjs"
+      ]
+    },
+    "lint": {
+      "outputs": [],
+      "cache": true,
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/ui/eslint.config.js", "$TURBO_ROOT$/ui/eslint-rules/*.js"]
+    },
+    "test:dist": {
+      "dependsOn": ["build"],
+      "cache": false
+    },
+    "test:watch": {
+      "cache": false,
+      "persistent": true
+    },
     "@objectstack/docs#build": {
       "dependsOn": ["^build"],
       "outputs": ["dist/**", "json-schema/**", ".next/**", "!.next/cache/**", "public/llms-full.txt"],

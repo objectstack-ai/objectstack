@@ -107,7 +107,7 @@
         "manifest.objects.element.membershipKeys.valueType",
         "manifest.pages.element",
         "manifest.pages.element.slots.header.options[0].type",
-        "manifest.permissions.element.objects.valueType.out",
+        "manifest.permissions.element.objects.valueType.out.out",
         "manifest.permissions.element.rowLevelSecurity.element",
         "manifest.reports.element",
         "manifest.reports.element.blocks.element",
@@ -229,7 +229,7 @@
         "data.options[1].manifest.objects.element.membershipKeys.valueType",
         "data.options[1].manifest.pages.element",
         "data.options[1].manifest.pages.element.slots.header.options[0].type",
-        "data.options[1].manifest.permissions.element.objects.valueType.out",
+        "data.options[1].manifest.permissions.element.objects.valueType.out.out",
         "data.options[1].manifest.permissions.element.rowLevelSecurity.element",
         "data.options[1].manifest.reports.element",
         "data.options[1].manifest.reports.element.blocks.element",
@@ -253,7 +253,7 @@
     },
     "api/GetObjectPermissionsResponse": {
       "sites": [
-        "permissions.out"
+        "permissions.out.out"
       ]
     },
     "api/GetPackageResponse": {
@@ -348,7 +348,7 @@
         "options[1].manifest.objects.element.membershipKeys.valueType",
         "options[1].manifest.pages.element",
         "options[1].manifest.pages.element.slots.header.options[0].type",
-        "options[1].manifest.permissions.element.objects.valueType.out",
+        "options[1].manifest.permissions.element.objects.valueType.out.out",
         "options[1].manifest.permissions.element.rowLevelSecurity.element",
         "options[1].manifest.reports.element",
         "options[1].manifest.reports.element.blocks.element",
@@ -414,7 +414,7 @@
         "data.packages.element.options[1].manifest.objects.element.membershipKeys.valueType",
         "data.packages.element.options[1].manifest.pages.element",
         "data.packages.element.options[1].manifest.pages.element.slots.header.options[0].type",
-        "data.packages.element.options[1].manifest.permissions.element.objects.valueType.out",
+        "data.packages.element.options[1].manifest.permissions.element.objects.valueType.out.out",
         "data.packages.element.options[1].manifest.permissions.element.rowLevelSecurity.element",
         "data.packages.element.options[1].manifest.reports.element",
         "data.packages.element.options[1].manifest.reports.element.blocks.element",
@@ -1168,12 +1168,12 @@
     },
     "security/ObjectPermission": {
       "sites": [
-        "out"
+        "out.out"
       ]
     },
     "security/PermissionSet": {
       "sites": [
-        "objects.valueType.out",
+        "objects.valueType.out.out",
         "rowLevelSecurity.element"
       ]
     },

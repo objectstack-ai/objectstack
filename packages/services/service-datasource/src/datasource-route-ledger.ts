@@ -134,7 +134,8 @@ export interface DatasourceRouteLedgerEntry {
 export const DATASOURCE_ROUTE_LEDGER: readonly DatasourceRouteLedgerEntry[] = [
   // ── runtime datasource lifecycle (ADR-0015 Addendum §3.5) ─────────────────
   // Served by `datasource-admin`; 503 SERVICE_UNAVAILABLE when that service is
-  // not wired, 400 DATASOURCE_ADMIN_ERROR on a refusal (#4249).
+  // not wired, 400 DATASOURCE_ADMIN_ERROR on a refusal (#4249), and 404
+  // RESOURCE_NOT_FOUND at every by-name door when the name resolves nothing.
   { route: 'GET /api/v1/datasources', family: 'datasource-lifecycle', disposition: 'server-only',
     note: 'Setup → Datasources list: provenance (code/runtime) + the retained connect verdict per datasource, so a datasource that failed to connect reports `error` here instead of looking untested. Console surface; the SDK expresses no datasource-lifecycle method.' },
   { route: 'GET /api/v1/datasources/:name', family: 'datasource-lifecycle', disposition: 'server-only',

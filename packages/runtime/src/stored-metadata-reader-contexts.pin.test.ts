@@ -235,7 +235,9 @@ const PIN_APP: any = {
   actions: [
     { name: 'family_bound_reads_record', label: 'Family-bound body', objectName: 'sys_metadata', type: 'script', body: actionBody(RETURN_RECORD) },
     { name: 'object_less_reads_record', label: 'Object-less body', type: 'script', body: actionBody(RETURN_RECORD) },
-    { name: 'host_object_less_reads_record', label: 'Object-less host handler', type: 'script' },
+    // [#25649] A package's action is stored as its `ActionSchema` parse, and a
+    // `script` action names its handler (`target`) when it carries no `body`.
+    { name: 'host_object_less_reads_record', label: 'Object-less host handler', type: 'script', target: 'host_object_less_reads_record' },
   ],
   hooks: [
     // ① a sandboxed hook body: it would COPY what it read onto the row being inserted.
