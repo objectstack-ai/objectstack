@@ -75,6 +75,9 @@ onlyBuiltDependencies:
 patchedDependencies:
   tsup@8.5.1: patches/tsup@8.5.1.patch
   tsx@4.23.15: patches/tsx@4.23.15.patch
+  # objectui's focus-scope patch (cutover, objectstack#25752);
+  # it was keyed unversioned in ui/package.json's ignored `pnpm` field.
+  '@radix-ui/react-focus-scope@1.1.16': patches/@radix-ui__react-focus-scope.patch
 
 # Transitive-dependency version pins. pnpm v10 reads `overrides` from THIS file
 # — the `pnpm.overrides` block in package.json is silently ignored — so all
@@ -233,6 +236,18 @@ patchedDependencies:
 #     legacy agent chain; force the patched 2.0.1 line.
 overrides:
   esbuild: '>=0.28.1'
+  # objectui's security floors, from ui/package.json's ignored `pnpm` field
+  # (cutover, objectstack#25752; dompurify is already pinned).
+  'qs@<6.15.2': '^6.15.2'
+  'shell-quote@<1.8.4': '^1.8.4'
+  'tmp@<0.2.6': '^0.2.6'
+  'uuid@<11.1.1': '^11.1.1'
+  # objectui's single react line (cutover, objectstack#25752):
+  # objectui pins 19.3.0 exactly; objectstack manifests still carry ^19.2.x ranges.
+  react: 19.3.0
+  react-dom: 19.3.0
+  '@types/react': 19.3.0
+  '@types/react-dom': 19.3.0
   'minimatch@<11.0.0': '^10.2.3'
   'tar@>=2.0.0 <8.0.0': '^7.5.11'
   'form-data@<5.0.0': '>=4.0.6'
@@ -364,7 +379,9 @@ overrides:
   # installs, so a consumer's own brace-expansion copy is theirs to lift.
   'brace-expansion@>=5.0.0 <6.0.0': '^5.0.12'
   'sharp@>=0.34.0 <0.36.0': '^0.35.5'
-  'react-router@<8.3.0': '^8.3.0'
+  # react-router GHSA-qwww-vcr4-c8h2: still floors the whole 8.x line below 8.3.0; the 7.x line
+  # (objectui's react-router-dom 7.18 pins its own react-router) has no fix to force onto.
+  'react-router@>=8.0.0 <8.3.0': '^8.3.0'
   '@sveltejs/kit@<2.69.1': '^2.69.1'
   '@hono/node-server@<3.0.0': '^2.0.10'
   # OSV batch 2026-08 (#5032) — all three name a fixed version, so they are
