@@ -887,7 +887,7 @@ Sort field and direction pair
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **fields** | `{ field: string; order?: Enum<'asc' \| 'desc'>; collapsed?: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field); the same order as the group header query's `groupBy` |
+| **fields** | `{ field: string; order?: Enum<'asc' \| 'desc'>; orderBy?: string; collapsed?: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field); the same order as the group header query's `groupBy` |
 
 ### Nested Shape: `ObjectGridProps.aggregations[number]`
 
@@ -1037,7 +1037,7 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **fields** | `{ field: string; order?: Enum<'asc' \| 'desc'>; collapsed?: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field); the same order as the group header query's `groupBy` |
+| **fields** | `{ field: string; order?: Enum<'asc' \| 'desc'>; orderBy?: string; collapsed?: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field); the same order as the group header query's `groupBy` |
 
 ### Nested Shape: `ObjectKanbanProps.conditionalFormatting[number]`
 

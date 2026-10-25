@@ -28,6 +28,7 @@ import {
   compileListViewGroupRowsQuery,
   deriveColumnSummary,
   listViewGroupKeyPredicate,
+  listViewGroupOrderColumn,
 } from './view-grouping-query';
 import type { ListViewGroupHeaderRow } from './view-grouping-query';
 
@@ -137,12 +138,20 @@ function reduceHeaderQuery(rows: Row[], query: EngineAggregateOptions): ListView
         case 'count_distinct': out[agg.alias] = new Set(values.filter((v) => v != null)).size; break;
         case 'sum': out[agg.alias] = nums.reduce((a, b) => a + b, 0); break;
         case 'avg': out[agg.alias] = nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null; break;
-        case 'min': out[agg.alias] = nums.length ? Math.min(...nums) : null; break;
-        case 'max': out[agg.alias] = nums.length ? Math.max(...nums) : null; break;
+        // Raw comparison, as the in-memory face does: a `YYYY-MM-DD` string
+        // orders chronologically, and a number orders as itself.
+        case 'min': out[agg.alias] = orderStatistic(values, (a, b) => a < b); break;
+        case 'max': out[agg.alias] = orderStatistic(values, (a, b) => a > b); break;
       }
     }
     return out as ListViewGroupHeaderRow;
   });
+}
+
+/** `min` / `max` over the non-null values, `null` over none. */
+function orderStatistic(values: unknown[], better: (a: never, b: never) => boolean): unknown {
+  const defined = values.filter((v) => v != null);
+  return defined.length === 0 ? null : defined.reduce((a, b) => (better(a as never, b as never) ? a : b));
 }
 
 /** Header rows → `{ unit: count }`, the shape a reader compares. */
@@ -516,6 +525,229 @@ describe('compileListViewGroupQuery — refuses what the contract cannot mean', 
     ));
     expect(err.reason).toBe('depth_out_of_range');
     expect(err.code).toBe('INVALID_QUERY');
+  });
+});
+
+// ─── [#25786] Ordering a level by another field ──────────────────────────────
+//
+// The HotCRM forecast shape: periods grouped by their LABEL, which sorts as
+// text ("Nov 2026" < "Oct 2026" < "Q1 2027" < "Q4 2025" …), ordered by their
+// period START. Two labels share a start on purpose (the tie arm) and one
+// period has no start at all (the null arm).
+
+interface Forecast {
+  id: string;
+  period_label: string;
+  period_start: string | null;
+  amount: number;
+}
+
+const FORECAST_PERIODS: ReadonlyArray<readonly [label: string, start: string | null, rows: number]> = [
+  ['Q4 2025', '2025-10-01', 2],
+  ['Sep 2026', '2026-09-01', 1],
+  ['Oct 2026', '2026-10-01', 3],
+  ['Q4 2026', '2026-10-01', 1],
+  ['Nov 2026', '2026-11-01', 2],
+  ['Q1 2027', '2027-01-01', 2],
+  ['Unscheduled', null, 1],
+];
+
+/** Interleaved on purpose, so no group order can fall out of the row order. */
+const FORECASTS: Forecast[] = (() => {
+  const queues = FORECAST_PERIODS.map(([label, start, rows]) =>
+    Array.from({ length: rows }, (_, i) => ({ id: `${label}-${i}`, period_label: label, period_start: start, amount: i + 1 })));
+  const out: Forecast[] = [];
+  while (queues.some((q) => q.length > 0)) {
+    for (const q of [...queues].reverse()) {
+      const next = q.shift();
+      if (next) out.push(next);
+    }
+  }
+  return out;
+})();
+
+/**
+ * The CONSUMER's sort, written out as `GroupingFieldSchema.orderBy` states it
+ * — test-local, because the sort is the consumer's and not this module's: by
+ * the header-row column {@link listViewGroupOrderColumn} names, a `null` value
+ * last in both directions, equal values by the group key in the same direction.
+ */
+function sortHeaders(
+  headers: ListViewGroupHeaderRow[],
+  column: string,
+  key: string,
+  order: 'asc' | 'desc',
+): string[] {
+  const sign = order === 'desc' ? -1 : 1;
+  const cmp = (a: unknown, b: unknown) => (a === b ? 0 : (a as string) < (b as string) ? -1 : 1);
+  return [...headers]
+    .sort((a, b) => {
+      const av = a[column];
+      const bv = b[column];
+      if (av == null || bv == null) return av == null && bv == null ? 0 : av == null ? 1 : -1;
+      return sign * (cmp(av, bv) || cmp(a[key], b[key]));
+    })
+    .map((h) => String(h[key]));
+}
+
+describe('[#25786] a level ordered by another field — the header query carries the value to sort by', () => {
+  const byStart = (order?: 'asc' | 'desc') => ({
+    grouping: { fields: [{ field: 'period_label', orderBy: 'period_start', ...(order ? { order } : {}) }] },
+  });
+
+  it('compiles ONE `min` node for `asc` (the default) and ONE `max` node for `desc`, named by listViewGroupOrderColumn', () => {
+    expect(compileListViewGroupQuery(byStart()).aggregations).toEqual([
+      { function: 'count', alias: LIST_VIEW_GROUP_COUNT_ALIAS },
+      { function: 'min', field: 'period_start', alias: 'min_period_start' },
+    ]);
+    expect(compileListViewGroupQuery(byStart('desc')).aggregations).toEqual([
+      { function: 'count', alias: LIST_VIEW_GROUP_COUNT_ALIAS },
+      { function: 'max', field: 'period_start', alias: 'max_period_start' },
+    ]);
+    // The grouping key never leaves `groupBy`: one header per LABEL.
+    expect(compileListViewGroupQuery(byStart()).groupBy).toEqual(['period_label']);
+    expect(listViewGroupOrderColumn(byStart().grouping, 0)).toBe('min_period_start');
+    expect(listViewGroupOrderColumn(byStart('desc').grouping, 0)).toBe('max_period_start');
+  });
+
+  it('sorting the header rows by that column puts the periods in TIME order, where the key alone gives text order', () => {
+    const asc = byStart();
+    const headers = reduceHeaderQuery(FORECASTS as unknown as Row[], compileListViewGroupQuery(asc));
+    expect(headers).toHaveLength(FORECAST_PERIODS.length);
+    expect(sortHeaders(headers, listViewGroupOrderColumn(asc.grouping, 0), 'period_label', 'asc')).toEqual([
+      'Q4 2025', 'Sep 2026', 'Oct 2026', 'Q4 2026', 'Nov 2026', 'Q1 2027', 'Unscheduled',
+    ]);
+    // CONTROL — the same rows by the group key: what the forecast list showed.
+    expect(sortHeaders(headers, 'period_label', 'period_label', 'asc')).toEqual([
+      'Nov 2026', 'Oct 2026', 'Q1 2027', 'Q4 2025', 'Q4 2026', 'Sep 2026', 'Unscheduled',
+    ]);
+
+    const desc = byStart('desc');
+    const descHeaders = reduceHeaderQuery(FORECASTS as unknown as Row[], compileListViewGroupQuery(desc));
+    // The null-start period is LAST in this direction too, and the tie keeps
+    // the key order in the same direction.
+    expect(sortHeaders(descHeaders, listViewGroupOrderColumn(desc.grouping, 0), 'period_label', 'desc')).toEqual([
+      'Q1 2027', 'Nov 2026', 'Q4 2026', 'Oct 2026', 'Sep 2026', 'Q4 2025', 'Unscheduled',
+    ]);
+    // Every count still rides the same row.
+    expect(Object.fromEntries(headers.map((h) => [h.period_label, h.count])))
+      .toEqual(Object.fromEntries(FORECAST_PERIODS.map(([label, , rows]) => [label, rows])));
+  });
+
+  it('`min` ascending and `max` descending are one rule: each group sits where its FIRST row would, rows sorted by `orderBy`', () => {
+    // An order field that is NOT a function of the group key: owners ordered
+    // by the dates of their deals.
+    const deals = [
+      { id: 'a1', owner: 'avery', closed_on: '2026-01-05' },
+      { id: 'a2', owner: 'avery', closed_on: '2026-06-01' },
+      { id: 'b1', owner: 'blake', closed_on: '2026-03-01' },
+      { id: 'c1', owner: 'casey', closed_on: '2026-02-01' },
+      { id: 'c2', owner: 'casey', closed_on: '2026-07-01' },
+    ];
+    for (const order of ['asc', 'desc'] as const) {
+      const grouping = { fields: [{ field: 'owner', orderBy: 'closed_on', order }] };
+      const headers = reduceHeaderQuery(deals as unknown as Row[], compileListViewGroupQuery({ grouping }));
+      const sorted = [...deals].sort((a, b) => (order === 'asc' ? 1 : -1) * a.closed_on.localeCompare(b.closed_on));
+      const firstAppearance = [...new Set(sorted.map((d) => d.owner))];
+      expect(sortHeaders(headers, listViewGroupOrderColumn(grouping, 0), 'owner', order), order).toEqual(firstAppearance);
+    }
+    expect(['avery', 'casey', 'blake']).toEqual(
+      [...new Set([...deals].sort((a, b) => a.closed_on.localeCompare(b.closed_on)).map((d) => d.owner))],
+    );
+  });
+
+  it('a level that orders by its own key compiles no node, and its sort column is the key itself', () => {
+    for (const fields of [[{ field: 'period_label' }], [{ field: 'period_label', orderBy: 'period_label', order: 'desc' as const }]]) {
+      const grouping = { fields };
+      expect(compileListViewGroupQuery({ grouping }).aggregations).toEqual([
+        { function: 'count', alias: LIST_VIEW_GROUP_COUNT_ALIAS },
+      ]);
+      expect(listViewGroupOrderColumn(grouping, 0)).toBe('period_label');
+    }
+  });
+
+  it('a column summary `min` over the same field IS the order node — one node, one column', () => {
+    const query = compileListViewGroupQuery({
+      ...byStart(),
+      columns: [{ field: 'period_start', summary: 'min' }, { field: 'amount', summary: 'sum' }],
+    });
+    expect(query.aggregations).toEqual([
+      { function: 'count', alias: LIST_VIEW_GROUP_COUNT_ALIAS },
+      { function: 'min', field: 'period_start', alias: 'min_period_start' },
+      { function: 'sum', field: 'amount', alias: 'sum_amount' },
+    ]);
+  });
+
+  it('per level, in nesting order; `depth` carries only the grouped levels\' nodes, and an outer level folds exactly', () => {
+    const rows = FORECASTS.map((f, i) => ({ ...f, region: i % 2 === 0 ? 'north' : 'south', region_rank: i % 2 === 0 ? 2 : 1 }));
+    const view = {
+      grouping: {
+        fields: [
+          { field: 'region', orderBy: 'region_rank' },
+          { field: 'period_label', orderBy: 'period_start', order: 'desc' as const },
+        ],
+      },
+    };
+    const leaves = compileListViewGroupQuery(view);
+    expect(leaves.aggregations).toEqual([
+      { function: 'count', alias: LIST_VIEW_GROUP_COUNT_ALIAS },
+      { function: 'min', field: 'region_rank', alias: 'min_region_rank' },
+      { function: 'max', field: 'period_start', alias: 'max_period_start' },
+    ]);
+    const outer = compileListViewGroupQuery(view, { depth: 1 });
+    expect(outer.aggregations).toEqual([
+      { function: 'count', alias: LIST_VIEW_GROUP_COUNT_ALIAS },
+      { function: 'min', field: 'region_rank', alias: 'min_region_rank' },
+    ]);
+    expect(listViewGroupOrderColumn(view.grouping, 1)).toBe('max_period_start');
+
+    // The outer level's value, folded from the leaves (`min` of mins), equals
+    // the outer level's own query.
+    const leafRows = reduceHeaderQuery(rows as unknown as Row[], leaves);
+    const outerRows = reduceHeaderQuery(rows as unknown as Row[], outer);
+    for (const region of ['north', 'south']) {
+      const folded = orderStatistic(leafRows.filter((r) => r.region === region).map((r) => r.min_region_rank), (a, b) => a < b);
+      expect(folded, region).toBe(outerRows.find((r) => r.region === region)!.min_region_rank);
+    }
+    expect(sortHeaders(outerRows, listViewGroupOrderColumn(view.grouping, 0), 'region', 'asc')).toEqual(['south', 'north']);
+  });
+
+  it('refuses a blank `orderBy` — INVALID_QUERY / 400 at the level\'s `orderBy`', () => {
+    for (const orderBy of ['', '  ']) {
+      const grouping = { fields: [{ field: 'status' }, { field: 'period_label', orderBy }] };
+      const err = refusal(() => compileListViewGroupQuery({ grouping }));
+      expect(err).toBeInstanceOf(ListViewGroupQueryError);
+      expect(err.reason).toBe('grouping_order_by_blank');
+      expect(err.code).toBe('INVALID_QUERY');
+      expect(err.status).toBe(400);
+      expect(err.path).toEqual(['grouping', 'fields', 1, 'orderBy']);
+      // The same refusal from the column helper, and past the compiled depth too.
+      expect(refusal(() => listViewGroupOrderColumn(grouping, 1)).reason).toBe('grouping_order_by_blank');
+      expect(refusal(() => compileListViewGroupQuery({ grouping }, { depth: 1 })).reason).toBe('grouping_order_by_blank');
+    }
+  });
+
+  it('refuses an order value landing on a grouped field\'s own column', () => {
+    const err = refusal(() => compileListViewGroupQuery({
+      grouping: { fields: [{ field: 'min_period_start' }, { field: 'period_label', orderBy: 'period_start' }] },
+    }));
+    expect(err.reason).toBe('alias_collision');
+    expect(err.code).toBe('INVALID_QUERY');
+    expect(err.status).toBe(400);
+    expect(err.path).toEqual(['grouping', 'fields', 1, 'orderBy']);
+  });
+
+  it.each([-1, 1, 0.5])('listViewGroupOrderColumn refuses level %s of a one-level grouping', (level) => {
+    const err = refusal(() => listViewGroupOrderColumn(byStart().grouping, level));
+    expect(err.reason).toBe('depth_out_of_range');
+    expect(err.code).toBe('INVALID_QUERY');
+    expect(err.status).toBe(400);
+  });
+
+  it('compiles from a grouping the schema accepts', () => {
+    const parsed = ListViewSchema.parse({ columns: ['period_label'], grouping: byStart('desc').grouping });
+    expect(compileListViewGroupQuery({ grouping: parsed.grouping! }).aggregations)
+      .toContainEqual({ function: 'max', field: 'period_start', alias: 'max_period_start' });
   });
 });
 

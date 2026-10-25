@@ -99,6 +99,7 @@ import {
   compileListViewGroupQuery,
   compileListViewGroupRowsQuery,
   deriveColumnSummary,
+  listViewGroupOrderColumn,
 } from '@objectstack/spec/ui';
 import type { ListViewGroupHeaderRow, ListViewGroupQuerySource } from '@objectstack/spec/ui';
 import { RestServer } from './rest-server';
@@ -215,6 +216,60 @@ const PLAIN_VIEW: ListViewGroupQuerySource = { grouping: { fields: [{ field: 'bu
 const OBJECT_CONTIGUOUS = 'work_item';
 const OBJECT_INTERLEAVED = 'work_item_interleaved';
 const OBJECT_WITH_EMPTY = 'work_item_unassigned';
+/** [#25786] The forecast shape §11 orders by another field. */
+const OBJECT_FORECAST = 'forecast_period';
+
+/**
+ * [#25786] Periods grouped by their LABEL, which sorts as text, ordered by
+ * their START. Two labels share a start (the tie), one has none (the null
+ * group), and the rows are stored interleaved so no group order can fall out
+ * of the stored order.
+ */
+const FORECAST_PERIODS: ReadonlyArray<readonly [label: string, start: string | null, closedAt: string | null, rows: number]> = [
+  ['Q4 2025', '2025-10-01', '2025-12-30T09:00:00.000Z', 2],
+  ['Sep 2026', '2026-09-01', '2026-09-29T17:30:00.000Z', 1],
+  ['Oct 2026', '2026-10-01', '2026-10-30T08:15:00.000Z', 3],
+  ['Q4 2026', '2026-10-01', '2026-12-31T23:59:00.000Z', 1],
+  ['Nov 2026', '2026-11-01', '2026-11-27T12:00:00.000Z', 2],
+  ['Q1 2027', '2027-01-01', '2027-03-31T10:45:00.000Z', 2],
+  ['Unscheduled', null, null, 1],
+];
+
+const FORECAST_ROWS: Array<Record<string, unknown>> = (() => {
+  const queues = FORECAST_PERIODS.map(([label, start, closedAt, rows]) =>
+    Array.from({ length: rows }, (_, i) => ({
+      id: `${label}-${i}`,
+      period_label: label,
+      period_start: start,
+      // Each row of a period closes an hour after the one before it, so `min`
+      // and `max` over this column are different instants per group.
+      closed_at: closedAt === null ? null : new Date(Date.parse(closedAt) + i * 3_600_000).toISOString(),
+      amount: i + 1,
+    })));
+  const out: Array<Record<string, unknown>> = [];
+  while (queues.some((q) => q.length > 0)) {
+    for (const q of [...queues].reverse()) {
+      const next = q.shift();
+      if (next) out.push(next);
+    }
+  }
+  return out;
+})();
+
+function forecastSchema() {
+  return {
+    name: OBJECT_FORECAST,
+    label: OBJECT_FORECAST,
+    systemFields: false,
+    fields: {
+      id: { name: 'id', type: 'text' as const, primaryKey: true },
+      period_label: { name: 'period_label', type: 'text' as const, label: 'Period' },
+      period_start: { name: 'period_start', type: 'date' as const, label: 'Period start' },
+      closed_at: { name: 'closed_at', type: 'datetime' as const, label: 'Closed at' },
+      amount: { name: 'amount', type: 'number' as const, label: 'Amount' },
+    },
+  };
+}
 
 function objectSchema(name: string) {
   return {
@@ -318,7 +373,7 @@ const TIERS: readonly Tier[] = ['driver-sql', 'in-memory'];
 const calls = { nativeAggregate: 0, driverFind: 0, dataFind: 0, findWithAggregations: 0 };
 
 /** The row stores this file seeds — a `find` on one of these is a DATA read. */
-const DATA_OBJECTS: readonly string[] = [OBJECT_CONTIGUOUS, OBJECT_INTERLEAVED, OBJECT_WITH_EMPTY];
+const DATA_OBJECTS: readonly string[] = [OBJECT_CONTIGUOUS, OBJECT_INTERLEAVED, OBJECT_WITH_EMPTY, OBJECT_FORECAST];
 
 /**
  * Every `driver.find` the shim saw, in order — object plus the AST's top-level
@@ -381,10 +436,12 @@ beforeAll(async () => {
   for (const name of [OBJECT_CONTIGUOUS, OBJECT_INTERLEAVED, OBJECT_WITH_EMPTY]) {
     engine.registry.registerObject(objectSchema(name) as never);
   }
+  engine.registry.registerObject(forecastSchema() as never);
   await engine.syncSchemas();
   await engine.insert(OBJECT_CONTIGUOUS, inStoredOrder(CONTIGUOUS));
   await engine.insert(OBJECT_INTERLEAVED, inStoredOrder(INTERLEAVED));
   await engine.insert(OBJECT_WITH_EMPTY, inStoredOrder([...CONTIGUOUS, ...UNASSIGNED]));
+  await engine.insert(OBJECT_FORECAST, FORECAST_ROWS);
 
   const protocol = new ObjectStackProtocolImplementation(engine as never);
   const rest = new RestServer(
@@ -945,6 +1002,120 @@ describe('§10 a grouped query under `search` groups the SEARCHED rows', () => {
       search: 'harbour',
       searchFields: ['no_such_column'],
     });
+    expect(res._status).toBe(400);
+    expect(res._body?.code).toBe('INVALID_FIELD');
+  });
+});
+
+// ─── §11 A level ordered by another field (#25786) ───────────────────────────
+
+/**
+ * `GroupingFieldSchema.orderBy`: the consumer sorts the header rows, and the
+ * header query carries the value to sort by — one `min` (asc) / `max` (desc)
+ * node over `orderBy`. What was unmeasured is whether the two faces answer
+ * that node with one value of one TYPE per group over a `date` and a
+ * `datetime` column, and whether the door refuses an operand the lint refuses.
+ *
+ * The consumer's sort is written out here as `GroupingFieldSchema.orderBy`
+ * states it — test-local, because the sort is the consumer's: by the column
+ * {@link listViewGroupOrderColumn} names, `null` last in both directions,
+ * equal values by the group key in the same direction.
+ */
+describe('§11 a level ordered by another field — the header rows carry the order value', () => {
+  const byStart = (order: 'asc' | 'desc' = 'asc') => ({
+    grouping: { fields: [{ field: 'period_label', orderBy: 'period_start', order }] },
+  });
+
+  const sortHeaders = (headers: Array<Record<string, unknown>>, column: string, order: 'asc' | 'desc'): string[] => {
+    const sign = order === 'desc' ? -1 : 1;
+    const cmp = (a: unknown, b: unknown) => (a === b ? 0 : (a as string) < (b as string) ? -1 : 1);
+    return [...headers]
+      .sort((a, b) => {
+        const av = a[column];
+        const bv = b[column];
+        if (av == null || bv == null) return av == null && bv == null ? 0 : av == null ? 1 : -1;
+        return sign * (cmp(av, bv) || cmp(a.period_label, b.period_label));
+      })
+      .map((h) => String(h.period_label));
+  };
+
+  it.each(TIERS)('%s: one header per LABEL, each carrying its period start under min_period_start', async (tier) => {
+    const view = byStart();
+    const query = compileListViewGroupQuery(view);
+    expect(query.groupBy).toEqual(['period_label']);
+    const column = listViewGroupOrderColumn(view.grouping, 0);
+    expect(column).toBe('min_period_start');
+
+    const headers = await onTier(tier, () => records(OBJECT_FORECAST, query));
+    expect(headers).toHaveLength(FORECAST_PERIODS.length);
+    for (const [label, start, , rows] of FORECAST_PERIODS) {
+      const header = headers.find((h) => h.period_label === label)!;
+      expect(header, label).toBeDefined();
+      expect(header[LIST_VIEW_GROUP_COUNT_ALIAS], label).toBe(rows);
+      // The stored calendar-day form, on both faces — a string the consumer
+      // orders as it is.
+      expect(header[column], label).toBe(start);
+    }
+    expect(sortHeaders(headers, column, 'asc')).toEqual([
+      'Q4 2025', 'Sep 2026', 'Oct 2026', 'Q4 2026', 'Nov 2026', 'Q1 2027', 'Unscheduled',
+    ]);
+    // CONTROL — the key alone sorts as text, which is what the forecast list showed.
+    expect(sortHeaders(headers, 'period_label', 'asc')).toEqual([
+      'Nov 2026', 'Oct 2026', 'Q1 2027', 'Q4 2025', 'Q4 2026', 'Sep 2026', 'Unscheduled',
+    ]);
+  });
+
+  it.each(TIERS)('%s: `desc` carries max_period_start, and the null group is still last', async (tier) => {
+    const view = byStart('desc');
+    const column = listViewGroupOrderColumn(view.grouping, 0);
+    expect(column).toBe('max_period_start');
+    const headers = await onTier(tier, () => records(OBJECT_FORECAST, compileListViewGroupQuery(view)));
+    expect(sortHeaders(headers, column, 'desc')).toEqual([
+      'Q1 2027', 'Nov 2026', 'Q4 2026', 'Oct 2026', 'Sep 2026', 'Q4 2025', 'Unscheduled',
+    ]);
+  });
+
+  it('driver-sql and the in-memory tier answer the same order values, types included — date and datetime', async () => {
+    for (const grouping of [
+      byStart().grouping,
+      byStart('desc').grouping,
+      { fields: [{ field: 'period_label', orderBy: 'closed_at' }] },
+      { fields: [{ field: 'period_label', orderBy: 'closed_at', order: 'desc' as const }] },
+    ]) {
+      const query = compileListViewGroupQuery({ grouping });
+      const pushedDown = await onTier('driver-sql', () => records(OBJECT_FORECAST, query));
+      const inMemory = await onTier('in-memory', () => records(OBJECT_FORECAST, query));
+      const label = JSON.stringify(grouping.fields[0]);
+      expect(canonical(inMemory), label).toEqual(canonical(pushedDown));
+      expect(pushedDown, label).toHaveLength(FORECAST_PERIODS.length);
+    }
+  });
+
+  it.each(TIERS)('%s: min and max over a datetime are different instants per group, each the right row\'s', async (tier) => {
+    const asc = { fields: [{ field: 'period_label', orderBy: 'closed_at' }] };
+    const desc = { fields: [{ field: 'period_label', orderBy: 'closed_at', order: 'desc' as const }] };
+    const first = await onTier(tier, () => records(OBJECT_FORECAST, compileListViewGroupQuery({ grouping: asc })));
+    const last = await onTier(tier, () => records(OBJECT_FORECAST, compileListViewGroupQuery({ grouping: desc })));
+    const own = (label: string) => FORECAST_ROWS.filter((r) => r.period_label === label).map((r) => r.closed_at as string).sort();
+    const instant = (v: unknown) => (v == null ? null : new Date(v as string).getTime());
+    const oct = (rows: Array<Record<string, unknown>>, column: string) =>
+      instant(rows.find((h) => h.period_label === 'Oct 2026')![column]);
+    expect(oct(first, listViewGroupOrderColumn(asc, 0))).toBe(instant(own('Oct 2026')[0]));
+    expect(oct(last, listViewGroupOrderColumn(desc, 0))).toBe(instant(own('Oct 2026')[2]));
+    expect(oct(first, 'min_closed_at')).not.toBe(oct(last, 'max_closed_at'));
+  });
+
+  it('an `orderBy` the lint refuses is refused by the door: `min` over a text field is 400 / INVALID_FIELD', async () => {
+    const query = compileListViewGroupQuery({ grouping: { fields: [{ field: 'period_start', orderBy: 'period_label' }] } });
+    expect(query.aggregations).toContainEqual({ function: 'min', field: 'period_label', alias: 'min_period_label' });
+    const res = await postQuery(OBJECT_FORECAST, query);
+    expect(res._status).toBe(400);
+    expect(res._body?.code).toBe('INVALID_FIELD');
+  });
+
+  it('a dotted `orderBy` is refused by the door: 400 / INVALID_FIELD, not a null order value', async () => {
+    const query = compileListViewGroupQuery({ grouping: { fields: [{ field: 'period_label', orderBy: 'period_start.year' }] } });
+    const res = await postQuery(OBJECT_FORECAST, query);
     expect(res._status).toBe(400);
     expect(res._body?.code).toBe('INVALID_FIELD');
   });
