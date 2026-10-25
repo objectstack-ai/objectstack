@@ -1,11 +1,14 @@
 ---
 name: pm-dispatch
 description: >
-  Project-manager dispatch loop: pull ready issues from the GitHub backlog, claim and dispatch each to a parallel
-  `os-dev` developer subagent, review the structured reports they return, then dispatch the next batch — filing
-  `needs-user-decision` issues for anything that requires the maintainer's confirmation instead of guessing. Use when
-  asked to "work through the backlog", "派发 issue 给开发 agent", "batch-dispatch issues", or via /pm-dispatch.
-  NOT a customer-published skill — internal agent tooling (lives in .claude/, never in the published `skills/` dir).
+  Project-manager dispatch loop: pull ready issues from the GitHub backlog,
+  claim and dispatch each to a parallel `os-dev` developer subagent, review
+  the structured reports they return, then dispatch the next batch — filing
+  `needs-user-decision` issues for anything that requires the maintainer's
+  confirmation instead of guessing. Use when asked to "work through the
+  backlog", "派发 issue 给开发 agent", "batch-dispatch issues", or via
+  /pm-dispatch. NOT a customer-published skill — internal agent tooling
+  (lives in .claude/, never in the published `skills/` dir).
 metadata:
   internal: true
 ---
@@ -25,8 +28,6 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - ⛔ 永不合自己的 PR,永不合红的或未复核的 PR,永不绕过合并队列。
 - ⛔ 永不派发 assignee 是别人的卡;⛔ 永不派发带 `needs-user-decision` 或 `pm:retriage` 的卡。
 - ⛔ 永不代维护者答产品或架构问题,⛔ 无代裁通道:席位只分析与推荐,裁决恒出自人工。
-- ⛔ 永不编辑共享检出,一任务一 worktree;⛔ 永不 `git stash`。
-- ⛔ 永不在代码 PR 里改 `content/docs/releases/`。
 - ⛔ GitHub 之外永不维护跟踪状态;看板(org Project)只是视图,权威层是 issue 正文 + REST。
 - ⛔ 永不跑版本发布、不合并 Version Packages PR;发布动作的完整清单以 AGENTS.md 为权威。
 - ⛔ 未经人工的发布痕迹按事故立案,不代跑补救性发布;机械通道存在不构成授权。
