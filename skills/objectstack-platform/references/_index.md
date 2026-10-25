@@ -10,7 +10,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 ## Core schemas
 
 - `node_modules/@objectstack/spec/src/data/datasource.zod.ts` — Exports: DriverType, DriverDefinitionSchema, SchemaModeSchema, ExternalDatasourceSettingsSchema, DatasourceSchema
-- `node_modules/@objectstack/spec/src/data/seed.zod.ts` — Exports: SeedMode, SeedSchema, leadSeed
+- `node_modules/@objectstack/spec/src/data/seed.zod.ts` — Exports: SeedMode, SeedColumnSchema, SeedSchema, leadSeed
 - `node_modules/@objectstack/spec/src/kernel/context.zod.ts` — Exports: RuntimeMode, KernelContextSchema, TenantRuntimeContextSchema
 - `node_modules/@objectstack/spec/src/kernel/manifest.zod.ts` — Exports: PluginPermissionsSchema, ManifestPermissionsSchema, PluginEnginesSchema, PluginRuntimeSchema, PluginPackagingSchema
 - `node_modules/@objectstack/spec/src/kernel/metadata-plugin.zod.ts` — Metadata Plugin Protocol

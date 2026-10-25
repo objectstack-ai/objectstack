@@ -13,7 +13,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/data/field.zod.ts` — Exports: FieldType, SelectOptionSchema, LocationCoordinatesSchema, CurrencyConfigSchema, CurrencyValueSchema
 - `node_modules/@objectstack/spec/src/data/hook.zod.ts` — Exports: HookEvent, HookSchema, HookContextSchema
 - `node_modules/@objectstack/spec/src/data/object.zod.ts` — Exports: ApiMethod, ApiOperationSchema, ObjectCapabilities, IndexSchema, TenancyConfigSchema
-- `node_modules/@objectstack/spec/src/data/seed.zod.ts` — Exports: SeedMode, SeedSchema, leadSeed
+- `node_modules/@objectstack/spec/src/data/seed.zod.ts` — Exports: SeedMode, SeedColumnSchema, SeedSchema, leadSeed
 - `node_modules/@objectstack/spec/src/data/validation.zod.ts` — ObjectStack Validation Protocol
 - `node_modules/@objectstack/spec/src/security/permission.zod.ts` — Exports: ObjectAccessScopeSchema, ObjectPermissionSchema, EffectiveObjectPermissionSchema, AdminScopeSchema, FieldPermissionSchema
 
@@ -21,6 +21,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 
 - `node_modules/@objectstack/spec/src/api/errors.zod.ts` — Standardized Error Codes Protocol
 - `node_modules/@objectstack/spec/src/automation/flow-function.zod.ts` — The contract for a **named handler function a `script` node invokes** —
+- `node_modules/@objectstack/spec/src/data/column-apply-on.zod.ts` — Exports: ColumnApplyOnSchema
 - `node_modules/@objectstack/spec/src/data/data-engine.zod.ts` — Data Engine Protocol
 - `node_modules/@objectstack/spec/src/data/driver-sql.zod.ts` — Exports: SQLDialectSchema, DataTypeMappingSchema, SSLConfigSchema, SQLDriverConfigSchema, SQLiteDataTypeMappingDefaults
 - `node_modules/@objectstack/spec/src/data/driver.zod.ts` — Exports: DriverOptionsSchema, DriverCapabilitiesSchema, DriverInterfaceSchema, PoolConfigSchema, DriverConfigSchema

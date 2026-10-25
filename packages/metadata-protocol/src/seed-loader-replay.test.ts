@@ -734,3 +734,253 @@ describe('seed replay — a credential the read path masks never blocks the skip
     expect(credentialNotices(noCredential.logger)).toEqual([]);
   });
 });
+
+describe('seed replay — a column declared applyOn: create is written on first seed only (#25761)', () => {
+  // The hotclm shape: master data the seed owns (`amount`) beside columns the
+  // app's own jobs own after the first write (`status`, `is_expiring`, and a
+  // reference a job re-points, `account`).
+  const INSTALMENT_FIELDS = {
+    name: { type: 'text' },
+    amount: { type: 'number' },
+    status: { type: 'text' },
+    is_expiring: { type: 'boolean' },
+    account: { type: 'lookup', reference: 'apply_on_account' },
+  };
+  const ACCOUNT = { name: 'apply_on_account', fields: { name: { type: 'text' } } };
+  const INSTALMENT = { name: 'apply_on_instalment', fields: INSTALMENT_FIELDS };
+  // A self-reference sends the dataset down the sequential `writeRecord` path.
+  const TREE_INSTALMENT = {
+    name: 'apply_on_tree_instalment',
+    fields: { ...INSTALMENT_FIELDS, parent: { type: 'lookup', reference: 'apply_on_tree_instalment' } },
+  };
+  const PATHS = [
+    { path: 'batched decideWriteAction', object: INSTALMENT, sequential: false },
+    { path: 'sequential writeRecord', object: TREE_INSTALMENT, sequential: true },
+  ];
+  const CREATE_ONLY = { status: { applyOn: 'create' }, is_expiring: { applyOn: 'create' }, account: { applyOn: 'create' } };
+  const RECORDS = [
+    { name: 'inst-1', amount: 100, status: 'pending', is_expiring: false, account: 'Acme' },
+    { name: 'inst-2', amount: 200, status: 'pending', is_expiring: false, account: 'Acme' },
+  ];
+
+  function metadataOf(...objects: Array<{ name: string }>): IMetadataService {
+    const byName = (name: string) => objects.find((o) => o.name === name);
+    return {
+      getObject: vi.fn(async (name: string) => byName(name)),
+      listObjects: vi.fn(async () => objects),
+      register: vi.fn(async () => {}),
+      get: vi.fn(async (_t: string, name: string) => byName(name)),
+      list: vi.fn(async () => []),
+      unregister: vi.fn(async () => {}),
+      exists: vi.fn(async () => false),
+      listNames: vi.fn(async () => []),
+    } as unknown as IMetadataService;
+  }
+
+  async function load(
+    engine: IDataEngine,
+    object: { name: string },
+    options: { mode?: string; columns?: Record<string, unknown>; records?: Array<Record<string, unknown>>; logger?: ReturnType<typeof createLogger> } = {},
+  ) {
+    const writeRecord = vi.spyOn(SeedLoaderService.prototype as any, 'writeRecord');
+    try {
+      const result = await new SeedLoaderService(engine, metadataOf(ACCOUNT, object), options.logger ?? createLogger()).load({
+        seeds: [
+          { object: ACCOUNT.name, externalId: 'name', mode: 'upsert', env: ['prod', 'dev', 'test'], records: [{ name: 'Acme' }, { name: 'Globex' }] },
+          {
+            object: object.name,
+            externalId: 'name',
+            mode: options.mode ?? 'upsert',
+            env: ['prod', 'dev', 'test'],
+            ...(options.columns ? { columns: options.columns } : {}),
+            records: options.records ?? RECORDS,
+          },
+        ] as any,
+        config: CONFIG,
+      });
+      return { result, writeRecordCalls: writeRecord.mock.calls.length };
+    } finally {
+      writeRecord.mockRestore();
+    }
+  }
+
+  const rowOf = (store: Record<string, any[]>, object: { name: string }, name: string) =>
+    store[object.name].find((r) => r.name === name)!;
+  const accountId = (store: Record<string, any[]>, name: string) =>
+    store[ACCOUNT.name].find((r) => r.name === name)!.id;
+  /** What the "jobs" did since the first seed: every create-only column moved, and someone edited `amount`. */
+  const runJobs = (store: Record<string, any[]>, object: { name: string }) => {
+    for (const row of store[object.name]) {
+      row.status = 'overdue';
+      row.is_expiring = true;
+      row.account = accountId(store, 'Globex');
+      row.amount = 999;
+    }
+  };
+  const updatesOf = (engine: IDataEngine, object: { name: string }) =>
+    (engine.update as any).mock.calls.filter(([o]: [string]) => o === object.name).map(([, data]: [string, any]) => data);
+
+  it.each(PATHS)('$path: a fresh insert writes the create-only and the always columns alike', async ({ object, sequential }) => {
+    const { engine, store } = createFaithfulEngine();
+    const first = await load(engine, object, { columns: CREATE_ONLY });
+
+    expect(first.writeRecordCalls > 0).toBe(sequential);
+    expect(first.result.success).toBe(true);
+    expect(first.result.summary.totalInserted).toBe(4);
+    expect(rowOf(store, object, 'inst-1')).toMatchObject({
+      amount: 100, status: 'pending', is_expiring: false, account: accountId(store, 'Acme'),
+    });
+  });
+
+  it.each(PATHS.flatMap((p) => ['upsert', 'update'].map((mode) => ({ ...p, mode }))))(
+    '$path, mode $mode: a re-seed after the jobs ran keeps the create-only columns and re-asserts the always ones',
+    async ({ object, sequential, mode }) => {
+      const { engine, store } = createFaithfulEngine();
+      await load(engine, object, { columns: CREATE_ONLY });
+      runJobs(store, object);
+      (engine.update as any).mockClear();
+
+      const replay = await load(engine, object, { mode, columns: CREATE_ONLY });
+
+      expect(replay.writeRecordCalls > 0).toBe(sequential);
+      expect(replay.result.success).toBe(true);
+      expect(replay.result.summary.totalErrored).toBe(0);
+      for (const name of ['inst-1', 'inst-2']) {
+        expect(rowOf(store, object, name)).toMatchObject({
+          status: 'overdue', is_expiring: true, account: accountId(store, 'Globex'),
+        });
+      }
+      expect(rowOf(store, object, 'inst-1').amount).toBe(100);
+      expect(rowOf(store, object, 'inst-2').amount).toBe(200);
+      // The merge set itself: each update names the key and the always column, never a create-only one.
+      const updates = updatesOf(engine, object);
+      expect(updates).toHaveLength(2);
+      for (const data of updates) {
+        expect(Object.keys(data).sort()).toEqual(['amount', 'id', 'name']);
+      }
+    },
+  );
+
+  it.each(PATHS)('$path: control — without the policy the same re-seed reverts the jobs\' columns', async ({ object }) => {
+    const { engine, store } = createFaithfulEngine();
+    await load(engine, object);
+    runJobs(store, object);
+
+    await load(engine, object);
+
+    expect(rowOf(store, object, 'inst-1')).toMatchObject({
+      amount: 100, status: 'pending', is_expiring: false, account: accountId(store, 'Acme'),
+    });
+  });
+
+  it.each(PATHS)('$path: a row whose only differences are create-only columns is a no-op replay — no update at all', async ({ object }) => {
+    const { engine, store } = createFaithfulEngine();
+    await load(engine, object, { columns: CREATE_ONLY });
+    for (const row of store[object.name]) {
+      row.status = 'overdue';
+      row.account = accountId(store, 'Globex');
+    }
+    (engine.update as any).mockClear();
+    const before = structuredClone(store);
+
+    const replay = await load(engine, object, { columns: CREATE_ONLY });
+
+    expect(updatesOf(engine, object)).toEqual([]);
+    expect(replay.result.summary.totalUpdated).toBe(0);
+    expect(store).toEqual(before);
+  });
+
+  it.each(PATHS)(
+    '$path: every non-key column create-only — the merge set is the key alone, so the row is skipped, never written with an empty patch',
+    async ({ object }) => {
+      const { engine, store } = createFaithfulEngine();
+      const allCreateOnly = { ...CREATE_ONLY, amount: { applyOn: 'create' } };
+      await load(engine, object, { columns: allCreateOnly });
+      runJobs(store, object);
+      (engine.update as any).mockClear();
+      const before = structuredClone(store);
+
+      const replay = await load(engine, object, { columns: allCreateOnly });
+
+      expect(updatesOf(engine, object)).toEqual([]);
+      expect(replay.result.summary.totalErrored).toBe(0);
+      expect(store).toEqual(before);
+    },
+  );
+
+  it.each(PATHS)('$path: a create-only reference on a matched row is not resolved, not deferred and not dropped', async ({ object }) => {
+    const { engine, store } = createFaithfulEngine();
+    await load(engine, object, { columns: CREATE_ONLY });
+    (engine.update as any).mockClear();
+    const unresolvable = RECORDS.map((r) => ({ ...r, amount: r.amount + 1, account: 'No Such Co' }));
+
+    const replay = await load(engine, object, { columns: CREATE_ONLY, records: unresolvable });
+
+    expect(replay.result.success).toBe(true);
+    expect(replay.result.errors).toEqual([]);
+    const instalments = replay.result.results.find((r) => r.object === object.name)!;
+    expect(instalments.referencesDeferred).toBe(0);
+    expect(instalments.referencesDropped).toBe(0);
+    expect(updatesOf(engine, object).some((data: Record<string, unknown>) => 'account' in data)).toBe(false);
+    expect(rowOf(store, object, 'inst-1')).toMatchObject({ amount: 101, account: accountId(store, 'Acme') });
+  });
+
+  it.each(PATHS)('$path: control — the same unresolvable reference on a row the load creates is deferred as before', async ({ object }) => {
+    const { engine } = createFaithfulEngine();
+    const unresolvable = RECORDS.map((r) => ({ ...r, account: 'No Such Co' }));
+
+    const first = await load(engine, object, { columns: CREATE_ONLY, records: unresolvable });
+
+    const instalments = first.result.results.find((r) => r.object === object.name)!;
+    expect(instalments.referencesDeferred).toBe(2);
+    expect(first.result.success).toBe(false);
+  });
+
+  it('a column of the externalId declared create-only is still matched on, and stays in the update', async () => {
+    const { engine, store } = createFaithfulEngine();
+    const columns = { ...CREATE_ONLY, name: { applyOn: 'create' } };
+    await load(engine, INSTALMENT, { columns });
+    runJobs(store, INSTALMENT);
+    (engine.update as any).mockClear();
+
+    const replay = await load(engine, INSTALMENT, { columns });
+
+    expect(replay.result.summary.totalInserted).toBe(0);
+    expect(store[INSTALMENT.name]).toHaveLength(2);
+    for (const data of updatesOf(engine, INSTALMENT)) {
+      expect(Object.keys(data).sort()).toEqual(['amount', 'id', 'name']);
+    }
+  });
+
+  it('a dry run judges every row as a create: nothing is matched, so the policy takes nothing out', async () => {
+    const { engine } = createFaithfulEngine();
+    const result = await new SeedLoaderService(engine, metadataOf(ACCOUNT, INSTALMENT), createLogger()).validate(
+      [{ object: INSTALMENT.name, externalId: 'name', mode: 'upsert', columns: CREATE_ONLY, records: RECORDS }] as any,
+    );
+    expect(result.summary.totalInserted).toBe(2);
+    expect(engine.update).not.toHaveBeenCalled();
+    expect(engine.insert).not.toHaveBeenCalled();
+  });
+
+  it('a policy naming no column of the object is reported once, by name, and governs nothing', async () => {
+    const { engine, store } = createFaithfulEngine();
+    const logger = createLogger();
+    const misspelt = { stauts: { applyOn: 'create' } };
+    await load(engine, INSTALMENT, { columns: misspelt, logger });
+    runJobs(store, INSTALMENT);
+
+    await load(engine, INSTALMENT, { columns: misspelt, logger });
+
+    const warnings = logger.warn.mock.calls.filter(([message]: [string]) => String(message).includes('stauts'));
+    expect(warnings).toHaveLength(2); // once per dataset per load
+    expect(warnings[0][1]).toMatchObject({ object: INSTALMENT.name, undeclaredColumns: ['stauts'] });
+    expect(rowOf(store, INSTALMENT, 'inst-1').status).toBe('pending');
+  });
+
+  it('a policy on an injected system column is a column of the object: no warning', async () => {
+    const { engine } = createFaithfulEngine();
+    const logger = createLogger();
+    await load(engine, INSTALMENT, { columns: { owner_id: { applyOn: 'create' } }, logger });
+    expect(logger.warn.mock.calls.filter(([, meta]: [string, any]) => meta?.undeclaredColumns)).toEqual([]);
+  });
+});
