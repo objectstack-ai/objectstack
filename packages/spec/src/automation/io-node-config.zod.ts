@@ -266,7 +266,9 @@ function notifyValuePhrase(value: unknown): string {
 // It is the WHOLE `recipients` value, never a list entry, and the node names
 // `email` as its only channel (the `superRefine` of `NotifyConfigSchema`): an
 // address that no user holds has no inbox, so the email channel is the one
-// that can deliver to it.
+// that can deliver to it. The runtime delivers it since #25721 (`d1e329e96d`):
+// service-automation's notify node reads the address off the STORED trigger
+// row and limits sends per address (see the `recipients` docblock below).
 
 /** A field's machine name — the grammar of `FieldSchema.name`, which `emailField` names. */
 const FIELD_MACHINE_NAME = /^[a-z_][a-z0-9_]*$/;
@@ -371,14 +373,26 @@ function notifyRecipientsRefusal(input: unknown): string {
  *    the whole value only, names an `email`-typed field of the triggering
  *    record whose address is the recipient.
  *
- * An address a CEL value envelope EVALUATES to is not an author constant: one
- * a user holds resolves to that user, and one that NO user holds is to fail
- * the node with a located message pointing to `{ emailField }` (the same
- * ruling). That refusal is PLANNED, not made: the runtime half (#25647, which
- * may ride #25571's files) has not landed, so until it does such an address is
- * still handed to the messaging service as written. The describes below say
- * "planned" for that reason — ⛔ they claim no refusal the runtime does not
- * make yet; when the runtime half lands, it rewrites them as made.
+ * An address a CEL value envelope EVALUATES to is not an author constant (the
+ * same ruling, made by #25721, `d1e329e96d`: `screenComputedAddresses` in
+ * service-automation's notify node). In a node whose `channels` include
+ * `email` — the one channel that sends to the address itself — a computed
+ * recipient that reads as an address, bare or as `user:ADDRESS`, must be a
+ * user's: one a user holds resolves to that user's id, and one that NO user
+ * holds fails the node with a located message pointing to `{ emailField }`,
+ * as does one that cannot be looked up (no data engine, a failing lookup). A
+ * node that does not name `email` (`inbox` alone, the messaging default)
+ * mails nobody, and its computed recipients reach the messaging resolver
+ * unscreened, as before. That channel scope is the runtime's current reading
+ * of the ruling and is with the maintainer for confirmation, so the describes
+ * below state it as the current behaviour, not as final.
+ *
+ * The same change delivers an email-field recipient: the address is read from
+ * the STORED trigger row (never the run's `record` snapshot), must be one
+ * plain ASCII mailbox, and one address receives at most 5 such sends per hour
+ * across every flow — best-effort: a faulting `cache` counter admits the send
+ * and says so once at `warn`. Each way there is no address fails the node and
+ * sends nothing.
  *
  * An envelope that evaluates to `null` or a blank string adds no recipient,
  * as a token that resolved to nothing did, and the executor's guard still
@@ -410,8 +424,8 @@ const NotifyRecipientsSlotSchema = z.union([
       + 'run (an entry that evaluates to a list adds each of its recipients); one envelope evaluating to a '
       + 'recipient or a list; or `{ emailField }`, the address in an `email`-typed field of the triggering record '
       + '— a `{…}` template token is refused. An email address written out as a string is an author constant, '
-      + 'sent as written; one an envelope evaluates to resolves to the user who holds it, and failing the node on '
-      + 'one no user holds, pointing to `{ emailField }`, is planned and not made yet',
+      + 'sent as written; in a node whose `channels` include `email`, one an envelope evaluates to must be a '
+      + 'user\'s: it resolves to that user, and one no user holds fails the node, pointing to `{ emailField }`',
     xExpression: 'value',
   });
 
@@ -654,12 +668,14 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
       + 'none; or one envelope evaluating to a recipient or a list. A `{…}` template token is refused. Or, as the '
       + 'whole value, `{ emailField: \'applicant_email\' }`: the address in that `email`-typed field of the record '
       + 'that triggered the flow, for a person who is not a user — the node then names `email` as its only channel. '
-      + 'Delivery to an email-field recipient is not live yet: until the messaging service resolves the form, a '
-      + 'run that reaches the node fails there. An email address written out as a string is no audience selector '
-      + 'but an author constant, sent as written: to the user who holds it, or else, on the `email` channel, to '
-      + 'the address itself. An address an envelope evaluates to is not one: it resolves to the user who holds it, '
-      + 'and one that no user holds is planned to fail the node, pointing to `{ emailField }` — that refusal is not '
-      + 'made yet, so until it is, such an address is still handed to the messaging service as written.',
+      + 'The address is read from the stored record when the node runs and must be one plain ASCII mailbox, or the '
+      + 'node fails and nothing is sent; one address receives at most 5 such emails per hour, best-effort. An email '
+      + 'address written out as a string is no audience selector but an author constant, sent as written: to the '
+      + 'user who holds it, or else, on the `email` channel, to the address itself. An address an envelope '
+      + 'evaluates to is not one: in a node whose `channels` include `email`, it must be a user\'s, written bare or '
+      + 'as `user:ADDRESS` — one a user holds resolves to that user, and one that no user holds fails the node, '
+      + 'pointing to `{ emailField }`. A node that does not name `email` mails nobody, and its computed recipients '
+      + 'go to the messaging service as before.',
     ),
   /**
    * Inline notification title — the NON-localizable content path, and a
