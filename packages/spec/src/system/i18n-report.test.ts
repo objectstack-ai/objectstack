@@ -68,13 +68,27 @@ describe('TranslationDataSchema — reports', () => {
   it('refuses a bare string per report — the value is an object of `label` / `description`', () => {
     const result = TranslationDataSchema.safeParse({ reports: { opps_by_stage: '各阶段商机' } });
     expect(result.success).toBe(false);
+    expect(result.error!.issues[0]).toMatchObject({ code: 'invalid_type', path: ['reports', 'opps_by_stage'] });
   });
 
   it('renames the singular spelling onto the group, and `name` / `title` onto `label`', () => {
-    expect(() => TranslationDataSchema.parse({ report: { r: { label: 'x' } } })).toThrow(/reports/);
-    expect(() => TranslationItemSchema.parse({ locale: 'en', report: { r: { label: 'x' } } })).toThrow(/reports/);
-    expect(() => TranslationDataSchema.parse({ reports: { r: { title: 'x' } } })).toThrow(/label/);
-    expect(() => TranslationDataSchema.parse({ reports: { r: { name: 'x' } } })).toThrow(/label/);
+    const issueOf = (result: { success: boolean; error?: { issues: any[] } }) => {
+      expect(result.success).toBe(false);
+      return result.error!.issues[0];
+    };
+    for (const result of [
+      TranslationDataSchema.safeParse({ report: { r: { label: 'x' } } }),
+      TranslationItemSchema.safeParse({ locale: 'en', report: { r: { label: 'x' } } }),
+    ]) {
+      const issue = issueOf(result);
+      expect(issue).toMatchObject({ code: 'unrecognized_keys', keys: ['report'], path: [] });
+      expect(issue.message).toContain('`report` → `reports`');
+    }
+    for (const key of ['title', 'name']) {
+      const issue = issueOf(TranslationDataSchema.safeParse({ reports: { r: { [key]: 'x' } } }));
+      expect(issue).toMatchObject({ code: 'unrecognized_keys', keys: [key], path: ['reports', 'r'] });
+      expect(issue.message).toContain(`\`${key}\` → \`label\``);
+    }
   });
 });
 
