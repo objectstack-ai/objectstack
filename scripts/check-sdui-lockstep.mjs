@@ -158,7 +158,8 @@
 
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -980,11 +981,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'The generator will not record a tree the pin does not name': 7,
   'The wiring this gate needs to be reachable at all': 12,
   'The containment predicate (#19969)': 10,
+  'The in-tree oracle (no pin: the merged layout)': 18,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 7;
+const SELF_TEST_BATTERY_FLOOR = 8;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1355,6 +1357,108 @@ export function selfTest() {
     })) === 'record-unusable',
   );
 
+  // ── The in-tree oracle (no pin: the merged layout) ────────────────────────
+  //
+  // Driven through `checkWithoutPin` over throwaway trees, so the path the
+  // production run takes — the presence test, `fingerprintOf` on both roots,
+  // the verdict — is the path asserted. The two ⭐ rows are the pair the mode
+  // owes: no pin with an agreeing `ui/` copy passes, no pin with no `ui/` copy
+  // REFUSES naming both. The `ui/` copy spells its code as a constant, the way
+  // objectui's does, so the decomposition is crossed between trees too.
+  battery('The in-tree oracle (no pin: the merged layout)');
+  check('the pin wins when a tree has both', oracleFor({ pinPresent: true, uiPresent: true }) === 'pin');
+  check('the pin alone is the pin oracle', oracleFor({ pinPresent: true, uiPresent: false }) === 'pin');
+  check('no pin and a ui/ copy is the in-tree oracle', oracleFor({ pinPresent: false, uiPresent: true }) === 'in-tree');
+  check('no pin and no ui/ copy is no oracle at all', oracleFor({ pinPresent: false, uiPresent: false }) === 'none');
+  const PARSE_FIXTURE = `export const head = 1;\n${REGION_DELIMITER}\nexport const alpha = 2;\nexport const beta = 3;\n`;
+  const trees = [];
+  const inTree = ({ ui = {}, omitUi = false } = {}) => {
+    const root = mkdtempSync(join(tmpdir(), 'sdui-lockstep-tree-'));
+    trees.push(root);
+    const write = (dir, files) => {
+      mkdirSync(join(root, dir), { recursive: true });
+      for (const [name, text] of Object.entries(files)) writeFileSync(join(root, dir, name), text);
+    };
+    write(PARSER_SRC, { 'parse.ts': PARSE_FIXTURE, 'validate.ts': FIXTURE_CONTAINMENT_SLOT, 'codes.ts': FIXTURE_LITERAL_SIDE });
+    if (!omitUi) {
+      write(UI_PARSER_SRC, { 'parse.ts': PARSE_FIXTURE, 'validate.ts': FIXTURE_CONTAINMENT_SLOT, 'codes.ts': FIXTURE_CONSTANT_SIDE, ...ui });
+    }
+    return checkWithoutPin(root);
+  };
+  const treeKinds = (result) => (result.refusal ? 'refused' : kinds(result.findings));
+  const agreeing = inTree();
+  check(
+    '⭐ no pin + a ui/ copy that agrees: no finding, so the gate exits 0',
+    treeKinds(agreeing) === '',
+    treeKinds(agreeing) || '(none)',
+  );
+  const noOracle = inTree({ omitUi: true });
+  check('⭐ no pin + no ui/ copy: REFUSED, so the gate exits 1, never a pass', treeKinds(noOracle) === 'refused', treeKinds(noOracle));
+  check(
+    'and the refusal names BOTH oracles it looked for',
+    (noOracle.refusal ?? '').includes(PIN_FILE) && (noOracle.refusal ?? '').includes(UI_PARSER_SRC),
+    noOracle.refusal ?? '(no refusal)',
+  );
+  const grammarDrift = inTree({ ui: { 'parse.ts': PARSE_FIXTURE.replace('beta', 'betb') } });
+  check('a one-character grammar change in the ui/ copy is a finding', treeKinds(grammarDrift) === 'grammar-drift', treeKinds(grammarDrift));
+  check(
+    'and the finding names the in-tree copy, never a recorded objectui revision',
+    (grammarDrift.findings?.[0] ?? '').includes(`${UI_TREE}/${REGION_FILE}`) && !(grammarDrift.findings?.[0] ?? '').includes("objectui's"),
+    grammarDrift.findings?.[0] ?? '(no finding)',
+  );
+  const codeDrift = inTree({ ui: { 'extra.ts': "export const later = { code: 'brand-new', message: 'x' };\n" } });
+  check(
+    'a code only the ui/ copy stamps is a finding — the direction the record could not see',
+    treeKinds(codeDrift) === 'code-drift',
+    treeKinds(codeDrift),
+  );
+  const predicateDrift = inTree({
+    ui: { 'validate.ts': FIXTURE_CONTAINMENT_SLOT.replace('!acceptsChildren(comp)', '!comp.isContainer') },
+  });
+  check('a changed containment predicate in the ui/ copy is a finding', treeKinds(predicateDrift) === 'containment-drift', treeKinds(predicateDrift));
+  const noRegion = inTree({ ui: { 'parse.ts': 'export const head = 1;\n// no delimiter here\n' } });
+  check(
+    'a ui/ copy without the region delimiter refuses, never compares a shorter region',
+    treeKinds(noRegion) === 'ui-region-unreachable',
+    treeKinds(noRegion),
+  );
+  const unresolvableThere = inTree({ ui: { 'extra.ts': FIXTURE_UNRESOLVABLE } });
+  check(
+    'an unresolvable code position in the ui/ copy refuses instead of comparing a short set',
+    treeKinds(unresolvableThere) === 'ui-code-set-unreadable',
+    treeKinds(unresolvableThere),
+  );
+  const noPredicate = inTree({ ui: { 'validate.ts': 'export const x = 1;\n' } });
+  check(
+    'a ui/ copy whose predicate cannot be located refuses instead of comparing',
+    treeKinds(noPredicate) === 'ui-containment-unreachable',
+    treeKinds(noPredicate),
+  );
+  const unresolvableHere = inTree();
+  check(
+    'this copy is held to its own refusals in this mode too',
+    kinds(judgeInTree({ ours: { ...unresolvableHere.ours, unresolved: ['x.ts:1: SOMEWHERE_ELSE'] }, theirs: unresolvableHere.theirs }))
+      === 'code-unresolvable',
+  );
+  for (const root of trees) rmSync(root, { recursive: true, force: true });
+  check('the in-tree path is spelled from the same two parts the reads join', UI_PARSER_SRC === `${UI_TREE}/${PARSER_SRC}`, UI_PARSER_SRC);
+  check(
+    `\`${UI_PARSER_SRC}\` is a path literal in this gate's code, so a diff under it derives this gate`,
+    inCode.includes(`'${UI_PARSER_SRC}'`),
+  );
+  const mainOpen = inCode.indexOf('\nfunction main() {');
+  const mainSrc = inCode.slice(mainOpen, inCode.indexOf('\n}\n', mainOpen));
+  check(
+    'main() sends a pin-less tree to the in-tree run BEFORE it reads the record',
+    mainOpen !== -1 && mainSrc.includes('mainWithoutPin();')
+      && mainSrc.indexOf('mainWithoutPin();') < mainSrc.indexOf('readFileSync(join(ROOT, RECORD_FILE)'),
+  );
+  const noPinOpen = inCode.indexOf('\nfunction mainWithoutPin() {');
+  check(
+    'and the in-tree run judges through checkWithoutPin, so the rows above are not phantom',
+    noPinOpen !== -1 && inCode.slice(noPinOpen, inCode.indexOf('\n}\n', noPinOpen)).includes('checkWithoutPin(ROOT)'),
+  );
+
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -1408,8 +1512,8 @@ export function selfTest() {
   console.log(
     'check:sdui-lockstep --self-test passed (the constant-vs-literal decomposition and its unresolvable '
     + 'direction, the region reader in both drift directions, all four refusal classes, the generator\'s '
-    + 'HEAD-vs-pin refusal in both directions, the CI wiring, and the containment predicate in both '
-    + 'directions)',
+    + 'HEAD-vs-pin refusal in both directions, the CI wiring, the containment predicate in both '
+    + 'directions, and the in-tree oracle with no pin in both directions)',
   );
 
   return SELF_TEST_VERDICT;
