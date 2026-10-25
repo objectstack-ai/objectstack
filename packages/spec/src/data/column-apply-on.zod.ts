@@ -20,4 +20,4 @@ import { z } from 'zod';
 export const ColumnApplyOnSchema = z.enum(['create', 'always'])
   .describe('When a matched-row write door writes a column: `always` on create and update, `create` on create only');
 
-export type ColumnApplyOn = z.infer<typeof ColumnApplyOnSchema>;
+export type ColumnApplyOn = z.input<typeof ColumnApplyOnSchema>;
