@@ -3239,6 +3239,12 @@ export class SeedLoaderService implements ISeedLoaderService {
    * was meant for is overwritten on every replay. The rows themselves are
    * valid, so they still load: refusing them would turn a policy typo into
    * missing seed data.
+   *
+   * The log is the one channel, on a dry run too. `result.errors` holds
+   * `ReferenceResolutionError`s, each about one record (`recordIndex`), and a
+   * dataset-level finding has no shape there. Unlike a dry run's possible
+   * reference miss (#4997), nothing about it is simulated: the policy is
+   * wrong whether or not the load writes.
    */
   private warnOnUndeclaredSeedColumns(dataset: Seed, definition: unknown): void {
     const columns = Object.keys(dataset.columns ?? {});
