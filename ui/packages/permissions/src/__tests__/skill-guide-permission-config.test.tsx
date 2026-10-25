@@ -47,11 +47,7 @@ import { usePermissions } from '../usePermissions';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '../../../..');
-// The published skill bundle is in the objectstack monorepo's `skills/` catalog
-// since the cutover (decision C, objectstack#25803), one level above this tree,
-// so its `skills/objectui/...` paths are read from there.
-const skillsBase = path.resolve(repoRoot, '..');
-const GUIDE = path.join(skillsBase, 'skills/objectui/guides/auth-permissions.md');
+const GUIDE = path.join(repoRoot, 'skills/objectui/guides/auth-permissions.md');
 
 // --- 8< --- guide example begin --- 8< ---
 // A role definition carries identity and inheritance only. Its grants live in
@@ -119,7 +115,7 @@ describe('objectui#4812 — the guide example is the shape the types declare', (
     const start = guide.findIndex((l) => l === want[0]);
     expect(
       start,
-      `first line of the pinned example not found in ${path.relative(skillsBase, GUIDE)}`,
+      `first line of the pinned example not found in ${path.relative(repoRoot, GUIDE)}`,
     ).toBeGreaterThan(-1);
     expect(guide.slice(start, start + want.length)).toEqual(want);
   });

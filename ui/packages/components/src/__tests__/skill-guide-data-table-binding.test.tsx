@@ -92,10 +92,6 @@ import type { DataSource } from '@object-ui/types';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '../../../..');
-// The published skill bundle is in the objectstack monorepo's `skills/` catalog
-// since the cutover (decision C, objectstack#25803), one level above this tree,
-// so its `skills/objectui/...` paths are read from there.
-const skillsBase = path.resolve(repoRoot, '..');
 
 const GUIDES = {
   'skills/objectui/guides/schema-expressions.md': 'schema-expressions',
@@ -106,7 +102,7 @@ const GUIDES = {
 const GUIDE_PATHS = Object.keys(GUIDES) as (keyof typeof GUIDES)[];
 
 function readGuide(rel: string): string {
-  return fs.readFileSync(path.join(skillsBase, rel), 'utf8');
+  return fs.readFileSync(path.join(repoRoot, rel), 'utf8');
 }
 
 /**

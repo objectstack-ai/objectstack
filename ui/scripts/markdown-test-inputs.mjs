@@ -327,13 +327,14 @@ export const ADJUDICATED = new Map([
     'packages/components/src/__tests__/readme-shadcn-sync-categories.test.ts',
     { reads: ['packages/components/README_SHADCN_SYNC.md'] },
   ],
-  // The three guides it reads moved with the published bundle into the objectstack
-  // monorepo's `skills/` catalog at the cutover (decision C, objectstack#25803), outside
-  // this tree, so this ledger can no longer name them; their trigger is the monorepo's.
   [
     'packages/components/src/__tests__/skill-guide-data-table-binding.test.tsx',
     {
-      reads: [],
+      reads: [
+        'skills/objectui/guides/data-integration.md',
+        'skills/objectui/guides/schema-expressions.md',
+        'skills/objectui/rules/protocol.md',
+      ],
       walker: 'not-markdown: concatenates plugin package `.tsx` sources',
     },
   ],
@@ -410,6 +411,10 @@ export const ADJUDICATED = new Map([
   [
     'packages/layout/src/__tests__/readme-sidebar-nav-example.test.ts',
     { reads: ['packages/layout/README.md'], notRead: ['README.md'] },
+  ],
+  [
+    'packages/permissions/src/__tests__/skill-guide-permission-config.test.tsx',
+    { reads: ['skills/objectui/guides/auth-permissions.md'] },
   ],
   [
     'packages/plugin-calendar/src/readme-calendar-view-schema.test.ts',
@@ -560,6 +565,19 @@ export const ADJUDICATED = new Map([
   [
     'packages/types/src/__tests__/held-public-block-arms-10872.test.ts',
     { reads: ['content/docs/guide/quick-start.md'] },
+  ],
+  // objectui#11405. Reads every marked fence in the two guides that authors a
+  // bind-only `list`, with the marker gate's own `scanSkillFences`, and judges it
+  // through `safeValidateSchema` and the strict face -- so an edit to either guide
+  // is an edit to this test's input.
+  [
+    'packages/types/src/__tests__/list-bind-only-11405.test.ts',
+    {
+      reads: [
+        'skills/objectui/guides/data-integration.md',
+        'skills/objectui/guides/schema-expressions.md',
+      ],
+    },
   ],
   // objectui#6152 round 9 -- the corpus census of `object-calendar` containers.
   // It walks the authored trees, reads every markdown document in them that

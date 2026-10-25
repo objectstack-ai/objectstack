@@ -236,7 +236,6 @@ import {
 } from './check-doc-snippet-types.mjs';
 import { PACKAGE_READMES, ROOT_PAGES, packageReadmePages } from './check-doc-component-types.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
-import { labelPath, skillBundleBase } from './skill-bundle-root.mjs';
 import { closesFence, openFence } from './markdown-fence-scan.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -347,9 +346,7 @@ export const SCAN_SURFACE = Object.freeze([
   Object.freeze({
     leg: `every ${SKILL_PAGE_EXTENSIONS.join(' / ')} page under ${SKILLS_ROOT}/`,
     anchor: SKILLS_ANCHOR,
-    // The bundle is in the monorepo's catalog since the cutover; its pages keep
-    // their `skills/objectui/...` labels (`skill-bundle-root.mjs`).
-    pages: (root) => pagesUnder(skillBundleBase(root), SKILLS_ROOT, SKILL_PAGE_EXTENSIONS),
+    pages: (root) => pagesUnder(root, SKILLS_ROOT, SKILL_PAGE_EXTENSIONS),
   }),
 ]);
 
@@ -611,7 +608,7 @@ export function analyze({ root = repoRoot, judge, tolerant, nodeTypes, parseJson
   let fenceCount = 0;
 
   for (const doc of documents) {
-    const { fences, markers } = scanJsonFences(readFileSync(labelPath(root, doc), 'utf8'));
+    const { fences, markers } = scanJsonFences(readFileSync(join(root, doc), 'utf8'));
     fenceCount += fences.length;
     for (const marker of markers) {
       if (!marker.consumed) {

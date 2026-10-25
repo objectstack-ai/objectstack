@@ -257,7 +257,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(HERE, '..');
 
 const ROOTS = ['skills'];
-const IMPL_ROOTS = ['packages', 'ui/packages'];
+const IMPL_ROOTS = ['packages'];
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'coverage', '.turbo']);
 const EXTENSIONS = new Set(['.md']);
 const IMPL_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json']);

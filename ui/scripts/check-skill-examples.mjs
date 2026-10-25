@@ -386,7 +386,6 @@ import {
   peerMappedCount,
 } from './check-doc-snippet-types.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
-import { labelPath, skillsWalk } from './skill-bundle-root.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -1235,18 +1234,16 @@ export function scanSkillFences(source) {
 /** Every guide in the scan set, repo-relative, in a stable order. */
 export function listGuides(root = repoRoot) {
   const out = [];
-  const walk = (dir, base) => {
+  const walk = (dir) => {
     for (const entry of readdirSync(dir).sort()) {
       const p = join(dir, entry);
-      if (statSync(p).isDirectory()) walk(p, base);
-      else if (entry.endsWith('.md')) out.push(relative(base, p).split(sep).join('/'));
+      if (statSync(p).isDirectory()) walk(p);
+      else if (entry.endsWith('.md')) out.push(relative(root, p).split(sep).join('/'));
     }
   };
   for (const rootName of SCAN_ROOTS) {
-    // `skills` is the published bundle, in the monorepo's catalog since the
-    // cutover (`skill-bundle-root.mjs`); its labels stay `skills/objectui/...`.
-    const { dir, base } = rootName === 'skills' ? skillsWalk(root) : { dir: join(root, rootName), base: root };
-    if (existsSync(dir)) walk(dir, base);
+    const dir = join(root, rootName);
+    if (existsSync(dir)) walk(dir);
   }
   return out;
 }
@@ -1357,7 +1354,7 @@ export function analyze({ root = repoRoot, measure = false, baseline = KNOWN_BAR
   const guides = listGuides(root);
   const scans = new Map();
   for (const guide of guides) {
-    scans.set(guide, scanSkillFences(readFileSync(labelPath(root, guide), 'utf8')));
+    scans.set(guide, scanSkillFences(readFileSync(join(root, guide), 'utf8')));
   }
 
   const findings = [];

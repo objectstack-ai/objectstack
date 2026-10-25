@@ -181,7 +181,6 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
-import { labelPath, skillsWalk } from './skill-bundle-root.mjs';
 import { scanFences } from './check-doc-fence-languages.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -352,25 +351,16 @@ export const RESIDUE_PATTERNS = Object.freeze([
  */
 export const FENCE_FLOOR = 400;
 
-/**
- * Where a declared root is on disk, and the base its documents are labelled from.
- * `skills` is the published bundle, in the monorepo's catalog since the cutover
- * (`skill-bundle-root.mjs`); its documents keep their `skills/objectui/...` labels.
- */
-function locate(root, spec) {
-  return spec === 'skills' ? skillsWalk(root) : { dir: join(root, spec), base: root };
-}
-
 /** Every document under one resolved root, repo-relative, in a stable order. */
 export function listDocuments(root, spec, kind) {
-  const { dir: abs, base } = locate(root, spec);
+  const abs = join(root, spec);
   if (kind === 'file') return [spec];
   const out = [];
   const walk = (dir) => {
     for (const entry of readdirSync(dir).sort()) {
       const p = join(dir, entry);
       if (statSync(p).isDirectory()) walk(p);
-      else if (DOC_EXTENSIONS.some((ext) => entry.endsWith(ext))) out.push(relative(base, p).split(sep).join('/'));
+      else if (DOC_EXTENSIONS.some((ext) => entry.endsWith(ext))) out.push(relative(root, p).split(sep).join('/'));
     }
   };
   walk(abs);
@@ -383,7 +373,7 @@ export function listDocuments(root, spec, kind) {
  * @returns {{ spec: string, kind: string, ok: boolean, problem: string | null }}
  */
 export function resolveRoot(root, { spec, kind }) {
-  const abs = locate(root, spec).dir;
+  const abs = join(root, spec);
   if (!existsSync(abs)) return { spec, kind, ok: false, problem: 'does not exist' };
   const isDir = statSync(abs).isDirectory();
   if (kind === 'file' && isDir) return { spec, kind, ok: false, problem: 'is declared a file but is a directory' };
@@ -492,7 +482,7 @@ export function scan(root, { roots = SCAN_ROOTS, fenceFloor = FENCE_FLOOR, cover
     for (const rel of documents) {
       let source;
       try {
-        source = readFileSync(labelPath(root, rel), 'utf8');
+        source = readFileSync(join(root, rel), 'utf8');
       } catch {
         continue; // symlink, gitlink, unreadable -- nothing to judge
       }

@@ -33,7 +33,6 @@ import {
   FRAGMENT_MARKER as SNIPPET_FRAGMENT_MARKER,
   FRAGMENT_MARKER_EXAMPLES as SNIPPET_FRAGMENT_MARKER_EXAMPLES,
 } from '../check-doc-snippet-types.mjs';
-import { labelPath } from '../skill-bundle-root.mjs';
 import { packageReadmePages as familyPackageReadmes, ROOT_PAGES as FAMILY_ROOT_PAGES } from '../check-doc-component-types.mjs';
 // The sibling gate over the skill bundle — imported HERE, never by the gate: the
 // gate spells its opt-in line itself, and this file pins the two spellings equal.
@@ -434,7 +433,7 @@ describe('the scan surface — the published skill bundle (objectui#12204)', () 
     // Non-vacuous: the bundle carries declared counter-examples; none would make the loop below pass over nothing.
     expect(pages.size, 'no declared fragment under the bundle').toBeGreaterThan(0);
     for (const doc of pages) {
-      const scan = scanSkillFences(fs.readFileSync(labelPath(repoRoot, doc), 'utf8'));
+      const scan = scanSkillFences(fs.readFileSync(path.join(repoRoot, doc), 'utf8'));
       expect(scan.orphans, `${doc}: orphaned opt-in lines`).toEqual([]);
     }
   });

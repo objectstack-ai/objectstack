@@ -81,11 +81,7 @@ import type { DataSource } from '@object-ui/types';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '../../../..');
-// The published skill bundle is in the objectstack monorepo's `skills/` catalog
-// since the cutover (decision C, objectstack#25803), one level above this tree,
-// so its `skills/objectui/...` paths are read from there.
-const skillsBase = path.resolve(repoRoot, '..');
-const skillsRoot = path.join(skillsBase, 'skills/objectui');
+const skillsRoot = path.join(repoRoot, 'skills/objectui');
 
 // The DECLARED column keys (`TableColumn`: `header` + `accessorKey`). These
 // mirror the two published guides' `data-table` example, which is why they
@@ -127,7 +123,7 @@ function publishedFiles(): string[] {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) walk(full);
-      else out.push(path.relative(skillsBase, full));
+      else out.push(path.relative(repoRoot, full));
     }
   };
   walk(skillsRoot);
@@ -135,7 +131,7 @@ function publishedFiles(): string[] {
 }
 
 function readSkillFile(rel: string): string {
-  return fs.readFileSync(path.join(skillsBase, rel), 'utf8');
+  return fs.readFileSync(path.join(repoRoot, rel), 'utf8');
 }
 
 describe('#5372 behaviour — a provider `dataSource` into a `data-table`', () => {
