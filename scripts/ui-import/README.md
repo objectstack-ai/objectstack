@@ -63,13 +63,12 @@ Changed by the patch:
 From the monorepo root, on the tree the subtree PR produced:
 
 ```sh
-# 1. Pending objectui changesets join the root ones (changesets reads one directory).
-#    A name the root already uses (react-pages-default-off.md on the cutover tree)
-#    keeps its objectui text under a `ui-` prefix.
-for f in ui/.changeset/*.md; do
-  b=$(basename "$f"); [ "$b" = README.md ] && continue
-  if [ -e ".changeset/$b" ]; then git mv "$f" ".changeset/ui-$b"; else git mv "$f" .changeset/; fi
-done
+# 1. Not here: objectui's 65 pending ui/.changeset/*.md stay under ui/ for the
+#    aftercare card objectstack#25831, which conforms them to the root changeset
+#    gates and moves them before the first post-cutover Version PR. Measured on
+#    c04b36dcb9, moving them as they stand reds check-empty-changeset (3 empty
+#    frontmatters) and check-adr-0087-registration (41 breaking changesets with no
+#    `adr-0087:` disposition), and one name collides with a root changeset.
 
 # 2. The deletions. `--ignore-unmatch`: the cutover tree already dropped
 #    ui/.objectstack-pin. The nested pull_request_template.md never renders (GitHub
