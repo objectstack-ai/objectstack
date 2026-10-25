@@ -265,12 +265,12 @@ localStorage / auth gotchas.
     approval, Tier S by the owning seat on a contract-tier review of record; before that record no AI seat merges,
     queues, or arms auto-merge on a PR whose diff touches one.** The governed surfaces are `docs/adr/**`,
     `docs/NORTH-STAR.md`, `.claude/**` (agents, hooks and settings — not only skills), `skills/**`, `AGENTS.md`,
-    `CLAUDE.md` — this file is one — and `.github/workflows/**`; a mixed diff is governed whole on one path hit.
-    The register is the `GOVERNED_SURFACES` table in `scripts/pm/check-governed-merges.mjs`, each row carrying its tier;
-    adding a surface is an edit *there*, never here, and `pnpm check:pm-governed-prose` reds per-PR when this
-    paragraph names fewer surfaces than the register — or more. When it reds, name the surface here. A fork PR
-    (head repo ≠ base repo) is a proposal, never a delivery, whatever its paths: no AI seat readies, queues, arms
-    auto-merge on or approves it; the owning seat adopts the diff onto an internal branch and lands that.
+    `CLAUDE.md` and `.github/workflows/**`, and under `ui/` `ui/docs/adr/**`, `ui/.claude/**`, `ui/skills/**`,
+    `ui/AGENTS.md`, `ui/CLAUDE.md` and `ui/.github/workflows/**`, all Tier H. The register is `GOVERNED_SURFACES` in
+    `scripts/pm/check-governed-merges.mjs`, each row carrying its tier; adding a surface is an edit *there*, never here,
+    and `pnpm check:pm-governed-prose` reds per-PR when this paragraph names fewer surfaces than the register — or
+    more. A fork PR (head repo ≠ base repo) is a proposal, never a delivery, whatever its paths: no AI seat readies,
+    queues, arms auto-merge on or approves it; the owning seat adopts the diff onto an internal branch and lands that.
 
     **Authoring stays open to every seat** — drafting, pushing, opening and revising the PR. What is reserved is the
     **landing**: on a PR whose diff touches a governed surface ⛔ never merge, ⛔ never queue, ⛔ never arm

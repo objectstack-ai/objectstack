@@ -1036,7 +1036,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ the FORK predicate: head repo ≠ base repo is a proposal, never a delivery': 6,
   '⭐ the argv is CLOSED: a flag the mode does not read, or a second repository beside a bare --pr, is refused': 22,
   'the per-row repository scope (ruled B2, 2026-10-13)': 20,
-  'the nested `ui/` workspace rows, through a register handed in (#25712)': 15,
+  'the nested `ui/` workspace rows, on the register (#25712)': 16,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1187,6 +1187,15 @@ export const HUMAN_MERGE_LINE_THRESHOLD = 3000;
  * The `claude-tree` row's Tier S holds in objectstack alone: the tier is the
  * landing the repository's own queue guard enforces, and only objectstack's
  * has a Tier S arm (#25199).
+ *
+ * The six `ui-*` rows are objectui's own register, carried under `ui/` now
+ * that objectui's tree is this repository's `ui/` workspace (#25677, #25712):
+ * every root row but the North Star, prefixed, scoped to objectstack (no other
+ * repository has a `ui/` tree), and all Tier H — `ui/.claude/**` included,
+ * which stays Tier H until it folds into the root `.claude/**` (maintainer
+ * ruling 2026-10-25, director item 16). A root row never reaches into `ui/`
+ * and a `ui-*` row never reaches the root: prefixes and exact paths both
+ * anchor at the repository root.
  */
 export const GOVERNED_SURFACES = Object.freeze([
   Object.freeze({ id: 'adr', prefix: 'docs/adr/', glob: 'docs/adr/**', tier: GOVERNED_TIER_H, what: 'architecture decision records' }),
@@ -1196,6 +1205,12 @@ export const GOVERNED_SURFACES = Object.freeze([
   Object.freeze({ id: 'claude-md', exact: 'CLAUDE.md', glob: 'CLAUDE.md', tier: GOVERNED_TIER_H, what: 'the repo-root Claude instruction file' }),
   Object.freeze({ id: 'north-star', exact: 'docs/NORTH-STAR.md', glob: 'docs/NORTH-STAR.md', tier: GOVERNED_TIER_H, what: "the maintainer's North Star — the law above AGENTS.md" }),
   Object.freeze({ id: 'workflows', prefix: '.github/workflows/', glob: '.github/workflows/**', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack', 'objectui', 'cloud']), what: 'CI, deploy and release workflows: what runs on every push, what deploys, what gates the queue' }),
+  Object.freeze({ id: 'ui-adr', prefix: 'ui/docs/adr/', glob: 'ui/docs/adr/**', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: "the ui workspace's architecture decision records" }),
+  Object.freeze({ id: 'ui-claude-tree', prefix: 'ui/.claude/', glob: 'ui/.claude/**', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: "the ui workspace's agent instruction tree" }),
+  Object.freeze({ id: 'ui-skills-catalog', prefix: 'ui/skills/', glob: 'ui/skills/**', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: "the ui workspace's published skills catalog" }),
+  Object.freeze({ id: 'ui-agents-md', exact: 'ui/AGENTS.md', glob: 'ui/AGENTS.md', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: "the ui workspace's agent instruction file" }),
+  Object.freeze({ id: 'ui-claude-md', exact: 'ui/CLAUDE.md', glob: 'ui/CLAUDE.md', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: "the ui workspace's Claude instruction file" }),
+  Object.freeze({ id: 'ui-workflows', prefix: 'ui/.github/workflows/', glob: 'ui/.github/workflows/**', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: "the ui workspace's workflow files" }),
 ]);
 
 /**
@@ -4411,7 +4426,7 @@ async function selfTest() {
   // ── the governed predicate: the 2026-08-18 unified list, exactly ──────────
   battery('the governed predicate: the 2026-08-18 unified list, exactly');
   const ids = (paths) => governedPathsIn(paths, REPO).map((s) => s.id);
-  assert('all-seven-surfaces-declared-in-order', GOVERNED_SURFACES.map((s) => s.id).join(',') === 'adr,claude-tree,skills-catalog,agents-md,claude-md,north-star,workflows', GOVERNED_SURFACES.map((s) => s.id).join(','));
+  assert('all-thirteen-surfaces-declared-in-order', GOVERNED_SURFACES.map((s) => s.id).join(',') === 'adr,claude-tree,skills-catalog,agents-md,claude-md,north-star,workflows,ui-adr,ui-claude-tree,ui-skills-catalog,ui-agents-md,ui-claude-md,ui-workflows', GOVERNED_SURFACES.map((s) => s.id).join(','));
   assert('adr-prefix', ids(['docs/adr/0001-x.md']).join() === 'adr');
   assert('whole-claude-tree-not-only-skills', ids(['.claude/hooks/guard-main-checkout.sh', '.claude/agents/os-dev.md', '.claude/settings.json']).join() === 'claude-tree');
   assert('published-skills-catalog-is-governed', ids(['skills/objectstack-ui/SKILL.md']).join() === 'skills-catalog');
@@ -4434,7 +4449,7 @@ async function selfTest() {
   battery('the per-row repository scope (ruled B2, 2026-10-13)');
   const everyRepo = GOVERNED_REPOS.map((r) => r.id);
   const workflowsRow = GOVERNED_SURFACES.find((s) => s.id === 'workflows');
-  assert('the-six-pre-existing-rows-declare-no-scope-and-so-govern-every-repository', GOVERNED_SURFACES.filter((s) => s.id !== 'workflows').every((s) => s.repos === undefined && surfaceRepos(s).join() === everyRepo.join()), JSON.stringify(GOVERNED_SURFACES.map((s) => [s.id, s.repos ?? null])));
+  assert('the-six-pre-existing-rows-declare-no-scope-and-so-govern-every-repository', GOVERNED_SURFACES.filter((s) => s.id !== 'workflows' && !s.id.startsWith('ui-')).every((s) => s.repos === undefined && surfaceRepos(s).join() === everyRepo.join()), JSON.stringify(GOVERNED_SURFACES.map((s) => [s.id, s.repos ?? null])));
   assert('the-workflows-row-is-scoped-to-objectstack-objectui-and-cloud-exactly', surfaceRepos(workflowsRow).join() === 'objectstack,objectui,cloud' && workflowsRow.tier === GOVERNED_TIER_H && workflowsRow.glob === '.github/workflows/**', JSON.stringify(workflowsRow));
   assert('every-declared-scope-is-a-non-empty-duplicate-free-subset-of-GOVERNED_REPOS-ids', GOVERNED_SURFACES.every((s) => s.repos === undefined || (Array.isArray(s.repos) && s.repos.length > 0 && new Set(s.repos).size === s.repos.length && s.repos.every((id) => everyRepo.includes(id)))), JSON.stringify(GOVERNED_SURFACES.map((s) => [s.id, s.repos ?? null])));
   assert('the-workflows-row-is-a-prefix-row-with-a-separator-so-it-reaches-dispatch-gates-as-written-and-declares-no-hint', workflowsRow.prefix === '.github/workflows/' && !ROOT_FILE_WATCH_HINTS.some((h) => h.startsWith('.github/')));
@@ -4446,7 +4461,7 @@ async function selfTest() {
   assert('a-hotcrm-workflow-path-is-NOT-governed', governedPathsIn([wf], 'hotcrm').length === 0 && testVerdict([wf], { repo: 'hotcrm' }).governed === false);
   assert('the-default-rows-still-govern-objectos-and-hotcrm-the-scope-narrows-one-row-not-the-register', ['objectos', 'hotcrm'].every((r) => governedPathsIn(['AGENTS.md', 'docs/adr/0001-x.md', '.claude/agents/os-dev.md'], r).map((s) => s.id).join() === 'adr,claude-tree,agents-md'));
   assert('the-near-misses-for-the-workflows-row-stay-out', ids(['.github/ISSUE_TEMPLATE/bug.md', '.github/workflows.bak/x.yml', '.github/workflowsx/y.yml', 'github/workflows/z.yml', '.github/CODEOWNERS', 'packages/x/.github/workflows/w.yml']).length === 0);
-  assert('surfacesChecked-counts-the-rows-that-govern-the-repository-not-the-table', testVerdict(['README.md'], { repo: 'objectstack' }).surfacesChecked === 7 && testVerdict(['README.md'], { repo: 'objectos' }).surfacesChecked === 6 && governedSurfacesFor('cloud').length === 7 && governedSurfacesFor('hotcrm').map((s) => s.id).join() === 'adr,claude-tree,skills-catalog,agents-md,claude-md,north-star');
+  assert('surfacesChecked-counts-the-rows-that-govern-the-repository-not-the-table', testVerdict(['README.md'], { repo: 'objectstack' }).surfacesChecked === 13 && testVerdict(['README.md'], { repo: 'objectos' }).surfacesChecked === 6 && governedSurfacesFor('cloud').length === 7 && governedSurfacesFor('hotcrm').map((s) => s.id).join() === 'adr,claude-tree,skills-catalog,agents-md,claude-md,north-star');
   assert('the-verdict-carries-the-repository-it-answered-for', testVerdict([wf], { repo: 'cloud' }).repo === 'cloud' && JSON.parse(JSON.stringify(testVerdict([wf], { repo: 'objectui' }))).repo === 'objectui');
   const refuses = (fn) => { try { fn(); return null; } catch (error) { return error; } };
   const noRepo = refuses(() => governedPathsIn([wf]));
@@ -4468,39 +4483,31 @@ async function selfTest() {
   // ── the nested `ui/` workspace rows (#25712) ─────────────────────────────
   //
   // The objectui tree arrives as the `ui/` workspace of this repository, and
-  // its own register's six rows have to govern it here under that prefix. The
-  // rows land on the register in the PR that also names them in the two
-  // instruction surfaces `check-governed-prose.mjs` pins (both at their line
-  // ceiling); until then they are THIS fixture, read through the matchers'
-  // `register` seam, so the matchers are proven on them first. Both directions
-  // are pinned: each row's specimen is governed Tier H in objectstack, and a
-  // `ui/` source path, a nested copy of an instruction file and every other
-  // repository answer NOT governed. The last case pins today's register: it
-  // does not know `ui/` yet — the PR that adds the rows flips that case.
-  battery('the nested `ui/` workspace rows, through a register handed in (#25712)');
-  const UI_ROWS = Object.freeze([
-    Object.freeze({ id: 'ui-adr', prefix: 'ui/docs/adr/', glob: 'ui/docs/adr/**', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: "the ui workspace's architecture decision records" }),
-    Object.freeze({ id: 'ui-claude-tree', prefix: 'ui/.claude/', glob: 'ui/.claude/**', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: "the ui workspace's agent instruction tree" }),
-    Object.freeze({ id: 'ui-skills-catalog', prefix: 'ui/skills/', glob: 'ui/skills/**', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: "the ui workspace's published skills catalog" }),
-    Object.freeze({ id: 'ui-agents-md', exact: 'ui/AGENTS.md', glob: 'ui/AGENTS.md', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: "the ui workspace's agent instruction file" }),
-    Object.freeze({ id: 'ui-claude-md', exact: 'ui/CLAUDE.md', glob: 'ui/CLAUDE.md', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: "the ui workspace's Claude instruction file" }),
-    Object.freeze({ id: 'ui-workflows', prefix: 'ui/.github/workflows/', glob: 'ui/.github/workflows/**', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: "the ui workspace's workflow files" }),
-  ]);
-  const WITH_UI = Object.freeze([...GOVERNED_SURFACES, ...UI_ROWS]);
-  const uiIds = (paths, repo = REPO) => governedPathsIn(paths, repo, WITH_UI).map((s) => s.id);
+  // its own register's six rows govern it here under that prefix (see the
+  // register's header). #25712's first PR proved the matchers on these rows as
+  // a fixture handed in through the `register` seam, before they landed; they
+  // are the live rows now, so every case below reads the register itself, and
+  // the seam is held by the one register that does NOT carry them. Both
+  // directions are pinned: each row's specimen is governed Tier H in
+  // objectstack, and a `ui/` source path, a nested copy of an instruction file
+  // and every other repository answer NOT governed.
+  battery('the nested `ui/` workspace rows, on the register (#25712)');
+  const UI_ROWS = GOVERNED_SURFACES.filter((s) => s.id.startsWith('ui-'));
+  const ROOT_ROWS = Object.freeze(GOVERNED_SURFACES.filter((s) => !s.id.startsWith('ui-')));
   const UI_SPECIMENS = { 'ui-adr': 'ui/docs/adr/0001-master-detail-subform.md', 'ui-claude-tree': 'ui/.claude/hooks/guard-main-checkout.sh', 'ui-skills-catalog': 'ui/skills/objectui/SKILL.md', 'ui-agents-md': 'ui/AGENTS.md', 'ui-claude-md': 'ui/CLAUDE.md', 'ui-workflows': 'ui/.github/workflows/ci.yml' };
-  assert('the-fixture-rows-are-well-formed-register-rows', UI_ROWS.every((r) => (r.prefix ? r.prefix.endsWith('/') && r.glob === `${r.prefix}**` && r.exact === undefined : r.glob === r.exact) && r.tier === GOVERNED_TIER_H && surfaceRepos(r).join() === 'objectstack') && new Set(WITH_UI.map((r) => r.id)).size === WITH_UI.length, JSON.stringify(UI_ROWS.map((r) => r.id)));
-  assert('the-fixture-mirrors-the-six-rows-objectui-governs-each-under-ui', UI_ROWS.map((r) => r.glob).join() === GOVERNED_SURFACES.filter((s) => s.id !== 'north-star').map((s) => `ui/${s.glob}`).join(), UI_ROWS.map((r) => r.glob).join());
+  assert('the-ui-rows-are-six-well-formed-register-rows', UI_ROWS.length === 6 && UI_ROWS.every((r) => (r.prefix ? r.prefix.endsWith('/') && r.glob === `${r.prefix}**` && r.exact === undefined : r.glob === r.exact) && r.tier === GOVERNED_TIER_H && r.tierRepos === undefined && surfaceRepos(r).join() === 'objectstack') && new Set(GOVERNED_SURFACES.map((r) => r.id)).size === GOVERNED_SURFACES.length, JSON.stringify(UI_ROWS.map((r) => r.id)));
+  assert('the-ui-rows-mirror-the-six-rows-objectui-governs-each-under-ui', UI_ROWS.map((r) => r.glob).join() === ROOT_ROWS.filter((s) => s.id !== 'north-star').map((s) => `ui/${s.glob}`).join(), UI_ROWS.map((r) => r.glob).join());
   for (const row of UI_ROWS) {
-    assert(`the-${row.id}-specimen-is-governed-by-its-own-row-alone`, uiIds([UI_SPECIMENS[row.id]]).join() === row.id, uiIds([UI_SPECIMENS[row.id]]).join());
+    assert(`the-${row.id}-specimen-is-governed-by-its-own-row-alone`, ids([UI_SPECIMENS[row.id]]).join() === row.id, ids([UI_SPECIMENS[row.id]]).join());
   }
-  assert('every-ui-row-lands-Tier-H-the-ui-claude-tree-included', Object.values(UI_SPECIMENS).every((p) => governedTierFor([p], REPO, WITH_UI) === GOVERNED_TIER_H) && governedTierFor([UI_SPECIMENS['ui-claude-tree'], '.claude/agents/os-dev.md'], REPO, WITH_UI) === GOVERNED_TIER_H);
-  assert('a-ui-source-path-is-NOT-governed', uiIds(['ui/packages/components/src/index.ts', 'ui/apps/console/src/App.tsx', 'ui/package.json', 'ui/.changeset/config.json']).length === 0);
-  assert('nested-copies-and-near-misses-stay-out', uiIds(['ui/examples/AGENTS.md', 'ui/packages/x/AGENTS.md', 'ui/packages/x/.github/workflows/w.yml', 'ui/.claude-x/y.md', 'ui/skillsx/a.md', 'ui/docs/adrs/z.md', 'ui/.github/CODEOWNERS', 'xui/AGENTS.md']).length === 0);
-  assert('the-root-rows-do-not-reach-into-ui-and-the-ui-rows-do-not-reach-the-root', uiIds(['ui/.github/workflows/ci.yml', '.github/workflows/lint.yml', 'ui/AGENTS.md', 'AGENTS.md']).join() === 'agents-md,workflows,ui-agents-md,ui-workflows');
-  assert('the-ui-rows-govern-objectstack-alone', ['objectui', 'cloud', 'objectos', 'hotcrm'].every((r) => uiIds(Object.values(UI_SPECIMENS), r).length === 0));
-  assert('a-register-handed-in-is-counted-by-the-same-reader', governedSurfacesFor(REPO, WITH_UI).length === governedSurfacesFor(REPO).length + UI_ROWS.length);
-  assert('today-the-register-does-not-know-ui-the-pr-adding-the-rows-flips-this', ids(Object.values(UI_SPECIMENS)).length === 0 && governedSurfacesFor(REPO).length === 7);
+  assert('every-ui-row-lands-Tier-H-the-ui-claude-tree-included', Object.values(UI_SPECIMENS).every((p) => governedTierFor([p], REPO) === GOVERNED_TIER_H) && governedTierFor([UI_SPECIMENS['ui-claude-tree'], '.claude/agents/os-dev.md'], REPO) === GOVERNED_TIER_H);
+  assert('--test-judges-a-ui-claude-path-Tier-H-and-a-ui-package-source-path-not-governed', testVerdict(['ui/.claude/x'], { repo: REPO }).tier === GOVERNED_TIER_H && testVerdict(['ui/packages/x/src/y.ts'], { repo: REPO }).governed === false && testVerdict(['ui/packages/x/src/y.ts'], { repo: REPO }).tier === null);
+  assert('a-ui-source-path-is-NOT-governed', ids(['ui/packages/components/src/index.ts', 'ui/apps/console/src/App.tsx', 'ui/package.json', 'ui/.changeset/config.json']).length === 0);
+  assert('nested-copies-and-near-misses-stay-out', ids(['ui/examples/AGENTS.md', 'ui/packages/x/AGENTS.md', 'ui/packages/x/.github/workflows/w.yml', 'ui/.claude-x/y.md', 'ui/skillsx/a.md', 'ui/docs/adrs/z.md', 'ui/.github/CODEOWNERS', 'xui/AGENTS.md']).length === 0);
+  assert('the-root-rows-do-not-reach-into-ui-and-the-ui-rows-do-not-reach-the-root', ids(['ui/.github/workflows/ci.yml', '.github/workflows/lint.yml', 'ui/AGENTS.md', 'AGENTS.md']).join() === 'agents-md,workflows,ui-agents-md,ui-workflows');
+  assert('the-ui-rows-govern-objectstack-alone', ['objectui', 'cloud', 'objectos', 'hotcrm'].every((r) => governedPathsIn(Object.values(UI_SPECIMENS), r).length === 0) && governedSurfacesFor('objectui').length === 7);
+  assert('a-register-handed-in-is-counted-by-the-same-reader', governedSurfacesFor(REPO, ROOT_ROWS).length === governedSurfacesFor(REPO).length - UI_ROWS.length && governedPathsIn(Object.values(UI_SPECIMENS), REPO, ROOT_ROWS).length === 0);
+  assert('the-register-knows-ui-the-rows-are-live', ids(Object.values(UI_SPECIMENS)).length === UI_ROWS.length && governedSurfacesFor(REPO).length === 13);
 
   // ── the dispatch-gates declaration (#9979) ───────────────────────────────
   //
@@ -4539,7 +4546,7 @@ async function selfTest() {
   assert('every-row-carries-a-tier-and-it-is-H-or-S', GOVERNED_SURFACES.every((s) => s.tier === GOVERNED_TIER_H || s.tier === GOVERNED_TIER_S), JSON.stringify(GOVERNED_SURFACES.map((s) => [s.id, s.tier])));
   assert('the-tier-values-are-distinct-single-letters-a-reader-greps', GOVERNED_TIER_H === 'H' && GOVERNED_TIER_S === 'S' && Object.keys(GOVERNED_TIERS).join() === 'H,S');
   assert('Tier-S-is-exactly-the-whole-claude-tree-row', GOVERNED_SURFACES.filter((s) => s.tier === GOVERNED_TIER_S).map((s) => s.id).join() === 'claude-tree');
-  assert('Tier-H-is-the-law-adr-north-star-skills-catalog-agents-md-claude-md-and-the-workflows-row', GOVERNED_SURFACES.filter((s) => s.tier === GOVERNED_TIER_H).map((s) => s.id).join() === 'adr,skills-catalog,agents-md,claude-md,north-star,workflows');
+  assert('Tier-H-is-the-law-adr-north-star-skills-catalog-agents-md-claude-md-the-workflows-row-and-the-six-ui-rows', GOVERNED_SURFACES.filter((s) => s.tier === GOVERNED_TIER_H).map((s) => s.id).join() === 'adr,skills-catalog,agents-md,claude-md,north-star,workflows,ui-adr,ui-claude-tree,ui-skills-catalog,ui-agents-md,ui-claude-md,ui-workflows');
   assert('settings-and-hooks-are-Tier-S-by-the-amendment', governedTierFor(['.claude/settings.json', '.claude/hooks/guard-main-checkout.sh'], REPO) === GOVERNED_TIER_S);
   assert('skills-agents-and-the-fact-layer-are-Tier-S', governedTierFor(['.claude/skills/pm-dispatch/SKILL.md', '.claude/agents/os-dev.md', '.claude/skills/pm-dispatch/references/contract-review.md'], REPO) === GOVERNED_TIER_S);
   assert('each-Tier-H-surface-answers-H-alone', ['docs/adr/0001-x.md', 'docs/NORTH-STAR.md', 'skills/objectstack-ui/SKILL.md', 'AGENTS.md', 'CLAUDE.md'].every((p) => governedTierFor([p], REPO) === GOVERNED_TIER_H));
@@ -6000,13 +6007,13 @@ async function selfTest() {
   const liftedHead = renderTestVerdict(liftedTest).split('\n')[0];
   assert(
     '⭐ the-test-head-no-longer-reports-a-post-lift-zero-as-if-nothing-had-hit-the-register',
-    liftedHead === 'governed-surface predicate: 0 of 4 path(s) hit the register after 1 generated-artifact lift(s) (7 surfaces govern objectstack).',
+    liftedHead === 'governed-surface predicate: 0 of 4 path(s) hit the register after 1 generated-artifact lift(s) (13 surfaces govern objectstack).',
     liftedHead,
   );
   const plainHead = renderTestVerdict(testVerdict(['packages/spec/src/ui/view.zod.ts'], { repo: REPO })).split('\n')[0];
   assert(
     'and-a-verdict-with-no-lift-keeps-its-head-line-byte-for-byte',
-    plainHead === 'governed-surface predicate: 0 of 1 path(s) hit the register (7 surfaces govern objectstack).',
+    plainHead === 'governed-surface predicate: 0 of 1 path(s) hit the register (13 surfaces govern objectstack).',
     plainHead,
   );
 
