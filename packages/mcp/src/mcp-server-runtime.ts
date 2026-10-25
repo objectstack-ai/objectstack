@@ -975,6 +975,33 @@ export async function buildObjectListResource(
 }
 
 /**
+ * The verbs the stateless Streamable HTTP surface serves: POST alone. Sent as
+ * the `Allow` header of {@link methodNotAllowedResponse}.
+ */
+const MCP_HTTP_ALLOWED_METHODS = 'POST';
+
+/**
+ * The stateless transport's answer to any verb but POST (#25759): `405` with
+ * `Allow: POST`. The body is the SDK transport's own 405 body
+ * (`handleUnsupportedRequest`), so a client reads the same JSON-RPC error it
+ * read for an unsupported verb before; only the status of GET and DELETE and
+ * the `Allow` value change.
+ */
+function methodNotAllowedResponse(): Response {
+  return new Response(
+    JSON.stringify({
+      jsonrpc: '2.0',
+      error: { code: -32000, message: 'Method not allowed.' },
+      id: null,
+    }),
+    {
+      status: 405,
+      headers: { Allow: MCP_HTTP_ALLOWED_METHODS, 'Content-Type': 'application/json' },
+    },
+  );
+}
+
+/**
  * MCPServerRuntime — Bridges ObjectStack kernel services to the Model Context Protocol.
  *
  * Responsibilities:
@@ -1624,6 +1651,8 @@ export class MCPServerRuntime {
    * Stateless by design: a fresh {@link McpServer} + transport is built per
    * request (the SDK-recommended pattern for stateless HTTP — it avoids any
    * cross-request session/request-id collision and keeps each call isolated).
+   * So it serves POST alone: GET (a server-initiated SSE stream), DELETE (a
+   * session end) and every other verb answer `405` with `Allow: POST` (#25759).
    * The tool set is the object-CRUD bridge plus — when the bridge can resolve
    * the framework's action mechanism — the business-action tools
    * (`list_actions` / `run_action`, and `resume_run` when the bridge can
@@ -1660,6 +1689,26 @@ export class MCPServerRuntime {
       toolOptions?: RegisterObjectToolsOptions & RegisterActionToolsOptions;
     } = {},
   ): Promise<Response> {
+    // [#25759] This transport answers POST and nothing else. It is stateless
+    // (no session id) and the per-request server is closed in `finally`, so it
+    // can hold no server-initiated SSE stream and has no session to end:
+    //  - GET used to reach the SDK's `handleGetRequest`, which answered `200
+    //    text/event-stream` and then lost the stream when `finally` closed the
+    //    server. The client read a dropped stream and opened another one, 2–3
+    //    times a second for as long as a session stayed connected. The Streamable
+    //    HTTP transport gives a server with no GET stream one answer: `405`, and
+    //    the SDK client then stops opening one (`client/streamableHttp.js`
+    //    treats 405 on GET as "this server offers no stream").
+    //  - DELETE ends a session. The SDK client sends it only for a session id
+    //    the server issued, and this server never issues one; the transport
+    //    lets a server that does not end sessions answer `405`.
+    // Every other verb was a 405 already, with an `Allow` that named GET and
+    // DELETE. All of them are answered here, before a server is built, so a
+    // refused verb pays for no tool registration.
+    if (request.method !== 'POST') {
+      return methodNotAllowedResponse();
+    }
+
     // The prompt surface is wired by capability, like the action tools: a
     // bridge that cannot read skill metadata gets no `prompts` capability and
     // no handlers, rather than a capability that answers nothing.

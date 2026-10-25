@@ -1325,11 +1325,16 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             // ── MCP (Streamable HTTP) + API keys (ADR-0036) ─────────────
             // Mounted explicitly (there is no catch-all) and routed through
             // dispatch() so the host's project-aware kernel swap + execution
-            // context resolution run first. /mcp accepts POST (JSON-RPC), GET
-            // (SSE) and DELETE (session end) — the transport reads the method
-            // from the request, the dispatcher gates on OS_MCP_SERVER_ENABLED
-            // and the resolved principal. NOTE: the dispatch() branches alone
-            // are unreachable over HTTP without these registrations.
+            // context resolution run first. /mcp is mounted for POST, GET and
+            // DELETE and the transport reads the method from the request: it
+            // is stateless, so it serves POST (JSON-RPC) and answers GET and
+            // DELETE `405 Allow: POST` itself (#25759). GET and DELETE stay
+            // mounted so that answer comes from the transport, after the
+            // dispatcher's anonymous refusal, and not from the adapter's
+            // unmatched-route handler. The dispatcher gates on
+            // OS_MCP_SERVER_ENABLED and the resolved principal. NOTE: the
+            // dispatch() branches alone are unreachable over HTTP without these
+            // registrations.
             const mountMcp = (method: 'GET' | 'POST' | 'DELETE') => {
                 const register = method === 'GET' ? server.get : method === 'DELETE' ? server.delete : server.post;
                 register.call(server, `${prefix}/mcp`, async (req: any, res: any) => {
