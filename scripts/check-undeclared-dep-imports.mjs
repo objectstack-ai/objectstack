@@ -323,9 +323,49 @@ const LEDGER = [
       + 'the same seam for exactly that reason — so declaring it would reverse a stance the tree '
       + 'states, not repair an omission.',
   },
+  // The objectui Console (imported as ui/ at the cutover, #25752 bill item 20). Two rows,
+  // one per dependency, each covering the package's whole `src/` directory: the evidence
+  // is the manifest, so it is per package, not per call site.
+  {
+    pkg: '@object-ui/console',
+    dep: '@objectstack/spec',
+    file: 'ui/apps/console/src',
+    kind: 'bundled-not-shipped',
+    why:
+      '@object-ui/console publishes a prebuilt SPA: `files` is dist + plugin.{ts,js,d.ts} + README, '
+      + 'and `exports` resolves to plugin.js, so src/** is bundled by vite into dist and never reaches '
+      + 'an installing consumer. Its only runtime dependency is @object-ui/sdui-parser; @objectstack/spec '
+      + 'is a build input, which is what devDependencies records.',
+  },
+  {
+    pkg: '@object-ui/console',
+    dep: '@objectstack/client',
+    file: 'ui/apps/console/src',
+    kind: 'bundled-not-shipped',
+    why:
+      'Same package, same evidence: the Console src imports @objectstack/client types for its own '
+      + 'pages, vite bundles src/** into dist, and the published files (dist + plugin.* + README) carry '
+      + 'no src for a consumer to resolve the import from.',
+  },
 ];
 
-const LEDGER_KINDS = new Set(['optional-runtime-probe', 'type-only']);
+/**
+ * The ledger kinds. `bundled-not-shipped` is the one keyed by DIRECTORY: its row
+ * names a package's whole `src/` (never a file), and its evidence is that package's
+ * manifest, re-read on every run -- `files` must exist and ship nothing under `src/`.
+ * The day `files` starts shipping source, or is deleted (everything ships), the row
+ * is stale and the imports are a consumer's problem again.
+ */
+const LEDGER_KINDS = new Set(['optional-runtime-probe', 'type-only', 'bundled-not-shipped']);
+
+/** Does a manifest's `files` keep `src/**` out of the published tarball? */
+export function shipsNoSource(manifest) {
+  if (!Array.isArray(manifest?.files)) return false;
+  return manifest.files.every((entry) => {
+    const e = String(entry).replace(/^\.\//, '');
+    return e !== 'src' && !e.startsWith('src/') && !e.includes('*');
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Workspace discovery
@@ -539,13 +579,15 @@ export function sweep(root) {
 // ---------------------------------------------------------------------------
 // Ledger reconciliation
 
-export function reconcile(findings, ledger) {
+export function reconcile(findings, ledger, manifests = new Map()) {
   const unledgered = [];
   const staleRows = [];
   const matched = new Set();
+  const covers = (r, f) => r.pkg === f.pkg && r.dep === f.dep
+    && (r.kind === 'bundled-not-shipped' ? f.file.startsWith(`${r.file}/`) : r.file === f.file);
 
   for (const finding of findings) {
-    const row = ledger.find((r) => r.pkg === finding.pkg && r.dep === finding.dep && r.file === finding.file);
+    const row = ledger.find((r) => covers(r, finding));
     if (row === undefined) { unledgered.push(finding); continue; }
     matched.add(row);
     if (row.kind === 'optional-runtime-probe' && finding.form !== 'dynamic') {
@@ -568,6 +610,15 @@ export function reconcile(findings, ledger) {
     }
   }
   for (const row of ledger) {
+    if (row.kind === 'bundled-not-shipped' && matched.has(row) && !shipsNoSource(manifests.get(row.pkg))) {
+      staleRows.push({
+        row,
+        why: `${row.pkg}'s manifest no longer keeps src/** out of the tarball (\`files\` is `
+          + `${JSON.stringify(manifests.get(row.pkg)?.files ?? null)}). A \`bundled-not-shipped\` row certifies `
+          + 'that no consumer ever resolves these imports; a published src makes every one of them real. '
+          + 'Declare the dependencies, or restore a `files` list that ships the bundle only.',
+      });
+    }
     if (matched.has(row)) continue;
     staleRows.push({
       row,
@@ -585,6 +636,9 @@ function ledgerShapeProblems(ledger) {
     if (!LEDGER_KINDS.has(row.kind)) problems.push(`${at}: unknown kind \`${row.kind}\``);
     if (typeof row.why !== 'string' || row.why.length < 40) problems.push(`${at}: \`why\` must state the reason`);
     if (typeof row.file !== 'string' || !row.file.includes('/')) problems.push(`${at}: \`file\` must be a repo-relative path`);
+    if (row.kind === 'bundled-not-shipped' && !/\/src$/.test(String(row.file))) {
+      problems.push(`${at}: a \`bundled-not-shipped\` row names the package's whole \`src\` directory, never a file`);
+    }
   }
   return problems;
 }
@@ -656,7 +710,8 @@ function main() {
   const floor = floorProblems(result);
   if (floor !== null) refuse(floor);
 
-  const { unledgered, staleRows } = reconcile(result.findings, LEDGER);
+  const manifests = new Map(result.packages.map((p) => [p.manifest.name, p.manifest]));
+  const { unledgered, staleRows } = reconcile(result.findings, LEDGER, manifests);
 
   if (staleRows.length > 0) {
     console.error(`✗ check:undeclared-dep-imports: ${staleRows.length} stale ledger row(s)\n`);
@@ -1038,6 +1093,23 @@ function selfTest() {
       ledgerShapeProblems([{ ...row, kind: 'made-up' }]).length === 1
       && ledgerShapeProblems([{ ...row, why: 'short' }]).length === 1
       && ledgerShapeProblems([row]).length === 0);
+    const spaRow = { pkg: '@objectstack/p', dep: '@objectstack/d', file: 'packages/p/src', kind: 'bundled-not-shipped', why: 'z'.repeat(50) };
+    const spaManifests = new Map([['@objectstack/p', { files: ['dist', 'plugin.js', 'README.md'] }]]);
+    t('LEDGER — a `bundled-not-shipped` row covers every form under its src directory',
+      reconcile([{ ...dyn, form: 'static' }, { ...typeFinding, file: 'packages/p/src/deep/b.ts' }], [spaRow], spaManifests)
+        .unledgered.length === 0
+      && reconcile([{ ...dyn, form: 'static' }], [spaRow], spaManifests).staleRows.length === 0);
+    t('LEDGER — a `bundled-not-shipped` row does not cover another package\'s src',
+      reconcile([{ ...dyn, pkg: '@objectstack/q', file: 'packages/q/src/a.ts' }], [spaRow], spaManifests)
+        .unledgered.length === 1);
+    t('LEDGER — a manifest that starts shipping src reds the `bundled-not-shipped` row',
+      reconcile([dyn], [spaRow], new Map([['@objectstack/p', { files: ['dist', 'src'] }]])).staleRows.length === 1
+      && reconcile([dyn], [spaRow], new Map([['@objectstack/p', { files: ['dist', 'src/**/*.ts'] }]])).staleRows.length === 1);
+    t('LEDGER — a manifest with no `files` (everything ships) reds the `bundled-not-shipped` row',
+      reconcile([dyn], [spaRow], new Map([['@objectstack/p', {}]])).staleRows.length === 1);
+    t('LEDGER — a `bundled-not-shipped` row naming a file instead of the src directory is refused',
+      ledgerShapeProblems([{ ...spaRow, file: 'packages/p/src/a.ts' }]).length === 1
+      && ledgerShapeProblems([spaRow]).length === 0);
     t('LEDGER — the shipped ledger is well formed', ledgerShapeProblems(LEDGER).length === 0);
 
     // ── the declared watch hints stay equal to the real population ────────
