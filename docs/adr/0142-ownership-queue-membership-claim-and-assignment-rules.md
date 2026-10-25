@@ -368,8 +368,11 @@ so a Console can answer "why can I see this".
 **Claim** is an update of `owner_id` to the caller's own id, by id, on an unowned record the sharing service positively
 admits. The UPDATE arm of step 3.5 gains one admitted case ahead of the grant check: the pre-image's `owner_id` is empty,
 the supplied `owner_id` is the caller's id as a scalar, the operation addresses one record by id (a bulk change-set
-carrying `owner_id` keeps failing closed), and the sharing verdict step 2.7 already obtained for this row is `allow` — a
-queue member through D3's basis, an `edit` share, or `modifyAllRecords`. A by-id update is reached two more ways, and
+carrying `owner_id` keeps failing closed), and the sharing verdict for this row is `allow` — a queue member through D3's
+basis, an `edit` share, or `modifyAllRecords`. The gate reads the verdict step 2.7 obtained where it asked one, stashed
+on the operation context beside the depth; where 2.7 did not ask — a delegated write, or no floor policy in the caller's
+collection — the gate asks `resolveSharingWriteVerdict` itself, one read on those paths only. A by-id update is reached
+two more ways, and
 neither licenses a claim: passage through the `created_by` floor where sharing abstains (so a disown stays reversible
 only under the grant), and an app-authored update widener, which retracts the sharing middleware's refusal without
 authorising the write. No membership is re-tested, a record with no `queue` is claimable by whoever holds a positive
@@ -403,7 +406,7 @@ write under the grant.
 Everything else at the step is unchanged: a foreign owner on insert or update needs the grant, the echo is tolerated,
 the guest is refused, the referential-integrity clear is exempt. The refusals stay `PERMISSION_DENIED` (403) through
 `packages/plugins/plugin-security/src/errors.ts#PermissionDeniedError`; their messages name the condition that failed
-("claim only an unowned record you can edit"; "release only your own record, back to its queue"; "moving a
+("claim only an unowned record the sharing model admits you to"; "release only your own record, back to its queue"; "moving a
 record between queues requires the transfer grant") and, per AGENTS.md's runtime-string rule, no tracker number.
 
 ⛔ No hook spells ownership. A claim is an ordinary update of `owner_id` the gate adjudicates; the Console's Claim
@@ -541,9 +544,9 @@ path. A rule naming a queue shares *its criteria's records* with *the queue's pe
 |:--|:--|:--|
 | `case_auto_assign` — least-loaded over position `service_agent`, open = `status $nin ['resolved','closed']` | a declared queue (members: position `service_agent`) and an `assignment_rule` on `crm_case`, one entry, no criteria, `least_loaded`, `load: record.status != "resolved" && record.status != "closed"` | delete the factory and its hook registration |
 | `lead_auto_assign` — least-loaded over `sales_rep`, open = `is_converted: false` | a queue (position `sales_rep`) and a rule on `crm_lead`, `least_loaded`, `load: record.is_converted == false` | delete the hook; `lead_assignment` is unchanged (it reads the owner the platform chose) |
-| `case_self_claim` + the `claim_case` screen flow writing `status` | the gate's claim admission (D4), with the same claimant set — anyone who can edit the unowned case: the agent through the queue, the manager through the escalation share, the admin through Modify All; reopening a resolved unowned case by claiming it keeps working, since the admission reads no status; the Claim affordance writes `{ owner_id: <self> }` (with or without a status) | delete the factory; re-point the flow or the action; delete `claim-case-one-owner-writer.test.ts`, whose premise inverts |
+| `case_self_claim` + the `claim_case` screen flow writing `status` | the gate's claim admission (D4), with the same claimant set — anyone the sharing model positively admits to the unowned case: the agent through the queue, the manager through the escalation share, the admin through Modify All; reopening a resolved unowned case by claiming it keeps working, since the admission reads no status; the Claim affordance writes `{ owner_id: <self> }` (with or without a status) | delete the factory; re-point the flow or the action; delete `claim-case-one-owner-writer.test.ts`, whose premise inverts |
 | `case_unassigned_triage_sharing` | D3's access path (members see what sits in their queue; it stops at the claim). One difference: the rule's criteria hid `resolved` and `closed` unowned cases; the access path shows every sitting record and the view filters | delete the rule; keep the view's status filter |
-| the existing ownerless backlog (`owner_id` NULL, no `queue`) | not reached by D3's path until `queue` is set; claimable by whoever can edit it (D4) | one system write under the transfer grant — `queue` = the intake queue where `owner_id IS NULL` — on `crm_case` and `crm_lead`, in the card that adopts the release |
+| the existing ownerless backlog (`owner_id` NULL, no `queue`) | not reached by D3's path until `queue` is set; claimable by whoever holds a positive basis (D4) | one system write under the transfer grant — `queue` = the intake queue where `owner_id IS NULL` — on `crm_case` and `crm_lead`, in the card that adopts the release |
 | `unassigned_triage` view | still valid (`owner_id is_null`); better as `queue equals <intake queue>` plus `owner_id is_null` | re-point the filter |
 | the guest owner strip in `case_sla_defaults` | the platform already refuses a guest-supplied owner (ADR-0138 D1); the strip is redundant, not wrong | HotCRM's call |
 | `case_escalation_reassign` — re-route on the transition to `escalated`, `escalated_from` stamp, the SLA sweep's dependency | **not covered**: this record evaluates rules on insert only | keep, until merge question 5 is decided the other way or a later record takes update-time routing |
@@ -706,7 +709,7 @@ objection names the number.
 14. **Who may claim: anyone the sharing service positively admits to the unowned pre-image — queue basis, `edit` share
     or Modify All — not queue members only, and not mere passage through step 2.7.** This is the first consumer's pinned
     contract ("whoever they are": the agent through the queue, the manager through the escalation share, the admin), it
-    covers the existing backlog once `queue` is backfilled, and it adds no read: the verdict is already computed. The
+    covers the existing backlog once `queue` is backfilled, and it adds a read only where step 2.7 asked no verdict. The
     narrower reading — the caller must be a member of the queue the pre-image names — refuses the escalation desk and
     every legacy row without a grant. The wider reading — any caller 2.7 passes — would let the creator re-own a
     disowned record on an object where sharing abstains, with no grant, and let an app-authored update widener license
