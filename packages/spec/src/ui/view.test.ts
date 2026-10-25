@@ -2311,11 +2311,23 @@ describe('GroupingFieldSchema', () => {
   ])('refuses %s whitespace at `orderBy`, by name', (_label, spelling, remedy) => {
     const result = GroupingFieldSchema.safeParse({ field: 'period_label', orderBy: spelling });
     expect(result.success).toBe(false);
-    expect(result.error!.issues.map((i) => [i.path.join('.'), i.code])).toEqual([['orderBy', 'custom']]);
+    expect(result.error!.issues.map((i) => [i.path.join('.'), i.code])).toEqual([['orderBy', 'invalid_format']]);
     const message = result.error!.issues[0]!.message;
     expect(message).toContain('grouping.fields[].orderBy');
     expect(message).toContain(JSON.stringify(spelling));
     expect(message).toContain(remedy);
+  });
+
+  // A native `.regex()`, not a refinement: the published JSON Schema states the
+  // rule, so a validator reading packages/spec/json-schema refuses it too (#18670).
+  it('publishes the padded-name rule on `orderBy` as the JSON Schema `pattern`', () => {
+    const json = z.toJSONSchema(GroupingFieldSchema, { unrepresentable: 'any', io: 'input' }) as {
+      properties: Record<string, { minLength?: number; pattern?: string }>;
+    };
+    expect(json.properties.orderBy).toMatchObject({ minLength: 1, pattern: '^(?:\\S|\\S[\\s\\S]*\\S)?$' });
+    const pattern = new RegExp(json.properties.orderBy!.pattern!);
+    expect([' period_start', 'period_start ', ' '].map((s) => pattern.test(s))).toEqual([false, false, false]);
+    expect(pattern.test('period_start')).toBe(true);
   });
 
   it('refuses a padded `orderBy` through ListViewSchema at `grouping.fields[N].orderBy`', () => {

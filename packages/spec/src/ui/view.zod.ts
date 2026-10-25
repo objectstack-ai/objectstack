@@ -1281,16 +1281,17 @@ function checkGroupingFieldName(raw: string): string | undefined {
 }
 
 /**
- * Validate one `grouping.fields[].orderBy` name (#25786): the same non-padded
- * rule as {@link checkGroupingFieldName}, for the same reason — the name is
- * compiled into the group header query verbatim, here as a `min` / `max`
- * operand. Returns the author-facing refusal, or `undefined` when it conforms.
- * The empty string is the schema's `min(1)` and the compiler's
+ * The refusal for a padded `grouping.fields[].orderBy` name (#25786): the same
+ * non-padded rule as {@link checkGroupingFieldName}, for the same reason — the
+ * name is compiled into the group header query verbatim, here as a `min` /
+ * `max` operand. Declared as the key's `.regex()` rather than a
+ * `.superRefine()`, so the published JSON Schema states the rule as its
+ * `pattern` instead of adding an `x-dropped-refinements` site (#18670). The
+ * empty string is the key's `min(1)` and the compiler's
  * `grouping_order_by_blank`, not this.
  */
-function checkGroupingOrderByName(raw: string): string | undefined {
-  if (NON_PADDED_FIELD_NAME_PATTERN.test(raw)) return undefined;
-
+function groupingOrderByPaddedRefusal(input: unknown): string {
+  const raw = String(input);
   const trimmed = raw.trim();
   const remedy = trimmed === ''
     ? 'Name the field to order the groups by, or remove `orderBy` — this value is nothing but whitespace.'
@@ -1410,7 +1411,7 @@ const groupByFieldCheck = (view: GroupByFieldView) => (raw: string, ctx: z.Refin
  * classes because two backends order strings by two collations — and
  * `os validate` refuses any other (`list-view-group-order-unorderable`). The
  * name is compiled verbatim, so a padded one is refused here as `field`'s is
- * (#17360's ruling, {@link checkGroupingOrderByName}). The header set is
+ * (#17360's ruling, {@link groupingOrderByPaddedRefusal}). The header set is
  * sorted whole: a `limit` on the header query slices before any sort (the
  * "Header cardinality is unbounded" limit on {@link GroupingConfigSchema}).
  */
@@ -1434,10 +1435,7 @@ export const GroupingFieldSchema = lazySchema(() => strictObject({
     + 'nothing): by the group key, or by the `orderBy` value each header row carries when `orderBy` is set',
   ),
   orderBy: z.string().min(1)
-    .superRefine((raw, ctx) => {
-      const refusal = checkGroupingOrderByName(raw);
-      if (refusal) ctx.addIssue({ code: 'custom', message: refusal });
-    })
+    .regex(NON_PADDED_FIELD_NAME_PATTERN, { error: (iss) => groupingOrderByPaddedRefusal(iss.input) })
     .optional()
     .describe(
       'Field whose value orders this level\'s groups, when that is not the grouping field — a field of the '
