@@ -242,8 +242,9 @@ function resolveRecipients(
             }
             const recipient = toStr(item);
             if (recipient === undefined) continue;
-            if (isExpressionEnvelopeShaped(raw) && readsAsAddress(recipient)) {
-                computed.push({ index: recipients.length, what, source: sourceOf(raw) });
+            const address = isExpressionEnvelopeShaped(raw) ? mailedAddressOf(recipient) : undefined;
+            if (address !== undefined) {
+                computed.push({ index: recipients.length, what, source: sourceOf(raw), address });
             }
             recipients.push(recipient);
         }
@@ -271,17 +272,37 @@ interface ComputedAddress {
     readonly what: string;
     /** The envelope's `source`. */
     readonly source: string;
+    /** The address the email channel would send to (`a@b.c`, also for `user:a@b.c`). */
+    readonly address: string;
 }
 
 /**
- * True when the messaging service would read `recipient` as an email address
- * rather than as a user id or a selector — the order its `RecipientResolver`
- * tries: the `user:` / `role:` / `team:` / `owner_of:` prefixes first, then
- * its linear email heuristic, mirrored here because this package takes no
- * runtime dependency on `@objectstack/service-messaging`.
+ * The address the email channel would send `recipient` to, or `undefined`
+ * when it sends to none — mirrored from `@objectstack/service-messaging`,
+ * which this package takes no runtime dependency on. The chain reads an
+ * address in TWO places: the `RecipientResolver` keeps an address-shaped
+ * value verbatim when no user holds it, and it hands the remainder of a
+ * `user:` value on as the recipient id with no lookup at all; the email
+ * channel then sends to any recipient id that is address-shaped. So both
+ * `a@b.c` and `user:a@b.c` (and `user:user:a@b.c`, whose remainder is itself
+ * address-shaped) reach the mail as an address. `role:` and `team:` yield
+ * user ids. `owner_of:` reads a stored owner field, which record writes put
+ * there, not the expression, so it is not screened.
+ */
+function mailedAddressOf(recipient: string): string | undefined {
+    if (recipient.startsWith('user:')) {
+        const rest = recipient.slice('user:'.length);
+        return readsAsAddress(rest) ? rest : undefined;
+    }
+    if (/^(role|team|owner_of):/.test(recipient)) return undefined;
+    return readsAsAddress(recipient) ? recipient : undefined;
+}
+
+/**
+ * The resolver's and the email channel's linear "looks like an email" test:
+ * no whitespace, one `@` not at either end, a dot inside the domain.
  */
 function readsAsAddress(recipient: string): boolean {
-    if (/^(user|role|team|owner_of):/.test(recipient)) return false;
     if (/\s/.test(recipient)) return false;
     const at = recipient.indexOf('@');
     if (at <= 0 || at !== recipient.lastIndexOf('@') || at === recipient.length - 1) return false;
@@ -322,7 +343,7 @@ async function screenComputedAddresses(
     if (computed.length === 0) return { ok: true, value: recipients };
     const screened = [...recipients];
     for (const entry of computed) {
-        const address = recipients[entry.index];
+        const address = entry.address;
         const located = `notify: ${entry.what} an email address — source: \`${entry.source}\``;
         if (!data) {
             return {
@@ -366,8 +387,10 @@ async function screenComputedAddresses(
  * `:`, `<`, `>` or quotes, and a visitor types this value. Here the local part
  * is dot-separated RFC 5322 atoms and the domain is dot-separated hostname
  * labels, so no list separator, display name, header break or audience prefix
- * (`role:` reads as one to the messaging resolver) can pass. Written as plain
- * scans and single-class tests, linear in the input.
+ * (`role:` reads as one to the messaging resolver) can pass. ASCII only, on
+ * purpose too: an internationalised address, a quoted local part or an
+ * IP-literal domain the field type stored is refused, and the refusal says
+ * so. Written as plain scans and single-class tests, linear in the input.
  */
 function isOneAddress(value: string): boolean {
     if (value.length === 0 || value.length > 254) return false;
@@ -440,8 +463,10 @@ async function resolveEmailFieldAddress(
     if (typeof value !== 'string' || !isOneAddress(value)) {
         return {
             ok: false,
-            error: `${lead}, and ${at} does not hold one email address, so nothing was sent. The address must be `
-                + 'exactly one mailbox, `name@example.com`: no list, display name or separator.',
+            error: `${lead}, and ${at} does not hold one plain ASCII email address, so nothing was sent. The address `
+                + 'must be exactly one mailbox, `name@example.com`, in ASCII letters, digits and the usual mailbox '
+                + 'punctuation: no list, display name, separator, quoted local part, IP-literal domain or '
+                + 'non-ASCII character.',
         };
     }
     return { ok: true, value };

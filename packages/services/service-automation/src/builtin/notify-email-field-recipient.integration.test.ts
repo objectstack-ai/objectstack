@@ -176,7 +176,7 @@ describe('#25571 — a notify node mails the address in an email field of the tr
         const { run, step } = await runOnce(stack, EMAIL_FIELD, onCreate('app_1'));
         expect(run.success).toBe(false);
         expect(step?.error?.message).toContain("`recipients: { emailField: 'applicant_email' }`");
-        expect(step?.error?.message).toContain('does not hold one email address');
+        expect(step?.error?.message).toContain('does not hold one plain ASCII email address');
         expect(step?.error?.message).not.toContain(String(value));
         expect(await stack.outbox.list()).toHaveLength(0);
         expect(stack.written.filter((w) => w.object === NOTIFICATION_EVENT_OBJECT)).toHaveLength(0);
@@ -223,7 +223,16 @@ describe('#25571 — a notify node mails the address in an email field of the tr
 });
 
 describe('#25647 — a computed recipient address must be a user', () => {
-    const LEAD = { id: 'lead_1', name: 'Lead', contact_text: 'stranger@outside.example', owner_email: 'owen@company.example' };
+    const LEAD = {
+        id: 'lead_1',
+        name: 'Lead',
+        contact_text: 'stranger@outside.example',
+        owner_email: 'owen@company.example',
+        // Text a visitor typed with the `user:` prefix: the resolver hands the remainder on with no lookup.
+        prefixed_text: 'user:stranger@outside.example',
+        doubled_text: 'user:user:stranger@outside.example',
+        prefixed_owner: 'user:owen@company.example',
+    };
     const OWEN = { id: 'usr_owen', email: 'owen@company.example' };
 
     function bootLead() {
@@ -242,6 +251,28 @@ describe('#25647 — a computed recipient address must be a user', () => {
         expect(step?.error?.message).toContain('no user holds it');
         expect(step?.error?.message).toContain("`recipients: { emailField: 'FIELD' }`");
         expect(await stack.outbox.list()).toHaveLength(0);
+    });
+
+    it.each([
+        ['user:ADDRESS', 'record.prefixed_text'],
+        ['user:user:ADDRESS', 'record.doubled_text'],
+    ])('E7: an envelope that evaluates to %s no user holds fails the node, and nothing is enqueued', async (_label, source) => {
+        const stack = bootLead();
+        const { run, step } = await runOnce(stack, { recipients: [CEL(source)], channels: 'email' }, onCreate('lead_1', LEAD));
+        expect(run.success).toBe(false);
+        expect(step?.error?.message).toContain(`recipients[0] evaluated to an email address — source: \`${source}\``);
+        expect(step?.error?.message).toContain('no user holds it');
+        expect(await stack.outbox.list()).toHaveLength(0);
+        await stack.dispatcher.tick();
+        expect(stack.mailed).toHaveLength(0);
+    });
+
+    it('E8: an envelope that evaluates to user: plus a user\'s address resolves to that user', async () => {
+        const stack = bootLead();
+        const { run } = await runOnce(stack, { recipients: CEL('record.prefixed_owner'), channels: 'email' }, onCreate('lead_1', LEAD));
+        expect(run.success).toBe(true);
+        const [row] = await stack.outbox.list();
+        expect(row).toMatchObject({ channel: 'email', recipientId: 'usr_owen' });
     });
 
     it('E2: an envelope that evaluates to a user\'s address resolves to that user', async () => {
