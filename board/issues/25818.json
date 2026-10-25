@@ -1,0 +1,32 @@
+{
+  "number": 25818,
+  "kind": "issue",
+  "title": "aggregate query answers wrong data under 200: dateGranularity on a non-date field, a duplicate alias, and an alias equal to a groupBy field",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T15:36:32Z",
+  "updated_at": "2026-10-25T16:03:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25818",
+  "body": "Filing gate: ① a product defect with a live reproduction. The aggregate door answers silently wrong numbers under 200, finding class (a).\nBusiness reason: a report, dashboard or AI caller that builds an aggregate gets a plausible-looking but wrong table: counts overwritten, group keys destroyed, every row in one bucket. Nothing tells it the request was malformed, which is the silent-coercion shape AGENTS.md route rules forbid (\"absence must be loud\").\nReader: the `packages/objectql` / protocol aggregate lane (the refusal belongs beside `assertAggregationFieldsExist` and the unknown-groupBy refusal); the next PR touching aggregate validation.\nDedupe (open AND closed): \"aggregate query duplicate alias overwritten or dateGranularity on non-date field returns 200\" → 11 hits, none of them this one. The nearest are #21437 (empty measure prefix → 500) and #20123 (unknown `having` key), both different doors.\nreach: public HTTP entry, measured on a fresh stock showcase boot, `main` 6679644a, as admin. Each shape was reproduced twice.\nChecklist item priority: P1\ntype: Bug\nQA-source: #25817 · api-backend.aggregate-contract-matrix · observed beside the clauses\n\nThe aggregate door is `POST /api/v1/data/showcase_account/query`. Each of these bodies answers 200 with a wrong result:\n\n| body | answer | expected |\n|---|---|---|\n| `{\"groupBy\":[{\"field\":\"name\",\"dateGranularity\":\"month\"}],\"aggregations\":[{\"function\":\"count\",\"alias\":\"n\"}]}` | `200 [{\"name\":null,\"n\":16}]`: every row lands in one null bucket | 400, naming `groupBy.0.dateGranularity` on a non-date field |\n| `{\"aggregations\":[{\"function\":\"count\",\"alias\":\"n\"},{\"function\":\"sum\",\"field\":\"annual_revenue\",\"alias\":\"n\"}]}` | `200 [{\"n\":682700000}]`: the count is silently overwritten by the sum | 400, naming the duplicate alias |\n| `{\"groupBy\":[\"status\"],\"aggregations\":[{\"function\":\"count\",\"alias\":\"status\"}]}` | `200 [{\"status\":10},{\"status\":2},{\"status\":4}]`: the group keys are replaced by counts | 400, naming the alias that collides with a groupBy field |\n\nThe same door already refuses an unknown groupBy field, explaining that otherwise every row would fall into one null bucket. These three shapes are that hazard reached by another path."
+}

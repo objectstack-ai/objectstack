@@ -1,0 +1,32 @@
+{
+  "number": 25820,
+  "kind": "issue",
+  "title": "automation: the resume and run-read doors ignore the flow name in the path, so POST /automation/OTHER_FLOW/runs/RUNID/resume completes another flow's paused run",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T15:37:47Z",
+  "updated_at": "2026-10-25T16:03:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25820",
+  "body": "Filing gate: ① a product defect with a live reproduction. A path segment is accepted and ignored, finding class (a).\nBusiness reason: an integrator or an AI agent that resumes \"this flow's run\" can complete a different flow's paused run when it holds a stale or mixed-up runId. The URL claims a scope the server never checks, so the mistake is silent, and audit trails read as if the named flow was resumed.\nReader: the `packages/runtime` automation domain (`domains/automation.ts`, the resume branch reads only the runId segment); the next PR touching automation run routes.\nDedupe (open AND closed): \"resume run flow name in path ignored automation runs resume wrong flow\" → 31 hits, none of them this one. The nearest is #23963 (a 404 resume leaves a row paused), a different defect.\nreach: public HTTP entry, measured on a fresh stock showcase boot, `main` 6679644a. Reproduced twice, with two different wrong names.\nChecklist item priority: P1\ntype: Bug\nQA-source: #25817 · automation.trigger-status-contract · observed beside the clauses\n\n**This is not an authorization hole.** Authority is still identity-based (`refuseUnrelatedResume` on the runId), and a member's resume answered 403 as expected. The defect is the ignored scope.\n\nReproduction:\n1. As admin, send `POST /api/v1/automation/showcase_reassign_wizard/trigger` with a task. It answers `200 {status:'paused', runId: RUNID}`.\n2. Send `POST /api/v1/automation/showcase_project_closure/runs/RUNID/resume` with `{\"inputs\":{\"new_assignee\":\"…\"}}`. It answers 200, and the reassign wizard's run completes.\n3. `GET /api/v1/automation/showcase_notify_owner/runs/RUNID` reads the wizard's run.\n4. Control: an unknown flow name in the same position answers `404 RUN_NOT_FOUND`.\n\n**Expected:** a flow name that exists but does not own RUNID answers `404 RUN_NOT_FOUND`, the same as an unknown name."
+}

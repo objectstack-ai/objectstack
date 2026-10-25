@@ -2,8 +2,8 @@
   "number": 25786,
   "kind": "issue",
   "title": "spec(ui): a list-view grouping field can order its groups only by its own value, so a period label (Q4 2026 / Sep 2026) cannot be grouped in time order without a second grouping level — add an order-by field to GroupingFieldSchema",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-steve",
@@ -14,7 +14,6 @@
     "area:records",
     "domain:spec",
     "enhancement",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-25T10:59:57Z",
-  "updated_at": "2026-10-25T13:36:13Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-25T17:31:43Z",
+  "closed_at": "2026-10-25T17:30:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25786",
   "body": "Filing gate **① a defect with a named landing site** (an app is carrying a workaround for a missing spec key; hotcrm AGENTS.md says the gap belongs here). Batch-of: 2026-10-25 browser pass on @objectstack/* 18.1.0 (23 cards: hotcrm 10, objectui 10, objectstack 3). Filed by the maintainer's account (`os-steve`) from the HotCRM pass driven in session `session_01AwpXhq2nFKU6J7GmbCEmZu`; ⛔ not a claim. Grade and routing are triage's.\n\n## What is seen\n\nHotCRM's 销售预测 list groups by `period_start` (desc) and then by `period_label`, because grouping on `period_label` alone sorts the periods as text (\"Sep 2026 → Q4 2026 → Q4 2025 …\"). The result is two header rows for every single forecast: 「周期起始 10月1日 · 1」 then 「Oct 2026 · 1」 then the row — six forecasts take 18 rows. [45-crm_forecast.png](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/shots/45-crm_forecast.png). The view's own comment (`src/sales/views/forecast.view.ts` ~:40–63) says why: `GroupingFieldSchema` is `field` / `order` / `collapsed`, with no key that orders one field's groups by another.\n\n`reach:` a named producer (HotCRM `forecast.view.ts`, shipped) and the public UI, measured once.\n\n## Expected\n\n`GroupingFieldSchema` gains an `orderBy` (a field of the same object whose value orders the groups; default = the grouping field), the server-side grouping query (#14556's shape) sorts groups by it, and objectui's grouped grid renders the group label from `field` while ordering by `orderBy`. HotCRM then drops its outer level (one line in the view).\n\nCross-layer: spec first, then the engine's grouping aggregate, then objectui — the usual parent + per-layer children if triage files it that way.\n\n## Dedupe\n\nMCP `search_issues` objectstack \"view grouping sort groups by a different field than the grouping field\" → 1 hit, #14556 (closed: server-side grouping, per-group counts, paging), which does not add an ordering field. Report: [REPORT.md](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/REPORT.md) §3.2."

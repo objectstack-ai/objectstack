@@ -1,0 +1,35 @@
+{
+  "number": 25810,
+  "kind": "issue",
+  "title": "chore(console): move the objectui pin b41ed7f68956 → objectui main before the 18.2.0 cut (maintainer: bump first)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:queue",
+    "priority:p1",
+    "target:v18",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T14:33:24Z",
+  "updated_at": "2026-10-25T16:03:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25810",
+  "body": "Filing gate: release precondition for 18.2.0, ordered by the maintainer. Filed by the 18.2.0 release-assessment thread · `session_01G3h9iZTpL8aCiXbfsp8H5u`. ⛔ Not a claim.\n\n**Maintainer's words** (project thread, 2026-10-25 14:31Z, verbatim): 「pin 先 bump，立卡派发处理」 — answering whether the 18.2.0 cut accepts the objectui pin lag or bumps it first.\n\n**Reader who acts:** the card thread dispatched for it. One pin-move PR via `scripts/bump-objectui.sh`.\n\n## Measured (2026-10-25 14:10Z)\n\n- `.objectui-sha` = `b41ed7f68956` (moved by #25735, 03:35Z). Console Pin Gate is green on it since 05:01Z.\n- objectui `main` is **30 commits** ahead (`b41ed7f68956...e6a06d2d2eed`, head 13:43Z). Five of them are `!` breaking:\n  - `699156a` refactor(providers)!: retire DataSourceProvider / MetadataProvider / ThemeProvider (objectui#13453 part 2, #13507)\n  - `1212e3e` feat(types)!: nine duration keys carry their unit in their name, old spellings refused (objectstack#25762, #13515)\n  - `0063f22` refactor!: retire nine zero-consumer modules, runner private (objectui#13453 part 1, #13506)\n  - `899f381` feat(core,types)!: retire the module widget source (objectui#13450, #13473)\n  - `610d9ef` feat(components,types)!: retire the raw-HTML `html` node type (objectui#13449, #13475)\n  - User-visible fixes in the range include objectui#13488/#13470 (inline locale labels, #13501/#13487), #13492 (chat chart order, #13500), #13460/#13503 (console i18n), #13461 (a11y).\n- Release rule (pm-dispatch `seat-post-protocol.md`, release board): a lagging pin needs a console bump card on the board, or explicit acceptance; the maintainer chose the bump.\n\n## Wanted\n\nMove `.objectui-sha` to the newest objectui `main` commit whose objectui `CI` is green at dispatch time (≥ `e6a06d2d2eed`); name the chosen commit and why on this card before the PR.\n\n1. `scripts/bump-objectui.sh <full-sha>` (writes the pin and the `@objectstack/console` changeset). ⛔ Never edit the pin by hand.\n2. `pnpm objectui:build` (cloud containers: `NODE_OPTIONS=--max-old-space-size=6144`), then `node scripts/gen-sdui-manifest-node.mjs`; re-record `check:sdui-lockstep` (`OBJECTUI_ROOT=$PWD/.cache/objectui-<SHA12> pnpm gen:sdui-lockstep`). `check-sdui-manifest.mjs` and `check:sdui-lockstep` pass.\n3. Run the Console Pin Gate job's steps locally at the new pin (client closure build, `bash scripts/build-console.sh`, `check:console-sha`, `check:console-injection --require-stamp`). A failure in objectui code goes upstream as an objectui card with a back-link, not patched here; if it blocks the bump, stop and report.\n4. For each `!` commit above, state whether the console bundle or anything objectstack ships reads the retired surface (grep the built console and `packages/console`), so the 18.2.0 notes can say what moved.\n\n## Acceptance\n\n- The PR names the pin commit, the compare from `b41ed7f68956`, and the per-`!` reading of step 4.\n- After merge, the next schedule `CI` on main reads `Console Pin Gate` `success` (report the run id here).\n- Then the maintainer runs Release `refresh_version_pr` on #25640, and the 18.2.0 browser test items re-run on the new pin (wave anchor #25807).\n\n## Serial\n\n- ui-merge epic #25677 (epic PM owns the cutover territory): touch only `.objectui-sha`, `.changeset/console-*` (generated), `sdui.manifest.json`, `scripts/sdui-manifest.record.json` and the sdui-lockstep record. Merge `origin/main` before each push.\n- Must land before #25640 merges.\n\nTarget: v18 (`target:v18`) — release-blocking for 18.2.0.\n"
+}

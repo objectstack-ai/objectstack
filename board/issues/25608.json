@@ -2,8 +2,8 @@
   "number": 25608,
   "kind": "issue",
   "title": "spec: retire the zero-consumer `kernel/package-upgrade.zod.ts` (upgrade plan, diff, conflict, snapshot, rollback) with its ADR-0087 conversion — item 3 of ruling 6259332195, the spec half of #24447",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:devpath",
     "chore",
     "domain:spec",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-24T08:28:22Z",
-  "updated_at": "2026-10-25T06:06:53Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-25T15:24:37Z",
+  "closed_at": "2026-10-25T15:21:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25608",
   "body": "carries item 3 of #24447; #24447 keeps items 2 and 4 (landed through PR #25512, merge `e207b973b1`).\n\n**Filing gate ③ a task the maintainer set.** Ruling `6259332195` on #24443 (batch #369 item 2, letter A, maintainer 「其他同意」 2026-10-19T03:58Z), item 3, verbatim: \"**Retired:** `packages/spec/src/kernel/package-upgrade.zod.ts` (plan, diff, conflict, snapshot, rollback; zero runtime consumers), with its ADR-0087 conversion.\" Item 4: \"the remaining classes and the retirement follow after v18\". The triage seat unlocked that half at `6360244800` on #24447 (18.0.0 is published), noting: \"Under the maintainer's standing order it is handled directly in 18.x, with no retirement stage, and its PR declares it (`Metadata-protocol:` line, ADR-0087 conversion).\"\n\nFiled by `domain:spec` seat 2 (seat post #18549), `sunhaolin`, session `session_01PC4NPXPgPmpDRG9DdDnyXT`, on the cross-lane pointer `6367986096` from `domain:services` seat 1 (claim `6367925751` and measurement `6367978063` on #24447). ⛔ Not a claim.\n\n**Reader (who acts):** central triage (grade, `domain:*`), then a `domain:spec` seat that dispatches it. #24447 (`domain:server`, `pm:blocked`) waits for this card's number to write its `Blocked-by:`.\n\n## 维护者速读\n\n- **事由：** `package-upgrade.zod.ts` 里的升级计划/差异/冲突/快照/回滚模型从未被运行时用过；裁决 A 已定退役（#24443 第 3 项），v18 后执行，现在可以做。\n- **要做：** 删掉这个文件及其导出、契约上的两个方法与一个可选字段，走 ADR-0087 转换，重新生成产物与文档。\n- **完成标准：** spec 不再导出这些类型，作者写到相关键时得到带处方的拒绝，生成物与文档同步。\n\n## What is retired (measured on `origin/main` `8801f2bb37`)\n\n- **Consumers outside `packages/spec`, CHANGELOGs excluded: none in code.** `git grep -n -E \"package-upgrade|UpgradePlanSchema|planUpgrade|UpgradePackageResponse|UpgradeSnapshot\" origin/main -- ':!packages/spec' ':!**/CHANGELOG.md'` hits only docs and one ADR sentence (below). Control: the same pattern hits 17 files inside `packages/spec`, so the instrument reads.\n- **Inside `packages/spec` (authored):** `src/kernel/package-upgrade.zod.ts` and its test; the re-export in `src/kernel/index.ts`; `src/contracts/package-service.ts` (`IPackageService.planUpgrade()` / `upgrade()`) and its test; `src/api/package-api.zod.ts` (`UpgradePlanSchema` as an optional `plan` field); `src/type-alias-convention.pin.test.ts`; the migration entries `src/migrations/entries/semantic/18.kernel-package-lifecycle-durations-unit-in-key.ts` and `src/migrations/entries/retired-keys/18.kernel__UpgradePlan__estimatedDuration.ts`; `scripts/build-docs.ts`.\n- **Generated (regenerate, never by hand):** `api-surface/kernel.json`, `authorable-surface.base.json`, `authorable-surface/kernel.json`, `declaration-map/kernel.json`, `dropped-refinements.baseline.json`, `export-origins/kernel.json`, `json-schema.manifest/kernel.json`; `content/docs/references/kernel/package-upgrade.mdx` and its rows in `references/index.mdx`, `references/kernel/index.mdx`, `references/kernel/meta.json`.\n- **Hand-written docs:** the link at `content/docs/upgrading.mdx:616`.\n- **ADR:** `docs/adr/0126-packaged-metadata-customization-model.md:321` names the file (\"Until then this wall holds in practice for the access class only.\"). `docs/adr/**` is a Tier H governed surface: an edit there makes the whole PR wait for the maintainer, so the dispatching seat decides whether the ADR sentence rides a separate docs-only PR.\n\n## Acceptance\n\n- `@objectstack/spec` no longer exports the retired schemas, types or the two contract methods; `package-api.zod.ts` has no `plan` field.\n- The ADR-0087 conversion for the removed authorable shapes is registered (`pnpm check:adr-0087-registration` green); the changeset carries the FROM → TO mapping and its disposition marker (AGENTS.md Post-Task Checklist step 3; the `spec-property-retirement` skill).\n- Generated artefacts and reference pages regenerated; `content/docs/upgrading.mdx` no longer links a removed page.\n- Declarations (this filing's reading; the dev measures): `Clause-②: yes (narrowing)` (a public export and an authorable shape are removed), `Metadata-protocol: narrowed`.\n\n## Dedupe\n\nMethod: the titles of every objectstack-ai/objectstack issue updated since 2026-09-15, open and closed, listed through the repo-scoped `issues` endpoint page by page (the search API is refused in this container), matched case-insensitively on `package-upgrade`, `package upgrade`, `UpgradePlan`, `upgrade plan`, `planUpgrade`, `upgrade snapshot`, `upgrade rollback`. 4,030 issues read (78 pages, the last one short); 2 hits, both the source of this card: #24447 (open, the parent) and #24443 (closed, the decision card). Control word `upgrade` on the same list: 51 hits. **New.**\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

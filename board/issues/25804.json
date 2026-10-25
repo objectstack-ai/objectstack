@@ -2,7 +2,7 @@
   "number": 25804,
   "kind": "pull_request",
   "title": "docs(release): the 18.1.0 CHANGELOGs name each entry's own commit, not the revert that restored its changeset",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -22,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-25T13:51:08Z",
-  "updated_at": "2026-10-25T13:56:39Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-25T14:54:16Z",
+  "closed_at": "2026-10-25T14:54:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-25T14:54:13Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/25804",

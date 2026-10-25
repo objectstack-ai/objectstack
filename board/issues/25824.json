@@ -1,0 +1,33 @@
+{
+  "number": 25824,
+  "kind": "issue",
+  "title": "plugin-auth: admin create-user accepts an explicit password shorter than minPasswordLength (a 1-character password saves and signs in) while set-user-password and change-password refuse it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:identity",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T15:53:24Z",
+  "updated_at": "2026-10-25T17:53:42Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25824",
+  "body": "Filing gate: ① a product defect with a live reproduction. Two sibling doors enforce a policy and this one skips it, finding class (a).\nBusiness reason: a deployment's password length policy (`minPasswordLength`, default 8) is meant to hold for every credential. An administrator creating a user with a typed password, and `mustChangePassword` turned off, can set a 1-character credential that the user keeps. Set Password and self-service change refuse the same value, so the policy depends on which door was used.\nReader: the `packages/plugins/plugin-auth` lane (`src/admin-user-endpoints.ts`: `runAdminCreateUser` → `resolvePassword` runs only `assertPasswordComplexity`, while the length check lives only in the set-user-password runner); the next PR touching admin create-user.\nDedupe (open AND closed): \"admin create-user accepts password shorter than minPasswordLength\" → 3 hits, none of them this one. The nearest is #5932 (the settings write path ignored min/max for `auth.password_min_length`), a different door.\nreach: public HTTP entry, measured on a fresh stock showcase boot, `main` 17f8217b. The code is the same at 6679644a, so this predates #25626. Reproduced twice with two users.\nChecklist item priority: P1\ntype: Bug\nQA-source: #25823 · identity-auth.admin-lifecycle-operations · observed beside the clauses\n\nThis is a password-policy gap reachable only by an administrator. It is not an authentication or authorization bypass.\n\nReproduction (seeded admin bearer):\n1. `POST /api/v1/auth/admin/create-user` with `{\"email\":\"x@example.com\",\"name\":\"s\",\"password\":\"a\",\"mustChangePassword\":false}` answers 200.\n2. `POST /api/v1/auth/sign-in/email` with `{\"email\":\"x@example.com\",\"password\":\"a\"}` answers 200.\n3. Contrast: `POST /api/v1/auth/admin/set-user-password` with `{\"userId\":\"…\",\"newPassword\":\"c\"}` answers `400 INVALID_REQUEST`, \"Password must be at least 8 characters\". The user's own `change-password` to `\"b\"` answers `400 PASSWORD_TOO_SHORT`.\n\n**Expected:** create-user refuses an explicit password outside `minPasswordLength`/`maxPasswordLength` with the same code as its siblings, before any account exists."
+}

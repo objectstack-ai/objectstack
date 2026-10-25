@@ -1,0 +1,33 @@
+{
+  "number": 25825,
+  "kind": "pull_request",
+  "title": "merge(ui): objectui becomes the ui/ workspace of this repository — subtree import at the frozen tip 9e1fe03286 plus the adaptation series (objectstack#25752)",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "skip-changeset",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T16:15:41Z",
+  "updated_at": "2026-10-25T18:55:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25825",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoYYsrey6RNUKhoT2wtFatch)_\n\nPart of objectstack#25752 (child 5, the cutover procedure; steps 3–4). Part of objectstack#25677.\nClause-②: no\nMetadata-protocol: none\n\n## ⛔ Merged by the maintainer at the Tier H sitting, 2026-10-26 09:00Z (北京 17:00) — not before\n\nThis PR is **Tier H by size** (the whole objectui tree, ~2.6 M lines) and is the first of four merged in order at the sitting: this PR → 4a #25745 → PR B (objectstack#25697 item 6) → 4b PR 2 #25712, then the required-checks change (step 6). It stays draft until the seat says it is green; the seat never enqueues it. Reviewers: the GOVERNED_APPROVERS, requested when it leaves draft.\n\n## What this PR is\n\nobjectui (objectstack-ai/objectui) becomes the `ui/` workspace of this repository, per the maintainer's D1 ruling (objectstack#25677: one repository, one fixed version group, the objectui repository archived as a migration notice).\n\n1. **`git subtree add --prefix=ui`** of objectui `main` at its **frozen tip `9e1fe032866965c7cb0460cff2b6af09350236b7`** (objectui#13545, the final `.objectstack-sha` pin, pointing at objectstack `5e7cf63e71`). objectui `main` is frozen since 2026-10-25 15:40Z (freeze notice: objectstack#25752); nothing lands there after that commit. History is kept (no squash).\n2. **Root workspace file.** pnpm v10 reads `overrides` and `patchedDependencies` from `pnpm-workspace.yaml` only, so objectui's `pnpm` field moves there: the qs / shell-quote / tmp / uuid floors, the single react line (19.3.0), the `@radix-ui/react-focus-scope@1.1.16` patch; the react-router override narrows to the 8.x line it fixes (objectui's react-router-dom 7.18 pins a 7.x react-router with no fixed version to force).\n3. **Adaptation series (objectstack#25803, card J)** — one commit per gate or concern, each named in its message. Drop 1: every `@objectstack/*` range in the 32 ui manifests becomes `workspace:^`; `ui/` stops being a workspace root of its own (nested `pnpm-workspace.yaml` deleted, `pnpm` field and `preinstall` pin check removed, `turbo.json` parked as `turbo.objectui.json`); the ui root manifest drops its turbo-recursive scripts; `scripts/ui-import/splice-lockfile.mjs` carries objectui's lockfile resolutions into the merged lock. Drop 2 (root gates, ledgers, eslint ignore, skills move, the K1 scoping of `check:published-files`) follows in this PR before it leaves draft; the list is in `/mnt/project-files/d1-merge/out/cutover-adaptation/SERIES.md` and will be mirrored here.\n4. **One lockfile.** `ui/pnpm-lock.yaml` is removed; the root lock is objectui's resolutions spliced in (`moved 0` against objectui's own lock at the splice), reconciled twice with `pnpm install --lockfile-only`, then `pnpm dedupe`; `pnpm install --frozen-lockfile` and `pnpm dedupe --check` exit 0. `ai` 7.0.118 and `@ai-sdk/react` 4.0.121 hold one copy each.\n\n## What this PR does not do\n\n- It does not touch `.github/workflows/**`, `AGENTS.md`, `docs/adr/**` or CODEOWNERS: the pin-gate retirement is PR B, the release lane is 4a #25745, the workflow port is 4b PR 2 #25712, the governance for `ui/` landed in #25732.\n- It does not remove the `packages/console` pin field or its build switch (sub-issue 4).\n- It does not conform the 39 `@object-ui` manifests to `check:published-files` (maintainer ruling K1: the gate is scoped off `ui/` here; aftercare objectstack#25753).\n\n## Accepted red classes (procedure #25752, \"Accepted red classes\") and the bill\n\nAnything red on this PR is read against `/mnt/project-files/d1-merge/out/5-cutover-bill-notes.md` (items 1–36). A red that is not on the bill stops the sitting until it is ruled.\n\n## Verification\n\n_(filled by the seat before the PR leaves draft: the CI run, the local gate sweep, the lock verdicts and sha, the `git am` acceptance of the series.)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01RSDL3SFtJaKzcymvCD8RsU\n"
+}

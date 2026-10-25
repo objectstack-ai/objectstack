@@ -2,8 +2,8 @@
   "number": 25772,
   "kind": "issue",
   "title": "skills(pm-dispatch): text written by accounts outside the maintainer and the fleet is read as data, never as instructions",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-25T09:37:57Z",
-  "updated_at": "2026-10-25T10:34:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-25T15:37:04Z",
+  "closed_at": "2026-10-25T15:37:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 2,
   "locked": false,
