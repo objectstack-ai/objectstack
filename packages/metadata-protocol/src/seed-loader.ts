@@ -3228,11 +3228,17 @@ export class SeedLoaderService implements ISeedLoaderService {
    * the named column, so the engine never refuses it the way it refuses an
    * unknown record key. The column it was meant for (a misspelt `status`)
    * keeps `always`, and every replay re-asserts it. `defineSeed` refuses the
-   * key when it runs; this is the same check for a seed that did not come
-   * through it (stored `seed` metadata, a package body). Judged against the
-   * set `defineSeed` uses — the declared fields plus the system columns the
-   * platform injects on this object — and only when the definition resolved
-   * with a field map: no opinion without one.
+   * key when it runs; this is the same check at load, where a stored `seed`
+   * or a package body arrives without passing through `defineSeed`. Judged
+   * against the set `defineSeed` uses — the declared fields plus the system
+   * columns the platform injects on this object — and only when the
+   * definition resolved with a field map: no opinion without one.
+   *
+   * `error`, not `warn` (AGENTS.md "Degradation log levels"): the load looks
+   * normal and reports success while a job's write to the column the policy
+   * was meant for is overwritten on every replay. The rows themselves are
+   * valid, so they still load: refusing them would turn a policy typo into
+   * missing seed data.
    */
   private warnOnUndeclaredSeedColumns(dataset: Seed, definition: unknown): void {
     const columns = Object.keys(dataset.columns ?? {});
@@ -3242,11 +3248,13 @@ export class SeedLoaderService implements ISeedLoaderService {
     const known = new Set<string>([...Object.keys(fields), ...resolveInjectedSystemColumns(definition).names]);
     const undeclared = columns.filter((column) => !known.has(column));
     if (undeclared.length === 0) return;
-    this.logger.warn(
+    this.logger.error(
       `[SeedLoader] The ${dataset.object} seed declares a write policy for ${undeclared.map((c) => `\`${c}\``).join(', ')}, ` +
         `which ${undeclared.length === 1 ? 'is not a column' : 'are not columns'} of ${dataset.object}: the policy governs ` +
-        `nothing, and a column it was meant for keeps \`applyOn: 'always'\`, re-asserted on every replay. Name a ` +
-        `field ${dataset.object} declares, or a system column the platform injects on it, as the \`columns\` key.`,
+        `nothing, and a column it was meant for keeps \`applyOn: 'always'\`, so every replay overwrites what a job ` +
+        `wrote to it while this load still reports success. Name a field ${dataset.object} declares, or a system ` +
+        `column the platform injects on it, as the \`columns\` key.`,
+      undefined,
       { object: dataset.object, undeclaredColumns: undeclared },
     );
   }

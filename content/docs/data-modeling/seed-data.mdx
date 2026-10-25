@@ -187,8 +187,9 @@ defineSeed(Instalment, {
 `applyOn` takes the same values, with the same default and meaning, as an import
 mapping entry's [`applyOn`](/docs/data-modeling/import-mappings). A `columns` key
 must name a field of the object (or a system column the platform injects on it,
-such as `owner_id`): `defineSeed` refuses one that does not, and the loader warns
-when a stored seed names one.
+such as `owner_id`): `defineSeed` refuses one that does not, and the loader logs
+an error naming the column whenever it loads a seed that names one, since a
+stored seed never passes through `defineSeed`.
 
 ---
 

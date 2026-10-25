@@ -154,8 +154,9 @@ export const SeedSchema = lazySchema(() => strictObject({
    *
    * Each key must name a column the target object has — a declared field or a
    * system column the platform injects on it. `defineSeed` refuses one that
-   * does not when it runs, and the loader warns, naming the column, when it
-   * loads a dataset whose map names one.
+   * does not when it runs, and the loader logs an error naming the column
+   * whenever it loads a dataset whose map names one (a stored seed never
+   * passes through `defineSeed`).
    */
   columns: z.record(z.string(), SeedColumnSchema).optional()
     .describe(

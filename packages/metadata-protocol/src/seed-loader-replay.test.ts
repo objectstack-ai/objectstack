@@ -985,6 +985,7 @@ describe('seed replay — a column declared applyOn: create is written on first 
 
     expect(replay.result.summary.totalInserted).toBe(0);
     expect(store[INSTALMENT.name]).toHaveLength(2);
+    expect(updatesOf(engine, INSTALMENT)).toHaveLength(2);
     for (const data of updatesOf(engine, INSTALMENT)) {
       expect(Object.keys(data).sort()).toEqual(['amount', 'id', 'name']);
     }
@@ -1000,7 +1001,7 @@ describe('seed replay — a column declared applyOn: create is written on first 
     expect(engine.insert).not.toHaveBeenCalled();
   });
 
-  it('a policy naming no column of the object is reported once, by name, and governs nothing', async () => {
+  it('a policy naming no column of the object is reported once, by name, at error, and governs nothing', async () => {
     const { engine, store } = createFaithfulEngine();
     const logger = createLogger();
     const misspelt = { stauts: { applyOn: 'create' } };
@@ -1009,16 +1010,22 @@ describe('seed replay — a column declared applyOn: create is written on first 
 
     await load(engine, INSTALMENT, { columns: misspelt, logger });
 
-    const warnings = logger.warn.mock.calls.filter(([message]: any[]) => String(message).includes('stauts'));
-    expect(warnings).toHaveLength(2); // once per dataset per load
-    expect(warnings[0][1]).toMatchObject({ object: INSTALMENT.name, undeclaredColumns: ['stauts'] });
+    // `error`, not `warn`: the column it was meant for is overwritten on every
+    // replay while the load reports success, the AGENTS.md degradation class.
+    const reports = logger.error.mock.calls.filter(([message]: any[]) => String(message).includes('stauts'));
+    expect(reports).toHaveLength(2); // once per dataset per load
+    expect(reports[0][2]).toMatchObject({ object: INSTALMENT.name, undeclaredColumns: ['stauts'] });
+    expect(logger.warn.mock.calls.filter(([message]: any[]) => String(message).includes('stauts'))).toEqual([]);
     expect(rowOf(store, INSTALMENT, 'inst-1').status).toBe('pending');
   });
 
-  it('a policy on an injected system column is a column of the object: no warning', async () => {
+  it('a policy on an injected system column is a column of the object: no report', async () => {
     const { engine } = createFaithfulEngine();
     const logger = createLogger();
     await load(engine, INSTALMENT, { columns: { owner_id: { applyOn: 'create' } }, logger });
-    expect(logger.warn.mock.calls.filter(([, meta]: any[]) => meta?.undeclaredColumns)).toEqual([]);
+    expect(
+      [...logger.warn.mock.calls, ...logger.error.mock.calls].filter((call: any[]) =>
+        call.some((arg) => (arg as { undeclaredColumns?: unknown } | undefined)?.undeclaredColumns)),
+    ).toEqual([]);
   });
 });
