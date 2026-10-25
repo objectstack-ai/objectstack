@@ -13,7 +13,7 @@ it. D4's read-both rule and D7 are unchanged, so every artifact already on disk 
 ([ADR-0141](./0141-inter-app-dependency-declared-checked-before-install.md) D5,
 [#25403](https://github.com/objectstack-ai/objectstack/issues/25403)): a package that declares
 `dependencies` on an installed package and shares its namespace is that package's co-owner at the
-install gate, across artifacts, so the owner field is deferred until **marketplace publishing**
+install gate, across artifacts (and its declared siblings' — ADR-0141 D5), so the owner field is deferred until **marketplace publishing**
 rather than until a module's first standalone artifact. The same addendum records that the
 2026-09-02 addendum's #14488 line is stale. D1–D7 are unchanged.
 **Deciders**: ObjectStack maintainer, 2026-09-01, live PM chat, verbatim and untranslated:
@@ -772,7 +772,8 @@ D6 and D8 above say the owner field becomes necessary *"the day a module ships a
 artifact"*. ADR-0141 D5 answers that day without the field: a package that declares `dependencies`
 on an installed package X and uses X's namespace is X's co-owner at the install gate — one-way (X
 declares nothing and gains nothing), read from either end at registration, direct declarations
-only — and D3's per-object-name uniqueness check spans those co-owners across artifacts exactly as
+only, plus siblings under one declared parent that holds the namespace, as ADR-0141 D5 defines —
+and D3's per-object-name uniqueness check spans those co-owners across artifacts exactly as
 it spans co-owners inside one artifact, because the registry reads one co-owner set for both halves
 of the pair. Inside one tenant the proof is the declaration plus the administrator's install act;
 no manifest field is added.
@@ -798,11 +799,13 @@ ships its own permission sets under ADR-0086 D4; the card is ⛔ not reopened fo
 inherited inputs listed under that line remain accurate as history; none is open work.
 
 One sentence of that ruling is read beside B′ here, so a reader of both records is not left to
-reconcile them: its premise 「目前的要求是发布物是完整安装的，没有设计单独安装其中 一个模块的需求。」 is
-unchanged — an artifact installs whole (D2 above stands), and a module shipped on its own under
-ADR-0141 is another artifact, not a partial install of the first. The maintainer's B′ ruling of
-2026-10-23 (「而每个包可以独立安装」) takes the path the ruling itself named for that case: a module
-carved out as its own artifact ships its own permission sets under ADR-0086 D4. The ruling's
-disposition is unchanged: a standalone module's permission sets are the module author's work, not a
-platform blocker (ADR-0141 D4, D6). What record-level access across a dependency means is ADR-0141
-D4's open section, decided with the first consumer.
+reconcile them: its premise 「目前的要求是发布物是完整安装的，没有设计单独安装其中 一个模块的需求。」 has
+two halves. The first — an artifact installs whole — is unchanged: D2 above stands, and a module
+shipped on its own under ADR-0141 is another artifact, not a partial install of the first. The
+second — that no requirement to install one module alone existed — names the need the maintainer's
+B′ ruling of 2026-10-23 (「而每个包可以独立安装」) now states, met by another artifact: the path the
+ruling itself named for that case, a module carved out as its own artifact shipping its own
+permission sets under ADR-0086 D4, never a partial install. The ruling's disposition is unchanged:
+a standalone module's permission sets are the module author's work, not a platform blocker
+(ADR-0141 D4, D6). What record-level access across a dependency means is ADR-0141 D4's open
+section, decided with the first consumer.
