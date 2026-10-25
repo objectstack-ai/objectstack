@@ -4,7 +4,7 @@
   "private": true,
   "description": "ObjectStack Protocol & Specification - Monorepo for TypeScript Interfaces, JSON Schemas, and Convention Configurations",
   "scripts": {
-    "build": "turbo run build --filter=!@objectstack/docs",
+    "build": "turbo run build --filter=!@objectstack/docs --filter=!./ui*/apps/site",
     "dev": "node scripts/check-dev-prereqs.mjs && pnpm --filter @objectstack/example-showcase dev",
     "dev:showcase": "node scripts/check-dev-prereqs.mjs && pnpm --filter @objectstack/example-showcase dev",
     "dev:crm": "node scripts/check-dev-prereqs.mjs && pnpm --filter @objectstack/example-crm dev",

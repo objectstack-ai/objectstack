@@ -1862,7 +1862,8 @@ type FlowRemovalService =
  *    nothing.
  *  - **A name with no row is not a failure** — `deleteMetaItem` answers it as
  *    "nothing to delete" (a flow registered before its door saved, or in a
- *    composition with no store).
+ *    composition with no store). A name with no row that the engine does not
+ *    hold either is no flow at all, and answers `404` as the trigger door does.
  *  - **A delete that fails puts the definition back** in the engine and
  *    relays the store's own failure, so no answer reports a removal that will
  *    not survive. A composition with no metadata store keeps the engine-only
@@ -1886,15 +1887,26 @@ async function unregisterAndDeleteFlow(
     const store: (Partial<Pick<ObjectStackProtocolImplementation, 'deleteMetaItem'>>
         & Partial<Pick<MetadataProtocol, 'getMetaItems'>>) | undefined =
         await deps.resolveServiceOrLoud(context, 'protocol');
+    // The trigger door's own probe: the engine holds no such flow.
+    const unknownToEngine = await flowIsUnknown(automationService, name);
     const held = typeof automationService.getFlow === 'function' ? await automationService.getFlow(name) : null;
     automationService.unregisterFlow(name);
+    let rowDeleted = false;
     if (typeof store?.deleteMetaItem === 'function') {
         try {
-            await store.deleteMetaItem({ type: FLOW_METADATA_TYPE, name });
+            const receipt = await store.deleteMetaItem({ type: FLOW_METADATA_TYPE, name });
+            rowDeleted = (receipt as { reset?: unknown } | undefined)?.reset === true;
         } catch (e) {
             if (held) automationService.registerFlow?.(name, held);
             return { handled: true, response: deps.errorFromThrown(await flowWriteRefusal(store, e, name, 'delete')) };
         }
+    }
+    // Neither the engine nor the store held it: `404`, the trigger door's
+    // answer, never `200 {deleted: true}` for a removal of nothing. A stored
+    // row the engine does not hold (a flow that failed to register) is still
+    // removed above and answered as a deletion.
+    if (unknownToEngine && !rowDeleted) {
+        return { handled: true, response: deps.error(flowNotFoundMessage(name), FLOW_NOT_FOUND_STATUS) };
     }
     return undefined;
 }
@@ -2418,6 +2430,8 @@ export async function classifyResumeResult(
  *                                  ⚑ a name two packages hold → 409
  *                                    `RESOURCE_CONFLICT` naming the metadata
  *                                    door's `DELETE /meta/flow/:name?package=`
+ *                                  ⚑ a name neither the engine nor the store
+ *                                    holds → 404 `RESOURCE_NOT_FOUND`
  *   POST   /:name/trigger        → execute (legacy: trigger/:name also supported;
  *                                  unknown name → 404, disabled → 409 `FLOW_DISABLED`,
  *                                  no start node → 422 `FLOW_NO_START_NODE`, node config
@@ -2467,7 +2481,9 @@ export async function classifyResumeResult(
  *                                  ignored rather than validated). `hasMore` is
  *                                  computed from the engine's own truncation
  *                                  report, never a constant. A service without
- *                                  `listRunsPage` → 501, ⛔ never a 200
+ *                                  `listRunsPage` → 501, ⛔ never a 200. An
+ *                                  unknown flow → 404 `RESOURCE_NOT_FOUND`,
+ *                                  the trigger door's answer, ⛔ never `[]`
  *                                  ⚑ run-state read — `sys_automation_run` grant (#7900)
  *   GET    /:name/runs/:runId    → getRun
  *                                  ⚑ run-state read — `sys_automation_run` grant (#7900)
@@ -3554,6 +3570,21 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         // GET /:name/runs → listRunsPage
         if (parts[1] === 'runs' && !parts[2] && m === 'GET') {
             if (typeof automationService.listRunsPage === 'function') {
+                // An unknown flow is `404`, never `200 { runs: [] }`: an empty
+                // page is the answer for a flow that exists and has not run, and
+                // a caller cannot tell the two apart from the body. The SAME
+                // registry probe and message the trigger doors answer through
+                // (`../flow-dispatch-status.js`), so this door and
+                // `POST /:name/trigger` cannot disagree about which flows exist.
+                // Asked first, as the trigger door asks it: a query-parameter
+                // refusal about a flow that is not there would be the less
+                // useful of the two true answers.
+                if (await flowIsUnknown(automationService, name)) {
+                    return {
+                        handled: true,
+                        response: deps.error(flowNotFoundMessage(name), FLOW_NOT_FOUND_STATUS),
+                    };
+                }
                 // [#7300] Both options are CHECKED at the point they are read,
                 // in the shared query-parameter refusal this route now consumes
                 // with `/notifications` (#6928 / PR #7299 — the same defect, one

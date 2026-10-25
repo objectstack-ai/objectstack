@@ -330,6 +330,14 @@ export interface EnsureDefaultOrganizationResult {
     | 'owner_bind_decided';
   /** Count of the default org's seeded rows re-owned to the platform admin. */
   ownershipClaimed?: number;
+  /**
+   * The user this call made the Default Organization's owner — set exactly when
+   * `memberCreated` or `ownerPromoted` is. The single posture's wiring gives
+   * that organization its owner's default currency at this moment
+   * (`organization-default-currency.ts`), the same rule a created
+   * organization's creator gets.
+   */
+  ownerUserId?: string;
 }
 
 /**
@@ -414,7 +422,14 @@ async function promoteReconciledMemberToOwner(
       logger?.warn?.('[default-org] seed ownership handoff failed', { error: (e as Error).message });
     }
   }
-  return { defaultOrgCreated: false, defaultOrgId, memberCreated: false, ownerPromoted: true, ownershipClaimed };
+  return {
+    defaultOrgCreated: false,
+    defaultOrgId,
+    memberCreated: false,
+    ownerPromoted: true,
+    ownershipClaimed,
+    ownerUserId: adminUserId,
+  };
 }
 
 /**
@@ -647,5 +662,5 @@ export async function ensureDefaultOrganization(
     }
   }
 
-  return { defaultOrgCreated, defaultOrgId, memberCreated: true, ownershipClaimed };
+  return { defaultOrgCreated, defaultOrgId, memberCreated: true, ownershipClaimed, ownerUserId: adminUserId };
 }

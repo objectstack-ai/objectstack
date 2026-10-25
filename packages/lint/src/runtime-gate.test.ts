@@ -339,6 +339,9 @@ describe('the views[] visibility-predicate family at the runtime publish gate (#
       // (`validateSearchableFields` / `validateSortableFields`) on the
       // per-write snapshot — see `runtime-gate.view-writes.test.ts`.
       'validateReferenceIntegrity',
+      // #25650 — a form open to anonymous intake declaring a file field;
+      // the snapshot's `objects` context carries the field types it reads.
+      'validatePublicFormFileFields',
       'validateVisibilityPredicates',
       'validatePredicatePathRefs',
     ]);
@@ -539,6 +542,7 @@ describe('the views[] visibility-predicate family at the runtime publish gate (#
       'validateStackExpressions', // #24798 — its bulk `confirmText` pass alone, clean here
       'validatePresetComparands', // #8793 — dispatched for `view`, clean here
       'validateReferenceIntegrity', // #9313 — its two list-view field members, clean here
+      'validatePublicFormFileFields', // #25650 — a public form's file fields, clean here
       'validateVisibilityPredicates',
       'validatePredicatePathRefs',
     ]);
@@ -634,6 +638,7 @@ describe('the publish gate judges a schema-bound form at its own layer (#7815)',
       'validateStackExpressions', // #24798 — its bulk `confirmText` pass alone, clean here
       'validatePresetComparands', // #8793 — dispatched for `view`, clean here
       'validateReferenceIntegrity', // #9313 — its two list-view field members, clean here
+      'validatePublicFormFileFields', // #25650 — a public form's file fields, clean here
       'validateVisibilityPredicates',
       'validatePredicatePathRefs',
     ]);

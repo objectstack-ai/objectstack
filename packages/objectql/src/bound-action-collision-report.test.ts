@@ -18,18 +18,23 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ObjectKernel, type PluginContext } from '@objectstack/core';
 import { defineStack } from '@objectstack/spec';
+import { ObjectSchema } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 import { ObjectQLPlugin } from './plugin.js';
 import { FIND_BOUND_ACTION_COLLISIONS, SchemaRegistry } from './registry.js';
 
-/** The package that OWNS the target object, with an action of its own. */
+/**
+ * The package that OWNS the target object, with an action of its own — authored
+ * as an object is (`ObjectSchema.create`), so its action is the parse of what
+ * was written, as a bound action's registered copy is (#25649).
+ */
 const OWNER = {
     id: 'com.test.owner', name: 'owner',
-    objects: [{
+    objects: [ObjectSchema.create({
         name: 'bc_org', label: 'Org',
         fields: { name: { name: 'name', type: 'text', label: 'Name' } },
         actions: [{ name: 'rename', label: 'Rename', type: 'url', target: 'https://example.com/own', locations: ['record_header'] }],
-    }],
+    } as any)],
 };
 
 /** Another package binding an action of the same NAME to the owner's object — a different declaration. */
@@ -41,7 +46,7 @@ const TWIN = {
 /** Another package carrying the owner's declaration itself, bound by `objectName` — one declaration, two packages. */
 const CARRIER = {
     id: 'com.test.carrier', name: 'carrier',
-    actions: [{ ...OWNER.objects[0].actions[0], objectName: 'bc_org' }],
+    actions: [{ ...OWNER.objects[0].actions![0], objectName: 'bc_org' }],
 };
 
 /** A package that brings an unrelated object — the late-artifact control. */
