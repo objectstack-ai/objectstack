@@ -1098,8 +1098,9 @@ export const CHANGE_KIND_ROWS = [
  * encoded: the one-line-class downgrade does not exist for a surface under
  * `skills/**` — the 2026-09-10 ruling's 必须, because a closed enumeration
  * beats a per-line "is this mechanical" call on a catalog third parties
- * install — so that entry carries `oneLineExit: false` and `tierLines`
- * refuses to offer the exit for any card whose surface hits it.
+ * install — nor under `docs/adr/**`, whose 2026-10-25 order says 都需要 —
+ * so those entries carry `oneLineExit: false` and `tierLines` refuses to
+ * offer the exit for any card whose surface hits one of them.
  *
  * ## Why the globs are matched with `hintCovers`, asymmetry included
  *
@@ -1160,8 +1161,9 @@ export const CHANGE_KIND_ROWS = [
  *
  * The authority for the policy is the maintainer ruling quoted in the PM
  * dispatch skill (2026-08-10 three-tier ruling, clause ① of its 强制条款, as
- * narrowed to protocol semantics by the 2026-08-20 ruling quoted there, and
- * widened to the published `skills/**` catalog by the 2026-09-10 ruling).
+ * narrowed to protocol semantics by the 2026-08-20 ruling quoted there,
+ * widened to the published `skills/**` catalog by the 2026-09-10 ruling, and
+ * to ADR text, `docs/adr/**`, by the 2026-10-25 order quoted in its row).
  * This table is a machine-readable copy of ONE predicate from it, not a second
  * statement of the policy: when they disagree, the skill wins and this table is
  * the thing to fix. The frame-copy half of the predicate is DEFINED by another
@@ -1187,6 +1189,15 @@ export const MANDATORY_TIER_GLOB_ROWS = [
     // The one-line-class mechanical-edit exit is a card-CONTENT judgment
     // everywhere else; here the ruling closes it by PATH (a closed enumeration
     // beats a per-line call on an installed catalog), so it is data, not prose.
+    oneLineExit: false,
+  },
+  {
+    glob: 'docs/adr/**',
+    tier: 'CONTRACT_REVIEW_TIER',
+    why: 'the 2026-10-25 order (marchtian, verbatim 「adr 这种任务都需要 fable extra，重新处理并立skills 卡片」): an ADR binds every later card cut from it until a superseding ADR says otherwise, and lands only by the maintainer\'s hand, so a drafting error is paid by the maintainer and again by each implementation card — 都需要 leaves no one-line exemption, and the same order fixes the effort floor at xhigh (the PM skill states it beside clause ①)',
+    // 都需要 closes the one-line-class exit by PATH, the same shape as the
+    // skills/** row; the effort floor is skill text, since this table carries a
+    // tier and the dispatch-gates freeze admits no new printed line.
     oneLineExit: false,
   },
 ];

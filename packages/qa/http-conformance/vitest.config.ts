@@ -54,6 +54,13 @@ export default defineConfig({
         find: /^@objectstack\/plugin-auth$/,
         replacement: path.resolve(__dirname, '../../plugins/plugin-auth/src/index.ts'),
       },
+      // `hono-mcp-stateless-verbs.conformance.test.ts` serves `/api/v1/mcp`
+      // from the REAL `MCPServerRuntime` on both doors, so its verdict on which
+      // verbs the transport answers is about this checkout's mcp source.
+      {
+        find: /^@objectstack\/mcp$/,
+        replacement: path.resolve(__dirname, '../../mcp/src/index.ts'),
+      },
     ],
   },
   test: {

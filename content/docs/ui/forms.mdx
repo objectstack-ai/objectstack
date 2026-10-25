@@ -240,6 +240,19 @@ lookup route.
 - To let a visitor pick an existing record, put the form behind sign-in — an
   internal form (section 6) renders lookup fields with the signed-in user's access.
 
+### File fields
+
+A public form takes no attachment. There is no anonymous upload route, so a
+visitor has no way to fill a file field (`file`, `image`, `avatar`, `video` or
+`audio`). A form open to anonymous intake
+whose sections declare such a field is therefore refused where it is written:
+`os validate`, `os build` and `os lint` fail with `public-form-file-field`, and
+publishing the view through Studio, REST `/meta` or MCP answers
+`422 INVALID_METADATA` naming the field's entry.
+
+To collect a file from someone outside the organization, have them register and
+sign in, then fill an internal form (section 6) that declares the file field.
+
 ### Auth model
 
 - Neither route calls `enforceAuth`, so both work under the always-on anonymous-deny default (there is no `requireAuth` knob to configure since v17).
