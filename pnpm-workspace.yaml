@@ -234,6 +234,18 @@ patchedDependencies:
 #     Keep both in sync; removing the root devDependency reintroduces 5.55.3.
 #   - @tootallnate/once: GHSA-vpq2-c234-7xj6 (low) — pulled 1.1.2 through a
 #     legacy agent chain; force the patched 2.0.1 line.
+#   - body-parser: GHSA-27r3-jxmh-p828 (high), GHSA-v422-hmwv-36x6 (low) —
+#     objectui's tree pulled 1.20.5 through express 4 (@object-ui/cli), whose
+#     `~1.20.5` range admits the patched 1.20.9; scoped below 1.20.9 so the
+#     body-parser 2 line under express 5 is untouched (cutover,
+#     objectstack#25803, bill item 40).
+#   - markdown-it: GHSA-r7fv-28h4-cvq7, GHSA-gfr2-rv44-r23c (high),
+#     GHSA-253c-mchw-3w2r, GHSA-vfgh-jcmw-g37q — objectui's tree pulled 14.3.0
+#     through typedoc and @vscode/vsce (`^14.1.0`); force the patched 14.3.3
+#     line, bounded to the 14 major (bill item 40).
+#   - postcss-selector-parser@6.0.10: GHSA-rj75-hqrm-r3gf — @tailwindcss/typography
+#     0.5.20 pins 6.0.10 exactly, and the fix is only on the 7 line; the exact
+#     selector moves that one copy to 7.1.6 (bill item 40).
 overrides:
   esbuild: '>=0.28.1'
   # objectui's security floors, from ui/package.json's ignored `pnpm` field
@@ -242,6 +254,10 @@ overrides:
   'shell-quote@<1.8.4': '^1.8.4'
   'tmp@<0.2.6': '^0.2.6'
   'uuid@<11.1.1': '^11.1.1'
+  # objectui's merged-lock advisories (cutover, objectstack#25803, bill item 40).
+  'body-parser@<1.20.9': '~1.20.9'
+  'markdown-it@>=14.0.0 <14.3.3': '^14.3.3'
+  'postcss-selector-parser@6.0.10': '7.1.6'
   # objectui's single react line (cutover, objectstack#25752):
   # objectui pins 19.3.0 exactly; objectstack manifests still carry ^19.2.x ranges.
   react: 19.3.0
