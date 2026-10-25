@@ -147,6 +147,51 @@ so a typo like `'complete'` for `'completed'` still surfaces before boot.
 
 ---
 
+## Columns Your App Owns After the First Seed — `applyOn: 'create'`
+
+An `upsert` replay re-asserts every column a record declares on the row it
+matched. That is right for master data and wrong for a column the app itself
+owns once the row exists: a status a scheduled job advances, a flag a job sets
+after it sends a notice, a reference a workflow re-points. Replayed, the seed
+would put those back, undoing the job's work on every boot.
+
+Declare such a column `applyOn: 'create'` under `columns`:
+
+```typescript
+defineSeed(Instalment, {
+  externalId: 'code',
+  mode: 'upsert',
+  columns: {
+    status:      { applyOn: 'create' },   // the payment job owns it after the first seed
+    is_expiring: { applyOn: 'create' },   // the renewal job sets it
+  },
+  records: [
+    { code: 'INS-001', amount: 1200, status: 'pending', is_expiring: false },
+  ],
+});
+```
+
+- When the seed **creates** the row, every column is written, `status` and
+  `is_expiring` included.
+- When a replay **matches** an existing row, `status` and `is_expiring` are left
+  out of the write: the row keeps the values the jobs gave it, while `amount`
+  (`applyOn: 'always'`, the default) is refreshed. A row whose only differences
+  are create-only columns is not written at all.
+- An `update` dataset never writes a create-only column. `insert`, `ignore` and
+  `replace` never update a matched row, so the policy changes nothing there.
+- A create-only **reference** on a matched row is not resolved at all, so a
+  replay neither re-points it nor reports it.
+- A column of the `externalId` is what the row was matched by, so it stays in
+  the update whatever it declares.
+
+`applyOn` takes the same values, with the same default and meaning, as an import
+mapping entry's [`applyOn`](/docs/data-modeling/import-mappings). A `columns` key
+must name a field of the object (or a system column the platform injects on it,
+such as `owner_id`): `defineSeed` refuses one that does not, and the loader warns
+when a stored seed names one.
+
+---
+
 ## Environment Scoping
 
 The `env` array controls which deployment environments receive the records. The
@@ -587,6 +632,7 @@ function defineSeed<
   config: {
     externalId?: string | string[];         // single field, or a composite list (join tables); default: 'name'
     mode?: 'insert' | 'update' | 'upsert' | 'replace' | 'ignore'; // default: 'upsert'
+    columns?: { [field: string]: { applyOn?: 'create' | 'always' } }; // per-column write policy; default: 'always'
     env?: Array<'prod' | 'dev' | 'test'>;  // default: ['prod','dev','test']
     locale?: string[];                      // BCP-47 tags; omitted = every locale
     records: Array<SeedRecord<TObj['fields']>>;  // declared fields + injectable system columns
@@ -596,7 +642,8 @@ function defineSeed<
 
 `SeedRecord` keys are the object's declared fields (a `lookup` / `master_detail`
 field takes its target's natural-key string) plus the injectable system column
-names. Every record key is checked again when the call runs.
+names. Every record key, and every `columns` key, is checked again when the call
+runs.
 
 The returned `Seed` object is a plain serialisable value — pass it to your
 stack's seed runner or store it in an export array.
