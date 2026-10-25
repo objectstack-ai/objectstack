@@ -383,9 +383,9 @@ function notifyRecipientsRefusal(input: unknown): string {
  * as does one that cannot be looked up (no data engine, a failing lookup). A
  * node that does not name `email` (`inbox` alone, the messaging default)
  * mails nobody, and its computed recipients reach the messaging resolver
- * unscreened, as before. That channel scope is the runtime's current reading
- * of the ruling and is with the maintainer for confirmation, so the describes
- * below state it as the current behaviour, not as final.
+ * unscreened, as before. That channel scope is the confirmed reading of the
+ * ruling (ruling record 6393736930 on #25647: the maintainer chose to screen
+ * only nodes that include the `email` channel).
  *
  * The same change delivers an email-field recipient: the address is read from
  * the STORED trigger row (never the run's `record` snapshot), must be one
