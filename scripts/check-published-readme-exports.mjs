@@ -2217,8 +2217,44 @@ function prerequisiteNotMetText(message) {
  *        result depends on whether it was passed. `root` is the self-test's
  *        scratch workspace and defaults to the repo — see `publishedDocs`.
  */
+/**
+ * The directory objectui's tree is imported under (objectstack#25677), as a
+ * bare segment: a literal with no path separator is no watch hint, so this
+ * declares no population (see DECLARED_WORKSPACE_POPULATION).
+ */
+const UI_TREE = 'ui';
+
+/** Is a repo-relative POSIX path the `ui/` tree or inside it? */
+export function inUiTree(rel) {
+  return rel === UI_TREE || rel.startsWith(`${UI_TREE}/`);
+}
+
+/**
+ * This gate's population with the `ui/` tree taken out, by PATH: every member
+ * whose directory is `ui` or under it, and every document it publishes.
+ *
+ * Those packages' README claims are objectui's own gate's to judge
+ * (`ui/scripts/check-readme-exports.mjs`, which objectui runs in its
+ * `repo-gates.yml` after a full build), and their built type entries are not
+ * in the closure this gate's lane builds -- so left
+ * in, they turn every run on the merged tree into PREREQUISITE NOT MET over
+ * packages it was never asked about, and the objectstack READMEs go unjudged
+ * with them. By path and not by `@object-ui/` scope: the `ui/` tree is the unit
+ * the import defined, and a scope test would miss a member of it with another
+ * name. A tree with no `ui/` directory comes back unchanged.
+ *
+ * An objectstack README that imports a `ui/` member now reads it as a
+ * non-member, the same as `react`: not this repo's own scope, so skipped.
+ */
+export function outsideUiTree({ byName, docs }) {
+  return {
+    byName: new Map([...byName].filter(([, member]) => !inUiTree(member.dir))),
+    docs: docs.filter((doc) => !inUiTree(doc.file)),
+  };
+}
+
 function run({ unreadReport: wantsUnreadReport = false, root = ROOT } = {}) {
-  const { byName, docs } = publishedDocs(SELF, { root });
+  const { byName, docs } = outsideUiTree(publishedDocs(SELF, { root }));
 
   // Pass 1: which workspace type entries do the READMEs actually reach?
   const { importStatements, ownScope, unresolvable, targets: reached } = reachedTargets(
@@ -2497,11 +2533,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'THE FOURTH STATE ON THAT AXIS (#10417)': 4,
   'THE UNBUILT-CLOSURE PREDICATE, and the two states it excludes (#15600)': 5,
   'THE EXIT-CODE SPLIT, END TO END on a scratch workspace (#15600)': 8,
+  'THE `ui/` TREE IS OUT OF THIS POPULATION, BY PATH (#25697)': 5,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 26;
+const SELF_TEST_BATTERY_FLOOR = 27;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -4296,6 +4333,91 @@ function selfTest() {
     eq('END TO END — GREEN CONTROL: a README that agrees passes', drive().exit, EXIT_OK);
   } finally {
     rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+
+  // -- THE `ui/` TREE IS OUT OF THIS POPULATION, BY PATH ---------------------
+  //
+  // Driven through the production `run` over a scratch workspace, like the
+  // split above. The `ui/` member is UNBUILT on purpose: that is the merged
+  // tree's state in this gate's lane, and left in the population it refuses the
+  // whole run. The control puts the same unbuilt member outside `ui/` and must
+  // still refuse, so the green run is the exclusion and not a fixture that
+  // never reached the refusal.
+  battery('THE `ui/` TREE IS OUT OF THIS POPULATION, BY PATH (#25697)');
+  eq(
+    'inUiTree — the tree and its descendants, by path segment',
+    ['ui', 'ui/packages/types', 'ui/README.md', 'uikit/x', 'packages/ui', 'packages/ui/README.md'].map(inUiTree),
+    [true, true, true, false, false, false],
+  );
+  eq(
+    'outsideUiTree — drops the members under `ui/` and the documents they publish, keeps the rest',
+    (() => {
+      const kept = outsideUiTree({
+        byName: new Map([
+          ['@objectstack/a', { dir: 'packages/a' }],
+          ['@object-ui/b', { dir: 'ui/packages/b' }],
+          ['object-ui-root', { dir: 'ui' }],
+          ['@objectstack/ui-kit', { dir: 'packages/ui' }],
+        ]),
+        docs: [{ file: 'packages/a/README.md' }, { file: 'ui/packages/b/README.md' }, { file: 'ui/README.md' }],
+      });
+      return [[...kept.byName.keys()], kept.docs.map((d) => d.file)];
+    })(),
+    [['@objectstack/a', '@objectstack/ui-kit'], ['packages/a/README.md']],
+  );
+  const uiRoot = mkdtempSync(join(tmpdir(), 'readme-exports-ui-tree-'));
+  try {
+    const member = (rel, name, built) => {
+      const dir = join(uiRoot, rel);
+      mkdirSync(join(dir, 'dist'), { recursive: true });
+      writeFileSync(
+        join(dir, 'package.json'),
+        `${JSON.stringify(
+          {
+            name,
+            version: '0.0.0',
+            files: ['dist', 'README.md'],
+            exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js' } },
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      writeFileSync(join(dir, 'README.md'), ['```typescript', `import { Documented } from '${name}';`, '```', ''].join('\n'));
+      if (built) writeFileSync(join(dir, 'dist', 'index.d.ts'), 'export declare const Documented: string;\n');
+    };
+    mkdirSync(join(uiRoot, 'scripts'), { recursive: true });
+    writeFileSync(join(uiRoot, BASELINE_REL), `${JSON.stringify({ entries: [] }, null, 2)}\n`);
+    member('packages/fixture', '@objectstack/ui-tree-fixture', true);
+    const drive = (globs) => {
+      writeFileSync(join(uiRoot, WORKSPACE_FILE), `packages:\n${globs.map((g) => `  - ${g}\n`).join('')}`);
+      const printed = [];
+      const { log, error } = console;
+      console.log = (...args) => printed.push(args.join(' '));
+      console.error = (...args) => printed.push(args.join(' '));
+      try {
+        return { exit: run({ root: uiRoot }), text: printed.join('\n') };
+      } finally {
+        console.log = log;
+        console.error = error;
+      }
+    };
+
+    member('ui/packages/unbuilt', '@object-ui/ui-tree-unbuilt', false);
+    const merged = drive(['packages/*', 'ui/packages/*']);
+    eq('END TO END — an unbuilt member under `ui/` does not refuse the run', merged.exit, EXIT_OK);
+    eq('END TO END — and the run does not name it', /ui-tree-unbuilt/.test(merged.text), false);
+
+    member('packages/unbuilt', '@object-ui/ui-tree-unbuilt', false);
+    rmSync(join(uiRoot, 'ui'), { recursive: true, force: true });
+    const control = drive(['packages/*']);
+    eq(
+      'END TO END — CONTROL: the same unbuilt member outside `ui/` still refuses, naming it',
+      [control.exit, /@object-ui\/ui-tree-unbuilt -> packages\/unbuilt\/dist\/index\.d\.ts/.test(control.text)],
+      [EXIT_PREREQUISITE_NOT_MET, true],
+    );
+  } finally {
+    rmSync(uiRoot, { recursive: true, force: true });
   }
 
   // The authority convention (#8435): the baseline path must never be offered

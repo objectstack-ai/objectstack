@@ -313,6 +313,14 @@ export const ROOT_DIR_WATCH_HINTS = [
   'packages/connectors/*/src/**',
   'apps/*/src/**',
   'examples/*/src/**',
+  // The objectui tree, imported under `ui/` (objectstack#25677 / #25697): four
+  // workspace roots pnpm-workspace.yaml declares ahead of the import. Each is a
+  // live workspace root (the self-test holds both directions), and each walks
+  // nothing until `ui/` arrives.
+  'ui/src/**',
+  'ui/packages/*/src/**',
+  'ui/apps/*/src/**',
+  'ui/examples/*/src/**',
 ];
 
 /** Canonical unit → every spelling the describe prose or a key token may use. */

@@ -105,6 +105,9 @@ import { negotiatedMessageLocale, objectDisplayLabel, validationMessageContext }
 // [#25522 cut 2] The datasource-routing bodies; the methods of the same names
 // below hand each body the members it reads (`DatasourceRoutingHost`).
 import { getDriver, matchPattern, resolveDatasourceFromMapping } from './engine-datasource-routing.js';
+// [#25522 cut 3] The lifecycle health bodies; the methods of the same names
+// below hand each body the members it reads (`LifecycleHealthHost`).
+import { checkDriversHealth, resolvePrimaryDatasource } from './engine-lifecycle-health.js';
 import { ExecutionContext, ExecutionContextSchema, type InstalledPackageSource } from '@objectstack/spec/kernel';
 // [#21120] The family-wide stored-metadata-body seam. A `data.record.*` event
 // carries the written row in `after` (and the input patch in `changes`), so a
@@ -250,7 +253,7 @@ import {
 export type InsertManyRowOutcome =
   | { ok: true; record: any; droppedFields?: DroppedFieldsEvent[] }
   | { ok: false; error: unknown };
-import { CoreServiceName, StorageNameMapping, PLATFORM_PROVIDED_OBJECT_NAMES } from '@objectstack/spec/system';
+import { CoreServiceName, StorageNameMapping } from '@objectstack/spec/system';
 import { IRealtimeService, RealtimeEventPayload } from '@objectstack/spec/contracts';
 import {
   BulkDataEventSchema,
@@ -12662,40 +12665,12 @@ export class ObjectQL implements IObjectQLEngine {
    * optional method.
    */
   async checkDriversHealth(opts?: { timeoutMs?: number }): Promise<DriverHealth[]> {
-    const timeoutMs = opts?.timeoutMs ?? 2_000;
-
-    return Promise.all(
-      Array.from(this.drivers, async ([driverName, driver]): Promise<DriverHealth> => {
-        if (typeof driver.checkHealth !== 'function') {
-          return { driverName, healthy: true, skipped: true };
-        }
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        try {
-          const healthy = await Promise.race([
-            Promise.resolve(driver.checkHealth()),
-            new Promise<never>((_, reject) => {
-              timer = setTimeout(
-                () => reject(new Error(`checkHealth did not settle within ${timeoutMs}ms`)),
-                timeoutMs,
-              );
-              // Never hold the event loop open for a probe.
-              (timer as { unref?: () => void }).unref?.();
-            }),
-          ]);
-          return healthy
-            ? { driverName, healthy: true }
-            : { driverName, healthy: false, error: 'checkHealth() returned false' };
-        } catch (e) {
-          return {
-            driverName,
-            healthy: false,
-            error: e instanceof Error ? e.message : String(e),
-          };
-        } finally {
-          if (timer) clearTimeout(timer);
-        }
-      }),
-    );
+    // [#25522 cut 3] The body moved to `engine-lifecycle-health.ts` (see `LifecycleHealthHost`).
+    const readDrivers = () => this.drivers;
+    const host: ThisParameterType<typeof checkDriversHealth> = {
+      get drivers() { return readDrivers(); },
+    };
+    return checkDriversHealth.call(host, opts);
   }
 
   /**
@@ -12754,43 +12729,16 @@ export class ObjectQL implements IObjectQLEngine {
    * readiness caller catches it into the same drain direction.)
    */
   resolvePrimaryDatasource(): PrimaryDatasourceVerdict {
-    const byDatasource = new Map<string, number>();
-    for (const objectName of PLATFORM_PROVIDED_OBJECT_NAMES) {
-      // Not registered in THIS deployment (OSS runtime vs cloud, plugins not
-      // installed) — no evidence either way, so it does not vote.
-      if (!this._registry.getObject(objectName)) continue;
-      // ADR-0057 §3.6: deliberately off the primary. See the header.
-      if (this.isSystemLedgerObject(objectName)) continue;
-
-      const binding = this.resolveDatasourceBinding(objectName);
-      // A registered platform object that routes NOWHERE is a broken
-      // deployment, not a quiet abstention: there is no binding and no default
-      // driver, so no answer about "the primary" can be true.
-      if (!binding) return { resolved: false, reason: 'system-object-unbound' };
-
-      byDatasource.set(binding.datasource, (byDatasource.get(binding.datasource) ?? 0) + 1);
-    }
-
-    if (byDatasource.size === 0) return { resolved: false, reason: 'no-system-objects-registered' };
-    if (byDatasource.size > 1) {
-      return {
-        resolved: false,
-        reason: 'system-objects-split',
-        candidates: [...byDatasource.keys()].sort(),
-      };
-    }
-
-    const [[datasource, witnesses]] = [...byDatasource];
-    // Steps 1-2 of the resolution order answer with a name even when nothing is
-    // registered under it (that is deliberate — `getDriver` throws loudly on
-    // it). A readiness probe cannot use such a name: `checkDriversHealth()`
-    // reports only REGISTERED drivers, so an unregistered primary would be
-    // absent from the unhealthy list and read as healthy — the silent
-    // don't-drain the ruling forbids.
-    if (!this.drivers.has(datasource)) {
-      return { resolved: false, reason: 'no-driver-registered', candidates: [datasource] };
-    }
-    return { resolved: true, datasource, witnesses };
+    // [#25522 cut 3] The body moved to `engine-lifecycle-health.ts` (see `LifecycleHealthHost`).
+    const readRegistry = () => this._registry;
+    const readDrivers = () => this.drivers;
+    const host: ThisParameterType<typeof resolvePrimaryDatasource> = {
+      get _registry() { return readRegistry(); },
+      isSystemLedgerObject: (...a) => this.isSystemLedgerObject(...a),
+      resolveDatasourceBinding: (...a) => this.resolveDatasourceBinding(...a),
+      get drivers() { return readDrivers(); },
+    };
+    return resolvePrimaryDatasource.call(host);
   }
 
   /**

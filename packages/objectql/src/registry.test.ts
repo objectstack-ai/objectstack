@@ -453,19 +453,21 @@ describe('SchemaRegistry', () => {
     // Generic Metadata Tests (Non-Object)
     // ==========================================
     describe('Generic Metadata', () => {
+        // [#25649] `report`, not `action`: a package's action is no longer a
+        // generic item — it is stored as its `ActionSchema` parse.
         it('should register and retrieve generic items', () => {
-            const item = { name: 'test_action', type: 'custom' };
-            registry.registerItem('action', item, 'name', 'com.pkg');
+            const item = { name: 'test_report', type: 'custom' };
+            registry.registerItem('report', item, 'name', 'com.pkg');
 
-            const retrieved = registry.getItem('action', 'test_action');
+            const retrieved = registry.getItem('report', 'test_report');
             expect(retrieved).toEqual(item);
         });
 
         it('should list items by type with package filter', () => {
-            registry.registerItem('action', { name: 'a1' }, 'name', 'com.pkg1');
-            registry.registerItem('action', { name: 'a2' }, 'name', 'com.pkg2');
+            registry.registerItem('report', { name: 'a1' }, 'name', 'com.pkg1');
+            registry.registerItem('report', { name: 'a2' }, 'name', 'com.pkg2');
 
-            const filtered = registry.listItems('action', 'com.pkg1');
+            const filtered = registry.listItems('report', 'com.pkg1');
             expect(filtered).toHaveLength(1);
         });
     });

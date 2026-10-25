@@ -528,7 +528,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir, totalmem } from 'node:os';
 import { join, posix, resolve } from 'node:path';
 import { getHeapStatistics } from 'node:v8';
+import ts from 'typescript';
 import { gitFreeEnv } from './git-env.mjs';
+import { maskComments } from './js-comment-mask.mjs';
 import {
   selfTest as workspaceEnumeratorSelfTest,
   workspaceEnumeratorFloorFailures,
@@ -1623,14 +1625,38 @@ function includeRoot(glob) {
   return glob.split('*')[0].replace(/\/$/, '');
 }
 
+/**
+ * A tsconfig's text read the way tsc reads it: JSON with comments, line AND
+ * block, and trailing commas. `JSON.parse` over the text with whole-line `//`
+ * comments stripped was the reader here, and it refused every config tsc
+ * accepts with a block comment or a trailing comma -- objectui's root
+ * `tsconfig.json` and three of its package configs are written that way, so
+ * the gate stopped on the first of them the moment `ui/` became a workspace
+ * member (objectstack#25697).
+ *
+ * TypeScript's own parser is the authority, not a second JSONC dialect typed
+ * here: what tsc compiles is what this gate claims to describe. Its refusals
+ * stay refusals -- a syntax error, a merge-conflict marker, a root that is not
+ * an object -- and so does a document holding no value at all, which the
+ * parser reads as `{}` and the old reader refused: an empty config read as
+ * "include everything, exclude nothing" is the silent pass this gate exists to
+ * refuse.
+ *
+ * @returns {{ config: object } | { error: string }}
+ */
+function parseTsconfigText(text, fileName) {
+  if (maskComments(text).trim() === '') return { error: 'the file holds no JSON value' };
+  const { config, error } = ts.parseConfigFileTextToJson(fileName, text);
+  if (error) return { error: ts.flattenDiagnosticMessageText(error.messageText, '\n') };
+  return { config };
+}
+
 function readTsconfig(dir, file) {
-  const raw = readFileSync(join(ROOT, dir, file), 'utf8').replace(/^\s*\/\/.*$/gm, '');
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (cause) {
-    throw new Error(`${dir}/${file} is not parseable, so its test coverage cannot be judged`, { cause });
+  const read = parseTsconfigText(readFileSync(join(ROOT, dir, file), 'utf8'), `${dir}/${file}`);
+  if (read.error !== undefined) {
+    throw new Error(`${dir}/${file} is not parseable, so its test coverage cannot be judged: ${read.error}`);
   }
+  const parsed = read.config;
   const include = parsed.include ?? null;
   const declared = Array.isArray(include) ? include.filter((g) => typeof g === 'string') : [];
   const roots = declared.length > 0
@@ -4169,12 +4195,15 @@ function tsconfigChainFacts(dir) {
   let configAbs = join(ROOT, dir, 'tsconfig.json');
   const facts = { selectsFiles: false, declaresTypeRoots: false };
   for (let depth = 0; depth < 8; depth++) {
-    let parsed;
+    let text;
     try {
-      parsed = JSON.parse(readFileSync(configAbs, 'utf8').replace(/^\s*\/\/.*$/gm, ''));
+      text = readFileSync(configAbs, 'utf8');
     } catch {
       return facts;
     }
+    const read = parseTsconfigText(text, configAbs);
+    if (read.error !== undefined) return facts;
+    const parsed = read.config;
     if (Array.isArray(parsed.include) && parsed.include.length > 0) facts.selectsFiles = true;
     if (Array.isArray(parsed.files)) facts.selectsFiles = true;
     if (parsed.compilerOptions?.typeRoots !== undefined) facts.declaresTypeRoots = true;
@@ -4348,10 +4377,12 @@ function remeasureProject({ pkgAbs, rootAbs, parsed, unreachable, chain }) {
 function measureTestDebt(dir, hiddenTests = []) {
   const rootAbs = ROOT.replaceAll('\\', '/').replace(/\/$/, '');
   const pkgAbs = join(ROOT, dir).replaceAll('\\', '/').replace(/\/$/, '');
-  const parsed = JSON.parse(
-    readFileSync(join(ROOT, dir, 'tsconfig.json'), 'utf8').replace(/^\s*\/\/.*$/gm, ''),
-  );
+  // readTsconfig first: it is the reader that refuses an unparseable config.
   const { roots } = readTsconfig(dir, 'tsconfig.json');
+  const { config: parsed } = parseTsconfigText(
+    readFileSync(join(ROOT, dir, 'tsconfig.json'), 'utf8'),
+    `${dir}/tsconfig.json`,
+  );
   const unreachable = hiddenTests.filter(
     (rel) => !roots.some((root) => root === '' || rel === root || rel.startsWith(`${root}/`)),
   );
@@ -5051,6 +5082,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // The closure build's shared-verify-lock contract: 11 verdict-reader rows, 2
   // wiring pins, 6 real-lock cases on a private lock file.
   'verify-lock cases (#23470)': 19,
+  // parseTsconfigText: what tsc accepts reads, what tsc refuses still refuses.
+  'JSONC tsconfig reader (#25697)': 8,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -5059,7 +5092,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // key in the literal above, so the roster falls below this number; the table
 // cross-check in `batteryFloorFailures()` is the other half, and names WHICH
 // label collided.
-const SELF_TEST_BATTERY_FLOOR = 65;
+const SELF_TEST_BATTERY_FLOOR = 66;
 
 // The ledger `batteryFloorFailures()` reads.
 //
@@ -7693,6 +7726,57 @@ function selfTest() {
   for (const c of textCases) {
     registerCase('exit-code cases');
     if (!c.ok) failures.push(`prerequisiteNotMetText — ${c.label}`);
+  }
+
+  // ── THE JSONC TSCONFIG READER (#25697) ─────────────────────────────────────
+  //
+  // tsc reads tsconfig files as JSON with comments and trailing commas, and so
+  // must this gate: the accepted rows below are all shapes tsc compiles, and
+  // the first is objectui's root config's own (a block comment between keys).
+  // The refused rows are what keeps "tolerant" from meaning "anything parses":
+  // each one used to throw under JSON.parse and must still come back as an
+  // error, never as a config that excludes nothing.
+  const jsoncCases = [
+    {
+      label: 'a block comment between keys reads',
+      text: '{\n  "compilerOptions": {\n    "skipLibCheck": true,\n\n    /* Bundler mode */\n'
+        + '    "moduleResolution": "bundler"\n  },\n  "include": ["src"]\n}\n',
+      include: ['src'],
+    },
+    {
+      label: 'trailing commas in an object and an array read',
+      text: '{ "include": ["src", "test",], "exclude": ["**/*.test.ts",], }',
+      include: ['src', 'test'],
+      exclude: ['**/*.test.ts'],
+    },
+    {
+      label: 'a whole-line `//` comment still reads, as it did before',
+      text: '// the base config\n{ "include": ["src/**/*"] }',
+      include: ['src/**/*'],
+    },
+    {
+      label: 'a `//` inside a string value is the value, not a comment',
+      text: '{ "include": ["src"], "compilerOptions": { "baseUrl": "http://x//y" } }',
+      include: ['src'],
+    },
+    { label: 'a truncated document is refused', text: '{ "include": [', refused: true },
+    { label: 'a merge-conflict marker is refused', text: '<<<<<<< HEAD\n{ "include": ["src"] }', refused: true },
+    { label: 'a root that is not an object is refused', text: '["src"]', refused: true },
+    { label: 'a document holding only a comment is refused, not read as {}', text: '// nothing here\n', refused: true },
+  ];
+  for (const c of jsoncCases) {
+    registerCase('JSONC tsconfig reader (#25697)');
+    const got = parseTsconfigText(c.text, 'fixture/tsconfig.json');
+    if (c.refused) {
+      if (got.error === undefined) {
+        failures.push(`parseTsconfigText — ${c.label}: read as ${JSON.stringify(got.config)} instead of refused`);
+      }
+      continue;
+    }
+    const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+    if (got.error !== undefined || !same(got.config.include, c.include) || !same(got.config.exclude, c.exclude)) {
+      failures.push(`parseTsconfigText — ${c.label}: got ${JSON.stringify(got)}`);
+    }
   }
 
   // The shared workspace enumerator is a plain module with no CI invocation of

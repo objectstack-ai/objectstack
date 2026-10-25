@@ -1359,6 +1359,38 @@ export function sliceMapForRun(names, shardCount) {
   return Object.freeze(Object.fromEntries(names.map((name) => [name, shardCount])));
 }
 
+// ── THE `ui/` TREE IS TEST UI'S, NOT TEST CORE'S (#25697) ──────────────────
+//
+// Once objectui's tree sits under `ui/` (objectstack#25677) its packages are
+// workspace members, so `turbo ls` lists them and every Test Core shard would
+// receive some. They have their own matrix in ci.yml (Test UI), and Test Core
+// cannot run them: its closure builds under OS_SKIP_DTS, and the ui packages
+// compile against built declarations (TS7016), while the ui ROOT package's
+// `test` script is objectui's whole-suite vitest -- measured on the verification
+// branch, shard 1 ran it for 38 minutes. So members whose directory is `ui` or
+// under it are dropped from the document here, BY PATH: the `ui/` tree is the
+// unit the import defined, and a scope test (`@object-ui/*`) would miss the
+// root package, which carries another name. A document with no `ui/` member
+// comes back unchanged, so today's split is byte-identical.
+//
+// The segment is spelled bare: a literal with no path separator is no
+// dispatch-gates watch hint, so this declares no `ui/**` population.
+const UI_TREE = 'ui';
+
+export function inUiTree(itemPath) {
+  return itemPath === UI_TREE || itemPath.startsWith(`${UI_TREE}/`);
+}
+
+// `turbo ls` writes repo-relative paths and an older union writer absolute ones
+// (packageDir() above), so the test runs on the path relative to the repo. An
+// entry with no string path is kept: weighItems() refuses it, naming it.
+export function withoutUiTree(items) {
+  const underUi = (it) =>
+    typeof it?.path === 'string' && inUiTree(path.relative(REPO_ROOT, packageDir(it.path)).split(path.sep).join('/'));
+  const kept = items.filter((it) => !underUi(it));
+  return { kept, dropped: items.length - kept.length };
+}
+
 // The split a real run computes, and the ONE path that computes it: main() runs
 // it and prints the result, and the self-test drives the same function on the
 // nightly's live document, so a pin on it cannot be a pin on a second copy of
@@ -1366,8 +1398,9 @@ export function sliceMapForRun(names, shardCount) {
 // shape, then the dataset, the weights, the density cap and the plan -- so a run
 // that refuses still refuses with the same message it always did.
 export function planRun(parsed, listPath, shardCount, { excluded = new Set(), timings = null } = {}) {
-  const items = readPackageItems(parsed, listPath);
-  const acrossShards = readSliceAcrossShards(parsed, items, listPath);
+  const listed = readPackageItems(parsed, listPath);
+  const acrossShards = readSliceAcrossShards(parsed, listed, listPath);
+  const { kept: items, dropped: uiTree } = withoutUiTree(listed);
   const dataset = timings ?? loadTimings();
   const sliced = acrossShards === null ? FILE_SHARDED_PACKAGES : sliceMapForRun(acrossShards, shardCount);
   const { weighed, estimated, packages } = weighItems(items, excluded, dataset, listPath, sliced);
@@ -1377,7 +1410,7 @@ export function planRun(parsed, listPath, shardCount, { excluded = new Set(), ti
   const cap = densityCapOf(dataset, excluded, shardCount);
   const { items: weighted, bins: placed, decisions } = planShards(weighed, shardCount, { cap });
   const bins = assertSlicesSpread(placed);
-  return { bins, weighted, decisions, estimated, packages, cap, acrossShards };
+  return { bins, weighted, decisions, estimated, packages, cap, acrossShards, uiTree };
 }
 
 // -- The self-test's own battery roster and floor (#13489) ------------------
@@ -1428,11 +1461,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // 16 read the live tree: 2 read test-nightly-tiers.yml back, and 3 drive the
   // nightly's own document at that workflow's shard count.
   'a document states its own slicing: the nightly tiers': 16,
+  // Members under `ui/` are Test UI's: dropped by path, the rest unperturbed.
+  'the `ui/` tree is Test UI\'s, not Test Core\'s (#25697)': 6,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 14;
+const SELF_TEST_BATTERY_FLOOR = 15;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -2694,6 +2729,65 @@ function selfTest() {
     }
   });
 
+  // -- THE `ui/` TREE IS TEST UI'S, NOT TEST CORE'S --------------------------
+  //
+  // The merged tree's `turbo ls` lists the ui ROOT package (path `ui`, another
+  // name than `@object-ui/*`) and the members under it. Through planRun() --
+  // the function main() runs -- none of them may reach a bin, and the
+  // objectstack items must split exactly as they do with no `ui/` tree at all.
+  battery('the `ui/` tree is Test UI\'s, not Test Core\'s (#25697)');
+  {
+    check(() => {
+      const got = ['ui', 'ui/packages/types', 'ui/apps/console', 'uikit', 'packages/ui', 'packages/spec'].map(inUiTree);
+      if (JSON.stringify(got) !== JSON.stringify([true, true, true, false, false, false])) {
+        throw new Error(`ui tree: inUiTree answered ${JSON.stringify(got)}`);
+      }
+    });
+    const coreItems = [
+      { name: '@objectstack/spec', path: 'packages/spec' },
+      { name: '@objectstack/cli', path: 'packages/cli' },
+      { name: '@objectstack/core', path: 'packages/core' },
+      { name: '@objectstack/ui-named', path: 'packages/ui' },
+    ];
+    const uiItems = [
+      { name: 'object-ui-monorepo', path: 'ui' },
+      { name: '@object-ui/types', path: 'ui/packages/types' },
+      { name: '@object-ui/console', path: path.join(REPO_ROOT, 'ui', 'apps', 'console') },
+    ];
+    const doc = (list) => ({ packages: { count: list.length, items: list } });
+    const corePlan = planRun(doc(coreItems), 'core only', SHARD_COUNT, { timings });
+    const mergedPlan = planRun(doc([...uiItems, ...coreItems]), 'merged tree', SHARD_COUNT, { timings });
+    const placedNames = (plan) => plan.bins.flatMap((bin) => bin.names);
+    check(() => {
+      const uiNames = new Set(uiItems.map((u) => u.name));
+      const leaked = placedNames(mergedPlan).filter((n) => uiNames.has(parseShardItem(n).name));
+      if (leaked.length > 0) throw new Error(`ui tree: ${leaked.join(', ')} reached a Test Core bin`);
+    });
+    check(() => {
+      if (mergedPlan.uiTree !== uiItems.length) {
+        throw new Error(
+          `ui tree: planRun reported ${mergedPlan.uiTree} dropped, expected ${uiItems.length} (an absolute path too)`
+        );
+      }
+    });
+    check(() => {
+      if (JSON.stringify(mergedPlan.bins) !== JSON.stringify(corePlan.bins)) {
+        throw new Error('ui tree: dropping the ui members changed how the objectstack items split');
+      }
+    });
+    check(() => {
+      if (corePlan.uiTree !== 0 || !placedNames(corePlan).includes('@objectstack/ui-named')) {
+        throw new Error('ui tree: a package outside `ui/` whose path merely contains "ui" was dropped');
+      }
+    });
+    check(() => {
+      const kept = withoutUiTree([{ name: 'no-path' }, ...uiItems]);
+      if (kept.dropped !== uiItems.length || kept.kept.length !== 1) {
+        throw new Error('ui tree: an entry with no path must be kept for weighItems() to refuse, not dropped');
+      }
+    });
+  }
+
   // -- A DOCUMENT STATES ITS OWN SLICING: THE NIGHTLY TIERS -----------------
   //
   // The nightly tiers' shard count is their own (test-nightly-tiers.yml), and
@@ -3002,7 +3096,7 @@ function main() {
   if (shardIndex > shardCount) throw new Error(`--shard ${shardSpec}: index exceeds count`);
 
   const parsed = JSON.parse(readFileSync(listPath, 'utf8'));
-  const { bins, weighted, decisions, estimated, packages, cap, acrossShards } = planRun(
+  const { bins, weighted, decisions, estimated, packages, cap, acrossShards, uiTree } = planRun(
     parsed,
     listPath,
     shardCount,
@@ -3034,6 +3128,10 @@ function main() {
       `  slicing map: the document's ${SLICE_ACROSS_SHARDS_KEY} -- ${what}; ` +
         "FILE_SHARDED_PACKAGES (Test Core's map) does not apply to this run"
     );
+  }
+  // Only a document listing `ui/` members prints this, so today's log is unchanged.
+  if (uiTree > 0) {
+    console.error(`  ui/ tree: ${uiTree} member(s) not partitioned here -- Test UI runs them`);
   }
   for (const d of decisions) console.error(`  slicing: ${renderSliceDecision(d)}`);
   for (const name of mine.names) console.log(name);
