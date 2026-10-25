@@ -20,6 +20,7 @@
  * | security-delegation-missing-reason(err) | ADR-0091 D3 dual audit          |
  * | security-cbp-no-relation      (error)   | #7503 (runtime refusal #7474)   |
  * | security-cbp-ambiguous-relation(error)  | #14747 order-dependent master; runtime refusal since #23100 |
+ * | security-modify-all-delete-withheld(error) | #25575 Modify All includes delete — UNPARSED intakes only, see the arm |
  *
  * Per ADR-0049 discipline these are NOT advisory security: every `error` rule
  * mirrors a runtime enforcement point (D1 fail-closed OWD default, D4
@@ -136,6 +137,7 @@ export const SECURITY_GRANT_EXPIRED_AT_AUTHORING = 'security-grant-expired-at-au
 export const SECURITY_DELEGATION_MISSING_REASON = 'security-delegation-missing-reason';
 export const SECURITY_CBP_NO_RELATION = 'security-controlled-by-parent-no-relation';
 export const SECURITY_CBP_AMBIGUOUS_RELATION = 'security-controlled-by-parent-ambiguous-relation';
+export const SECURITY_MODIFY_ALL_DELETE_WITHHELD = 'security-modify-all-delete-withheld';
 
 export type SecuritySeverity = 'error' | 'warning' | 'info';
 
@@ -910,6 +912,31 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
           `Point the key at a field "${flsObject}" declares` +
           (nearest ? ` ('${flsObject}.${nearest}' is the nearest)` : '') +
           `, or delete the entry if the field is gone`,
+      });
+    }
+
+    // [#25575] `allowDelete: false` beside `modifyAllRecords: true`. Modify All
+    // is the write bypass for edit, delete and transfer, so the evaluator
+    // grants delete and never reads the false. The schema refuses the pair, so
+    // on a parsed door this arm never sees it (`ObjectPermissionSchema` refuses
+    // an authored false and writes `true` into an omitted key). It reaches the
+    // unparsed doors, as `security-owd-alias` does: `os lint` on a raw
+    // object-literal config, and a direct call of this exported function.
+    for (const [objName, entry] of Object.entries(objectsMap)) {
+      if (!entry || typeof entry !== 'object') continue;
+      const grant = entry as AnyRec;
+      if (grant.modifyAllRecords !== true || grant.allowDelete !== false) continue;
+      findings.push({
+        severity: 'error',
+        rule: SECURITY_MODIFY_ALL_DELETE_WITHHELD,
+        where: `permission set "${psName}"`,
+        path: `${psPath}.objects.${objName}.allowDelete`,
+        message:
+          `objects.${objName} sets allowDelete: false beside modifyAllRecords: true, and Modify All ` +
+          `includes delete, so the holder can still delete every record`,
+        hint:
+          `Delete allowDelete if Modify All is meant; to edit every record but delete none, remove ` +
+          `modifyAllRecords and grant the edit with a criteria sharing rule (accessLevel: 'edit')`,
       });
     }
 

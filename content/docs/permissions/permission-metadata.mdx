@@ -94,7 +94,7 @@ objects: {
 | `allowDelete` | Soft-delete records |
 | `allowTransfer` | Transfer record ownership |
 | `viewAllRecords` | View all records regardless of sharing rules |
-| `modifyAllRecords` | Edit all records regardless of sharing rules |
+| `modifyAllRecords` | Edit and delete all records regardless of sharing rules; `allowDelete: false` beside it is refused |
 
 > **Retired:** the former `allowRestore` / `allowPurge` keys were removed
 > (#12497, ADR-0049) — the `restore` / `purge` operations they claimed to gate

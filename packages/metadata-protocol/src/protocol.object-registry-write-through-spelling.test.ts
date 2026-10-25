@@ -665,10 +665,13 @@ function executableTextOf(src: string): string {
 }
 
 describe('[#8862] the `objects` tolerance stays removed', () => {
-    const code = executableTextOf(readFileSync(
-        fileURLToPath(new URL('./protocol.ts', import.meta.url)),
+    // [#25467 cut 8] `assertRuntimeAuthoringRules`, which holds the collection
+    // pair, moved whole into `protocol-authoring-gate.ts`; the scan reads both
+    // files as one, so the population it counts is the one it always counted.
+    const code = executableTextOf(['./protocol.ts', './protocol-authoring-gate.ts'].map((path) => readFileSync(
+        fileURLToPath(new URL(path, import.meta.url)),
         'utf8',
-    ));
+    )).join('\n'));
 
     it('has exactly one executable `objects` literal — the collection pair, not a tolerance', () => {
         const occurrences = code.match(/'objects'/g) ?? [];

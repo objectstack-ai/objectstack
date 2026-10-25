@@ -630,7 +630,7 @@ export const ShowcaseTranslationBundle = {
             label: '阶段',
             options: { new: '新建', working: '跟进中', qualified: '合格', closed: '已关闭' },
           },
-          lead_score: { label: '线索评分' },
+          lead_score: { label: '线索评分', help: '由评分规则计算,不可手动编辑。' },
           notes: { label: '备注' },
         },
         // #5420 — `ContactViews` had never been listed in the config's `views:`
