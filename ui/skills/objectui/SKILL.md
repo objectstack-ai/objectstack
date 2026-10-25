@@ -4,6 +4,7 @@ description: Universal Server-Driven UI (SDUI) engine for building JSON-driven R
 license: Apache-2.0
 compatibility: Tracks the @objectstack/spec range each @object-ui/* package declares in its own manifest; read it there. This file states no version literal, per the doc-version-claims ratchet.
 metadata:
+  internal: true
   author: objectstack-ai
   version: "2.0"
   domain: ui
