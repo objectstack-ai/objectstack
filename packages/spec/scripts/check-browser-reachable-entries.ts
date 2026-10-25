@@ -61,14 +61,14 @@
  *     `dist/<entry>/index.mjs` convention. Repointing a subpath at a
  *     schema-bearing bundle moves what this reads, exactly as it moves what a
  *     consumer loads.
- *   - **"it only reads one file."** Today every entry is self-contained
- *     (`splitting: false`, and the scan finds zero relative specifiers across all
- *     34 bundles), so a one-file check would pass today and go quietly blind the
- *     day `splitting` is turned on and zod arrives through a shared chunk. So the
- *     walk is TRANSITIVE over relative hops, and a relative specifier that does
- *     not resolve is a hard error — an incomplete walk reporting "no zod" is the
- *     false green this gate exists to prevent. The self-test drives that walk
- *     over a synthetic chunk chain, because this tree cannot exercise it.
+ *   - **"it only reads one file."** Every entry imports shared chunks
+ *     (`tsup.config.ts`, `oneModuleGraph`), so zod or a server-only package
+ *     arrives through a relative hop far more often than in the entry file
+ *     itself. So the walk is TRANSITIVE over relative hops, and a relative
+ *     specifier that does not resolve is a hard error — an incomplete walk
+ *     reporting "no zod" is the false green this gate exists to prevent. The
+ *     self-test drives that walk over a synthetic chunk chain as well, so the
+ *     walk stays pinned whatever the build's chunk layout is.
  *   - **"it reads prose."** The bundles carry documentation strings, and one of
  *     them really does contain the text `from '@objectstack/spec/ui'` inside a
  *     `reason:` string in `dist/index.mjs` — a naive grep reports it as an

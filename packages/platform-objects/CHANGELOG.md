@@ -4,7 +4,7 @@
 
 ### Minor Changes
 
-- 3937697: fix(platform-objects): a team record no longer lists Sessions with "Sign out other devices" (#24765)
+- a8b44d4: fix(platform-objects): a team record no longer lists Sessions with "Sign out other devices" (#24765)
   
   Clause-②: no (narrowing)
   
@@ -17,14 +17,14 @@
   - **Unchanged.** The `active_team_id` field, its lookup to `sys_team`, its label and its column: better-auth still writes `activeTeamId` there. A user record's Sessions tab (keyed on `user_id`), where "Sign out other devices" belongs, and the action itself.
   
   **What to do.** Nothing. No team-scoped session action existed to lose.
-- 3937697: fix(platform-objects): `SETUP_NAV_CONTRIBUTIONS` no longer carries the Setup → Branding entry; `@objectstack/service-settings` contributes it with the `branding` namespace
+- 78ab647: fix(platform-objects): `SETUP_NAV_CONTRIBUTIONS` no longer carries the Setup → Branding entry; `@objectstack/service-settings` contributes it with the `branding` namespace
   
   Clause-②: no (the entry moves to the package that serves its page: a composition that serves Setup → Branding still lists it, and one that does not no longer lists a page it cannot open)
   
   The `nav_settings_branding` entry (Setup → Configuration → Branding) was a static item of `SETUP_NAV_CONTRIBUTIONS`, listed whatever the settings service offered. From this release `@objectstack/service-settings` does not offer the `branding` namespace under the `group` and `isolated` tenancy postures, so a static entry would open a page the server refuses with `404 UNKNOWN_NAMESPACE`.
   
   `SettingsServicePlugin` (`@objectstack/service-settings`, same release) now contributes the entry from the same `kernel:ready` step that offers the namespace, and only then. On a single-organization deployment Setup still lists Branding, now at the end of the Configuration group's platform entries. Its translated labels are unchanged and still keyed `apps.setup.navigation.nav_settings_branding`.
-- 3937697: fix(platform-objects)!: deleting a business unit that still has child units is refused, instead of silently turning each child into a root of the tenant
+- 4b8f597: fix(platform-objects)!: deleting a business unit that still has child units is refused, instead of silently turning each child into a root of the tenant
   
   Clause-②: no (narrowing)
   
@@ -36,7 +36,7 @@
   - **TO:** the same delete answers `409 DELETE_RESTRICTED`, naming the blocking object (`dependentObject: 'sys_business_unit'`) and the number of child units (`dependentCount`), with the sentence "This Business Unit is still referenced by N Business Unit record(s) through “Parent Business Unit”. Delete or reassign them first." The unit and its children are left exactly as they were. The field's help text now says a unit with child units cannot be deleted until they are re-parented or deleted.
   - **Unchanged:** a unit with no child units deletes as before. A bulk delete (`deleteMany`, `batch`) that lists the children before their parent (leaf to root) completes, atomic or not. Deleting an organization leaves its units and their tree in place, as before.
   - **Fix:** before deleting a business unit, re-parent its child units (edit each child's Parent Business Unit) or delete them first. A bulk delete of a whole subtree lists the units leaf to root; listed root first, the root is refused.
-- 3937697: fix(platform-objects)!: `sys_oauth_application.type` declares only `web` and `native`, the two application types its writer produces
+- ba244f1: fix(platform-objects)!: `sys_oauth_application.type` declares only `web` and `native`, the two application types its writer produces
   
   Clause-②: no (narrowing) — the stored column's declared options, which `GET /api/v1/meta/object/sys_oauth_application` serves and the record validator judges a write against, lose `useragentbased` and `public`, which no writer produces.
   
@@ -50,7 +50,7 @@
   - **TO:** it declares and serves `web` and `native`. A write that sends any other value, including `useragentbased` and `public`, is refused with `VALIDATION_FAILED` (`400` at an HTTP boundary) and an `invalid_option` finding on `type`. No door sends one: the provider sends only `web`, `native` or no type, and the generic data API answers `405` for every write to this table.
   - **Unchanged:** the column stays optional and defaults to `web`, and a `null` type is a blank value. No stored row is rewritten. A row holding any type, `user-agent-based` included, still reads and lists through the data API and the provider. It takes every write that leaves `type` out, such as a secret rotation or enabling and disabling the application. The provider's own update path still refuses a row whose type is not `web` or `native`, as it did before. The register-form entry in this release refers to this entry for the stored column's options.
   - **The fix:** nothing to change for a client the provider registered. A row an earlier provider line stored as `user-agent-based` keeps that value. To edit it through the provider's update path, set `application_type` (`web` or `native`) in the same update.
-- 3937697: feat: an `external` organization role for portal users, who read their own identity rows and reach data only through explicit grants
+- 9019af9: feat: an `external` organization role for portal users, who read their own identity rows and reach data only through explicit grants
   
   Clause-②: yes (widening)
   Metadata-protocol: added
@@ -71,7 +71,7 @@
 
 ### Patch Changes
 
-- 3937697: fix(platform-objects): the password an administrator or user types into an action dialog is masked, no longer shown in clear text
+- 7035682: fix(platform-objects): the password an administrator or user types into an action dialog is masked, no longer shown in clear text
   
   Clause-②: no (an input's presentation: the param still accepts the same string, and no accept set or served shape moves)
   
@@ -82,7 +82,7 @@
   - `sys_sso_provider`: `register_sso_provider`'s `clientSecret`.
   
   Labels, names, `required` and the posted body are unchanged: the value is still posted as the string typed, and no endpoint changes what it accepts.
-- 3937697: fix(platform-objects): Setup no longer offers Ban with Unban, Revoke with Restore, or Unlock on every account, whatever the record's state
+- d606fc1: fix(platform-objects): Setup no longer offers Ban with Unban, Revoke with Restore, or Unlock on every account, whatever the record's state
   
   Clause-②: no (an action's offering: `visible` is judged in the console, and no server door reads it, so no accept set or served shape moves; if the dev measures a door that does, the dev stops, and the seat re-declares)
   
@@ -95,7 +95,7 @@
   The `sys_user` actions keep their platform-admin standing (`current_user.isPlatformAdmin == true`) first. A row that does not carry the field offers neither action of a pair. The console asks for every field an object action's predicate reads, so the default Users list carries `banned` without showing it.
   
   Unchanged: labels, texts, targets and params, and what the ban, unban, unlock and key routes accept and answer. Who may restore a key that a forced password reset revoked is still decided by the server.
-- 3937697: fix(platform-objects): the OAuth application register form offers only Web and Native, and its Redirect URLs help states the rule for each (#24773)
+- 73a2b52: fix(platform-objects): the OAuth application register form offers only Web and Native, and its Redirect URLs help states the rule for each (#24773)
   
   Clause-②: no (a form's offering: nothing on the server reads the action's param options, so this change moves no accept set or served shape; the register route's refusal of the other types is its own breaking entry in this release)
   
@@ -106,7 +106,7 @@
   - **Unchanged.** A row written under an earlier provider line keeps its stored type, and the `public` column is unchanged; the stored column's options narrow to Web and Native in this release's `sys_oauth_application.type` entry.
   
   The zh-CN, ja-JP and es-ES translations carry the new help texts.
-- 3937697: fix(plugin-auth)!: `POST /api/v1/auth/sys-oauth-application/register` refuses an application type the OAuth provider does not judge with `400 INVALID_REQUEST`, where it registered it as a `web` client
+- 5872450: fix(plugin-auth)!: `POST /api/v1/auth/sys-oauth-application/register` refuses an application type the OAuth provider does not judge with `400 INVALID_REQUEST`, where it registered it as a `web` client
   
   Clause-②: no (narrowing) — the register door accepted any `type` value and registered every one other than `web` / `native` as a `web` client with a secret; it now refuses each of those values with 400, so it accepts exactly `web`, `native` and no type.
   
@@ -122,14 +122,14 @@
   - **Unchanged:** A request with no `type`, or with `type: null`, registers a `web` client, the provider's default. The other refusals keep their codes (their statuses are this release's refusal-status entry). Clients already registered are not touched.
   - **`@objectstack/platform-objects`:** only the code comment on the `create_oauth_application` action changes, to state this refusal; it ships in the package's JavaScript. The form offers only Web and Native (this release's register-form entry).
   - **The fix for an integrator:** send `type: 'web'` for a client whose redirect URIs are https on a host that is not a loopback address, or `type: 'native'` for a client that also redirects to `http://localhost`, `http://127.0.0.1` or `http://[::1]`. Omitting `type` registers `web`.
-- 3937697: fix(platform-objects): Rotate Client Secret's result dialog states the immediate cut-off its confirmation states
+- 9ea5afe: fix(platform-objects): Rotate Client Secret's result dialog states the immediate cut-off its confirmation states
   
   Clause-②: no (text only: no accept set, served shape or behaviour moves)
   
   - **Before.** On `sys_oauth_application`, the Rotate Client Secret confirmation said the previous secret "will stop working immediately". The result dialog then told the admin to "update every integration before the previous secret's grace period ends". Only the first is true.
   - **What rotation does.** `POST /api/v1/auth/oauth2/client/rotate-secret` is better-auth's own route. It overwrites the client's one stored secret, and client authentication checks a presented secret against that value only. No previous secret is kept, so there is no grace period: the old secret is refused from the moment the rotation completes.
   - **Now.** The result dialog reads "Save the new secret now — it is shown only once. The previous secret has already stopped working: update every integration with the new secret." The zh-CN, ja-JP and es-ES translations of that sentence are updated to match. The confirmation, the dialog's title, acknowledgement and secret field are unchanged.
-- 3937697: feat(service-messaging,spec,cli)!: `sys_notification_subscription` retires — no reader ever expanded a subscription into recipients (ADR-0030 L3, amended)
+- 63085c3: feat(service-messaging,spec,cli)!: `sys_notification_subscription` retires — no reader ever expanded a subscription into recipients (ADR-0030 L3, amended)
   
   Clause-②: yes (narrowing)
   
@@ -147,19 +147,19 @@
   - **`os migrate organization-ownership` (`@objectstack/cli`).** The inventory row for `sys_notification_subscription` moves FROM fate 3 (`attribution`: organization-less rows went to the Default Organization under `single`) TO fate 4 (`report`: rows listed by id, never attributed, never deleted). The table is exempt from NOT NULL, because no declaration anchors tenancy on its column any more. The row stays, so a database that still holds the table plans instead of being refused as carrying an uninventoried platform table. The plan's `inventoryDigest` changes: a plan file written by an earlier CLI no longer matches, and `--apply --plan-file` refuses it with `plan-digest-mismatch`. Re-run `os migrate organization-ownership --out PLAN`, review it, and apply that.
   
   **Existing databases.** The table is left in place untouched: no backfill, no reaper, no migrate command. Schema sync is additive and never drops a table, so a database an earlier release provisioned keeps `sys_notification_subscription` and any rows an administrator wrote, and nothing reads them. Export any row worth keeping. Dropping the table is the operator's call, by hand: `DROP TABLE sys_notification_subscription`.
-- 3937697: fix(platform-objects): the Create User result dialog no longer tells an admin who typed the password to copy a temporary one
+- 5d2c5a1: fix(platform-objects): the Create User result dialog no longer tells an admin who typed the password to copy a temporary one
   
   Clause-②: no (text only: the create-user result dialog's sentence and button; no param, response, status, outcome or export moves)
   
   `sys_user.create_user`'s result dialog said "Copy the temporary password now — it is shown only once and never stored." with an "I have saved this password" button, in both outcomes. The endpoint returns `temporaryPassword` only when it generated one, so after a typed password the dialog showed the email alone and asked the admin to save a password it never showed. The dialog now reads "If a temporary password was generated, copy it now — it is shown only once and never stored." with a "Done" button — the same sentence and button as `set_user_password`, true for a typed and for a generated password. The zh-CN, ja-JP and es-ES bundles carry the same change, reusing `set_user_password`'s existing translations.
-- 3937697: fix(platform-objects): the user page's Security tab shows only on the viewer's own record
+- 066dabc: fix(platform-objects): the user page's Security tab shows only on the viewer's own record
   
   Clause-②: no (platform metadata only: the Security tab's self-service sections are shown on the viewer's own record only; no action, param, response, spec key or export moves)
   
   The `sys_user` record page's Security tab holds only self-service controls: change password and email, two-factor authentication, email verification and account deletion. Every one of those actions is already gated to the viewer's own record. On another user's record the actions were withheld, but the tab still showed its four "your account" headings and captions with nothing under them, addressed to an administrator about an account that is not theirs.
   
   The tab item now carries the own-record gate `has(record.id) && record.id == ctx.user.id` as an item-level `visibleWhen` in the CEL envelope (the same guard the page's unverified-email alert carries). On your own record the tab is unchanged. On anyone else's record the tab header and its panel are both omitted. The actions, their own gates and the other tabs are unchanged.
-- 3937697: fix(spec)!: the `Field.select` string shorthand keeps every character it does not document transforming, so an option such as `'no-overlay'` is refused instead of being declared as a different value
+- 386f60f: fix(spec)!: the `Field.select` string shorthand keeps every character it does not document transforming, so an option such as `'no-overlay'` is refused instead of being declared as a different value
   
   Clause-②: no (narrowing: a `Field.select` shorthand string the helper used to rewrite silently, e.g. `'no-overlay'` → `nooverlay`, is refused instead)
   
@@ -179,7 +179,7 @@
   `@objectstack/metadata-core`: `sys_metadata_audit.lock_state` was the one in-tree column relying on the strip. It declared the options `none`, `nooverlay`, `nodelete` and `full`, while its writer stores the `MetadataLock` spelling (`none`, `no-overlay`, `no-delete`, `full`), so no `no-overlay` or `no-delete` row ever matched a declared option. It is now `Field.text({ maxLength: 255 })`, read-only as before. `GET /api/v1/meta/object/sys_metadata_audit` serves `lock_state` as `type: 'text'` with `maxLength: 255` and no `options`. No stored row is rewritten, the writer and reader are unchanged, and an existing `varchar(255)` column reports no schema drift on postgres, mysql or sqlite.
   
   `@objectstack/platform-objects`: the translation bundles drop the four `sys_metadata_audit.lock_state` option labels (`none`, `nooverlay`, `nodelete`, `full`), which the column no longer declares. The field label stays translated.
-- 3937697: feat(spec): `ISharingRuleService` declares the optional `declaredRuleNamed` reader that the catalog activation door uses for declared sharing rules
+- dfab597: feat(spec): `ISharingRuleService` declares the optional `declaredRuleNamed` reader that the catalog activation door uses for declared sharing rules
   
   Clause-②: yes (widening)
   Metadata-protocol: none
@@ -187,7 +187,7 @@
   - **The contract member.** `ISharingRuleService` (`@objectstack/spec/contracts`) gains an optional `declaredRuleNamed?(name)` member. It returns `Promise<{ name: string; packageId?: string } | null>`: the rule the application declares under that name, or `null` when nothing servable is declared under it. The answer covers every organization, and it does not depend on whether the activation ledger has the rule switched off. `POST /api/v1/security/_activation/sharing_rule/:name` reads it to confirm the name it is asked to switch. Before this change the door read the method by duck type, and the contract did not mention it.
   - **Optional, so no implementer breaks.** An implementation that serves no declared rules can leave it out. A caller probes for it and refuses fail-closed when it is absent. The activation door still answers `503 SERVICE_UNAVAILABLE` in that case, so the door's behaviour does not change. `@objectstack/plugin-sharing`'s `SharingRuleService` already implements it with a compatible signature.
   - **The ledger's field description.** On `sys_metadata_activation`, the `metadata_type` description now lists every type the ledger holds: `flow`, `action`, `position`, `permission`, `sharing_rule` and `webhook`. It used to stop at `flow`, `permission`, ….
-- 3937697: fix: the `sys_user` page and list views show no 2FA state on a deployment where two-factor authentication is off
+- c109bfc: fix: the `sys_user` page and list views show no 2FA state on a deployment where two-factor authentication is off
   
   Clause-②: no
   Metadata-protocol: none
@@ -199,7 +199,7 @@
   - **List views:** `all_users` and `me` drop the `two_factor_enabled` column, and the `two_factor` ("2FA Enabled") list view is retired. A list column or view has no feature gate, and adding one would be a new authorable key.
   
   The `two_factor_enabled` field itself is unchanged. A deployment with 2FA on that wants the column back can add it to its own list view.
-- 3937697: feat(platform-objects): the console hides the six doors that add people while `features.cloudManaged` is on
+- f4112a7: feat(platform-objects): the console hides the six doors that add people while `features.cloudManaged` is on
   
   Clause-②: no
   Metadata-protocol: none
@@ -211,7 +211,7 @@
   - `sys_user.set_user_password`. This one is hidden in the console only: the server keeps answering it for a local (`env_native`) account, so the break-glass admin stays editable.
   
   Each action keeps the gate it already had (`organization` or `admin`), and the new gate is added beside it, so nothing changes where the flag is off.
-- 3937697: feat(analytics): a dataset answer carries each dimension column's null-bucket name, and System Overview names its null user bucket "System"
+- 830a63a: feat(analytics): a dataset answer carries each dimension column's null-bucket name, and System Overview names its null user bucket "System"
   
   Clause-②: no
   Metadata-protocol: none
@@ -221,7 +221,7 @@
   - **`@objectstack/spec`:** `AnalyticsResult.fields[]` and its mirror `AnalyticsResultResponseSchema` gain the optional response member `nullLabel?: string`, the display name of a dimension column's null bucket. It is a response member only; nothing an author writes changes.
   - **`@objectstack/service-analytics`:** the column-description pass shared by the live query and the draft-data preview sets `fields[].nullLabel` on a dimension column whose dataset dimension declares `nullLabel`, resolved to a string at the request locale by the same resolver as `label`. A dimension without one, and every measure column, carry no `nullLabel` key, so those answers are byte-identical to before.
   - **`@objectstack/platform-objects`:** the `sys_audit_log_metrics` dataset's `user_id` dimension declares `nullLabel: { en: 'System', 'zh-CN': '系统', 'ja-JP': 'システム', 'es-ES': 'Sistema' }`. The rows the platform writes itself carry no user, and System Overview's "Events by User" drew them, its largest bar, under the renderer's default "(None)". Once the console reads `fields[].nullLabel`, that bar reads "System".
-- 3937697: fix: Setup field help is written for administrators, and the two access-review fields nothing uses yet are hidden from the Setup forms
+- ee63b47: fix: Setup field help is written for administrators, and the two access-review fields nothing uses yet are hidden from the Setup forms
   
   Clause-②: no
   Metadata-protocol: none
@@ -236,7 +236,7 @@
   - the Data Lifecycle settings page and its retention overrides.
   
   `Last Certified At` and `Certified By` on `sys_user_permission_set` and `sys_user_position` are reserved for a future access-review feature and nothing writes or reads them. They are now `hidden: true`, so the Setup forms and detail pages no longer show them. The columns and any stored values stay.
-- 3937697: fix: Setup forms show option labels instead of machine values on Business Units, Sharing Rules and Datasources
+- bdf762c: fix: Setup forms show option labels instead of machine values on Business Units, Sharing Rules and Datasources
   
   Clause-②: no
   Metadata-protocol: none
@@ -246,7 +246,7 @@
   - **`@objectstack/spec`:** the `autoMigrate` key of the SQLite, PostgreSQL and MySQL driver configs had no JSON-Schema `title`, so the New datasource form labelled the field with the raw key `autoMigrate`. It is now titled "Auto-migrate schema".
   
   The English labels flow into the generated translation bundles; the existing zh-CN, ja-JP and es-ES option translations are kept.
-- 3937697: feat: Create User can grant a permission set in the same step, judged by the same delegated-administration gate as Setup's grant form
+- 3306cad: feat: Create User can grant a permission set in the same step, judged by the same delegated-administration gate as Setup's grant form
   
   Clause-②: yes (widening: `POST /api/v1/auth/admin/create-user` and the `sys_user` `create_user` action accept an optional `permissionSet`; a request without it is answered exactly as before)
   Metadata-protocol: none
@@ -258,7 +258,7 @@
   - **Refused before anything is written:** a `permissionSet` that is not a string (400), a caller whose own context does not resolve (403), and a host that wires no grant seam (501).
   - **Response.** The success body carries `permissionSet` beside the user, and the result dialog shows it.
   - **Cloud-managed environments are unchanged.** `create_user` stays hidden while `features.cloudManaged` is on.
-- 3937697: feat: Setup → API Keys → Create Key offers the key's expiry, and a date past the policy's maximum is refused with the policy named
+- c898bd8: feat: Setup → API Keys → Create Key offers the key's expiry, and a date past the policy's maximum is refused with the policy named
   
   Clause-②: yes
   Metadata-protocol: none
@@ -266,7 +266,7 @@
   Create Key asked only for a name, so every key silently got the default life the Authentication API key policy sets, and the list then showed an expiry the admin never chose. The `sys_api_key` action `create_api_key` now declares an optional `expires_at` param, the second body key `POST /api/v1/keys` already reads. Its help text says what an empty field means (the policy's Default key lifetime, 90 days unless changed) and that a date later than the policy's Maximum key lifetime is refused. The param has no literal default on purpose: an action param default is submitted verbatim, so a fixed date there would override the deployment's policy instead of following it. The reveal dialog now shows the expiry the key actually got, beside the key.
   
   The route behaviour is unchanged: an empty field gets the policy's default life, and a date past the maximum is refused `400 API_KEY_EXPIRY_TOO_LONG`, never clamped. That refusal's message now names the setting that decided it ("the Authentication API key policy's Maximum key lifetime is N days") next to the latest date allowed.
-- 3937697: fix: Setup → Sessions shows each session's user agent and last activity, so two sessions of one user can be told apart
+- 97aa34e: fix: Setup → Sessions shows each session's user agent and last activity, so two sessions of one user can be told apart
   
   Clause-②: no
   Metadata-protocol: none
@@ -276,7 +276,7 @@
   The two views that list live sessions, `all_sessions` (Setup's Sessions page) and `mine` (the Account app), now show `user_agent` and `last_activity_at` next to the IP address. Both fields already existed on `sys_session`. The `revoked` audit view is unchanged.
   
   `user_agent` is the raw string better-auth records. `last_activity_at` is written only while an idle timeout is configured (`session_idle_timeout_minutes` above 0). With the default of 0 the column is empty.
-- 3937697: fix(platform-objects): the organization record says its name is not the product name, and that Localization's timezone is the one in effect
+- 832a84e: fix(platform-objects): the organization record says its name is not the product name, and that Localization's timezone is the one in effect
   
   Clause-②: no
   Metadata-protocol: none
@@ -285,74 +285,74 @@
   - **`sys_organization.timezone`'s help** no longer says date boundaries are computed in it: nothing on the platform reads the column. It now says the value is kept as the root default for business units, changes no date calculation today, and that formulas, reports and displayed dates use Settings → Localization → Default timezone.
   
   Both in all four bundles. Nothing stored or served changes meaning.
-- 3937697: fix(platform-objects): Setup → People & Organization no longer shows two identical "组织" / "組織" entries
+- f7d7403: fix(platform-objects): Setup → People & Organization no longer shows two identical "组织" / "組織" entries
   
   Clause-②: no
   Metadata-protocol: none
   
   `nav_organization` (the active organization's record page) and `nav_organizations` (the organization list, shown where `org-scoping` is mounted) both translated to "组织" in zh-CN and "組織" in ja-JP, so a multi-organization deployment showed two identical menu entries that open different pages. They now read "当前组织" / "所有组织" (zh-CN) and "現在の組織" / "すべての組織" (ja-JP). A new test fails when any two entries in one Setup nav group read the same in any shipped locale.
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
+- Updated dependencies [448374d]
+- Updated dependencies [7cacad5]
+- Updated dependencies [df8bb40]
+- Updated dependencies [0091d84]
+- Updated dependencies [5e9b100]
+- Updated dependencies [7532ea3]
+- Updated dependencies [fde7456]
+- Updated dependencies [b42c621]
+- Updated dependencies [de9cd1f]
+- Updated dependencies [925fd07]
+- Updated dependencies [e7befa7]
+- Updated dependencies [55d7aab]
+- Updated dependencies [0715fac]
+- Updated dependencies [60b42cd]
+- Updated dependencies [b9a79ef]
+- Updated dependencies [63085c3]
+- Updated dependencies [0b8bce4]
+- Updated dependencies [2069b81]
+- Updated dependencies [1862d8d]
+- Updated dependencies [30d21f6]
+- Updated dependencies [eddffc3]
+- Updated dependencies [69712d5]
+- Updated dependencies [e939357]
+- Updated dependencies [045858f]
+- Updated dependencies [baedcec]
+- Updated dependencies [03c12a5]
+- Updated dependencies [386f60f]
+- Updated dependencies [28c9a2c]
+- Updated dependencies [2354058]
+- Updated dependencies [edcc8ce]
+- Updated dependencies [fccbd9d]
+- Updated dependencies [c8f4c43]
+- Updated dependencies [02ad31a]
+- Updated dependencies [03966ce]
+- Updated dependencies [e3aa111]
+- Updated dependencies [863c580]
+- Updated dependencies [7f5b19d]
+- Updated dependencies [14e7239]
+- Updated dependencies [fe0ec2b]
+- Updated dependencies [dfab597]
+- Updated dependencies [9127f23]
+- Updated dependencies [24360dc]
+- Updated dependencies [ecb4e69]
+- Updated dependencies [bda53bb]
+- Updated dependencies [b964ea1]
+- Updated dependencies [9019af9]
+- Updated dependencies [45f9962]
+- Updated dependencies [e5eab06]
+- Updated dependencies [dc532e8]
+- Updated dependencies [5f30f00]
+- Updated dependencies [7db1697]
+- Updated dependencies [f5b6b3f]
+- Updated dependencies [f4112a7]
+- Updated dependencies [303aef0]
+- Updated dependencies [d12e650]
+- Updated dependencies [830a63a]
+- Updated dependencies [1000cc7]
+- Updated dependencies [ee63b47]
+- Updated dependencies [bdf762c]
+- Updated dependencies [27b3f1f]
+- Updated dependencies [7c68b10]
+- Updated dependencies [025f6de]
   - @objectstack/spec@18.1.0
   - @objectstack/metadata-core@18.1.0
 

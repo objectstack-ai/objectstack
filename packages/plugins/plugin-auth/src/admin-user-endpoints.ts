@@ -101,7 +101,16 @@ export interface AdminUserEndpointDeps {
    * mis-bind new users into the default org. Wire this everywhere tenancy
    * is registered.
    */
-  getTenancy?(): { defaultOrgId(): Promise<string | null> } | undefined;
+  getTenancy?(): {
+    defaultOrgId(): Promise<string | null>;
+    /**
+     * True iff an organization wall is in force — the same predicate
+     * `features.multiOrgEnabled` is derived from. create-user's multi-org join
+     * of the administrator's current organization reads it. Optional for lean
+     * mocks: absent ⇒ not multi-org ⇒ no join.
+     */
+    readonly isolationActive?: boolean;
+  } | undefined;
   /**
    * ADR-0093 D1 — the deployment's membership policy, read LIVE through
    * `AuthManager.getMembershipPolicy()` (never a captured option).
@@ -127,8 +136,19 @@ export interface AdminUserEndpointDeps {
    * [#25338] What create-user's optional `permissionSet` needs. Absent ⇒ a
    * request that names a set is refused 501 and no user is created; a request
    * that names none never reads it. See {@link AdminCreateGrantSeam}.
+   *
+   * Its unit of work also carries the multi-org join of the administrator's
+   * current organization, so a refused join rolls the account back as a
+   * refused grant does. Absent ⇒ a multi-org creation is refused 501.
    */
   createGrant?: AdminCreateGrantSeam;
+  /**
+   * The CALLING administrator's current (active) organization, read from their
+   * session, or `null` when they have none. In multi-org mode the new user
+   * joins it, and `null` refuses the creation (ADR-0093 D3 amendment).
+   * Absent ⇒ no join: the creation behaves as before.
+   */
+  getCallerActiveOrganizationId?(): Promise<string | null>;
   logger?: { warn(msg: string): void };
 }
 
@@ -208,6 +228,7 @@ import { generatePlaceholderEmail } from './placeholder-email.js';
 import { revokeSessionsAndApiKeys, type ForcedResetRevocationOutcome } from './forced-reset-revocation.js';
 import { reconcileMembership, type MembershipPolicy } from './reconcile-membership.js';
 import { resolveDefaultOrgId } from './tenancy-service.js';
+import type { AddMemberCapableApi } from './organization-add-member.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import { cloudManagedRefusal } from './cloud-managed.js';
 import { isCloudManaged } from '@objectstack/core';
@@ -670,6 +691,48 @@ export async function runAdminCreateUser(
   const resolved = await resolvePassword(deps, body, 'password');
   if ('status' in resolved) return resolved;
 
+  // ADR-0093 D3 amendment — in multi-org mode the new user joins the
+  // administrator's CURRENT organization, settled BEFORE the account exists:
+  // the join runs in the account's own unit of work, so an administrator with
+  // no current organization, or a host that cannot run the join, is refused
+  // with nothing created — never handed a member-less account.
+  let join:
+    | { seam: AdminCreateGrantSeam; addMember: AddMemberCapableApi['addMember']; organizationId: string }
+    | undefined;
+  if (multiOrgCreationJoinsCurrentOrganization(deps)) {
+    const organizationId = await deps.getCallerActiveOrganizationId!();
+    if (typeof organizationId !== 'string' || organizationId.length === 0) {
+      return {
+        status: 400,
+        body: {
+          success: false,
+          error: {
+            code: 'NO_ACTIVE_ORGANIZATION',
+            message:
+              'You are not working in an organization, so no user was created. '
+              + 'Switch to the organization the new user belongs to, then create them there.',
+          },
+        },
+      };
+    }
+    const seam = deps.createGrant;
+    const authApi = (await deps.getAuthApi()) as Partial<AddMemberCapableApi>;
+    if (!seam || typeof authApi.addMember !== 'function') {
+      return {
+        status: 501,
+        body: {
+          success: false,
+          error: {
+            code: 'NOT_IMPLEMENTED',
+            message:
+              'This server cannot add a new user to your organization while creating them, so no user was created.',
+          },
+        },
+      };
+    }
+    join = { seam, addMember: authApi.addMember.bind(authApi), organizationId };
+  }
+
   // [#25338] Everything the grant needs is settled BEFORE the account exists,
   // so a host that cannot judge the grant refuses with nothing created.
   let grant: { seam: AdminCreateGrantSeam; engine: AdminUserDataEngine; context: Record<string, unknown> } | undefined;
@@ -740,11 +803,15 @@ export async function runAdminCreateUser(
       ? await stampMustChangePassword(deps, userId, true)
       : false;
 
-    // Match the invite / add-member flows: give the new user a membership so a
-    // single-org deployment shows them under the Default Organization instead of
-    // as a member-less account. No-op in multi-org (≥2 orgs), and no-op under
+    // In multi-org mode the administrator's current organization is joined
+    // explicitly (the add-member act, ADR-0093 D1, D3 amendment). Otherwise match the invite / add-member
+    // flows: give the new user a membership so a single-org deployment shows
+    // them under the Default Organization instead of as a member-less account.
+    // No-op in multi-org (≥2 orgs), and no-op under
     // `membershipPolicy: 'invite-only'` (ADR-0093 D1) — see the helper.
-    const membership = await bindUserToSoleOrganization(deps, userId);
+    const membership = join
+      ? await joinCurrentOrganization(deps, join.addMember, userId, join.organizationId)
+      : await bindUserToSoleOrganization(deps, userId);
 
     // [#25338] The grant, under the administrator's own context (see
     // `AdminCreateGrantSeam`). A refusal throws, and the unit of work around
@@ -757,7 +824,7 @@ export async function runAdminCreateUser(
           { context: grant.context },
         );
       } catch (error) {
-        throw new GrantRefused(grantRefusal(error));
+        throw new CreationRefused(grantRefusal(error));
       }
     }
 
@@ -765,13 +832,14 @@ export async function runAdminCreateUser(
   };
 
   let account: CreatedAccount | EndpointResult;
-  if (grant) {
+  const unitOfWork = grant?.seam ?? join?.seam;
+  if (unitOfWork) {
     try {
       // A creation that fails answers without throwing: nothing landed, so
       // there is nothing to roll back.
-      account = await grant.seam.runAtomically(createAccount);
+      account = await unitOfWork.runAtomically(createAccount);
     } catch (error) {
-      if (error instanceof GrantRefused) return error.result;
+      if (error instanceof CreationRefused) return error.result;
       throw error;
     }
   } else {
@@ -827,11 +895,78 @@ interface CreatedAccount {
 }
 
 /** [#25338] Thrown out of the unit of work so it rolls back; carries the refusal the caller answers. */
-class GrantRefused extends Error {
+class CreationRefused extends Error {
   constructor(readonly result: EndpointResult) {
-    super(result.body.error?.message ?? 'permission set grant refused');
-    this.name = 'GrantRefused';
+    super(result.body.error?.message ?? 'user creation refused');
+    this.name = 'CreationRefused';
   }
+}
+
+/**
+ * Join the new user to the administrator's current organization, as a
+ * `member` — the same act as the organization's Add Member action, folded into
+ * the creation so the administrator does not have to perform it afterwards.
+ *
+ * It goes through better-auth's own server-only `addMember` (as the
+ * `/organization/add-member` mount does), so the vendor's checks — the
+ * organization exists, the membership limit, its hooks — all stay the
+ * vendor's. A refusal throws, and the unit of work around the creation rolls
+ * the account back with it.
+ *
+ * ADR-0093 D3 amendment: this is NOT the reconciler guessing a tenant (D3 —
+ * it still binds nothing in multi mode); it is the organization the
+ * administrator is working in, which makes it an explicit flow that
+ * `membershipPolicy: 'invite-only'` admits (D1). The role is `member`, the D1
+ * default: elevation stays the separate, audited `update-member-role`.
+ *
+ * A membership already there is respected and reported as
+ * `membershipCreated: false`, exactly as the reconciler reports it.
+ */
+async function joinCurrentOrganization(
+  deps: AdminUserEndpointDeps,
+  addMember: AddMemberCapableApi['addMember'],
+  userId: string,
+  organizationId: string,
+): Promise<{ organizationId: string; membershipCreated: boolean }> {
+  const engine = deps.getDataEngine();
+  if (engine?.find) {
+    const existing = await engine.find(
+      'sys_member',
+      { where: { organization_id: organizationId, user_id: userId }, limit: 1 },
+      { context: SYSTEM_CTX },
+    );
+    if (Array.isArray(existing) && existing.length > 0) return { organizationId, membershipCreated: false };
+  }
+  try {
+    await addMember({ body: { userId, role: 'member', organizationId } });
+  } catch (error) {
+    const refused = mapAuthApiError(error, 'organization/add-member failed');
+    throw new CreationRefused({
+      status: refused.status,
+      body: {
+        success: false,
+        error: {
+          code: refused.body.error?.code ?? 'INTERNAL_ERROR',
+          message: `The user could not be added to the organization, so no user was created: ${
+            refused.body.error?.message ?? 'organization/add-member failed'
+          }`,
+        },
+      },
+    });
+  }
+  return { organizationId, membershipCreated: true };
+}
+
+/**
+ * Whether this creation joins the administrator's current organization: multi-org
+ * mode only (ADR-0093 D3 amendment), judged by `tenancy.isolationActive` — the
+ * predicate behind `features.multiOrgEnabled`, so a single-org deployment and a
+ * degraded walled request (which serves single-org-like) keep the reconciler's
+ * default-organization bind, unchanged. A host that wires no way to read the
+ * caller's current organization does not join either.
+ */
+function multiOrgCreationJoinsCurrentOrganization(deps: AdminUserEndpointDeps): boolean {
+  return deps.getTenancy?.()?.isolationActive === true && typeof deps.getCallerActiveOrganizationId === 'function';
 }
 
 /**

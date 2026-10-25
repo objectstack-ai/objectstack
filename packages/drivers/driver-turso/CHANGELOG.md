@@ -4,7 +4,7 @@
 
 ### Minor Changes
 
-- 3937697: **Shipped in 18.0.0**, whose CHANGELOG missed this entry; listed here one release late.
+- df8bb40: **Shipped in 18.0.0**, whose CHANGELOG missed this entry; listed here one release late.
   
   feat!: an organization-less row on a tenant table no longer draws its autonumber from the `__global__` counter, and a production server boot with no auth secret is refused
   
@@ -26,7 +26,7 @@
   The retired export:
   
   - FROM `GLOBAL_TENANT` TO `GLOBAL_TENANT` imported from `@objectstack/driver-sql`, where the counter and the index emitters keep it (or the literal `'__global__'`).
-- 3937697: feat(driver-sql,driver-turso,driver-memory,objectql,metadata-protocol,cli): an organization-scoped unique index keys the plain organization column, and an index an earlier release built with `COALESCE(organization_id, '__global__')` is read as the same index on a certified database
+- d5d8146: feat(driver-sql,driver-turso,driver-memory,objectql,metadata-protocol,cli): an organization-scoped unique index keys the plain organization column, and an index an earlier release built with `COALESCE(organization_id, '__global__')` is read as the same index on a certified database
   
   Clause-②: yes (widening)
   Metadata-protocol: semantic
@@ -37,7 +37,7 @@
   - **Existing indexes stay as they are.** Nothing is renamed, and no declared organization composite is dropped or rebuilt by the boot, `os migrate plan` or `os migrate apply`; on SQLite the ownership ceremony's NOT NULL step rebuilds the tables it tightens, and their composites come back plain, enforcing the same constraint. One index is re-keyed: the `sys_setting` row-identity index, which the metadata protocol rebuilds on every boot, keys the plain `organization_id` from the next boot on (probe-first; a pure relaxation, so it cannot fail on existing rows). The schema differ reads `COALESCE(<tenant>, …)` and the plain tenant column as one key part, in both directions, where the column is physically `NOT NULL` or the database is certified (its organization-ownership birth marker, or the ownership ceremony's marker at the current shape generation). So `os migrate plan` and the boot report no `recreate_index` for those indexes. On an uncertified database with a nullable tenant column the two forms stay different constraints: the finding is reported, and it names `os migrate organization-ownership` as its remedy.
   - **What widens.** Where a tenant column is still nullable (every table of a database 18.0.0 created, an uncertified 17.x / 18.0 database, a rotation shard, a Turso remote table, a table the ceremony reported), a unique index created from now on does not constrain rows whose organization is NULL, exactly like a NULL in any other key part; in the in-memory driver a record with no organization is exempt from an organization-scoped unique. The unique duplicate pre-flight no longer reports groups of rows with a NULL key part, since the index never refuses them.
   - **Who sees it.** A fresh install and every ceremonied table whose tenant column is NOT NULL see nothing. A database 18.0.0 created from empty is certified by its birth marker yet keeps nullable tenant columns: its existing indexes are kept unchanged, and a new organization unique declared on one of its tables constrains only rows that carry an organization.
-- 3937697: fix(spec,driver-turso)!: a turso datasource that declares `encryptionKey` on a local file or an embedded replica is refused where it is written and when the driver is built, instead of being accepted and written in plaintext
+- 28c9a2c: fix(spec,driver-turso)!: a turso datasource that declares `encryptionKey` on a local file or an embedded replica is refused where it is written and when the driver is built, instead of being accepted and written in plaintext
   
   Clause-②: no (narrowing) — the accept set of the `turso` `datasource.config` contract, of the published `TursoConfigSchema` mirror and of `new TursoDriver()` narrows by one key beside a `file:` url or `:memory:`, in every mode. No key is added, removed or renamed, and no exported symbol moves. `@objectstack/service-datasource` is graded `patch`: the TSDoc of its exported `TursoDriverConfigInput.encryptionKey` no longer promises an encrypted file, and nothing else in it changes.
   
@@ -66,7 +66,7 @@
   Blast radius, measured on this tree: no example, template, CLI scaffold or published skill authors the key, and no host default or environment variable sets it (a turso `encryptionKey` reaches the driver only from an authored `datasource.config`). Whether any out-of-repo deployment declares such a config is NOT measured and is not claimed to be zero.
   
   <!-- adr-0087: registered turso-config-local-encryption-key-refused -->
-- 3937697: feat(spec,driver-turso)!: turso `config.encryptionKey` is removed — it never encrypted anything, in any mode, and is now refused everywhere it is written instead of accepted on a remote datasource
+- 2354058: feat(spec,driver-turso)!: turso `config.encryptionKey` is removed — it never encrypted anything, in any mode, and is now refused everywhere it is written instead of accepted on a remote datasource
   
   Clause-②: no (narrowing)
   
@@ -109,7 +109,7 @@
 
 ### Patch Changes
 
-- 3937697: feat(driver-sql,driver-turso)!: a table the driver creates carries its tenant column NOT NULL, so a write that names no organization is refused at the database
+- 5e9b100: feat(driver-sql,driver-turso)!: a table the driver creates carries its tenant column NOT NULL, so a write that names no organization is refused at the database
   
   Clause-②: yes (narrowing)
   Metadata-protocol: none
@@ -124,7 +124,7 @@
   - **Who sees it.** A composed `os serve` / `os dev` / `os start` with auth stamps every write with its organization, so nothing changes there. A production `os serve` whose `AuthPlugin` did not compose (no `OS_AUTH_SECRET`) and a lean embedding (`@objectstack/objectql/core` or `createStandaloneStack` over a SQL driver, with no organization object) used to write those rows with a NULL organization; now each such write fails, loudly.
   
   **The remedy.** Carry the organization on the write: `ql.insert(object, { ...row, organization_id: orgId })`, or `{ context: { tenantId: orgId } }`. Compose authentication (set `OS_AUTH_SECRET`) so the platform derives it. If the object's rows legitimately belong to no organization, declare it so and it has no tenant column: `systemFields: { tenant: false }` or `tenancy: { enabled: false }`.
-- 3937697: fix(plugin-security): a `controlled_by_parent` detail's read scope is the engine's `ReadableIds` leaf over its master — one statement per read, no master id list, 200 past the dialect's bind limit
+- 0b8bce4: fix(plugin-security): a `controlled_by_parent` detail's read scope is the engine's `ReadableIds` leaf over its master — one statement per read, no master id list, 200 past the dialect's bind limit
   
   Clause-②: no
   Metadata-protocol: none
@@ -133,7 +133,7 @@
   - **`@objectstack/service-analytics`.** The engine-bound merges (`ObjectQLStrategy.withReadScope`, its FK attribute map, and the plugin's record-label pass) admit the leaf and hand the scope to the engine, which composes it as a find does. `NativeSQLStrategy.canHandle` declines a query whose base or joined object's read scope carries the leaf, so a `controlled_by_parent` object's analytics query routes to the ObjectQL strategy and serves the find path's rows. `compileScopedFilterToSql` refuses a scope carrying the leaf by name, in its existing `READ_SCOPE_COMPILE_FAILED` / 500 envelope: the `/api/v1/analytics/sql` dry-run echo of a `controlled_by_parent` object now refuses where it rendered the bound id list — it runs no composition and shows no statement it would not run. A filter an author writes keeps its judgement on every face.
   - **`@objectstack/driver-turso`.** The remote face resolves a composed leaf nested inside a composed leaf's scope through `toRemoteWhere` with the outer read's options, so a two-level `controlled_by_parent` chain on a remote Turso datasource answers rows instead of `INTERNAL_ERROR` / 500.
   - **`@objectstack/spec`.** One nested-leaf row in `READABLE_IDS_CASES`, so every driver's conformance suite measures the shape, and the comparand-shape door's docblock names both callers that pass `admitReadableIds`. No schema, accept set or export of a metadata key moves.
-- 3937697: fix(objectql, driver-sql, spec): a stored field whose `expression` reads an `autonumber` stores the value computed with the number
+- c8f4c43: fix(objectql, driver-sql, spec): a stored field whose `expression` reads an `autonumber` stores the value computed with the number
   
   Clause-②: yes (widening)
   Metadata-protocol: none
@@ -145,87 +145,87 @@
   - **A driver that owns its counter without the member** stores the readers computed without the number, as before, and the engine now says so once per object at `error` level, with the remedy.
   - **`ObjectQL.registerInsertRecomputeListener(id, fn)` (new).** Called per row after that second computation, on the row the driver is handed. `plugin-pinyin-search` registers on it, so a `__search` companion whose name field reads the record number is stamped from the value that carries the number, and `$search` finds the record by pinyin and by its number.
   - **One change in what a refused insert reports.** On an object whose stored expression reads the number, a SQL driver's collision that survives every retry now leaves as `ERR_AUTONUMBER_COLLISION` (the engine's three attempts) instead of `DUPLICATE_RECORD` (the driver's own retries). Every other object is unchanged.
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
+- Updated dependencies [448374d]
+- Updated dependencies [94842ba]
+- Updated dependencies [7cacad5]
+- Updated dependencies [df8bb40]
+- Updated dependencies [0091d84]
+- Updated dependencies [d5d8146]
+- Updated dependencies [5e9b100]
+- Updated dependencies [7532ea3]
+- Updated dependencies [fde7456]
+- Updated dependencies [74fcec1]
+- Updated dependencies [de9cd1f]
+- Updated dependencies [925fd07]
+- Updated dependencies [e7befa7]
+- Updated dependencies [55d7aab]
+- Updated dependencies [eee65af]
+- Updated dependencies [644e4b2]
+- Updated dependencies [0715fac]
+- Updated dependencies [60b42cd]
+- Updated dependencies [b9a79ef]
+- Updated dependencies [63085c3]
+- Updated dependencies [0b8bce4]
+- Updated dependencies [2069b81]
+- Updated dependencies [5d66021]
+- Updated dependencies [7f99616]
+- Updated dependencies [4d99158]
+- Updated dependencies [1862d8d]
+- Updated dependencies [30d21f6]
+- Updated dependencies [eddffc3]
+- Updated dependencies [69712d5]
+- Updated dependencies [dfe60e3]
+- Updated dependencies [e939357]
+- Updated dependencies [045858f]
+- Updated dependencies [baedcec]
+- Updated dependencies [03c12a5]
+- Updated dependencies [386f60f]
+- Updated dependencies [d6a5fa3]
+- Updated dependencies [28c9a2c]
+- Updated dependencies [8c73398]
+- Updated dependencies [2354058]
+- Updated dependencies [edcc8ce]
+- Updated dependencies [fccbd9d]
+- Updated dependencies [c8f4c43]
+- Updated dependencies [4e2c42f]
+- Updated dependencies [02ad31a]
+- Updated dependencies [03966ce]
+- Updated dependencies [e3aa111]
+- Updated dependencies [863c580]
+- Updated dependencies [7f5b19d]
+- Updated dependencies [14e7239]
+- Updated dependencies [fe0ec2b]
+- Updated dependencies [dfab597]
+- Updated dependencies [9127f23]
+- Updated dependencies [3a440b0]
+- Updated dependencies [24360dc]
+- Updated dependencies [ecb4e69]
+- Updated dependencies [8dfd126]
+- Updated dependencies [bda53bb]
+- Updated dependencies [b62f959]
+- Updated dependencies [b964ea1]
 - Updated dependencies [4395cbc]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
+- Updated dependencies [9019af9]
+- Updated dependencies [45f9962]
+- Updated dependencies [e5eab06]
+- Updated dependencies [dc532e8]
+- Updated dependencies [d196748]
+- Updated dependencies [5f30f00]
+- Updated dependencies [7db1697]
+- Updated dependencies [f5b6b3f]
+- Updated dependencies [f4112a7]
+- Updated dependencies [db1c7cc]
+- Updated dependencies [303aef0]
+- Updated dependencies [b3034ee]
+- Updated dependencies [d12e650]
+- Updated dependencies [830a63a]
+- Updated dependencies [1000cc7]
+- Updated dependencies [bdf762c]
+- Updated dependencies [27b3f1f]
+- Updated dependencies [7c68b10]
+- Updated dependencies [025f6de]
 - Updated dependencies [9f39094]
-- Updated dependencies [3937697]
+- Updated dependencies [6abee03]
   - @objectstack/spec@18.1.0
   - @objectstack/core@18.1.0
   - @objectstack/driver-sql@18.1.0

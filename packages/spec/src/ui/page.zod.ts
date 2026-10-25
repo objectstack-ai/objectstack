@@ -2068,8 +2068,8 @@ export const PageSchema = lazySchema(() => strictObject({
       "object with hsl(var(--token)) theme colors; " +
       "react = real-React source executed at render by the runtime (ADR-0081), styled " +
       "by inline `style` with the same token colors; it " +
-      "runs author JS, so it is gated by a host capability that defaults ON and is " +
-      "disabled server-side via the OS_PAGE_REACT=off env toggle. " +
+      "runs author JS, so it is gated by a host capability that defaults OFF and is " +
+      "turned on server-side via the OS_PAGE_REACT_ENABLED=true env toggle. " +
       "Do not author Tailwind classes in page source in either tier: `source` is " +
       "runtime metadata the build-time Tailwind never scans, so utility classNames " +
       "silently produce no CSS (ADR-0065; ADR-0080).",

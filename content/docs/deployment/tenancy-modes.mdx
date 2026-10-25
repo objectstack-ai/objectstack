@@ -250,6 +250,10 @@ round-trip that phone-number-only accounts cannot complete. Its admit set is
 organization](/docs/permissions/authentication#attaching-an-existing-user-to-an-organization).
 </Callout>
 
+Under a walled posture the admin **Create User** flow is the one exception: it
+joins the new user to the administrator's own current organization — the one
+they are working in, never a guess (ADR-0093 D3 amendment). See [Create a User Directly](/docs/permissions/authentication#create-a-user-directly).
+
 ### Membership policy
 
 | Policy | Behavior |

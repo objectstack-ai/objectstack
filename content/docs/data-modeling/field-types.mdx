@@ -511,18 +511,43 @@ guarantee as a separate requirement to satisfy explicitly, not something
 
 These types store structured values as JSON on the parent row — no separate table or foreign key.
 
+<Callout type="warn">
+On an object field, `composite` and `repeater` are **untyped JSON** containers of CMS lineage (similar
+to a Strapi component, an ACF group or an ACF repeater). A field declares no sub-fields: `fields`,
+`subFields` and `columns` are refused on the field, so nothing gives the inner keys labels, types,
+options, required flags or translations, and nothing validates or addresses a single row.
+
+**A list that needs typed columns is a child object** with a [`master_detail`](#master_detail) field
+pointing back at the parent — the shape Salesforce, Dynamics, ServiceNow and Odoo use for line items.
+The child's own fields carry the types and validation, `inlineEdit: 'grid'` edits the rows as an
+inline grid on the parent's form, and every row is a record a lookup, a roll-up or a flow can reach.
+</Callout>
+
 ### `composite`
-Single embedded sub-object with declared sub-fields (similar to a Strapi component / ACF group).
+A single embedded JSON object, untyped — no declared sub-fields.
 
 ```typescript
 { name: 'dimensions', label: 'Dimensions', type: 'composite' }
 ```
 
 ### `repeater`
-Repeating embedded sub-object array with declared sub-fields (similar to a Strapi repeatable component / ACF repeater).
+An array of embedded JSON objects, untyped — no declared sub-fields or columns. For typed rows, use a
+child object (see above).
 
 ```typescript
-{ name: 'line_items', label: 'Line Items', type: 'repeater' }
+{ name: 'import_log', label: 'Import Log', type: 'repeater' }
+```
+
+```typescript
+// A typed list: a child object, edited inline on the parent's form
+{
+  name: 'invoice_line',
+  fields: {
+    invoice: { type: 'master_detail', reference: 'invoice', required: true, deleteBehavior: 'cascade', inlineEdit: 'grid' },
+    product: { type: 'text', label: 'Product' },
+    quantity: { type: 'number', label: 'Quantity' },
+  },
+}
 ```
 
 ### `record`
