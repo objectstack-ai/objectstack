@@ -1,0 +1,257 @@
+# Regenerate scripts/test-shard-timings.json from main's full-battery runs,
+# weekly, and open the pull request (objectui#12208, ruling 6121816480, letter
+# B: "the timing file refreshed from `main`'s full-suite runs on a schedule").
+#
+# ## What the file is, and why it has a clock
+#
+# `scripts/test-shard-timings.json` is the per-file duration dataset both
+# `ci.yml` test matrices are split by (`scripts/test-shard-sequencer.mjs`,
+# wired as the root vitest config's `sequence.sequencer`). It goes stale in one
+# direction only: files are added and suites get slower while the committed
+# numbers stay put. A new file is weighed at the dataset's median, so a stale
+# dataset degrades to spreading files by count -- the old hash split's shape,
+# and visible in the aggregators' headroom readings -- but the drift is silent
+# unless something refreshes it. A timer is what refreshes it.
+#
+# ## Why a committed file and a pull request, not an artifact the shards fetch
+#
+# Every leg of a matrix computes the whole partition on its own and keeps its
+# bin, so every leg of one run must read the SAME weights. A committed file
+# guarantees that by construction: the legs share a checkout. Legs that each
+# fetched "the newest timings artifact" at their own start could straddle a
+# refresh, and two legs on different weights run some files twice and others
+# never, with every leg green. The committed file also makes a partition move a
+# reviewed, reproducible event -- `pnpm test --shard=3/16` on a laptop runs the
+# same files CI's leg 3 ran -- and the dataset is in the root config's import
+# closure, so the pull request that moves it runs the full suite on the new
+# split before it lands (`scripts/select-affected-tests.mjs`).
+#
+# ## What this workflow is not allowed to do
+#
+#   ⛔ It never hand-edits a timing: every byte it commits came out of
+#      `scripts/test-file-timings.mjs merge`.
+#   ⛔ It never touches `ci.yml`: not the matrix widths, not a `timeout-minutes`.
+#      The width a run's measured total implies is printed by the `Test` and
+#      `Test (coverage)` aggregators on every run; moving a width is a reviewed
+#      edit, not this workflow's.
+#   ⛔ It never opens a pull request for a byte-identical file.
+#
+# ## Whose identity opens the pull request, and why (objectui#13349)
+#
+# GitHub starts no workflow run for an event raised by this run's
+# `GITHUB_TOKEN`. Until objectui#13349 the refresh pushed and opened with that
+# token, so every refresh pull request arrived with no CI and sat until a seat
+# or person pushed to its branch: #13028 waited from 2026-10-19 to 2026-10-23
+# while the shards ran 1.3-1.8x apart on a dataset missing 764 files.
+#
+# So the two acts that leave the runner -- the push and the pull request -- are
+# done as the fleet App (`objectstack-fleet[bot]`), whose events DO start
+# workflows: `actions/create-github-app-token` mints a token on this runner
+# from the organization variable `OS_FLEET_APP_ID` and the organization secret
+# `OS_FLEET_PRIVATE_KEY`, the same pair and action objectstack's
+# `fleet-write.yml` mints with. The token is narrowed to this one repository
+# and to the three grants below, exists only in the steps that use it, and is
+# revoked by the action's post step. The job's own `GITHUB_TOKEN` keeps only
+# the reads the selection and the downloads need.
+#
+#   ⛔ Never a personal access token: objectui#5397's ruling keeps one out of
+#      this repository's automation, and the fleet App is an installation, not
+#      a person. The App-token route here is objectui#13349's ruling (Sales,
+#      2026-10-23), which reads #5397's rejection as scoped to the release
+#      pull request, where an in-workflow validation was the alternative; here
+#      the pull request's own full-suite run IS the validation.
+#   ⛔ No fallback to `GITHUB_TOKEN`. A missing credential is a red run that
+#      names it, never a quiet return to a pull request nobody's CI reads.
+#
+# The branch, `ci/test-shard-timings-refresh`, is this workflow's own and is
+# overwritten by each refresh, the same posture `changeset-release.yml` takes
+# with its version branch. A force-push moves it from last week's base to
+# today's `main`, across whatever workflow files landed in between, and GitHub
+# refuses an App token that moves a ref across a workflow-file change unless it
+# carries `workflows: write` -- the reason for that third grant; this workflow
+# writes no workflow file.
+#
+# ## Which runs it reads
+#
+# `scripts/test-file-timings.mjs select`: the newest completed `CI` runs on
+# `main` from the full battery's events (`push` and the hourly `schedule`,
+# objectui#12214) whose sixteen `Test (shard N/16)` legs all reported success
+# and whose sixteen `test-file-timings-N` artifacts are all present; at most
+# six, and a file keeps the median of the runs that ran it. When no run
+# qualifies -- before the first full battery has uploaded, or after a week of
+# red -- it prints NOT MEASURED, writes nothing and exits green, because
+# nothing failed; a NOT MEASURED that persists is the finding.
+#
+# The `--shards` it selects by is the `test` matrix's width, and it moves with
+# it: a run of another width names other legs (`Test (shard 1/12)` is not
+# `Test (shard 1/16)`), so it is never eligible, and a stale value here selects
+# nothing forever -- the silent NOT MEASURED above, not a red run. Right after
+# a widening, the old-width runs are skipped by name and the first full
+# battery at the new width that goes green is the first one taken; a refresh
+# that fires before it exists keeps the committed file, which the sequencer
+# reads per file and never by width.
+#
+# ## The pull-request leg
+#
+# A pull request that edits this workflow or the scripts it runs executes it
+# all -- the selection, the downloads, the regeneration -- and stops before
+# the two acts that leave the runner: the push and the pull request. It mints
+# no fleet token either, so a pull request's run never reads the App secret.
+#
+# The same three steps run only from `main`: a manual dispatch on any other
+# branch regenerates and prints, and pushes nothing, so the refresh branch is
+# only ever built from `main`'s tree.
+
+name: Test Shard Timings Refresh
+
+on:
+  schedule:
+    # Monday 06:47 UTC: after a weekend of hourly full-battery runs, and on a
+    # minute no other workflow here is scheduled on.
+    - cron: '47 6 * * 1'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/test-shard-timings-refresh.yml'
+      - 'scripts/test-file-timings.mjs'
+      - 'scripts/test-shard-partition.mjs'
+
+# Read-only at the top level; the one job widens to exactly what it writes.
+permissions:
+  contents: read
+
+# One refresh per ref at a time: the newer inputs are the better ones, so an
+# in-flight run yields. Scoped by ref so two pull requests' dry runs do not
+# cancel each other.
+concurrency:
+  group: test-shard-timings-refresh-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    name: Regenerate the per-file test timings
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # The push and the pull request go out on the fleet App token minted
+    # below, so this run's own token only reads.
+    permissions:
+      contents: read # the checkout
+      actions: read # list runs, read their jobs, download their timing artifacts
+
+    steps:
+      # No persisted credential: the one push goes out on the fleet token
+      # (`gh auth setup-git` below), never on this run's `GITHUB_TOKEN`.
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # The selector and the generator are node builtins only: no pnpm, no
+      # install.
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22.x'
+
+      # Exit 3 is NOT MEASURED, not a failure: nothing was eligible, nothing is
+      # written, and the job says so and stays green. Any other non-zero exit
+      # is red. `|| status=$?` because this step runs under `bash -e`.
+      - name: Choose the runs to measure from
+        id: select
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          status=0
+          node scripts/test-file-timings.mjs select --shards 16 --limit 6 > "$RUNNER_TEMP/runs.json" || status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          if [ "$status" -eq 3 ]; then
+            echo "::warning title=Test shard timings::NOT MEASURED: no completed full-battery run on main has all sixteen test shards green and all sixteen timing artifacts. scripts/test-shard-timings.json is untouched."
+            exit 0
+          fi
+          if [ "$status" -ne 0 ]; then
+            exit "$status"
+          fi
+          cat "$RUNNER_TEMP/runs.json"
+
+      - name: Download each run's per-file timings
+        if: steps.select.outputs.status == '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/timings"
+          node -e 'for (const r of JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))) console.log(r.id)' "$RUNNER_TEMP/runs.json" > "$RUNNER_TEMP/run-ids.txt"
+          while read -r id; do
+            gh run download "$id" --repo "$GITHUB_REPOSITORY" --pattern 'test-file-timings-*' --dir "$RUNNER_TEMP/timings/$id"
+          done < "$RUNNER_TEMP/run-ids.txt"
+
+      - name: Regenerate the dataset
+        if: steps.select.outputs.status == '0'
+        run: |
+          node scripts/test-file-timings.mjs merge --runs-file "$RUNNER_TEMP/runs.json" \
+            --out scripts/test-shard-timings.json --summary "$RUNNER_TEMP/summary.md" "$RUNNER_TEMP"/timings/*
+          git diff --stat -- scripts/test-shard-timings.json
+          cat "$RUNNER_TEMP/summary.md" >> "$GITHUB_STEP_SUMMARY"
+
+      # Read as a boolean, never printed: a red run that names the missing
+      # credential beats `create-github-app-token`'s own error, which does not.
+      - name: Check the fleet App credential is visible to this repository
+        id: credential
+        if: steps.select.outputs.status == '0' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          HAS_APP_ID: ${{ vars.OS_FLEET_APP_ID != '' }}
+          HAS_PRIVATE_KEY: ${{ secrets.OS_FLEET_PRIVATE_KEY != '' }}
+        run: |
+          if [ "$HAS_APP_ID" != 'true' ] || [ "$HAS_PRIVATE_KEY" != 'true' ]; then
+            echo "::error title=Test shard timings::The fleet App credential is not visible to this repository (OS_FLEET_APP_ID set: $HAS_APP_ID; OS_FLEET_PRIVATE_KEY set: $HAS_PRIVATE_KEY). Both are organization-level; grant this repository access to them. Nothing was pushed (objectui#13349)."
+            exit 1
+          fi
+          # The token's one repository, by name: the action takes names
+          # without the owner, and an empty list would widen it to every
+          # repository the installation covers.
+          echo "repository=${GITHUB_REPOSITORY#*/}" >> "$GITHUB_OUTPUT"
+
+      - name: Mint the fleet App token, narrowed to this repository
+        id: fleet
+        if: steps.select.outputs.status == '0' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.OS_FLEET_APP_ID }}
+          private-key: ${{ secrets.OS_FLEET_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ steps.credential.outputs.repository }}
+          permission-contents: write # push this workflow's own branch
+          permission-pull-requests: write # open or update the refresh pull request
+          permission-workflows: write # the force-push crosses workflow files main changed (header)
+
+      - name: Open or update the refresh pull request
+        if: steps.select.outputs.status == '0' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ steps.fleet.outputs.token }}
+          BRANCH: ci/test-shard-timings-refresh
+        run: |
+          if git diff --quiet -- scripts/test-shard-timings.json; then
+            echo "The regenerated dataset is byte-identical to the committed one: no pull request."
+            exit 0
+          fi
+          gh auth setup-git
+          git config user.name 'objectstack-fleet[bot]'
+          git config user.email '332303061+objectstack-fleet[bot]@users.noreply.github.com'
+          git switch -c "$BRANCH"
+          git add scripts/test-shard-timings.json
+          git commit -m 'chore(test): refresh the per-file test timings (objectui#12208)'
+          git push --force origin "$BRANCH"
+          {
+            echo 'The weekly refresh of `scripts/test-shard-timings.json`, the per-file durations both `ci.yml` test matrices are split by (objectui#12208). Generated by `scripts/test-file-timings.mjs merge` from the runs below; never hand-edited.'
+            echo
+            cat "$RUNNER_TEMP/summary.md"
+            echo
+            echo 'Pushed and opened as the fleet App (objectui#13349), so this pull request runs its own CI: the dataset is in the root vitest config import closure, so that run is the full suite on the new split.'
+          } > "$RUNNER_TEMP/body.md"
+          open=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$open" ]; then
+            gh pr edit "$open" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/body.md"
+            echo "Updated the open refresh pull request #$open."
+          else
+            gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" \
+              --title 'chore(test): refresh the per-file test timings (objectui#12208)' --body-file "$RUNNER_TEMP/body.md"
+          fi

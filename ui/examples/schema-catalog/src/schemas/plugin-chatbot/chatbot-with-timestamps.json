@@ -1,0 +1,28 @@
+{
+  "type": "chatbot",
+  "messages": [
+    {
+      "id": "1",
+      "role": "assistant",
+      "content": "Welcome to our support chat!",
+      "timestamp": "9:00 AM"
+    },
+    {
+      "id": "2",
+      "role": "user",
+      "content": "I need help with my account",
+      "timestamp": "9:01 AM"
+    },
+    {
+      "id": "3",
+      "role": "assistant",
+      "content": "I'd be happy to help you with your account. What specific issue are you experiencing?",
+      "timestamp": "9:01 AM"
+    }
+  ],
+  "showTimestamp": true,
+  "placeholder": "Ask a question...",
+  "autoResponse": true,
+  "autoResponseText": "I'll look into that for you right away.",
+  "maxHeight": "450px"
+}

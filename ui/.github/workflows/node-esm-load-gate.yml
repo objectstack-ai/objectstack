@@ -1,0 +1,125 @@
+name: Node ESM Load Gate
+
+# The artifact-level half of objectui#4538: every published ESM package must be
+# importable by Node's own resolver, with no bundler and no loader hooks. The
+# gate, and why a resolution-only criterion was measured and rejected, are
+# documented at length in scripts/check-node-esm-load.mjs.
+#
+# "Every" has one ruled exception, and it is a product boundary rather than a
+# backlog item: the three style-carrying plugin packages named in
+# UNBUNDLED_NODE_UNSUPPORTED import a `.css` file at module scope, which Node
+# cannot load at all, and objectui#5384 ruled unbundled Node consumption
+# unsupported for them permanently. They are printed on every run, never
+# silently subtracted, and the specifier leg — not this one — is what guards
+# them against a real regression.
+#
+# ── Why this is a scheduled workflow and NOT a pull-request job ──────────────
+#
+# The load leg has to EVALUATE each entry, so it has to build all 39 published
+# packages. This repository deliberately has no per-PR full-repo build —
+# `ci.yml`'s `Build & E2E` builds `@object-ui/console` alone, and its `Type
+# Check` gets only the DEPENDENCY CLOSURE out of turbo's `dependsOn:
+# ["^build"]`, so leaf packages such as `@object-ui/plugin-map` are never built
+# there. `published-dist-gate.yml` records the same trade for the same reason,
+# and the 2026-08-16 ruling on objectui#4846 rejected paying a full build per
+# pull request to catch a defect that reaches a user at publish time.
+#
+# ⛔ Do not add `pull_request` here. The per-PR half of objectui#4538 is the
+# CHEAP leg — `pnpm check:esm-specifiers`, a source-level scan that needs no
+# build — and it already runs in `ci.yml`'s `Type Check` job. That leg is the
+# ratchet; this workflow is the proof that the ratchet guards the right
+# property, because it is the only thing that can catch a package broken by a
+# DEPENDENCY rather than by its own sources (measured: four plugin packages
+# failing on `packages/mobile/dist/useBreakpoint`, which is not their file).
+#
+# This workflow is therefore an ALARM, not a merge blocker: it cannot make
+# anyone's pull request red, so a slow run costs a second look and nothing else.
+
+on:
+  workflow_dispatch:
+
+  # Nightly at 04:17 UTC — after `published-dist-gate.yml`'s 03:41 so the two
+  # full builds do not contend, and off the top of the hour because GitHub's
+  # scheduled queue is most congested, and most delayed, at :00.
+  schedule:
+    - cron: '17 4 * * *'
+
+  # Changes to the gate itself get a real run. Its unit tests DO run per-PR
+  # inside the ordinary vitest suite, but they exercise the verdicts over
+  # synthetic fixtures and cannot exercise a real build.
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/check-node-esm-load.mjs'
+      - '.github/workflows/node-esm-load-gate.yml'
+
+concurrency:
+  group: node-esm-load-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  node-esm-load:
+    name: Node ESM Load Scan
+    runs-on: ubuntu-latest
+    # A full build of every published package plus one child `node` import per
+    # package. Generous, because a timeout here reads as a gate failure and this
+    # workflow blocks nobody.
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - name: Enable Corepack and download the pinned pnpm
+        run: bash scripts/ci-setup-pnpm.sh
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22.x'
+          cache: 'pnpm'
+
+      # objectui#12957: every @objectstack/* package resolves to the build of the
+      # commit `.objectstack-sha` pins, read from node_modules/.cache/objectstack, so
+      # it must be there before pnpm resolves anything. Restored by the pin and built
+      # only on a miss (scripts/objectstack-pin.mjs); the save is this job's last step.
+      - name: Restore the pinned @objectstack build
+        id: objectstack-pin
+        uses: actions/cache/restore@v6
+        with:
+          path: node_modules/.cache/objectstack
+          key: objectstack-pin-${{ runner.os }}-${{ hashFiles('.objectstack-sha', 'scripts/objectstack-pin.mjs') }}
+
+      - name: Build @objectstack at the pin (skips a restored build)
+        id: objectstack-build
+        run: node scripts/objectstack-pin.mjs build
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # No `pnpm build` step before this one, on purpose. The gate runs the build
+      # ITSELF and fails when it cannot, so that "there were no artifacts,
+      # therefore nothing was wrong" can never be this workflow's verdict. A
+      # published package whose entry is missing after the build is reported as
+      # `no-build-output`, not skipped, and the run asserts a floor on how many
+      # entries actually evaluated.
+      - name: Build every published package and import its entry under plain Node
+        run: pnpm check:node-esm-load
+
+      # The pinned @objectstack build, saved only when this job built it (a cache
+      # miss) and whatever the verdict above was -- it does not depend on it.
+      # Bookkeeping: bounded and non-fatal (objectui#6577, objectui#7048). The bound
+      # is not yet derived from a measured save; re-derive it from this step's runs.
+      - name: Save the pinned @objectstack build
+        if: ${{ !cancelled() && steps.objectstack-build.outcome == 'success' && steps.objectstack-pin.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: actions/cache/save@v6
+        with:
+          path: node_modules/.cache/objectstack
+          key: objectstack-pin-${{ runner.os }}-${{ hashFiles('.objectstack-sha', 'scripts/objectstack-pin.mjs') }}

@@ -1,0 +1,126 @@
+---
+title: "Form Blocks"
+description: "Contact forms, settings panels, and form layouts"
+---
+
+import { SchemaExample } from '@/app/components/ComponentDemo';
+
+# Form Blocks
+
+Professional form layouts for various use cases. All forms are accessible and include proper validation.
+
+## Contact Form
+
+Simple contact form with name, email, and message fields.
+
+<SchemaExample id="forms/contact-form" />
+
+## Settings Form
+
+User settings panel with various input types.
+
+<SchemaExample id="forms/settings-form" />
+
+## Newsletter Signup
+
+Simple newsletter subscription form.
+
+<SchemaExample id="forms/newsletter-signup" />
+
+## Payment Form
+
+Payment details form with card information.
+
+<SchemaExample id="forms/payment-form" />
+
+## Usage
+
+Customize form blocks for your application:
+
+### Add Validation
+
+The blocks on this page are built from plain `input` nodes, and an `input`
+declares its own validation keys — `required`, `pattern`, `maxLength`, `min`,
+`max` and `step` — which the renderer forwards to the native HTML input
+attributes:
+
+```json
+{
+  "type": "input",
+  "name": "email",
+  "inputType": "email",
+  "required": true,
+  "pattern": "^[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}$"
+}
+```
+
+`inputType: "email"` already gets the browser's own email check; `pattern`
+tightens it. The browser enforces these constraints when the input is submitted
+inside a `<form>`.
+
+An `input` node has **no `validation` key**. Rule objects with custom messages
+belong to the [form component](/docs/components/form/form), whose `fields[]`
+entries carry them. Every rule there is a `{ value, message }` object, and
+`validation.required` supplies the message only — whether the field is required
+is decided by `required` on the field itself:
+
+```json
+{
+  "type": "form",
+  "fields": [
+    {
+      "name": "message",
+      "type": "textarea",
+      "label": "How can we help?",
+      "required": true,
+      "validation": {
+        "required": "Please tell us how we can help",
+        "minLength": { "value": 20, "message": "Please use at least 20 characters" },
+        "maxLength": { "value": 2000, "message": "Please keep it under 2000 characters" }
+      }
+    }
+  ]
+}
+```
+
+`pattern` is the one rule that route cannot take from JSON: react-hook-form runs
+it only when the rule's `value` is a compiled `RegExp`, and no JSON document can
+hold one. In a TypeScript-authored schema pass the real thing —
+`pattern: { value: /.../, message: '...' }`. For a form bound to an object,
+declare the check on the object as a `format` validation rule
+(see [Text Field](/docs/fields/text#format-validation)): the server runs it when
+the record is saved, and an object field has no `pattern` key of its own. The
+full rule table is in the [Form Plugin](/docs/plugins/plugin-form) reference.
+
+### Add Submit Action
+
+A control that runs something is its own node type, `action:button`, and its
+props go in the `properties` bag; `actionType: "api"` sends the request to
+`target`:
+
+```json
+{
+  "type": "action:button",
+  "properties": {
+    "label": "Submit",
+    "actionType": "api",
+    "target": "/api/contact",
+    "method": "POST"
+  }
+}
+```
+
+### Customize Layout
+
+```json
+{
+  "type": "div",
+  "className": "grid grid-cols-1 md:grid-cols-2 gap-6"
+}
+```
+
+## Next Steps
+
+- Browse [Marketing Blocks](/docs/blocks/marketing)
+- Explore [E-commerce Blocks](/docs/blocks/ecommerce)
+- Learn about [Form Validation](/docs/guide/fields)

@@ -1,0 +1,11 @@
+{
+  "type": "footer",
+  "className": "p-4 border-t bg-slate-50 text-center",
+  "children": [
+    {
+      "type": "text",
+      "content": "© 2024 Company Name",
+      "className": "text-sm text-muted-foreground"
+    }
+  ]
+}

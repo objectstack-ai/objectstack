@@ -1,0 +1,48 @@
+{
+  "type": "dashboard",
+  "columns": 2,
+  "gap": 4,
+  "dateRange": {
+    "field": "created_at",
+    "defaultRange": "this_quarter",
+    "allowCustomRange": true
+  },
+  "globalFilters": [
+    {
+      "name": "region",
+      "field": "region",
+      "label": "Region",
+      "type": "select",
+      "options": [
+        { "value": "EMEA", "label": "EMEA" },
+        { "value": "APAC", "label": "APAC" },
+        { "value": "AMER", "label": "AMER" }
+      ]
+    }
+  ],
+  "widgets": [
+    {
+      "id": "revenue_total",
+      "title": "Revenue",
+      "type": "metric",
+      "dataset": "sales",
+      "values": ["revenue"]
+    },
+    {
+      "id": "revenue_by_stage",
+      "title": "Revenue by Stage",
+      "type": "donut",
+      "dataset": "sales",
+      "dimensions": ["stage"],
+      "values": ["revenue"]
+    },
+    {
+      "id": "invoices_by_status",
+      "title": "Invoices by Status",
+      "type": "bar",
+      "dataset": "invoices",
+      "dimensions": ["status"],
+      "values": ["count"]
+    }
+  ]
+}

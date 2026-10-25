@@ -1,0 +1,237 @@
+/**
+ * @object-ui/app-shell shared Tailwind v4 styles.
+ *
+ * Import once per consumer right after `@import 'tailwindcss';`:
+ *
+ *   @import 'tailwindcss';
+ *   @import '@object-ui/app-shell/styles.css';
+ *
+ * Centralizing here keeps every host app (console, runner, starter, custom
+ * shells) on the same theming/variant contract.
+ */
+
+/* Bind Tailwind's `dark:` variant to the `.dark` class on <html> (or any
+ * ancestor) instead of the OS `prefers-color-scheme`. Required so the
+ * in-app theme toggle fully controls light/dark UI under Tailwind v4. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Shimmer keyframe + utility for skeleton loading placeholders.
+ *
+ * Usage:   <div class="animate-shimmer ..."> or via ShimmerSkeleton
+ *          from @object-ui/components.
+ *
+ * The keyframe slides a 200%-wide gradient across an element's
+ * background. Pair with `bg-[length:200%_100%]` and a gradient that
+ * uses the design-system muted tokens, e.g.
+ *   bg-[linear-gradient(90deg,var(--muted),var(--muted-foreground)/10,var(--muted))]
+ *
+ * Respects `prefers-reduced-motion` automatically via the
+ * `motion-safe:` Tailwind variant on the consuming site.
+ */
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@utility animate-shimmer {
+  animation: shimmer 1.6s linear infinite;
+}
+
+/* Press feedback for shadcn-style Button components.
+ *
+ * The cva base in `packages/components/src/ui/button.tsx` always emits
+ * this 6-class combination on the outermost element:
+ *   inline-flex + whitespace-nowrap + rounded-md + text-sm +
+ *   font-medium + ring-offset-background
+ *
+ * That intersection is specific enough to scope the rule to Button
+ * (and `asChild` <a> Buttons) while leaving cmdk rows, SidebarNav
+ * links, native input[type=submit], and bare <button> in third-party
+ * libraries untouched.
+ *
+ * Gated on `prefers-reduced-motion: no-preference` so reduced-motion
+ * users see a hard click with no transform.
+ *
+ * Failure mode: if shadcn upstream changes the cva base class
+ * combination, the selector silently no-longer matches and we lose
+ * the animation — no UI breakage. Search the cva base string in
+ * `ui/button.tsx` to locate and update this rule when that happens.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  :is(button, a).inline-flex.whitespace-nowrap.rounded-md.text-sm.font-medium.ring-offset-background:not(:disabled):active {
+    transform: scale(0.97);
+    transition: transform 100ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+}
+
+/* ===========================================================================
+ * Print layout (objectui#4462).
+ *
+ * ## The defect
+ *
+ * Three surfaces expose a Print control backed by a bare `window.print()`
+ * (`plugin-list/src/ListView.tsx`, `plugin-report/src/ReportViewer.tsx`,
+ * `app-shell/src/views/DashboardView.tsx`). With no print stylesheet the
+ * browser printed the WHOLE console: sidebar, top bar, chat rail, toasts —
+ * and the data table clipped to one viewport, because the shell is a
+ * viewport-height flex chain (`h-svh` on the SidebarProvider, `flex-1
+ * min-h-0 overflow-hidden` all the way down to the grid's scroller). This
+ * sheet is the fix: make the browser's own dialog produce a usable page. It
+ * prints a screen as shown; a printable DOCUMENT (an invoice, a delivery
+ * order, a letter) is a page that declares `print` (objectstack#8346, ruling
+ * B′), and `PageRenderer` in `@object-ui/components` mounts that page's own
+ * print sheet (`@page` size and margins, running header and footer) beside
+ * this one.
+ *
+ * ## Why it lives HERE and not in each plugin
+ *
+ * The chrome being hidden belongs to the app shell, not to any plugin — one
+ * mechanism serves list, report and dashboard alike, and a plugin cannot
+ * reach a sidebar it does not render. This file is the centralized styles
+ * entry host apps pull in (`apps/console/src/index.css` does exactly that).
+ *
+ * REACH, measured: `apps/console` imports this file, so the console — where
+ * the chrome that provoked #4462 lives — is covered. `@object-ui/components`
+ * and `@object-ui/runner` deliberately do NOT import it (a components→app-shell
+ * import is circular; runner has no app-shell dependency — both say so in
+ * their own `index.css` headers), so a runner-hosted app keeps the old
+ * behaviour until it opts in. That is a pre-existing split in this file's
+ * reach, not something this block introduces.
+ *
+ * ## Failure mode
+ *
+ * These are structural selectors over markup this repo owns but that lives in
+ * other packages. If `AppShell` (packages/layout) or the shadcn sidebar
+ * primitive changes its DOM, a rule silently stops matching and that piece of
+ * chrome comes back on paper — no error, no UI breakage on screen. The
+ * selector list is pinned in `src/__tests__/print-stylesheet-4462.test.ts`
+ * so a DELETED rule fails CI; a rule that merely stops MATCHING cannot be
+ * caught from a stylesheet, and `@media print` does not execute under
+ * happy-dom at all (that limitation is stated in the test file).
+ * ======================================================================== */
+@media print {
+  @page {
+    margin: 12mm;
+  }
+
+  /* 1. Release the viewport-height chain. `h-svh`/`overflow-hidden` on the
+   *    shell is what clips a long table down to one screen on paper. */
+  html,
+  body {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+
+  /* 2. Hide the console chrome.
+   *
+   *    - `.group\/sidebar-wrapper > header` is AppShell's full-width top bar
+   *      (packages/layout/src/AppShell.tsx). Scoped as a DIRECT child of the
+   *      SidebarProvider wrapper so the many in-content `<header>` elements
+   *      (record pages, studio panels, activity timeline) still print.
+   *    - `[data-collapsible][data-side][data-state]` is the shadcn Sidebar
+   *      root (packages/components/src/ui/sidebar.tsx). All three attributes
+   *      together, because that root is the only element carrying the triple —
+   *      and it must be the element hidden, not just the visible panel: its
+   *      first child is the layout GAP that reserves the sidebar's width.
+   *    - the `data-testid` hooks are the shell's floating surfaces (chat rail,
+   *      its mobile sheet, the FAB) and the two preview bars.
+   *    - `[data-sonner-toaster]` and `[data-radix-popper-content-wrapper]` are
+   *      transient overlays that would otherwise be stamped onto page 1.
+   *      Modal dialogs are deliberately NOT hidden: an open record overlay is
+   *      the content the user is looking at when they hit Print. */
+  .group\/sidebar-wrapper > header,
+  [data-collapsible][data-side][data-state],
+  [data-sidebar='sidebar'],
+  [data-sidebar='rail'],
+  [data-sidebar='trigger'],
+  [data-testid='chat-dock-panel'],
+  [data-testid='chat-dock-mobile-sheet'],
+  [data-testid='console-chatbot-fab'],
+  [data-testid='draft-preview-bar'],
+  [data-testid='unpublished-app-bar'],
+  [data-sonner-toaster],
+  [data-radix-popper-content-wrapper],
+  [role='tooltip'],
+  [data-print-hide] {
+    display: none !important;
+  }
+
+  /* 3. The active content area prints full-width. */
+  .group\/sidebar-wrapper {
+    display: block !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+
+  main {
+    display: block !important;
+    width: 100% !important;
+    max-width: none !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+
+  /* 4. Un-clip every bounded box inside the printed content.
+   *
+   *    Attribute substring matches on the class list, because that is where
+   *    the constraint lives: AGENTS.md §2 bans inline `style={{}}` and CSS
+   *    modules, so every `overflow-*` / `h-full` / `max-h-*` in the render
+   *    tree is a Tailwind utility CLASS. `ListView`'s root
+   *    (`flex flex-col h-full … overflow-hidden`), its view container
+   *    (`flex-1 min-h-0 … overflow-hidden`) and the grid's scroller
+   *    (`flex-1 min-h-0 overflow-auto`) are all reached this way, which is
+   *    why plugin-list needs no print rules of its own. */
+  main [class*='overflow-'] {
+    overflow: visible !important;
+  }
+
+  main [class*='max-h-'] {
+    max-height: none !important;
+  }
+
+  main [class*='h-full'],
+  main [class*='h-screen'],
+  main [class*='h-svh'] {
+    height: auto !important;
+  }
+
+  /* 5. Tables paginate instead of clipping: header row repeats on every
+   *    sheet, rows are not split across a page break. */
+  main table {
+    width: 100% !important;
+  }
+
+  main thead {
+    display: table-header-group;
+  }
+
+  main tfoot {
+    display: table-footer-group;
+  }
+
+  main tr,
+  main img {
+    break-inside: avoid;
+  }
+
+  main h1,
+  main h2,
+  main h3 {
+    break-after: avoid;
+  }
+
+  /* 6. Dark mode on paper is unreadable: browsers drop background fills by
+   *    default but keep the light foreground colours, so the page prints
+   *    white-on-white. Only fires while `.dark` is actually on <html>. */
+  .dark,
+  .dark * {
+    background-color: transparent !important;
+    color: #000 !important;
+    box-shadow: none !important;
+    border-color: #ccc !important;
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "name": "@object-ui/test-support",
+  "version": "17.4.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Internal, never-published test-support modules shared by other packages' test suites",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./defaults-table-scan": "./src/defaults-table-scan.ts",
+    "./hand-rolled-tables": "./src/hand-rolled-tables.json",
+    "./zod-wrapper-keys": "./src/zod-wrapper-keys.json"
+  },
+  "scripts": {
+    "test": "vitest run --root ../.. packages/test-support/",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@objectstack/spec": "^18.0.0-next.1",
+    "@types/node": "^26.2.0",
+    "typescript": "^6.0.3",
+    "zod": "^4.6.5"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/objectstack-ai/objectui.git",
+    "directory": "packages/test-support"
+  },
+  "bugs": {
+    "url": "https://github.com/objectstack-ai/objectui/issues"
+  }
+}

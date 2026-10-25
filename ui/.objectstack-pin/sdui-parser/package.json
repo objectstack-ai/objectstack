@@ -1,0 +1,47 @@
+{
+  "name": "@objectstack/sdui-parser",
+  "version": "18.1.0",
+  "license": "Apache-2.0",
+  "description": "ObjectStack constrained JSX-source → SDUI SchemaNode tree compiler (parse, never execute). Isomorphic, zero React. ADR-0080.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.11"
+  },
+  "keywords": [
+    "objectstack",
+    "sdui",
+    "jsx",
+    "parser",
+    "adr-0080"
+  ],
+  "author": "ObjectStack",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/objectstack-ai/objectstack.git",
+    "directory": "packages/sdui-parser"
+  },
+  "homepage": "https://objectstack.ai/docs",
+  "bugs": "https://github.com/objectstack-ai/objectstack/issues",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsup --config ../../tsup.config.ts && node ../../scripts/check-dts-emitted.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  }
+}

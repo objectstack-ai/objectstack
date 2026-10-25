@@ -1,0 +1,1545 @@
+name: Changeset Release
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TWO LANES, ONE FILE: THE VERSION PR REFRESHES ON A CLOCK, npm PUBLISHES ON A
+# MERGE. (objectstack#10850)
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# Maintainer ruling, 2026-08-21 (verbatim, do not translate):
+#
+#   「我每周才发一次版本,changeset 每个pr 都跑有必要吗」
+#   「立卡吧,version 工作流改成发版前手动触发」
+#   「包括 objectui 仓库」
+#
+# The sister half landed first in `../objectstack` as its `release.yml`
+# `version-pr` job (objectstack#11233 / PR #11238, maintainer 2026-08-23): a
+# 6-hourly `schedule` plus an on-demand dispatch input, which is the later and
+# more specific spelling of "手动触发" and the one mirrored here. Per-PR changeset
+# VALIDATION is explicitly untouched by the ruling — `changeset-guard.yml` and
+# `changeset-presence.yml` still run on every pull request.
+#
+# WHY THE REFRESH LEFT THE PUSH TRIGGER
+# -------------------------------------
+# With pending changesets this file's changesets step recomputed and FORCE-PUSHED
+# the standing "chore: release packages" PR (objectui#5400) on every landing, and
+# `main` takes ~18 merges a working day (the same cadence the concurrency note
+# below measures). The PR therefore never held still long enough for its own
+# branch CI to finish. Releases are weekly, so every one of those refreshes was a
+# CI run spent on bookkeeping nobody reads until release day. Between refreshes
+# `changeset-release/main` is now a static branch whose CI can converge.
+#
+# The staleness window is the whole cost, and it is bounded on demand: dispatch
+# with `refresh_version_pr` when you want the PR current NOW (immediately before
+# a release, say). The bookkeeping is not time-critical — the changesets are
+# already committed on `main`; objectui#5400 is only their rendering.
+#
+# WHY THE SPLIT NEEDS A SEPARATE `lane` JOB, AND NOT JUST AN `if:` ON THE STEP
+# ---------------------------------------------------------------------------
+# ⚠️ Unlike objectstack's `release.yml` — which has a version job and a publish
+# job and could simply give each one its own trigger — this repository publishes
+# from THE SAME changesets step that refreshes the PR. Which of the two it does
+# is not ours to choose per invocation: the action decides from repository state.
+# Its v1 source (`changesets/action`, `src/index.ts`) dispatches on exactly two
+# facts, `hasChangesets` and whether a `publish:` input was given:
+#
+#     case !hasChangesets && !hasPublishScript:  -> nothing
+#     case !hasChangesets &&  hasPublishScript:  -> runPublish   (npm + tags)
+#     case  hasChangesets && !hasNonEmptyChangesets: -> nothing
+#     case  hasChangesets:                       -> runVersion   (force-push PR)
+#
+# ⚠️ "(npm + tags)" is v1's design, not what it does here any more: it pushes a
+# tag (and creates a Release) only for the packages whose `New tag:` line it
+# parses from the publish script's stdout, and `@changesets/cli` v3 prints
+# none. So under v3 `runPublish` is npm only, and the tags and Releases come
+# from two steps of this file's own after the npm check (objectui#11596).
+#
+# Two consequences drive everything below, and they are NOT symmetric:
+#
+#   - Omitting `publish:` makes publishing UNREACHABLE BY CONSTRUCTION. There is
+#     no state in which the action publishes without that input.
+#   - Omitting `version:` does NOT make the refresh unreachable. `runVersion`
+#     falls back to plain `changeset version` when the input is absent, so a step
+#     invoked on a push that still carries pending changesets force-pushes
+#     objectui#5400 no matter how it is configured.
+#
+# So the refresh lane is closed by construction, and the publish lane can only be
+# closed by NOT INVOKING THE ACTION on a push that carries pending changesets.
+# That question — "does `main` carry pending changesets?" — has to be answered
+# before the expensive steps, or the saving the ruling asked for is not made: the
+# job would still install and build on all ~18 daily landings just to decide to
+# do nothing. Hence one cheap job that answers it from a sparse checkout, and one
+# job-level `if:` that states the policy. A second workflow FILE was ruled out
+# (no new lanes to maintain, and the publish invariants would be duplicated where
+# they can drift apart).
+#
+# THE LANES
+# ---------
+#   push to main, version NOT on npm    -> PUBLISH what this commit declares,
+#                                          then push its tags and create its
+#                                          GitHub Releases (objectui#11596).
+#                                          Normally that is the version-PR merge
+#                                          itself. It is also the retry: any
+#                                          later push re-attempts a release whose
+#                                          own run failed, which is how
+#                                          @object-ui/*@17.5.0 eventually shipped
+#                                          6h50m late (see the `pnpm test` note
+#                                          further down) — except that it is no
+#                                          longer luck, because it no longer
+#                                          depends on `.changeset/` happening to
+#                                          still be empty (objectui#5442).
+#   push to main, version already on npm-> NOTHING. This is every ordinary
+#                                          landing: a merge that is not a release
+#                                          does not move the manifest version, so
+#                                          there is nothing to publish and the
+#                                          expensive job is skipped.
+#   schedule (6-hourly)                 -> REFRESH ONLY. The changesets step is
+#   or a dispatch with                     invoked WITHOUT a `publish:` script
+#   `refresh_version_pr`                   and WITHOUT npm credentials, so the
+#                                          publish branch is unreachable by
+#                                          construction rather than by an `if:`
+#                                          someone can get wrong.
+#   dispatch without the input          -> NOTHING, loudly. See the input's note.
+#
+# THE REFRESH LANE VALIDATES WHAT IT IS ABOUT TO RENDER (objectui#5397)
+# ---------------------------------------------------------------------
+# The release PR runs no CI and cannot be made to — 849 `ci.yml` runs on
+# `changeset-release/main`, every recent one `action_required`, created and
+# parked with nothing executed — so the release commit is the only commit that
+# reaches `main` without passing the merge queue. Before the refresh step
+# invokes the action, this job therefore renders the post-version tree itself,
+# validates the surfaces the version step can move, and puts the tree back. The
+# ruling, the measurements that chose that scope over a 40-minute `pnpm test`,
+# and why the restore is load-bearing are at "POST-VERSION VALIDATION" below.
+#
+# WHY THE PUBLISH LANE IS KEYED ON npm AND NOT ON `.changeset/`
+# -------------------------------------------------------------
+# It used to be keyed on "does this commit carry pending changesets?", and that
+# predicate answers a question about BOOKKEEPING while being read as if it
+# answered a question about the REGISTRY. The two come apart exactly where it
+# costs a release (objectui#5442, maintainer ruling 2026-08-22, Option B):
+#
+#   The version PR is cut from `main` at T and merged at T+n. `main` takes ~18
+#   merges a working day, so by T+n it has almost always accumulated changesets
+#   that the merge does not remove. Those changesets belong to the NEXT version;
+#   the version this commit declares is finished and unpublished. Keyed on
+#   changesets, that release is skipped, and the next version PR bumps straight
+#   past it.
+#
+# Measured, and still true at the commit this paragraph was written on: of the 90
+# versions `packages/core/CHANGELOG.md` declares, 16 never reached npm, and
+# `packages/core/package.json` says 17.6.0 while `dist-tags.latest` says 17.5.0.
+# `@object-ui/react` and `@object-ui/types` are missing the exact same 16, which
+# is the counter-probe that matters: whole RELEASES never published, rather than
+# some package failing to.
+#
+# So the predicate is now "is the version this commit declares already on npm?".
+# It is answered in the `lane` job by one read of `registry.npmjs.org`, and it is
+# better than its predecessor on both axes at once:
+#
+#   - CORRECTNESS. Pending changesets stop being the publish lane's business.
+#     What this commit declares gets published, whatever the next version is
+#     accumulating.
+#   - COST. It is STRICTLY cheaper than "no pending changesets", not a trade
+#     against it. An ordinary landing does not move the manifest version, so it
+#     answers "already on npm" and skips the expensive job — where the old
+#     predicate ran the job in full on every landing that happened to find
+#     `.changeset/` empty, only to publish nothing.
+#
+# The saving objectstack#10850 asked for is therefore kept, and kept for a
+# sounder reason: a landing pays for the release job when it has a release to
+# make, rather than when a directory happens to be empty.
+#
+# ⚠️ The predicate cannot reach the action on its own. `changesets/action@v1`
+# does not take a "publish" instruction — it picks a branch from repository
+# state, and `hasChangesets` is the discriminator (algorithm quoted above). On a
+# release-merge commit carrying the next version's changesets it takes
+# `runVersion` and publishes nothing. So the publish lane hands it a tree with
+# nothing pending; see the step that does it, which explains why that is safe.
+#
+# ⛔ A refresh lane that could publish would be a NEW capability, not a moved
+# one: this repository's release act is the version-PR MERGE, a human action. A
+# scheduled tick that reached npm would publish with nobody having merged
+# anything. That is why the publish half is denied to it twice over — no
+# `publish:` input and no `NPM_TOKEN`/`NODE_AUTH_TOKEN` in its env — and why the
+# publish half keeps its trigger exactly as it was. This card changed WHEN the
+# version PR refreshes and nothing else: no gate was added, and none removed.
+#
+# ⚠️ Scheduled runs are queued, not guaranteed on the minute — GitHub delays or
+# drops them under load, and disables them entirely after 60 days of repository
+# inactivity. Both are acceptable HERE and would not be on a publishing lane: a
+# refresh that arrives late leaves objectui#5400 stale, which is visible on the
+# PR and fixable with one dispatch. It is a second reason the publish lane must
+# never be reachable from `schedule`.
+
+on:
+  # The PUBLISH lane (and only it — see the header). Kept exactly as it was: the
+  # merge of the version PR is the release act in this repository.
+  push:
+    branches:
+      - main
+  # The REFRESH lane. GitHub runs `schedule` on the DEFAULT BRANCH exclusively,
+  # which is the only ref this workflow may regenerate the version PR from, so
+  # the trigger cannot reach a ref the lane is not meant to touch.
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      # The on-demand half of the schedule. Its ONLY effect is to select the
+      # refresh lane; it can start nothing the 6-hourly tick does not start, so
+      # it cannot widen anything.
+      #
+      # ⚠️ It defaults to FALSE to match objectstack's spelling of the same
+      # input, which leaves "Run workflow" with default inputs doing NOTHING in
+      # this repository — objectstack's bare dispatch is its publish REPAIR lane,
+      # and this repository has no such lane (publishing here is not gated on an
+      # environment approval, so there is nothing to re-approve). Rather than
+      # invent one under this card, the `lane` job below prints a `::notice::`
+      # saying why nothing ran, so a bare dispatch reports instead of vanishing.
+      refresh_version_pr:
+        description: >-
+          Regenerate the "chore: release packages" PR (objectui#5400) now instead
+          of waiting for the next 6-hourly refresh. Runs the bookkeeping lane
+          ONLY: nothing is published to npm. Leave unchecked and this workflow
+          does nothing at all.
+        required: false
+        default: false
+        type: boolean
+
+# One concurrency group per COMMIT — never one shared by every push to `main`.
+#
+# A shared group does not queue. GitHub keeps at most ONE pending run per group and
+# cancels the previous pending run whenever a newer one arrives, so on a branch that
+# takes ~18 merges a day a long-running release job discards most of what follows it.
+# Measured over runs #3712-#3911 (2026-08-17 .. 2026-08-20, 200 runs): 93 were
+# `conclusion: cancelled` with an EMPTY jobs array — not one step ever ran — while the
+# 106 that did execute held the group for a median of 33m22s. Median wait for a run
+# that survived: 5m16s (objectui#5404, method and figures from objectui#5395).
+#
+# A push run of this workflow can publish to npm, so a discarded run is a discarded
+# publish. `cancel-in-progress: true` is NOT the fix: it keeps one pending slot by
+# killing the run that may be mid-`changeset publish`, which is strictly worse than
+# any wait.
+#
+# ⚠️ "A push run" is where that sentence used to say "this workflow", and the
+# distinction is new with objectstack#10850: since the refresh lane arrived, `push`
+# is no longer the only event here, and `github.sha` is no longer unique per run.
+# A `schedule` tick and a `workflow_dispatch` both read the head of `main`, so two
+# of them between merges land in the SAME group and the older pending one is
+# evicted. That is harmless, and provably so rather than by luck:
+#
+#   - Only refresh runs can be evicted. A push run at `<sha>` is always the FIRST
+#     run in its group — the sha did not exist before that push — so it is never
+#     the pending one, and `cancel-in-progress: false` means it is never cancelled
+#     once started. The publish lane keeps exactly the protection this key was
+#     added for.
+#   - An evicted refresh is nothing lost. The refresh regenerates objectui#5400
+#     from scratch, so the newest run's result is the one that was wanted anyway —
+#     the same reasoning `../objectstack`'s `version-pr` job records for its own
+#     concurrency group.
+#
+# Keyed by `github.sha` the group holds exactly one run, so nothing is ever discarded.
+# Serialisation is not given up — it moves into the "Wait for older release runs" step
+# below, which queues runs for real and in order, and which can only ever delay a run,
+# never drop one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.sha }}
+  cancel-in-progress: false
+
+permissions:
+  # `actions: read` lets the queue step below list this workflow's own runs. Declaring
+  # any `permissions:` block sets every unlisted scope to `none`, so it has to be named.
+  actions: read
+  contents: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  # ══════════════════════════════════════════════════════════════════════════
+  # Which lane is this run in? (objectstack#10850)
+  # ══════════════════════════════════════════════════════════════════════════
+  # The header explains why this cannot be an `if:` on the changesets step: the
+  # publish lane is only safe on a commit where `.changeset/` is empty, and that
+  # fact has to be known BEFORE install and build, or every one of `main`'s ~18
+  # daily landings still pays for a job that will decide to do nothing.
+  #
+  # This job answers the FACT ("does this commit carry pending changesets?") and
+  # nothing else. The POLICY lives in the release job's `if:` below, in workflow
+  # expression language where it can be read in one place — a shell script that
+  # emitted "the lane" would move the split somewhere no reviewer looks.
+  lane:
+    name: Decide lane
+    runs-on: ubuntu-latest
+
+    # ── The job ceiling, DERIVED FOR THIS JOB (objectui#7956) ────────────
+    # Before this line the only backstop was GitHub's 360-minute default — on
+    # the job that gates every landing on `main`, sitting directly above
+    # `release`, which objectui#7270 bounded at 40. Two jobs in one file with
+    # two answers is what objectui#7956 was filed to close.
+    #
+    # ⚠️ The stakes here are NOT objectui#7270's. That card's argument leaned on
+    # two of its three jobs producing a REQUIRED context on a shared serial
+    # queue. Re-measured for this one on `GET /repos/objectstack-ai/objectui/
+    # rules/branches/main` at 2026-09-06T17:20Z, the required checks are `Lint`,
+    # `Type Check`, `Build & E2E`, `Test (shard 1/4)` through `(4/4)`,
+    # `Build Docs` and `Changeset Declaration` — this workflow produces none of
+    # them. What is left is the generic exposure: a wedged job holds a runner
+    # for six hours and then reports `cancelled`, a verdict the merge queue
+    # cannot tell from `failure`.
+    #
+    # ⛔ NOT inherited from `release`'s 40 directly below, and not from
+    # `ci.yml`'s 10/15/20/30/40 — objectui#7048 fences exactly that. The
+    # arithmetic below is this job's own.
+    #
+    #   - Population: the last 300 successful runs of this workflow, window
+    #     2026-09-02T14:14Z .. 2026-09-06T17:19Z, n=300 `Decide lane` jobs.
+    #     Per-job wall clock from the Actions jobs endpoint (`completed_at`
+    #     minus `started_at`), never the run's total. This job carries no `if:`,
+    #     so it runs on every run of the workflow and its sample is not thinned
+    #     the way `release`'s is by the skip-on-push branch.
+    #   - min 4s / median 6s / p95 8s / max 43s.
+    #   - By event: push n=297 (median 6s, max 43s), schedule n=3 (median 7s,
+    #     max 7s). No material difference, so one ceiling covers both.
+    #   - max/p95 = 5.3 — a fat tail, unlike `Lint`'s 1.25, and worth naming
+    #     because it is not WORK: on the three slowest runs the steps sum to 3
+    #     seconds while the job's wall clock is 41-43s, so the tail is runner
+    #     overhead that no step reports. It is still wall clock the ceiling has
+    #     to cover, which is why the max above is the job's and not the steps'.
+    #
+    # Ceiling = the smallest round number that is both >= 3x max (2.2min) and
+    # >= max + 15min (15.7min) => 20. That is ~28x the slowest run ever observed
+    # here, so it cannot fire on a healthy-but-slow runner; a wedge dies in 20
+    # minutes instead of 6 hours.
+    #
+    # ⚠️ Four of the six jobs objectui#7956 bounded land on 20 by this same
+    # arithmetic. That is NOT one number copied across them, which precondition
+    # ② of that card's triage forbids: for any job whose slowest run is under
+    # 7.5 minutes the additive term dominates the multiplicative one, so the
+    # rule puts every sub-minute job on the same rung. Each of the four carries
+    # its own sample and its own derivation beside its own key.
+    #
+    # ⛔ Raising this toward 360 is the ruled-out non-fix (objectui#6577,
+    # objectui#7048): the hang just runs longer and the gate still reports
+    # `cancelled`.
+    timeout-minutes: 20
+    # Narrower than the workflow-level block deliberately: this job reads files
+    # and writes nothing. Declaring any `permissions:` sets every unlisted scope
+    # to `none`, which is the point — a new job on a workflow that can publish
+    # should not inherit the publish credentials' scopes.
+    permissions:
+      contents: read
+    outputs:
+      manifest_version: ${{ steps.npm.outputs.manifest_version }}
+      version_on_npm: ${{ steps.npm.outputs.version_on_npm }}
+    steps:
+      # Two directories, because the lane now turns on two facts: `.changeset/`
+      # answers "are changesets pending?" and `packages/core/` carries the fixed
+      # group's version anchor, which answers "is that version already on npm?".
+      # Still far short of a full checkout of this repository — ~15s that every
+      # landing would otherwise pay.
+      - name: Check out the lane inputs
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            .changeset
+            packages/core
+
+      # This step no longer PREDICTS anything: it reports the lane's inputs and
+      # says why a bare "Run workflow" did nothing. That is all it does.
+      #
+      # It used to also mirror, in bash and before any install, the file scan
+      # that `changesets/action` performs through `readChangesetState`, and
+      # publish the result as a `pending_changesets` output gating the release
+      # job's "Clear pending changesets" step. objectui#6081 DELETED that mirror.
+      #
+      # ⛔ Do not reintroduce it. The thing it mirrored has no stable referent,
+      # which is why no amount of care could keep it honest: `changesets/action`
+      # is used at a MOVING TAG, its bundled `@changesets/read@^0.6.7` is a
+      # different major from the `1.0.0` this repository installs, the two
+      # disagree in OPPOSITE directions (`AGENTS.md` / `CLAUDE.md` / `GEMINI.md`
+      # count for one and not the other; `.changeset/pre/*.md` the other way),
+      # and the bundled copy is a minified chunk that nothing here installs — so
+      # no test could execute it and no lockfile recorded it. A retag of `v1` in
+      # place changed what the mirror was mirroring and NOTHING in this
+      # repository failed. On the release lane, where objectui#5442 already
+      # produced one silent lost release, that is the worst available property.
+      #
+      # What replaced it is not a better prediction but the absence of one: the
+      # clear step is IDEMPOTENT and a measured no-op on the very input where
+      # this output used to skip it — `Removed 0 pending changeset file(s)`,
+      # exit 0, byte-identical tree, and a rerun after a real clear also removes
+      # 0. A step that does nothing when there is nothing to do does not need
+      # something else to predict whether there is anything to do.
+      #
+      # ⛔ Nor should anyone reintroduce it to "save" the clear step a run. It
+      # costs a directory glob and some `rm -f` on a job whose other steps take
+      # ~90s, and the price of buying that back is a hand-maintained copy of
+      # another project's minified file scan.
+      #
+      # ⚠️ `.changeset` stays in the sparse-checkout above: the `npm` step below
+      # reads `.changeset/config.json` for the `fixed` group. It is no longer
+      # read for changeset FILES.
+      - name: Report the lane
+        env:
+          REFRESH_VERSION_PR: ${{ inputs.refresh_version_pr }}
+        run: |
+          set -euo pipefail
+
+          {
+            echo '### Changeset Release lane'
+            echo
+            echo "- event: \`${GITHUB_EVENT_NAME}\`"
+            echo "- commit: \`${GITHUB_SHA}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # A bare "Run workflow" reports instead of vanishing — see the input's
+          # note in the `on:` block above.
+          if [ "${GITHUB_EVENT_NAME}" = 'workflow_dispatch' ] && [ "${REFRESH_VERSION_PR}" != 'true' ]; then
+            echo "::notice::Nothing to do. Check 'refresh_version_pr' to regenerate the version PR; publishing to npm happens when that PR is merged, not from a dispatch."
+          fi
+
+      # ══════════════════════════════════════════════════════════════════════
+      # THE PUBLISH PREDICATE: is the version this commit declares on npm?
+      # (objectui#5442 — the ruled Option B, argued in this file's header)
+      # ══════════════════════════════════════════════════════════════════════
+      # `@object-ui/core` is an ANCHOR, not a special case: every package in the
+      # `fixed` group of `.changeset/config.json` moves as one version, so any
+      # member answers for the whole release. That membership is ASSERTED rather
+      # than assumed — if `@object-ui/core` ever leaves the group it stops
+      # answering for the release, and the publish lane must fail rather than key
+      # itself on a package that no longer represents one.
+      #
+      # LOUD on every answer that is not a clean yes or no. 200 is present, 404
+      # is absent, and anything else — 5xx, a proxy, no network — is neither.
+      # Guessing "absent" publishes on a registry hiccup; guessing "present"
+      # skips a real release. Neither is worth making silently, which is the same
+      # reason the detector above refuses to guess a lane.
+      - name: Is this commit's version already on npm?
+        id: npm
+        env:
+          ANCHOR_PKG: '@object-ui/core'
+          ANCHOR_MANIFEST: packages/core/package.json
+          ATTEMPTS: '5'
+          BACKOFF_SECONDS: '5'
+        run: |
+          set -euo pipefail
+
+          if ! jq -e --arg p "$ANCHOR_PKG" '[.fixed[]?[]?] | index($p)' \
+                 .changeset/config.json > /dev/null; then
+            echo "::error::${ANCHOR_PKG} is not in the 'fixed' group of .changeset/config.json, so it no longer answers for the release version. Point this step at a package that is still in the group (objectui#5442)."
+            exit 1
+          fi
+
+          manifest_version=$(jq -r '.version // empty' "$ANCHOR_MANIFEST")
+          if [ -z "$manifest_version" ]; then
+            echo "::error::Could not read a version from ${ANCHOR_MANIFEST} (objectui#5442)."
+            exit 1
+          fi
+
+          # The registry's per-version endpoint, which answers 200 for a version
+          # it has published and 404 for one it has never seen. `/` in the scope
+          # has to be percent-encoded.
+          encoded=$(printf '%s' "$ANCHOR_PKG" | sed 's|/|%2F|')
+          url="https://registry.npmjs.org/${encoded}/${manifest_version}"
+
+          on_npm=''
+          for attempt in $(seq 1 "$ATTEMPTS"); do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' \
+                     -H 'Cache-Control: no-cache' --max-time 20 "$url" 2>/dev/null) || code='000'
+            case "$code" in
+              200) on_npm=true;  break ;;
+              404) on_npm=false; break ;;
+              *)   echo "attempt ${attempt}/${ATTEMPTS}: registry answered ${code} for ${url}" ;;
+            esac
+            # An explicit `if`, not `[ ... ] && sleep`: bash exempts AND-lists
+            # from `set -e`, so the short form works, but it works for a reason
+            # a reader has to already know.
+            if [ "${attempt}" -lt "${ATTEMPTS}" ]; then sleep "$BACKOFF_SECONDS"; fi
+          done
+
+          if [ -z "$on_npm" ]; then
+            echo "::error::Could not establish whether ${ANCHOR_PKG}@${manifest_version} is on npm after ${ATTEMPTS} attempts, so the publish lane has no predicate to run on. Refusing to guess (objectui#5442)."
+            exit 1
+          fi
+
+          echo "manifest_version=${manifest_version}" >> "$GITHUB_OUTPUT"
+          echo "version_on_npm=${on_npm}" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "- declared version: \`${ANCHOR_PKG}@${manifest_version}\`"
+            echo "- already on npm: \`${on_npm}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$on_npm" = false ] && [ "${GITHUB_EVENT_NAME}" != 'push' ]; then
+            # Visible, but not a failure here: this lane cannot publish, and the
+            # next push to `main` closes the gap. The failure lives on the push
+            # lane, where it is actionable — see "Verify the release reached npm".
+            echo "::notice::${ANCHOR_PKG}@${manifest_version} is not on npm. The next push to main will publish it (objectui#5442)."
+          fi
+
+  release:
+    name: Changeset Release
+    needs: lane
+    # The whole lane split, in one place (objectstack#10850). Each half names its
+    # own event rather than leaning on the complement of the other:
+    #
+    #   push + version not yet on npm -> PUBLISH what this commit declares.
+    #   push + version already on npm -> skipped; nothing to release.
+    #   schedule                      -> REFRESH.
+    #   dispatch WITH the input       -> the same refresh, on demand.
+    #   dispatch WITHOUT it           -> skipped; the `lane` job says why.
+    #
+    # ⚠️ The push half reads `version_on_npm`, NOT a count of pending
+    # changesets. That is the whole of objectui#5442: pending changesets belong
+    # to the next version and say nothing about whether THIS one shipped. Since
+    # objectui#6081 nothing counts them at all — `.changeset/` reaches the
+    # release only through the step that CLEARS it for the action, never through
+    # a decision about whether there is a release to make.
+    #
+    # `inputs.refresh_version_pr` is guarded by its event test rather than read
+    # bare: the `inputs` context exists only on `workflow_dispatch`, so on a
+    # `schedule` run it is null — falsy, and therefore the right answer by
+    # accident. Say which event we are on, so the guard states the lane split
+    # instead of leaning on a context's emptiness.
+    if: >-
+      (github.event_name == 'push' && needs.lane.outputs.version_on_npm == 'false') ||
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' && inputs.refresh_version_pr)
+    runs-on: ubuntu-latest
+
+    # ── The job ceiling, DERIVED FOR THIS JOB (objectui#7270) ────────────
+    # Before this line the only backstop was GitHub's 360-minute default, on
+    # the lane that PUBLISHES. This ceiling is derived differently from the two
+    # that objectui#7270 set on `Lint` and `Bundle Analysis`, because this
+    # job's honest slowest run is not the slowest run in its sample: the `Wait
+    # for older release runs to finish` step below declares
+    # `MAX_WAIT_SECONDS: '900'`, so a contended release may legitimately spend
+    # 15 minutes waiting before it does any work at all. None of the sampled
+    # runs was contended, so that 15 minutes appears nowhere in the
+    # distribution below and has to be ADDED rather than measured.
+    #
+    # ⛔ NOT inherited from `ci.yml`'s 10/15/20/30/40 — objectui#7048 fences
+    # exactly that. The arithmetic below is this job's own.
+    #
+    #   - Population: every successful `schedule` run of this workflow, window
+    #     2026-08-23T06:08Z .. 2026-09-06T00:23Z, n=25 `Changeset Release`
+    #     jobs. Per-job wall clock from the Actions jobs endpoint
+    #     (`completed_at` minus `started_at`), never the run's total.
+    #   - min 1m23s / median 2m37s / p95 5m37s / max 7m15s.
+    #   - ⚠️ n=25 is the whole recent population, not a sample cut short. This
+    #     job is `skipped` on a push unless that push left the manifest version
+    #     absent from npm, and the 400 most recent successful `push` runs
+    #     (2026-08-30 .. 2026-09-06) skipped it 400 times out of 400. Paging
+    #     further buys skips, not samples.
+    #   - max/p95 = 1.29 — no fat tail inside the sample.
+    #
+    # Ceiling = 15min (the declared wait cap, taken at face value: it is
+    # already a hard, fail-open bound, so multiplying it would only buy slack
+    # for a clock that cannot overrun) + 3x the measured max work
+    # (3 x 7m15s = 21.8min) => 36.8min, rounded up to 40. The plain rule the
+    # other two jobs use would have given 25, which leaves a legitimately
+    # contended release (15min of waiting + 7m15s of work = 22m15s) inside 12%
+    # of its own ceiling — a ceiling set under a job's honest slowest run,
+    # which is the mirror hazard objectui#7048 fenced.
+    #
+    # ⛔ Raising this toward 360 is the ruled-out non-fix, and ⛔ lowering it
+    # under 23 minutes would let the clock truncate a release that the workflow
+    # itself says is behaving.
+    timeout-minutes: 40
+
+    steps:
+      # The queue the `concurrency:` key above cannot provide. GitHub offers exactly two
+      # behaviours for a contended group — cancel the running one, or discard the pending
+      # ones — and neither is acceptable on a workflow that publishes. So the ordering is
+      # done here: a run waits until every release run older than itself has finished, then
+      # proceeds. Ordering is by `run_number`, a total order, so the oldest run is always
+      # free to proceed and this cannot deadlock.
+      #
+      # It is deliberately FAIL-OPEN. Every exit path is `exit 0`, and the step additionally
+      # carries `continue-on-error: true`: if the API cannot be read, or an older run is
+      # wedged past the cap, this step gives up waiting and lets the release proceed. A run
+      # that never runs is the defect this queue exists to remove — degrading to today's
+      # unserialised behaviour is the acceptable failure, blocking a publish is not.
+      - name: Wait for older release runs to finish
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_NUMBER: ${{ github.run_number }}
+          # A release job is ~90s of work; this cap is a wedged-run escape hatch, not a
+          # normal wait.
+          MAX_WAIT_SECONDS: '900'
+          POLL_SECONDS: '20'
+        run: |
+          set -uo pipefail
+
+          # A rename of this file makes the path 404, `gh` exits non-zero, and the step
+          # fails open below — it does not silently stop serialising while looking green.
+          runs_path="repos/${GITHUB_REPOSITORY}/actions/workflows/changeset-release.yml/runs?per_page=100"
+          older_jq='[.workflow_runs[] | select(.status != "completed" and .run_number < '"${RUN_NUMBER}"')]
+                    | .[] | "  waiting on run #\(.run_number) (\(.status)) \(.html_url)"'
+
+          deadline=$(( $(date +%s) + MAX_WAIT_SECONDS ))
+          while : ; do
+            if ! older=$(gh api "${runs_path}" --jq "${older_jq}"); then
+              echo "::warning::Could not list this workflow's runs, so the release lane is not serialised for this run. Proceeding — this step may delay a release, never block one (objectui#5404)."
+              exit 0
+            fi
+
+            count=$(printf '%s\n' "${older}" | grep -c 'waiting on run' || true)
+            if [ "${count}" -eq 0 ]; then
+              echo "No older release run is still in flight. Proceeding."
+              exit 0
+            fi
+
+            if [ "$(date +%s)" -ge "${deadline}" ]; then
+              echo "::warning::${count} older release run(s) still unfinished after ${MAX_WAIT_SECONDS}s. Proceeding without waiting further — a release run that never executes is the defect this queue exists to prevent (objectui#5404)."
+              exit 0
+            fi
+
+            echo "${count} older release run(s) still in flight:"
+            printf '%s\n' "${older}"
+            sleep "${POLL_SECONDS}"
+          done
+
+      - name: Checkout Repo
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: true
+
+      - name: Enable Corepack and download the pinned pnpm
+        run: bash scripts/ci-setup-pnpm.sh
+
+      - name: Verify pnpm version
+        run: pnpm --version
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22.x'
+          cache: 'pnpm'
+          registry-url: 'https://registry.npmjs.org'
+
+      # ⛔ Do NOT add a lockfile merge-driver `git config` step back here.
+      #
+      # There used to be one, and it could never fire. Removed by objectui#6436
+      # under the maintainer's ruling of 2026-08-27 ("dead in CI, live for
+      # contributors"): this job performs NO local merge, so a driver configured
+      # here had no occasion to run.
+      #
+      # ⭐ The MECHANISM is not retired — only this file's dead half is.
+      # `.gitattributes` still routes `pnpm-lock.yaml` through `merge=pnpm-merge`,
+      # and `CONTRIBUTING.md` still tells contributors to define that driver
+      # locally before `git merge upstream/main`. Measured both ways in a scratch
+      # repo, one variable changed: WITH the attribute the driver fires and the
+      # lockfile is regenerated; WITHOUT it, nothing else altered, the identical
+      # merge ends in `CONFLICT (content)` with conflict markers left inside
+      # `pnpm-lock.yaml`. The mechanism is contributor-facing with zero CI
+      # consumers, and this file is where the last CI consumer used to be.
+      #
+      # The sweep, so nobody re-derives it a fourth time (objectui#6358 and
+      # objectui#6369 each re-derived it for a different workflow):
+      #
+      #   Every `git` in this file, enumerated rather than grepped-for-absence:
+      #   `git status --porcelain` (x2), `git checkout -- .` and `git clean -fdq`
+      #   in "Restore the pre-version tree", and — since objectui#11596 —
+      #   `git rev-parse -q --verify` and `git push origin <tag refs>` in "Push
+      #   the release tags", which reads and pushes refs and resolves nothing.
+      #   No `merge`, `rebase`, `pull`, `cherry-pick`, `am`, `apply` or `revert`
+      #   anywhere in the file — each of those zero-hits was taken with a
+      #   control term that DID hit the same file, because a zero-hit with no
+      #   control is not a reading.
+      #
+      #   `git checkout -- .` (below, in the restore step) takes tracked paths
+      #   from the INDEX to undo what `pnpm changeset:version` wrote. That is a
+      #   discard, not a merge; no merge driver participates.
+      #
+      # ⭐ The load-bearing part is not in this file at all — it is what
+      # `changesets/action@v1` does, and it has to be read to be known. Read at
+      # v1.9.0 (`a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d`), `src/git.ts` and the
+      # executed `dist/` bundle agreeing: the action's COMPLETE git surface is
+      # `checkout <branch>` / `checkout -b`, `reset --hard <sha>`, `add .`,
+      # `commit -m`, `push origin HEAD:<branch> --force`, `push origin <tag>`
+      # and `config user.*`. The version-branch update is `prepareBranch`
+      # (checkout, then `reset --hard github.context.sha`) followed by a commit
+      # and a FORCE-PUSH. It never merges, rebases or three-ways anything, so on
+      # this side too the driver had no occasion to fire. (Its `commitMode:
+      # github-api` path — not selected here; the default is `git-cli` — builds
+      # the commit through the GitHub API instead, and the bundle reads no
+      # `.gitattributes` and implements no merge driver at all.)
+      #
+      # ⚠️ Re-adding the step reddens `ci-cd-pipeline-doc.test.ts`, which now
+      # asserts that ZERO workflows configure the driver — in both directions. If
+      # some future job really does merge locally on the runner, it needs the step
+      # AND a row in the "Lockfile Merge Driver" table of
+      # `content/docs/guide/ci-cd-pipeline.md`; the pin fails otherwise. Note that
+      # pin greps workflow files for the config key, so even NAMING the key in a
+      # comment here trips it — deliberately the safe direction (a false red, never
+      # a false green), which is why this comment spells the attribute form.
+
+      # ── Cache bookkeeping cannot void a recorded verdict (objectui#7048) ──
+      # THE ORDERING, carried here from the type-check split in `ci.yml`
+      # (objectui#6577, PR #7047) because it is what a future reader needs in
+      # order to judge whether these steps may be touched: the verdict is
+      # recorded by the checking steps; everything after them is bookkeeping,
+      # and bookkeeping must never discard an answer the gate already produced.
+      # In this job the answer at stake is the publish/refresh outcome and the
+      # post-version tree validation below it.
+      #
+      # Why the SPLIT rather than a timeout on one step: combined
+      # `actions/cache` declares `main: dist/restore/index.js` plus
+      # `post: dist/save/index.js`, so its save is a step the RUNNER generates
+      # at job end (`Post Turbo Cache`). No workflow syntax attaches
+      # `timeout-minutes` or `continue-on-error` to a generated post step.
+      # Measured once, on `ci.yml`'s type-check cache: a 1-second save took
+      # 789s and ran that job into its ceiling (objectui#6577).
+      # `actions/cache`'s own `save-always` deprecation text points at this
+      # same split.
+      #
+      # ⚠️ This job's ceiling is `timeout-minutes: 40`, DERIVED at the job
+      # header above from this job's own run distribution PLUS the 900-second
+      # wait cap this job declares for itself (objectui#7270). Until that line
+      # existed the ceiling was GitHub's 360-minute default — and this is the
+      # PUBLISH lane, where a job that hangs after `Publish to npm` has already
+      # shipped and the concurrency note above records what a long-running
+      # release job does to the pushes behind it. The constraint that used to
+      # argue against any ceiling at all is the one that shaped 40: the release
+      # act must never be truncated by a clock, so the number is generous
+      # rather than tight. The bound below is still on the bookkeeping step
+      # alone, which runs after every release step.
+      #
+      # The restore half is deliberately left UNBOUNDED: a restore stall fails
+      # BEFORE anything is published, which is the honest failure.
+      #
+      # ONE restore key, this job's own prefix (objectui#12276, the shape
+      # `ci.yml`'s `type-check` job took in objectui#12222). Until then this key
+      # was `turbo-<os>-<sha>` with a bare `turbo-<os>-` fallback, and `Lint`
+      # and `Bundle Analysis` saved under that same key, so this job restored
+      # whichever of their caches reached the sha first -- and its own save
+      # below found an exact hit and skipped. Every run of this job is on
+      # `main` (push, `schedule`, dispatch), so its own previous entry is what
+      # the prefix finds.
+      - name: Restore Turbo Cache
+        id: turbo-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-release-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ runner.os }}-release-
+
+      # objectui#12957: every @objectstack/* package resolves to the build of the
+      # commit `.objectstack-sha` pins, read from node_modules/.cache/objectstack, so
+      # it must be there before pnpm resolves anything. Restored by the pin and built
+      # only on a miss (scripts/objectstack-pin.mjs); the save is this job's last step.
+      - name: Restore the pinned @objectstack build
+        id: objectstack-pin
+        uses: actions/cache/restore@v6
+        with:
+          path: node_modules/.cache/objectstack
+          key: objectstack-pin-${{ runner.os }}-${{ hashFiles('.objectstack-sha', 'scripts/objectstack-pin.mjs') }}
+
+      - name: Build @objectstack at the pin (skips a restored build)
+        id: objectstack-build
+        run: node scripts/objectstack-pin.mjs build
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # ⛔ Do not add a `pnpm test` step back here.
+      #
+      # There used to be one, and it was 31m19s of a 33m22s job (medians over the 106 runs
+      # of #3712-#3911 that executed; everything else combined is ~90s — install 6s, build
+      # 35s, the changesets action 24s). It re-tested a commit that is ALREADY on `main`, so
+      # it could not keep anything out; the only thing it could do was stop the release
+      # afterwards, and it did: 2 of the last 27 release-PR merges (runs #3606 and #3901)
+      # failed here and skipped the changesets step entirely. #3606 was the run that would
+      # have published @object-ui/*@17.5.0, which reached npm 6h50m late, on a later push
+      # that happened to still find `.changeset/` empty.
+      #
+      # The backstop for `main` is `ci.yml`'s push lane, which runs the whole suite under
+      # coverage across every shard of its `test-coverage` matrix on every push and enforces
+      # the thresholds on the merged report (objectui#5403). That is the copy that tests this
+      # commit; this one only ever duplicated it, ~34 minutes later.
+
+      - name: Build packages
+        env:
+          TURBO_RUN_SUMMARY: 'true'
+        run: pnpm build
+
+      # ══════════════════════════════════════════════════════════════════════
+      # One changesets step per lane, and each one CANNOT do the other's job.
+      # ══════════════════════════════════════════════════════════════════════
+      # These were a single step carrying both `version:` and `publish:`, which
+      # let repository state pick the behaviour (the algorithm is quoted in this
+      # file's header). Splitting them is what makes each lane's limit structural
+      # instead of conditional: the refresh step has no `publish:` input, so no
+      # state — not even a `.changeset/` that has just been emptied by a merge
+      # racing the tick — can make a scheduled run publish. An `if:` cannot say
+      # that; an absent input can.
+      #
+      # The refresh step's `id:` is for the log; nothing reads it. The publish
+      # step's IS read: the two tag/Release steps after the npm check gate on
+      # its outcome (objectui#11596).
+      #
+      # ══════════════════════════════════════════════════════════════════════
+      # ⛔ THE `@v1` PIN IS LOAD-BEARING. READ THIS BEFORE BUMPING IT.
+      # ══════════════════════════════════════════════════════════════════════
+      # `changesets/action@v1` is pinned because two lanes in this file are
+      # built on properties asserted against **v1's source**, not because anyone
+      # prefers an old version. Dependabot has proposed the v1 -> v2 bump in both
+      # repositories and it was declined in both, deliberately and on the same
+      # reasoning: objectstack#9208 (closed unmerged 2026-08-19) and
+      # objectui#4945 (closed unmerged 2026-08-23). Neither was merged; both
+      # repositories stay on v1.
+      #
+      # A bump is not forbidden — it is UNVERIFIED. What follows is what a future
+      # upgrade has to re-establish, written here because the next reader stands
+      # here and not in a closed PR.
+      #
+      # THE TWO PROPERTIES AN UPGRADE MUST RE-VERIFY
+      # --------------------------------------------
+      #  (1) THE DISPATCH TABLE. `!hasChangesets && hasPublishScript ->
+      #      runPublish` (quoted in full in this file's header, from v1's
+      #      `src/index.ts`). BOTH the `lane` job's predicate and the "Clear
+      #      pending changesets" step exist only because the action chooses its
+      #      branch from repository state rather than from an input. If v-next
+      #      takes an explicit instruction instead, the clear step is no longer a
+      #      workaround to keep — it is dead weight to delete, and keeping it
+      #      would be the bug.
+      #
+      #  (2) `runPublish` NEVER COMMITS AND NEVER PUSHES A BRANCH. Verified in
+      #      v1's `src/run.ts`: `runPublish` spans lines 83-198 and the only git
+      #      operation inside it is `git.pushTag()` (lines 124 and 146);
+      #      `git.prepareBranch()` (line 290) and `git.pushChanges()` (line 362)
+      #      occur solely inside `runVersion`. THIS is what makes the clear
+      #      step's runner-local deletion safe. ⚠️ If that ever stops holding,
+      #      that step stops being a local trick and becomes a commit that
+      #      DELETES EVERY PENDING CHANGESET IN THE REPOSITORY — ~161 files at
+      #      the time of writing. Re-verify it by reading the source, not by
+      #      reading release notes.
+      #      ⚠️ Under CLI v3 even that `git.pushTag()` is never reached — it sits
+      #      behind the `New tag:` parse, which finds nothing — so the tags are
+      #      pushed by this file's own "Push the release tags" step. That step
+      #      pushes tag refs alone, so the property's conclusion still holds:
+      #      nothing on the publish lane commits (objectui#11596).
+      #
+      # WHAT v2 ACTUALLY CHANGES (read from its CHANGELOG, not from compiled
+      # source; every item below was checked against the v2.0.0 entry)
+      # ---------------------------------------------------------------------
+      #  - #681 / #668 — INPUTS RENAMED AND KEBAB-CASED: `version` ->
+      #    `version-script`, `publish` -> `publish-script`, `commit` ->
+      #    `commit-message`, `title` -> `pr-title` (also `branch` ->
+      #    `pr-base-branch`, which this file does not use). This file passes all
+      #    four of the old names. Under v2 they are simply unknown inputs, and
+      #    the two failures are both SILENT: the publish lane loses its
+      #    `publish:` and stops publishing, and the refresh lane loses its
+      #    `version:` and falls back to bare `changeset version` — which skips
+      #    `scripts/sync-quick-reference-release.mjs` and breaks objectui#5394.
+      #    (`scripts/__tests__/sync-quick-reference-release.test.ts` pins the
+      #    `version:` line and would catch the rename, so that half fails loudly
+      #    at least in CI.)
+      #  - #692 — RELEASE COMMITS AND TAGS ARE PUSHED VIA THE GitHub API BY
+      #    DEFAULT (`commit-mode` replaced by a boolean `push-with-git-cli`).
+      #    ⚠️ This is the one that undercuts property (2): that verification is
+      #    about v1's git-CLI path. An API-based push is a different code path
+      #    and property (2) must be re-established against it from scratch.
+      #  - #674 — the `GITHUB_TOKEN` ENVIRONMENT VARIABLE IS NO LONGER ACCEPTED;
+      #    a custom token must go through the `github-token` input. Both steps
+      #    below pass it via `env:`.
+      #  - #695 — `.npmrc` HANDLING REMOVED when `NPM_TOKEN` is set; npm auth is
+      #    expected via Trusted Publishing or `actions/setup-node`'s
+      #    `registry-url`. This job does run `actions/setup-node` with
+      #    `registry-url`, so that half may already be satisfied — but it is
+      #    `NODE_AUTH_TOKEN` that such a setup consumes, and the interaction has
+      #    to be checked rather than assumed.
+      #  - #678 — PUBLISHED-PACKAGE DETECTION MOVED off stdout parsing onto a
+      #    shared output file named by a `CHANGESETS_OUTPUT` environment
+      #    variable, which custom scripts must forward to the Changesets CLI.
+      #    `pnpm changeset:publish` is a custom script
+      #    (`check-published-dist-tooling.mjs && changeset publish`), so it would
+      #    have to forward it or git tags and GitHub releases stop being created
+      #    (#697 downgrades that to a warning rather than an error — i.e. it
+      #    fails QUIETLY, which is this card's whole subject matter).
+      #    ⚠️ v1 met that same quiet failure WITHOUT a bump: its detection is
+      #    the stdout parse for `New tag:` lines, CLI v3 prints none, and
+      #    17.6.0 and 17.7.0 shipped with no tag and no Release
+      #    (objectui#11596). Tags and Releases no longer depend on the action's
+      #    detection in either major — the two steps after the npm check make
+      #    them — so this item now concerns only the action's OWN Releases.
+      #
+      # ⛔ DO NOT WRITE "we are held back by the Changesets CLI generation."
+      # That is the plausible wrong answer. v2's #699 validates that projects use
+      # Changesets CLI v3 and directs CLI **v2** users to `changesets/action@v1`
+      # — and this repository is already on v3: `package.json` declares
+      # `@changesets/cli: ^3.0.0` and `pnpm-lock.yaml` resolves it to 3.0.1
+      # (`../objectstack` declares `^3.0.0` too). Measured, not assumed. The CLI
+      # generation is NOT what pins us; the two properties above are.
+      #
+      # Worth knowing rather than acting on: v2's #656 adds `/select-mode`,
+      # `/version` and `/publish` SUB-ACTIONS. A dedicated publish sub-action is
+      # plausibly the shape that makes the clear step unnecessary — which is an
+      # argument for revisiting the pin eventually, not for bumping it blind.
+      #
+      # ⛔ WHAT NOTICES A BUMP. This v1 ref is pinned by exactly one thing:
+      # `scripts/__tests__/changeset-release-action-ref-pin.test.ts`. It fails on
+      # a bump of EITHER `uses: changesets/action@...` line in this file and names
+      # the two properties above as what a bump must re-establish. There is no
+      # second guard — the type checker and the linters do not read this file at
+      # all — so ⛔ do not delete that test as collateral of some other cleanup.
+      #
+      # It is deliberately a pin on the REF and not a copy of the action's
+      # behaviour. objectui#5775 tried the other shape: the `lane` job carried a
+      # bash mirror of the action's file scan, measured against BOTH readers and
+      # found at different majors (this action bundles `@changesets/read@^0.6.7`,
+      # the repository installs `1.0.0`, and they disagree on `AGENTS.md` /
+      # `CLAUDE.md` / `GEMINI.md` and on `.changeset/pre/`). objectui#6081
+      # deleted that mirror, because the bundled copy is a minified chunk behind
+      # a MOVING tag and cannot be pinned from here at any effort — a retag of
+      # `v1` in place changed it and nothing here failed. A ref pin catches the
+      # DELIBERATE bump, which is the only moment anyone can act on.
+      #
+      # ⭐ THE REF IS A COMMIT SHA, NOT THE MOVING `v1`. Both `uses:` lines name
+      # `a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d`, the commit the `v1` branch
+      # and the `v1.9.0` tag both resolved to when this was written, and the
+      # same commit the git-surface reading above was taken at. This step runs
+      # with `NPM_TOKEN`, so a retag of `v1` would otherwise hand the publish
+      # credential to code nobody here has read; a sha cannot move. A bump is
+      # still a deliberate edit of both lines to another sha (the trailing
+      # `# vX.Y.Z` comment names the release it is), and it still has to
+      # re-establish the two properties above. The sha is a declared exception
+      # to `scripts/check-action-ref-convention.mjs`'s floating-tag default.
+
+      # ⚠️ THE STEP THAT LETS THE PREDICATE REACH THE ACTION (objectui#5442).
+      #
+      # The job guard above no longer says anything about `.changeset/` — it says
+      # the declared version is not on npm. But `changesets/action@v1` still
+      # picks its own branch from `hasChangesets`, so on a release-merge commit
+      # carrying the NEXT version's changesets it would take `runVersion` and
+      # publish nothing. That is objectui#5442's defect arriving through the
+      # action instead of through the job guard, and no `if:` can talk the action
+      # out of it. A tree with nothing pending can.
+      #
+      # ⛔ Nothing is committed, and no branch is pushed. That is verified
+      # against the action's source rather than assumed: `runPublish`
+      # (`src/run.ts`) runs the publish script, then for each package whose
+      # `New tag:` line it parses — none, under CLI v3 (objectui#11596) — pushes
+      # a TAG and creates a GitHub release. It never commits, and never pushes a
+      # branch. The one push this lane does make is the tag-ref push after the
+      # npm check, of tags at HEAD, which is `github.sha` because nothing
+      # commits. So this deletion cannot leave the runner, and `.changeset/` on
+      # `main` is untouched — those changesets are still owed to the next
+      # version PR, which the 6-hourly refresh lane will render as usual.
+      #
+      # This is deliberately a SUPERSET of what the action counts, and it is NOT
+      # a second copy of the `lane` job's mirror. The mirror's job is to PREDICT
+      # the action's branch, and predicting requires agreeing exactly. This step
+      # has a one-directional obligation — leave the count at zero — so removing
+      # more than the action would count is safe, and it is checked directly
+      # below instead of being reasoned about. Keeping only `README.md` covers
+      # every name the reader ignores (`README.md` case-insensitively, plus
+      # `AGENTS.md` / `CLAUDE.md` / `GEMINI.md`) as well as `.changeset/pre/*.md`,
+      # without owning a list that has to track theirs.
+      #
+      # `.changeset/config.json` is NOT touched: `changeset publish` reads the
+      # `fixed` group from it, and so does `check-published-dist-tooling.mjs`,
+      # which `pnpm changeset:publish` runs first.
+      #
+      # ⛔ THE `github.event_name == 'push'` TEST IS LOAD-BEARING. DO NOT DROP IT.
+      #
+      # This guard used to carry a second half that read the `lane` job's
+      # `pending_changesets` output. objectui#6081 deleted that half — the
+      # step is idempotent and a measured no-op on an empty tree, so predicting
+      # whether it has work was buying nothing at the price of a mirror of
+      # another project's file scan (see the `lane` job's report step).
+      #
+      # ⚠️ The EVENT half is a different thing entirely and dropping it kills the
+      # release SILENTLY. On the refresh lane this step would empty the tree
+      # before the action runs, so `hasChangesets` is false — and the refresh
+      # step passes no `publish:` input, so `hasPublishScript` is false too.
+      # v1 then takes `case !hasChangesets && !hasPublishScript` (`src/index.ts`
+      # line 68), logs "No changesets present or were removed by merging release
+      # PR", and RETURNS. The 6-hourly refresh becomes a permanent no-op and the
+      # standing "chore: release packages" PR fossilises forever, with nothing
+      # failing anywhere. That is this file's own failure class, on the other
+      # lane. What objectui#6081 deleted is the PREDICTION, not the event scoping.
+      #
+      # ⚠️ ONE CASE WHERE THIS STEP IS NOT LITERALLY A NO-OP: PRE MODE. Under
+      # `@changesets/cli` 3, `.changeset/pre.json` holds only `mode` and `tag`.
+      # Each pre-mode `changeset version` MOVES the changesets it consumes into
+      # `.changeset/pre/` instead of deleting them; later pre-mode runs skip
+      # them, and the version run after `changeset pre exit` deletes them
+      # together with `pre.json`. This step's glob takes `.changeset/pre/*.md`
+      # too, so on a pre-mode tree it removes those consumed records along with
+      # anything pending, while `pre.json` itself SURVIVES (it is not a `.md`),
+      # so pre mode is still detected. Harmless on two independent grounds —
+      # the deletion is runner-local (property (2) above), so on `main` the
+      # records stay where the version run put them; and `changeset publish`
+      # takes its dist-tag from `pre.json` and reads no changeset file. Neither
+      # a count nor the repository's mode is written down here, because both
+      # move: the step's `Removed N` line prints the count on every run (on a
+      # pre-mode tree it includes every consumed record), and whether
+      # `.changeset/pre.json` exists, and what it says, is the record of the
+      # mode. The layout above was read from the CLI 3 source and measured once
+      # on a scratch tree; nothing re-derives it, so re-read it when the CLI
+      # major moves. Written down because a pre-release is precisely when
+      # nobody wants to rediscover it.
+      - name: Clear pending changesets for the publish branch
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          # `/^README\.md$/i` is how `@changesets/read` spells its exclusion, so
+          # the comparison is case-folded rather than matching one spelling.
+          keep_this() {
+            [ "$(printf '%s' "${1##*/}" | tr '[:upper:]' '[:lower:]')" = 'readme.md' ]
+          }
+
+          removed=0
+          for file in .changeset/*.md .changeset/pre/*.md; do
+            if keep_this "$file"; then continue; fi
+            rm -f "$file"
+            removed=$((removed + 1))
+          done
+          echo "Removed ${removed} pending changeset file(s) from the runner's working tree."
+
+          left=0
+          for file in .changeset/*.md .changeset/pre/*.md; do
+            if keep_this "$file"; then continue; fi
+            echo "still pending: ${file}"
+            left=$((left + 1))
+          done
+          if [ "${left}" -ne 0 ]; then
+            echo "::error::${left} changeset file(s) survived the clear step, so changesets/action will take its runVersion branch and publish nothing (objectui#5442)."
+            exit 1
+          fi
+
+      # PUBLISH. Reachable only from `push`. Between the job guard (the declared
+      # version is not on npm) and the step above (nothing pending in the tree),
+      # the action takes its `!hasChangesets && hasPublishScript` branch, which is
+      # `runPublish`. No `version:` here: it would be dead configuration, and a
+      # reader is better served by a step that carries only what it can use.
+      #
+      # ⚠️ Do not mistake that for a guarantee. Omitting `version:` does NOT
+      # disable the refresh branch — the action falls back to plain
+      # `changeset version` — so what keeps THIS step from force-pushing the
+      # version PR is now the clear step above, and only that. If you ever drop
+      # or weaken it, this step starts refreshing the PR again, and the release
+      # goes back to being skipped exactly as objectui#5442 describes.
+      - name: Publish to npm
+        id: changesets-publish
+        if: github.event_name == 'push'
+        uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1.9.0
+        with:
+          publish: pnpm changeset:publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # ══════════════════════════════════════════════════════════════════════
+      # THE LOUD CHECK (objectui#5442, ruled alongside the predicate)
+      # ══════════════════════════════════════════════════════════════════════
+      # The defect this closes was never a red run — it was a GREEN one. Run 3370
+      # on `cfeb378b5` (#3598) completed `success` having published nothing,
+      # purely because three changesets were pending; 17.4.0 was skipped, the next
+      # version PR bumped past it, and only an audit of CHANGELOG-against-registry
+      # noticed, 16 versions later. A publish lane whose failure mode is a green
+      # tick is not a publish lane, so this one is not allowed to finish green
+      # without the version it exists to ship being on npm.
+      #
+      # There is no innocent reading of a failure here: the job only reached this
+      # step because the `lane` job said this version was ABSENT from npm.
+      #
+      # Scope, so it is not mistaken for more. This asserts the fixed group's
+      # anchor, and that is enough because the OTHER failure shapes are already
+      # red without it: a per-package publish failure makes `changeset publish`
+      # exit non-zero and the action forwards that exit code
+      # (`process.exit(result.exitCode)` in its `src/index.ts`). What only this
+      # step can catch is the lane publishing NOTHING while reporting success.
+      #
+      # The retries are for registry propagation, not for flakiness: `npm publish`
+      # returns before the version is readable through every CDN edge. An
+      # unreadable registry is a failure too — a release nobody can confirm is not
+      # a confirmed release.
+      - name: Verify the release reached npm
+        # The `id:` is read: the two tag/Release steps below gate on this
+        # step's outcome (objectui#11596).
+        id: verify-npm
+        if: github.event_name == 'push'
+        env:
+          ANCHOR_PKG: '@object-ui/core'
+          ANCHOR_MANIFEST: packages/core/package.json
+          EXPECTED: ${{ needs.lane.outputs.manifest_version }}
+          ATTEMPTS: '10'
+          BACKOFF_SECONDS: '15'
+        run: |
+          set -euo pipefail
+
+          # The lane job read the anchor from a sparse checkout of the same sha;
+          # if the two disagree the predicate was computed against a different
+          # tree than the one just published, and nothing below means what it says.
+          from_tree=$(jq -r '.version // empty' "$ANCHOR_MANIFEST")
+          if [ "${from_tree}" != "${EXPECTED}" ]; then
+            echo "::error::The lane job keyed on ${ANCHOR_PKG}@${EXPECTED} but this checkout declares ${from_tree}. The publish decision was made against a different tree (objectui#5442)."
+            exit 1
+          fi
+
+          encoded=$(printf '%s' "$ANCHOR_PKG" | sed 's|/|%2F|')
+          url="https://registry.npmjs.org/${encoded}/${EXPECTED}"
+
+          for attempt in $(seq 1 "$ATTEMPTS"); do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' \
+                     -H 'Cache-Control: no-cache' --max-time 20 "$url" 2>/dev/null) || code='000'
+            if [ "${code}" = '200' ]; then
+              echo "${ANCHOR_PKG}@${EXPECTED} is on npm."
+              echo "- published: \`${ANCHOR_PKG}@${EXPECTED}\`" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "attempt ${attempt}/${ATTEMPTS}: registry answered ${code} for ${url}"
+            # An explicit `if`, not `[ ... ] && sleep`: bash exempts AND-lists
+            # from `set -e`, so the short form works, but it works for a reason
+            # a reader has to already know.
+            if [ "${attempt}" -lt "${ATTEMPTS}" ]; then sleep "$BACKOFF_SECONDS"; fi
+          done
+
+          echo "::error::${ANCHOR_PKG}@${EXPECTED} is STILL not on npm after a publish run that reported success. The repository declares a version the registry has never seen — this is objectui#5442's silent failure, made loud. Check the 'Publish to npm' step's log for which branch changesets/action took."
+          exit 1
+
+      # ══════════════════════════════════════════════════════════════════════
+      # TAGS AND GITHUB RELEASES (objectui#11596)
+      # ══════════════════════════════════════════════════════════════════════
+      # `changesets/action@v1` used to do both of these itself, and since
+      # objectui#5296 it does neither. v1's `runPublish` learns WHAT was
+      # published by parsing the publish script's stdout for
+      # `New tag: <pkg>@<version>` lines, and pushes a tag and creates a
+      # Release only for the packages it finds there. `@changesets/cli` v3
+      # prints no such line — it reports through `@clack/prompts` and an output
+      # report — so v1 found nothing, and 17.6.0 and 17.7.0 reached npm with no
+      # git tag and no GitHub Release while every step above stayed green. The
+      # npm check above reads npm only; nothing read the tags or the Releases.
+      #
+      # `changeset publish` still CREATES the tags, on this runner, at HEAD: an
+      # annotated `<pkg>@<version>` tag per package it published, under the git
+      # identity v1's default `setupGitUser` configures before it runs the
+      # publish script. They just never left the runner. So the two steps below
+      # take over the half of `runPublish` v1 can no longer reach, and neither
+      # depends on its stdout parse:
+      #
+      #   1. push the tags `changeset publish` created — exactly the
+      #      `<pkg>@<version>` set this version owes, in ONE push
+      #      (objectstack#2191: per-tag pushes fired concurrently raced
+      #      GitHub's ref backend), and loudly when one is missing;
+      #   2. create one GitHub Release per public package with
+      #      `scripts/release-github-releases.mjs`, ported from objectstack:
+      #      idempotent, and every body truncated to the Releases API's
+      #      125,000-character limit, which the 17.7.0 entries far exceed.
+      #
+      # ⛔ PUBLISH LANE ONLY. Both carry `github.event_name == 'push'`, like
+      # every publish-lane step in this job, and both read the outcomes of the
+      # publish step and of the npm check — two steps a refresh run never
+      # executes, so on `schedule` / `workflow_dispatch` both outcomes are
+      # `skipped` and neither condition can be true. A version already on npm
+      # never reaches this job at all (the job guard above).
+      #
+      # `!cancelled()` rather than the implicit success(), as objectstack's
+      # `release.yml` gates its own Release step (objectstack#4900): once the
+      # npm check has passed the version is public, so a failure between here
+      # and the Release step — the tag push, say — must not also cost the
+      # release its record. The two outcomes are the gate, not the job status.
+      #
+      # ⚠️ This is the only push the publish lane makes, and it pushes tag refs
+      # alone. Each points at HEAD, which is still `github.sha`: no step on this
+      # lane commits, so the clear step's runner-local deletions are in no
+      # commit and cannot leave the runner through a tag. Property (2) of the
+      # `@v1` pin above is about the ACTION's pushes; this adds tag refs to
+      # them and nothing else.
+      #
+      # No `git config user.*` here, deliberately. objectstack's publish step
+      # configures one because it runs `changeset publish` itself; here the
+      # action runs it, after its own `setupGitUser`, and by the time this step
+      # runs the tags exist. Pushing a ref creates no object, so there is
+      # nothing for an identity to sign.
+      #
+      # `contents: write` is what both need — a tag push and a Release create
+      # are both contents writes — and this job inherits it from the
+      # workflow-level `permissions:` block, declaring none of its own.
+      - name: Push the release tags
+        if: >-
+          ${{ !cancelled() && github.event_name == 'push'
+          && steps.changesets-publish.outcome == 'success'
+          && steps.verify-npm.outcome == 'success' }}
+        env:
+          RELEASE_VERSION: ${{ needs.lane.outputs.manifest_version }}
+        run: |
+          set -euo pipefail
+
+          # The set this version owes, from the same enumeration the Release
+          # step below uses rather than a second copy of it in bash.
+          owed=$(node scripts/release-github-releases.mjs --print-tags)
+
+          refs=()
+          missing=()
+          while IFS= read -r tag; do
+            if [ -z "${tag}" ]; then continue; fi
+            if git rev-parse -q --verify "refs/tags/${tag}" > /dev/null; then
+              refs+=("refs/tags/${tag}")
+            else
+              missing+=("${tag}")
+            fi
+          done <<< "${owed}"
+
+          # ONE push for the whole set. A tag the remote already holds at the
+          # same object is a no-op, so this never fails on a tag it has
+          # already pushed.
+          if [ "${#refs[@]}" -gt 0 ]; then
+            git push origin "${refs[@]}"
+          fi
+          echo "- release tags pushed: \`${#refs[@]}\`" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::changeset publish left no local tag for ${#missing[@]} package(s) this release owes: ${missing[*]}. The next step still creates their Releases, and the API then creates each missing tag itself as a LIGHTWEIGHT tag at ${GITHUB_SHA} (objectui#11596)."
+            exit 1
+          fi
+
+      # Ordering is load-bearing: a Release POSTed for a tag the remote does not
+      # have makes the API create that tag itself — lightweight, at
+      # `target_commitish`, which the script sets to this run's `github.sha`.
+      # The annotated tags therefore go first, and this step finds them there.
+      #
+      # ⛔ No `--dry-run` here: it plans and prints, calls no API, and exits 0 —
+      # a Release step that would report success having released nothing.
+      - name: Create GitHub Releases (bodies truncated to the API limit)
+        if: >-
+          ${{ !cancelled() && github.event_name == 'push'
+          && steps.changesets-publish.outcome == 'success'
+          && steps.verify-npm.outcome == 'success' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The fixed group releases every public package at one version, so
+          # the version alone drives the whole publishable workspace — the
+          # value the npm check above has just confirmed.
+          RELEASE_VERSION: ${{ needs.lane.outputs.manifest_version }}
+        run: node scripts/release-github-releases.mjs
+
+      # ══════════════════════════════════════════════════════════════════════
+      # POST-VERSION VALIDATION — THE ONLY GATE THE RELEASE COMMIT EVER PASSES
+      # (objectui#5397)
+      # ══════════════════════════════════════════════════════════════════════
+      # The release PR runs NO CI, and cannot be made to. Re-measured
+      # 2026-08-25: `ci.yml` has 849 runs on `changeset-release/main` and every
+      # recent one is `action_required` with
+      # `created_at == run_started_at == updated_at` — created and immediately
+      # parked, nothing executed. GitHub does not start workflow runs from
+      # events raised by `GITHUB_TOKEN`, and the refresh step below force-pushes
+      # that branch, so there is no stable head for a human to re-run against
+      # either. On the 17.6.0 release PR the check-runs endpoint returned
+      # `total_count: 1` — one job, started 7 SECONDS AFTER the merge. The
+      # largest machine-generated diff of the week is therefore the only commit
+      # that reaches `main` without passing the merge queue.
+      #
+      # Maintainer ruling 2026-08-22 (「接受所有」): validate the POST-VERSION
+      # tree HERE, before the action opens or updates the PR. Not by giving the
+      # PR a PAT / GitHub App token (widens the supply-chain trust surface and
+      # adds rotation obligations), and not by guaranteeing outputs one artifact
+      # at a time (objectui#5396 saved exactly one doc row and did not
+      # generalise). The ruling attached a condition — PRICE IT FIRST — and the
+      # price is what chose the shape below.
+      #
+      # WHY THIS IS NOT `pnpm test` (measured 2026-08-25, not argued)
+      # ------------------------------------------------------------
+      # The naive reading of the ruling is "run the suite on the post-version
+      # tree". It is the wrong shape, because THE VERSION STEP CANNOT MOVE A
+      # SOURCE BYTE. Rendered against this repository's real tree (328 pending
+      # changesets, 17.6.0 -> 17.7.0) `pnpm changeset:version` touches 411 paths
+      # and every one of them is one of four kinds:
+      #
+      #     330  .changeset/*.md      deleted (consumed by the version)
+      #      40  */package.json       the `"version"` key and NOTHING else —
+      #                               80 changed lines, all of them `"version":`
+      #      40  */CHANGELOG.md       generated from the changeset bodies
+      #       1  QUICK_REFERENCE.md   rewritten by `changeset:version`'s
+      #                               `sync-quick-reference-release.mjs`
+      #
+      # Zero `.ts`, zero `.tsx`, zero config. The source in the post-version
+      # tree is byte-identical to the `main` commit this run checked out, and
+      # `ci.yml`'s push lane already ran the whole suite over that commit under
+      # coverage across every shard. A `pnpm test` here would re-test bytes that
+      # were tested ~13 min ago and would report nothing new — at 40 minutes a
+      # go (`ci.yml` measured its own unsharded suite at 39 min 51 s of tests /
+      # 40 min 19 s of job), four times a day on the cron below, i.e. ~2.7 h of
+      # runner time daily for a PR nobody reads until release day. That is the
+      # cost objectstack#10850 was closed to REMOVE, walking back in.
+      #
+      # ⚠️ "SOURCE" ABOVE MEANS `.ts`/`.tsx`/config AND NOT EVERY BUILD INPUT: a
+      # generated `CHANGELOG.md` IS a Tailwind source input for any package whose
+      # stylesheet entry scans it, which is how a changeset body that merely
+      # QUOTED a class name used to compile that class into a published sheet and
+      # subtract it back out of the plugin sheets (objectui#9569).
+      #
+      # So the validation is scoped to what the diff can actually move, and the
+      # union — `ci.yml` on the source, these steps on the version outputs — is
+      # the whole post-version tree.
+      #
+      #     pnpm quick-reference:check   QUICK_REFERENCE.md            ~1 s
+      #     pnpm check:control-bytes     the 40 generated CHANGELOGs   ~4 s
+      #     pnpm test scripts/__tests__  every test in that directory  ~50 s
+      #
+      # The tooling suite is named as a DIRECTORY rather than as a list of test
+      # files, deliberately: every test in this repository that reads a
+      # manifest version, `QUICK_REFERENCE.md` or a `CHANGELOG.md` lives in it
+      # (measured — 7 of 7 matches), `doc-version-claims.test.ts` among them,
+      # and a list would go stale the first time someone adds an eighth.
+      #
+      # ⭐ The middle column names that directory instead of counting it, for
+      # the same reason. It read "73 files / 1996 tests" until objectui#8122,
+      # by which time the directory held 121 files and 3618 tests -- a figure
+      # copied into a comment is true only on the day it is written, and this
+      # one was false even on 2026-08-25, the date this block measures from:
+      # `main` carried 81 test files there, not 73.
+      # The run prints its own `Test Files` / `Tests` line; that is the count.
+      #
+      # Measured green on a real rendered tree, 2026-08-25: 1 s + 4 s + 50 s.
+      # ⚠️ Those wall-clocks are THAT DAY's readings, kept because the scoping
+      # decision was made on their order of magnitude. The tooling suite has
+      # grown since, so re-measure before quoting them as today's.
+      #
+      # ⛔ WHAT IS DELIBERATELY NOT RUN, AND WHY IT IS NOT AN OMISSION.
+      # `check:spec-floors` and `check:published-dist` read dependency RANGES
+      # and built `dist/` output. The measurement above is what rules them out:
+      # no range moved (the only changed key is `"version"`) and no source moved,
+      # so on this tree they can only restate the verdict they gave on `main`.
+      # `check:published-dist` also costs a full build (8 m 39 s cold, measured),
+      # and `pnpm changeset:publish` runs both of them first on the publish lane
+      # anyway, where the tree they judge is the one being shipped.
+      #
+      # ⛔ WHY THERE IS NO "ONLY WHEN THE PR CONTENT CHANGED" CONDITION. That
+      # layer was the other half of the ruling's condition, and the measurement
+      # retired it: across the seven consecutive 6-hourly windows from
+      # 2026-08-23T06:08Z to 2026-08-25T00:10Z, SIX carried new changeset files
+      # (median 18 per window; 219, 46, 23, 18, 13, 9, and one zero). This
+      # repository lands ~18 merges a working day and most carry a changeset, so
+      # a content-change predicate would skip about one refresh in seven — it
+      # would buy ~14% of 70 seconds while adding exactly the thing
+      # objectui#6081 just deleted from this file: a local prediction of another
+      # project's state that is free to be wrong silently. The cost was solved
+      # by SCOPE, so frequency does not need solving.
+      #
+      # FAILURE SEMANTICS. A red validation fails the job and the refresh step
+      # below never runs, so the standing PR keeps its last VALIDATED content
+      # instead of being force-pushed to a broken one. If the post-version tree
+      # stays broken the PR goes stale — but loudly, on a red run every six
+      # hours, which is the opposite of this card's defect. Nothing here can
+      # block the publish lane: every step is scoped to `schedule` /
+      # `workflow_dispatch`, and `push` skips all three.
+      #
+      # ⚠️ THE RESTORE STEP IS LOAD-BEARING — DO NOT DROP IT. These steps render
+      # the version into the runner's working tree, and `changesets/action`
+      # picks its branch from that tree: with `.changeset/` already consumed it
+      # would find `hasChangesets` false, and with no `publish:` input on the
+      # refresh step `hasPublishScript` is false too, so v1 takes
+      # `case !hasChangesets && !hasPublishScript` (`src/index.ts` line 68),
+      # logs "No changesets present or were removed by merging release PR", and
+      # RETURNS. The refresh becomes a permanent no-op and the PR fossilises
+      # with nothing failing anywhere — this file's own failure class, one lane
+      # over. So the tree is put back and the restoration is ASSERTED rather
+      # than assumed, in the same shape the clear step asserts its own work.
+      # The action then runs `pnpm changeset:version` itself, on the inputs
+      # these steps measured, and it — not this job — owns the commit and the
+      # push.
+      - name: Render the post-version tree
+        id: post_version
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          # `/^README\.md$/i` is how `@changesets/read` spells its exclusion, so
+          # the comparison is case-folded rather than matching one spelling.
+          count_pending() {
+            local n=0 file
+            for file in .changeset/*.md .changeset/pre/*.md; do
+              if [ "$(printf '%s' "${file##*/}" | tr '[:upper:]' '[:lower:]')" = 'readme.md' ]; then
+                continue
+              fi
+              n=$((n + 1))
+            done
+            printf '%s' "$n"
+          }
+
+          pending_before=$(count_pending)
+          echo "pending_before=${pending_before}" >> "$GITHUB_OUTPUT"
+
+          pnpm changeset:version
+
+          changed=$(git status --porcelain | wc -l | tr -d ' ')
+          {
+            echo "- post-version tree rendered from \`${GITHUB_SHA}\`"
+            echo "- pending changesets consumed: \`${pending_before}\`"
+            echo "- paths the version step moved: \`${changed}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Validate the post-version tree
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          pnpm quick-reference:check
+          pnpm check:control-bytes
+          pnpm test scripts/__tests__
+
+      - name: Restore the pre-version tree
+        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        env:
+          PENDING_BEFORE: ${{ steps.post_version.outputs.pending_before }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          if [ -z "${PENDING_BEFORE}" ]; then
+            echo "The render step did not run, so there is nothing to restore."
+            exit 0
+          fi
+
+          git checkout -- .
+          # Narrow on purpose: the version step can only create files beside a
+          # package manifest, and a `git clean` in a job that also publishes
+          # should never be able to reach further than the thing it undoes.
+          git clean -fdq -- packages apps examples .changeset
+
+          count_pending() {
+            local n=0 file
+            for file in .changeset/*.md .changeset/pre/*.md; do
+              if [ "$(printf '%s' "${file##*/}" | tr '[:upper:]' '[:lower:]')" = 'readme.md' ]; then
+                continue
+              fi
+              n=$((n + 1))
+            done
+            printf '%s' "$n"
+          }
+
+          pending_after=$(count_pending)
+          # `--untracked-files=no`: the build that ran earlier in this job
+          # leaves its own untracked output around, and none of it is part of
+          # what the version step moved or of what the action reads. Tracked
+          # state plus the pending count is the whole restoration.
+          dirty=$(git status --porcelain --untracked-files=no | wc -l | tr -d ' ')
+
+          if [ "${pending_after}" != "${PENDING_BEFORE}" ] || [ "${dirty}" -ne 0 ]; then
+            echo "::error::The pre-version tree was not restored (${PENDING_BEFORE} changesets before, ${pending_after} after; ${dirty} tracked path(s) still modified). changesets/action would read this tree, find nothing pending and return without refreshing the PR — a silent permanent no-op (objectui#5397)."
+            exit 1
+          fi
+          echo "Pre-version tree restored: ${pending_after} pending changeset(s), working tree clean."
+
+      # REFRESH. No `publish:` input, so `runPublish` is unreachable; no npm
+      # credentials in `env:`, so it is unreachable a second time over. Both are
+      # deliberate — this lane runs unattended on a clock, and the release act in
+      # this repository is a human merging the PR it regenerates.
+      #
+      # `version:` must stay `pnpm changeset:version` rather than bare
+      # `changeset version`: the npm script also runs
+      # `scripts/sync-quick-reference-release.mjs`, which is the only thing that
+      # keeps `QUICK_REFERENCE.md` from fossilising at release time
+      # (objectui#5394). `scripts/__tests__/sync-quick-reference-release.test.ts`
+      # reads this very line and fails if it changes.
+      #
+      # ⛔ `@v1` is pinned deliberately here too — see "THE `@v1` PIN IS
+      # LOAD-BEARING" above the publish step before changing it.
+      - name: Refresh the version PR
+        id: changesets-version
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1.9.0
+        with:
+          version: pnpm changeset:version
+          title: 'chore: release packages'
+          commit: 'chore: release packages'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── What the cache replayed, and only what it used is kept (objectui#12276) ──
+      # The `type-check` job's two bookkeeping steps (objectui#12222), for this
+      # job's cache. `Build packages` above sets `TURBO_RUN_SUMMARY`, so turbo
+      # wrote its run summary to `.turbo/runs/`; the report reads it and puts
+      # what the restored cache replayed, what re-ran and the restored key on
+      # ONE `::notice` annotation, readable through the check-runs API by
+      # anyone who cannot open this log. The prune then deletes every entry
+      # that build did not use, so the entry saved below is exactly the
+      # current build outputs. Every run of this job is a `main` run, so both
+      # run on every run, after every release step: `!cancelled()` on the
+      # report so a failed release still reports, the prune on success like
+      # the save it prepares.
+      #
+      # Bounded and `continue-on-error`, like the save: neither can redden a
+      # job that has already published. `timeout-minutes: 1` each is DERIVED
+      # FOR THIS SITE: the script reads one run summary and lists one
+      # directory, and measured 87 ms on a lint run's summary
+      # (objectui#12276); a minute is several hundred times that.
+      - name: Report what the turbo cache replayed
+        if: ${{ !cancelled() }}
+        timeout-minutes: 1
+        continue-on-error: true
+        env:
+          RESTORED_CACHE_KEY: ${{ steps.turbo-cache.outputs.cache-matched-key }}
+        run: node scripts/report-turbo-cache.mjs
+
+      - name: Prune the turbo cache to what this run used
+        timeout-minutes: 1
+        continue-on-error: true
+        run: node scripts/report-turbo-cache.mjs --prune
+
+      # The bookkeeping half of the split documented at the restore step above,
+      # placed HERE — last in the job, after publish, after the post-version
+      # tree validation and after the refresh — because that is exactly where
+      # the post phase it replaces already ran. Nothing this job publishes,
+      # validates or restores moves with it, and no step above it is touched.
+      #
+      # `timeout-minutes: 5` is DERIVED, and the derivation is weaker here than
+      # at the other six sites — said plainly rather than dressed up.
+      # objectui#7048 fences inheriting PR #7047's 5, so: this cache is
+      # `.turbo/cache`, under the same `turbo-${{ runner.os }}-${{ github.sha }}`
+      # key as `lint.yml` and `performance-budget.yml` when this was derived
+      # (each job has its own key prefix since objectui#12276), and the saves
+      # of that cache measured 1s, 2s, 5s and 6s across four jobs on 2026-09-02
+      # (`Bundle Analysis` 100096569559, `Type Check` 100096569872,
+      # `Build Docs` 100094597253, `Lint` 100097466846). A same-SITE save was
+      # not observable in the sampled runs: this job runs on `push` to `main`
+      # only when the version is not yet on npm, and on the 6-hourly `schedule`
+      # the primary key was an exact hit -- another job's save under the shared
+      # key -- so `Post Turbo Cache` measured 0s on
+      # the sampled scheduled run (job 99021319583, 2026-08-29) with its
+      # restore at 4s. 5 minutes is 50x the slowest of the four same-cache
+      # saves; if a directly measured save of this site ever lands and lies
+      # outside that range, re-derive rather than defend this number.
+      #
+      # `continue-on-error: true` is the other half. A cache that failed to
+      # upload costs the next run some build time; it says nothing about
+      # whether the release succeeded, so it must not be able to redden a job
+      # that has already published.
+      #
+      # Behaviour preserved, spelled out so the equivalence is checkable:
+      #   - `cache-hit != 'true'` reproduces the combined action's own "exact
+      #     hit on the primary key ⇒ do not save" skip — which is precisely the
+      #     path the scheduled run above took.
+      #   - the condition names no status function, so the implicit `success()`
+      #     still applies — matching the combined action's `post-if: success()`.
+      #   - same `path` and same `key` as the restore step above.
+      - name: Save Turbo Cache
+        if: steps.turbo-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        timeout-minutes: 5
+        continue-on-error: true
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-release-${{ github.sha }}
+
+      # The pinned @objectstack build, saved only when this job built it (a cache
+      # miss) and whatever the verdict above was -- it does not depend on it.
+      # Bookkeeping: bounded and non-fatal (objectui#6577, objectui#7048). The bound
+      # is not yet derived from a measured save; re-derive it from this step's runs.
+      - name: Save the pinned @objectstack build
+        if: ${{ !cancelled() && steps.objectstack-build.outcome == 'success' && steps.objectstack-pin.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: actions/cache/save@v6
+        with:
+          path: node_modules/.cache/objectstack
+          key: objectstack-pin-${{ runner.os }}-${{ hashFiles('.objectstack-sha', 'scripts/objectstack-pin.mjs') }}

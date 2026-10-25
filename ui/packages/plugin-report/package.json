@@ -1,0 +1,85 @@
+{
+  "name": "@object-ui/plugin-report",
+  "version": "18.1.0",
+  "type": "module",
+  "main": "dist/index.umd.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "sideEffects": [
+    "./dist/index.js",
+    "./dist/index.umd.cjs",
+    "./src/index.tsx"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.umd.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "type-check": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "clean": "rm -rf dist",
+    "test": "vitest run --root ../.. packages/plugin-report/",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@object-ui/components": "workspace:*",
+    "@object-ui/core": "workspace:*",
+    "@object-ui/fields": "workspace:*",
+    "@object-ui/i18n": "workspace:*",
+    "@object-ui/react": "workspace:*",
+    "@object-ui/types": "workspace:*",
+    "lucide-react": "^1.43.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@object-ui/test-support": "workspace:*",
+    "@objectstack/spec": "^18.0.0-next.1",
+    "@types/node": "^26.2.0",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "^6.0.5",
+    "vite": "^8.2.1",
+    "vite-plugin-dts": "^5.0.3",
+    "vitest": "^4.1.10"
+  },
+  "description": "Report plugin for Object UI — schema-driven pivot tables, grouped aggregations and printable report layouts",
+  "keywords": [
+    "objectui",
+    "sdui",
+    "schema-driven-ui",
+    "react",
+    "tailwind",
+    "shadcn",
+    "objectstack",
+    "plugin",
+    "report",
+    "pivot-table",
+    "analytics"
+  ],
+  "license": "MIT",
+  "author": "ObjectStack Team <team@objectstack.ai>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/objectstack-ai/objectui.git",
+    "directory": "packages/plugin-report"
+  },
+  "bugs": {
+    "url": "https://github.com/objectstack-ai/objectui/issues"
+  },
+  "homepage": "https://www.objectui.org/docs/plugins/plugin-report",
+  "publishConfig": {
+    "access": "public"
+  }
+}

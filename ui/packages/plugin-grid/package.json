@@ -1,0 +1,90 @@
+{
+  "name": "@object-ui/plugin-grid",
+  "version": "18.1.0",
+  "type": "module",
+  "license": "MIT",
+  "description": "Grid plugin for Object UI",
+  "main": "dist/index.umd.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "sideEffects": true,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.umd.cjs"
+    },
+    "./style.css": "./dist/index.css"
+  },
+  "scripts": {
+    "build": "vite build && node scripts/build-css.mjs",
+    "test": "vitest run --root ../.. packages/plugin-grid/",
+    "type-check": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@object-ui/components": "workspace:*",
+    "@object-ui/core": "workspace:*",
+    "@object-ui/fields": "workspace:*",
+    "@object-ui/i18n": "workspace:*",
+    "@object-ui/mobile": "workspace:*",
+    "@object-ui/permissions": "workspace:*",
+    "@object-ui/plugin-detail": "workspace:*",
+    "@object-ui/react": "workspace:*",
+    "@object-ui/types": "workspace:*",
+    "@objectstack/spec": "^18.0.0-next.1",
+    "@tanstack/react-virtual": "^3.14.9",
+    "exceljs": "^4.4.0",
+    "lucide-react": "^1.43.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@object-ui/data-objectstack": "workspace:*",
+    "@object-ui/sdui-parser": "workspace:*",
+    "@object-ui/test-support": "workspace:*",
+    "@objectstack/spec": "^18.0.0-next.1",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@vitejs/plugin-react": "^6.0.5",
+    "msw": "^2.15.0",
+    "postcss": "^8.5.26",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^6.0.3",
+    "vite": "^8.2.1",
+    "vite-plugin-dts": "^5.0.3"
+  },
+  "keywords": [
+    "objectui",
+    "sdui",
+    "schema-driven-ui",
+    "react",
+    "tailwind",
+    "shadcn",
+    "objectstack",
+    "plugin",
+    "grid",
+    "data-grid",
+    "table"
+  ],
+  "author": "ObjectStack Team <team@objectstack.ai>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/objectstack-ai/objectui.git",
+    "directory": "packages/plugin-grid"
+  },
+  "bugs": {
+    "url": "https://github.com/objectstack-ai/objectui/issues"
+  },
+  "homepage": "https://www.objectui.org/docs/plugins/plugin-grid",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ]
+}

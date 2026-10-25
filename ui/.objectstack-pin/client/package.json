@@ -1,0 +1,72 @@
+{
+  "name": "@objectstack/client",
+  "version": "18.1.0",
+  "license": "Apache-2.0",
+  "description": "Official Client SDK for ObjectStack Protocol",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@objectstack/core": "18.1.0",
+    "@objectstack/spec": "18.1.0"
+  },
+  "devDependencies": {
+    "@hono/node-server": "^2.1.1",
+    "@objectstack/driver-sqlite-wasm": "18.1.0",
+    "@objectstack/hono": "18.1.0",
+    "@objectstack/metadata-core": "18.1.0",
+    "@objectstack/metadata-protocol": "18.1.0",
+    "@objectstack/objectql": "18.1.0",
+    "@objectstack/platform-objects": "18.1.0",
+    "@objectstack/plugin-auth": "18.1.0",
+    "@objectstack/plugin-hono-server": "18.1.0",
+    "@objectstack/rest": "18.1.0",
+    "@objectstack/runtime": "18.1.0",
+    "@objectstack/service-analytics": "18.1.0",
+    "@objectstack/service-automation": "18.1.0",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.11"
+  },
+  "keywords": [
+    "objectstack",
+    "client",
+    "sdk",
+    "rest",
+    "api"
+  ],
+  "author": "ObjectStack",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/objectstack-ai/objectstack.git",
+    "directory": "packages/client"
+  },
+  "homepage": "https://objectstack.ai/docs",
+  "bugs": "https://github.com/objectstack-ai/objectstack/issues",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "tsup --config ../../tsup.config.ts && node ../../scripts/check-dts-emitted.mjs",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "check:exported-any-returns": "tsx ../../scripts/check-exported-any-returns.mts --self-test && tsx ../../scripts/check-exported-any-returns.mts --package packages/client",
+    "check:test-typecheck": "tsx ../../scripts/check-test-typecheck.mts --self-test && tsx ../../scripts/check-test-typecheck.mts --package packages/client --project tsconfig.test.json",
+    "gen:test-typecheck-debt": "tsx ../../scripts/check-test-typecheck.mts --update --package packages/client --project tsconfig.test.json",
+    "typecheck": "tsc --noEmit && pnpm check:test-typecheck"
+  }
+}

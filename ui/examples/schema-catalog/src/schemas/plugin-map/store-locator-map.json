@@ -1,0 +1,35 @@
+{
+  "type": "object-map",
+  "properties": {
+    "staticData": [
+      {
+        "id": 1,
+        "name": "San Francisco HQ",
+        "lat": 37.7749,
+        "lng": -122.4194,
+        "address": "123 Market St, San Francisco, CA"
+      },
+      {
+        "id": 2,
+        "name": "Oakland Office",
+        "lat": 37.8044,
+        "lng": -122.2711,
+        "address": "456 Broadway, Oakland, CA"
+      },
+      {
+        "id": 3,
+        "name": "San Jose Branch",
+        "lat": 37.3382,
+        "lng": -121.8863,
+        "address": "789 First St, San Jose, CA"
+      }
+    ],
+    "map": {
+      "latitudeField": "lat",
+      "longitudeField": "lng",
+      "titleField": "name",
+      "descriptionField": "address",
+      "zoom": 9
+    }
+  }
+}

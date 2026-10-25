@@ -1,0 +1,72 @@
+{
+  "name": "@object-ui/react",
+  "version": "18.1.0",
+  "type": "module",
+  "license": "MIT",
+  "description": "React bindings and SchemaRenderer component for Object UI",
+  "homepage": "https://www.objectui.org/docs/packages/react",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/objectstack-ai/objectui.git",
+    "directory": "packages/react"
+  },
+  "bugs": {
+    "url": "https://github.com/objectstack-ai/objectui/issues"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc && node ../../scripts/check-dist-completeness.mjs",
+    "test": "vitest run --root ../.. packages/react/",
+    "type-check": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@object-ui/core": "workspace:*",
+    "@object-ui/data-objectstack": "workspace:*",
+    "@object-ui/i18n": "workspace:*",
+    "@object-ui/types": "workspace:*",
+    "@objectstack/spec": "^18.0.0-next.1"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@object-ui/test-support": "workspace:*",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "typescript": "^6.0.3"
+  },
+  "keywords": [
+    "objectui",
+    "sdui",
+    "schema-driven-ui",
+    "react",
+    "tailwind",
+    "shadcn",
+    "objectstack",
+    "renderer",
+    "schema-renderer",
+    "hooks"
+  ],
+  "author": "ObjectStack Team <team@objectstack.ai>",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ]
+}

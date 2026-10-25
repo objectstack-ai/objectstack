@@ -1,0 +1,7 @@
+{
+  "type": "toast",
+  "variant": "success",
+  "title": "Saved Successfully",
+  "description": "Your changes have been saved.",
+  "durationMs": 3000
+}

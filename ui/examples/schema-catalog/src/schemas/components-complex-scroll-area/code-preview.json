@@ -1,0 +1,20 @@
+{
+  "type": "scroll-area",
+  "height": "200px",
+  "width": "100%",
+  "orientation": "both",
+  "className": "rounded-md border bg-slate-950 text-slate-50",
+  "children": [
+    {
+      "type": "box",
+      "className": "p-4 font-mono text-sm",
+      "children": [
+        {
+          "type": "text",
+          "content": "function example() {\n  const data = { name: 'ObjectUI', version: '1.0.0', features: ['components', 'layouts', 'forms'] };\n  return data.features.map(f => f.toUpperCase());\n}\n\nconst result = example();",
+          "className": "whitespace-pre block"
+        }
+      ]
+    }
+  ]
+}

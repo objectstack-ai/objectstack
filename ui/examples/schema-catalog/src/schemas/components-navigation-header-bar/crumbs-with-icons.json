@@ -1,0 +1,19 @@
+{
+  "type": "header-bar",
+  "crumbs": [
+    {
+      "label": "Home",
+      "href": "#",
+      "icon": "home"
+    },
+    {
+      "label": "Settings",
+      "href": "#",
+      "icon": "settings"
+    },
+    {
+      "label": "Profile",
+      "icon": "user"
+    }
+  ]
+}

@@ -1,0 +1,63 @@
+---
+title: "Statistic"
+description: "Display key metrics and statistical values with trend indicators"
+---
+
+import { DemoGrid } from '@/app/components/ComponentDemo';
+
+The Statistic component displays numerical data and key metrics with optional labels, descriptions, and trend indicators.
+
+## Basic Usage
+
+<SchemaExample id="components-data-display-statistic/simple-statistic" />
+
+## With Trend Indicators
+
+<DemoGrid>
+  <SchemaExample id="components-data-display-statistic/positive-trend" />
+  <SchemaExample id="components-data-display-statistic/negative-trend" />
+  <SchemaExample id="components-data-display-statistic/neutral" />
+</DemoGrid>
+
+## With Descriptions
+
+<SchemaExample id="components-data-display-statistic/with-description" />
+
+## Schema
+
+```ts
+interface StatisticSchema {
+  type: 'statistic';
+  
+  // Content
+  label?: string;                       // Label/title of the statistic
+  value: string | number;               // Main value to display
+  description?: string;                 // Additional description text
+  icon?: string;                        // Optional icon name
+  
+  // Trend indicator
+  trend?: 'up' | 'down' | 'neutral';   // Trend direction
+  
+  // Styling
+  className?: string;                   // Tailwind CSS classes
+  
+  // Base properties
+  id?: string;
+  visible?: boolean | string | { dialect?: string; source: string };
+  testId?: string;
+}
+```
+
+## Examples
+
+### Dashboard Metrics
+
+<SchemaExample id="components-data-display-statistic/metrics-grid" />
+
+### Sales Dashboard
+
+<SchemaExample id="components-data-display-statistic/sales-dashboard" />
+
+### Simple Stats Row
+
+<SchemaExample id="components-data-display-statistic/social-stats" />

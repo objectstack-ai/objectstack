@@ -1,0 +1,90 @@
+{
+  "name": "@object-ui/fields",
+  "version": "18.1.0",
+  "description": "Field renderers and registry for Object UI",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": true,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./style.css": "./dist/index.css"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc && vite build && node scripts/build-css.mjs",
+    "clean": "rm -rf dist",
+    "type-check": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "test": "vitest run --root ../.. packages/fields/",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@object-ui/components": "workspace:*",
+    "@object-ui/core": "workspace:*",
+    "@object-ui/i18n": "workspace:*",
+    "@object-ui/permissions": "workspace:*",
+    "@object-ui/providers": "workspace:*",
+    "@object-ui/react": "workspace:*",
+    "@object-ui/types": "workspace:*",
+    "@objectstack/spec": "^18.0.0-next.1",
+    "hast-util-to-jsx-runtime": "^2.3.6",
+    "hastscript": "^9.0.1",
+    "lucide-react": "^1.43.0",
+    "react-markdown": "^10.1.0",
+    "rehype-sanitize": "^6.0.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@object-ui/test-support": "workspace:*",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "^6.0.5",
+    "postcss": "^8.5.26",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^6.0.3",
+    "vite": "^8.2.1",
+    "vite-plugin-dts": "^5.0.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "objectui",
+    "sdui",
+    "schema-driven-ui",
+    "react",
+    "tailwind",
+    "shadcn",
+    "objectstack",
+    "fields",
+    "form-fields",
+    "renderer",
+    "widgets"
+  ],
+  "author": "ObjectStack Team <team@objectstack.ai>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/objectstack-ai/objectui.git",
+    "directory": "packages/fields"
+  },
+  "bugs": {
+    "url": "https://github.com/objectstack-ai/objectui/issues"
+  },
+  "homepage": "https://www.objectui.org/docs/fields"
+}

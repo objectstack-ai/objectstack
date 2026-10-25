@@ -1,0 +1,21 @@
+{
+  "type": "radio-group",
+  "value": "free",
+  "options": [
+    {
+      "value": "free",
+      "label": "Free",
+      "description": "Basic features for personal use"
+    },
+    {
+      "value": "pro",
+      "label": "Pro",
+      "description": "Advanced features for professionals"
+    },
+    {
+      "value": "enterprise",
+      "label": "Enterprise",
+      "description": "Full suite for teams"
+    }
+  ]
+}

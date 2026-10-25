@@ -1,0 +1,42 @@
+{
+  "type": "object-map",
+  "properties": {
+    "staticData": [
+      {
+        "id": 1,
+        "venue": "Conference Center",
+        "latitude": 37.7833,
+        "longitude": -122.4167,
+        "info": "Capacity: 500 people, A/V equipped"
+      },
+      {
+        "id": 2,
+        "venue": "Exhibition Hall",
+        "latitude": 37.7891,
+        "longitude": -122.3894,
+        "info": "Capacity: 1000 people, Trade show ready"
+      },
+      {
+        "id": 3,
+        "venue": "Outdoor Amphitheater",
+        "latitude": 37.7694,
+        "longitude": -122.4862,
+        "info": "Capacity: 2000 people, Open-air venue"
+      },
+      {
+        "id": 4,
+        "venue": "Meeting Room Complex",
+        "latitude": 37.775,
+        "longitude": -122.4183,
+        "info": "Multiple rooms, Flexible configurations"
+      }
+    ],
+    "map": {
+      "latitudeField": "latitude",
+      "longitudeField": "longitude",
+      "titleField": "venue",
+      "descriptionField": "info",
+      "zoom": 11
+    }
+  }
+}

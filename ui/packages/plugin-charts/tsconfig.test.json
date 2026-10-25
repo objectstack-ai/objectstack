@@ -1,0 +1,36 @@
+{
+  // Type-checks this package's TESTS, which `tsconfig.json` excludes.
+  // Modelled on `packages/plugin-map/tsconfig.test.json` — the sibling that
+  // already reads schema-catalog fixtures off disk from a `*-6939` render pin.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    // objectui#8691: test programs only. One notch above the package build's
+    // ES2020, mirroring packages/app-shell. The package SOURCE tsconfig is
+    // untouched, so what this package SHIPS still compiles at the ES2020
+    // baseline; nothing here is emitted.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "noEmit": true,
+    // The package build emits `dist`; this project emits nothing, so it must
+    // not inherit `composite` / `declaration` from the build config.
+    "composite": false,
+    // Naming `types` at all switches off automatic `@types/*` inclusion, so
+    // every type package these tests need is named here.
+    // - `@testing-library/jest-dom` is a global augmentation, not an import,
+    //   and does not live under `@types/`, so it is never picked up
+    //   automatically (two test files here use its matchers).
+    // - `node` is what `ChartRenderer.catalogRender-6939.test.tsx` needs: it
+    //   reads the schema-catalog chart fixtures off disk with `node:fs` /
+    //   `node:path` / `node:url` and hashes their render with `node:crypto`.
+    //   The pin has to cross a package boundary, and it cannot move to
+    //   `examples/schema-catalog/test/` — `vi.mock('recharts')` does not
+    //   intercept plugin-charts' import from there, because pnpm's strict
+    //   layout gives the two packages different resolved paths for recharts,
+    //   so the real `ResponsiveContainer` renders 0x0 and nothing paints.
+    "types": ["@testing-library/jest-dom", "node"],
+    // Drop the root tsconfig's source-tree `paths` so `@object-ui/*` resolves
+    // through the workspace dependency's built `.d.ts` instead of pulling
+    // sibling sources in as program inputs (TS6059).
+    "paths": {}
+  },
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/**/*.d.ts"]
+}

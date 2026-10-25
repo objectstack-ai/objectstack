@@ -1,0 +1,43 @@
+{
+  "type": "dashboard",
+  "columns": 2,
+  "gap": 4,
+  "widgets": [
+    {
+      "type": "metric-card",
+      "title": "Open Tickets",
+      "value": "47",
+      "icon": "ticket",
+      "trend": "down",
+      "trendValue": "-15%",
+      "description": "less than yesterday"
+    },
+    {
+      "type": "metric-card",
+      "title": "Avg. Response Time",
+      "value": "2.4h",
+      "icon": "clock",
+      "trend": "down",
+      "trendValue": "-12%",
+      "description": "faster than target"
+    },
+    {
+      "type": "metric-card",
+      "title": "Resolution Rate",
+      "value": "94%",
+      "icon": "circle-check",
+      "trend": "up",
+      "trendValue": "+3%",
+      "description": "vs last week"
+    },
+    {
+      "type": "metric-card",
+      "title": "Customer Satisfaction",
+      "value": "4.8/5",
+      "icon": "star",
+      "trend": "up",
+      "trendValue": "+0.2",
+      "description": "CSAT score"
+    }
+  ]
+}

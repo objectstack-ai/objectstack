@@ -1,0 +1,22 @@
+{
+  "type": "box",
+  "className": "max-w-sm rounded-lg border bg-card text-card-foreground shadow-sm",
+  "children": [
+    {
+      "type": "box",
+      "className": "p-6 space-y-2",
+      "children": [
+        {
+          "type": "text",
+          "content": "Card Title",
+          "className": "text-2xl font-semibold"
+        },
+        {
+          "type": "text",
+          "content": "The same markup as the div example, retyped to box: className verbatim, no layout injected, no extra element.",
+          "className": "text-sm text-muted-foreground"
+        }
+      ]
+    }
+  ]
+}

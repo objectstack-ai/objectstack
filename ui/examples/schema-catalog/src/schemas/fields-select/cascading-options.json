@@ -1,0 +1,30 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "fields": [
+    {
+      "name": "country",
+      "label": "Country",
+      "type": "select",
+      "placeholder": "Select country...",
+      "options": [
+        { "label": "China", "value": "cn" },
+        { "label": "United States", "value": "us" }
+      ]
+    },
+    {
+      "name": "province",
+      "label": "Province / State",
+      "type": "select",
+      "placeholder": "Select province...",
+      "dependsOn": "country",
+      "options": [
+        { "label": "Zhejiang", "value": "zj", "visibleWhen": "record.country == 'cn'" },
+        { "label": "Guangdong", "value": "gd", "visibleWhen": "record.country == 'cn'" },
+        { "label": "California", "value": "ca", "visibleWhen": "record.country == 'us'" },
+        { "label": "Texas", "value": "tx", "visibleWhen": "record.country == 'us'" }
+      ]
+    }
+  ]
+}

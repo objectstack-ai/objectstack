@@ -1,0 +1,92 @@
+{
+  "name": "@object-ui/plugin-designer",
+  "version": "18.1.0",
+  "type": "module",
+  "license": "MIT",
+  "description": "Visual designer plugin for Object UI with page, data model, process, and report designers plus collaborative editing.",
+  "main": "dist/index.umd.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "sideEffects": [
+    "./dist/index.js",
+    "./dist/index.umd.cjs",
+    "./src/index.tsx"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.umd.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "test": "vitest run --root ../.. packages/plugin-designer/",
+    "type-check": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "lint": "eslint ."
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^6.0.0 || ^7.0.0"
+  },
+  "dependencies": {
+    "@object-ui/components": "workspace:*",
+    "@object-ui/core": "workspace:*",
+    "@object-ui/data-objectstack": "workspace:*",
+    "@object-ui/i18n": "workspace:*",
+    "@object-ui/layout": "workspace:*",
+    "@object-ui/plugin-form": "workspace:*",
+    "@object-ui/plugin-grid": "workspace:*",
+    "@object-ui/react": "workspace:*",
+    "@object-ui/types": "workspace:*",
+    "@objectstack/spec": "^18.0.0-next.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.43.0",
+    "sonner": "^2.0.8",
+    "tailwind-merge": "^3.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "^6.0.5",
+    "vite": "^8.2.1",
+    "vite-plugin-dts": "^5.0.3",
+    "vitest": "^4.1.10"
+  },
+  "keywords": [
+    "objectui",
+    "sdui",
+    "schema-driven-ui",
+    "react",
+    "tailwind",
+    "shadcn",
+    "objectstack",
+    "plugin",
+    "designer",
+    "wysiwyg",
+    "page-builder",
+    "low-code"
+  ],
+  "author": "ObjectStack Team <team@objectstack.ai>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/objectstack-ai/objectui.git",
+    "directory": "packages/plugin-designer"
+  },
+  "bugs": {
+    "url": "https://github.com/objectstack-ai/objectui/issues"
+  },
+  "homepage": "https://www.objectui.org/docs/plugins/plugin-designer",
+  "publishConfig": {
+    "access": "public"
+  }
+}

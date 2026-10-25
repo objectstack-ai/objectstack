@@ -1,0 +1,8 @@
+{
+  "type": "file-upload",
+  "id": "avatar-upload",
+  "label": "Profile Picture",
+  "accept": "image/png,image/jpeg",
+  "multiple": false,
+  "buttonText": "Upload photo"
+}

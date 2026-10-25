@@ -1,0 +1,212 @@
+{
+  "type": "card",
+  "children": [
+    {
+      "type": "flex",
+      "properties": {
+        "align": "center",
+        "justify": "between",
+        "children": [
+          {
+            "type": "text",
+            "content": "Team Members",
+            "className": "text-lg font-semibold"
+          },
+          {
+            "type": "button",
+            "label": "Invite Member",
+            "variant": "default",
+            "size": "sm",
+            "icon": "user-plus"
+          }
+        ]
+      },
+      "className": "mb-4"
+    },
+    {
+      "type": "stack",
+      "gap": 0,
+      "children": [
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 4,
+            "children": [
+              {
+                "type": "text",
+                "content": "Name",
+                "className": "w-40"
+              },
+              {
+                "type": "text",
+                "content": "Role",
+                "className": "w-32"
+              },
+              {
+                "type": "text",
+                "content": "Department",
+                "className": "w-28"
+              },
+              {
+                "type": "text",
+                "content": "Status",
+                "className": "w-20"
+              },
+              {
+                "type": "text",
+                "content": "Last Active",
+                "className": "w-24"
+              }
+            ]
+          },
+          "className": "px-4 py-2 bg-muted text-xs font-medium text-muted-foreground border-b"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 4,
+            "children": [
+              {
+                "type": "text",
+                "content": "Sarah Chen",
+                "className": "w-40 font-medium"
+              },
+              {
+                "type": "text",
+                "content": "Lead Engineer",
+                "className": "w-32"
+              },
+              {
+                "type": "text",
+                "content": "Engineering",
+                "className": "w-28 text-muted-foreground"
+              },
+              {
+                "type": "badge",
+                "label": "Online",
+                "variant": "default",
+                "className": "w-20"
+              },
+              {
+                "type": "text",
+                "content": "Just now",
+                "className": "w-24 text-xs text-muted-foreground"
+              }
+            ]
+          },
+          "className": "px-4 py-3 border-b text-sm"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 4,
+            "children": [
+              {
+                "type": "text",
+                "content": "Marcus Rodriguez",
+                "className": "w-40 font-medium"
+              },
+              {
+                "type": "text",
+                "content": "Designer",
+                "className": "w-32"
+              },
+              {
+                "type": "text",
+                "content": "Design",
+                "className": "w-28 text-muted-foreground"
+              },
+              {
+                "type": "badge",
+                "label": "Online",
+                "variant": "default",
+                "className": "w-20"
+              },
+              {
+                "type": "text",
+                "content": "2m ago",
+                "className": "w-24 text-xs text-muted-foreground"
+              }
+            ]
+          },
+          "className": "px-4 py-3 border-b text-sm"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 4,
+            "children": [
+              {
+                "type": "text",
+                "content": "Emily Watson",
+                "className": "w-40 font-medium"
+              },
+              {
+                "type": "text",
+                "content": "PM",
+                "className": "w-32"
+              },
+              {
+                "type": "text",
+                "content": "Product",
+                "className": "w-28 text-muted-foreground"
+              },
+              {
+                "type": "badge",
+                "label": "Away",
+                "variant": "secondary",
+                "className": "w-20"
+              },
+              {
+                "type": "text",
+                "content": "1h ago",
+                "className": "w-24 text-xs text-muted-foreground"
+              }
+            ]
+          },
+          "className": "px-4 py-3 border-b text-sm"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 4,
+            "children": [
+              {
+                "type": "text",
+                "content": "James Kim",
+                "className": "w-40 font-medium"
+              },
+              {
+                "type": "text",
+                "content": "DevOps",
+                "className": "w-32"
+              },
+              {
+                "type": "text",
+                "content": "Engineering",
+                "className": "w-28 text-muted-foreground"
+              },
+              {
+                "type": "badge",
+                "label": "Offline",
+                "variant": "outline",
+                "className": "w-20"
+              },
+              {
+                "type": "text",
+                "content": "3h ago",
+                "className": "w-24 text-xs text-muted-foreground"
+              }
+            ]
+          },
+          "className": "px-4 py-3 text-sm"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+/*
+ * Tailwind entry for `@object-ui/fields` — BUILD-TIME ONLY.
+ *
+ * Consumers never compile this file. They import the compiled artifact:
+ *
+ *   @import '@object-ui/components/style.css';
+ *   @import '@object-ui/fields/style.css';   <- ./dist/index.css, built from this
+ *
+ * The `@reference` below is what makes the "narrow" shape possible
+ * (objectui#4059): it gives this compilation `@object-ui/components`' theme
+ * tokens, its class-based `dark` variant and its `tailwindcss-animate` plugin
+ * WITHOUT emitting a single byte of them. So the sheet built from this entry
+ * carries utilities only — no preflight, no `@theme` `:root` block, no base
+ * layer. `@object-ui/components`' own stylesheet owns all of that, and
+ * `scripts/build-css.mjs` then subtracts every rule that sheet already ships.
+ *
+ * That is why the import ORDER above is not cosmetic: this sheet is a
+ * supplement to the components sheet, not a replacement for it.
+ *
+ * This file has no `@import 'tailwindcss'` on purpose — that would pull in
+ * preflight and re-emit the shared theme, which is exactly the ~160 kB
+ * duplication the narrow variant exists to avoid.
+ */
+@reference '../../components/src/index.css';
+
+/*
+ * `source(none)` is load-bearing, not tidiness. Tailwind's automatic source
+ * detection resolves against the PROCESS CWD, and `@reference` above pulls in
+ * components' entry, whose own `@import 'tailwindcss'` turns that detection on.
+ * Without `source(none)` the candidate set therefore depends on where the build
+ * was launched from: run from this package it scanned `packages/fields` and
+ * produced a 21 kB sheet, run from the repo root it scanned the whole workspace
+ * and produced a 287 kB one full of other packages' utilities. Same commit, same
+ * command, two different published artifacts.
+ *
+ * With it, the ONLY inputs are the explicit `@source` lines below, and the
+ * output is byte-identical from any working directory.
+ */
+@import 'tailwindcss/utilities.css' layer(utilities) source(none);
+
+/* Only shipped source: `*.test.tsx` never reaches a consumer, so utilities used
+   solely by tests must not be compiled into the published sheet. */
+@source './**/*.{ts,tsx}';
+@source not './**/*.test.{ts,tsx}';

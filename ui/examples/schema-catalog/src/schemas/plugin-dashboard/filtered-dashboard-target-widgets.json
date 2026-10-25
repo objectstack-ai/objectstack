@@ -1,0 +1,48 @@
+{
+  "type": "dashboard",
+  "columns": 2,
+  "gap": 4,
+  "globalFilters": [
+    {
+      "name": "status",
+      "field": "status",
+      "label": "Status",
+      "type": "select",
+      "options": [
+        { "value": "draft", "label": "draft" },
+        { "value": "sent", "label": "sent" },
+        { "value": "paid", "label": "paid" },
+        { "value": "void", "label": "void" }
+      ],
+      "targetWidgets": ["invoices_by_region", "invoices_recent"]
+    }
+  ],
+  "widgets": [
+    {
+      "id": "invoices_by_region",
+      "title": "Invoices by Region (allow-listed)",
+      "type": "bar",
+      "dataset": "invoices",
+      "dimensions": ["region"],
+      "values": ["count"]
+    },
+    {
+      "id": "invoices_recent",
+      "title": "Recent Invoices (allow-listed, field override)",
+      "type": "line",
+      "dataset": "invoices",
+      "dimensions": ["created_week"],
+      "values": ["count"],
+      "filterBindings": {
+        "status": "state"
+      }
+    },
+    {
+      "id": "total_invoices",
+      "title": "Total Invoices (not allow-listed)",
+      "type": "metric",
+      "dataset": "invoices",
+      "values": ["count"]
+    }
+  ]
+}

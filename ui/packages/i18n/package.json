@@ -1,0 +1,81 @@
+{
+  "name": "@object-ui/i18n",
+  "version": "18.1.0",
+  "type": "module",
+  "sideEffects": false,
+  "license": "MIT",
+  "description": "Internationalization (i18n) support for Object UI with 10+ language packs, RTL layout, and date/currency formatting.",
+  "homepage": "https://www.objectui.org/docs/packages/i18n",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/objectstack-ai/objectui.git",
+    "directory": "packages/i18n"
+  },
+  "bugs": {
+    "url": "https://github.com/objectstack-ai/objectui/issues"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./locales": {
+      "types": "./dist/locales/index.d.ts",
+      "import": "./dist/locales/index.js",
+      "default": "./dist/locales/index.js"
+    },
+    "./locales/*": {
+      "types": "./dist/locales/*.d.ts",
+      "import": "./dist/locales/*.js",
+      "default": "./dist/locales/*.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc && node ../../scripts/check-dist-completeness.mjs",
+    "test": "vitest run --root ../.. packages/i18n/",
+    "type-check": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@object-ui/core": "workspace:*",
+    "i18next": "^26.4.0",
+    "react-i18next": "^17.0.11"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@object-ui/test-support": "workspace:*",
+    "@types/react": "19.3.0",
+    "react": "19.3.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  },
+  "keywords": [
+    "objectui",
+    "sdui",
+    "schema-driven-ui",
+    "react",
+    "tailwind",
+    "shadcn",
+    "objectstack",
+    "i18n",
+    "internationalization",
+    "localization",
+    "rtl"
+  ],
+  "author": "ObjectStack Team <team@objectstack.ai>",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ]
+}

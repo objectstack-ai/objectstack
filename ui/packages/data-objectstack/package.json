@@ -1,0 +1,70 @@
+{
+  "name": "@object-ui/data-objectstack",
+  "version": "18.1.0",
+  "description": "ObjectStack Data Adapter for Object UI",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run --root ../.. packages/data-objectstack/",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@object-ui/core": "workspace:*",
+    "@object-ui/types": "workspace:*",
+    "@objectstack/client": "^18.0.0-next.1",
+    "@objectstack/spec": "^18.0.0-next.1"
+  },
+  "devDependencies": {
+    "@object-ui/test-support": "workspace:*",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "objectui",
+    "sdui",
+    "schema-driven-ui",
+    "react",
+    "tailwind",
+    "shadcn",
+    "objectstack",
+    "data-source",
+    "adapter",
+    "objectql",
+    "objectstack-client"
+  ],
+  "author": "ObjectStack Team <team@objectstack.ai>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/objectstack-ai/objectui.git",
+    "directory": "packages/data-objectstack"
+  },
+  "bugs": {
+    "url": "https://github.com/objectstack-ai/objectui/issues"
+  },
+  "homepage": "https://www.objectui.org/docs/guide/data-source"
+}

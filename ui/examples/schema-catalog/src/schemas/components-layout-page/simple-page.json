@@ -1,0 +1,12 @@
+{
+  "type": "page",
+  "pageType": "app",
+  "title": "Dashboard",
+  "description": "Welcome to your dashboard",
+  "children": [
+    {
+      "type": "text",
+      "content": "Page content goes here"
+    }
+  ]
+}

@@ -1,0 +1,122 @@
+---
+title: "Building Blocks"
+description: "Clean, modern building blocks. Copy and paste into your apps. Open Source. Free forever."
+---
+
+import { SchemaExample } from '@/app/components/ComponentDemo';
+
+# Building Blocks for the Web
+
+Pre-built, production-ready UI blocks powered by ObjectUI's schema-driven architecture. Copy the JSON, paste into your application, and ship faster.
+
+## What are Blocks?
+
+Blocks are complete, ready-to-use UI patterns built with ObjectUI components. Unlike individual components, blocks are composed sections like login forms, pricing tables, dashboard cards, and more—ready to be dropped into your application.
+
+### Quick Preview
+
+<SchemaExample id="blocks-gallery/block-gallery-stats-card" />
+
+<SchemaExample id="blocks-gallery/block-gallery-login-card" />
+
+<SchemaExample id="blocks-gallery/block-gallery-notification-item" />
+
+### Why Use Blocks?
+
+- 🚀 **Ship Faster** - Start with working examples instead of building from scratch
+- 📋 **Copy & Paste** - Simple JSON schemas you can copy directly into your project
+- 🎨 **Beautiful Design** - Built with Tailwind CSS and Shadcn UI
+- ♿️ **Accessible** - WCAG 2.1 AA compliant
+- 🌓 **Theme Ready** - Supports light and dark modes out of the box
+- 📱 **Responsive** - Mobile-first design that works everywhere
+
+## Available Block Categories
+
+### [Authentication Blocks](/docs/blocks/authentication)
+
+Login forms, signup pages, password reset flows, and more.
+
+### [Dashboard Blocks](/docs/blocks/dashboard)
+
+Stats cards, metric displays, chart layouts for admin panels and dashboards.
+
+### [Form Blocks](/docs/blocks/forms)
+
+Contact forms, multi-step wizards, settings panels, and profile editors.
+
+### [Marketing Blocks](/docs/blocks/marketing)
+
+Pricing tables, feature grids, testimonials, CTAs, and hero sections.
+
+### [E-commerce Blocks](/docs/blocks/ecommerce)
+
+Product cards, shopping carts, checkout flows, and order summaries.
+
+## How to Use Blocks
+
+1. **Browse** the block categories to find what you need
+2. **Preview** the block in action with live examples
+3. **Copy** the JSON schema from the code tab
+4. **Paste** into your ObjectUI application
+5. **Customize** by modifying the schema to match your needs
+
+### Example: Using a Block
+
+All blocks are defined as JSON schemas. Here's how simple it is:
+
+```tsx
+import { SchemaRenderer } from '@object-ui/react';
+import type { DeclaredNode } from '@object-ui/types';
+
+// Copy this JSON from any block. `DeclaredNode` is a node of a declared type,
+// so each key is checked against the type its `type` names.
+const loginBlockSchema: DeclaredNode = {
+  type: "card",
+  className: "max-w-md mx-auto",
+  children: [
+    // ... block schema here
+  ]
+};
+
+// Render it in your app
+function App() {
+  return <SchemaRenderer schema={loginBlockSchema} />;
+}
+```
+
+## Customization
+
+Every block is fully customizable:
+
+- **Styling**: Add or modify `className` properties with Tailwind classes
+- **Content**: Change text, labels, and placeholders
+- **Layout**: Adjust spacing, sizing, and arrangement
+- **Behavior**: Add actions, data sources, and expressions
+- **Themes**: Works automatically with your theme configuration
+
+## Block Architecture
+
+All blocks follow ObjectUI best practices:
+
+- Built with composable components
+- Use semantic HTML structure
+- Follow accessibility guidelines
+- Leverage Tailwind utility classes
+- Support responsive breakpoints
+- Include proper ARIA attributes
+
+## Open Source & Free Forever
+
+All blocks are open source under the MIT license. Use them in personal projects, commercial applications, or as inspiration for your own designs.
+
+## Next Steps
+
+- Browse [Authentication Blocks](/docs/blocks/authentication)
+- Explore [Dashboard Blocks](/docs/blocks/dashboard)
+- Check out [Form Blocks](/docs/blocks/forms)
+- View [Marketing Blocks](/docs/blocks/marketing)
+- Discover [E-commerce Blocks](/docs/blocks/ecommerce)
+
+## Contributing
+
+Have a block idea? We'd love to see it! Check out our [contribution guidelines](https://github.com/objectstack-ai/objectui/blob/main/CONTRIBUTING.md) to submit your own blocks.

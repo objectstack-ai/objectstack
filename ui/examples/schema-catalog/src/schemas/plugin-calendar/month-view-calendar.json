@@ -1,0 +1,36 @@
+{
+  "type": "calendar-view",
+  "view": "month",
+  "currentDate": "2026-05-15T12:00:00.000Z",
+  "data": [
+    {
+      "id": 1,
+      "title": "Team Meeting",
+      "start": "2026-05-28T02:00:00.000Z",
+      "end": "2026-05-28T03:00:00.000Z",
+      "color": "#3b82f6",
+      "allDay": false
+    },
+    {
+      "id": 2,
+      "title": "Project Deadline",
+      "start": "2026-05-31T06:32:37.758Z",
+      "color": "#ef4444",
+      "allDay": true
+    },
+    {
+      "id": 3,
+      "title": "Conference",
+      "start": "2026-06-04T06:32:37.758Z",
+      "end": "2026-06-06T06:32:37.758Z",
+      "color": "#10b981",
+      "allDay": true
+    }
+  ],
+  "titleField": "title",
+  "startDateField": "start",
+  "endDateField": "end",
+  "colorField": "color",
+  "allDayField": "allDay",
+  "className": "h-[600px] border rounded-lg"
+}

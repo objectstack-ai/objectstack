@@ -1,0 +1,29 @@
+{
+  "type": "nav",
+  "className": "p-4 border rounded bg-slate-50",
+  "children": [
+    {
+      "type": "flex",
+      "properties": {
+        "gap": 4,
+        "children": [
+          {
+            "type": "text",
+            "content": "Home",
+            "className": "font-medium cursor-pointer hover:text-primary"
+          },
+          {
+            "type": "text",
+            "content": "About",
+            "className": "font-medium cursor-pointer hover:text-primary"
+          },
+          {
+            "type": "text",
+            "content": "Contact",
+            "className": "font-medium cursor-pointer hover:text-primary"
+          }
+        ]
+      }
+    }
+  ]
+}

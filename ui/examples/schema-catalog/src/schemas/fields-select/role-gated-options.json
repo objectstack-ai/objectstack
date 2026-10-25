@@ -1,0 +1,29 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "fields": [
+    {
+      "name": "subject",
+      "label": "Subject",
+      "type": "text",
+      "placeholder": "Short summary..."
+    },
+    {
+      "name": "visibility",
+      "label": "Visibility",
+      "type": "select",
+      "placeholder": "Select visibility...",
+      "options": [
+        { "label": "Private (only me)", "value": "private" },
+        { "label": "My team", "value": "team" },
+        { "label": "Whole organization", "value": "org" },
+        {
+          "label": "Public — external",
+          "value": "public",
+          "visibleWhen": "'admin' in current_user.positions"
+        }
+      ]
+    }
+  ]
+}

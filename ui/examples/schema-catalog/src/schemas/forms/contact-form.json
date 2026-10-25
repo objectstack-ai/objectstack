@@ -1,0 +1,135 @@
+{
+  "type": "card",
+  "className": "w-full max-w-2xl mx-auto",
+  "header": [
+    {
+      "type": "stack",
+      "gap": 2,
+      "children": [
+        {
+          "type": "text",
+          "content": "Contact Us",
+          "className": "text-2xl font-bold"
+        },
+        {
+          "type": "text",
+          "content": "Fill out the form below and we'll get back to you as soon as possible.",
+          "className": "text-muted-foreground"
+        }
+      ]
+    }
+  ],
+  "children": [
+    {
+      "type": "stack",
+      "gap": 4,
+      "children": [
+        {
+          "type": "grid",
+          "columns": 2,
+          "gap": 4,
+          "children": [
+            {
+              "type": "stack",
+              "gap": 2,
+              "children": [
+                {
+                  "type": "label",
+                  "htmlFor": "firstName",
+                  "label": "First Name"
+                },
+                {
+                  "type": "input",
+                  "id": "firstName",
+                  "name": "firstName",
+                  "placeholder": "John",
+                  "required": true
+                }
+              ]
+            },
+            {
+              "type": "stack",
+              "gap": 2,
+              "children": [
+                {
+                  "type": "label",
+                  "htmlFor": "lastName",
+                  "label": "Last Name"
+                },
+                {
+                  "type": "input",
+                  "id": "lastName",
+                  "name": "lastName",
+                  "placeholder": "Doe",
+                  "required": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "stack",
+          "gap": 2,
+          "children": [
+            {
+              "type": "label",
+              "htmlFor": "email",
+              "label": "Email"
+            },
+            {
+              "type": "input",
+              "id": "email",
+              "name": "email",
+              "inputType": "email",
+              "placeholder": "john.doe@example.com",
+              "required": true
+            }
+          ]
+        },
+        {
+          "type": "stack",
+          "gap": 2,
+          "children": [
+            {
+              "type": "label",
+              "htmlFor": "subject",
+              "label": "Subject"
+            },
+            {
+              "type": "input",
+              "id": "subject",
+              "name": "subject",
+              "placeholder": "How can we help?",
+              "required": true
+            }
+          ]
+        },
+        {
+          "type": "stack",
+          "gap": 2,
+          "children": [
+            {
+              "type": "label",
+              "htmlFor": "message",
+              "label": "Message"
+            },
+            {
+              "type": "textarea",
+              "id": "message",
+              "name": "message",
+              "placeholder": "Tell us more about your inquiry...",
+              "rows": 5,
+              "required": true
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Send Message",
+          "variant": "default",
+          "className": "w-full"
+        }
+      ]
+    }
+  ]
+}

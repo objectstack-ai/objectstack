@@ -1,0 +1,53 @@
+{
+  // Type-checks this package's TESTS, which `tsconfig.json` excludes.
+  // See `packages/types/tsconfig.test.json` for why that exclusion was a hole:
+  // the build correctly keeps tests out of `dist`, but nothing else compiled
+  // them, so a test could assert a contract the compiler never checked. Here it
+  // hid a whole undeclared prop contract: `serverPagination.test.tsx` passed
+  // `data` / `manualPagination` / `rowCount` / `page` / ... to `ObjectGrid`,
+  // none of which `ObjectGridProps` declared (#4277).
+  //
+  // This project is now the ONLY one that compiles `spec-symbol-batch7.test.ts`,
+  // whose whole value is compile-time assertions (objectui#3181). It used to be
+  // rescued by a narrow `tsconfig.typetests.json` next door, which named that one
+  // file while the rest of the tree was still in TEST_DEBT; the package graduated
+  // in objectui#4040 and the narrow project was retired in objectui#4291, after
+  // `--listFiles` showed this project reads the same file and a provably-false
+  // `Assert` appended to it turned this project red. Keep the file compiling
+  // here: those assertions are erased at runtime, so vitest proves nothing
+  // about them and `tsc` is the only thing that can. Note this project's `lib`
+  // is one notch ABOVE the retired one's (ES2022 vs ES2020) — a superset, so
+  // every assertion that compiled there still compiles here.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // The package build emits `dist`; this project emits nothing, so it must
+    // not inherit `composite` / `declaration` from the build config.
+    "composite": false,
+    "jsx": "react-jsx",
+    // One notch above the root `lib` (ES2020), and only here: the tests use
+    // `Array.prototype.at` (ES2022) — `column-features.test.tsx`,
+    // `columnIdentity.test.tsx` — which shipped SOURCE must not, so raising it
+    // in `tsconfig.json` would let the build compile calls the browser targets
+    // do not have.
+    "lib": ["ES2022", "DOM"],
+    // Two global augmentations, neither of them an import:
+    //   - `node` for the import/export suites, which reach for `Buffer` and
+    //     Node globals while exercising the ExcelJS/CSV seams.
+    //   - `@testing-library/jest-dom` for the `toBeInTheDocument` /
+    //     `toHaveTextContent` matchers used across the `.tsx` suites; it does
+    //     not live under `@types/`, so it is never picked up automatically.
+    // Naming `types` at all switches off automatic `@types/*` inclusion, so
+    // both have to be listed here.
+    "types": ["node", "@testing-library/jest-dom"],
+    // Drop the root tsconfig's source-tree `paths` so `@object-ui/*` and
+    // `@objectstack/spec` resolve through the workspace dependency's built
+    // `.d.ts` instead of pulling sibling sources in as program inputs (TS6059).
+    "paths": {}
+  },
+  // `src/**/*.d.ts` is pulled in explicitly: the build program gets ambient
+  // declarations for free from `"include": ["src"]`, but an ambient declaration
+  // file is only a program input when a pattern NAMES it — being imported is
+  // not enough, because nothing imports it (plugin-map's lesson, #4270).
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/**/*.d.ts"]
+}

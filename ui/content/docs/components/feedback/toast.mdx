@@ -1,0 +1,53 @@
+---
+title: "Toast"
+description: "Brief notification messages that appear temporarily"
+---
+
+import { DemoGrid } from '@/app/components/ComponentDemo';
+
+The Toast component displays brief notifications to users that appear temporarily and then disappear.
+
+## Basic Usage
+
+A `toast` node renders its own trigger button. Clicking the button raises the toast the
+node declares — the title, description, variant and `durationMs` are all read off the node
+itself, so the whole demo is one schema node with no handler to wire up.
+
+<SchemaExample id="components-feedback-toast/basic-toast" />
+
+## Variants
+
+`variant` selects the toast style. `ToastSchema` declares exactly five members —
+`default`, `success`, `warning`, `error` and `info`; the four below plus `success`,
+which the Success Message example uses.
+
+<DemoGrid>
+  <SchemaExample id="components-feedback-toast/default" />
+  <SchemaExample id="components-feedback-toast/destructive" />
+  <SchemaExample id="components-feedback-toast/toast-with-action" />
+  <SchemaExample id="components-feedback-toast/toast-with-undo" />
+</DemoGrid>
+
+## Schema
+
+```ts
+interface ToastSchema {
+  type: 'toast';
+  title?: string;                // Toast title
+  description?: string;           // Toast message
+  variant?: 'default' | 'success' | 'warning' | 'error' | 'info';
+  
+  // Timing
+  durationMs?: number;            // Auto-dismiss time in ms
+}
+```
+
+## Examples
+
+### Success Message
+
+<SchemaExample id="components-feedback-toast/success-toast" />
+
+### Error Message
+
+<SchemaExample id="components-feedback-toast/error-toast" />

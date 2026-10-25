@@ -1,0 +1,12 @@
+{
+  "type": "alert-dialog",
+  "title": "Save Changes?",
+  "description": "You have unsaved changes. Do you want to save them before leaving?",
+  "trigger": {
+    "type": "button",
+    "label": "Close",
+    "variant": "outline"
+  },
+  "cancelText": "Don't Save",
+  "actionText": "Save"
+}

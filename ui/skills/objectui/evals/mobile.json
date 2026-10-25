@@ -1,0 +1,51 @@
+{
+  "skill_name": "objectui",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "My ObjectUI dashboard looks broken on mobile phones — cards stack but the sidebar takes up the whole screen. How do I make it responsive?",
+      "expected_output": "Provides responsive grid schema with Tailwind mobile-first classes, useBreakpoint hook usage, and the ResponsiveContainer breakpoint gate for the sidebar — @object-ui/mobile ships no mobile widgets, only that gate.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "useBreakpoint",
+          "grid-cols-1",
+          "md:",
+          "ResponsiveContainer"
+        ],
+        "must_not_contain": [
+          "window.innerWidth <"
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "prompt": "I need my ObjectUI app to work offline — users should be able to view cached data and queue form submissions when there's no network.",
+      "expected_output": "Provides useOffline hook usage with queue management, sync state UI indicators, and offline-first data flow pattern.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "useOffline",
+          "queue",
+          "sync"
+        ],
+        "must_not_contain": []
+      }
+    },
+    {
+      "id": 3,
+      "prompt": "How do I add swipe-to-delete and long-press context menus to my ObjectUI list items on mobile?",
+      "expected_output": "Provides useGesture from @object-ui/mobile, one hook per gesture, with type 'swipe-left' / 'long-press' and a threshold; the hook returns a ref to attach, not a handler bag.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "useGesture",
+          "swipe-left",
+          "long-press",
+          "@object-ui/mobile"
+        ],
+        "must_not_contain": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+---
+title: "Empty"
+description: "Empty state placeholder with optional action"
+---
+
+The Empty component displays a placeholder when there's no content to show.
+
+## Basic Usage
+
+<SchemaExample id="components-feedback-empty/basic-empty-state" />
+
+## With Icon
+
+<SchemaExample id="components-feedback-empty/with-icon" />
+
+## With Action
+
+<SchemaExample id="components-feedback-empty/with-action-button" />
+
+## Schema
+
+```ts
+import type { SchemaNode } from '@object-ui/types';
+
+interface EmptySchema {
+  type: 'empty';
+  icon?: string;                  // Lucide icon name
+  title?: string;                 // Main message
+  description?: string;           // Supporting text
+  action?: SchemaNode;            // Call to action button (any node; a bare string renders as text)
+  className?: string;
+}
+```
+
+## Examples
+
+### Search Results
+
+<SchemaExample id="components-feedback-empty/empty-search-results" />
+
+### Empty List
+
+<SchemaExample id="components-feedback-empty/empty-team-list" />

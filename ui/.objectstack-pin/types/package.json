@@ -1,0 +1,58 @@
+{
+  "name": "@objectstack/types",
+  "version": "18.1.0",
+  "license": "Apache-2.0",
+  "description": "Shared interfaces describing the ObjectStack Runtime environment",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "import": "./dist/node.mjs",
+      "require": "./dist/node.js"
+    }
+  },
+  "dependencies": {
+    "@objectstack/spec": "18.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.11"
+  },
+  "keywords": [
+    "objectstack",
+    "typescript",
+    "types",
+    "utilities"
+  ],
+  "author": "ObjectStack",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/objectstack-ai/objectstack.git",
+    "directory": "packages/types"
+  },
+  "homepage": "https://objectstack.ai/docs",
+  "bugs": "https://github.com/objectstack-ai/objectstack/issues",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "tsup && node ../../scripts/check-dts-emitted.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --project local",
+    "test:repo": "vitest run --project repo"
+  }
+}

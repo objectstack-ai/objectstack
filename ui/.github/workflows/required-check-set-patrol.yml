@@ -1,0 +1,177 @@
+name: Required Check Set Patrol
+
+# The standing caller for `scripts/check-required-check-set.mjs`.
+#
+# ## What it watches for (objectui#9422)
+#
+# `main`'s merge queue requires a set of check contexts — which ones is this
+# patrol's reading, not a number written here. That set lives in GitHub
+# ruleset 11776024 — repository SETTINGS. Removing a member from it reds no
+# gate, fires no alarm, and leaves no trace in any diff a reviewer reads. The
+# one time this repository was in that state (objectui#3523) three pull requests
+# (#3503, #3510, #3516) merged with `Type Check` at `conclusion=failure` onto a
+# `main` that #3498 had left with a type error; #3505 hot-fixed the result.
+#
+# ⛔ This patrol only READS. It never enrols, removes or renames a required
+# context, and never edits the ruleset — one `GET` per run and nothing else.
+#
+# ## Why a SCHEDULE, and why NOT a pull-request check
+#
+# A gate that calls the GitHub API at pull-request time inherits three failure
+# modes that have nothing to do with its subject: a fork pull request's reduced
+# token, an offline or degraded API, and rate limits. Each turns into a red that
+# teaches seats to ignore this check — and a watchdog nobody reads is exactly
+# what this card is about (objectui#6596: a permanently red check trains
+# everyone to ignore red).
+#
+# ⛔ A `merge_group` leg was considered and rejected for a sharper reason: a
+# check that is not in the required set does not gate the queue, and putting
+# THIS one in the required set is circular — the gate watching the required set
+# would then be the thing whose silent removal it exists to detect. The set can
+# never be self-watching. That argues for an out-of-band clock, which is what
+# this is.
+#
+# The same reasoning as `merge-queue-head-patrol.yml` rules out a
+# `pull_request` leg here: every job of a `pull_request`-triggered workflow
+# produces a check run, and `scripts/dependabot-merge-gate.mjs` requires every
+# produced name to be classified in one of its three buckets. Adding a leg would
+# mean editing that gate's declaration from a card that does not hold it. What
+# replaces it: `node scripts/check-required-check-set.mjs --self-test` runs
+# offline on every pull request through
+# `scripts/__tests__/check-required-check-set.test.ts`, which also drives the
+# real CLI over a committed fixture of the live API response with one member
+# removed and asserts it exits 3. The live transport is proven by
+# `workflow_dispatch`, which needs no merge.
+#
+# ## ⭐ What watches THIS patrol — the honest answer, in four parts
+#
+# A scheduled watchdog that silently stops running is the same defect one level
+# up, so this is answered rather than assumed:
+#
+#  1. THE LOGIC is watched offline, on every pull request, by the test above —
+#     including the ablation. A gate never observed failing is decoration.
+#  2. THE WIRING is watched in a diff. That test pins this file's existence, its
+#     `schedule` trigger, its permissions and the script it calls, and
+#     `scripts/__tests__/ci-cd-pipeline-doc.test.ts` independently requires
+#     every workflow here to carry a section and an inventory row in
+#     `content/docs/guide/ci-cd-pipeline.md`. Deleting the patrol, or quietly
+#     removing its clock, fails a pull request.
+#  3. THE TRANSPORT is watched by the exit contract: a reading that could not be
+#     taken is exit 2 and a RED job, never a green one. A token that lost the
+#     scope, a moved endpoint or an API outage is loud.
+#  4. ⚠️ THE RESIDUAL, declared and NOT dissolved: GitHub can delay or drop
+#     scheduled runs under load, and a repository admin can disable this
+#     workflow in the Actions UI — neither is visible from inside the tree. That
+#     is the same class as the gap this patrol closes, one level up, and it is
+#     an open question on objectui#9422 rather than something this file pretends
+#     to solve. Two things bound it, both measured rather than assumed:
+#       · GitHub disables scheduled workflows after 60 days of repository
+#         INACTIVITY. `origin/main` took 3392 commits in the last 60 days and
+#         the longest gap between consecutive commits over the most recent 400
+#         was 0.13 days (measured 2026-09-14), so that precondition is nowhere
+#         near holding here.
+#       · The reader is STATELESS — every run re-reads the full current
+#         membership, never a delta or a cursor. A dropped tick therefore costs
+#         detection LATENCY and never coverage: the next tick sees the same
+#         breach.
+#
+# ## The cadence, and why it is not the sibling's
+#
+# Daily, not every fifteen minutes. `merge-queue-head-patrol.yml` runs 96 times
+# a day because its subject is a wedge whose remedy has a 60-minute window. This
+# subject is a settings edit: it has no window, it does not heal itself, and it
+# stays true until somebody changes it back — so a second read four minutes
+# later would read exactly the same thing. One run a day is one API call a day.
+# The minute is off the hour on purpose: scheduled workflows bunch at :00 and
+# are delayed under that load. 05:23 UTC is clear of every other cron in this
+# directory.
+
+on:
+  schedule:
+    - cron: '23 5 * * *'
+  workflow_dispatch: {}
+
+# Least privilege, and less than either sibling patrol takes. The reading is a
+# GET against a public repository's own rules endpoint; this job writes nothing,
+# anywhere, so it asks for no `issues: write` and no `actions: read`.
+permissions:
+  contents: read
+
+# One patrol at a time, and never cancelled: a scheduled run overlapping a
+# manual dispatch buys nothing, and cancelling one mid-read discards a reading.
+concurrency:
+  group: required-check-set-patrol
+  cancel-in-progress: false
+
+jobs:
+  patrol:
+    name: Required check set patrol
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # No `pnpm install`: the patrol imports `scripts/invoked-as.mjs` and
+      # nothing else, and reaches the API through global `fetch`. Installing the
+      # workspace would buy nothing and would give a scheduled patrol a lockfile
+      # it could fail on.
+      - name: Read the merge queue's required-check set
+        id: patrol
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          # The branch the queue protects, taken from the repository rather than
+          # typed: `GET /rules/branches/<branch>` answers `200 []` for a branch
+          # no ruleset targets, and the patrol reports an empty answer as a
+          # breach — so a hand-typed branch name would be a permanent red.
+          QUEUE_BASE_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set +e
+          node scripts/check-required-check-set.mjs \
+            > "$RUNNER_TEMP/patrol.md" 2> "$RUNNER_TEMP/patrol.err"
+          code=$?
+          set -e
+          # Captured with NO pipe in between: `node … | tail` would report the
+          # PIPE's status, and `tail` essentially never fails, so a breach (3),
+          # a clean reading (0) and an unreadable one (2) would all read as 0 —
+          # the exact class of silent pass this patrol exists to catch.
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          cat "$RUNNER_TEMP/patrol.err" >&2 || true
+
+      - name: Publish the reading to the run summary
+        # Always: this IS the delivery. A drift in the WATCHED contexts is
+        # reported here and deliberately does not fail the job — see the script's
+        # header for the two tiers and the failure mode that split accepts.
+        if: always()
+        run: |
+          {
+            echo "### Required check set patrol — exit ${{ steps.patrol.outputs.exit_code }}"
+            echo
+            cat "$RUNNER_TEMP/patrol.md" 2>/dev/null || echo '_(no reading produced)_'
+            echo
+            echo '<details><summary>stderr</summary>'
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/patrol.err" 2>/dev/null || true
+            echo '```'
+            echo
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail the run on a breach, or when the set could not be read
+        # LAST, on purpose: the summary carries the reading BEFORE the job goes
+        # red. Land the truth, then raise the alarm.
+        if: steps.patrol.outputs.exit_code != '0'
+        run: |
+          if [ "${{ steps.patrol.outputs.exit_code }}" = "3" ]; then
+            echo "::error::The merge queue's required-check set has LOST a pinned member — a check that is not required does not fail a queue build, so the queue will merge without it and nothing else will go red. The reading is in this run's summary."
+          else
+            echo "::error::check-required-check-set exited ${{ steps.patrol.outputs.exit_code }} — the required set was NOT read. This is not an intact-set reading."
+          fi
+          exit 1

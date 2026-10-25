@@ -1,0 +1,76 @@
+---
+title: "Text"
+description: "Display text with standardized typography styles"
+---
+
+import { DemoGrid } from '@/app/components/ComponentDemo';
+
+The Text component displays text content with predefined typography variants.
+
+`variant` is the published vocabulary of `TextSchema` and the renderer maps every
+value in it: `h1`-`h6` render the heading element they name, `body`, `caption` and
+`overline` render an inline span. Any other spelling is refused by the validator
+rather than ignored.
+
+## Basic Usage
+
+<SchemaExample id="components-basic-text/simple-text" />
+
+## Variants
+
+<DemoGrid>
+  <SchemaExample id="components-basic-text/heading-1" />
+  <SchemaExample id="components-basic-text/heading-2" />
+  <SchemaExample id="components-basic-text/heading-3" />
+  <SchemaExample id="components-basic-text/heading-4" />
+  <SchemaExample id="components-basic-text/heading-5" />
+  <SchemaExample id="components-basic-text/paragraph" />
+  <SchemaExample id="components-basic-text/caption" />
+</DemoGrid>
+
+## Schema
+
+```plaintext
+interface TextSchema {
+  type: 'text';
+  content: string;           // Text content to display — the one spelling
+  variant?: 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' | 'body' | 'caption' | 'overline';
+  align?: 'left' | 'center' | 'right' | 'justify';
+  className?: string;        // Additional CSS classes
+}
+```
+
+> **Retired: `value`** (objectui#6951, ADR-0049 enforce-or-remove). `value` was a
+> second spelling of the one content slot — the renderer read it only as the
+> fallback of `content || value` — and it is no longer part of `TextSchema` on
+> either face. A `text` node that authors `value` now fails validation with:
+>
+> > RETIRED (ADR-0049) — `value` is no longer part of TextSchema; write
+> > `content`. …
+>
+> Rename the key to `content`; the string is unchanged. Measured before the
+> retirement: 776 `content`-only `text` nodes against 25 `value`-only across
+> `examples/`, `apps/`, `packages/*/examples` and `content/docs/**`.
+
+## Examples
+
+### Colored Text
+
+Colour is `className`, not a key of its own. `TextSchema` publishes no `color`,
+and the renderer builds the element's class list from `variant`, `align` and
+`className` alone — so the three tiles below author
+`"className": "text-primary"`, `"text-destructive"` and
+`"text-muted-foreground"` on the `text` nodes themselves.
+
+⚠️ This page taught a `color` key until objectui#7444. Nothing ever declared or
+read it: `BaseSchema` is `.passthrough()`, so an authored `color` still renders
+without error and still does nothing — it does not even reach the element,
+because `color` is not on the DOM pass-through whitelist. `objectui validate`
+refuses it by name. Rename the key to `className`; the Tailwind class string is
+unchanged.
+
+<SchemaExample id="components-basic-text/text-with-colors" />
+
+### Text Alignment
+
+<SchemaExample id="components-basic-text/text-alignment" />

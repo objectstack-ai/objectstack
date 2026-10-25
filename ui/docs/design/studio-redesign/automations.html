@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Studio · Automations · Flow canvas</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#ffffff}
+:root{--bg:#ffffff;--fg:#0f172a;--muted:#f1f5f9;--muted-fg:#64748b;--border:#e2e8f0;--sidebar:#fafafa;--primary-soft:#eef2ff;--primary-fg:#ffffff;--green:#16a34a;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+*{box-sizing:border-box}
+a{color:var(--primary);text-decoration:none}a:hover{color:#3730a3}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+input,textarea{font:inherit;color:inherit}
+.iconbtn:hover{background:var(--muted);color:var(--fg)}
+.chip:hover{background:var(--muted)}
+.railitem:hover{background:#eef0f4;color:var(--fg)}
+.tab:hover{color:var(--fg)}
+.node:hover{border-color:#cbd5e1}
+</style>
+</head>
+<body>
+<div style="width:100%;min-height:820px;display:flex;flex-direction:column;background:var(--bg);color:var(--fg);font-family:Inter,ui-sans-serif,system-ui,sans-serif;font-size:13px;line-height:1.4;--primary:#4f46e5">
+
+  <header style="height:48px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;padding:0 12px;border-bottom:1px solid var(--border);background:var(--bg)">
+    <div style="display:flex;align-items:center;gap:6px;min-width:0">
+      <a href="#" aria-label="Back to home" class="iconbtn" style="display:inline-flex;width:32px;height:32px;align-items:center;justify-content:center;border-radius:6px;color:var(--muted-fg)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+      </a>
+      <button type="button" class="chip" style="display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 8px 0 4px;border-radius:6px">
+        <span style="display:inline-flex;width:24px;height:24px;align-items:center;justify-content:center;border-radius:6px;background:#dc2626;color:#ffffff">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path><rect width="20" height="14" x="2" y="6" rx="2"></rect></svg>
+        </span>
+        <span style="font-size:13px;font-weight:600">HotCRM</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--muted-fg)"><path d="m6 9 6 6 6-6"></path></svg>
+      </button>
+    </div>
+
+    <nav aria-label="Pillars" style="display:flex;gap:2px;padding:3px;background:var(--muted);border-radius:8px">
+      <a href="#" class="tab" style="display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border-radius:6px;color:var(--muted-fg);font-size:13px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M3 5v14a9 3 0 0 0 18 0V5"></path><path d="M3 12a9 3 0 0 0 18 0"></path></svg>
+        Data
+      </a>
+      <a href="#" aria-current="page" style="display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border-radius:6px;background:var(--bg);color:var(--fg);font-weight:500;font-size:13px;box-shadow:0 1px 2px rgba(15,23,42,.08)">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--primary)"><rect width="8" height="8" x="3" y="3" rx="2"></rect><path d="M7 11v4a2 2 0 0 0 2 2h4"></path><rect width="8" height="8" x="13" y="13" rx="2"></rect></svg>
+        Automations
+      </a>
+      <a href="#" class="tab" style="display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border-radius:6px;color:var(--muted-fg);font-size:13px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="7" height="9" x="3" y="3" rx="1"></rect><rect width="7" height="5" x="14" y="3" rx="1"></rect><rect width="7" height="9" x="14" y="12" rx="1"></rect><rect width="7" height="5" x="3" y="16" rx="1"></rect></svg>
+        Interfaces
+      </a>
+      <a href="#" class="tab" style="display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border-radius:6px;color:var(--muted-fg);font-size:13px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path></svg>
+        Access
+      </a>
+    </nav>
+
+    <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px">
+      <button type="button" class="chip" style="display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;color:var(--fg)">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--muted-fg)"><line x1="6" x2="6" y1="3" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg>
+        Changes
+        <span style="display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--primary);color:var(--primary-fg);font-size:11px;font-weight:600">3</span>
+      </button>
+      <button type="button" style="display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:6px;background:var(--primary);color:var(--primary-fg);font-size:13px;font-weight:500">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"></path><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"></path><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"></path><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"></path></svg>
+        Publish
+      </button>
+    </div>
+  </header>
+
+  <div style="display:flex;flex-wrap:wrap;flex:1 1 auto;min-height:0">
+
+    <aside style="flex:0 0 240px;display:flex;flex-direction:column;background:var(--sidebar);border-right:1px solid var(--border)">
+      <div style="height:44px;display:flex;align-items:center;gap:8px;padding:0 12px 0 16px">
+        <span style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-fg)">Automations</span>
+        <span style="display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:18px;padding:0 6px;border-radius:9px;background:var(--muted);color:var(--muted-fg);font-size:11px;font-weight:500">23</span>
+        <button type="button" aria-label="New automation" class="iconbtn" style="margin-left:auto;display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border-radius:6px;color:var(--muted-fg)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>
+        </button>
+      </div>
+      <div style="padding:0 12px 8px">
+        <label for="search-flows" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Search automations</label>
+        <div style="position:relative">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="position:absolute;left:10px;top:9px;color:var(--muted-fg)"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>
+          <input id="search-flows" type="text" placeholder="Search automations…" style="width:100%;height:32px;padding:0 10px 0 30px;border:1px solid var(--border);border-radius:6px;background:var(--bg);font-size:13px;outline:none">
+        </div>
+      </div>
+      <nav aria-label="Automations" style="display:flex;flex-direction:column;gap:1px;padding:4px 8px 12px">
+        <div style="display:flex;align-items:center;gap:6px;height:28px;padding:0 10px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-fg)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>Account<span style="margin-left:auto;font-weight:500;letter-spacing:0;text-transform:none">2</span></div>
+        <a href="#" class="railitem" title="Record-triggered · after create · On" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 10px 0 22px;border-radius:6px;color:#334155;font-size:13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--muted-fg)"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Account Approval</span><span style="width:6px;height:6px;border-radius:3px;background:var(--green)"></span></a>
+        <a href="#" class="railitem" title="Autolaunched subflow · On" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 10px 0 22px;border-radius:6px;color:#334155;font-size:13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--muted-fg)"><polyline points="15 10 20 15 15 20"></polyline><path d="M4 4v7a4 4 0 0 0 4 4h12"></path></svg><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Copy Lead Revenue to New Account</span><span style="width:6px;height:6px;border-radius:3px;background:var(--green)"></span></a>
+
+        <div style="display:flex;align-items:center;gap:6px;height:28px;margin-top:6px;padding:0 10px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-fg)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>Campaign<span style="margin-left:auto;font-weight:500;letter-spacing:0;text-transform:none">2</span></div>
+        <a href="#" aria-current="page" title="Screen flow · On" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 10px 0 22px;border-radius:6px;background:var(--primary-soft);color:var(--primary);font-weight:500;font-size:13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4.1 12 6"></path><path d="m5.1 8-2.9-.8"></path><path d="m6 12-1.9 2"></path><path d="M7.2 2.2 8 5.1"></path><path d="M9.037 9.69a.498.498 0 0 1 .653-.653l11 4.5a.5.5 0 0 1-.074.949l-4.349 1.041a1 1 0 0 0-.74.739l-1.04 4.35a.5.5 0 0 1-.95.074z"></path></svg><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Enroll Members in Campaign</span><span style="width:6px;height:6px;border-radius:3px;background:var(--green)"></span></a>
+        <a href="#" class="railitem" title="Scheduled · Not running here" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 10px 0 22px;border-radius:6px;color:#334155;font-size:13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--muted-fg)"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Campaign Auto-Completion</span><span style="width:6px;height:6px;border-radius:3px;background:#94a3b8"></span></a>
+
+        <div style="display:flex;align-items:center;gap:6px;height:28px;margin-top:6px;padding:0 10px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-fg)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>Campaign Member<span style="margin-left:auto;font-weight:500;letter-spacing:0;text-transform:none">2</span></div>
+        <a href="#" class="railitem" title="Autolaunched subflow · On" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 10px 0 22px;border-radius:6px;color:#334155;font-size:13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--muted-fg)"><polyline points="15 10 20 15 15 20"></polyline><path d="M4 4v7a4 4 0 0 0 4 4h12"></path></svg><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Enroll Lead in Campaign</span><span style="width:6px;height:6px;border-radius:3px;background:var(--green)"></span></a>
+        <a href="#" class="railitem" title="Autolaunched subflow · On" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 10px 0 22px;border-radius:6px;color:#334155;font-size:13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--muted-fg)"><polyline points="15 10 20 15 15 20"></polyline><path d="M4 4v7a4 4 0 0 0 4 4h12"></path></svg><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Enroll Contact in Campaign</span><span style="width:6px;height:6px;border-radius:3px;background:var(--green)"></span></a>
+
+        <div style="display:flex;align-items:center;gap:6px;height:28px;margin-top:6px;padding:0 10px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-fg)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>Contact<span style="margin-left:auto;font-weight:500;letter-spacing:0;text-transform:none">1</span></div>
+        <a href="#" class="railitem" title="Record-triggered · after create · On" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 10px 0 22px;border-radius:6px;color:#334155;font-size:13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--muted-fg)"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Contact Welcome</span><span style="width:6px;height:6px;border-radius:3px;background:var(--green)"></span></a>
+
+        <div style="display:flex;align-items:center;gap:6px;height:28px;margin-top:6px;padding:0 10px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-fg)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>Contract<span style="margin-left:auto;font-weight:500;letter-spacing:0;text-transform:none">2</span></div>
+        <a href="#" class="railitem" title="Scheduled · Not running here" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 10px 0 22px;border-radius:6px;color:#334155;font-size:13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--muted-fg)"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Contract Renewal Reminder</span><span style="width:6px;height:6px;border-radius:3px;background:#94a3b8"></span></a>
+        <a href="#" class="railitem" title="Scheduled · Not running here" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 10px 0 22px;border-radius:6px;color:#334155;font-size:13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--muted-fg)"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Contract Auto-Expiration</span><span style="width:6px;height:6px;border-radius:3px;background:#94a3b8"></span></a>
+
+        <div style="display:flex;align-items:center;gap:6px;height:28px;margin-top:6px;padding:0 10px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-fg)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>Forecast<span style="margin-left:auto;font-weight:500;letter-spacing:0;text-transform:none">1</span></div>
+        <a href="#" class="railitem" title="Scheduled · Not running here" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 10px 0 22px;border-radius:6px;color:#334155;font-size:13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--muted-fg)"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Forecast Snapshot</span><span style="width:6px;height:6px;border-radius:3px;background:#94a3b8"></span></a>
+
+        <div style="display:flex;align-items:center;gap:6px;height:28px;margin-top:6px;padding:0 10px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-fg)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>Lead<span style="margin-left:auto;font-weight:500;letter-spacing:0;text-transform:none">4</span></div>
+        <a href="#" class="railitem" title="Record-triggered · after create · On" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 10px 0 22px;border-radius:6px;color:#334155;font-size:13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--muted-fg)"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">New Lead Routing &amp; SLA</span><span style="width:6px;height:6px;border-radius:3px;background:var(--green)"></span></a>
+        <a href="#" class="railitem" title="Screen flow · On" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 10px 0 22px;border-radius:6px;color:#334155;font-size:13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--muted-fg)"><path d="M14 4.1 12 6"></path><path d="m5.1 8-2.9-.8"></path><path d="m6 12-1.9 2"></path><path d="M7.2 2.2 8 5.1"></path><path d="M9.037 9.69a.498.498 0 0 1 .653-.653l11 4.5a.5.5 0 0 1-.074.949l-4.349 1.041a1 1 0 0 0-.74.739l-1.04 4.35a.5.5 0 0 1-.95.074z"></path></svg><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Lead Conversion Process</span><span style="width:6px;height:6px;border-radius:3px;background:var(--green)"></span></a>
+        <a href="#" class="railitem" title="Record-triggered · after create · On" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 10px 0 22px;border-radius:6px;color:#334155;font-size:13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--muted-fg)"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Lead Conversion Approval</span><span style="width:6px;height:6px;border-radius:3px;background:var(--green)"></span></a>
+        <a href="#" class="railitem" title="Screen flow · On" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 10px 0 22px;border-radius:6px;color:#334155;font-size:13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--muted-fg)"><path d="M14 4.1 12 6"></path><path d="m5.1 8-2.9-.8"></path><path d="m6 12-1.9 2"></path><path d="M7.2 2.2 8 5.1"></path><path d="M9.037 9.69a.498.498 0 0 1 .653-.653l11 4.5a.5.5 0 0 1-.074.949l-4.349 1.041a1 1 0 0 0-.74.739l-1.04 4.35a.5.5 0 0 1-.95.074z"></path></svg><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Schedule Follow-up</span><span style="width:6px;height:6px;border-radius:3px;background:var(--green)"></span></a>
+
+        <div style="display:flex;align-items:center;gap:6px;height:28px;margin-top:6px;padding:0 10px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-fg)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>Opportunity<span style="margin-left:auto;font-weight:500;letter-spacing:0;text-transform:none">7</span></div>
+        <a href="#" class="railitem" title="Record-triggered · after update · On" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 10px 0 22px;border-radius:6px;color:#334155;font-size:13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--muted-fg)"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Large Deal Approval</span><span style="width:6px;height:6px;border-radius:3px;background:var(--green)"></span></a>
+        <a href="#" class="railitem" title="Record-triggered · after create · On" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 10px 0 22px;border-radius:6px;color:#334155;font-size:13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--muted-fg)"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Large Deal Approval (on create)</span><span style="width:6px;height:6px;border-radius:3px;background:var(--green)"></span></a>
+        <a href="#" class="railitem" title="Record-triggered · after update · On" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 10px 0 22px;border-radius:6px;color:#334155;font-size:13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--muted-fg)"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Opportunity Status Change Approval</span><span style="width:6px;height:6px;border-radius:3px;background:var(--green)"></span></a>
+        <a href="#" class="railitem" title="Record-triggered · after update · On" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 10px 0 22px;border-radius:6px;color:#334155;font-size:13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--muted-fg)"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Opportunity Qualification Approval</span><span style="width:6px;height:6px;border-radius:3px;background:var(--green)"></span></a>
+        <a href="#" class="railitem" title="Screen flow · On" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 10px 0 22px;border-radius:6px;color:#334155;font-size:13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--muted-fg)"><path d="M14 4.1 12 6"></path><path d="m5.1 8-2.9-.8"></path><path d="m6 12-1.9 2"></path><path d="M7.2 2.2 8 5.1"></path><path d="M9.037 9.69a.498.498 0 0 1 .653-.653l11 4.5a.5.5 0 0 1-.074.949l-4.349 1.041a1 1 0 0 0-.74.739l-1.04 4.35a.5.5 0 0 1-.95.074z"></path></svg><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Generate Quote from Opportunity</span><span style="width:6px;height:6px;border-radius:3px;background:var(--green)"></span></a>
+        <a href="#" class="railitem" title="Record-triggered · after update · On" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 10px 0 22px;border-radius:6px;color:#334155;font-size:13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--muted-fg)"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Large Deal Won Alert</span><span style="width:6px;height:6px;border-radius:3px;background:var(--green)"></span></a>
+        <a href="#" class="railitem" title="Scheduled · Not running here" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 10px 0 22px;border-radius:6px;color:#334155;font-size:13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--muted-fg)"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Stalled Deal Alert</span><span style="width:6px;height:6px;border-radius:3px;background:#94a3b8"></span></a>
+
+        <div style="display:flex;align-items:center;gap:6px;height:28px;margin-top:6px;padding:0 10px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-fg)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>Quote<span style="margin-left:auto;font-weight:500;letter-spacing:0;text-transform:none">1</span></div>
+        <a href="#" class="railitem" title="Scheduled · Not running here" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 10px 0 22px;border-radius:6px;color:#334155;font-size:13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--muted-fg)"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Quote Auto-Expiration</span><span style="width:6px;height:6px;border-radius:3px;background:#94a3b8"></span></a>
+
+        <div style="display:flex;align-items:center;gap:6px;height:28px;margin-top:6px;padding:0 10px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-fg)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>Task<span style="margin-left:auto;font-weight:500;letter-spacing:0;text-transform:none">1</span></div>
+        <a href="#" class="railitem" title="Record-triggered · after create · On" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 10px 0 22px;border-radius:6px;color:#334155;font-size:13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--muted-fg)"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Urgent Task Alert</span><span style="width:6px;height:6px;border-radius:3px;background:var(--green)"></span></a>
+
+        <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;padding:0 10px;font-size:10px;color:var(--muted-fg)">
+          <span style="display:inline-flex;align-items:center;gap:4px"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>Record</span>
+          <span style="display:inline-flex;align-items:center;gap:4px"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>Scheduled</span>
+          <span style="display:inline-flex;align-items:center;gap:4px"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.037 9.69a.498.498 0 0 1 .653-.653l11 4.5a.5.5 0 0 1-.074.949l-4.349 1.041a1 1 0 0 0-.74.739l-1.04 4.35a.5.5 0 0 1-.95.074z"></path></svg>Screen</span>
+          <span style="display:inline-flex;align-items:center;gap:4px"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 10 20 15 15 20"></polyline><path d="M4 4v7a4 4 0 0 0 4 4h12"></path></svg>Subflow</span>
+          <span style="display:inline-flex;align-items:center;gap:4px"><span style="width:6px;height:6px;border-radius:3px;background:var(--green)"></span>On</span>
+          <span style="display:inline-flex;align-items:center;gap:4px"><span style="width:6px;height:6px;border-radius:3px;background:#94a3b8"></span>Not running here</span>
+        </div>
+      </nav>
+    </aside>
+
+    <main style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column;background:var(--bg)">
+
+      <div style="padding:18px 24px 0;border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:12px">
+          <span style="display:inline-flex;width:32px;height:32px;align-items:center;justify-content:center;border-radius:8px;background:var(--primary-soft);color:var(--primary)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="8" height="8" x="3" y="3" rx="2"></rect><path d="M7 11v4a2 2 0 0 0 2 2h4"></path><rect width="8" height="8" x="13" y="13" rx="2"></rect></svg>
+          </span>
+          <h1 style="margin:0;font-size:18px;font-weight:600;letter-spacing:-.01em">Enroll Members in Campaign</h1>
+          <code style="display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:5px;background:var(--muted);color:var(--muted-fg);font-family:var(--mono);font-size:11px">campaign_enrollment</code>
+          <span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted-fg)"><span>Trigger · screen</span><span style="color:#cbd5e1">·</span><span>Run as · user</span><span style="color:#cbd5e1">·</span><span>v1</span></span>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:10px">
+            <span style="display:inline-flex;align-items:center;gap:8px;font-size:12px;color:#334155" title="Off by default · review before enabling">
+              <button type="button" role="switch" aria-checked="true" aria-label="Enabled" style="position:relative;width:36px;height:20px;border-radius:10px;background:var(--green)">
+                <span style="position:absolute;top:2px;left:18px;width:16px;height:16px;border-radius:8px;background:#ffffff;box-shadow:0 1px 2px rgba(15,23,42,.2)"></span>
+              </button>
+              Enabled
+            </span>
+            <span style="width:1px;height:20px;background:var(--border)"></span>
+            <button type="button" aria-label="More actions" class="iconbtn" style="display:inline-flex;width:32px;height:32px;align-items:center;justify-content:center;border-radius:6px;color:var(--muted-fg)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle></svg>
+            </button>
+          </div>
+        </div>
+        <nav aria-label="Automation sections" style="display:flex;gap:4px;margin-top:12px;margin-bottom:-1px">
+          <a href="#" aria-current="page" style="display:inline-flex;align-items:center;height:36px;padding:0 10px;border-bottom:2px solid var(--primary);color:var(--fg);font-weight:500;font-size:13px">Canvas</a>
+          <a href="#" class="tab" style="display:inline-flex;align-items:center;height:36px;padding:0 10px;border-bottom:2px solid transparent;color:var(--muted-fg);font-size:13px">Variables</a>
+          <a href="#" class="tab" style="display:inline-flex;align-items:center;height:36px;padding:0 10px;border-bottom:2px solid transparent;color:var(--muted-fg);font-size:13px">Runs</a>
+          <a href="#" class="tab" style="display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 10px;border-bottom:2px solid transparent;color:var(--muted-fg);font-size:13px">Problems <span style="display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#fef3c7;color:#92400e;font-size:11px;font-weight:600">3</span></a>
+          <a href="#" class="tab" style="display:inline-flex;align-items:center;height:36px;padding:0 10px;border-bottom:2px solid transparent;color:var(--muted-fg);font-size:13px">Debug</a>
+        </nav>
+      </div>
+
+      <div style="display:flex;flex-wrap:wrap;flex:1 1 auto;min-height:0">
+
+        <section aria-label="Flow canvas" style="position:relative;flex:999 1 480px;min-width:0;display:flex;flex-direction:column;align-items:center;padding:24px;background-color:var(--sidebar);background-image:radial-gradient(#d4d9e2 1px, transparent 1px);background-size:20px 20px">
+
+          <div class="node" style="display:flex;align-items:center;gap:10px;width:260px;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;box-shadow:0 1px 2px rgba(15,23,42,.04)">
+            <span style="display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border-radius:6px;background:#dcfce7;color:#15803d"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3"></polygon></svg></span>
+            <span style="min-width:0;flex:1"><span style="display:block;font-size:13px;font-weight:600">Start</span><span style="display:flex;gap:6px;align-items:baseline;font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:#15803d;font-weight:600">Start <code style="font-family:var(--mono);text-transform:none;letter-spacing:0;color:var(--muted-fg);font-weight:400;font-size:11px">crm_campaign</code></span></span>
+          </div>
+          <div style="width:2px;height:22px;background:#cbd5e1"></div>
+
+          <div class="node" style="display:flex;align-items:center;gap:10px;width:260px;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;box-shadow:0 1px 2px rgba(15,23,42,.04)">
+            <span style="display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border-radius:6px;background:#fce7f3;color:#be185d"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="14" x="2" y="3" rx="2"></rect><line x1="8" x2="16" y1="21" y2="21"></line><line x1="12" x2="12" y1="17" y2="21"></line></svg></span>
+            <span style="min-width:0;flex:1"><span style="display:block;font-size:13px;font-weight:600">Enrollment Criteria</span><span style="display:block;font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:#be185d;font-weight:600">Screen</span></span>
+          </div>
+          <div style="width:2px;height:22px;background:#cbd5e1"></div>
+
+          <div class="node" style="display:flex;align-items:center;gap:10px;width:260px;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;box-shadow:0 1px 2px rgba(15,23,42,.04)">
+            <span style="display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border-radius:6px;background:#dbeafe;color:#1d4ed8"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M3 5v14a9 3 0 0 0 18 0V5"></path><path d="M3 12a9 3 0 0 0 18 0"></path></svg></span>
+            <span style="min-width:0;flex:1"><span style="display:block;font-size:13px;font-weight:600">Get Campaign</span><span style="display:flex;gap:6px;align-items:baseline;font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:#1d4ed8;font-weight:600">Get record <code style="font-family:var(--mono);text-transform:none;letter-spacing:0;color:var(--muted-fg);font-weight:400;font-size:11px">crm_campaign</code></span></span>
+          </div>
+          <div style="width:2px;height:22px;background:#cbd5e1"></div>
+
+          <div aria-current="true" style="display:flex;align-items:center;gap:10px;width:260px;padding:10px 12px;background:var(--bg);border:1px solid var(--primary);border-radius:8px;box-shadow:0 0 0 3px var(--primary-soft)">
+            <span style="display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border-radius:6px;background:#fef3c7;color:#b45309"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 3h5v5"></path><path d="M8 3H3v5"></path><path d="M12 22v-8.3a4 4 0 0 0-1.172-2.872L3 3"></path><path d="m15 9 6-6"></path></svg></span>
+            <span style="min-width:0;flex:1"><span style="display:block;font-size:13px;font-weight:600">Campaign Open?</span><span style="display:block;font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:#b45309;font-weight:600">Decision · 2 outcomes</span></span>
+          </div>
+          <div style="width:2px;height:16px;background:#cbd5e1"></div>
+          <div style="width:280px;height:2px;background:#cbd5e1"></div>
+
+          <div style="width:560px;display:grid;grid-template-columns:repeat(2, minmax(0, 1fr))">
+            <div style="display:flex;flex-direction:column;align-items:center">
+              <div style="width:2px;height:14px;background:#cbd5e1"></div>
+              <code style="display:inline-block;margin-bottom:6px;padding:2px 6px;border-radius:4px;background:var(--muted);font-family:var(--mono);font-size:10px;color:#334155">memberSource != "contacts"</code>
+              <div class="node" style="display:flex;align-items:center;gap:10px;width:260px;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;box-shadow:0 1px 2px rgba(15,23,42,.04)">
+                <span style="display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border-radius:6px;background:#dbeafe;color:#1d4ed8"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M3 5v14a9 3 0 0 0 18 0V5"></path><path d="M3 12a9 3 0 0 0 18 0"></path></svg></span>
+                <span style="min-width:0;flex:1"><span style="display:block;font-size:13px;font-weight:600">Find Eligible Leads</span><span style="display:flex;gap:6px;align-items:baseline;font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:#1d4ed8;font-weight:600">Get record <code style="font-family:var(--mono);text-transform:none;letter-spacing:0;color:var(--muted-fg);font-weight:400;font-size:11px">crm_lead</code></span></span>
+              </div>
+              <div style="width:2px;height:22px;background:#cbd5e1"></div>
+              <div class="node" style="display:flex;align-items:center;gap:10px;width:260px;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;box-shadow:0 1px 2px rgba(15,23,42,.04)">
+                <span style="display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border-radius:6px;background:#ede9fe;color:#6d28d9"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m17 2 4 4-4 4"></path><path d="M3 11v-1a4 4 0 0 1 4-4h14"></path><path d="m7 22-4-4 4-4"></path><path d="M21 13v1a4 4 0 0 1-4 4H3"></path></svg></span>
+                <span style="min-width:0;flex:1"><span style="display:block;font-size:13px;font-weight:600">Process Each Lead</span><span style="display:block;font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:#6d28d9;font-weight:600">Loop</span></span>
+              </div>
+              <div style="width:2px;height:16px;background:#cbd5e1"></div>
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:center">
+              <div style="width:2px;height:14px;background:#cbd5e1"></div>
+              <code style="display:inline-block;margin-bottom:6px;padding:2px 6px;border-radius:4px;background:var(--muted);font-family:var(--mono);font-size:10px;color:#334155">memberSource == "contacts"</code>
+              <div class="node" style="display:flex;align-items:center;gap:10px;width:260px;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;box-shadow:0 1px 2px rgba(15,23,42,.04)">
+                <span style="display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border-radius:6px;background:#dbeafe;color:#1d4ed8"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M3 5v14a9 3 0 0 0 18 0V5"></path><path d="M3 12a9 3 0 0 0 18 0"></path></svg></span>
+                <span style="min-width:0;flex:1"><span style="display:block;font-size:13px;font-weight:600">Find Eligible Contacts</span><span style="display:flex;gap:6px;align-items:baseline;font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:#1d4ed8;font-weight:600">Get record <code style="font-family:var(--mono);text-transform:none;letter-spacing:0;color:var(--muted-fg);font-weight:400;font-size:11px">crm_contact</code></span></span>
+              </div>
+              <div style="width:2px;height:22px;background:#cbd5e1"></div>
+              <div class="node" style="display:flex;align-items:center;gap:10px;width:260px;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;box-shadow:0 1px 2px rgba(15,23,42,.04)">
+                <span style="display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border-radius:6px;background:#ede9fe;color:#6d28d9"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m17 2 4 4-4 4"></path><path d="M3 11v-1a4 4 0 0 1 4-4h14"></path><path d="m7 22-4-4 4-4"></path><path d="M21 13v1a4 4 0 0 1-4 4H3"></path></svg></span>
+                <span style="min-width:0;flex:1"><span style="display:block;font-size:13px;font-weight:600">Process Each Contact</span><span style="display:block;font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:#6d28d9;font-weight:600">Loop</span></span>
+              </div>
+              <div style="width:2px;height:16px;background:#cbd5e1"></div>
+            </div>
+          </div>
+
+          <div style="width:280px;height:2px;background:#cbd5e1"></div>
+          <div style="width:2px;height:16px;background:#cbd5e1"></div>
+          <div class="node" style="display:flex;align-items:center;gap:10px;width:260px;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;box-shadow:0 1px 2px rgba(15,23,42,.04)">
+            <span style="display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border-radius:6px;background:var(--muted);color:var(--muted-fg)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"></rect></svg></span>
+            <span style="min-width:0;flex:1"><span style="display:block;font-size:13px;font-weight:600">End</span><span style="display:block;font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted-fg);font-weight:600">End</span></span>
+          </div>
+
+          <div style="position:absolute;right:16px;bottom:16px;display:flex;align-items:center;gap:2px;padding:3px;background:var(--bg);border:1px solid var(--border);border-radius:8px;box-shadow:0 1px 2px rgba(15,23,42,.06)">
+            <button type="button" aria-label="Zoom out" class="iconbtn" style="display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border-radius:6px;color:var(--muted-fg)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"></path></svg></button>
+            <span style="min-width:44px;text-align:center;font-size:12px;color:#334155">100%</span>
+            <button type="button" aria-label="Zoom in" class="iconbtn" style="display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border-radius:6px;color:var(--muted-fg)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg></button>
+            <span style="width:1px;height:18px;background:var(--border);margin:0 2px"></span>
+            <button type="button" aria-label="Fit to view" class="iconbtn" style="display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border-radius:6px;color:var(--muted-fg)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3"></path><path d="M21 8V5a2 2 0 0 0-2-2h-3"></path><path d="M3 16v3a2 2 0 0 0 2 2h3"></path><path d="M16 21h3a2 2 0 0 0 2-2v-3"></path></svg></button>
+          </div>
+        </section>
+
+        <aside aria-label="Node configuration" style="flex:0 0 300px;display:flex;flex-direction:column;background:var(--bg);border-left:1px solid var(--border)">
+          <div style="display:flex;align-items:flex-start;gap:8px;padding:14px 16px 12px;border-bottom:1px solid var(--border)">
+            <div style="min-width:0;flex:1">
+              <span style="display:block;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-fg)">Node · Decision</span>
+              <span style="display:block;margin-top:2px;font-size:15px;font-weight:600">Campaign Open?</span>
+            </div>
+            <button type="button" aria-label="Close configuration" class="iconbtn" style="display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border-radius:6px;color:var(--muted-fg)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+            </button>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:14px;padding:16px">
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <label for="node-label" style="font-size:12px;font-weight:500;color:#334155">Label</label>
+              <input id="node-label" type="text" value="Campaign Open?" style="height:32px;padding:0 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);font-size:13px;outline:none">
+            </div>
+            <div style="height:1px;background:var(--border)"></div>
+            <span style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-fg)">Outcomes</span>
+
+            <div style="border:1px solid var(--border);border-radius:8px">
+              <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--border)">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--muted-fg)"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg>
+                <span style="font-size:13px;font-weight:500">Find Eligible Leads</span>
+              </div>
+              <label for="outcome-1" style="display:block;padding:8px 10px 2px;font-size:11px;color:var(--muted-fg)">Condition</label>
+              <textarea id="outcome-1" rows="5" style="display:block;width:100%;padding:6px 10px 8px;border:0;background:transparent;font-family:var(--mono);font-size:11px;line-height:1.5;color:#334155;resize:vertical;outline:none">has(vars.campaignRecord) &amp;&amp; has(vars.campaignRecord.status) &amp;&amp; (vars.campaignRecord.status == "planning" || vars.campaignRecord.status == "in_progress") &amp;&amp; vars.memberSource != "contacts"</textarea>
+            </div>
+
+            <div style="border:1px solid var(--border);border-radius:8px">
+              <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--border)">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--muted-fg)"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg>
+                <span style="font-size:13px;font-weight:500">Find Eligible Contacts</span>
+              </div>
+              <label for="outcome-2" style="display:block;padding:8px 10px 2px;font-size:11px;color:var(--muted-fg)">Condition</label>
+              <textarea id="outcome-2" rows="5" style="display:block;width:100%;padding:6px 10px 8px;border:0;background:transparent;font-family:var(--mono);font-size:11px;line-height:1.5;color:#334155;resize:vertical;outline:none">has(vars.campaignRecord) &amp;&amp; has(vars.campaignRecord.status) &amp;&amp; (vars.campaignRecord.status == "planning" || vars.campaignRecord.status == "in_progress") &amp;&amp; vars.memberSource == "contacts"</textarea>
+            </div>
+
+            <button type="button" class="chip" style="display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;border:1px dashed #cbd5e1;border-radius:6px;font-size:12px;color:var(--muted-fg)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>
+              Add outcome
+            </button>
+          </div>
+
+          <div style="margin-top:auto;padding:12px 16px;border-top:1px solid var(--border);font-size:12px;color:var(--muted-fg)">
+            Edits save as drafts. Publish the package to apply them.
+          </div>
+        </aside>
+      </div>
+    </main>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,8 @@
+[
+  { "file": "packages/plugin-gantt/src/useGanttTranslation.ts", "name": "GANTT_DEFAULT_TRANSLATIONS" },
+  { "file": "packages/plugin-grid/src/ImportWizard.tsx", "name": "IMPORT_DEFAULT_TRANSLATIONS" },
+  {
+    "file": "packages/plugin-timeline/src/useTimelineTranslation.ts",
+    "name": "TIMELINE_DEFAULT_TRANSLATIONS"
+  }
+]

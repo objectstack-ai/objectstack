@@ -1,0 +1,56 @@
+{
+  "type": "resizable",
+  "direction": "horizontal",
+  "minHeight": "250px",
+  "withHandle": true,
+  "className": "rounded-lg border",
+  "panels": [
+    {
+      "defaultSize": 25,
+      "minSize": 15,
+      "content": [
+        {
+          "type": "box",
+          "className": "p-4 h-full bg-purple-50",
+          "children": [
+            {
+              "type": "text",
+              "content": "Sidebar"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "defaultSize": 50,
+      "content": [
+        {
+          "type": "box",
+          "className": "p-4 h-full bg-slate-50",
+          "children": [
+            {
+              "type": "text",
+              "content": "Main Content"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "defaultSize": 25,
+      "minSize": 15,
+      "content": [
+        {
+          "type": "box",
+          "className": "p-4 h-full bg-amber-50",
+          "children": [
+            {
+              "type": "text",
+              "content": "Inspector"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

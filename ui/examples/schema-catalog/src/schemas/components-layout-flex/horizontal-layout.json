@@ -1,0 +1,20 @@
+{
+  "type": "flex",
+  "properties": {
+    "gap": 3,
+    "children": [
+      {
+        "type": "button",
+        "label": "Button 1"
+      },
+      {
+        "type": "button",
+        "label": "Button 2"
+      },
+      {
+        "type": "button",
+        "label": "Button 3"
+      }
+    ]
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "type": "object-kanban",
+  "groupBy": "status",
+  "data": [],
+  "columns": [
+    {
+      "id": "backlog",
+      "title": "Backlog",
+      "cards": [
+        {
+          "id": "1",
+          "title": "User Authentication",
+          "description": "Implement OAuth2.0",
+          "badges": [
+            {
+              "label": "Backend",
+              "variant": "secondary"
+            },
+            {
+              "label": "High",
+              "variant": "destructive"
+            }
+          ]
+        },
+        {
+          "id": "2",
+          "title": "Dark Mode",
+          "description": "Add theme switcher",
+          "badges": [
+            {
+              "label": "UI",
+              "variant": "outline"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "wip",
+      "title": "Work In Progress",
+      "limit": 3,
+      "cards": [
+        {
+          "id": "3",
+          "title": "API Integration",
+          "description": "Connect to backend services",
+          "badges": [
+            {
+              "label": "In Progress",
+              "variant": "default"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "review",
+      "title": "Code Review",
+      "cards": []
+    },
+    {
+      "id": "completed",
+      "title": "Completed",
+      "cards": [
+        {
+          "id": "4",
+          "title": "Project Setup",
+          "description": "Repository initialized"
+        }
+      ]
+    }
+  ]
+}
