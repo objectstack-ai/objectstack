@@ -195,11 +195,7 @@ export type { FormFieldInput };
 import { METADATA_FORM_REGISTRY, CORE_SERVICE_PROVIDER, serviceUnavailableMessage, inProcessServiceMessage } from '@objectstack/spec/system';
 import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataTypeSchema, getMetadataTypeActions, getMetadataCreateSeed, PROTOCOL_VERSION } from '@objectstack/spec/kernel';
 import {
-    extractProtection,
-    evaluateLockForWrite,
-    evaluateLockForDelete,
     resolveLockState,
-    MetadataLockSchema,
     type MetadataLock,
     type MetadataLockSource,
     type MetadataProvenance,
@@ -381,6 +377,15 @@ import {
     restoredCredentialPathsFor,
     storedBodyForCarryForward,
 } from './protocol-credential-carry-forward.js';
+// [#25467 cut 10] The served lock state and the stored-row decline.
+import {
+    declinesStoredRow,
+    isShippedFlowName,
+    isStoredEntryOfDeclinedName,
+    isStoredFlowEntryOfShippedName,
+    isUnservedSealedOverlay,
+    servedLockState,
+} from './protocol-lock-state.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -15898,35 +15903,11 @@ export class ObjectStackProtocolImplementation implements
         itemLock: ItemLock,
         storedRowServed = false,
     ): ReturnType<typeof resolveLockState> {
-        const { provenance, packageId, packageVersion } = extractProtection(document);
-        const editable = evaluateLockForWrite(itemLock.lock) === null
-            && this.packagedBaseRefusal({ type, name, operation: 'save' }) === null;
-        const removalRefusal = this.packagedBaseRefusal({ type, name, operation: 'delete' });
-        const deletable = evaluateLockForDelete(itemLock.lock) === null
-            && (removalRefusal === null || (storedRowServed && isOriginGatedType(type)));
-        const lock = MetadataLockSchema.options.find((state) =>
-            (evaluateLockForWrite(state) === null) === editable
-            && (evaluateLockForDelete(state) === null) === deletable);
-        if (lock === undefined) {
-            // Unreachable while the lock algebra covers all four verdict pairs;
-            // a state added to it without a write/delete answer must fail here,
-            // loudly, not publish a guessed lock.
-            throw new Error(
-                `No ADR-0010 lock state answers editable=${editable}, deletable=${deletable}.`,
-            );
-        }
-        return {
-            lock,
-            lockReason: itemLock.lockReason,
-            lockSource: itemLock.lockSource,
-            lockDocsUrl: itemLock.lockDocsUrl,
-            provenance,
-            packageId,
-            packageVersion,
-            editable,
-            deletable,
-            resettable: artifactBacked,
+        // [#25467 cut 10] The body moved to `protocol-lock-state.ts` (see `LockStateHost`).
+        const host: ThisParameterType<typeof servedLockState> = {
+            packagedBaseRefusal: (...a) => this.packagedBaseRefusal(...a),
         };
+        return servedLockState.call(host, type, name, document, artifactBacked, itemLock, storedRowServed);
     }
 
     /**
@@ -15970,9 +15951,11 @@ export class ObjectStackProtocolImplementation implements
      * the code definition too.
      */
     isShippedFlowName(type: string, name: unknown): boolean {
-        if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'flow') return false;
-        if (typeof name !== 'string' || name === '') return false;
-        return this.packagedArtifactOwner({ type: 'flow', name }) !== undefined;
+        // [#25467 cut 10] The body moved to `protocol-lock-state.ts` (see `LockStateHost`).
+        const host: ThisParameterType<typeof isShippedFlowName> = {
+            packagedArtifactOwner: (...a) => this.packagedArtifactOwner(...a),
+        };
+        return isShippedFlowName.call(host, type, name);
     }
 
     /**
@@ -15985,8 +15968,11 @@ export class ObjectStackProtocolImplementation implements
      * envelope ({@link hydrateOverlayIntoRegistry}), so it never passes it.
      */
     private isStoredFlowEntryOfShippedName(type: string, item: unknown): boolean {
-        return this.isShippedFlowName(type, (item as { name?: unknown } | null | undefined)?.name)
-            && !isCodeArtifactBody(item);
+        // [#25467 cut 10] The body moved to `protocol-lock-state.ts` (see `LockStateHost`).
+        const host: ThisParameterType<typeof isStoredFlowEntryOfShippedName> = {
+            isShippedFlowName: (...a) => this.isShippedFlowName(...a),
+        };
+        return isStoredFlowEntryOfShippedName.call(host, type, item);
     }
 
     /**
@@ -16046,9 +16032,13 @@ export class ObjectStackProtocolImplementation implements
      * ask it; the writes keep their own refusals.
      */
     declinesStoredRow(type: string, name: unknown): boolean {
-        if (this.isShippedFlowName(type, name)) return true;
-        if (typeof name !== 'string' || name === '') return false;
-        return this.isDeclaredCodeDatasource(type, name) || this.isUnservedSealedOverlay(type, name);
+        // [#25467 cut 10] The body moved to `protocol-lock-state.ts` (see `LockStateHost`).
+        const host: ThisParameterType<typeof declinesStoredRow> = {
+            isDeclaredCodeDatasource: (...a) => this.isDeclaredCodeDatasource(...a),
+            isShippedFlowName: (...a) => this.isShippedFlowName(...a),
+            isUnservedSealedOverlay: (...a) => this.isUnservedSealedOverlay(...a),
+        };
+        return declinesStoredRow.call(host, type, name);
     }
 
     /**
@@ -16068,8 +16058,11 @@ export class ObjectStackProtocolImplementation implements
      * operator's act, so it keeps that ruling's disposition.
      */
     private isUnservedSealedOverlay(type: string, name: string): boolean {
-        if (canonicalMetaType(type) === 'permission') return false;
-        return this.isSealedManagedItem(type, name);
+        // [#25467 cut 10] The body moved to `protocol-lock-state.ts` (see `LockStateHost`).
+        const host: ThisParameterType<typeof isUnservedSealedOverlay> = {
+            isSealedManagedItem: (...a) => this.isSealedManagedItem(...a),
+        };
+        return isUnservedSealedOverlay.call(host, type, name);
     }
 
     /**
@@ -16082,8 +16075,11 @@ export class ObjectStackProtocolImplementation implements
      * MetadataService's), so every entry it matches is a hydrated row.
      */
     private isStoredEntryOfDeclinedName(type: string, item: unknown): boolean {
-        return this.declinesStoredRow(type, (item as { name?: unknown } | null | undefined)?.name)
-            && !isCodeArtifactBody(item);
+        // [#25467 cut 10] The body moved to `protocol-lock-state.ts` (see `LockStateHost`).
+        const host: ThisParameterType<typeof isStoredEntryOfDeclinedName> = {
+            declinesStoredRow: (...a) => this.declinesStoredRow(...a),
+        };
+        return isStoredEntryOfDeclinedName.call(host, type, item);
     }
 
     /**
