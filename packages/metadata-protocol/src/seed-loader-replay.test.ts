@@ -936,6 +936,44 @@ describe('seed replay — a column declared applyOn: create is written on first 
     expect(first.result.success).toBe(false);
   });
 
+  it('a create-only reference declared BEFORE a reference column of a composite externalId is judged after the key resolves', async () => {
+    // `billed_to` precedes `account` in the field map, so the reference loop
+    // meets it first. Judged in that order, the row's key would still hold the
+    // natural key 'Acme', match nothing, and the unresolvable `billed_to`
+    // would be deferred to pass 2 — whose back-fill writes it onto the
+    // matched row after all.
+    const PERIOD = {
+      name: 'apply_on_period',
+      fields: {
+        billed_to: { type: 'lookup', reference: 'apply_on_account' },
+        account: { type: 'lookup', reference: 'apply_on_account' },
+        period: { type: 'text' },
+        amount: { type: 'number' },
+      },
+    };
+    const { engine, store } = createFaithfulEngine();
+    const seedOf = (records: Array<Record<string, unknown>>) => [
+      { object: ACCOUNT.name, externalId: 'name', mode: 'upsert', env: ['prod', 'dev', 'test'], records: [{ name: 'Acme' }, { name: 'Globex' }] },
+      {
+        object: PERIOD.name, externalId: ['account', 'period'], mode: 'upsert', env: ['prod', 'dev', 'test'],
+        columns: { billed_to: { applyOn: 'create' } }, records,
+      },
+    ] as any;
+    const loadPeriods = (records: Array<Record<string, unknown>>) =>
+      new SeedLoaderService(engine, metadataOf(ACCOUNT, PERIOD), createLogger()).load({ seeds: seedOf(records), config: CONFIG });
+    await loadPeriods([{ account: 'Acme', period: '2026-10', billed_to: 'Acme', amount: 1 }]);
+    (engine.update as any).mockClear();
+
+    const replay = await loadPeriods([{ account: 'Acme', period: '2026-10', billed_to: 'No Such Co', amount: 2 }]);
+
+    expect(replay.success).toBe(true);
+    const periods = replay.results.find((r) => r.object === PERIOD.name)!;
+    expect(periods.referencesDeferred).toBe(0);
+    expect(store[PERIOD.name]).toHaveLength(1);
+    expect(store[PERIOD.name][0]).toMatchObject({ amount: 2, billed_to: accountId(store, 'Acme') });
+    expect(updatesOf(engine, PERIOD).some((data: Record<string, unknown>) => 'billed_to' in data)).toBe(false);
+  });
+
   it('a column of the externalId declared create-only is still matched on, and stays in the update', async () => {
     const { engine, store } = createFaithfulEngine();
     const columns = { ...CREATE_ONLY, name: { applyOn: 'create' } };
