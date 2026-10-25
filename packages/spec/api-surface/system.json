@@ -556,6 +556,7 @@
     "RenderOperationMessageOptions (interface)",
     "RenderValidationMessageInput (interface)",
     "RenderValidationMessageOptions (interface)",
+    "ReportLike (interface)",
     "ResolveOptions (interface)",
     "ResolvedBook (interface)",
     "ResolvedBookSchema (const)",
@@ -892,6 +893,7 @@
     "translatePermissionSet (function)",
     "translatePicklist (function)",
     "translatePosition (function)",
+    "translateReport (function)",
     "translateView (function)",
     "validationMessageTranslationKey (function)",
     "walkAddressedPageComponents (function)"

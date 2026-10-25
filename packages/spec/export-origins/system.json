@@ -532,6 +532,7 @@
     "RenderOperationMessageOptions": "src/system/operation-message.ts#RenderOperationMessageOptions (interface)",
     "RenderValidationMessageInput": "src/system/validation-message.ts#RenderValidationMessageInput (interface)",
     "RenderValidationMessageOptions": "src/system/validation-message.ts#RenderValidationMessageOptions (interface)",
+    "ReportLike": "src/system/i18n-resolver.ts#ReportLike (interface)",
     "ResolveOptions": "src/system/i18n-resolver.ts#ResolveOptions (interface)",
     "ResolvedBook": "src/system/book.zod.ts#ResolvedBook (interface)",
     "ResolvedBookSchema": "src/system/book.zod.ts#ResolvedBookSchema (const)",
@@ -853,6 +854,7 @@
     "translatePermissionSet": "src/system/i18n-resolver.ts#translatePermissionSet (function)",
     "translatePicklist": "src/system/i18n-resolver.ts#translatePicklist (function)",
     "translatePosition": "src/system/i18n-resolver.ts#translatePosition (function)",
+    "translateReport": "src/system/i18n-resolver.ts#translateReport (function)",
     "translateView": "src/system/i18n-resolver.ts#translateView (function)",
     "validationMessageTranslationKey": "src/system/validation-message.ts#validationMessageTranslationKey (function)",
     "walkAddressedPageComponents": "src/system/i18n-resolver.ts#walkAddressedPageComponents (function)"
