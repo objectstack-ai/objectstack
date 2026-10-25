@@ -134,7 +134,9 @@ describe('the development boot provisions the stack`s demo accounts (#25777)', (
       );
     /**
      * Run the boot step again, as the next boot against this database runs it,
-     * recording what it logged and at which level.
+     * recording what it logged and at which level. The boot itself ran with a
+     * silent logger, so a level is read here: the same method, the same gate
+     * verdict from `init()`, a logger that records.
      */
     const rerun = async () => {
       const logs: Array<{ level: string; message: string }> = [];

@@ -281,6 +281,7 @@ export async function provisionDemoStaff(
 
   for (const entry of staff) {
     const email = entry.email.trim().toLowerCase();
+    let createdNow = false;
     try {
       let userId = await findUserIdByEmail(engine, email);
       if (userId) {
@@ -290,6 +291,7 @@ export async function provisionDemoStaff(
         userId = await findUserIdByEmail(engine, email);
         if (!userId) throw new Error('the sign-up returned but no account row was found for the address');
         outcome.created.push(email);
+        createdNow = true;
         // Born verified, as the development admin is: the account is created by
         // the deployment's own boot command with operator-known credentials,
         // and a deployment that requires a verified address to sign in would
@@ -337,7 +339,10 @@ export async function provisionDemoStaff(
         }
       }
     } catch (err) {
-      outcome.failed.push({ email, message: String((err as Error)?.message ?? err) });
+      // An account this pass created stays created (and listed so): the
+      // failure says so, rather than reading as "no account was made".
+      const message = String((err as Error)?.message ?? err);
+      outcome.failed.push({ email, message: createdNow ? `its account was created, but ${message}` : message });
     }
   }
   return { ...outcome, assignmentsAdded };

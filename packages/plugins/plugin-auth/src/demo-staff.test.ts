@@ -20,6 +20,8 @@ import { describe, expect, it } from 'vitest';
 import {
   decideDemoStaffEnvironmentGate,
   probeDemoStaffPriorLogin,
+  provisionDemoStaff,
+  type DemoStaffEngine,
   type DemoStaffEnvironment,
   type DemoStaffProbeEngine,
 } from './demo-staff.js';
@@ -84,31 +86,56 @@ describe('question 1 — only a local development boot creates demo accounts', (
   });
 });
 
-/** An engine double answering `sys_user` and `sys_account` reads from fixed rows, recording each query. */
+/**
+ * The rows a `where` selects, for the doubles below: equality, `$in` and `$nin`
+ * — every operator the code under test sends. A combinator or any other
+ * operator throws, so a query this double does not implement fails loudly
+ * instead of being answered as a different one.
+ */
+function selectRows<T extends Record<string, unknown>>(rows: readonly T[], where: Record<string, unknown>): T[] {
+  return rows.filter((row) => {
+    const clauses = Object.entries(where);
+    if (clauses.some(([field]) => field.startsWith('$'))) throw new Error('test double: combinators are not implemented');
+    return clauses.every(([field, cond]) => {
+      if (cond === null || typeof cond !== 'object') return row[field] === cond;
+      if (Object.keys(cond).some((op) => op !== '$in' && op !== '$nin')) {
+        throw new Error(`test double: only $in and $nin are implemented (${field})`);
+      }
+      const { $in, $nin } = cond as { $in?: unknown[]; $nin?: unknown[] };
+      return ($in === undefined || $in.includes(row[field])) && ($nin === undefined || !$nin.includes(row[field]));
+    });
+  });
+}
+
+/**
+ * An engine double answering `sys_user` and `sys_account` reads from fixed rows,
+ * recording each query. It holds the caller's `limit` after the filter, as the
+ * engine does, so the probe's own bound is what is measured.
+ */
 function recordingEngine(rows: {
   users?: Array<{ id: string; email: string }>;
   accounts?: Array<{ id: string; user_id: string }>;
-  fail?: boolean;
 }): DemoStaffProbeEngine & { queries: Array<{ object: string; query: Record<string, unknown> }> } {
   const queries: Array<{ object: string; query: Record<string, unknown> }> = [];
   return {
     queries,
     async find(object, query) {
       queries.push({ object, query });
-      if (rows.fail) throw new Error('connection refused');
-      const where = (query.where ?? {}) as Record<string, { $in?: unknown[]; $nin?: unknown[] }>;
-      if (object === 'sys_user') {
-        const wanted = where.email?.$in ?? [];
-        return (rows.users ?? []).filter((u) => wanted.includes(u.email));
-      }
-      if (object === 'sys_account') {
-        const excluded = where.user_id?.$nin ?? [];
-        return (rows.accounts ?? []).filter((a) => !excluded.includes(a.user_id)).slice(0, 1);
-      }
-      return [];
+      const where = (query.where ?? {}) as Record<string, unknown>;
+      const table: Array<Record<string, unknown>> =
+        object === 'sys_user' ? (rows.users ?? []) : object === 'sys_account' ? (rows.accounts ?? []) : [];
+      const matched = selectRows(table, where);
+      return typeof query.limit === 'number' ? matched.slice(0, query.limit) : matched;
     },
   };
 }
+
+/** An engine whose every read fails, as an unreachable credential store does. */
+const unreachableEngine = (): DemoStaffProbeEngine => ({
+  async find() {
+    throw new Error('connection refused');
+  },
+});
 
 describe('question 2 — a demo account is never the first account that can sign in', () => {
   const STAFF = ['Counsel1@legal.example', 'counsel2@legal.example'];
@@ -148,7 +175,7 @@ describe('question 2 — a demo account is never the first account that can sign
   });
 
   it('refuses a probe that throws — SERVICE_UNAVAILABLE 503, never read as "someone can sign in"', async () => {
-    const verdict = await probeDemoStaffPriorLogin(recordingEngine({ fail: true }), STAFF);
+    const verdict = await probeDemoStaffPriorLogin(unreachableEngine(), STAFF);
     expect(verdict.act).toBe(false);
     if (verdict.act) return;
     expect(verdict.refusal).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503, reason: 'unanswerable' });
@@ -160,5 +187,44 @@ describe('question 2 — a demo account is never the first account that can sign
     expect(verdict.act).toBe(false);
     if (verdict.act) return;
     expect(verdict.refusal).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503, reason: 'unanswerable' });
+  });
+});
+
+describe('provisioning — a failure after sign-up says the account exists', () => {
+  it('lists an account it created but could not assign under both, and the failure says it was created', async () => {
+    const users: Array<Record<string, unknown>> = [];
+    const engine: DemoStaffEngine = {
+      async find(object, query) {
+        const matched = object === 'sys_user' ? selectRows(users, (query.where ?? {}) as Record<string, unknown>) : [];
+        return typeof query.limit === 'number' ? matched.slice(0, query.limit) : matched;
+      },
+      async update() {
+        return undefined;
+      },
+      async insert() {
+        throw new Error('no assignment may be written without an organization');
+      },
+    };
+
+    const outcome = await provisionDemoStaff(
+      [{ name: 'Legal Counsel 1', email: 'Counsel1@legal.example', position: 'legal_counsel' }],
+      {
+        engine,
+        password: 'admin123',
+        signUp: async ({ email }) => {
+          users.push({ id: 'u_c1', email });
+        },
+        defaultOrganizationId: async () => null,
+      },
+    );
+
+    expect(outcome.created).toEqual(['counsel1@legal.example']);
+    expect(outcome.failed).toEqual([
+      {
+        email: 'counsel1@legal.example',
+        message: 'its account was created, but there is no Default Organization to assign its position and permission sets in, so none was written',
+      },
+    ]);
+    expect(outcome.assignmentsAdded).toBe(0);
   });
 });
