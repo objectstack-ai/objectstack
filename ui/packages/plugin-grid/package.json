@@ -32,7 +32,7 @@
     "@object-ui/plugin-detail": "workspace:*",
     "@object-ui/react": "workspace:*",
     "@object-ui/types": "workspace:*",
-    "@objectstack/spec": "^18.0.0-next.1",
+    "@objectstack/spec": "workspace:^",
     "@tanstack/react-virtual": "^3.14.9",
     "exceljs": "^4.4.0",
     "lucide-react": "^1.43.0"
@@ -45,7 +45,7 @@
     "@object-ui/data-objectstack": "workspace:*",
     "@object-ui/sdui-parser": "workspace:*",
     "@object-ui/test-support": "workspace:*",
-    "@objectstack/spec": "^18.0.0-next.1",
+    "@objectstack/spec": "workspace:^",
     "@tailwindcss/postcss": "^4.3.3",
     "@vitejs/plugin-react": "^6.0.5",
     "msw": "^2.15.0",

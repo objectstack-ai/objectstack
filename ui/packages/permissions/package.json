@@ -39,7 +39,7 @@
   },
   "dependencies": {
     "@object-ui/types": "workspace:*",
-    "@objectstack/spec": "^18.0.0-next.1"
+    "@objectstack/spec": "workspace:^"
   },
   "devDependencies": {
     "@types/react": "19.3.0",
