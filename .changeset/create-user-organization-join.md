@@ -1,5 +1,6 @@
 ---
 '@objectstack/plugin-auth': patch
+'@objectstack/spec': patch
 ---
 
 feat(plugin-auth): in multi-org mode, Create User adds the new user to the administrator's current organization
@@ -16,4 +17,5 @@ Metadata-protocol: none
 - **No current organization.** FROM a member-less account TO `400 NO_ACTIVE_ORGANIZATION`, before any account exists. The fix is to switch to the organization the user belongs to, then create them.
 - **Policy.** Under `membershipPolicy: 'invite-only'` the user still joins: creating a user inside your organization is an explicit act, like Add Member (ADR-0093 D1).
 - **Capability.** A walled server without the organization plugin, or without a unit of work for the creation, answers `501` before any account exists.
+- **Error code.** `NO_ACTIVE_ORGANIZATION` is registered in `@objectstack/spec`'s error-code ledger under `@objectstack/plugin-auth`. It is better-auth's own code for the same condition on Add Member.
 - **Unchanged.** The `single` posture (a degraded wall included), self sign-up, bulk import, SSO sign-in and invitations.
