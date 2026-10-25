@@ -1,0 +1,13 @@
+{
+  "type": "sheet",
+  "side": "right",
+  "trigger": {
+    "type": "button",
+    "label": "Right"
+  },
+  "title": "Right Sheet",
+  "content": {
+    "type": "text",
+    "content": "Content"
+  }
+}

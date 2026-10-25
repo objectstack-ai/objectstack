@@ -1,0 +1,110 @@
+{
+  "type": "card",
+  "className": "w-full max-w-4xl mx-auto bg-gradient-to-r from-primary to-primary/80",
+  "children": [
+    {
+      "type": "stack",
+      "gap": 6,
+      "children": [
+        {
+          "type": "text",
+          "content": "Ready to get started?",
+          "className": "text-3xl font-bold text-white"
+        },
+        {
+          "type": "text",
+          "content": "Join thousands of users who trust us to power their applications",
+          "className": "text-lg text-white/90 max-w-2xl mx-auto"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "justify": "center",
+            "gap": 4,
+            "children": [
+              {
+                "type": "button",
+                "label": "Start Free Trial",
+                "variant": "secondary",
+                "size": "lg"
+              },
+              {
+                "type": "button",
+                "label": "Schedule Demo",
+                "variant": "outline",
+                "size": "lg",
+                "className": "border-white text-white hover:bg-white/10"
+              }
+            ]
+          }
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "justify": "center",
+            "gap": 8,
+            "children": [
+              {
+                "type": "flex",
+                "properties": {
+                  "align": "center",
+                  "gap": 2,
+                  "children": [
+                    {
+                      "type": "icon",
+                      "icon": "circle-check-big",
+                      "className": "h-4 w-4"
+                    },
+                    {
+                      "type": "text",
+                      "content": "No credit card required"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "flex",
+                "properties": {
+                  "align": "center",
+                  "gap": 2,
+                  "children": [
+                    {
+                      "type": "icon",
+                      "icon": "circle-check-big",
+                      "className": "h-4 w-4"
+                    },
+                    {
+                      "type": "text",
+                      "content": "Cancel anytime"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "flex",
+                "properties": {
+                  "align": "center",
+                  "gap": 2,
+                  "children": [
+                    {
+                      "type": "icon",
+                      "icon": "circle-check-big",
+                      "className": "h-4 w-4"
+                    },
+                    {
+                      "type": "text",
+                      "content": "24/7 support"
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          "className": "text-white/80 text-sm"
+        }
+      ]
+    }
+  ]
+}

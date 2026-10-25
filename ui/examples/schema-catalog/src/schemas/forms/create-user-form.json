@@ -1,0 +1,117 @@
+{
+  "type": "card",
+  "className": "max-w-lg mx-auto",
+  "header": [
+    {
+      "type": "text",
+      "content": "Create New User",
+      "className": "text-lg font-semibold"
+    }
+  ],
+  "children": [
+    {
+      "type": "stack",
+      "gap": 4,
+      "children": [
+        {
+          "type": "grid",
+          "columns": 2,
+          "gap": 4,
+          "children": [
+            {
+              "type": "stack",
+              "gap": 2,
+              "children": [
+                {
+                  "type": "label",
+                  "label": "First Name"
+                },
+                {
+                  "type": "input",
+                  "placeholder": "Alice"
+                }
+              ]
+            },
+            {
+              "type": "stack",
+              "gap": 2,
+              "children": [
+                {
+                  "type": "label",
+                  "label": "Last Name"
+                },
+                {
+                  "type": "input",
+                  "placeholder": "Johnson"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "stack",
+          "gap": 2,
+          "children": [
+            {
+              "type": "label",
+              "label": "Email"
+            },
+            {
+              "type": "input",
+              "inputType": "email",
+              "placeholder": "alice@example.com"
+            }
+          ]
+        },
+        {
+          "type": "stack",
+          "gap": 2,
+          "children": [
+            {
+              "type": "label",
+              "label": "Role"
+            },
+            {
+              "type": "select",
+              "options": [
+                {
+                  "label": "Admin",
+                  "value": "admin"
+                },
+                {
+                  "label": "Editor",
+                  "value": "editor"
+                },
+                {
+                  "label": "Viewer",
+                  "value": "viewer"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "justify": "end",
+            "gap": 2,
+            "children": [
+              {
+                "type": "button",
+                "label": "Cancel",
+                "variant": "outline"
+              },
+              {
+                "type": "button",
+                "label": "Create User",
+                "variant": "default",
+                "icon": "plus"
+              }
+            ]
+          },
+          "className": "pt-2"
+        }
+      ]
+    }
+  ]
+}

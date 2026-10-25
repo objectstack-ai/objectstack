@@ -1,0 +1,158 @@
+---
+title: "Rich Text Field"
+description: "Rich text editor for formatted content"
+---
+
+The Rich Text Field component edits formatted text content with markdown or HTML support — a plain-textarea editor today, with the stored markup rendered formatted on every read surface.
+
+## Basic Usage
+
+<SchemaExample id="fields-rich-text/markdown-editor" />
+
+## HTML Editor
+
+<SchemaExample id="fields-rich-text/html-editor" />
+
+## Field Schema
+
+`markdown`, `html` and `richtext` are three field types served by one widget, and each
+has its own exported metadata type — `MarkdownFieldMetadata`, `HtmlFieldMetadata` and
+`RichtextFieldMetadata` (`@object-ui/types`). All three extend `BaseFieldMetadata` and
+add a length bound and an inline-editor height; there is no combined "rich text"
+metadata type.
+
+```ts
+import type {
+  HtmlFieldMetadata,
+  MarkdownFieldMetadata,
+  RichtextFieldMetadata,
+} from '@object-ui/types';
+
+const releaseNotes: MarkdownFieldMetadata = {
+  type: 'markdown',
+  name: 'release_notes',
+  label: 'Release Notes',
+  placeholder: 'Write the notes…',
+  maxLength: 20000,
+  // Inline editor height in text rows (positive integer; default 8). The
+  // fullscreen dialog sizes itself and ignores it.
+  rows: 12,
+};
+
+const emailBody: HtmlFieldMetadata = {
+  type: 'html',
+  name: 'email_body',
+  label: 'Email Body',
+  maxLength: 50000,
+};
+
+const articleBody: RichtextFieldMetadata = {
+  type: 'richtext',
+  name: 'article_body',
+  label: 'Article Body',
+  rows: 10,
+  maxLength: 50000,
+};
+```
+
+`richtext` gained its exported type in
+[objectui#7083](https://github.com/objectstack-ai/objectui/issues/7083); until then it
+was the one key of the three with no member to annotate against, so its metadata could
+only be written through a cast to one of its siblings. It stores **HTML** — it reads
+through the same display pipeline as `html`, not the markdown one
+([objectui#5452](https://github.com/objectstack-ai/objectui/issues/5452)) — and that
+pipeline is the only thing `type` changes between the three.
+
+`maxLength` is `@objectstack/spec`'s own `FieldSchema.maxLength`, typed by reference: a
+bound on the stored text. The widget reads it — the editor's native stop, a character
+counter and its `aria-describedby` description, inline and in the fullscreen dialog
+([objectui#8438](https://github.com/objectstack-ai/objectui/issues/8438)) — and the form's
+validation rules enforce it again when the form is submitted, whatever the field's type.
+The snake_case `max_length` is retired: the spec refuses it by name and nothing reads it
+([objectui#11070](https://github.com/objectstack-ai/objectui/issues/11070)).
+
+`rows` sizes the inline editor, in text rows — declared on all three types (and on
+`@objectstack/spec`'s `FieldSchema` for the multiline editor types), matching the
+`textarea` field's key of the same name ([objectui#6140](https://github.com/objectstack-ai/objectui/issues/6140)).
+The editor is a plain textarea today — there is no formatting toolbar, no preview pane
+and no pixel height to configure, so none of the three metadata types declares one:
+`toolbar`, `preview`, `minHeight` and `maxHeight` are **not** metadata keys, and writing
+them does nothing.
+
+The value being edited, and the `className` / `disabled` a host supplies, are **not**
+metadata keys — they are runtime widget props. See [Field Widget Props](/docs/fields/widget-props).
+
+## Supported Formats
+
+### Markdown
+- **Headings**: `# H1`, `## H2`, `### H3`
+- **Bold/Italic**: `**bold**`, `*italic*`
+- **Lists**: Ordered and unordered
+- **Links**: `[text](url)`
+- **Images**: `![alt](url)`
+- **Code**: Inline and blocks
+- **Tables**: Markdown tables
+
+### HTML
+- Headings, paragraphs, emphasis, lists, quotes, code, tables, links and images
+- Sanitized on display against an allow-list (`rehype-sanitize`, GitHub-style):
+  links keep `http`, `https`, `mailto` and relative URLs, and images keep `http`,
+  `https` and relative URLs
+- Inline `style`, event-handler attributes, embedded frames, objects and SVG or
+  MathML content are not rendered; an element outside the allow-list shows its text
+  without its tag
+- The `markdown` and `html` / `richtext` display pipelines share the same allow-list
+
+## Cell Renderer
+
+In tables/grids, rich text is shown as plain text:
+
+```ts
+import { TextCellRenderer } from '@object-ui/fields';
+
+// Strips formatting, shows plain text only
+// Long content is truncated
+```
+
+## Use Cases
+
+- **Blog Posts**: Article content, blog posts
+- **Documentation**: Technical documentation
+- **Descriptions**: Product or feature descriptions
+- **Comments**: Rich formatted comments
+- **Emails**: Email templates, rich email content
+- **Pages**: CMS page content
+
+## Features
+
+- **Markdown Support**: For lightweight formatting
+- **HTML Support**: For advanced formatting
+- **Formatted read surfaces**: Grids, detail pages and the readonly form branch
+  render the stored markup formatted (sanitized for HTML)
+- **Fullscreen editing**: An expand affordance when the form opts in
+  (`mobile.fullscreenLongText`)
+
+The editing surface itself is a plain textarea with no header row above it; guidance
+for the person typing comes from the field's own `placeholder` and help text. A
+formatting toolbar, an edit-time preview pane and WYSIWYG editing are **not yet
+implemented** (whatever the editor grows into, both the inline and fullscreen
+surfaces gain it at once, since they share one editor component).
+
+## Editor Modes
+
+The rich text field can operate in different modes:
+
+1. **Markdown Mode** (`type: 'markdown'`)
+   - Lightweight markup
+   - Easy to write and read
+   - Great for documentation
+
+2. **HTML Mode** (`type: 'html'`)
+   - Full HTML editing
+   - Advanced formatting
+   - Embedded content support
+
+3. **Rich Text Mode** (`type: 'richtext'`)
+   - Stores HTML, and reads through the same display pipeline as `html`
+   - Editable under `RichtextFieldMetadata`
+   - Same plain-textarea editing surface as the other two

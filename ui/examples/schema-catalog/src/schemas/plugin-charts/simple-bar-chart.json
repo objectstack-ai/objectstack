@@ -1,0 +1,33 @@
+{
+  "type": "bar-chart",
+  "data": [
+    {
+      "name": "Jan",
+      "value": 400
+    },
+    {
+      "name": "Feb",
+      "value": 300
+    },
+    {
+      "name": "Mar",
+      "value": 600
+    },
+    {
+      "name": "Apr",
+      "value": 800
+    },
+    {
+      "name": "May",
+      "value": 500
+    },
+    {
+      "name": "Jun",
+      "value": 700
+    }
+  ],
+  "dataKey": "value",
+  "xAxisKey": "name",
+  "height": 300,
+  "color": "#8884d8"
+}

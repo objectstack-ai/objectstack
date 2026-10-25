@@ -1,0 +1,30 @@
+{
+  // Type-checks this package's TESTS, which `tsconfig.json` excludes.
+  // See `packages/types/tsconfig.test.json` for why that exclusion was a hole:
+  // the build correctly keeps tests out of `dist`, but nothing else compiled
+  // them, so a test could assert a contract the compiler never checked.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    // objectui#8691: test programs only. One notch above the package build's
+    // ES2020, mirroring packages/app-shell. The package SOURCE tsconfig is
+    // untouched, so what this package SHIPS still compiles at the ES2020
+    // baseline; nothing here is emitted.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "noEmit": true,
+    // The package build emits `dist`; this project emits nothing.
+    "composite": false,
+    // Naming `types` at all switches off automatic `@types/*` inclusion, so
+    // BOTH entries are load-bearing:
+    //   - jest-dom: the `toBeInTheDocument` / `toHaveClass` matchers these tests
+    //     use are a global augmentation, not an import, and it does not live
+    //     under `@types/` so it is never picked up automatically.
+    //   - node: the test program pulls in `LegacyReportRenderer.tsx`, which
+    //     reads `process.env`.
+    "types": ["@testing-library/jest-dom", "node"],
+    // Drop the root tsconfig's source-tree `paths` so `@object-ui/*` and
+    // `@objectstack/spec` resolve through the workspace dependency's built
+    // `.d.ts` instead of pulling sibling sources in as program inputs (TS6059).
+    "paths": {}
+  },
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+}

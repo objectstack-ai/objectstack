@@ -1,0 +1,61 @@
+---
+title: "Phone Field"
+description: "Phone number input with formatting"
+---
+
+The Phone Field component provides a text input optimized for phone number entry with proper formatting.
+
+## Basic Usage
+
+<SchemaExample id="fields-phone/basic-phone-field" />
+
+## Required Phone
+
+<SchemaExample id="fields-phone/required-phone" />
+
+## Field Schema
+
+A phone field is authored as `PhoneFieldMetadata` (`@object-ui/types`), which is the
+source of truth for the key set: it extends `BaseFieldMetadata` with a display format.
+
+```ts
+import type { PhoneFieldMetadata } from '@object-ui/types';
+
+const mobile: PhoneFieldMetadata = {
+  type: 'phone',
+  name: 'mobile',
+  label: 'Mobile',
+  placeholder: '(555) 000-0000',
+  required: false,
+  format: '(###) ###-####',
+};
+```
+
+The value being edited, and the `className` / `disabled` a host supplies, are **not**
+metadata keys — they are runtime widget props. See [Field Widget Props](/docs/fields/widget-props).
+
+## Cell Renderer
+
+In tables/grids, phone numbers are clickable tel: links:
+
+```ts
+import { PhoneCellRenderer } from '@object-ui/fields';
+
+// Renders as: <a href="tel:+15551234567">+1 (555) 123-4567</a>
+// Clicking initiates a phone call on mobile devices
+```
+
+## Use Cases
+
+- **Contact Information**: Customer phone numbers
+- **Support**: Support line numbers
+- **Emergency Contacts**: Emergency contact numbers
+- **Delivery**: Delivery contact numbers
+- **Appointments**: Callback numbers
+
+## Features
+
+- **Mobile Optimized**: Opens phone dialer on mobile
+- **Clickable Links**: tel: links in read-only mode
+- **International Support**: Supports international formats
+- **Accessible**: Proper input type for mobile keyboards

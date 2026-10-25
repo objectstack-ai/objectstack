@@ -1,0 +1,24 @@
+{
+  "type": "stack",
+  "gap": 3,
+  "children": [
+    {
+      "type": "input",
+      "label": "Email",
+      "inputType": "email",
+      "placeholder": "email@example.com"
+    },
+    {
+      "type": "input",
+      "label": "Password",
+      "inputType": "password",
+      "placeholder": "••••••••"
+    },
+    {
+      "type": "input",
+      "label": "Number",
+      "inputType": "number",
+      "placeholder": "123"
+    }
+  ]
+}

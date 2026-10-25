@@ -1,0 +1,13 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "fields": [
+    {
+      "name": "office_location",
+      "label": "Office Location",
+      "type": "location",
+      "placeholder": "latitude, longitude"
+    }
+  ]
+}

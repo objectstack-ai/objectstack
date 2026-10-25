@@ -1,0 +1,14 @@
+{
+  "type": "button-group",
+  "buttons": [
+    {
+      "label": "Bold"
+    },
+    {
+      "label": "Italic"
+    },
+    {
+      "label": "Underline"
+    }
+  ]
+}

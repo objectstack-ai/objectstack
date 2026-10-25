@@ -1,0 +1,87 @@
+{
+  "type": "resizable",
+  "direction": "vertical",
+  "minHeight": "500px",
+  "className": "rounded-lg border",
+  "panels": [
+    {
+      "defaultSize": 70,
+      "content": [
+        {
+          "type": "resizable",
+          "direction": "horizontal",
+          "className": "h-full",
+          "panels": [
+            {
+              "defaultSize": 65,
+              "content": [
+                {
+                  "type": "box",
+                  "className": "p-6 h-full",
+                  "children": [
+                    {
+                      "type": "text",
+                      "content": "Main Dashboard",
+                      "className": "text-xl font-bold mb-4"
+                    },
+                    {
+                      "type": "grid",
+                      "columns": 2,
+                      "gap": 4,
+                      "children": [
+                        {
+                          "type": "statistic",
+                          "label": "Revenue",
+                          "value": "$45,231"
+                        },
+                        {
+                          "type": "statistic",
+                          "label": "Users",
+                          "value": "12,543"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "defaultSize": 35,
+              "minSize": 25,
+              "content": [
+                {
+                  "type": "box",
+                  "className": "p-6 h-full bg-slate-50",
+                  "children": [
+                    {
+                      "type": "text",
+                      "content": "Activity Feed",
+                      "className": "font-semibold"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "defaultSize": 30,
+      "minSize": 20,
+      "content": [
+        {
+          "type": "box",
+          "className": "p-6 h-full bg-slate-100",
+          "children": [
+            {
+              "type": "text",
+              "content": "Details Panel",
+              "className": "font-semibold"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

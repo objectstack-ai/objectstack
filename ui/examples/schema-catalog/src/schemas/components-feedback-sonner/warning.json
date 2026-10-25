@@ -1,0 +1,6 @@
+{
+  "type": "sonner",
+  "variant": "warning",
+  "message": "Please review your input",
+  "buttonLabel": "Warning"
+}

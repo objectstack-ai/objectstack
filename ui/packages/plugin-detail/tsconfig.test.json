@@ -1,0 +1,69 @@
+{
+  // Type-checks this package's TESTS, which `tsconfig.json` excludes.
+  // See `packages/types/tsconfig.test.json` for why that exclusion was a hole:
+  // the build correctly keeps tests out of `dist`, but nothing else compiled
+  // them, so a test could assert a contract the compiler never checked.
+  //
+  // This project is now the ONLY one that compiles `spec-symbol-batch7.test.ts`,
+  // whose compile-time pins are erased at runtime — vitest proves nothing about
+  // them and `tsc` is the only thing that can (objectui#3181). A narrow
+  // `tsconfig.typetests.json` next door used to name that one file while the rest
+  // of the tree was in TEST_DEBT; the package graduated in objectui#4040 and the
+  // narrow project was retired in objectui#4291, after `--listFiles` showed this
+  // project reads the same file and a provably-false `Assert` appended to it
+  // turned this project red.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    // objectui#8691: test programs only. One notch above the package build's
+    // ES2020, mirroring packages/app-shell. The package SOURCE tsconfig is
+    // untouched, so what this package SHIPS still compiles at the ES2020
+    // baseline; nothing here is emitted.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "noEmit": true,
+    // The package build emits `dist`; this project emits nothing, so it must
+    // not inherit `composite` / `declaration` from the build config.
+    "composite": false,
+    "declaration": false,
+    // `recordDetailsInputs.spec-parity.test.ts` reads the sibling spec source
+    // off disk to compare the declared input list against the renderer's, so
+    // this project needs Node's globals. Naming `types` at all switches off
+    // automatic `@types/*` inclusion, so every entry here has to be earned.
+    //
+    // `@testing-library/jest-dom` is named so the matchers are registered by
+    // THIS config rather than by whichever other file happens to import them.
+    // This comment used to argue the opposite: that the matchers "do not need
+    // naming here because the three files that use them `import
+    // '@testing-library/jest-dom'` explicitly, and a global augmentation reached
+    // by an import applies to the whole program". The augmentation half is true;
+    // the conclusion is not (objectui#8722, all figures measured on this
+    // project's tsc-resolved file list, not on a glob):
+    //   - the count was stale by an order of magnitude -- 33 files carry the
+    //     bare import today, not three;
+    //   - 65 files here use a jest-dom matcher and 43 of them import it NOWHERE,
+    //     so their matchers were typed by a sibling's import alone;
+    //   - ablated before this entry existed: dropping the bare import from all
+    //     33 carriers gave 423 TS2339 errors across 65 files, 43 of which the
+    //     edit never touched. Neither the diff, nor this config, nor the failing
+    //     files would have named the cause.
+    // Dropping any ONE carrier stays green (measured too) -- the program depends
+    // on the SET, which is what makes the dependency invisible to a reviewer and
+    // why declaring it here is not merely tidier.
+    "types": ["node", "@testing-library/jest-dom"],
+    // Drop the root tsconfig's source-tree `paths` so `@object-ui/*` and
+    // `@objectstack/spec` resolve through the workspace dependency's built
+    // `.d.ts` instead of pulling sibling sources in as program inputs (TS6059).
+    //
+    // This is now empty like every other wired-up package's. It briefly carried
+    // one entry — `@object-ui/fields/widgets/*` → `../fields/src/widgets/*` —
+    // restating the repo vitest alias so `tsc` could resolve the deep specifier
+    // `RelatedList.longFormColumns.test.tsx` used to pre-resolve the lazy
+    // markdown chunk (TS2882 without it). #4325 ruled that specifier out rather
+    // than publishing it: `@object-ui/fields`' surface is its index, so the
+    // subpath was never resolvable outside this repo's vitest config, and the
+    // test's anti-race guarantee was rebuilt on a witness that does not need it
+    // (see that file's header). With the import gone the entry has no subject,
+    // and no source-tree path survives here.
+    "paths": {}
+  },
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+}

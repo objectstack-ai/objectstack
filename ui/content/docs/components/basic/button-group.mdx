@@ -1,0 +1,49 @@
+---
+title: "Button Group"
+description: "Group multiple buttons together with shared styling"
+---
+
+The Button Group component groups multiple buttons together with consistent styling.
+
+## Basic Usage
+
+<SchemaExample id="components-basic-button-group/basic-button-group" />
+
+## Variants
+
+<SchemaExample id="components-basic-button-group/outline-variant" />
+
+## Schema
+
+```ts
+interface ButtonGroupButton {
+  label: string;                  // Button label (required)
+  variant?: 'default' | 'secondary' | 'destructive' | 'outline' | 'ghost' | 'link';
+  size?: 'default' | 'sm' | 'lg' | 'icon';
+  disabled?: boolean;             // Whether this button is disabled
+  onClick?: never;                // RETIRED (objectui#6124) — author behaviour
+                                  // as a node type, e.g. an action:button node
+  className?: string;             // Per-button CSS class
+}
+
+interface ButtonGroupSchema {
+  type: 'button-group';
+  buttons?: ButtonGroupButton[];  // Button definitions
+
+  // Defaults applied to every button that does not set its own
+  variant?: 'default' | 'secondary' | 'destructive' | 'outline' | 'ghost' | 'link';
+  size?: 'default' | 'sm' | 'lg' | 'icon';
+
+  // States
+  disabled?: boolean | string | { dialect?: string; source: string };   // boolean, predicate expression, or CEL envelope
+
+  // Styling
+  className?: string;
+}
+```
+
+## Examples
+
+### Toolbar Actions
+
+<SchemaExample id="components-basic-button-group/icon-toolbar" />

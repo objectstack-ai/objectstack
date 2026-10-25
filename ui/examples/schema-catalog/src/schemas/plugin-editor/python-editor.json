@@ -1,0 +1,7 @@
+{
+  "type": "code-editor",
+  "value": "def calculate_fibonacci(n):\n    if n <= 1:\n        return n\n    return calculate_fibonacci(n-1) + calculate_fibonacci(n-2)\n\n# Calculate first 10 Fibonacci numbers\nfor i in range(10):\n    print(f'F({i}) = {calculate_fibonacci(i)}')",
+  "language": "python",
+  "theme": "vs-dark",
+  "height": "300px"
+}

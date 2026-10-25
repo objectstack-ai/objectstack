@@ -1,0 +1,443 @@
+#!/usr/bin/env bash
+# copied from objectstack@338297e46018ae96256262590a308c8be735f825
+# Self-test for guard-main-checkout-bash.sh — run it after touching that hook:
+#
+#   .claude/hooks/guard-main-checkout-bash.selftest.sh
+#
+# Feeds the hook the same JSON payload shape Claude Code delivers on PreToolUse and asserts
+# the block/allow verdict per command. Hermetic: it builds its OWN throwaway git repo, a
+# linked worktree of it, and a non-repo directory under $TMPDIR, so the matrix never depends
+# on which machine or which checkout it runs from. Needs jq and git and nothing else — no
+# install, no build, no network. Exit 0 = all cases hold.
+#
+# Mirrors .claude/hooks/guard-shared-stash.selftest.sh case-for-case in shape.
+
+set -uo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+hook="$here/guard-main-checkout-bash.sh"
+pass=0
+fail=0
+
+command -v jq >/dev/null 2>&1 || { echo "selftest needs jq to build payloads" >&2; exit 1; }
+command -v git >/dev/null 2>&1 || { echo "selftest needs git to build the fixture" >&2; exit 1; }
+
+# --- fixture: a shared primary checkout, a linked worktree of it, a plain directory -----
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+MAIN="$tmp/mainrepo"
+WT="$tmp/wt"
+PLAIN="$tmp/plain"
+# ODD: a PRIMARY checkout whose own path carries a literal `worktrees` segment. Every write
+# into it must BLOCK — it is a primary checkout, and the verdict comes from the git-dir vs
+# git-common-dir structure, never from the spelling of the path (#7259). $WT is its positive
+# twin: a real linked worktree at a path with no such segment.
+ODD="$tmp/worktrees/oddrepo"
+mkdir -p "$MAIN/pkg" "$PLAIN" "$ODD/pkg"
+(
+  cd "$MAIN" || exit 1
+  git init -q .
+  git config user.email selftest@example.com
+  git config user.name selftest
+  : > README.md
+  : > pkg/x.ts
+  git add -A
+  git commit -qm init
+  git worktree add -q "$WT" -b selftest-wt
+  cd "$ODD" || exit 1
+  git init -q .
+  git config user.email selftest@example.com
+  git config user.name selftest
+  : > README.md
+  : > pkg/x.ts
+  git add -A
+  git commit -qm init
+) >/dev/null 2>&1 || { echo "could not build the git fixture" >&2; exit 1; }
+
+CWD="$MAIN"   # payload cwd for the cases that follow; reassigned per section
+
+# verdict <command> [env assignments…] -> prints "block" or "allow"
+verdict() {
+  local cmd="$1"; shift
+  local payload out rc
+  payload="$(jq -nc --arg c "$cmd" --arg w "$CWD" \
+    '{cwd:$w,tool_name:"Bash",tool_input:{command:$c}}')"
+  out="$(printf '%s' "$payload" | env "$@" "$hook" 2>/dev/null)"
+  rc=$?
+  case "$rc" in
+    0) printf 'allow' ;;
+    2) printf 'block' ;;
+    *) printf 'exit%s' "$rc" ;;
+  esac
+}
+
+expect() { # expect <block|allow> <command> [env…]
+  local want="$1" cmd="$2"; shift 2
+  local got; got="$(verdict "$cmd" "$@")"
+  local shown="${cmd//$'\n'/ ⏎ }"
+  shown="${shown//$MAIN/\$MAIN}"; shown="${shown//$WT/\$WT}"; shown="${shown//$PLAIN/\$PLAIN}"
+  shown="${shown//$ODD/\$ODD}"
+  if [ "$got" = "$want" ]; then
+    pass=$((pass + 1)); printf '  ok   %-5s  %s\n' "$got" "$shown"
+  else
+    fail=$((fail + 1)); printf '  FAIL want=%s got=%s  %s\n' "$want" "$got" "$shown"
+  fi
+}
+
+stderr_of() { # stderr_of <command> [env…] -> the refusal text an agent actually reads
+  local cmd="$1"; shift
+  local payload
+  payload="$(jq -nc --arg c "$cmd" --arg w "$CWD" \
+    '{cwd:$w,tool_name:"Bash",tool_input:{command:$c}}')"
+  printf '%s' "$payload" | env "$@" "$hook" 2>&1 >/dev/null
+}
+
+says() { # says <needle> <label> <command> [env…]
+  local needle="$1" label="$2" subject="$3"; shift 3
+  local out; out="$(stderr_of "$subject" "$@")"
+  case "$out" in
+    *"$needle"*) pass=$((pass + 1)); printf '  ok   says   %s\n' "$label" ;;
+    *) fail=$((fail + 1)); printf '  FAIL missing "%s"  %s\n' "$needle" "$label" ;;
+  esac
+}
+
+lacks() { # lacks <needle> <label> <command> [env…]
+  # The direction only an ABSENCE assertion can hold: a remedy that stopped being true stays
+  # in the text a reader acts on long after the thing it described stopped working.
+  local needle="$1" label="$2" subject="$3"; shift 3
+  local out; out="$(stderr_of "$subject" "$@")"
+  case "$out" in
+    *"$needle"*) fail=$((fail + 1)); printf '  FAIL still says "%s"  %s\n' "$needle" "$label" ;;
+    *) pass=$((pass + 1)); printf '  ok   lacks  %s\n' "$label" ;;
+  esac
+}
+
+echo "== writes into the shared PRIMARY checkout are blocked =="
+CWD="$MAIN"
+expect block "sed -i s/a/b/ $MAIN/pkg/x.ts"
+expect block 'sed -i "s/a/b/g" pkg/x.ts'
+expect block 'sed -i -e "s/a/b/" pkg/x.ts'
+expect block 'sed --in-place s/a/b/ pkg/x.ts'
+expect block 'sed -ri "s/a/b/" pkg/x.ts'
+expect block 'perl -pi -e "s/a/b/" pkg/x.ts'
+expect block "echo x > $MAIN/README.md"
+expect block 'echo x >> pkg/x.ts'
+expect block 'printf hi > pkg/new.ts'
+expect block 'pnpm build | tee build.log'
+expect block 'tee -a notes.txt'
+expect block 'cp /tmp/a.txt pkg/a.txt'
+expect block 'mv /tmp/a.txt pkg/a.txt'
+expect block "cp -t $MAIN/pkg /tmp/a.txt"
+expect block 'rm -rf pkg/x.ts'
+expect block 'touch pkg/new.ts'
+
+echo "== reached through separators, env prefixes, absolute argv0 and cd =="
+CWD="$PLAIN"
+expect block "cd $MAIN && tee pkg/a.ts"
+expect block "cd $MAIN; echo hi > README.md"
+expect block "git status && sed -i s/a/b/ $MAIN/pkg/x.ts; pnpm test"
+expect block "$(printf 'cd %s\npnpm install\nsed -i "s/a/b/" pkg/x.ts\n' "$MAIN")"
+CWD="$MAIN"
+expect block 'FOO=1 sed -i s/a/b/ pkg/x.ts'
+expect block '/usr/bin/sed -i s/a/b/ pkg/x.ts'
+
+echo "== the SAME writes into a linked worktree are fine =="
+CWD="$WT"
+expect allow "sed -i s/a/b/ $WT/pkg/x.ts"
+expect allow 'sed -i "s/a/b/g" pkg/x.ts'
+expect allow "echo x > $WT/README.md"
+expect allow 'pnpm build | tee build.log'
+expect allow 'rm -rf pkg/x.ts'
+expect allow 'touch pkg/new.ts'
+expect allow 'cp /tmp/a.txt pkg/a.txt'
+expect allow "cd $WT && tee pkg/a.ts"
+
+echo "== a PRIMARY checkout whose own path carries a 'worktrees' segment is BLOCKED =="
+# Every target here is ABSOLUTE, so the verdict can only have come from the path's own repo.
+# The two $ODD SUBDIRECTORY cases were `allow` under the `*/worktrees/*` substring test this
+# replaced — unguarded writes into a primary checkout — because git prints an ABSOLUTE
+# git-dir from a subdirectory and a RELATIVE one at the toplevel, so one checkout got
+# opposite verdicts by depth (#7259). The structural test is spelling-independent.
+CWD="$PLAIN"
+expect block "sed -i s/a/b/ $ODD/pkg/x.ts"   # a SUBDIRECTORY — the depth the substring test lost
+expect block "echo x > $ODD/pkg/x.ts"        # same depth, reached through redirection
+expect block "sed -i s/a/b/ $ODD/README.md"  # the toplevel, which blocked only by accident
+expect block "sed -i s/a/b/ $MAIN/pkg/x.ts"  # control: an ordinary shared primary checkout
+expect allow "sed -i s/a/b/ $WT/pkg/x.ts"    # control: a real linked worktree still allows
+
+echo "== writes outside any repo are fine (/tmp, scratchpad, \$HOME dotfiles) =="
+CWD="$MAIN"
+expect allow 'echo x > /tmp/os-selftest-out.log'
+expect allow "sed -i s/a/b/ $PLAIN/notes.md"
+expect allow "tee $PLAIN/x.log"
+expect allow 'echo hi > /dev/null'
+expect allow "rm -rf $PLAIN/scratch"
+
+echo "== reading the shared checkout is NEVER blocked =="
+CWD="$MAIN"
+expect allow "cat $MAIN/README.md"
+expect allow 'cat < README.md'
+expect allow "grep -rn worktree $MAIN"
+expect allow "ls -la $MAIN/pkg"
+expect allow "git -C $MAIN grep -n sed"
+expect allow 'sed -n "1,5p" README.md'
+expect allow 'sed "s/a/b/" README.md > /tmp/os-selftest-out'
+expect allow "cp $MAIN/README.md /tmp/copy.md"
+expect allow 'pnpm --filter @object-ui/app-shell test'
+expect allow 'git status'
+
+echo "== writing ABOUT the ban must not trip the ban =="
+CWD="$MAIN"
+expect allow 'grep -n "sed -i" .claude/'
+expect allow "grep -rn \"echo x > $MAIN/README.md\" .claude/"
+expect allow 'echo "never run sed -i inside the shared checkout"'
+expect allow 'git grep -n "cd main && tee packages/a.ts"'
+# a heredoc BODY is prose: its lines are documentation, not commands (the introducing
+# line's own redirect still counts — see the block case below)
+expect allow "$(printf "cat > /tmp/notes.md <<'EOF'\nsed -i 's/a/b/' %s/pkg/x.ts\necho x > %s/README.md\nEOF\n" "$MAIN" "$MAIN")"
+expect block "$(printf 'cat > %s/notes.md <<EOF\nhello\nEOF\n' "$MAIN")"
+expect allow 'grep -q worktree <<<"$AGENTS"'
+
+echo "== non-ASCII codepoints are never operators; ASCII redirects still are (objectstack#10247) =="
+CWD="$MAIN"
+# A pure-read `node -e` whose string literal carries U+2192. Nothing is redirected: the
+# arrow is a display separator. Every byte of a non-ASCII codepoint is >= 0x80 and `>` is
+# 0x3e, so no arrow can ever reach operator position.
+expect allow "node -e \"console.log(steps.map(st=>st.a).join(' $(printf '\xe2\x86\x92') '))\""
+expect allow "echo 'build $(printf '\xe2\x86\x92') test $(printf '\xe2\x86\x92') ship'"
+expect allow "grep -n '$(printf '\xe2\x86\x92') the URL' AGENTS.md"     # arrows fill this repo's prose
+expect allow "echo 'a $(printf '\xe2\x87\x92') b'"
+# The negative twins: an otherwise-similar command with a REAL ASCII redirect still blocks,
+# so the allow side above is widened for non-ASCII only and not for redirection at large.
+expect block "node -e \"console.log(1)\" > out.log"
+expect block "echo 'build $(printf '\xe2\x86\x92') ship' > steps.txt"
+expect block "echo 'a $(printf '\xe2\x86\x92') b' >> pkg/x.ts"
+
+echo "== \\\" inside a double-quoted word does not end the quote (objectstack#10247 real cause) =="
+CWD="$MAIN"
+# The shape from the card: an escaped \" used to close the string, after which the JS arrow
+# function `st=>` put a real `>` in operator position and the guard named the JS tail that
+# followed it as a write target. Pure read — must be allowed.
+expect allow 'node -e "const j=require(\"./a.json\"); console.log(j.x.map(st=>st.a).join(\" - \"))"'
+expect allow 'node -e "console.log(\"a\", x.map(s=>s.t))"'
+expect allow 'grep -rn "he said \"sed -i\" once" .claude/'
+# Negative twins: a real write is still caught even when an escaped quote precedes it.
+expect block 'node -e "console.log(\"hi\")" > pkg/out.json'
+expect block 'sed -i "s/\"a\"/\"b\"/" pkg/x.ts'
+
+echo "== an UNQUOTED \\\" opens no quote, so the write behind it is still seen (objectstack#11131) =="
+CWD="$MAIN"
+# The measured hole: segmentation read the escaped `"` as OPENING a quoted region that never
+# closed. Every separator behind it went inert, the command collapsed into one `echo`
+# segment, and the real in-place write was just another argument. tokenize() always had the
+# backslash branch; this is the pass agreement.
+expect block 'echo \" ; sed -i s/a/b/ pkg/x.ts'
+expect block 'echo \" ; rm -rf pkg/x.ts'
+expect block 'printf \" ; tee pkg/a.ts'
+expect block "$(printf 'echo \\"\nsed -i s/a/b/ pkg/x.ts\n')"
+# Precision twins: the escape must not manufacture a target where nothing is written, and
+# the same command aimed at a linked worktree stays allowed.
+expect allow 'echo \" ; echo hello'
+expect allow 'echo \" ; cat README.md'
+expect allow 'echo a\ b'
+expect allow 'echo \\ ; grep -n worktree README.md'
+# NOT a discriminating case for this fix, kept as a plain regression pin: a `>` target is
+# collected wherever it appears, so this blocked even while the passes disagreed. What the
+# disagreement lost was the COMMAND-NAME writers (sed -i / rm / tee) — once the command
+# collapsed into one segment the head word became `echo` and they were mere arguments.
+expect block 'echo \" && echo x > pkg/x.ts'
+CWD="$WT"
+expect allow 'echo \" ; sed -i s/a/b/ pkg/x.ts'
+
+echo "== a shell COMMENT is text, not a command (objectstack#10570) =="
+CWD="$MAIN"
+# The measured false blocks: prose in a comment put a real `>` in operator position and the
+# next word was named as a write target. Nothing in either command writes anything.
+expect allow "$(printf '# rename foo -> bar\necho hello\n')"
+expect allow "$(printf '# sitting 1 landed; card stays open for sitting 2 -> pm:dispatched goes, pm:queue returns\ncurl -s https://example.com/a\ncurl -s https://example.com/b\n')"
+expect allow 'echo hi   # then; tee pkg/x.ts would write it down'
+expect allow "$(printf '# step one; then a -> b\n# 2> is not a redirect here either\ngit status\n')"
+# Recall is untouched: a real redirect on a LATER line still blocks, and so does one on the
+# SAME line ahead of an inline comment.
+expect block "$(printf '# rename foo -> bar\necho x > pkg/x.ts\n')"
+expect block 'echo x > pkg/x.ts   # write it down'
+expect block "$(printf '# a comment; with a separator\nsed -i s/a/b/ pkg/x.ts\n')"
+# Word start is the whole rule: these `#`s are not comments and must not change a verdict.
+expect block 'touch foo#bar'
+expect block 'rm -rf pkg/x.ts#old'
+expect allow 'curl -s "https://example.com/docs#frag"'
+expect allow "curl -s https://example.com/docs#a-real-redirect-would-be > /dev/null"
+expect allow "grep -n '#' README.md"
+expect allow "sed 's/#//' README.md"
+expect allow 'echo "# not a comment > pkg/x.ts"'
+# `${x#y}` / `${#arr[@]}` — a parameter expansion, not a comment. Swallowing the line here
+# would drop the redirect behind it, so the negative twin is the load-bearing case.
+expect allow 'echo ${x#pkg/} '
+expect block 'echo ${#TOK[@]} > pkg/x.ts'
+expect block 'echo ${x#a} > pkg/x.ts'
+# an escaped `\#` outside quotes is a literal, not a comment opener
+expect allow 'echo \# not a comment'
+
+echo "== a heredoc introducer NAMED in a comment introduces nothing (objectstack#11133) =="
+CWD="$MAIN"
+# The measured hole: `<<EOF` inside prose registered as a real introducer. `EOF` never
+# appeared on a line of its own, so the pending heredoc was never satisfied and every
+# remaining line — including the real write — was dropped before analysis.
+expect block "$(printf '# use cat > /tmp/n <<EOF for notes\nsed -i s/a/b/ pkg/x.ts\n')"
+expect block "$(printf '# see the <<EOF trick\necho x >> pkg/x.ts\n')"
+expect block "$(printf 'git status   # cat <<MARKER writes notes\nrm -rf pkg/x.ts\n')"
+expect block "$(printf '# heredocs: <<-EOF and <<"Q" both introduce\ntouch pkg/new.ts\n')"
+# Real heredocs are untouched: a body is still prose, and the introducing line's own
+# redirect is still a write.
+expect allow "$(printf "cat > /tmp/notes.md <<'EOF'\nsed -i 's/a/b/' %s/pkg/x.ts\nEOF\n" "$MAIN")"
+expect block "$(printf 'cat > %s/notes.md <<EOF\nhello\nEOF\n' "$MAIN")"
+# An inline comment AFTER a real introducer must not cancel it — the body is still stripped,
+# and the negative twin shows a real write after the terminator is still caught.
+expect allow "$(printf 'cat > /tmp/n.md <<EOF   # notes\nsed -i s/a/b/ pkg/x.ts\nEOF\n')"
+expect block "$(printf 'cat > /tmp/n.md <<EOF   # notes\nhello\nEOF\nsed -i s/a/b/ pkg/x.ts\n')"
+# A QUOTED `#` on the introducing line is not a comment: truncating there would lose the
+# real introducer and expose the body as commands. This is the load-bearing precision case.
+expect allow "$(printf "grep '#' README.md <<EOF\nsed -i 's/a/b/' pkg/x.ts\nEOF\n")"
+# Ordering pin: an unbalanced apostrophe inside a heredoc BODY must not desynchronise the
+# comment rule for the lines that follow. Body lines never reach the comment scan, so the
+# real write after the terminator is still analysed.
+expect block "$(printf "cat > /tmp/n.md <<'EOF'\n# it's a note, don't strip me\nEOF\nsed -i s/a/b/ pkg/x.ts\n")"
+expect allow "$(printf "cat > /tmp/n.md <<'EOF'\n# it's a note, don't strip me\nEOF\ngit status\n")"
+
+echo "== a \$(…) inside \"…\" is its own quoting context (objectstack#24812) =="
+CWD="$MAIN"
+# The measured false blocks: a `"` inside the substitution was read as CLOSING the outer string,
+# so the `>` in a quoted JSON body became a redirect and the fragment after it a write target.
+# Pure reads — nothing is written.
+expect allow 'echo "a $(curl -d "{\"c\":\"x > 1\"}" http://h)"'
+expect allow "echo \"a \$(curl -d '{\"c\":\"x > 1\"}' http://h)\""
+expect allow 'echo "a `curl -d "{\"c\":\"x > 1\"}" http://h`"'      # the backtick spelling
+# Recall is untouched: a real write beside a quoted substitution still blocks — in the same
+# command, behind a separator, and inside a sed -i script — and so does the card's control.
+expect block 'echo hi > out.txt'
+expect block 'echo "a $(curl -d "{\"c\":\"x > 1\"}" http://h)" > pkg/x.ts'
+expect block 'X="$(git rev-parse HEAD)" ; sed -i s/a/b/ pkg/x.ts'
+expect block 'sed -i "s/a/$(date +%F)/" pkg/x.ts'
+# The fail-OPEN mirror: one `"` in the body used to leave the outer string hanging, so the
+# separator behind it went inert and the real write rode through as text.
+expect block "echo \"\$(printf '\"')\" ; sed -i s/a/b/ pkg/x.ts"
+expect block "echo \"\$(echo \"\$(printf '\"')\")\" ; sed -i s/a/b/ pkg/x.ts"   # nested
+# The heredoc scan reads the body the same way: the ` #` inside it is no comment, so the
+# introducer behind it is found and the body stays prose.
+expect allow "$(printf 'echo "$(echo " #")" <<EOF\nsed -i s/a/b/ pkg/x.ts\nEOF\n')"
+
+echo "== a \${…} inside \"…\" is its own quoting context too (objectstack#24901) =="
+CWD="$MAIN"
+# The measured false block: the `"` that opens the default was read as CLOSING the outer string,
+# so `b}` became a write target. Pure reads — nothing is written. Each one exercises a different
+# pass: tokenisation (the first two), segmentation (the `;`), nesting both ways (the third).
+expect allow 'echo "${x:-"a > b"}"'
+expect allow 'echo "${x#"a > b"}"'
+expect allow 'echo "${x:-"$(printf "a > b")"}"'
+expect allow 'echo "${x:-"a; sed -i s/a/b/ pkg/x.ts"}"'
+expect allow "echo \"\${x:-'a > b'}\""          # control: no nested `"`, allowed before and after
+# The heredoc scan agrees: the ` #` inside the expansion is no comment, so the introducer
+# behind it is found and the body stays prose.
+expect allow "$(printf 'echo "${x:-" #"}" <<EOF\nsed -i s/a/b/ pkg/x.ts\nEOF\n')"
+# Recall is untouched: a write behind, beside or inside the script of a quoted expansion. A
+# '…' run holding no character the shells disagree on is skipped, so the write behind it stays.
+expect block 'sed -i "s/a/${x:-"b"}/" pkg/x.ts'
+expect block 'sed -i "s/a/${x}/" pkg/x.ts'
+expect block 'echo "${HOME}" > pkg/x.ts'
+expect block 'echo "${x:-"a"}" ; sed -i s/a/b/ pkg/x.ts'
+expect block "echo \"\${x:-'a'}\" ; sed -i s/a/b/ pkg/x.ts"
+# A `$(…)` inside the expansion is read by the same function, quotes and all: the `"` inside
+# its single quotes closes nothing, so the separator behind the word still splits.
+expect block "echo \"\${x:-\$(printf '\"')}\" ; sed -i s/a/b/ pkg/x.ts"
+
+echo "== shapes this guard deliberately does NOT claim (documented fail-open) =="
+CWD="$MAIN"
+expect allow "bash -c \"sed -i s/a/b/ $MAIN/pkg/x.ts\""
+expect allow 'echo pkg/x.ts | xargs sed -i s/a/b/'
+expect allow 'node -e "fs.writeFileSync(\"pkg/x.ts\", \"y\")"'
+expect allow 'python3 -c "open(\"pkg/x.ts\",\"w\").write(\"y\")"'
+expect allow 'echo "$(sed -i s/a/b/ pkg/x.ts)"'      # a QUOTED $(…) body is one inert word
+expect allow 'echo "${x:-"$(sed -i s/a/b/ pkg/x.ts)"}"'   # …and so is a QUOTED ${…} body
+expect allow 'echo hi > "${x:-"a > b"}"'              # a target holding an expansion
+# A '…' run inside a quoted ${…} that holds `}` (or `"` `\` `$` and a backtick): bash 5.2 reads
+# it as quoted and POSIX shells as literal, so they end the expansion in different places and
+# everything after it is inert. Under bash the first is a pure read, under dash a real write.
+expect allow "echo \"\${x:-'}\"; sed -i s/a/b/ pkg/x.ts'}\""
+expect allow "echo \"\${x:-'}'}\" ; sed -i s/a/b/ pkg/x.ts"
+expect allow 'sed -i s/a/b/ $SOMEDIR/x.ts'
+expect allow 'sed -i s/a/b/ pkg/*.ts'
+
+echo "== escape hatch =="
+CWD="$MAIN"
+expect allow 'sed -i s/a/b/ pkg/x.ts' OS_ALLOW_MAIN_EDITS=1
+expect allow 'echo x > README.md' OS_ALLOW_MAIN_EDITS=1
+
+echo "== the hatch names WHERE it works: this hook's own environment, never a prefix =="
+# The refusal used to end by telling the reader to re-run the same thing with the variable
+# as a VAR=1 command prefix — an instruction that cannot work where it is printed. A VAR=1
+# prefix sets the variable in the environment of THAT COMMAND; this hook is not that
+# command, and it reads the variable from its own environment, so the prefix changes
+# nothing and the refusal repeats (#15971). An instruction that does not work is an
+# invitation to route around the guard, so both directions are pinned: the dead remedy is
+# gone, and the sentence names the environment the hook actually reads. The `allow` rows
+# next door — the variable really in the hook's environment — are this pair's other half.
+# The first row is the card's own reproduction, kept as a case: the prefix spelled exactly
+# as the old message told the reader to spell it must still BLOCK, because it never reaches
+# this hook. It is the twin of the `allow` rows above, where the same variable is really in
+# the hook's environment.
+CWD="$MAIN"
+expect block "OS_ALLOW_MAIN_EDITS=1 rm -f $MAIN/x"
+expect block 'OS_ALLOW_MAIN_EDITS=1 sed -i s/a/b/ pkg/x.ts'
+lacks 're-run with' 'the refusal no longer prints the prefix remedy' 'sed -i s/a/b/ pkg/x.ts'
+says 'hook itself runs in' 'the refusal names the environment this hook reads' 'sed -i s/a/b/ pkg/x.ts'
+
+echo "== unparseable / absent payload fails open =="
+for probe in '{"tool_name":"Bash","tool_input":{}}' 'not json at all' '{}'; do
+  if printf '%s' "$probe" | "$hook" >/dev/null 2>&1; then
+    pass=$((pass + 1)); printf '  ok   allow  (payload: %s)\n' "$probe"
+  else
+    fail=$((fail + 1)); printf '  FAIL should fail open  (payload: %s)\n' "$probe"
+  fi
+done
+
+echo "== a relative target with no cwd in the payload fails open; absolute still lands =="
+printf '%s' '{"tool_name":"Bash","tool_input":{"command":"sed -i s/a/b/ pkg/x.ts"}}' \
+  | "$hook" >/dev/null 2>&1
+if [ "$?" -eq 0 ]; then
+  pass=$((pass + 1)); printf '  ok   allow  (relative target, no cwd)\n'
+else
+  fail=$((fail + 1)); printf '  FAIL relative target with no cwd should fail open\n'
+fi
+printf '%s' "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"sed -i s/a/b/ $MAIN/pkg/x.ts\"}}" \
+  | "$hook" >/dev/null 2>&1
+if [ "$?" -eq 2 ]; then
+  pass=$((pass + 1)); printf '  ok   block  (absolute target, no cwd)\n'
+else
+  fail=$((fail + 1)); printf '  FAIL absolute target should still be judged without cwd\n'
+fi
+
+echo "== jq-less fallback still parses command and cwd =="
+nojq="$(mktemp -d)"
+for b in bash env cat sed head grep git dirname basename; do
+  p="$(command -v "$b")" && ln -s "$p" "$nojq/$b"
+done
+nojq_case() { # nojq_case <want> <cwd> <command>
+  local want="$1" w="$2" c="$3" got
+  printf '{"cwd":"%s","tool_name":"Bash","tool_input":{"command":"%s"}}' "$w" "$c" \
+    | PATH="$nojq" "$hook" >/dev/null 2>&1
+  case "$?" in 0) got=allow ;; 2) got=block ;; *) got=other ;; esac
+  if [ "$got" = "$want" ]; then
+    pass=$((pass + 1)); printf '  ok   %-5s  (no jq) %s\n' "$got" "$c"
+  else
+    fail=$((fail + 1)); printf '  FAIL want=%s got=%s  (no jq) %s\n' "$want" "$got" "$c"
+  fi
+}
+nojq_case block "$MAIN" 'sed -i s/a/b/ pkg/x.ts'
+nojq_case allow "$WT" 'sed -i s/a/b/ pkg/x.ts'
+nojq_case block "$MAIN" 'echo x > README.md'
+nojq_case block "$MAIN" 'cd /tmp\ntee '"$MAIN"'/pkg/a.ts'
+nojq_case allow "$MAIN" 'grep -n \"sed -i\" .claude/'
+rm -rf "$nojq"
+
+printf '\n%s passed, %s failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]

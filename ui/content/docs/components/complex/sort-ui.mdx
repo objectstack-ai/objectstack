@@ -1,0 +1,44 @@
+---
+title: "Sort UI"
+description: "Configure sorting with dropdowns or button toggles"
+---
+
+The Sort UI component exposes single or multi-field sorting controls.
+
+## JSON Configuration
+
+```plaintext
+{
+  type: 'sort-ui',
+  variant: 'dropdown',
+  multiple: true,
+  fields: [
+    { field: 'name', label: 'Name' },
+    { field: 'created_at', label: 'Created At' }
+  ],
+  sort: [{ field: 'name', direction: 'asc' }]
+}
+```
+
+## Basic Usage
+
+<SchemaExample id="components-complex-sort-ui/sort-ui" />
+
+## Schema
+
+```ts
+interface SortUISchema {
+  type: 'sort-ui';
+  fields: Array<{
+    field: string;
+    label?: string;
+  }>;
+  sort?: Array<{
+    field: string;
+    direction: 'asc' | 'desc';
+  }>;
+  onChange?: string;
+  multiple?: boolean;
+  variant?: 'dropdown' | 'buttons';
+}
+```

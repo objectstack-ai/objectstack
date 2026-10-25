@@ -1,0 +1,25 @@
+{
+  "type": "navigation-menu",
+  "items": [
+    {
+      "label": "Getting Started",
+      "children": [
+        {
+          "label": "Introduction",
+          "description": "Learn the basics",
+          "href": "/docs/intro"
+        },
+        {
+          "label": "Installation",
+          "description": "Install the package",
+          "href": "/docs/install"
+        },
+        {
+          "label": "Quick Start",
+          "description": "Build your first app",
+          "href": "/docs/quick-start"
+        }
+      ]
+    }
+  ]
+}

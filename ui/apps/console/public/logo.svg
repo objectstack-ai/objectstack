@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 196 44" fill="none" role="img" aria-label="ObjectOS">
+  <!-- Brand mark: flat indigo-600 rounded square (matches login BrandMark / favicon) -->
+  <rect width="44" height="44" rx="12" fill="#4F46E5" />
+
+  <!-- Layered "stack" glyph, scaled from the 24x24 lucide layers icon -->
+  <g transform="translate(10 10)" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 2 2 7l10 5 10-5-10-5Z" />
+    <path d="m2 17 10 5 10-5" />
+    <path d="m2 12 10 5 10-5" />
+  </g>
+
+  <!-- Wordmark -->
+  <text x="56" y="29" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+        font-size="22" font-weight="600" letter-spacing="-0.5" fill="#0F172A">ObjectOS</text>
+</svg>

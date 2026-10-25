@@ -1,0 +1,31 @@
+{
+  "type": "flex",
+  "properties": {
+    "direction": "col",
+    "gap": 4,
+    "children": [
+      {
+        "type": "label",
+        "text": "Notification Preference"
+      },
+      {
+        "type": "radio-group",
+        "value": "email",
+        "options": [
+          {
+            "value": "email",
+            "label": "Email notifications"
+          },
+          {
+            "value": "sms",
+            "label": "SMS notifications"
+          },
+          {
+            "value": "none",
+            "label": "No notifications"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "fields": [
+    {
+      "name": "phone",
+      "label": "Phone Number",
+      "type": "phone",
+      "placeholder": "+1 (555) 123-4567"
+    }
+  ]
+}

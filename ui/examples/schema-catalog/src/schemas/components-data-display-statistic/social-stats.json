@@ -1,0 +1,29 @@
+{
+  "type": "flex",
+  "properties": {
+    "gap": 6,
+    "children": [
+      {
+        "type": "statistic",
+        "label": "Views",
+        "value": "124.5K"
+      },
+      {
+        "type": "statistic",
+        "label": "Likes",
+        "value": "8.2K"
+      },
+      {
+        "type": "statistic",
+        "label": "Comments",
+        "value": "342"
+      },
+      {
+        "type": "statistic",
+        "label": "Shares",
+        "value": "89"
+      }
+    ]
+  },
+  "className": "p-4"
+}

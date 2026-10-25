@@ -1,0 +1,99 @@
+{
+  "name": "@object-ui/plugin-list",
+  "version": "18.1.0",
+  "type": "module",
+  "license": "MIT",
+  "description": "ListView plugin for Object UI - unified view component with view type switching",
+  "homepage": "https://www.objectui.org/docs/plugins/plugin-list",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
+    "directory": "ui/packages/plugin-list"
+  },
+  "bugs": {
+    "url": "https://github.com/objectstack-ai/objectui/issues"
+  },
+  "main": "dist/index.umd.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "sideEffects": [
+    "./dist/ObjectGallery.js",
+    "./dist/index.js",
+    "./dist/index.umd.cjs",
+    "./src/ObjectGallery.tsx",
+    "./src/index.tsx"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.umd.cjs"
+    }
+  },
+  "scripts": {
+    "build": "vite build",
+    "test": "vitest run --root ../.. packages/plugin-list/",
+    "test:watch": "vitest --root ../.. packages/plugin-list/",
+    "type-check": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "lucide-react": "^1.43.0"
+  },
+  "peerDependencies": {
+    "@object-ui/components": "workspace:^",
+    "@object-ui/core": "workspace:^",
+    "@object-ui/fields": "workspace:^",
+    "@object-ui/i18n": "workspace:^",
+    "@object-ui/mobile": "workspace:^",
+    "@object-ui/permissions": "workspace:^",
+    "@object-ui/plugin-detail": "workspace:^",
+    "@object-ui/react": "workspace:^",
+    "@object-ui/types": "workspace:^",
+    "@objectstack/spec": "workspace:^",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@object-ui/components": "workspace:*",
+    "@object-ui/core": "workspace:*",
+    "@object-ui/fields": "workspace:*",
+    "@object-ui/i18n": "workspace:*",
+    "@object-ui/mobile": "workspace:*",
+    "@object-ui/permissions": "workspace:*",
+    "@object-ui/plugin-detail": "workspace:*",
+    "@object-ui/react": "workspace:*",
+    "@object-ui/test-support": "workspace:*",
+    "@object-ui/types": "workspace:*",
+    "@objectstack/spec": "workspace:^",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "^6.0.5",
+    "typescript": "^6.0.3",
+    "vite": "^8.2.1",
+    "vite-plugin-dts": "^5.0.3",
+    "vitest": "^4.1.10"
+  },
+  "keywords": [
+    "objectui",
+    "sdui",
+    "schema-driven-ui",
+    "react",
+    "tailwind",
+    "shadcn",
+    "objectstack",
+    "plugin",
+    "list-view",
+    "view-switcher"
+  ],
+  "author": "ObjectStack Team <team@objectstack.ai>",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ]
+}

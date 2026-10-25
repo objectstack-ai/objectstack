@@ -1,0 +1,20 @@
+{
+  "type": "stack",
+  "gap": 6,
+  "className": "max-w-md p-6 border rounded-lg",
+  "children": [
+    {
+      "type": "text",
+      "content": "Project Files",
+      "className": "text-xl font-semibold"
+    },
+    {
+      "type": "file-upload",
+      "id": "project-files",
+      "label": "Upload project files",
+      "accept": "*",
+      "multiple": true,
+      "buttonText": "Drop files here or click to upload"
+    }
+  ]
+}

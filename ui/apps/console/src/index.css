@@ -1,0 +1,533 @@
+/*
+ * `source(none)` turns off Tailwind's AUTOMATIC source detection, so the only
+ * inputs are the `@source` lines below (objectui#11586). It is the same switch
+ * `packages/components/src/index.css` took in objectui#9569, and that file's
+ * header records the mechanism.
+ *
+ * Detection roots at the process CWD, which is this app's directory when it
+ * builds, and it scans every non-ignored file there, prose included.
+ * `pnpm changeset:version` writes each pending changeset body into
+ * `CHANGELOG.md`, so on the 17.7.0 release head the console sheet gained 11
+ * rules (9,450 bytes) compiled from changelog prose. Among them was the
+ * sentinel of components' own scan test, which the second test in
+ * `index-css-scan-excludes-tests.test.ts` asserts never reaches this sheet.
+ * On `main` it gained `.w-100`, out of a proposal under `docs/`.
+ * Ablated on objectui#11586: every rule that only detection supplied came from
+ * a `.md` file, and none came from source.
+ */
+@import 'tailwindcss' source(none);
+@import '@object-ui/app-shell/styles.css';
+
+/* Typography plugin — generates the `prose` utilities. plugin-markdown's
+   MarkdownImpl renders docs/markdown inside `prose prose-h1:text-3xl …`;
+   without this plugin those classes are no-ops and Markdown renders with
+   NO heading sizes, list markers, or spacing (ADR-0046 docs looked unstyled
+   — headings indistinguishable from body text). */
+@plugin '@tailwindcss/typography';
+
+/* Scan sources for Tailwind classes */
+@source '../src/**/*.{ts,tsx}';
+@source '../../../packages/app-shell/src/**/*.{ts,tsx}';
+@source '../../../packages/auth/src/**/*.{ts,tsx}';
+@source '../../../packages/components/src/**/*.{ts,tsx}';
+@source '../../../packages/layout/src/**/*.{ts,tsx}';
+@source '../../../packages/fields/src/**/*.{ts,tsx}';
+@source '../../../packages/react/src/**/*.{ts,tsx}';
+@source '../../../packages/plugin-dashboard/src/**/*.{ts,tsx}';
+@source '../../../packages/plugin-report/src/**/*.{ts,tsx}';
+@source '../../../packages/plugin-form/src/**/*.{ts,tsx}';
+@source '../../../packages/plugin-grid/src/**/*.{ts,tsx}';
+@source '../../../packages/plugin-calendar/src/**/*.{ts,tsx}';
+@source '../../../packages/plugin-kanban/src/**/*.{ts,tsx}';
+@source '../../../packages/plugin-gantt/src/**/*.{ts,tsx}';
+@source '../../../packages/plugin-timeline/src/**/*.{ts,tsx}';
+@source '../../../packages/plugin-markdown/src/**/*.{ts,tsx}';
+@source '../../../packages/plugin-map/src/**/*.{ts,tsx}';
+@source '../../../packages/plugin-charts/src/**/*.{ts,tsx}';
+@source '../../../packages/plugin-chatbot/src/**/*.{ts,tsx}';
+/* Streamdown (used by chatbot markdown) emits a fixed set of Tailwind utility
+   classes at runtime from inside node_modules — Tailwind v4 doesn't scan
+   node_modules by default, so we explicitly inline the classes we know it
+   needs. Without this, ordered/unordered list markers and table borders
+   render unstyled. Keep in sync with streamdown's component class strings. */
+@source inline("{,group-hover:}list-{inside,outside,decimal,disc,none}");
+@source inline("whitespace-{normal,nowrap,pre,pre-wrap,pre-line}");
+@source inline("[li_&]:pl-{2,3,4,5,6,8}");
+/* Streamdown ALSO emits syntax-highlight color + background utilities as runtime
+   arbitrary-value classes. Without these the per-token color (carried in an
+   inline `--sdm-c` var) has no `color: var(--sdm-c)` rule to apply it, so chat
+   code blocks render MONOCHROME. The previous safelist (above) missed these. */
+@source inline("text-[var(--sdm-c,inherit)]");
+@source inline("dark:text-[var(--shiki-dark,var(--sdm-c,inherit))]");
+@source inline("bg-[var(--sdm-tbg)]");
+@source inline("dark:bg-[var(--shiki-dark-bg,var(--sdm-tbg))]");
+@source inline("bg-[var(--sdm-bg,inherit)]");
+@source inline("dark:bg-[var(--shiki-dark-bg,var(--sdm-bg,inherit))]");
+@source '../../../packages/plugin-editor/src/**/*.{ts,tsx}';
+@source '../../../packages/plugin-view/src/**/*.{ts,tsx}';
+@source '../../../packages/plugin-detail/src/**/*.{ts,tsx}';
+@source '../../../packages/plugin-list/src/**/*.{ts,tsx}';
+@source '../../../packages/plugin-designer/src/**/*.{ts,tsx}';
+@source '../../../packages/i18n/src/**/*.{ts,tsx}';
+@source '../../../packages/collaboration/src/**/*.{ts,tsx}';
+@source '../../../packages/mobile/src/**/*.{ts,tsx}';
+
+/*
+ * Only SHIPPED source. Tailwind v4 scans source TEXT, not an import graph, so
+ * any class-shaped token in a scanned file compiles a real utility into this
+ * app's eager `index-*.css` -- including a token that only ever appears as a
+ * test's EXPECTED value. `packages/components/src/index.css` and
+ * `packages/runner/src/index.css` already carry this pair; this entry was the
+ * one that did not, while reaching FURTHER than either of them.
+ *
+ * Anchored at the repository root because that is the one base that covers
+ * BOTH trees this entry scans: the 27 package globs above (`../../../packages`)
+ * and Tailwind's AUTOMATIC detection root, which is the PROCESS CWD -- here
+ * `apps/console`, where `pnpm --filter @object-ui/console build` runs. Runner's
+ * header records the same reasoning one level down, and records the measurement
+ * that makes it sound: negations DO apply to files the automatic root found.
+ *
+ * Measured (objectui#6379), not assumed: these two lines remove 19 classes --
+ * 10,096 bytes from the unminified compile, and -7,998 raw / -955 gzipped from
+ * the built `index-*.css` users are served -- and every removed class was
+ * traced to a test file. That is 2.0% of the render-blocking gzipped CSS: a
+ * correctness fix with a size side-effect, NOT a first-paint fix.
+ *
+ * The clearest single reading among the 19 is `mt-[3.7331px]` -- the
+ * self-hosted sentinel of components' own
+ * `index-css-scan-excludes-tests.test.ts`, a token that exists ONLY to prove
+ * that package's exclusion works, and which this app was shipping to users.
+ * `prose-lg` and `prose-slate` are 10,302 of the unminified bytes between
+ * them: the typography plugin emits a very large rule block per `prose-*`
+ * variant, and both variants were named by tests and by no shipped source.
+ */
+@source not '../../../**/*.test.{ts,tsx}';
+@source not '../../../**/__tests__/**';
+
+/* Tailwind plugin for animations remove
+@plugin 'tailwindcss-animate';
+*/
+
+/* Define theme colors for Tailwind 4 */
+@theme {
+  /* Border radius tokens */
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+
+  /* Color tokens mapped to CSS variables */
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-sidebar: hsl(var(--sidebar));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-sidebar-primary: hsl(var(--sidebar-primary));
+  --color-sidebar-primary-foreground: hsl(var(--sidebar-primary-foreground));
+  --color-sidebar-accent: hsl(var(--sidebar-accent));
+  --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+  --color-sidebar-ring: hsl(var(--sidebar-ring));
+
+  /* Data-visualization palette (used by chart plugins) */
+  --color-chart-1: hsl(var(--chart-1));
+  --color-chart-2: hsl(var(--chart-2));
+  --color-chart-3: hsl(var(--chart-3));
+  --color-chart-4: hsl(var(--chart-4));
+  --color-chart-5: hsl(var(--chart-5));
+
+  /* Semantic status tokens (KPI deltas, tags, alerts) */
+  --color-success: hsl(var(--success));
+  --color-success-foreground: hsl(var(--success-foreground));
+  --color-warning: hsl(var(--warning));
+  --color-warning-foreground: hsl(var(--warning-foreground));
+}
+
+/* CSS custom properties for theme */
+@layer base {
+  :root {
+    /* Render native controls (date/time picker indicators, scrollbars) in
+       light mode so their built-in glyphs stay legible. */
+    color-scheme: light;
+
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+ 
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+ 
+    --primary: 243 75% 59%;
+    --primary-foreground: 0 0% 100%;
+ 
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+ 
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+ 
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+ 
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 243 75% 59%;
+ 
+    --radius: 0.5rem;
+
+    /* Sidebar colors */
+    --sidebar: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 243 75% 59%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 243 75% 59%;
+
+    /* Chart palette — modern, distinguishable hues for B2B dashboards */
+    --chart-1: 221 83% 53%;   /* blue   */
+    --chart-2: 173 58% 39%;   /* teal   */
+    --chart-3: 262 83% 58%;   /* violet */
+    --chart-4: 27 96% 61%;    /* orange */
+    --chart-5: 340 75% 55%;   /* rose   */
+
+    /* Semantic status colors */
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+
+    /* SDUI design tokens (ADR-0065) — the curated palette author
+       `responsiveStyles` resolve against. Spacing/radius/shadow are
+       theme-independent; the semantic color tokens alias the theme so they
+       track light/dark automatically (resolved at use-site). */
+    --space-1: 0.25rem;
+    --space-2: 0.5rem;
+    --space-3: 0.75rem;
+    --space-4: 1rem;
+    --space-5: 1.25rem;
+    --space-6: 1.5rem;
+    --space-8: 2rem;
+    --space-10: 2.5rem;
+    --space-12: 3rem;
+    --radius-xl: 1rem;
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    --shadow-md: 0 4px 12px -2px rgb(0 0 0 / 0.12);
+    --shadow-lg: 0 10px 30px -5px rgb(0 0 0 / 0.25);
+    --surface: hsl(var(--card));
+    --surface-sunken: hsl(var(--muted));
+    --text-strong: hsl(var(--foreground));
+    --text-muted: hsl(var(--muted-foreground));
+    --brand: hsl(var(--primary));
+    --brand-foreground: hsl(var(--primary-foreground));
+    --hairline: hsl(var(--border));
+  }
+
+  .dark {
+    /* Dark native controls: the webkit calendar-picker-indicator (and other
+       built-in glyphs) render light-on-dark instead of vanishing against the
+       dark input background. */
+    color-scheme: dark;
+
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+ 
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+ 
+    --primary: 239 84% 67%;
+    --primary-foreground: 0 0% 100%;
+ 
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+ 
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+ 
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+ 
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+ 
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 239 84% 67%;
+
+    /* Sidebar colors for dark mode */
+    --sidebar: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 239 84% 67%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 239 84% 67%;
+
+    /* Chart palette — slightly desaturated for dark backgrounds */
+    --chart-1: 217 91% 60%;
+    --chart-2: 173 70% 50%;
+    --chart-3: 262 83% 68%;
+    --chart-4: 27 96% 65%;
+    --chart-5: 340 82% 65%;
+
+    /* Semantic status colors (dark mode) */
+    --success: 142 65% 50%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 55%;
+    --warning-foreground: 0 0% 10%;
+  }
+
+  * {
+    border-color: hsl(var(--border));
+  }
+  
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+  }
+
+  /* Prevent iOS zoom on input focus (ensure minimum 16px font) */
+  @media screen and (max-width: 767px) {
+    input, select, textarea {
+      font-size: 16px;
+    }
+  }
+
+  /* Dynamic viewport height utility for mobile-safe full-screen layouts */
+  .h-dvh {
+    height: 100dvh;
+  }
+
+  /* Safe-area-inset utility for notched devices */
+  .safe-area-inset {
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+}
+
+/* Brand-tinted active state for sidebar nav buttons (P1.1).
+ * Layered outside @layer base so it wins over Shadcn's default tokenized classes
+ * without modifying any file under packages/components/src/ui (no-touch zone). */
+[data-sidebar="menu-button"][data-active="true"] {
+  background-color: hsl(var(--primary) / 0.10);
+  color: hsl(var(--primary));
+  font-weight: 500;
+  position: relative;
+}
+[data-sidebar="menu-button"][data-active="true"]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  height: 1.25rem;
+  width: 2px;
+  border-radius: 0 9999px 9999px 0;
+  background-color: hsl(var(--primary));
+  transform: translateY(-50%);
+}
+[data-sidebar="menu-button"][data-active="true"]:hover {
+  background-color: hsl(var(--primary) / 0.14);
+  color: hsl(var(--primary));
+}
+.dark [data-sidebar="menu-button"][data-active="true"] {
+  background-color: hsl(var(--primary) / 0.18);
+  color: hsl(var(--primary));
+}
+.dark [data-sidebar="menu-button"][data-active="true"]:hover {
+  background-color: hsl(var(--primary) / 0.24);
+}
+
+/* ============================================================
+ * iOS desktop experience — "Liquid Glass" theme layer (iteration 1)
+ *
+ * App-level theming only (console/index.css); no shared component
+ * library (packages/components/src/ui) is touched. Delete this whole
+ * block to revert to the stock look.
+ *
+ * What it changes: iOS-scale concentric corners, a grouped system-gray
+ * canvas so white cards read as floating layers, SF Pro typography with
+ * iOS tracking, a frosted-glass top bar, soft elevation on overlays, and
+ * an iOS press-springback on buttons.
+ * ============================================================ */
+@layer base {
+  :root {
+    /* iOS uses larger, concentric corner radii */
+    --radius: 0.875rem;
+
+    /* iOS "grouped" canvas: soft system gray (≈ #F2F2F7) instead of pure
+       white, so white cards/popovers float above it with real depth. */
+    --background: 240 24% 97%;
+    --secondary: 240 18% 94%;
+    --muted: 240 18% 94%;
+    --accent: 240 18% 94%;
+    --border: 240 16% 90%;
+  }
+
+  .dark {
+    /* iOS dark uses near-black, not blue-black; cards sit slightly above. */
+    --background: 240 6% 6%;
+    --card: 240 6% 10%;
+    --popover: 240 6% 11%;
+    --secondary: 240 5% 16%;
+    --muted: 240 5% 16%;
+    --accent: 240 5% 16%;
+    --border: 240 5% 18%;
+  }
+
+  body {
+    /* SF Pro / system font with iOS rendering + tighter tracking */
+    font-family: -apple-system, "SF Pro Text", "SF Pro Display",
+      BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif,
+      "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    letter-spacing: -0.011em;
+  }
+}
+
+/* Frosted-glass top bar (the signature iOS "material") */
+header.sticky {
+  background-color: hsl(var(--background) / 0.72) !important;
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  border-bottom-color: hsl(var(--border) / 0.7);
+}
+.dark header.sticky {
+  background-color: hsl(var(--background) / 0.6) !important;
+}
+
+/* Soft, diffuse iOS elevation on floating surfaces (dialogs, menus, popovers). */
+[role="dialog"],
+[role="menu"],
+[data-radix-popper-content-wrapper] > * {
+  box-shadow:
+    0 12px 32px -8px hsl(240 40% 20% / 0.18),
+    0 4px 12px -4px hsl(240 40% 20% / 0.12) !important;
+}
+
+/* iOS-style press springback on interactive controls. */
+@media (hover: hover) {
+  button:not([disabled]) {
+    transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1),
+      filter 0.18s ease;
+  }
+  button:not([disabled]):active {
+    transform: scale(0.96);
+  }
+}
+
+/* ------------------------------------------------------------
+ * iOS theme — iteration 2: system-blue accent + deeper controls
+ * ------------------------------------------------------------ */
+@layer base {
+  :root {
+    /* iOS system blue (#007AFF) replaces the indigo brand accent.
+       Drives buttons, links, progress bars, focus rings, active nav. */
+    --primary: 211 100% 50%;
+    --ring: 211 100% 50%;
+    --sidebar-primary: 211 100% 50%;
+    --sidebar-ring: 211 100% 50%;
+    /* iOS sidebar is a translucent vibrancy material → near-white base. */
+    --sidebar: 240 24% 98%;
+  }
+  .dark {
+    /* iOS dark blue (#0A84FF) is a touch brighter for contrast. */
+    --primary: 211 100% 60%;
+    --ring: 211 100% 60%;
+    --sidebar-primary: 211 100% 60%;
+    --sidebar-ring: 211 100% 60%;
+    --sidebar: 240 6% 8%;
+  }
+}
+
+/* Frosted-glass sidebar (iPad-style translucent vibrancy). */
+[data-sidebar="sidebar"] {
+  background-color: hsl(var(--sidebar) / 0.7) !important;
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+}
+
+/* iOS toggle: switches turn system-green (#34C759) when on, not blue. */
+[role="switch"][data-state="checked"] {
+  background-color: hsl(135 59% 49%) !important;
+}
+
+/* iOS sheet/dialog: extra-rounded corners. */
+[role="dialog"] {
+  border-radius: 1.25rem !important;
+}
+
+/* iOS-blue tinted text selection. */
+::selection {
+  background-color: hsl(211 100% 50% / 0.22);
+}
+
+/* Thin, overlay-style iOS scrollbars. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(240 6% 70% / 0.6) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: hsl(240 6% 70% / 0.55);
+  border-radius: 9999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(240 6% 60% / 0.75);
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ------------------------------------------------------------
+ * iOS theme — iteration 3: high-confidence control polish
+ * (CSS-only overrides; shadcn ui components not edited)
+ * ------------------------------------------------------------ */
+
+/* iOS "spotlight"-style backdrop: blur + lighten the dim behind any
+   dialog / sheet / command palette overlay instead of a flat 80% black. */
+.fixed.inset-0.z-50.bg-black\/80 {
+  background-color: rgb(0 0 0 / 0.35) !important;
+  -webkit-backdrop-filter: blur(8px) saturate(140%);
+  backdrop-filter: blur(8px) saturate(140%);
+}
+
+/* iOS slider thumb: solid white knob with a soft drop shadow instead of a
+   hollow accent-ring. (Radix SliderThumb carries role="slider".) */
+[role="slider"] {
+  height: 1.5rem !important;
+  width: 1.5rem !important;
+  background-color: #fff !important;
+  border-color: transparent !important;
+  box-shadow:
+    0 1px 4px rgb(0 0 0 / 0.25),
+    0 0 0 0.5px rgb(0 0 0 / 0.06) !important;
+}

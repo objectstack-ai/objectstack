@@ -1,0 +1,211 @@
+{
+  "type": "card",
+  "children": [
+    {
+      "type": "flex",
+      "properties": {
+        "align": "center",
+        "justify": "between",
+        "children": [
+          {
+            "type": "text",
+            "content": "Revenue by Region",
+            "className": "font-semibold"
+          },
+          {
+            "type": "badge",
+            "label": "5 regions",
+            "variant": "secondary"
+          }
+        ]
+      },
+      "className": "mb-4"
+    },
+    {
+      "type": "stack",
+      "gap": 0,
+      "children": [
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 4,
+            "children": [
+              {
+                "type": "text",
+                "content": "Region",
+                "className": "w-36"
+              },
+              {
+                "type": "text",
+                "content": "Revenue",
+                "className": "w-24"
+              },
+              {
+                "type": "text",
+                "content": "Orders",
+                "className": "w-20"
+              },
+              {
+                "type": "text",
+                "content": "Growth",
+                "className": "w-20"
+              }
+            ]
+          },
+          "className": "px-4 py-2 bg-muted text-xs font-medium text-muted-foreground border-b"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 4,
+            "children": [
+              {
+                "type": "text",
+                "content": "North America",
+                "className": "w-36 font-medium"
+              },
+              {
+                "type": "text",
+                "content": "$125,400",
+                "className": "w-24"
+              },
+              {
+                "type": "text",
+                "content": "824",
+                "className": "w-20"
+              },
+              {
+                "type": "text",
+                "content": "+15.2%",
+                "className": "w-20 text-green-600"
+              }
+            ]
+          },
+          "className": "px-4 py-3 border-b text-sm"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 4,
+            "children": [
+              {
+                "type": "text",
+                "content": "Europe",
+                "className": "w-36 font-medium"
+              },
+              {
+                "type": "text",
+                "content": "$89,200",
+                "className": "w-24"
+              },
+              {
+                "type": "text",
+                "content": "562",
+                "className": "w-20"
+              },
+              {
+                "type": "text",
+                "content": "+10.8%",
+                "className": "w-20 text-green-600"
+              }
+            ]
+          },
+          "className": "px-4 py-3 border-b text-sm"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 4,
+            "children": [
+              {
+                "type": "text",
+                "content": "Asia Pacific",
+                "className": "w-36 font-medium"
+              },
+              {
+                "type": "text",
+                "content": "$42,300",
+                "className": "w-24"
+              },
+              {
+                "type": "text",
+                "content": "298",
+                "className": "w-20"
+              },
+              {
+                "type": "text",
+                "content": "+22.1%",
+                "className": "w-20 text-green-600"
+              }
+            ]
+          },
+          "className": "px-4 py-3 border-b text-sm"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 4,
+            "children": [
+              {
+                "type": "text",
+                "content": "Latin America",
+                "className": "w-36 font-medium"
+              },
+              {
+                "type": "text",
+                "content": "$18,600",
+                "className": "w-24"
+              },
+              {
+                "type": "text",
+                "content": "108",
+                "className": "w-20"
+              },
+              {
+                "type": "text",
+                "content": "+5.4%",
+                "className": "w-20 text-green-600"
+              }
+            ]
+          },
+          "className": "px-4 py-3 border-b text-sm"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 4,
+            "children": [
+              {
+                "type": "text",
+                "content": "Middle East",
+                "className": "w-36 font-medium"
+              },
+              {
+                "type": "text",
+                "content": "$9,000",
+                "className": "w-24"
+              },
+              {
+                "type": "text",
+                "content": "50",
+                "className": "w-20"
+              },
+              {
+                "type": "text",
+                "content": "+18.7%",
+                "className": "w-20 text-green-600"
+              }
+            ]
+          },
+          "className": "px-4 py-3 text-sm"
+        }
+      ]
+    }
+  ]
+}

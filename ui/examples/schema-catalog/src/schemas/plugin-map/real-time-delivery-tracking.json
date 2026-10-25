@@ -1,0 +1,35 @@
+{
+  "type": "object-map",
+  "properties": {
+    "staticData": [
+      {
+        "id": 1,
+        "driver": "Driver A",
+        "current_lat": 37.7849,
+        "current_lng": -122.4094,
+        "destination": "Downtown SF"
+      },
+      {
+        "id": 2,
+        "driver": "Driver B",
+        "current_lat": 37.7949,
+        "current_lng": -122.3994,
+        "destination": "Financial District"
+      },
+      {
+        "id": 3,
+        "driver": "Driver C",
+        "current_lat": 37.7649,
+        "current_lng": -122.4294,
+        "destination": "Mission District"
+      }
+    ],
+    "map": {
+      "latitudeField": "current_lat",
+      "longitudeField": "current_lng",
+      "titleField": "driver",
+      "descriptionField": "destination",
+      "zoom": 12
+    }
+  }
+}

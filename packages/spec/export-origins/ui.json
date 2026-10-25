@@ -533,6 +533,7 @@
     "isRecordContextBlockType": "src/ui/react-blocks.ts#isRecordContextBlockType (function)",
     "isViewContainerShaped": "src/ui/assembled-views.zod.ts#isViewContainerShaped (function)",
     "listViewGroupKeyPredicate": "src/ui/view-grouping-query.ts#listViewGroupKeyPredicate (function)",
+    "listViewGroupOrderColumn": "src/ui/view-grouping-query.ts#listViewGroupOrderColumn (function)",
     "misplacedDefaultPageRefusal": "src/ui/default-record-page.ts#misplacedDefaultPageRefusal (function)",
     "navItemVisibleDataNeedsDataSource": "src/ui/app.zod.ts#navItemVisibleDataNeedsDataSource (function)",
     "normalizeFilterOperator": "src/ui/view.zod.ts#normalizeFilterOperator (function)",

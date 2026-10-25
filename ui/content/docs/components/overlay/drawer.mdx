@@ -1,0 +1,22 @@
+---
+title: "Drawer"
+description: "Sliding panel from edge of screen"
+---
+
+## Examples
+
+  <SchemaExample id="components-overlay-drawer/basic-drawer" />
+
+## Schema
+
+```ts
+import type { SchemaNode } from '@object-ui/types';
+
+interface DrawerSchema {
+  type: 'drawer';
+  trigger: SchemaNode | SchemaNode[];
+  title?: string;
+  content?: SchemaNode | SchemaNode[];
+  side?: 'left' | 'right' | 'top' | 'bottom';
+}
+```

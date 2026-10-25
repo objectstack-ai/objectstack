@@ -1,0 +1,19 @@
+{
+  // `examples/` is documentation that consumers copy from, so it has to compile
+  // against the same sources it teaches. It cannot live in tsconfig.json: that
+  // project is the package build (`tsc` -> dist) with "rootDir": "./src",
+  // "composite" and "declaration", so example files are both outside rootDir and
+  // would emit into dist. Note that deleting "examples" from that file's
+  // "exclude" would change nothing on its own — its "include" is already scoped
+  // to "src/**/*". Hence a separate, emit-free project, chained from the
+  // package's `type-check` script.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "lib": ["ES2020", "DOM"],
+    // Same reason as tsconfig.json: drop the root tsconfig's source-tree paths
+    // so @objectstack/spec resolves through the workspace dependency.
+    "paths": {}
+  },
+  "include": ["examples/**/*.ts"]
+}

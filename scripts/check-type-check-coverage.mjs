@@ -858,6 +858,8 @@ const EXEMPT = {
     'Published Console build artifact -- package.json/README/CHANGELOG plus a dist/ copied from ui/apps/console by its own build:dist (build-dist.sh, plain bash; objectstack#25711). No TypeScript sources, no tsconfig; the sources are type-checked as @object-ui/console under ui/.',
   '@objectstack/skills':
     'Published skills catalog -- package.json/README/CHANGELOG plus a dist/skills tree copied from the repository root skills/** by its own build (scripts/sync-catalog.mjs, plain node). No TypeScript sources, no tsconfig; the catalog is markdown and JSON, judged by the skill gates over skills/**.',
+  '@object-ui/example-hello-world':
+    'Imported objectui documentation snippet (ui/examples/hello-world: App.tsx, schema.json, README) -- no build script and no tsconfig, its source read rather than run. objectui\'s own coverage gate declares it NOT_COMPILED for exactly that reason (ui/scripts/check-type-check-coverage.mjs); seeded at the import (objectstack#25803).',
 };
 
 // Package name -> { errors, note? } for packages whose tsconfig excludes their
@@ -1533,7 +1535,34 @@ const PHANTOM_PIN_DEBT = {};
 // recorded, so nothing was repaired to graduate it: the directory stopped being
 // unread source. ⛔ This list only shrinks, and it is empty now; a new entry
 // needs the same justification any DEBT entry needs.
-const UNCHECKED_SOURCE_DEBT = {};
+//
+// ── The objectui import seeded six (objectstack#25803, cutover bill item 1) ──
+//
+// Directories under `ui/` that no program of their package's `type-check`
+// reads -- and that objectui's own coverage gate never asked about, because it
+// walks each package's tsconfig programs and not the package tree. Each reason
+// carries a probe taken at the import: the package's own `tsconfig.json` with
+// `include` narrowed to the directory, at 9e37acd126, counting only errors IN
+// the named files (the probe's TS6307/TS6059 program-shape noise and the
+// errors it pulls in from `src/` are not the directory's). They graduate the
+// way #14710's did: a program that reads them, in the ui/ aftercare.
+const UNCHECKED_SOURCE_DEBT = {
+  'ui/packages/plugin-calendar/test':
+    'objectui import: test/setup.ts, the vitest setup file (jsdom globals). Probe: 2 x TS2304 (`global`, no node types in the package program).',
+  'ui/packages/plugin-charts/examples':
+    'objectui import: examples/chart-examples.ts, schema samples the package README points at. Probe: 0 errors.',
+  'ui/packages/plugin-dashboard/demo':
+    'objectui import: demo/starvation-7696.tsx, a vite dev page reproducing objectui#7696. Probe: 1 x TS2882 (side-effect import of @object-ui/components/style.css).',
+  'ui/packages/plugin-gantt/demo':
+    'objectui import: demo/main.tsx, the package\'s vite dev page. Probe: 1 x TS2882 (side-effect import of @object-ui/components/style.css).',
+  'ui/packages/plugin-grid/demo':
+    'objectui import: demo/main.tsx and demo/bulk-actions.tsx, vite dev pages. Probe: 2 x TS2882 (style.css side-effect imports) + 1 x TS2322 (bulk-actions i18n resources prop).',
+  'ui/packages/sdui-parser/scripts':
+    'objectui import: scripts/gen-manifest.ts, the SDUI manifest generator run with tsx. Probe: 1 x TS2591 (`node:fs`, no node types in the package program).',
+};
+// The ceiling those six set. The self-test's FLOOR battery holds the ledger at
+// or below it, so the list only shrinks from the import on.
+const UNCHECKED_SOURCE_DEBT_SEEDED = 6;
 
 /**
  * GENERATED_COVERED's declared table (#10880) -- the generated `include` roots
@@ -2087,7 +2116,10 @@ function walkPackageFiles(absDir, dir, ignored) {
       if (isIgnoredPath(ignored, posix.join(dir, childRel))) continue;
       if (entry.isDirectory()) {
         if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name.startsWith('.')) continue;
-        if (depth > 0 && existsSync(join(child, 'package.json'))) continue; // another package's problem
+        // Any depth, since the ui/ import (objectstack#25752): `ui/` is a workspace
+        // member that sits DIRECTLY under the root, so a depth guard here would hand
+        // its root-level scripts and tests to the ROOT package's walk.
+        if (existsSync(join(child, 'package.json'))) continue; // another package's problem
         walk(child, childRel, depth + 1);
       } else if (TEST_FILE.test(entry.name)) {
         testRels.push(childRel);
@@ -2361,6 +2393,105 @@ const { populationFloorProblem, populationProvenanceLine } = definePopulationFlo
   ],
 });
 
+// The SECOND SPELLINGS of the coverage script (objectstack#25803, cutover bill
+// item 1), for the objectui tree imported under `ui/`.
+//
+// `member`: objectui spells the per-package check `type-check` -- 45 of the 47
+// members, run by the Type Check UI job as `turbo run type-check` -- so without
+// this row every one of them read here as a package with no script at all, and
+// the four clauses billed the tests and pins its own `tsc -p tsconfig.test.json`
+// already compiles. A member under `root` that declares `script` and NOT
+// `typecheck` is judged by `script`, through every clause `typecheck` is judged
+// by; one declaring both is judged by `typecheck`. Renaming the tasks instead is
+// ruled out by the bill (objectui keeps its spelling; no mass rename).
+//
+// `root`: the objectui workspace ROOT (`ui/`, `object-ui-monorepo`) has no such
+// script. Its `type-check` was the turbo aggregator, dropped with the other
+// recursive root scripts when ui/ joined this workspace; what compiles its own
+// files is three named programs Type Check UI runs one step each, which are its
+// coverage the way `typecheck:root` is this root's. `type-check:vitest-config` is
+// NOT among them: it builds `apps/console/tsconfig.node.json`, the Console's
+// program, and the shared predicate credits a config by BASENAME
+// (typecheck-configs.mjs header), so naming it here would credit `ui/`'s own
+// unrelated `tsconfig.node.json`.
+//
+// RUNNABLE asks of each the questions it asks of `typecheck`: the turbo task
+// exists (members only -- the root's programs are not turbo tasks) and CI runs
+// it. Nowhere outside these rows does a second spelling count.
+//
+// The member row names its tree as a separator-less `root` and joins the `/`
+// at the test, the shape check-published-files' imported-tree scope takes: the
+// row is a predicate over member DIRECTORIES, not a walk of the files under
+// `ui/`, and a `'ui/'` literal would hand the dispatch derivation a bare-root
+// watch hint it cannot name (check:pm-dispatch-gates, the escapable-literal
+// species).
+const SECOND_COVERAGE_SPELLINGS = Object.freeze([
+  {
+    kind: 'member',
+    root: 'ui',
+    script: 'type-check',
+    ciFile: '.github/workflows/ci.yml',
+  },
+  {
+    kind: 'root',
+    dir: 'ui',
+    scripts: Object.freeze(['type-check:scripts', 'type-check:e2e', 'type-check:vitest-setup']),
+    ciFile: '.github/workflows/ci.yml',
+  },
+]);
+
+/** The slot name a SECOND_COVERAGE_SPELLINGS row is quoted under in a finding. */
+function spellingSlot(row) {
+  return row.kind === 'member' ? row.script : row.scripts.join(' + ');
+}
+
+/**
+ * The coverage slot a workspace package is judged by, and the scripts object
+ * the observation is taken from: `typecheck` unless a SECOND_COVERAGE_SPELLINGS
+ * row applies, in which case its script (or, for a root row, its scripts'
+ * bodies joined with `&&`, which is what the CI steps run one after another)
+ * arrives under the `typecheck` key the shared predicate reads -- the
+ * way `observed()` hands this root its `typecheck:root` -- with the rest of the
+ * manifest kept, so same-package delegation is still followed.
+ *
+ * @param {string} dir  repo-relative package directory
+ * @param {Record<string, string>} scripts  the manifest's `scripts`
+ * @returns {{ scripts: Record<string, string>, name?: string }}
+ */
+function coverageSpelling(dir, scripts) {
+  if (scripts.typecheck !== undefined) return { scripts };
+  const row = SECOND_COVERAGE_SPELLINGS.find((r) => (r.kind === 'member'
+    ? dir.startsWith(`${r.root}/`) && scripts[r.script] !== undefined
+    : dir === r.dir && r.scripts.every((name) => scripts[name] !== undefined)));
+  if (row === undefined) return { scripts };
+  const body = row.kind === 'member' ? scripts[row.script] : row.scripts.map((name) => scripts[name]).join(' && ');
+  return { scripts: { ...scripts, typecheck: body }, name: spellingSlot(row) };
+}
+
+/** The manifest slot `evaluate` names a package's coverage script by. */
+function coverageSlot(pkg) {
+  return pkg.coverageScriptName ?? 'typecheck';
+}
+
+/**
+ * RUNNABLE's observation for each second spelling, keyed by its slot name.
+ * `turboHasTask` is null where no turbo task is involved (a root row).
+ */
+function spelledRunnable(turbo) {
+  return Object.fromEntries(SECOND_COVERAGE_SPELLINGS.map((row) => {
+    const ci = existsSync(join(ROOT, row.ciFile)) ? readFileSync(join(ROOT, row.ciFile), 'utf8') : '';
+    const invoked = row.kind === 'member'
+      ? new RegExp(`\\bturbo run ${row.script}(?![\\w:-])`).test(ci)
+      : row.scripts.every((name) => new RegExp(`\\brun ${name}(?![\\w:-])`).test(ci));
+    return [spellingSlot(row), {
+      ciFile: row.ciFile,
+      ciCommand: row.kind === 'member' ? `turbo run ${row.script}` : row.scripts.map((n) => `run ${n}`).join(', '),
+      turboHasTask: row.kind === 'member' ? Object.hasOwn(turbo.tasks ?? {}, row.script) : null,
+      ciInvokesTask: invoked,
+    }];
+  }));
+}
+
 function workspacePackages() {
   // Membership comes from scripts/workspace-enumerator.mjs (#11510) — this repo's
   // one parse of the workspace file, and one of nine private copies before it.
@@ -2369,12 +2500,14 @@ function workspacePackages() {
   const dirs = workspacePackageDirs(ROOT);
   const packages = dirs.map((dir) => {
     const manifest = JSON.parse(readFileSync(join(ROOT, dir, 'package.json'), 'utf8'));
+    const spelled = coverageSpelling(dir, manifest.scripts ?? {});
     return {
       name: manifest.name ?? dir,
       dir,
       scripts: manifest.scripts ?? {},
       hasTsconfig: existsSync(join(ROOT, dir, 'tsconfig.json')),
-      ...testCoverage(dir, manifest.scripts ?? {}),
+      ...testCoverage(dir, spelled.scripts),
+      ...(spelled.name === undefined ? {} : { coverageScriptName: spelled.name }),
     };
   });
 
@@ -2591,7 +2724,9 @@ function compositionProblems(ledgerName, entries) {
  *           exempt: Record<string, string>,
  *           testDebt: Record<string, {errors: number, note?: string, compositionAt?: number}>,
  *           phantomPins: Record<string, string>,
- *           turboHasTask: boolean, ciInvokesTask: boolean, ciInvokesRoot: boolean }} state
+ *           turboHasTask: boolean, ciInvokesTask: boolean, ciInvokesRoot: boolean,
+ *           spelledRunnable?: Record<string, {ciFile: string, ciCommand: string,
+ *             turboHasTask: boolean | null, ciInvokesTask: boolean}> }} state
  * @returns {string[]} problems, empty when the ratchet holds
  */
 /**
@@ -2813,7 +2948,11 @@ function evaluate(packages, root, state) {
   const clauseSubjects = [...packages, root];
 
   for (const pkg of packages) {
-    const script = pkg.scripts.typecheck;
+    // `typecheck`, or a SECOND_COVERAGE_SPELLINGS slot (objectstack#25803). The
+    // carried `coverageScript` first: a root row's slot names a chain of scripts,
+    // not one manifest key; fixtures that carry none read the manifest slot.
+    const slot = coverageSlot(pkg);
+    const script = pkg.coverageScript ?? pkg.scripts[slot];
     const inDebt = Object.hasOwn(state.debt, pkg.name);
     const inExempt = Object.hasOwn(state.exempt, pkg.name);
 
@@ -2826,20 +2965,20 @@ function evaluate(packages, root, state) {
       // REAL: the script must put tsc in front of the package's sources.
       if (!/\btsc\b/.test(script)) {
         problems.push(
-          `${pkg.name} (${pkg.dir}): \`typecheck\` script does not invoke tsc ("${script}") -- ` +
+          `${pkg.name} (${pkg.dir}): \`${slot}\` script does not invoke tsc ("${script}") -- ` +
             `a typecheck that never type-checks satisfies the letter of COVERED and nothing else.`,
         );
       }
       // RECONCILED: covered packages must not also sit in the ledger.
       if (inDebt) {
         problems.push(
-          `${pkg.name}: declares \`typecheck\` but still has a DEBT entry -- it graduated; ` +
+          `${pkg.name}: declares \`${slot}\` but still has a DEBT entry -- it graduated; ` +
             `delete its entry from DEBT in ${SELF}.`,
         );
       }
       if (inExempt) {
         problems.push(
-          `${pkg.name}: declares \`typecheck\` but still has an EXEMPT entry -- ` +
+          `${pkg.name}: declares \`${slot}\` but still has an EXEMPT entry -- ` +
             `delete its entry from EXEMPT in ${SELF}.`,
         );
       }
@@ -3023,6 +3162,24 @@ function evaluate(packages, root, state) {
       `.github/workflows/lint.yml does not invoke \`turbo run typecheck\` -- the per-package ` +
         `scripts exist but CI never runs them (#4203 is the history of exactly this). Restore the step.`,
     );
+  }
+  // RUNNABLE for each second spelling some package is judged by (objectstack#25803):
+  // the same questions, asked of what that spelling names.
+  for (const slot of new Set(packages.map((p) => p.coverageScriptName).filter((n) => n !== undefined))) {
+    const run = state.spelledRunnable?.[slot];
+    const judged = packages.filter((p) => p.coverageScriptName === slot).length;
+    if (run === undefined || run.turboHasTask === false) {
+      problems.push(
+        `turbo.json does not declare a \`${slot}\` task, and ${judged} package(s) are judged by their ` +
+          `\`${slot}\` script -- \`turbo run ${slot}\` runs nothing, so that coverage is dead.`,
+      );
+    }
+    if (run === undefined || !run.ciInvokesTask) {
+      problems.push(
+        `${run?.ciFile ?? 'CI'} does not invoke \`${run?.ciCommand ?? slot}\` -- the ${judged} package(s) judged by ` +
+          `\`${slot}\` are covered by a check CI never runs.`,
+      );
+    }
   }
 
   return problems;
@@ -4923,6 +5080,7 @@ function observed() {
       turboHasTask: Object.hasOwn(turbo.tasks ?? {}, 'typecheck'),
       ciInvokesTask: /turbo run typecheck/.test(lintYml),
       ciInvokesRoot: /typecheck:root/.test(lintYml),
+      spelledRunnable: spelledRunnable(turbo),
     },
   };
 }
@@ -5044,6 +5202,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'a debt-ledgered root passes; graduating it stale-fails like anyone else': 1,
   'a root aggregator that does not run turbo fails RUNNABLE': 1,
   'a covered root that CI never runs fails RUNNABLE': 1,
+  'a member judged by its second spelling is REAL-checked under that name (#25803)': 1,
+  'a second spelling with no turbo task and no CI step fails RUNNABLE (#25803)': 1,
+  'a root spelling asks no turbo task, only its CI steps (#25803)': 1,
   'a note whose opening tier itemisation contradicts its own field fails COMPOSITION': 1,
   'a multi-tier itemisation is summed across the tiers, not read one tier at a time': 1,
   'the same itemisation agreeing with the field is silent': 1,
@@ -5084,6 +5245,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'verify-lock cases (#23470)': 19,
   // parseTsconfigText: what tsc accepts reads, what tsc refuses still refuses.
   'JSONC tsconfig reader (#25697)': 8,
+  // coverageSpelling's six manifests plus spelledRunnable's turbo question.
+  'second coverage spelling (#25803)': 7,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -5627,6 +5790,37 @@ function selfTest() {
       state: { ...okState, ciInvokesRoot: false },
       expect: [/never invokes `typecheck:root`/],
     },
+    // The second spellings (objectstack#25803): a ui/ member judged by its
+    // `type-check`, and the ui/ root judged by a chain of named programs.
+    {
+      label: 'a member judged by its second spelling is REAL-checked under that name (#25803)',
+      packages: [pkg('u', { dir: 'ui/packages/u', scripts: { 'type-check': 'vite build' }, coverageScriptName: 'type-check' })],
+      root: okRoot,
+      state: { ...okState, spelledRunnable: { 'type-check': { ciFile: 'ci.yml', ciCommand: 'turbo run type-check', turboHasTask: true, ciInvokesTask: true } } },
+      expect: [/ui\/packages\/u\): `type-check` script does not invoke tsc \("vite build"\)/],
+    },
+    {
+      label: 'a second spelling with no turbo task and no CI step fails RUNNABLE (#25803)',
+      packages: [pkg('u', { dir: 'ui/packages/u', scripts: { 'type-check': 'tsc --noEmit' }, coverageScriptName: 'type-check' })],
+      root: okRoot,
+      state: okState,
+      expect: [/turbo\.json does not declare a `type-check` task, and 1 package/, /CI does not invoke `type-check`/],
+    },
+    {
+      label: 'a root spelling asks no turbo task, only its CI steps (#25803)',
+      packages: [pkg('ui', {
+        dir: 'ui',
+        scripts: { 'type-check:a': 'tsc -p tsconfig.a.json', 'type-check:b': 'tsc -p tsconfig.b.json' },
+        coverageScript: 'tsc -p tsconfig.a.json && tsc -p tsconfig.b.json',
+        coverageScriptName: 'type-check:a + type-check:b',
+      })],
+      root: okRoot,
+      state: {
+        ...okState,
+        spelledRunnable: { 'type-check:a + type-check:b': { ciFile: 'ci.yml', ciCommand: 'run type-check:a, run type-check:b', turboHasTask: null, ciInvokesTask: false } },
+      },
+      expect: [/^ci\.yml does not invoke `run type-check:a, run type-check:b`/],
+    },
     // COMPOSITION (#10722). The fixtures are the real instances, transplanted:
     // service-automation's `code-tier 5` over `errors: 3`, and metadata's
     // 34 + 24 + 34 over `errors: 89`.
@@ -5779,6 +5973,39 @@ function selfTest() {
     if (got.length !== c.expect.length || !c.expect.every((rx, i) => rx.test(got[i]))) {
       failures.push(`${c.label}: expected ${c.expect.length} problem(s) matching ${c.expect}, got ${JSON.stringify(got)}`);
     }
+  }
+
+  // Which slot a manifest is judged by (objectstack#25803). Pure over the
+  // manifest, so literal fixtures; the rows themselves are the real ones.
+  const rootRow = SECOND_COVERAGE_SPELLINGS.find((r) => r.kind === 'root');
+  const rootScripts = Object.fromEntries(rootRow.scripts.map((n, i) => [n, `tsc -p tsconfig.p${i}.json`]));
+  const spellingCases = [
+    { label: 'outside ui/, a `type-check` script is not coverage',
+      dir: 'packages/x', scripts: { 'type-check': 'tsc --noEmit' }, name: undefined, body: undefined },
+    { label: 'under ui/, `type-check` alone is judged as the member spelling',
+      dir: 'ui/packages/x', scripts: { 'type-check': 'tsc --noEmit' }, name: 'type-check', body: 'tsc --noEmit' },
+    { label: 'under ui/, a declared `typecheck` wins over the second spelling',
+      dir: 'ui/packages/x', scripts: { typecheck: 'tsc -p a.json', 'type-check': 'tsc --noEmit' }, name: undefined, body: 'tsc -p a.json' },
+    { label: 'the ui/ root is judged by its named programs, joined in row order',
+      dir: rootRow.dir, scripts: rootScripts, name: rootRow.scripts.join(' + '),
+      body: rootRow.scripts.map((n) => rootScripts[n]).join(' && ') },
+    { label: 'the ui/ root missing one named program is judged by nothing',
+      dir: rootRow.dir, scripts: { ...rootScripts, [rootRow.scripts[0]]: undefined }, name: undefined, body: undefined },
+    { label: 'a ui/ member carrying the root\'s program names is not the root row',
+      dir: 'ui/packages/x', scripts: rootScripts, name: undefined, body: undefined },
+  ];
+  for (const c of spellingCases) {
+    registerCase('second coverage spelling (#25803)');
+    const got = coverageSpelling(c.dir, c.scripts);
+    if (got.name !== c.name || got.scripts.typecheck !== c.body) {
+      failures.push(`coverageSpelling — ${c.label}: expected ${JSON.stringify({ name: c.name, body: c.body })}, `
+        + `got ${JSON.stringify({ name: got.name, body: got.scripts.typecheck })}`);
+    }
+  }
+  registerCase('second coverage spelling (#25803)');
+  const noTasks = spelledRunnable({ tasks: {} });
+  if (noTasks['type-check']?.turboHasTask !== false || noTasks[spellingSlot(rootRow)]?.turboHasTask !== null) {
+    failures.push(`spelledRunnable — a member row asks turbo for its task and a root row asks nothing, got ${JSON.stringify(noTasks)}`);
   }
 
   // The observation half is where the :267 blind spot lived: `excludesTests`
@@ -7839,10 +8066,13 @@ function selfTest() {
     // three derived counts, and a fourth row keyed to a ledger would break this.
     pop('FLOOR — the census names only derived populations, never a ledger',
       Object.keys(MEASURED_POPULATION).join(',') === 'ref,packages,walkedTestFiles,walkedSourceFiles');
+    // UNCHECKED_SOURCE_DEBT is no longer empty: the objectui import seeded its
+    // rows (objectstack#25803). Read against that ceiling, so the list still only
+    // shrinks and a row added after the import fails here as it did before.
     pop('FLOOR — an emptied ledger alone cannot move any floor',
       populationFloorProblem(fullPop) === null
         && Object.keys(PHANTOM_PIN_DEBT).length === 0
-        && Object.keys(UNCHECKED_SOURCE_DEBT).length === 0);
+        && Object.keys(UNCHECKED_SOURCE_DEBT).length <= UNCHECKED_SOURCE_DEBT_SEEDED);
     // HONESTY (#13014 acceptance): a fallen row names ITS OWN stage and says
     // nothing about the rows that are standing.
     const pkgMsg = populationFloorProblem({ ...fullPop, packages: 0 }) ?? '';
@@ -7970,7 +8200,7 @@ if (problems.length) {
   process.exit(1);
 }
 
-const covered = packages.filter((p) => p.scripts.typecheck !== undefined).length;
+const covered = packages.filter((p) => (p.coverageScript ?? p.scripts[coverageSlot(p)]) !== undefined).length;
 const debtTotal = Object.values(DEBT).reduce((sum, e) => sum + (e.errors ?? 0), 0);
 const testDebtErrors = Object.values(TEST_DEBT).reduce((sum, e) => sum + (e.errors ?? 0), 0);
 // Counted on this run, not read from the ledger: the file count is the one

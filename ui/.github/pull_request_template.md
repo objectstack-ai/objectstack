@@ -1,0 +1,1 @@
+- [ ] Adds no product-specific widget, dialog, hook or string (see AGENTS.md › Product-neutral renderer)

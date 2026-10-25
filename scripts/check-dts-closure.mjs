@@ -112,7 +112,7 @@
 
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import process from 'node:process';
 
 import { declaredDeclarationPaths, missingDeclarations } from './check-dts-emitted.mjs';
@@ -159,6 +159,51 @@ export function sizeOnDisk(packageDir) {
 }
 
 /**
+ * The files an `exports` SUBPATH PATTERN target names (objectstack#25803, cutover
+ * bill item 22). `./locales/*` -> `./dist/locales/*.d.ts` promises a FAMILY of
+ * declarations, one per locale, and the literal path with the `*` in it is no
+ * file at all: tested as one, `@object-ui/i18n` read as missing a declaration
+ * its build had emitted thirteen times over.
+ *
+ * Node substitutes the `*` with any non-empty string, `/` included, so the
+ * family is every file under the pattern's fixed directory whose path starts
+ * with the text before the `*` and ends with the text after it. A pattern with
+ * a second `*` is not one Node resolves; it expands to nothing, which reports it.
+ *
+ * Expanded HERE and not in the shared derivation: `check-dts-emitted.mjs` is a
+ * build input of every package (turbo.json `build.inputs`), so changing it
+ * re-keys every build cache, and no package that runs it declares a pattern.
+ *
+ * @param {string} packageDir absolute package directory
+ * @param {string} pattern package-relative declared path containing one `*`
+ * @returns {string[]} package-relative matches, sorted
+ */
+export function expandDeclarationPattern(packageDir, pattern) {
+  const star = pattern.indexOf('*');
+  const prefix = pattern.slice(0, star);
+  const suffix = pattern.slice(star + 1);
+  if (suffix.includes('*')) return [];
+  const matches = [];
+  const walk = (rel) => {
+    let entries;
+    try {
+      entries = readdirSync(join(packageDir, rel), { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const child = `${rel}${entry.name}`;
+      if (entry.isDirectory()) walk(`${child}/`);
+      else if (child.length > prefix.length + suffix.length && child.startsWith(prefix) && child.endsWith(suffix)) {
+        matches.push(child);
+      }
+    }
+  };
+  walk(prefix.slice(0, prefix.lastIndexOf('/') + 1));
+  return matches.sort();
+}
+
+/**
  * The sweep itself, over an already-enumerated member list.
  *
  * Split from `run()` so the self-test drives the real logic against real
@@ -186,7 +231,15 @@ export function sweep(root, members) {
     }
     checked += 1;
     files += declared.length;
-    const missing = missingDeclarations(declared, sizeOnDisk(join(root, dir)));
+    // A pattern is owed as a family: missing when nothing matches it, and each
+    // match held to the same not-empty rule as a literal path.
+    const packageDir = join(root, dir);
+    const missing = missingDeclarations(declared.filter((path) => !path.includes('*')), sizeOnDisk(packageDir));
+    for (const pattern of declared.filter((path) => path.includes('*'))) {
+      const family = expandDeclarationPattern(packageDir, pattern);
+      if (family.length === 0) missing.push({ path: pattern, why: 'missing' });
+      else missing.push(...missingDeclarations(family, sizeOnDisk(packageDir)));
+    }
     if (missing.length > 0) findings.push({ name: typeof manifest.name === 'string' ? manifest.name : dir, dir, missing });
   }
 
@@ -305,6 +358,7 @@ export function run(root) {
 const SELF_TEST_BATTERIES = Object.freeze({
   'the sweep, over real fixture workspaces': 12,
   'the shared derivation is the per-package guard\'s own': 2,
+  'an `exports` subpath pattern is owed as a family (#25803)': 6,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -369,7 +423,10 @@ function selfTest() {
       writeFileSync(join(abs, 'package.json'), JSON.stringify(spec.manifest, null, 2));
       if (spec.dist) {
         mkdirSync(join(abs, 'dist'), { recursive: true });
-        for (const [file, contents] of Object.entries(spec.dist)) writeFileSync(join(abs, 'dist', file), contents);
+        for (const [file, contents] of Object.entries(spec.dist)) {
+          mkdirSync(dirname(join(abs, 'dist', file)), { recursive: true });
+          writeFileSync(join(abs, 'dist', file), contents);
+        }
       }
     }
     return root;
@@ -491,6 +548,67 @@ function selfTest() {
     ok(
       '(d) the refusal disclaims the measurement rather than reading as a pass',
       prerequisiteNotMetText('x').includes('NOT a pass and NOT a finding'),
+    );
+
+    battery('an `exports` subpath pattern is owed as a family (#25803)');
+    // `@object-ui/i18n`'s shape: a literal entry beside a `*` pattern whose
+    // family sits one directory down.
+    const patternManifest = (pkgName) => ({
+      name: pkgName,
+      exports: {
+        '.': { types: './dist/index.d.ts', import: './dist/index.js' },
+        './locales/*': { types: './dist/locales/*.d.ts', import: './dist/locales/*.js' },
+      },
+    });
+    const familyRoot = fixture('family', {
+      'packages/i18n': {
+        manifest: patternManifest('@fixture/i18n'),
+        dist: { 'index.js': '', 'index.d.ts': 'export {}\n', 'locales/en.js': '', 'locales/en.d.ts': 'export {}\n', 'locales/zh.d.ts': 'export {}\n' },
+      },
+    });
+    eq('a pattern with matching declarations is not a finding', sweep(familyRoot, workspacePackages(familyRoot)).findings, []);
+    eq(
+      'the family is every match under the fixed directory, nothing else',
+      expandDeclarationPattern(join(familyRoot, 'packages/i18n'), 'dist/locales/*.d.ts'),
+      ['dist/locales/en.d.ts', 'dist/locales/zh.d.ts'],
+    );
+    const nestedRoot = fixture('family-nested', {
+      'packages/i18n': {
+        manifest: patternManifest('@fixture/i18n'),
+        dist: { 'index.js': '', 'index.d.ts': 'export {}\n', 'locales/zh/hans.d.ts': 'export {}\n' },
+      },
+    });
+    eq(
+      'the `*` spans `/`, the way Node substitutes it',
+      expandDeclarationPattern(join(nestedRoot, 'packages/i18n'), 'dist/locales/*.d.ts'),
+      ['dist/locales/zh/hans.d.ts'],
+    );
+    const emptyFamilyRoot = fixture('family-empty', {
+      'packages/i18n': { manifest: patternManifest('@fixture/i18n'), dist: { 'index.js': '', 'index.d.ts': 'export {}\n', 'locales/en.js': '' } },
+    });
+    eq(
+      'a pattern nothing matches is a finding that names the pattern',
+      sweep(emptyFamilyRoot, workspacePackages(emptyFamilyRoot)).findings.map((f) => f.missing.map((x) => `${x.why}:${x.path}`)),
+      [['missing:dist/locales/*.d.ts']],
+    );
+    const zeroByteRoot = fixture('family-zero', {
+      'packages/i18n': {
+        manifest: patternManifest('@fixture/i18n'),
+        dist: { 'index.js': '', 'index.d.ts': 'export {}\n', 'locales/en.d.ts': 'export {}\n', 'locales/zh.d.ts': '' },
+      },
+    });
+    eq(
+      'a zero-byte member of the family reds as `empty`',
+      sweep(zeroByteRoot, workspacePackages(zeroByteRoot)).findings.map((f) => f.missing.map((x) => `${x.why}:${x.path}`)),
+      [['empty:dist/locales/zh.d.ts']],
+    );
+    eq(
+      'the `*` stands for a non-empty string, and a second `*` expands to nothing',
+      [
+        expandDeclarationPattern(join(familyRoot, 'packages/i18n'), 'dist/locales/en.d.ts*'),
+        expandDeclarationPattern(join(familyRoot, 'packages/i18n'), 'dist/*/*.d.ts'),
+      ],
+      [[], []],
     );
 
     battery('the shared derivation is the per-package guard\'s own');

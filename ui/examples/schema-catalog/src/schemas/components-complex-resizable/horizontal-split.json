@@ -1,0 +1,48 @@
+{
+  "type": "resizable",
+  "direction": "horizontal",
+  "minHeight": "200px",
+  "className": "rounded-lg border",
+  "panels": [
+    {
+      "defaultSize": 50,
+      "content": [
+        {
+          "type": "flex",
+          "properties": {
+            "justify": "center",
+            "align": "center",
+            "gap": 0,
+            "children": [
+              {
+                "type": "text",
+                "content": "Panel 1"
+              }
+            ]
+          },
+          "className": "p-4 h-full bg-slate-50"
+        }
+      ]
+    },
+    {
+      "defaultSize": 50,
+      "content": [
+        {
+          "type": "flex",
+          "properties": {
+            "justify": "center",
+            "align": "center",
+            "gap": 0,
+            "children": [
+              {
+                "type": "text",
+                "content": "Panel 2"
+              }
+            ]
+          },
+          "className": "p-4 h-full bg-slate-100"
+        }
+      ]
+    }
+  ]
+}

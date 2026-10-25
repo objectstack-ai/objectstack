@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
+  <defs>
+    <linearGradient id="gradient" x1="0" y1="0" x2="256" y2="256" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0F172A"/> <!-- Slate 900 -->
+      <stop offset="1" stop-color="#334155"/> <!-- Slate 700 -->
+    </linearGradient>
+    <linearGradient id="accent" x1="96" y1="96" x2="160" y2="160" gradientUnits="userSpaceOnUse">
+       <stop stop-color="#3B82F6"/> <!-- Blue 500 -->
+       <stop offset="1" stop-color="#8B5CF6"/> <!-- Violet 500 -->
+    </linearGradient>
+  </defs>
+  
+  <!-- Background Shape: Soft Rounded Squircle -->
+  <rect width="256" height="256" rx="56" fill="url(#gradient)" />
+  
+  <!-- Left Brace { -->
+  <path d="M84 72H68C61.3726 72 56 77.3726 56 84V116C56 122.627 50.6274 128 44 128V128C50.6274 128 56 133.373 56 140V172C56 178.627 61.3726 184 68 184H84" stroke="white" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- Right Brace } -->
+  <path d="M172 184H188C194.627 184 200 178.627 200 172V140C200 133.373 205.373 128 212 128V128C205.373 128 200 122.627 200 116V84C200 77.3726 194.627 72 188 72H172" stroke="white" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- Center Object Block (The UI Component) -->
+  <rect x="92" y="92" width="72" height="72" rx="16" fill="url(#accent)" stroke="white" stroke-width="8" />
+
+</svg>

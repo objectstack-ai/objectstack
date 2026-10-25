@@ -1,0 +1,23 @@
+{
+  "type": "flex",
+  "properties": {
+    "direction": "col",
+    "gap": 4,
+    "children": [
+      {
+        "type": "label",
+        "text": "Enter verification code"
+      },
+      {
+        "type": "input-otp",
+        "length": 6,
+        "separator": true
+      },
+      {
+        "type": "text",
+        "content": "We sent a code to your email",
+        "className": "text-sm text-muted-foreground"
+      }
+    ]
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "note": [
+    "Keys a t() call site references that exist in NO locale pack, measured on main@a2c8f2a29.",
+    "A RATCHET, not an allowlist: a key missing from this file fails the build, and an",
+    "entry whose defect is gone fails it too, so the file can only shrink.",
+    "Fix one by adding the key to packages/i18n/src/locales/en.ts and deleting its line",
+    "here; all-locales-key-parity.test.ts then demands the same key in the other nine",
+    "packs. Adding an inline defaultValue is NOT a fix -- that is the mechanism that hid",
+    "these for months (objectui#3517).",
+    "Of the three lists in this file, missingKeys and missingPrefixes are the PAIR that",
+    "objectui#3546 ratcheted to zero -- BOTH LISTS ARE NOW EMPTY. The 258-key stock it opened",
+    "with was paid off across seven slices, the last of them two template families. Keep both",
+    "of that pair: empty is their terminal, load-bearing state. Any NEW unresolved call-site",
+    "key is `unexpected` against an empty baseline and fails the build, which is the point.",
+    "missingMembers is a THIRD list (objectui#4964), NOT part of that pair and empty since objectui#6023 -- so",
+    "the sentence above counts missingKeys and missingPrefixes only, never all three. It held",
+    "debt the exact-member check MEASURED on its first run, not debt this repo took on."
+  ],
+
+  "missingKeys": {},
+
+  "//": "Template keys whose static head matches no en key at all, so every expansion misses.",
+  "missingPrefixes": {},
+
+  "//missingMembers": [
+    "objectui#4964 -- a template family whose HEAD resolves (so missingPrefixes is satisfied)",
+    "and whose declared vocabulary names a member `en` does not define. Ten packs missing it",
+    "identically is full parity, so no pack gate can see it; this is the class that check found.",
+    "Same ratchet rules as the two lists above: an entry that no longer fires fails the build.",
+    "Fix by adding the key to packages/i18n/src/locales/en.ts (which then makes",
+    "all-locales-key-parity.test.ts demand it in the other nine packs) and deleting the line",
+    "here -- NOT by narrowing the vocabulary the family declares, which would shrink the check",
+    "rather than pay off the debt.",
+    "The two entries this list held were measured by the check's first run, not created by it."
+  ],
+
+  "missingMembers": {}
+}

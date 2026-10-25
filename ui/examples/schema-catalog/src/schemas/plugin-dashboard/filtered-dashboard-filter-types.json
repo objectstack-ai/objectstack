@@ -1,0 +1,63 @@
+{
+  "type": "dashboard",
+  "columns": 2,
+  "gap": 4,
+  "globalFilters": [
+    {
+      "name": "customer",
+      "field": "customer_name",
+      "label": "Customer",
+      "type": "text"
+    },
+    {
+      "name": "amount",
+      "field": "amount",
+      "label": "Amount",
+      "type": "number"
+    },
+    {
+      "name": "owner",
+      "field": "owner",
+      "label": "Owner",
+      "type": "lookup",
+      "optionsFrom": {
+        "object": "users",
+        "valueField": "id",
+        "labelField": "name"
+      }
+    }
+  ],
+  "widgets": [
+    {
+      "id": "invoices_by_status",
+      "title": "Invoices by Status",
+      "type": "bar",
+      "dataset": "invoices",
+      "dimensions": ["status"],
+      "values": ["count"]
+    },
+    {
+      "id": "invoices_by_month",
+      "title": "Invoices by Month",
+      "type": "line",
+      "dataset": "invoices",
+      "dimensions": ["created_month"],
+      "values": ["count"],
+      "filterBindings": {
+        "owner": "assigned_to"
+      }
+    },
+    {
+      "id": "total_invoices",
+      "title": "Total Invoices (unfiltered)",
+      "type": "metric",
+      "dataset": "invoices",
+      "values": ["count"],
+      "filterBindings": {
+        "customer": false,
+        "amount": false,
+        "owner": false
+      }
+    }
+  ]
+}

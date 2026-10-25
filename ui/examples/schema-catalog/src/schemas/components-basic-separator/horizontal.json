@@ -1,0 +1,17 @@
+{
+  "type": "stack",
+  "gap": 4,
+  "children": [
+    {
+      "type": "text",
+      "content": "Content Above"
+    },
+    {
+      "type": "separator"
+    },
+    {
+      "type": "text",
+      "content": "Content Below"
+    }
+  ]
+}

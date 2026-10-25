@@ -1,0 +1,71 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    // `..` (i.e. `packages/`), NOT `src` — load-bearing, measured in
+    // objectui#4006. This config inherits the root tsconfig's `paths`, which map
+    // `@object-ui/core` / `@object-ui/types` to their sibling `packages/*/src`
+    // trees, so those sources are real program inputs. Narrowing `rootDir` to
+    // `src` (or dropping it, which defaults it to the common source directory)
+    // turns all 122 of them into TS6059 "not under rootDir" — and it does so
+    // even under `--noEmit`, because TS6059 is a program-level verdict. It does
+    // not affect what is emitted: this config inherits the root's
+    // `noEmit: true`, so `tsc` here only CHECKS; `dist` is written by
+    // vite-plugin-dts, which overrides `rootDir` to `src` and clears `paths`.
+    "rootDir": "..",
+    "jsx": "react-jsx",
+
+    // See `packages/react/tsconfig.json` for the full argument: under
+    // `nodenext` a missing relative extension is TS2835 and a bare directory
+    // import is TS2834, so the property is enforced by the compiler instead
+    // of by review. objectui#5365 is what unblocked it here — until
+    // `@object-ui/components` emitted resolvable typings, this pin turned
+    // `tsc` red with 300+ TS2305 that had nothing to do with this package.
+    "module": "nodenext",
+    "moduleResolution": "nodenext"
+  },
+  "include": ["src"],
+  // Tests are excluded from the BUILD program so they stop being emitted into
+  // the published `dist` (objectui#4006 — 85 `*.test.d.ts` shipped from here).
+  // Their type coverage did not go away with them: it moved to the
+  // `tsconfig.test.json` chained off this package's `type-check` script, which
+  // is what scripts/check-type-check-coverage.mjs verifies.
+  //
+  // The exclusions cover TOOLING DIRECTORIES, not just the `*.test.*` name
+  // (objectui#6943 — the THIRD instance of that mismatch, after objectui#4006
+  // here and objectui#4836 in plugin-{grid,view,designer}). Which program the
+  // directories have to be excluded FROM was measured on 56453410f rather than
+  // assumed, because the comment above says `tsc` here only checks: run alone,
+  // the `tsc` leg of `build` exited 0 and wrote ZERO files, while `vite build`
+  // alone produced the whole 81-file output — including
+  // `dist/__tests__/numberInputBrowserReadings.d.ts`. So vite-plugin-dts is the
+  // emitting program, and it builds its declaration program from THIS config
+  // (`dts()` in `vite.config.ts` passes no `exclude` of its own), which is why
+  // the fix belongs here and not in the plugin options.
+  //
+  // That file is not a `*.test.ts` by NAME, so the name-only list let it ship in
+  // the tarball while its 79 neighbours in the same directory were caught.
+  //
+  // The name patterns stay: 52 `*.test.ts(x)` files in this package sit outside
+  // any `__tests__/` directory, so the directory patterns do not subsume them.
+  // `__mocks__` / `__benchmarks__` match nothing here today and are listed so
+  // the table is the directory convention itself — exactly as `TOOLING_FILE` in
+  // scripts/check-phantom-dependencies.mjs spells it — rather than a list that
+  // has to be extended the next time such a directory appears.
+  //
+  // No type coverage moves with this change. `numberInputBrowserReadings.ts` is
+  // the only file the directory patterns newly remove from this program, and the
+  // `tsconfig.test.json` chained off `type-check` already reads it as a
+  // transitive input of the three suites that import it (measured with
+  // `tsc -p tsconfig.test.json --listFiles`, before and after), so it needs no
+  // entry there — the same reason plugin-grid's `explainDouble.ts` needed none.
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/__tests__/**",
+    "**/__mocks__/**",
+    "**/__benchmarks__/**",
+    "**/*.test.ts",
+    "**/*.test.tsx"
+  ]
+}

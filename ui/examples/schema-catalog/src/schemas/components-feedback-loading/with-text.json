@@ -1,0 +1,15 @@
+{
+  "type": "stack",
+  "gap": 2,
+  "align": "center",
+  "children": [
+    {
+      "type": "loading"
+    },
+    {
+      "type": "text",
+      "content": "Loading...",
+      "variant": "caption"
+    }
+  ]
+}

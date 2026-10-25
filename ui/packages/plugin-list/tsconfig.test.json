@@ -1,0 +1,52 @@
+{
+  // Type-checks this package's TESTS, which `tsconfig.json` excludes.
+  // See `packages/types/tsconfig.test.json` for why that exclusion was a hole:
+  // the build correctly keeps tests out of `dist`, but nothing else compiled
+  // them, so a test could assert a contract the compiler never checked.
+  //
+  // This project is now the ONLY one that compiles `spec-symbol-batch6.test.tsx`,
+  // whose compile-time pins are erased at runtime — vitest proves nothing about
+  // them and `tsc` is the only thing that can (objectui#3181). A narrow
+  // `tsconfig.typetests.json` next door used to name that one file while the rest
+  // of the tree was in TEST_DEBT; the package graduated in objectui#4040 and the
+  // narrow project was retired in objectui#4291, after `--listFiles` showed this
+  // project reads the same file and a provably-false `Assert` appended to it
+  // turned this project red.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // The package build emits `dist`; this project emits nothing, so it must
+    // not inherit `composite` / `declaration` from the build config.
+    "composite": false,
+    "declaration": false,
+    // One notch above the root's ES2020, and no further. 14 of this package's
+    // 23 raw errors were a single missing built-in: `Array.prototype.at`, which
+    // these tests use to read the last emitted call (`calls.at(-1)`). The
+    // compiler named the remedy itself ("Try changing the 'lib' compiler option
+    // to 'es2022' or later"). Raised HERE and not in `tsconfig.json`, so the
+    // package SOURCE keeps compiling against the ES2020 baseline it ships to.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // `spec-symbol-batch6.test.tsx` reads sibling sources off disk to prove the
+    // spec-derived symbols are not hand-copied. Naming `types` at all switches
+    // off automatic `@types/*` inclusion, so every entry here has to be earned.
+    //
+    // `@testing-library/jest-dom` is named so the matchers are registered by THIS
+    // config instead of by whichever other file happens to import them. The
+    // earlier note here — that the matchers "do not need naming because the files
+    // that use them `import '@testing-library/jest-dom'` explicitly, and a global
+    // augmentation reached by an import applies to the whole program" — is a true
+    // statement about TypeScript and a false one about this package, and two
+    // sibling configs cite it as "plugin-list's lesson", so it propagated.
+    // Measured off this project's tsc-resolved file list (objectui#8722): 14
+    // files carry the bare import, 23 files use a matcher, and 13 of those import
+    // it NOWHERE — typed by a sibling's import alone. The ablation run in
+    // plugin-detail shows the shape of the failure that leaves: 423 TS2339 errors
+    // across 65 files, 43 of them never touched by the edit that caused them.
+    "types": ["node", "@testing-library/jest-dom"],
+    // Drop the root tsconfig's source-tree `paths` so `@object-ui/*` and
+    // `@objectstack/spec` resolve through the workspace dependency's built
+    // `.d.ts` instead of pulling sibling sources in as program inputs (TS6059).
+    "paths": {}
+  },
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+}

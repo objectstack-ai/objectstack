@@ -1,0 +1,494 @@
+---
+title: "Report Schema (ReportComponentSchema)"
+description: "Enterprise reports with aggregation, export, and scheduling"
+---
+
+import { SchemaExample } from '@/app/components/ComponentDemo';
+
+# Report Schema
+
+The `ReportComponentSchema` enables creating comprehensive data reports with field aggregation, multiple export formats, and automated scheduling.
+
+## Overview
+
+ReportComponentSchema provides:
+- **Field aggregation** - Sum, average, count, min, max, distinct
+- **Export formats** - PDF, Excel, CSV, JSON, HTML
+- **Scheduled reports** - Daily, weekly, monthly, quarterly, yearly
+- **Email distribution** - Automatic report delivery
+- **Interactive builder** - Report configuration UI
+- **Data filtering** - Complex filter criteria
+
+## Interactive Examples
+
+### Sales Report Header
+
+<SchemaExample id="report/report-header-with-kpis" />
+
+### Report Data Table
+
+<SchemaExample id="report/report-breakdown-table" />
+
+### Schedule Configuration Preview
+
+<SchemaExample id="report/report-scheduling" />
+
+## Basic Usage
+
+```ts
+import type { ReportComponentSchema } from '@object-ui/types';
+
+const salesReport: ReportComponentSchema = {
+  type: 'report',
+  title: 'Monthly Sales Report',
+  description: 'Sales performance analysis',
+  
+  fields: [
+    {
+      name: 'total_sales',
+      label: 'Total Sales',
+      type: 'number',
+      aggregation: 'sum',
+      format: 'currency'
+    },
+    {
+      name: 'order_count',
+      label: 'Orders',
+      type: 'number',
+      aggregation: 'count'
+    }
+  ],
+  
+  filters: [
+    {
+      field: 'date',
+      operator: 'between',
+      values: ['2024-01-01', '2024-01-31']
+    }
+  ],
+  
+  showExportButtons: true
+};
+```
+
+## Properties
+
+The tables in this section describe `ReportComponentSchema`, declared by
+`@object-ui/types` (`packages/types/src/reports.ts`) and imported by name in the
+example above. They group its properties by topic; the declaration remains the
+complete list.
+
+### Basic Configuration
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `type` | `'report'` | Component type identifier (required) |
+| `title` | `string` | Report title |
+| `description` | `string` | Report description |
+
+> **Retired (objectui#6121):** `ReportComponentSchema.dataSource` and
+> `ReportBuilderSchema.dataSources` used to be documented and declared here.
+> Both were annotated with `DataSource`, the runtime **adapter** interface
+> (`find(resource, params)`), which no JSON document can author — and no
+> renderer ever read either key off a schema: the report renderers take their
+> adapter as a React prop or from the renderer context. Both keys are now
+> `never` on the TypeScript face and are refused **by name** by the published
+> validator, so an authored value fails loudly instead of being accepted and
+> ignored. A report binds its data through the semantic-layer `dataset` form
+> (ADR-0021); a legacy presentation report receives already-fetched rows under
+> `data`.
+
+### Report Fields
+
+```ts
+interface ReportField {
+  name: string;                    // Field name
+  label?: string;                  // Display label
+
+  // Drives type-aware cell rendering. Author-provided only — the renderer
+  // reads `type` straight off this field and does not infer it from any
+  // bound object (ReportComponentSchema has no `objectName`).
+  type?:
+    | 'string' | 'text' | 'number' | 'date' | 'datetime' | 'time' | 'boolean'
+    | 'select' | 'multi_select' | 'status'
+    | 'lookup' | 'reference' | 'master_detail'
+    | 'email' | 'url' | 'phone' | 'currency' | 'percent'
+    | 'image' | 'file' | 'user'
+    | 'richtext' | 'html' | 'markdown' | 'json' | 'tags';
+
+  // Used when type is select / multi_select / status.
+  options?: Array<{ value: string | number; label: string; color?: string }>;
+
+  // Used when type is lookup / reference / master_detail. Enables
+  // deep-links to the related record's detail page.
+  referenceTo?: string;
+
+  aggregation?: 'sum' | 'avg' | 'min' | 'max' | 'count' | 'distinct';
+  format?: string;                 // Display format
+  showInSummary?: boolean;         // Show in summary section
+  sortOrder?: number;              // Sort order
+
+  // Legacy opt-in: render a plain string cell as a Badge.
+  // For most cases prefer `type: 'select'` + `options`.
+  renderAs?: 'badge' | 'text';
+  colorMap?: Record<string, string>; // value → CSS class
+}
+```
+
+#### Type-aware rendering
+
+The runtime maps `field.type` to a cell renderer from
+`@object-ui/fields`'s `getCellRenderer` registry. Examples: `select`
+becomes a coloured `Badge`, `lookup` becomes a deep link to the
+related record, `boolean` becomes ✓/✗, `email`/`url`/`phone` become
+`mailto:`/external/`tel:` links, `image` becomes a thumbnail. Any
+unknown type falls back to plain text.
+
+There is no automatic hydration from a bound object — `ReportComponentSchema`
+has no `objectName` property, and nothing in `packages/plugin-report`
+resolves one. `ReportViewer`'s `renderCellValue` reads `field.type` directly
+off each `ReportField` entry and passes it (plus `field.options` /
+`field.referenceTo`) straight into `getCellRenderer`; `field.label || field.name`
+is what renders the column header. Declare `type` (and `options` /
+`referenceTo` where relevant) on every field that needs type-aware
+rendering — a field with no `type` falls back to plain text.
+
+### Aggregation Types
+
+- **`sum`** - Total of all values
+- **`avg`** - Average value
+- **`min`** - Minimum value
+- **`max`** - Maximum value
+- **`count`** - Count of records
+- **`distinct`** - Count of unique values
+
+### Filters
+
+```ts
+interface ReportFilter {
+  field: string;
+  operator: 'equals' | 'not_equals' | 'contains' | 'greater_than' | 
+            'less_than' | 'between' | 'in' | 'not_in';
+  value?: any;
+  values?: any[];  // For 'between' and 'in' operators
+}
+```
+
+### Group By
+
+```ts
+interface ReportGroupBy {
+  field: string;
+  label?: string;
+  sort?: 'asc' | 'desc';
+}
+```
+
+## Report Sections
+
+Define report structure with sections:
+
+```ts
+import type { ChartSchema, ReportField, SchemaNode } from '@object-ui/types';
+
+interface ReportSection {
+  type: 'header' | 'summary' | 'chart' | 'table' | 'text' | 'page-break';
+  title?: string;
+  content?: SchemaNode | SchemaNode[];
+  chart?: ChartSchema;        // For type='chart'
+  columns?: ReportField[];    // For type='table'
+  text?: string;              // For type='text'
+  visible?: boolean | string; // Visibility condition
+}
+```
+
+## Export Configuration
+
+```ts
+interface ReportExportConfig {
+  format: 'pdf' | 'excel' | 'csv' | 'json' | 'html';
+  filename?: string;
+  includeHeaders?: boolean;
+  orientation?: 'portrait' | 'landscape';  // PDF only
+  pageSize?: 'A4' | 'A3' | 'Letter' | 'Legal';  // PDF only
+  options?: Record<string, any>;
+}
+```
+
+## Scheduling
+
+```ts
+import type { ReportExportFormat } from '@object-ui/types';
+
+interface ReportScheduleConfig {
+  enabled?: boolean;
+  frequency?: 'once' | 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly';
+  dayOfWeek?: number;          // For weekly (0-6)
+  dayOfMonth?: number;         // For monthly (1-31)
+  time?: string;               // HH:mm format
+  timezone?: string;
+  recipients?: string[];       // Email addresses
+  subject?: string;
+  body?: string;
+  formats?: ReportExportFormat[];  // Formats to attach
+}
+```
+
+## Complete Example
+
+```ts
+import type { ReportComponentSchema } from '@object-ui/types';
+
+const comprehensiveReport: ReportComponentSchema = {
+  type: 'report',
+  title: 'Quarterly Sales Analysis',
+  description: 'Comprehensive sales performance analysis by region and product',
+  
+  // Report fields
+  fields: [
+    {
+      name: 'region',
+      label: 'Region',
+      type: 'string'
+    },
+    {
+      name: 'product',
+      label: 'Product',
+      type: 'string'
+    },
+    {
+      name: 'revenue',
+      label: 'Revenue',
+      type: 'number',
+      aggregation: 'sum',
+      format: 'currency',
+      showInSummary: true
+    },
+    {
+      name: 'units_sold',
+      label: 'Units Sold',
+      type: 'number',
+      aggregation: 'sum',
+      showInSummary: true
+    },
+    {
+      name: 'avg_price',
+      label: 'Average Price',
+      type: 'number',
+      aggregation: 'avg',
+      format: 'currency'
+    }
+  ],
+  
+  // Filters
+  filters: [
+    {
+      field: 'date',
+      operator: 'between',
+      values: ['2024-01-01', '2024-03-31']
+    },
+    {
+      field: 'status',
+      operator: 'equals',
+      value: 'completed'
+    }
+  ],
+  
+  // Grouping
+  groupBy: [
+    {
+      field: 'region',
+      label: 'Region',
+      sort: 'asc'
+    },
+    {
+      field: 'product',
+      label: 'Product',
+      sort: 'desc'
+    }
+  ],
+  
+  // Report sections
+  sections: [
+    {
+      type: 'header',
+      title: 'Executive Summary'
+    },
+    {
+      type: 'summary',
+      title: 'Key Metrics'
+    },
+    {
+      type: 'chart',
+      title: 'Revenue Trend',
+      chart: {
+        type: 'chart',
+        chartType: 'line',
+        xAxisKey: 'month',
+        data: [
+          { month: 'January', Revenue: 120000 },
+          { month: 'February', Revenue: 145000 },
+          { month: 'March', Revenue: 132000 }
+        ],
+        series: [
+          {
+            name: 'Revenue',
+            type: 'line'
+          }
+        ]
+      }
+    },
+    {
+      type: 'table',
+      title: 'Detailed Breakdown',
+      columns: [
+        { name: 'region', label: 'Region' },
+        { name: 'product', label: 'Product' },
+        { name: 'revenue', label: 'Revenue', aggregation: 'sum' },
+        { name: 'units_sold', label: 'Units', aggregation: 'sum' }
+      ]
+    },
+    {
+      type: 'page-break'
+    },
+    {
+      type: 'text',
+      text: 'Report generated on ${new Date().toLocaleDateString()}'
+    }
+  ],
+  
+  // Schedule configuration
+  schedule: {
+    enabled: true,
+    frequency: 'monthly',
+    dayOfMonth: 1,
+    time: '09:00',
+    timezone: 'America/New_York',
+    recipients: [
+      'sales-team@company.com',
+      'management@company.com'
+    ],
+    subject: 'Monthly Sales Report - ${date}',
+    body: 'Please find attached the monthly sales report.',
+    formats: ['pdf', 'excel']
+  },
+  
+  // Export configuration
+  defaultExportFormat: 'pdf',
+  exportConfigs: {
+    pdf: {
+      format: 'pdf',
+      filename: 'sales-report-${date}.pdf',
+      orientation: 'landscape',
+      pageSize: 'A4',
+      includeHeaders: true
+    },
+    excel: {
+      format: 'excel',
+      filename: 'sales-report-${date}.xlsx',
+      includeHeaders: true
+    },
+    csv: {
+      format: 'csv',
+      filename: 'sales-data-${date}.csv',
+      includeHeaders: true
+    }
+  },
+  
+  // UI options
+  showExportButtons: true,
+  showPrintButton: true,
+  showScheduleButton: true,
+  refreshIntervalSeconds: 300  // Auto-refresh every 5 minutes
+};
+```
+
+## Report Builder
+
+Use `ReportBuilderSchema` for interactive report creation:
+
+```ts
+import type { ReportBuilderSchema } from '@object-ui/types';
+
+const builder: ReportBuilderSchema = {
+  type: 'report-builder',
+  
+  report: {
+    type: 'report',
+    title: 'Untitled Report'
+  },
+  
+  availableFields: [
+    { name: 'revenue', label: 'Revenue', type: 'number' },
+    { name: 'units', label: 'Units Sold', type: 'number' }
+  ],
+  
+  showPreview: true
+};
+```
+
+## Report Viewer
+
+Use `ReportViewerSchema` to display generated reports:
+
+```ts
+import type { ReportComponentSchema, ReportViewerSchema } from '@object-ui/types';
+
+// The report defined under "Basic Usage" above, and the rows a run produced.
+declare const salesReport: ReportComponentSchema;
+declare const reportData: Array<Record<string, unknown>>;
+
+const viewer: ReportViewerSchema = {
+  type: 'report-viewer',
+  report: salesReport,
+  data: reportData,
+  showToolbar: true,
+  allowExport: true,
+  allowPrint: true,
+  loading: false
+};
+```
+
+## Runtime Validation
+
+```ts
+import { ReportComponentSchema } from '@object-ui/types/zod';
+
+// The report configuration to validate.
+declare const myReport: unknown;
+
+const result = ReportComponentSchema.safeParse(myReport);
+
+if (result.success) {
+  console.log('Valid report configuration');
+} else {
+  console.error('Validation errors:', result.error);
+}
+```
+
+## Use Cases
+
+ReportComponentSchema is perfect for:
+
+- **Analytics dashboards** - Display key business metrics and KPIs
+- **Business intelligence** - Generate insights from operational data
+- **Automated reporting** - Schedule regular reports for stakeholders
+- **Data exports** - Provide data in multiple formats (PDF, Excel, CSV)
+- **Compliance reporting** - Generate audit trails and regulatory reports
+- **Executive summaries** - Create high-level overviews for management
+
+## Best Practices
+
+1. **Use meaningful aggregations** - Choose aggregation types that make sense for the data
+2. **Limit field count** - Too many fields make reports hard to read
+3. **Group logically** - Group by dimensions that provide insights
+4. **Test exports** - Verify all export formats render correctly
+5. **Set reasonable schedules** - Don't over-email recipients
+6. **Include filters** - Allow users to customize date ranges
+7. **Add summary sections** - Provide key metrics at the top
+
+## Related
+
+- [Charts Plugin](/docs/plugins/plugin-charts) - Data visualization
+- [Data Table](/docs/components/complex/data-table) - Tabular data display
+- [Data Source](/docs/guide/data-source) - Data integration

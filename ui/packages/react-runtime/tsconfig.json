@@ -1,0 +1,31 @@
+{
+  "extends": "../../tsconfig.json",
+  // `tsBuildInfoFile` pins the incremental build RECORD outside the published
+  // build output in every composite package here; see the longer note in
+  // packages/components/tsconfig.json for what happens without it (objectui#9189).
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "noEmit": false,
+    "declaration": true,
+    "composite": true,
+    "tsBuildInfoFile": "./tsconfig.tsbuildinfo",
+    "jsx": "react-jsx",
+    "lib": ["ES2020", "DOM"]
+  },
+  "include": ["src"],
+  // Tooling is excluded by DIRECTORY, not just by file NAME. A helper under
+  // `__tests__/` that is not itself called `*.test.ts` is otherwise a program
+  // input, and an EMITTING program writes it into the published `dist`
+  // (objectui#4006 / #4836 / #6943 -- the same defect three times, each found
+  // by hand). Enforced repo-wide by `pnpm check:published-tsconfig-exclude`
+  // (objectui#7212), which derives these directory names from `TOOLING_FILE`
+  // in scripts/check-phantom-dependencies.mjs.
+  "exclude": [
+    "**/__tests__/**",
+    "**/__mocks__/**",
+    "**/__benchmarks__/**",
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx"
+  ]
+}

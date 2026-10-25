@@ -1,0 +1,5 @@
+{
+  "type": "date-picker",
+  "placeholder": "Pick a date",
+  "value": "2024-01-15"
+}

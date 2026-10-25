@@ -1,0 +1,39 @@
+{
+  "name": "@object-ui/sdui-parser",
+  "version": "18.1.0",
+  "type": "module",
+  "sideEffects": false,
+  "license": "MIT",
+  "description": "Constrained JSX-source → SDUI SchemaNode tree compiler (parse, never execute). Isomorphic, zero React. ADR-0080.",
+  "homepage": "https://www.objectui.org/docs/sdui-parser",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
+    "directory": "ui/packages/sdui-parser"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc && node ../../scripts/check-dist-completeness.mjs",
+    "test": "vitest run --root ../.. packages/sdui-parser/",
+    "type-check": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@object-ui/core": "workspace:*",
+    "@object-ui/react": "workspace:*",
+    "@object-ui/types": "workspace:*",
+    "@objectstack/spec": "workspace:^"
+  }
+}

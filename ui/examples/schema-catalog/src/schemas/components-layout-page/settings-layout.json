@@ -1,0 +1,54 @@
+{
+  "type": "page",
+  "pageType": "utility",
+  "title": "Settings",
+  "description": "Manage your account settings and preferences",
+  "children": [
+    {
+      "type": "card",
+      "className": "mb-6",
+      "children": [
+        {
+          "type": "text",
+          "content": "Profile Settings",
+          "className": "text-lg font-semibold mb-4"
+        },
+        {
+          "type": "input",
+          "label": "Name",
+          "placeholder": "Enter your name"
+        },
+        {
+          "type": "input",
+          "label": "Email",
+          "placeholder": "Enter your email"
+        }
+      ]
+    },
+    {
+      "type": "card",
+      "children": [
+        {
+          "type": "text",
+          "content": "Notifications",
+          "className": "text-lg font-semibold mb-4"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "justify": "between",
+            "children": [
+              {
+                "type": "text",
+                "content": "Email notifications"
+              },
+              {
+                "type": "switch"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

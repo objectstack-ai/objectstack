@@ -1,0 +1,12 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "fields": [
+    {
+      "name": "attachment",
+      "label": "Attachment",
+      "type": "file"
+    }
+  ]
+}

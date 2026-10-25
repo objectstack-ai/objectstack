@@ -1,0 +1,8 @@
+{
+  "type": "code-editor",
+  "value": "{\n  \"name\": \"objectui-demo\",\n  \"version\": \"1.0.0\",\n  \"description\": \"Interactive demo\",\n  \"main\": \"index.js\",\n  \"dependencies\": {\n    \"@object-ui/core\": \"latest\",\n    \"@object-ui/react\": \"latest\"\n  }\n}",
+  "language": "json",
+  "theme": "vs-dark",
+  "height": "300px",
+  "readOnly": true
+}

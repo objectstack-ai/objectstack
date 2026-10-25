@@ -282,6 +282,30 @@ export function makeRegexRecogniser(options) {
  * @param {string} source
  * @returns {{ comment: Uint8Array, literal: Uint8Array, interpolation: Uint8Array }}
  */
+/**
+ * The name of a JSX tag opening at `at` (a `<`), `''` for a fragment, or null
+ * when the next character cannot start one. Read only where the position rule
+ * already allows an expression to begin (#25803).
+ */
+function jsxTagName(source, at) {
+  if (source[at + 1] === '>') return '';
+  const m = /^[A-Za-z_$][\w$.:-]*/.exec(source.slice(at + 1, at + 129));
+  return m ? m[0] : null;
+}
+
+/**
+ * Every tag name this source CLOSES (`</name>`), with the offset of the last
+ * such closer -- the evidence an opening tag is an element with children and
+ * not a type argument or assertion that happens to sit where JSX could
+ * (`<T,>(x) => x`, `<Foo>bar` in a `.ts` file). One pass, taken lazily the
+ * first time a candidate tag is seen, so a file with no JSX pays nothing.
+ */
+function lastClosingTags(source) {
+  const last = new Map();
+  for (const m of source.matchAll(/<\/([A-Za-z_$][\w$.:-]*)?\s*>/g)) last.set(m[1] ?? '', m.index);
+  return last;
+}
+
 export function scanSource(source) {
   const n = source.length;
   const comment = new Uint8Array(n);
@@ -300,6 +324,28 @@ export function scanSource(source) {
   // Closed `${...}` spans, flushed to `literal` after the pass -- see the
   // closing block of this function for why they are not flagged inline.
   const interpolations = [];
+
+  // JSX (objectstack#25803, cutover bill item 23). A JSX element's CHILDREN
+  // text is content, not code: `<code>src/docs/*.md</code>` holds a `/*` that
+  // opens nothing, and read as code it opened a comment 1,517 bytes long.
+  //
+  // One stack, innermost last, of two kinds of entry:
+  //   tag      an OPENING tag being read -- code, since attributes are code --
+  //            until its `>` or `/>`;
+  //   element  an element whose CHILDREN are being read -- text, until a tag,
+  //            a closing tag or a `{` child expression opens.
+  // Each carries the `{` depth open inside it (0: the tag's own syntax, or the
+  // element's text) and the template depth it was opened at, so a template
+  // opened inside one stays innermost. An attribute or child expression is
+  // ordinary code, where another JSX element can open in turn.
+  //
+  // A tag becomes an element only on evidence: its `>` is reached with nothing
+  // but attribute syntax on the way, and the source closes that name later on.
+  // A type argument or an assertion in JSX's position (`<T,>(x) => x`,
+  // `<Foo>bar` in a `.ts` file) carries no closer and stays code, as before.
+  // Text bytes are flagged `literal`: content, the way a string's are.
+  const jsx = [];
+  let closers = null;
 
   // A shebang is a comment to node; it is also the one line whose slashes are
   // neither division nor a regex.
@@ -344,6 +390,42 @@ export function scanSource(source) {
       continue;
     }
 
+    // The innermost JSX entry, when no template opened inside it since.
+    const top = jsx.length && jsx[jsx.length - 1].templates === templates.length ? jsx[jsx.length - 1] : null;
+
+    // A JSX element's CHILDREN: text until a tag or a `{` expression opens.
+    if (top && top.kind === 'element' && top.braces === 0) {
+      const ch = source[i];
+      if (ch === '{') {
+        top.braces = 1;
+        i++;
+        prev = ''; // the expression starts fresh
+        word = '';
+        continue;
+      }
+      if (ch === '<' && source[i + 1] === '/') {
+        // The closing tag: code, read to its `>`, and the element is done.
+        let k = i + 2;
+        while (k < n && /[\w$.:\s-]/.test(source[k])) k++;
+        i = source[k] === '>' ? k + 1 : k;
+        jsx.pop();
+        prev = 'x'; // an element is a value
+        word = '';
+        continue;
+      }
+      const name = ch === '<' ? jsxTagName(source, i) : null;
+      if (name !== null) {
+        jsx.push({ kind: 'tag', name, braces: 0, templates: templates.length });
+        i++;
+        prev = '<';
+        word = '';
+        continue;
+      }
+      literal[i] = 1;
+      i++;
+      continue;
+    }
+
     const c = source[i];
     const next = source[i + 1];
 
@@ -380,6 +462,49 @@ export function scanSource(source) {
       i++;
       continue;
     }
+    // JSX opening tags (see the stack's comment above): the tag's own syntax,
+    // when it is the innermost entry and no attribute expression is open.
+    let inner = top;
+    if (inner && inner.kind === 'tag' && inner.braces === 0) {
+      if (c === '/' && next === '>') {
+        jsx.pop(); // self-closing: no children
+        i += 2;
+        prev = 'x';
+        word = '';
+        continue;
+      }
+      if (c === '>' && source[i - 1] !== '=') {
+        jsx.pop();
+        i++;
+        closers ??= lastClosingTags(source);
+        if ((closers.get(inner.name) ?? -1) >= i) {
+          jsx.push({ kind: 'element', name: inner.name, braces: 0, templates: templates.length });
+        } else {
+          prev = '>'; // not an element after all -- read on exactly as before
+          word = '';
+        }
+        continue;
+      }
+      // Anything but attribute syntax means this was never an opening tag.
+      if (!/[\s\w$.:=/{-]/.test(c)) {
+        jsx.pop();
+        inner = null;
+      }
+    }
+    // A tag opens wherever an expression can begin -- this module's regex
+    // position rule, plus the keywords -- in plain code, or in an attribute or
+    // child expression.
+    if (c === '<' && (inner === null || inner.braces > 0)
+      && (!(IDENT_CHAR.test(prev) || prev === ')' || prev === ']') || REGEX_AFTER_KEYWORD.has(word))) {
+      const name = jsxTagName(source, i);
+      if (name !== null) {
+        jsx.push({ kind: 'tag', name, braces: 0, templates: templates.length });
+        i++;
+        prev = '<';
+        word = '';
+        continue;
+      }
+    }
     // A regex literal: a `/` after anything that is not a value. THIS is this
     // module's position rule and it stays here (#15487) -- `}`, a bare `<`/`>`
     // and `++`/`--` are read as regex positions, which over-masks safely and is
@@ -406,7 +531,13 @@ export function scanSource(source) {
     // Inside `${...}`: balance the braces, so the interpolation ends at ITS
     // `}` and not at one quoted inside it. A `{` or `}` in a string, regex or
     // comment never reaches here -- its own branch consumed it already.
-    if (frame && frame.braces > 0) {
+    // The innermost context owns the brace: a JSX entry's attribute or child
+    // expression (an element's text resumes when its depth returns to 0), then
+    // a template's interpolation.
+    if (inner && (c === '{' || c === '}')) {
+      if (c === '{') inner.braces++;
+      else if (inner.braces > 0) inner.braces--;
+    } else if (frame && frame.braces > 0) {
       if (c === '{') frame.braces++;
       else if (c === '}' && --frame.braces === 0) {
         interpolations.push([frame.start, i + 1, true]);
@@ -655,6 +786,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'a real comment inside an interpolation': 1,
   'a genuine docblock is still removed': 1,
   'a genuine line comment is still removed': 1,
+  'a block-comment opener inside JSX text': 1,
+  'a quote and a // inside JSX text, around a child expression and a nested element': 1,
+  'a JSX comment in a child expression is still a comment': 1,
+  'a self-closing tag after a spread opens no children': 1,
+  'a generic arrow in JSX position is code, not an element': 1,
+  'a type assertion with no closer is code, not an element': 1,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -663,7 +800,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // the literal above, so the roster falls below this number; the table
 // cross-check in the floor block is the other half, and names WHICH label
 // collided.
-const SELF_TEST_BATTERY_FLOOR = 23;
+const SELF_TEST_BATTERY_FLOOR = 29;
 
 // ── The SHARED RECOGNISER section's own roster and floor (#15487) ──────────
 //
@@ -783,6 +920,22 @@ export function selfTest() {
       ['/** Retired: err.code = ' + "'GHOST'" + ' must never come back. */', "err.code = 'REAL';"].join('\n')],
     ['a genuine line comment is still removed',
       ["// err.code = 'GHOST'", "err.code = 'REAL';"].join('\n')],
+    // JSX children text is content (objectstack#25803). The first row is the
+    // merged tree's DocsIndex.tsx shape: read as code, its `/*` opened a
+    // comment that ran to the GHOST docblock's closer and took REAL with it.
+    ['a block-comment opener inside JSX text',
+      ['const el = (', '  <p>Ship docs as <code className="mx-1">src/docs/*.md</code> files.</p>', ');',
+        "err.code = 'REAL';", "/* err.code = 'GHOST' */"].join('\n')],
+    ['a quote and a // inside JSX text, around a child expression and a nested element',
+      ["const el = <div>see https://x.y/a <b>b</b> {n} don't</div>; err.code = 'REAL';", "// err.code = 'GHOST'"].join('\n')],
+    ['a JSX comment in a child expression is still a comment',
+      ["const el = <div>{/* err.code = 'GHOST' */}</div>;", "err.code = 'REAL';"].join('\n')],
+    ['a self-closing tag after a spread opens no children',
+      ["const el = <Foo {...p} />; // err.code = 'GHOST'", "err.code = 'REAL';", '</Foo>'].join('\n')],
+    ['a generic arrow in JSX position is code, not an element',
+      ["const f = <T,>(x: T) => x; // err.code = 'GHOST'", "err.code = 'REAL';", '</T>'].join('\n')],
+    ['a type assertion with no closer is code, not an element',
+      ["const a = <Foo>bar; // err.code = 'GHOST'", "err.code = 'REAL';"].join('\n')],
   ];
 
   // Both projections are driven, on every shape: they share one scanner, so a

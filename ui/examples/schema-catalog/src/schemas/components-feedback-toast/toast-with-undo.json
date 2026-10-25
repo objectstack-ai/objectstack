@@ -1,0 +1,6 @@
+{
+  "type": "toast",
+  "variant": "warning",
+  "title": "Item Deleted",
+  "description": "The item has been removed."
+}

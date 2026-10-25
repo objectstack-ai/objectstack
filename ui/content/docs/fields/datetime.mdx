@@ -1,0 +1,128 @@
+---
+title: "DateTime Field"
+description: "Date and time input with combined picker"
+---
+
+The DateTime Field component provides a combined date and time input for collecting both date and time information in a single field.
+
+## Basic Usage
+
+<SchemaExample id="fields-datetime/basic-datetime-field" />
+
+## With Default Value
+
+<SchemaExample id="fields-datetime/with-default-value" />
+
+## Required Field
+
+<SchemaExample id="fields-datetime/required-datetime" />
+
+## Read-Only
+
+<SchemaExample id="fields-datetime/read-only-datetime" />
+
+## Field Schema
+
+A datetime field is authored as `DateTimeFieldMetadata` (`@object-ui/types`), which is
+the source of truth for the key set: it extends `BaseFieldMetadata` with a display
+format and the due/deadline flag. As on the [Date Field](/docs/fields/date), there is
+no range key: the spec refuses `min_date` / `max_date` by name and nothing read them.
+
+```ts
+import type { DateTimeFieldMetadata } from '@object-ui/types';
+
+const startsAt: DateTimeFieldMetadata = {
+  type: 'datetime',
+  name: 'starts_at',
+  label: 'Starts At',
+  placeholder: 'Pick a date and time',
+  required: true,
+  format: 'yyyy-MM-dd HH:mm',
+  dueLike: true,
+};
+```
+
+## Overdue Affordance
+
+`dueLike` declares the datetime a deadline. It is `@objectstack/spec`'s
+`FieldSchema.dueLike`, the same key, with the same meaning, that the
+[Date Field](/docs/fields/date) uses, and the spec accepts it on `date` and
+`datetime` fields only. A past `starts_at` or `created_at` is not a missed
+deadline, so only a field that says so gets the affordance:
+
+- the relative face reads **"Overdue Nd"** instead of the neutral "N days ago";
+- the cell is styled red, whichever display face it is painting.
+
+An absent key, or `false`, means "not a deadline", with nothing inferred from
+the field's name: an undeclared `due_at` in the past reads as any past datetime
+does.
+
+`settledWhen` says when the deadline is settled for one record. It is
+`FieldSchema.settledWhen`: a CEL predicate over the record's own columns, read as
+`record`, written as a bare string or as the spec's expression envelope. While it
+holds, no overdue wording or colour applies to that record, and the spec accepts it
+only beside `dueLike: true`:
+
+```ts
+import type { DateTimeFieldMetadata } from '@object-ui/types';
+
+const respondBy: DateTimeFieldMetadata = {
+  type: 'datetime',
+  name: 'respond_by',
+  dueLike: true,
+  settledWhen: { dialect: 'cel', source: "record.status == 'closed'" },
+};
+```
+
+Every view that draws the datetime beside its record evaluates `settledWhen`
+against that record (see [Date Field](/docs/fields/date)), and a settled deadline
+reads the neutral phrase with no red. A predicate that fails to evaluate leaves
+the deadline unsettled.
+
+The affordance is **day-granular**. It compares calendar days, so a datetime a
+few hours past its deadline still reads "Today" and is not red — the same answer
+the date field gives for a deadline falling today. The shortest overdue phrase
+is "Overdue 2d".
+
+The two halves do not switch on and off together. The red styling starts the day
+after the deadline; the "Overdue Nd" wording starts a day later still, and then
+stops once the date is far enough in the past that the relative face falls back
+to an absolute date. The red does not stop with it — a long-overdue deadline
+reads as a plain past date, in red.
+
+The same key is authorable on a **detail-view field entry**, where it means
+exactly this. See [DetailViewSchema](/docs/api/schema-reference#detailviewschema).
+
+The value being edited, and the `className` / `disabled` a host supplies, are **not**
+metadata keys — they are runtime widget props. See [Field Widget Props](/docs/fields/widget-props).
+
+## Date Format
+
+The datetime field stores values in ISO 8601 format: `YYYY-MM-DDTHH:mm`
+
+Example: `2024-03-15T14:30` represents March 15, 2024 at 2:30 PM
+
+## Cell Renderer
+
+When used in data tables or grids:
+
+```ts
+import { DateTimeCellRenderer } from '@object-ui/fields';
+
+// Renders: Mar 15, 2024, 02:30 PM
+```
+
+## Time Zone
+
+A datetime is an instant, and it renders in the workspace's time zone: the
+`timezone` that `GET /api/v1/auth/me/localization` answers, which the console
+hands to every date face through `LocalizationProvider`. Without one it renders
+in the viewer's own zone. A date-only value is a calendar day and shows the
+same day in every zone.
+
+## Use Cases
+
+- **Event Scheduling**: Meeting times, appointments
+- **Timestamps**: Order placed, task deadline
+- **Booking Systems**: Reservation date and time
+- **Notifications**: Scheduled notification time

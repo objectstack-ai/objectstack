@@ -1,0 +1,52 @@
+{
+  "type": "card",
+  "className": "w-full max-w-md mx-auto",
+  "header": [
+    {
+      "type": "stack",
+      "gap": 2,
+      "className": "text-center",
+      "children": [
+        { "type": "text", "content": "Two-Factor Authentication", "className": "text-2xl font-bold tracking-tight" },
+        {
+          "type": "text",
+          "content": "Enter the verification code from your authenticator app",
+          "className": "text-sm text-muted-foreground"
+        }
+      ]
+    }
+  ],
+  "children": [
+    {
+      "type": "stack",
+      "gap": 4,
+      "children": [
+        {
+          "type": "stack",
+          "gap": 2,
+          "children": [
+            { "type": "label", "htmlFor": "code", "label": "Verification Code" },
+            {
+              "type": "input",
+              "id": "code",
+              "name": "code",
+              "placeholder": "000000",
+              "className": "text-center text-2xl tracking-widest",
+              "maxLength": 6,
+              "required": true
+            }
+          ]
+        },
+        { "type": "button", "label": "Verify", "variant": "default", "className": "w-full" },
+        {
+          "type": "box",
+          "className": "text-center",
+          "children": [
+            { "type": "text", "content": "Didn't receive a code? ", "className": "text-sm text-muted-foreground" },
+            { "type": "text", "content": "Resend", "className": "text-sm text-primary hover:underline cursor-pointer" }
+          ]
+        }
+      ]
+    }
+  ]
+}

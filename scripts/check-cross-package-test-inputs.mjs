@@ -1410,6 +1410,11 @@ export const RECOGNISED_TOP_LEVEL_DIRECTORIES = Object.freeze([
   // input. No test names it flat today; the entry closes the hole the sentence
   // above promises rather than waiting for one to be written.
   '.claude',
+  // The objectui tree, imported under `ui/` at the cutover (objectstack#25677):
+  // turbo.json's `type-check` and `lint` tasks declare its repo-root inputs
+  // re-rooted there, and it left TOP_LEVEL_DIRECTORIES_AWAITING_IMPORT with the
+  // import commit, as that map's own note required.
+  'ui',
 ]);
 
 /**
@@ -1443,13 +1448,11 @@ export const TOP_LEVEL_DIRECTORIES_PENDING = Object.freeze({
  * `RECOGNISED_TOP_LEVEL_DIRECTORIES` or `TOP_LEVEL_DIRECTORIES_PENDING` like any
  * other, so the import commit decides how this collector treats it.
  *
- * `ui`: the objectui tree, imported under `ui/` (objectstack#25677). turbo.json's
- * `type-check` and `lint` tasks carry objectui's repo-root inputs re-rooted there.
- * Retire the entry with the import.
+ * Empty: its one entry, `ui` (the objectui tree, objectstack#25677), was retired
+ * by the import commit into RECOGNISED_TOP_LEVEL_DIRECTORIES. Kept, with its
+ * battery, for the next tree declared ahead of its arrival.
  */
-export const TOP_LEVEL_DIRECTORIES_AWAITING_IMPORT = Object.freeze({
-  ui: 'the objectui import (objectstack#25677): turbo.json declares its type-check and lint inputs ahead of the tree',
-});
+export const TOP_LEVEL_DIRECTORIES_AWAITING_IMPORT = Object.freeze({});
 
 /** Repo-root FILES declared as `$TURBO_ROOT$` inputs -- the fourth shape, pinned, not collected. */
 export const TURBO_ROOT_FILE_INPUTS = Object.freeze(['sdui.manifest.json']);
@@ -4385,7 +4388,8 @@ function selfTest() {
       'an awaiting-import name git already tracks is NOT excused here (it must be recognised or pending)',
       [...awaitingImport].every((name) => !live.directories.has(name) || recognised.has(name) || pending.has(name)),
     );
-    ok('the awaiting-import map holds exactly the measured arrivals', [...awaitingImport].sort().join() === 'ui');
+    // Empty since the cutover moved `ui` into RECOGNISED_TOP_LEVEL_DIRECTORIES.
+    ok('the awaiting-import map holds exactly the measured arrivals', [...awaitingImport].sort().join() === '');
     ok(
       'every awaiting-import entry carries a reason',
       Object.values(TOP_LEVEL_DIRECTORIES_AWAITING_IMPORT).every((r) => typeof r === 'string' && r.length > 0),

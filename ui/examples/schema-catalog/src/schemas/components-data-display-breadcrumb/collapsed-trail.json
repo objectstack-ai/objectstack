@@ -1,0 +1,25 @@
+{
+  "type": "breadcrumb",
+  "maxItems": 3,
+  "items": [
+    {
+      "label": "Home",
+      "href": "/"
+    },
+    {
+      "label": "Products",
+      "href": "/products"
+    },
+    {
+      "label": "Electronics",
+      "href": "/products/electronics"
+    },
+    {
+      "label": "Laptops",
+      "href": "/products/electronics/laptops"
+    },
+    {
+      "label": "ObjectBook Pro"
+    }
+  ]
+}

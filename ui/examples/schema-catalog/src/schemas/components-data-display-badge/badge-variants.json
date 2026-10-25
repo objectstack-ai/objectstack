@@ -1,0 +1,27 @@
+{
+  "type": "flex",
+  "properties": {
+    "gap": 2,
+    "children": [
+      {
+        "type": "badge",
+        "label": "Default"
+      },
+      {
+        "type": "badge",
+        "label": "Secondary",
+        "variant": "secondary"
+      },
+      {
+        "type": "badge",
+        "label": "Outline",
+        "variant": "outline"
+      },
+      {
+        "type": "badge",
+        "label": "Destructive",
+        "variant": "destructive"
+      }
+    ]
+  }
+}

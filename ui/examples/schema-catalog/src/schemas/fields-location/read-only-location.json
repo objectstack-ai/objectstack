@@ -1,0 +1,19 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "defaultValues": {
+    "headquarters": {
+      "lat": 40.7128,
+      "lng": -74.006
+    }
+  },
+  "fields": [
+    {
+      "name": "headquarters",
+      "label": "Headquarters",
+      "type": "location",
+      "readonly": true
+    }
+  ]
+}

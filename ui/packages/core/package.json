@@ -1,0 +1,67 @@
+{
+  "name": "@object-ui/core",
+  "version": "18.1.0",
+  "type": "module",
+  "sideEffects": false,
+  "license": "MIT",
+  "description": "Core logic, types, and validation for Object UI. Zero React dependencies.",
+  "homepage": "https://www.objectui.org/docs/core",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
+    "directory": "ui/packages/core"
+  },
+  "bugs": {
+    "url": "https://github.com/objectstack-ai/objectui/issues"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc && node ../../scripts/check-dist-completeness.mjs",
+    "test": "vitest run --root ../.. packages/core/",
+    "type-check": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@object-ui/types": "workspace:*",
+    "@objectstack/formula": "workspace:^",
+    "@objectstack/spec": "workspace:^"
+  },
+  "devDependencies": {
+    "@object-ui/test-support": "workspace:*",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  },
+  "keywords": [
+    "objectui",
+    "sdui",
+    "schema-driven-ui",
+    "react",
+    "tailwind",
+    "shadcn",
+    "objectstack",
+    "core",
+    "engine",
+    "expression-engine",
+    "action-engine",
+    "registry"
+  ],
+  "author": "ObjectStack Team <team@objectstack.ai>",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ]
+}

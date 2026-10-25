@@ -1,0 +1,45 @@
+---
+title: "Aspect Ratio"
+description: "Maintain a consistent width to height ratio"
+---
+
+import { DemoGrid } from '@/app/components/ComponentDemo';
+
+The Aspect Ratio component maintains a consistent width to height ratio for content.
+
+## Basic Usage
+
+<SchemaExample id="components-layout-aspect-ratio/16-9-aspect-ratio" />
+
+## Different Ratios
+
+<DemoGrid>
+  <SchemaExample id="components-layout-aspect-ratio/square" />
+  <SchemaExample id="components-layout-aspect-ratio/4-3" />
+  <SchemaExample id="components-layout-aspect-ratio/ultrawide" />
+</DemoGrid>
+
+## Schema
+
+The box holds its content one of two ways, and the renderer reads exactly one of them:
+set `image` for a photo, which is drawn to fill the box; otherwise the box renders
+`children`.
+
+```ts
+import type { SchemaNode } from '@object-ui/types';
+
+interface AspectRatioSchema {
+  type: 'aspect-ratio';
+  ratio?: number;                  // Width / Height ratio (default: 16 / 9)
+  image?: string;                  // Image URL, drawn to fill the box
+  alt?: string;                    // Alt text for `image`
+  children?: SchemaNode | SchemaNode[];   // Content, when no `image` is set
+  className?: string;
+}
+```
+
+## Examples
+
+### Video Container
+
+<SchemaExample id="components-layout-aspect-ratio/video-aspect-ratio" />

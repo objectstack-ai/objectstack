@@ -1,0 +1,309 @@
+name: Changeset Presence
+
+# Demands the DECLARATION that objectstack#4731 / #4843 made the criterion for
+# "which frontend changes shipped": a change to the source of a package the
+# release covers must add a `.changeset/*.md`. An empty frontmatter counts — what
+# is required is one sentence written while the author still knows what the change
+# does, not a release. Full rationale, the measured history, and the exemption's
+# exact spelling: `scripts/check-changeset-presence.mjs`.
+#
+# Why this is a SECOND changeset workflow rather than a wider trigger on the
+# first. `changeset-guard.yml` runs only when `.changeset/**` changes, and that
+# inversion is deliberate and documented in its own header: on a PR that adds
+# ONLY a changeset, every gate inside `ci.yml` and `lint.yml` skips, so nothing
+# in either of them ever reads the changeset — and that guard exists to see
+# exactly that PR. A PR which FORGOT its changeset does not touch `.changeset/**`
+# at all, so the one check that could notice is the one guaranteed not to run.
+# Widening those paths would break the case it was built for. Hence two
+# workflows, opposite directions: that one polices the level of a declaration
+# that exists, this one polices the existence of a declaration at all.
+#
+# That is no longer the reason this header used to give. It said `ci.yml` and
+# `lint.yml` both list `.changeset/**` under `paths-ignore`, so a PR adding ONLY
+# a changeset "starts nothing else". objectui#3523 step 2 deleted `paths-ignore`
+# from their `pull_request` trigger; it remains ONLY on `push`. Such a PR does
+# start both workflows and does produce their contexts — measured: PR #3856 (one
+# markdown file) 16 checks, PR #4339 (one line added to AGENTS.md) 17. The
+# correction is objectui#3857; an author had already acted on the old sentence
+# and got the opposite result.
+#
+# What #3523 moved rather than deleted is the path DECISION: it is now the
+# `Decide whether this change needs a full run` step in `ci.yml`, with a twin in
+# `lint.yml`, and its exclusion list is that `push` filter unchanged — markdown
+# and `.changeset/**` included, held identical to it by
+# `scripts/__tests__/merge-queue-reporting.test.ts`. Both workflows therefore
+# start, report, and skip every expensive step on precisely this PR: the
+# conclusion survives its premise, and `changeset-guard.yml`, running outside
+# that in-job switch with no install and no build, is still the only thing that
+# judges a changeset-only PR at all.
+#
+# Hence also: no `paths` and no `paths-ignore` here, deliberately — the same
+# choice `control-bytes.yml` and `docs-links.yml` made and for a stronger reason.
+# A path filter on the trigger skips the WHOLE workflow (GitHub has no per-job
+# path filter), so the context is never CREATED on a pull request that does not
+# match, and a required context that is never created leaves the PR pending rather
+# than failing it — in the queue, until the ruleset's 60-minute timeout. That is
+# objectui#3523's second half, and it is why the four gates moved their filters
+# into the jobs. This gate reports on every pull request instead: it decides from
+# the diff, inside the script, and says so when nothing is owed. A `paths` filter
+# would additionally be a second copy of the script's guarded surface, free to
+# drift from it — and the surface is derived from `.changeset/config.json`
+# precisely so there is only one. `scripts/__tests__/check-changeset-presence.test.ts`
+# fails if a filter is ever added.
+#
+# It needs no install and no build — a checkout, `setup-node`, and one `node` call
+# over `git diff` — so keep it that way if you add checks to it.
+
+on:
+  pull_request:
+    branches: [main, develop]
+  # Merge queue (objectui#3523 — see `ci.yml`'s trigger block for the full note
+  # and the measurements behind it). A required context that does not report on a
+  # queue build stalls the queue until the ruleset's 60-minute status-check
+  # timeout fails it, so a gate that carries no path filter — and therefore CAN
+  # be required — has to subscribe. `types:` is named although `checks_requested`
+  # is currently the only one GitHub defines.
+  #
+  # The script needs no per-event branch to work here: it resolves the base as
+  # the merge base with the target branch, and on a queue build (no
+  # `GITHUB_BASE_REF`, no `github.event.pull_request`) that falls through to the
+  # merge base with `origin/main`, which is the commit the queue built the group
+  # on. `ci.yml`'s `pnpm check:i18n-drift` step already resolves its base exactly
+  # this way on this event.
+  merge_group:
+    types: [checks_requested]
+
+# Deliberately NOT subscribed:
+#
+#   - `push` to `main`. There is nothing left to demand: the change has landed,
+#     and failing the push would only paint `main` red at the author of the next
+#     commit. The pull request and the queue build are where a declaration can
+#     still be written.
+#   - `workflow_dispatch`. A manual run has no revision range to judge, and this
+#     gate fails loudly rather than inventing one. Locally it is
+#     `node scripts/check-changeset-presence.mjs`, which defaults to this branch
+#     against its merge base and reads the working tree, so an author gets the
+#     answer before committing.
+
+concurrency:
+  group: changeset-presence-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  changeset-presence:
+    name: Changeset Declaration
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          # The gate compares this change against its MERGE BASE with the target
+          # branch, so it needs history — checkout's default is a depth-1 clone
+          # where `git merge-base` has nothing to find. An unresolvable base is a
+          # hard failure in the script, never a skip, so getting this wrong is a
+          # red build rather than a silent pass; it is spelled out here so it
+          # stays that way. Same requirement, same reason, as the `fetch-depth: 0`
+          # on `ci.yml`'s `type-check` job for `pnpm check:i18n-drift`.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22.x'
+
+      # Reads `.changeset/config.json` and `git diff`, and nothing else — no
+      # install, no network. The guarded surface is every workspace package named
+      # in the `fixed` group, so it follows the release configuration instead of
+      # being a hand-written glob: `@object-ui/console` lives at `apps/console`,
+      # outside `packages/`, and is both the most-edited published package here
+      # and the one the platform's `bump-objectui.sh` writes a changeset for.
+      - name: Verify a changeset declares this change
+        run: node scripts/check-changeset-presence.mjs
+
+  # A SECOND job rather than a step in `changeset-presence`, for two reasons.
+  # It answers the OPPOSITE question — `changeset-presence` asks whether THIS
+  # change declares one, this one asks whether SOMEBODY ELSE'S pending
+  # declaration still describes the tree — and it is report-only, so a finding
+  # must never turn the declaration gate's context red.
+  #
+  # Why it lives in THIS workflow and not in `changeset-guard.yml` with the
+  # other two changeset gates: that workflow carries a `paths:` filter. For the
+  # overwrite gate the filter is free, because a change that modifies a
+  # changeset touches `.changeset/**` by definition. This gate's subject is the
+  # opposite — an ordinary source change that falsifies somebody else's pending
+  # claim — and nothing obliges it to touch `.changeset/**` at all. This
+  # workflow has no path filter, which is exactly what that needs; its absence
+  # is pinned in `scripts/__tests__/check-changeset-claims.test.ts`.
+  changeset-claims:
+    name: Changeset Claim Re-read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    # ⚠️ A JOB-LEVEL block, so `pull-requests: write` reaches THIS job and not
+    # the declaration gate above it, which needs nothing but a checkout. A
+    # job-level block REPLACES the workflow-level one rather than extending it,
+    # so `contents: read` has to be named again here or checkout loses it.
+    #
+    # ⛔ Not a new permission (objectui#9140's ruling required this to be
+    # checked): `pull-requests: write` on the run's `GITHUB_TOKEN` is what
+    # `performance-budget.yml` already uses to post the Console Performance
+    # Budget report, and four other workflows here hold it too. There is no new
+    # secret, no personal token, no app, and no `pull_request_target`.
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          # Same requirement, same reason, as the job above: the gate compares
+          # this change against its MERGE BASE, and an unresolvable base is a
+          # hard failure in the script rather than a skip.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22.x'
+
+      # REPORT-ONLY, with no enforcing switch at all, deliberately: "a pending
+      # changeset names a file you edited" is usually still TRUE, and a gate
+      # that failed a build on prose being adjacent is the one triage said
+      # would be turned off within a month. It reads a tree listing and one
+      # batched blob read — measured at ~1.1s against the 1,384 changesets
+      # pending when it was written — so it needs no install and no build.
+      - name: Report pending changesets this change may have falsified
+        # `--json` is the hand-off to the delivery steps below, written from the
+        # same run that prints the log — ⛔ never a second measurement, which
+        # could disagree with the log it claims to report.
+        run: node scripts/check-changeset-claims.mjs --json claims.json
+
+      # ── Delivery (objectui#9140, director ruling, maintainer 「同意」) ──────
+      #
+      # The finding is a REQUEST TO READ, and objectui#9140 measured that request
+      # at zero answers out of four because it was addressed to a job log nobody
+      # opens on a green check. So it is carried to the pull request, where the
+      # seat that can answer it already is.
+      #
+      # ⛔ Report-only is UNCHANGED and must stay that way: the step above still
+      # exits 0 on findings, this job is still not a required context, and the
+      # rendered comment says both in its own opening lines. Delivery moves where
+      # the finding is READ, never what it does.
+      #
+      # Rendering lives in a script for the reason the budget report's does:
+      # logic embedded in YAML cannot be unit tested, and the failure this
+      # rendering can carry — an empty finding set rendered as a request to
+      # re-read — is the same class of bug as objectui#3152.
+      - name: Render the claim re-read comment
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: node scripts/render-changeset-claims-comment.mjs --from claims.json > claims-comment.md
+
+      # One comment per pull request, updated in place on re-runs rather than
+      # stacked. The marker it finds itself by is the FIRST LINE of the body it
+      # is about to post — plain text, never an HTML comment, because this
+      # repository has measured that GitHub deletes tag-shaped fragments from a
+      # stored body and that a first-line HTML comment is eaten with them
+      # (AGENTS.md). A marker that vanishes does not degrade gracefully: every
+      # re-run would fail to find its predecessor and post again, which is the
+      # stacking this is required to avoid.
+      #
+      # ⛔ The marker is not spelled here. It is read off the rendered body, so
+      # there is only ever one copy of it.
+      - name: Deliver the finding to the pull request
+        if: ${{ github.event_name == 'pull_request' }}
+        # A fork's pull request gets a read-only token, so the API call fails for
+        # a reason that says nothing about changesets. `continue-on-error` plus
+        # the try/catch below keep that from painting this job red — the same
+        # pairing, for the same reason, as the budget report's comment step.
+        continue-on-error: true
+        uses: actions/github-script@v9
+        with:
+          # GitHub's API intermittently rejects valid run tokens with 401
+          # (seen on PR #1627), so 401/403 must stay retryable here.
+          retries: 3
+          retry-exempt-status-codes: 400,404,422
+          script: |
+            const fs = require('fs');
+
+            if (!fs.existsSync('claims-comment.md')) {
+              core.warning('claims-comment.md was not rendered; skipping the pull request comment.');
+              return;
+            }
+            const body = fs.readFileSync('claims-comment.md', 'utf8');
+            const marker = body.split('\n', 1)[0].trim();
+            if (!/^[a-z][a-z0-9-]{4,}$/.test(marker)) {
+              core.warning(
+                `Rendered body does not open with a marker line (read: ${JSON.stringify(marker)}). ` +
+                  'Posting without in-place update — this comment may stack.',
+              );
+            }
+
+            // ALL THREE readings (objectui#9509, objectui#9841). `findings` is the
+            // went-false half — somebody else's pending changeset — `bornFalse` is
+            // this pull request's own prose, and `selfContradiction` is one
+            // changeset read against its own front matter. A run whose ONLY
+            // finding is of one kind must still create the comment, or that kind
+            // is delivered to the job log the ruling measured at zero answers out
+            // of four. Every reading the gate gains needs a term here; landing one
+            // without it is objectui#9842's shape — a patrol that runs and reaches
+            // nobody — chosen knowingly.
+            let findings = 0;
+            try {
+              const measured = JSON.parse(fs.readFileSync('claims.json', 'utf8'));
+              findings =
+                measured.findings.length +
+                (measured.bornFalse ?? []).length +
+                (measured.selfContradiction ?? []).length;
+            } catch (error) {
+              core.warning(`Could not read the finding count: ${error.message}`);
+            }
+
+            const target = {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            };
+
+            try {
+              const all = await github.paginate(github.rest.issues.listComments, {
+                ...target,
+                per_page: 100,
+              });
+              const mine = all
+                .filter((comment) => (comment.body ?? '').split('\n', 1)[0].trim() === marker)
+                .sort((a, b) => a.id - b.id);
+
+              if (mine.length === 0) {
+                // ⛔ Never CREATE a comment for an empty finding set. Most pull
+                // requests here have nothing to re-read, and a reassuring "all
+                // clear" on every one of them is how a channel gets muted — the
+                // channel this ruling exists to un-mute.
+                if (findings === 0) {
+                  core.info('Nothing to re-read, and no earlier request on this pull request.');
+                  return;
+                }
+                const created = await github.rest.issues.createComment({ ...target, body });
+                core.info(`Posted the request to re-read: ${created.data.html_url}`);
+                return;
+              }
+
+              await github.rest.issues.updateComment({ ...target, comment_id: mine[0].id, body });
+              core.info(`Updated the request to re-read in place: ${mine[0].html_url}`);
+              if (mine.length > 1) {
+                core.warning(
+                  `${mine.length} comments carry this marker; updated the earliest and left the ` +
+                    'rest alone. ⛔ Not this job\'s to delete — somebody else may own them.',
+                );
+              }
+            } catch (error) {
+              core.warning(`Could not deliver the finding to the pull request: ${error.message}`);
+              await core.summary.addRaw(body).write();
+            }

@@ -1,0 +1,40 @@
+{
+  // Type-checks this package's TESTS, which `tsconfig.json` excludes.
+  //
+  // Why the exclusion exists and why it was a hole: `tsconfig.json` is the
+  // package BUILD (`rootDir: ./src`, `declaration`, `outDir: ./dist`), so a
+  // test file left in that program would emit into `dist` and ship inside the
+  // `.vsix`. Excluding it keeps the build honest — but until this project
+  // existed, no `tsc` invocation read the test at all, and an unchecked test
+  // can assert a contract the compiler never checked and then read as evidence
+  // that the contract holds. Same shape and same reason as the 35 sibling
+  // `tsconfig.test.json` files; `scripts/check-type-check-coverage.mjs`
+  // enforces the chaining off `type-check`, since a config nothing runs is the
+  // objectui#3009 failure itself.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // objectui#8691: test programs only. One notch above the package build's
+    // ES2020, mirroring packages/app-shell. The package SOURCE tsconfig is
+    // untouched, so what this package SHIPS still compiles at the ES2020
+    // baseline; nothing here is emitted.
+    "lib": ["ES2022"],
+    // A checking project, never an emitting one.
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    // The BUILD is CommonJS (`module: node16`, no `"type": "module"`), which is
+    // what tsup emits for VS Code. Vitest is not that program: it loads these
+    // files as ESM, so `import.meta.url` — the only stable way for a test to
+    // locate its sibling source on disk — is legal there and TS1470 under the
+    // build's CommonJS target. This project therefore describes the runtime the
+    // tests actually run in, and the build config keeps describing the .vsix.
+    "module": "ESNext",
+    "moduleResolution": "Bundler"
+  },
+  // Both fields are overridden, not merged: `tsconfig.json`'s `exclude` lists
+  // `**/*.test.ts`, so inheriting it would leave this project with no inputs —
+  // green, and reading nothing.
+  "include": ["src/**/*.test.ts"],
+  "exclude": ["node_modules", "dist"]
+}

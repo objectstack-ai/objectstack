@@ -1,0 +1,635 @@
+name: Lint
+
+# Until #2923 this workflow was `workflow_dispatch`-only, so ESLint had never
+# gated a PR. That mattered more than it looked: every `object-ui/*` rule that
+# `eslint.config.js` sets to `error` is a ratchet — added *specifically* so a
+# new violation fails CI, with its existing sites pre-cleaned first so the rule
+# lints clean on the day it lands. While nothing ran them, every one of them was
+# inert.
+#
+# `eslint.config.js` is the single list of those rules, and this comment
+# deliberately neither counts them nor names them: it used to hand-count, and
+# the count was stale by the time anyone read it (#3261). A hand-copied
+# enumeration drifts by construction, and a stale one still reads as
+# authoritative — `content/docs/guide/ci-cd-pipeline.md` avoids the number for
+# the same reason. `scripts/__tests__/lint-workflow.test.ts` holds that in
+# place: it fails if a count or a rule name reappears here, if the config stops
+# setting any `object-ui/*` rule to `error`, or if this workflow stops gating
+# pull requests.
+#
+# `--max-warnings` is deliberately not set: warnings repo-wide run into the
+# thousands, dominated by `no-explicit-any` plus React Compiler rules the config
+# downgrades on purpose — known historical debt, not a signal. This gate is
+# about errors. No exact figure here, for the reason above: this paragraph used
+# to carry a hand-maintained warning count and percentage that nothing
+# recomputed and nothing alarmed on as they aged (#3274), and
+# `scripts/check-lint-coverage.mjs` held a copy of the same number that would
+# have gone stale on its own clock. The order of magnitude is the whole
+# argument; the integer never was.
+on:
+  push:
+    branches: [main, develop]
+    paths-ignore:
+      - '**/*.md'
+      - 'content/**'
+      - 'docs/**'
+      - '.changeset/**'
+  # No `paths-ignore` here any more (objectui#3523, step 2) — it skipped the
+  # whole workflow on a docs-only / changeset-only PR, so the `Lint` context was
+  # absent exactly where a required check must still report. The path decision
+  # moved into the job below. `push` above keeps its copy: nothing judges a push
+  # to `main`.
+  pull_request:
+    branches: [main, develop]
+  # ── Merge queue (objectui#3523) ────────────────────────────────────────
+  # The merge queue is ENFORCED on this repository by a ruleset — a direct push
+  # to `main` returns 405 `Changes must be made through the merge queue`
+  # (measured in #3243). Until this trigger landed, not one of the repository's
+  # workflows subscribed `merge_group`: repo-wide `event=merge_group` runs stood
+  # at total_count = 0, historically. A queue with nothing subscribed to it can
+  # only have an EMPTY required-check set, so it rebuilt each PR on the current
+  # `main` and let it through without validating anything.
+  #
+  # That is not a theoretical hole; it was cashed in on 2026-08-07. #3498 landed
+  # a `scripts/` type gate, itself fully green, that left a TS2578 on `main`;
+  # #3503, #3510 and #3516 then merged between 02:11Z and 02:15Z with `Type
+  # Check` at conclusion=failure, and #3505 hot-fixed the result. objectstack
+  # went through the same frames (objectstack#6067 -> #5615).
+  #
+  # `types:` is spelled out although `checks_requested` is the ONLY activity
+  # type GitHub defines for `merge_group` today — the two spellings are
+  # equivalent right now (objectstack's `ci.yml` and `lint.yml` use the bare
+  # `merge_group:` form and produce queue builds normally, 3552 of them). Naming
+  # the type means a second activity type added later cannot silently start
+  # queue builds this workflow was never written for.
+  #
+  # `concurrency` below needs no merge-queue special case, and that was checked
+  # rather than assumed: on `merge_group` the `github.event.pull_request` half of
+  # the group expression is null, so the group falls back to `github.ref`, which
+  # on a queue build is the queue's own generation — measured on objectstack,
+  # `gh-readonly-queue/main/pr-6594-251e888ac9ace8226f3a8450951e5b40a0a84c2c`.
+  # It can collide with neither a pull-request group (a bare PR number) nor a
+  # push group (`refs/heads/main`), so a queue build and the PR build it came
+  # from never cancel each other.
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    # ── The job ceiling, DERIVED FOR THIS JOB (objectui#7270) ────────────
+    # Before this line the only backstop was GitHub's 360-minute default. This
+    # repository has been bitten twice by an unbounded step whose only backstop
+    # was the job ceiling — the `apt-get` hang (objectui#5304) and the cache-save
+    # stall that ejected an all-green pull request (objectui#6577) — and both
+    # times the ceiling converted a transient fault into a `cancelled` check,
+    # which the merge queue cannot tell from `failure`. `Lint` is a required
+    # context on `pull_request` and `merge_group` alike, so at 360 the same
+    # fault holds a shared serial queue for six hours.
+    #
+    # ⛔ NOT inherited from `ci.yml`'s 10/15/20/30/40 — objectui#7048 fences
+    # exactly that. The arithmetic below is this job's own.
+    #
+    #   - Population: the last 300 successful runs of this workflow, window
+    #     2026-09-05T11:51Z .. 2026-09-06T04:11Z, n=300 `Lint` jobs. Per-job
+    #     wall clock from the Actions jobs endpoint (`completed_at` minus
+    #     `started_at`), never the run's total.
+    #   - min 9s / median 5m16s / p95 5m46s / max 7m14s.
+    #   - Bimodal at the LOW end only: 11 runs finished in 9-14s, which is the
+    #     `Decide whether this change needs a full run` gate skipping every
+    #     step; the other 289 ran 3m27s-7m14s. A low mode cannot raise a
+    #     ceiling, so it is recorded and not used.
+    #   - By event, no material difference, so one ceiling covers all three:
+    #     merge_group n=103 (median 5m17s, max 6m06s), pull_request n=142
+    #     (median 5m15s, max 6m39s), push n=55 (median 5m14s, max 7m14s).
+    #   - max/p95 = 1.25 — no fat tail, so the multiplier is not widened.
+    #
+    # Ceiling = the smallest round number that is both >= 3x max (21.7min) and
+    # >= max + 15min (22.2min) => 25. That is ~3.5x the slowest run ever
+    # observed here, so it cannot fire on a healthy-but-slow runner; a wedge
+    # dies in 25 minutes instead of 6 hours.
+    #
+    # ⛔ Raising this toward 360 is the ruled-out non-fix (objectui#6577,
+    # objectui#7048): the hang just runs longer and the gate still reports
+    # `cancelled`.
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          submodules: true
+          # `fetch-depth: 0` for the gate step below (objectui#3523): it diffs
+          # against the merge base, which a depth-1 clone cannot resolve.
+          fetch-depth: 0
+
+      # ── Always report; run only when it matters (objectui#3523) ──────────
+      # `on.pull_request.paths-ignore` used to skip this whole workflow on a
+      # docs-only or changeset-only pull request, so the `Lint` context was
+      # simply absent there — and a required check that never reports leaves the
+      # PR pending forever (in the merge queue, until the ruleset's 60-minute
+      # timeout fails it). The filter moved from the trigger into the job: the
+      # job always runs and always reports, the paths decide only whether the
+      # expensive steps execute. `ci.yml`'s `docs` job is the in-repo precedent
+      # for the shape, and its `type-check` job carries the long version of this
+      # note. The list below IS the `paths-ignore` it replaced; the `push`
+      # trigger keeps its copy, because nothing judges a push to `main`.
+      #
+      # Fails OPEN: if the diff cannot be computed the job runs everything,
+      # rather than reporting green having linted nothing (objectstack#4928).
+      - name: Decide whether this change needs a full run
+        id: relevant
+        run: |
+          if [ "${{ github.event_name }}" != 'pull_request' ]; then
+            echo 'should_run=true' >> "$GITHUB_OUTPUT"
+            echo 'Not a pull request: push is filtered at the trigger, and a merge_group build is the last validation before main. Running everything.'
+            exit 0
+          fi
+          if ! CHANGED=$(git diff --name-only \
+            '${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}' -- \
+            . \
+            ':(exclude,glob)**/*.md' \
+            ':(exclude,glob)content/**' \
+            ':(exclude,glob)docs/**' \
+            ':(exclude,glob).changeset/**'); then
+            echo 'should_run=true' >> "$GITHUB_OUTPUT"
+            echo 'Could not diff against the merge base. Running everything rather than skipping silently.'
+            exit 0
+          fi
+          if [ -n "$CHANGED" ]; then
+            echo 'should_run=true' >> "$GITHUB_OUTPUT"
+            echo "$CHANGED"
+          else
+            echo 'should_run=false' >> "$GITHUB_OUTPUT"
+            echo 'Only ignored paths changed. Skipping the steps below; this check still reports.'
+          fi
+
+      - name: Enable Corepack and download the pinned pnpm
+        if: steps.relevant.outputs.should_run == 'true'
+        run: bash scripts/ci-setup-pnpm.sh
+
+      - name: Verify pnpm version
+        if: steps.relevant.outputs.should_run == 'true'
+        run: pnpm --version
+
+      - name: Setup Node.js
+        if: steps.relevant.outputs.should_run == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22.x'
+          cache: 'pnpm'
+
+      # Every package must run ESLint or be declared a known gap. turbo skips
+      # scriptless packages silently, so without this a package reads as clean
+      # because nothing linted it. Runs before install: only reads package.json.
+      - name: Verify lint coverage
+        if: steps.relevant.outputs.should_run == 'true'
+        run: node scripts/check-lint-coverage.mjs
+
+      # ── One entry guard, one predicate (objectui#6092) ───────────────────
+      # A `scripts/**` CLI has to answer "did node run me, or did something
+      # import me?" before it does anything, and the hand-typed answers in this
+      # tree had drifted into NINE spellings across 28 `.mjs` files. Every one
+      # of them fails the same way: node resolves symlinks for the module graph
+      # but leaves `process.argv[1]` as the caller typed it, so a script reached
+      # through a symlink compares two different paths, answers false, and does
+      # NOTHING — exit 0, no output. The wrappers that spawn these tools hold
+      # `result.status` only, so an inert child is a green gate. Measured on a
+      # real blocking gate in this repository (objectui#6078):
+      # `check-skills-paths.mjs` run directly on a deliberately broken tree
+      # exits 1 with 696 bytes naming the dead path; run through a symlink
+      # against the SAME tree it exits 0 with no output.
+      #
+      # `scripts/invoked-as.mjs` landed here in #5984 with a header stating that
+      # a gate enforced the single-spelling rule. It did not exist, and the
+      # sweep it described had not happened either (objectui#6078). This is that
+      # gate. It lands BEFORE the conversion on purpose: the worklist grew while
+      # the card sat open, so a sweep with nothing under it can be undone
+      # silently by the next pull request. The 29 existing guards are baselined,
+      # SHRINK-ONLY, and the script's own header says why that is safe.
+      #
+      # Runs before install, next to `check-lint-coverage.mjs` above and for the
+      # same reason: it reads sources with no dependency beyond node builtins
+      # and two local modules, so nothing it needs is in `node_modules`. Placed
+      # before `pnpm install` it also cannot be made green by an install
+      # failure. `--self-test` runs FIRST and is the half that stops the gate
+      # rotting into decoration — it drives the scanner over fixture sources,
+      # including the nine spellings measured in this tree, and pins the
+      # baseline in every direction it can move.
+      #
+      # Invoked as `node` rather than through the `pnpm check:entry-guard` alias
+      # for the pre-install placement, matching `check-lint-coverage.mjs` above
+      # and `check-cross-repo-closer-outcome.mjs` below. The alias exists in
+      # `package.json` for local use and `scripts/__tests__/entry-guard-wiring.test.ts`
+      # holds the two spellings to the same script.
+      - name: Verify every scripts/ entry guard goes through one predicate
+        if: steps.relevant.outputs.should_run == 'true'
+        run: |
+          node scripts/check-entry-guard.mjs --self-test
+          node scripts/check-entry-guard.mjs
+
+      # ── The bash 3.2 floor on this repository's own shell (objectui#7692) ──
+      # macOS ships bash 3.2.57 and no bash 4+, for licensing reasons. CI runs
+      # bash 5, where every bash-4-only construct works — so a `mapfile`,
+      # a `declare -A` or an unguarded `$EPOCHSECONDS` in a hand-run script is
+      # invisible to a normal green run: the defect AND its repair both read as
+      # green, and the only reader who ever sees the failure is a contributor on
+      # a Mac at the moment they most need the script to work.
+      #
+      # This repository held its shell to nothing. Measured on `origin/main`
+      # `28cfff4` with a control beside the zero: 0 tracked files named
+      # `bash32`/`bash-32`, against 47 `scripts/check-*.mjs` gates that do exist.
+      # `check-control-bytes` judges bytes in every text file and
+      # `check-shell-escape-residue` judges markdown FENCES ("206 file(s) and
+      # 1309 fenced block(s)"), so neither is this.
+      #
+      # ⭐ The scan roots are `scripts/**`, `.claude/hooks/**` and `e2e/**`, and
+      # the third one is the point rather than a detail: two of the four shell
+      # files this repository wrote itself live in `e2e/live/ci/`. Upstream's
+      # roots (`.githooks/**` instead of `e2e/**`) would have walked past half
+      # the population while printing a green line.
+      #
+      # This is a RATCHET, not a repair: the gate's first full-population run on
+      # this tree is green — 12 shell files, 19 constructs, 0 findings. The card
+      # that filed it had grepped 10 of the 19 by hand; this step is what makes
+      # the other 9 a measurement instead of an assumption, and what stops the
+      # first violation being typed.
+      #
+      # Copied from objectstack `scripts/check-bash32-floor.mjs`; the script's
+      # own `copied from objectstack@` line names the commit it was last synced
+      # at. Since objectui#10208 no gate compares it with upstream, and drift
+      # from upstream is found by hand.
+      #
+      # Runs before install, next to the gates above and for the same
+      # reason: node builtins, `scripts/invoked-as.mjs` and `git ls-files` only,
+      # so nothing it needs is in `node_modules` and an install failure cannot
+      # make it green. Invoked as `node` rather than through the
+      # `pnpm check:bash32-floor` alias for that placement, matching the steps
+      # above; `scripts/__tests__/bash32-floor-wiring.test.ts` holds the two
+      # spellings to the same script. `--self-test` runs FIRST and is the half
+      # that stops the scanner rotting into decoration — a pattern that matches
+      # nothing reports a clean tree forever, so every row is driven against a
+      # real instance of its construct AND against the 3.2 replacement the
+      # failure text tells you to write.
+      #
+      # Cost, measured on this tree so the job ceiling question is answered
+      # rather than assumed: both invocations together run in well under two
+      # seconds. `timeout-minutes: 25` at the job header is DERIVED from this
+      # job's own distribution (objectui#7270, max 7m14s) and is untouched.
+      - name: Verify this repository's shell holds the bash 3.2 floor
+        if: steps.relevant.outputs.should_run == 'true'
+        run: |
+          node scripts/check-bash32-floor.mjs --self-test
+          node scripts/check-bash32-floor.mjs
+
+      # ── Cache bookkeeping cannot void a recorded verdict (objectui#7048) ──
+      # THE ORDERING, carried here from the type-check split in `ci.yml`
+      # (objectui#6577, PR #7047) because it is what a future reader needs in
+      # order to judge whether these steps may be touched: the verdict is
+      # recorded by the checking steps; everything after them is bookkeeping,
+      # and bookkeeping must never discard an answer the gate already produced.
+      #
+      # Why the SPLIT rather than a timeout on one step: combined
+      # `actions/cache` declares `main: dist/restore/index.js` plus
+      # `post: dist/save/index.js`, so its save is a step the RUNNER generates
+      # at job end (`Post Turbo Cache`). No workflow syntax attaches
+      # `timeout-minutes` or `continue-on-error` to a generated post step.
+      # Measured once, on `ci.yml`'s type-check cache: a 1-second save took
+      # 789s, ran that job into its ceiling, and the resulting `cancelled` —
+      # which the merge queue cannot tell from `failure` — ejected an all-green
+      # pull request (objectui#6577). `actions/cache`'s own `save-always`
+      # deprecation text points at this same split.
+      #
+      # ⚠️ This job's ceiling is `timeout-minutes: 25`, DERIVED at the job
+      # header above from this job's own run distribution (objectui#7270).
+      # Until that line existed the ceiling was GitHub's 360-minute default,
+      # and `Lint` is a required context on `pull_request` and `merge_group`
+      # alike, so a stalled save would have held the shared serial queue for up
+      # to six hours before reporting `cancelled`. The bound below is still on
+      # the bookkeeping step alone, and both numbers are needed: 25 minutes is
+      # the backstop, 5 minutes is what a healthy save is allowed.
+      #
+      # The restore half is deliberately left UNBOUNDED: a restore stall fails
+      # BEFORE any verdict exists — a gate that did not run, which is honest —
+      # rather than a recorded verdict discarded.
+      #
+      # ONE restore key, this job's own prefix (objectui#12276, the shape
+      # `ci.yml`'s `type-check` job took in objectui#12222). Until then this key
+      # was `turbo-<os>-<sha>` with a bare `turbo-<os>-` fallback: two other
+      # workflows' build jobs (`changeset-release.yml`, `performance-budget.yml`)
+      # saved under that same key, and the fallback also matched the `docs` and
+      # `type-check` prefixes, so this job restored and re-saved whichever
+      # job's cache came first on the ref -- build outputs, for a task whose
+      # own entries hold only logs. `actions/cache` tries the run's
+      # OWN ref before `main`; pull-request and queue runs save nothing now (see
+      # the save step below), so on those refs this key finds nothing and the
+      # lookup falls through to `main`'s lint entry.
+      - name: Restore Turbo Cache
+        id: turbo-cache
+        if: steps.relevant.outputs.should_run == 'true'
+        uses: actions/cache/restore@v6
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-lint-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ runner.os }}-lint-
+
+      # objectui#12957: every @objectstack/* package resolves to the build of the
+      # commit `.objectstack-sha` pins, read from node_modules/.cache/objectstack, so
+      # it must be there before pnpm resolves anything. Restored by the pin and built
+      # only on a miss (scripts/objectstack-pin.mjs); the save is this job's last step.
+      - name: Restore the pinned @objectstack build
+        id: objectstack-pin
+        if: steps.relevant.outputs.should_run == 'true'
+        uses: actions/cache/restore@v6
+        with:
+          path: node_modules/.cache/objectstack
+          key: objectstack-pin-${{ runner.os }}-${{ hashFiles('.objectstack-sha', 'scripts/objectstack-pin.mjs') }}
+
+      - name: Build @objectstack at the pin (skips a restored build)
+        id: objectstack-build
+        if: steps.relevant.outputs.should_run == 'true'
+        run: node scripts/objectstack-pin.mjs build
+
+      - name: Install dependencies
+        if: steps.relevant.outputs.should_run == 'true'
+        run: pnpm install --frozen-lockfile
+
+      # `TURBO_RUN_SUMMARY` makes turbo write its run summary to `.turbo/runs/`
+      # -- per task, the hash, the cache status and the tasks it depends on. It
+      # changes nothing turbo runs or caches; `Report what the turbo cache
+      # replayed` below reads it (objectui#12276). Every package's `lint`
+      # dependsOn `//#lint:root`, and turbo folds that task's hash into theirs,
+      # so `turbo.json` gives the root task the inputs it actually lints: with
+      # none it hashed every file in the repository, and no commit could replay
+      # a single package's lint.
+      - name: Run linter
+        if: steps.relevant.outputs.should_run == 'true'
+        env:
+          TURBO_RUN_SUMMARY: 'true'
+        run: pnpm lint
+
+      # ── vi.mock override VALUE shapes (objectui#8903) ─────────────────────
+      # The third property of the `vi.mock` population, and the only one of the
+      # three that needs a parser. `check-vi-mock-specifiers.mjs` judges whether
+      # a relative specifier resolves; `check-vi-mock-inherit.mjs` judges whether
+      # the factory obtains and spreads the real module. Neither judges what the
+      # override is WORTH: thirteen stubs returned `{ viewers, others }` where
+      # the real hook returns `PresenceUser[]`, and putting them back on disk
+      # made both of those gates print a BYTE-IDENTICAL verdict line and exit 0
+      # (objectui#8083, fixed by PR #8902).
+      #
+      # Its two siblings live in `repo-gates.yml` (objectui#12214), in steps that
+      # run before that job's install so that they see every pull request shape. This one cannot: it
+      # imports `typescript` to read declared return types, and
+      # `check-pre-install-import-graph.mjs` fails any pre-install gate that
+      # reaches a package — measured, by injecting the import into the sibling
+      # and watching that gate go from exit 0 to exit 1. So it runs here, after
+      # `pnpm install`.
+      #
+      # The `should_run` switch above is not a blind spot for it: the ignore list
+      # is Markdown plus the `content`, `docs` and `.changeset` trees, and both
+      # halves of what this gate compares — the override and the declared export
+      # — live in TypeScript files. `check-vi-mock-override-shape.test.ts` fails
+      # if a pattern matching a TypeScript file is ever added to that list.
+      - name: Check every vi.mock override matches the declared export shape
+        if: steps.relevant.outputs.should_run == 'true'
+        run: node scripts/check-vi-mock-override-shape.mjs
+
+      # ── Test path roots (objectui#8953) ───────────────────────────────────
+      # A test that resolves a repository path from `process.cwd()` reads a
+      # different tree under a package's own `test` script than under the form
+      # CI runs, so the same assertion reaches two verdicts. AGENTS.md has
+      # taught that rule since PR objectui#8952 and nothing enforced it;
+      # objectui#7799 repaired 13 instances of it in a single day.
+      #
+      # This step is a SECOND signal, not the gate. The gate is
+      # `scripts/__tests__/check-test-path-roots.test.ts`, which runs inside
+      # `Test (shard N/16)`. Those shards are not required contexts themselves
+      # since objectui#9499 — the `Test` aggregator reports for all of them, and
+      # it is required and subscribes `merge_group` — so the verdict still
+      # blocks a queue build, through one name instead of N. This step reaches the same verdict sooner
+      # and with a message aimed at the author.
+      #
+      # After `pnpm install`, unlike the entry-guard step above: the scan parses
+      # every test file with the TypeScript compiler, because the defect is a
+      # RESOLVED ROOT and not a spelling — one of objectui#7799's own 13 was
+      # invisible to that card's census regex.
+      - name: Verify no test resolves a repository path from the process cwd
+        if: steps.relevant.outputs.should_run == 'true'
+        run: node scripts/check-test-path-roots.mjs
+
+
+      # ── The cross-repo closer's outcome contract (#5261) ──────────────────
+      # `cross-repo-issue-closer.yml` carries ~250 lines of inline
+      # github-script, and until this step existed it was code nobody had ever
+      # seen run: it fires only on a merge, its conclusion is required by
+      # nothing, and every one of its runs so far has been green. That last part
+      # is the problem rather than the reassurance — measured over every merged
+      # pull request in this repository, its close loop has had a live target
+      # roughly one and a half times a day since it landed, took the same
+      # `already closed -- skipping` exit every time, and left no backlink on
+      # any of them. Greenly. The header of the workflow carries the figures.
+      #
+      # This step is the exercise: the shipped script is extracted from the YAML
+      # with a real parser (never retyped) and run under doubles the way
+      # actions/github-script runs it, as one AsyncFunction body. The scenarios
+      # pin the target parse, the target KIND, and the outcome of every exit —
+      # which of setFailed / warning / job summary fires, and which API calls
+      # were made.
+      #
+      # Assertion 0 is the compile, and it is not theoretical: the framework's
+      # copy of this workflow was taken down twice in one day by a `SyntaxError`
+      # in the inline block, i.e. a script that never ran at all, on a
+      # post-merge workflow whose red nothing else in CI can see.
+      #
+      # `--self-test` runs FIRST and is the half that stops the battery rotting
+      # into decoration: it mutates the shipped script — downgrade the verdict
+      # to a warning, break out of the loop instead of isolating, drop the
+      # same-repo skip, collapse the already-closed branch, strip the backlink
+      # marker, drop the pull-request guard, and the rest — and requires the
+      # battery to go RED for each, naming the scenario that catches it. Neither
+      # the mutations nor the scenarios are counted here: a hand-copied
+      # enumeration drifts by construction, which is the lesson this workflow's
+      # own header records. A mutation whose anchor no longer exists is a
+      # failure too, so rewriting the workflow cannot leave them silently
+      # matching nothing.
+      #
+      # Invoked as `node` rather than through a `pnpm check:*` alias, matching
+      # `check-lint-coverage.mjs` above. No network, no build; well under a
+      # second.
+      - name: Cross-repo closer outcome contract
+        if: steps.relevant.outputs.should_run == 'true'
+        run: |
+          node scripts/check-cross-repo-closer-outcome.mjs --self-test
+          node scripts/check-cross-repo-closer-outcome.mjs
+
+      # ── The product's own check command, on the product's own tree ────────
+      # `objectui check` is what a consumer runs against their schema tree, and
+      # the root `check` script points that same command at this repository.
+      # Nothing ran it. It exited 1 with 64 errors on `main` — and had done
+      # since the first `tsconfig.json` grew a comment — until someone ran it by
+      # hand while measuring something unrelated (objectui#5237, fixed by
+      # #5245). A shipped command sitting red on its own repository is the
+      # dogfood invariant failing, and the reason it could sit there is that no
+      # gate ever asked. This is that gate (objectui#5246).
+      #
+      # The build step below is not a convenience. The root script is
+      # `node packages/cli/dist/cli.js check`, and this job installs without
+      # building, so without it the step dies on a missing file. That failure
+      # mode is worse than no gate at all: it is red for a reason that has
+      # nothing to do with the tree being checked, and the obvious repair from
+      # outside is to delete the step — leaving the hole exactly as it was, now
+      # with a commit saying it was considered.
+      #
+      # `...` is pnpm's dependency closure: the CLI plus every workspace
+      # package it depends on, in topological order, derived from the graph
+      # rather than listed here. The closure is the requirement and not just
+      # tidiness — `dist/cli.js` imports `@object-ui/types`' built output at
+      # startup, so building the CLI package alone produces a binary that
+      # cannot load (objectui#5237 records the same import as the reproduce
+      # recipe's first step).
+      #
+      # Deliberately NOT `turbo run build`, although the Turbo cache above is
+      # restored by this point and would usually make it free. A turbo cache
+      # HIT restores a task's recorded outputs, and an entry recorded with an
+      # empty output set replays as "cache hit, replaying logs" plus FULL
+      # TURBO while writing no `dist/` at all — measured on this repo, where
+      # the CLI then died with ERR_MODULE_NOT_FOUND on the types import above.
+      # A blocking gate must not be able to fail for a reason that lives in a
+      # cache rather than in the tree it is judging, which is the same argument
+      # as the paragraph above one level down. Building through pnpm has no
+      # cache layer to replay, and it costs well under a minute.
+      - name: Build the CLI the self-check runs
+        if: steps.relevant.outputs.should_run == 'true'
+        run: pnpm --filter '@object-ui/cli...' build
+
+      # Errors only, which is the command's existing behaviour rather than a
+      # setting chosen here: a parse failure increments the error count, a
+      # non-zero count is the only thing that exits 1, and the unknown-schema-
+      # type arm prints and moves on. So this step blocks on the same arm
+      # `pnpm lint` above does, and for the same reason — errors are a signal,
+      # the warning stream is known debt. Nothing here promotes those warnings
+      # to failures, and no output-suppressing flag hides them either: they stay
+      # visible in the log and non-blocking. That arm belongs to objectui#5127,
+      # which is open; whatever it settles changes what this step PRINTS, never
+      # what it fails on. No count is quoted, for the reason the `--max-warnings`
+      # paragraph in the header gives.
+      - name: Verify the CLI's own check command passes on this repository
+        if: steps.relevant.outputs.should_run == 'true'
+        run: pnpm check
+
+      # ── What the cache replayed (objectui#12276) ─────────────────────────
+      # The `type-check` job's report step (objectui#12222), here for this job's
+      # cache. Bookkeeping, like the save below: it runs after the last checking
+      # step, so it can neither delay nor change the verdict. It reads the run
+      # summary `Run linter` asked turbo for and prints, per task, what the
+      # restored cache replayed and what re-ran -- each re-run task with the
+      # tasks it depends on, so a dependency whose hash moved every package's
+      # is named in the log -- and puts the counts and the restored key on ONE
+      # `::notice` annotation, which the check-runs API serves to readers who
+      # cannot open this log (AGENTS.md #9: the instrument is the claim, its
+      # answer is not written down). `!cancelled()` so a red lint still
+      # reports what it replayed.
+      #
+      # `timeout-minutes: 1` is DERIVED FOR THIS SITE: the script reads one
+      # summary and lists one directory, and measured 87 ms on a lint run's
+      # summary (objectui#12276); a minute is several hundred times that, and
+      # with the save's 5 below this job's bookkeeping stays at 7 of its 25.
+      # `continue-on-error: true` because a broken report says nothing about
+      # the code under lint.
+      - name: Report what the turbo cache replayed
+        if: steps.relevant.outputs.should_run == 'true' && !cancelled()
+        timeout-minutes: 1
+        continue-on-error: true
+        env:
+          RESTORED_CACHE_KEY: ${{ steps.turbo-cache.outputs.cache-matched-key }}
+        run: node scripts/report-turbo-cache.mjs
+
+      # ── Only `push` writes this cache, and only what it used ─────────────
+      # The `type-check` job's rule (objectui#12222): pull-request and queue
+      # runs restore and never save, because what they would save is scoped to
+      # a ref no later run of another pull request can read, and every entry
+      # saved is one more a size-limited cache store can evict `main`'s for.
+      # A `push` run saves, after this step deletes every entry the run did
+      # not use, so `main`'s entry is exactly the current lint verdicts.
+      #
+      # `push` alone, not `push` or `schedule`: this workflow has no
+      # `schedule`. Measured on objectui#12276 before relying on it: the push
+      # concurrency group here is the ref, so a merge can cancel the previous
+      # merge's run, and 14 of the 20 newest `main` push runs succeeded (6
+      # cancelled) -- the save lands on most merges, and a pull request
+      # restores the newest one that did. Bookkeeping like the report step:
+      # bounded, `continue-on-error`; `scripts/report-turbo-cache.mjs` refuses
+      # to prune on a summary that lists no task.
+      - name: Prune the turbo cache to what this run used
+        if: >-
+          steps.relevant.outputs.should_run == 'true'
+          && github.event_name == 'push'
+        timeout-minutes: 1
+        continue-on-error: true
+        run: node scripts/report-turbo-cache.mjs --prune
+
+      # The bookkeeping half of the split documented at the restore step above,
+      # placed HERE — after the last checking step — because that is exactly
+      # where the post phase it replaces already ran. Nothing about which
+      # commits this job accepts or rejects moves with it.
+      #
+      # `timeout-minutes: 5` is DERIVED FOR THIS SITE, and landing on the same
+      # number PR #7047 chose is a result rather than a copy — objectui#7048
+      # fences inheriting that 5, so here is this site's own arithmetic. This
+      # job's own save of this cache measured 6s on 2026-09-02 (`Post Turbo
+      # Cache`, job 100097466846); the whole job was 5m14s. 5 minutes is 50x
+      # the measured save, so it cannot fire on a working runner, and it is a
+      # bound on a step whose only alternative backstop is a 360-minute default
+      # ceiling.
+      #
+      # `continue-on-error: true` is the other half, and without it the bound
+      # would only trade a `cancelled` gate for a red one. A cache that failed
+      # to upload costs the next run some time; it says nothing whatsoever
+      # about the code under test, so it must not be allowed to speak for it.
+      #
+      # Behaviour preserved, spelled out so the equivalence is checkable:
+      #   - `cache-hit != 'true'` reproduces the combined action's own "exact
+      #     hit on the primary key ⇒ do not save" skip. A `restore-keys` prefix
+      #     match leaves `cache-hit` false and the save still runs, exactly as
+      #     the combined action behaved.
+      #   - the condition names no status function, so the implicit `success()`
+      #     still applies — matching the combined action's `post-if: success()`.
+      #   - same `path` and same `key` as the restore step above.
+      # One deliberate change (objectui#12276): only `push` saves, after the
+      # prune step above; see there for why.
+      - name: Save Turbo Cache
+        if: >-
+          steps.relevant.outputs.should_run == 'true'
+          && steps.turbo-cache.outputs.cache-hit != 'true'
+          && github.event_name == 'push'
+        uses: actions/cache/save@v6
+        timeout-minutes: 5
+        continue-on-error: true
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-lint-${{ github.sha }}
+
+      # The pinned @objectstack build, saved only when this job built it (a cache
+      # miss) and whatever the verdict above was -- it does not depend on it.
+      # Bookkeeping: bounded and non-fatal (objectui#6577, objectui#7048). The bound
+      # is not yet derived from a measured save; re-derive it from this step's runs.
+      - name: Save the pinned @objectstack build
+        if: ${{ !cancelled() && steps.relevant.outputs.should_run == 'true' && steps.objectstack-build.outcome == 'success' && steps.objectstack-pin.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: actions/cache/save@v6
+        with:
+          path: node_modules/.cache/objectstack
+          key: objectstack-pin-${{ runner.os }}-${{ hashFiles('.objectstack-sha', 'scripts/objectstack-pin.mjs') }}

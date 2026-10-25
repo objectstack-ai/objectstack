@@ -1,0 +1,89 @@
+{
+  "name": "@object-ui/plugin-calendar",
+  "version": "18.1.0",
+  "type": "module",
+  "license": "MIT",
+  "description": "Calendar view plugins for Object UI - includes both ObjectQL-integrated and standalone calendar components",
+  "homepage": "https://www.objectui.org/docs/plugins/plugin-calendar",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
+    "directory": "ui/packages/plugin-calendar"
+  },
+  "bugs": {
+    "url": "https://github.com/objectstack-ai/objectui/issues"
+  },
+  "main": "dist/index.umd.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "sideEffects": [
+    "./dist/calendar-view-renderer.js",
+    "./dist/index.js",
+    "./dist/index.umd.cjs",
+    "./src/calendar-view-renderer.tsx",
+    "./src/index.tsx"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.umd.cjs"
+    }
+  },
+  "scripts": {
+    "build": "vite build",
+    "test": "vitest run --root ../.. packages/plugin-calendar/",
+    "test:watch": "vitest --root ../.. packages/plugin-calendar/",
+    "type-check": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@object-ui/components": "workspace:*",
+    "@object-ui/core": "workspace:*",
+    "@object-ui/i18n": "workspace:*",
+    "@object-ui/mobile": "workspace:*",
+    "@object-ui/permissions": "workspace:*",
+    "@object-ui/plugin-detail": "workspace:*",
+    "@object-ui/react": "workspace:*",
+    "@object-ui/types": "workspace:*",
+    "lucide-react": "^1.43.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@object-ui/test-support": "workspace:*",
+    "@object-ui/data-objectstack": "workspace:*",
+    "@object-ui/sdui-parser": "workspace:*",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "^6.0.5",
+    "typescript": "^6.0.3",
+    "vite": "^8.2.1",
+    "vite-plugin-dts": "^5.0.3"
+  },
+  "keywords": [
+    "objectui",
+    "sdui",
+    "schema-driven-ui",
+    "react",
+    "tailwind",
+    "shadcn",
+    "objectstack",
+    "plugin",
+    "calendar",
+    "scheduler",
+    "view"
+  ],
+  "author": "ObjectStack Team <team@objectstack.ai>",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ]
+}

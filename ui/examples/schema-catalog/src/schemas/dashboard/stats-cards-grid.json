@@ -1,0 +1,39 @@
+{
+  "type": "grid",
+  "gap": 4,
+  "className": "md:grid-cols-2 lg:grid-cols-4",
+  "children": [
+    {
+      "type": "statistic",
+      "label": "Total Revenue",
+      "value": "$45,231.89",
+      "trend": "up",
+      "description": "+20.1% from last month",
+      "icon": "dollar-sign"
+    },
+    {
+      "type": "statistic",
+      "label": "New Users",
+      "value": "+2,350",
+      "trend": "up",
+      "description": "+180.1% from last month",
+      "icon": "users"
+    },
+    {
+      "type": "statistic",
+      "label": "Active Sessions",
+      "value": "+12,234",
+      "trend": "up",
+      "description": "+19% from last month",
+      "icon": "activity"
+    },
+    {
+      "type": "statistic",
+      "label": "Conversion Rate",
+      "value": "3.2%",
+      "trend": "down",
+      "description": "-4.3% from last month",
+      "icon": "percent"
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "note": [
+    "Waivers for scripts/check-i18n-en-drift.mjs (objectui#3650): an en string changed and one",
+    "or more of the nine translation packs deliberately did not follow it.",
+    "",
+    "Shape:  \"<dotted key>\": { \"en\": \"<the NEW en text, verbatim>\", \"reason\": \"…\", \"issue\": \"objectui#1234\" }",
+    "",
+    "This file ships EMPTY and holds no backlog, unlike scripts/i18n-call-site-key-baseline.json.",
+    "That gate measures a STATE (keys missing from en today), so it could inventory the debt. This",
+    "one judges an EVENT in a diff (en changed, the packs did not), and 'is ja's sentence still",
+    "what en's now means?' is the semantic question no gate can answer -- objectui#3625 was eight",
+    "idiomatic, native-script, mutually distinct translations of a retired sentence, green under",
+    "every mechanical judgement there is. So there is nothing to write down here at landing.",
+    "",
+    "An entry must transcribe the new en text, which is what makes it reviewable and what makes it",
+    "expire: the gate re-checks that text against the en pack on every run, so the waiver covers",
+    "that one sentence and stops applying the moment the key changes again. A waiver that fires",
+    "nothing is fine (every run after its PR merges sees an empty diff); a waiver whose text is",
+    "gone fails the build until it is deleted or renewed.",
+    "",
+    "Adding an entry also means raising WAIVER_CEILING in scripts/__tests__/check-i18n-en-drift.test.ts.",
+    "That is the ratchet: the ceiling is free to fall and costs a reviewed test edit to rise.",
+    "",
+    "The first five entries below are objectui#3878's ellipsis convergence, and they are the one shape",
+    "this ledger was designed for: en moved to U+2026 on keys where the packs ALREADY spelled it",
+    "U+2026, so there is nothing for them to follow. That is the inverse of the usual drift -- here",
+    "en was the outlier, not the packs -- and the transcribed sentences below are the evidence, since",
+    "the gate re-checks each one against en on every run. Four of the five had all nine packs already",
+    "correct; search.placeholder had zh already correct and the other eight followed in that same PR.",
+    "The sixth, marketplace.searchPlaceholder (objectui#10969), has that search.placeholder shape: en",
+    "dropped the 'manifest ID' jargon, eight packs followed, and zh had already dropped it.",
+    "",
+    "designerWaivers is the SECOND section, for the metadata-admin designer table population added by",
+    "objectui#8834 (packages/app-shell/src/views/metadata-admin/i18n.ts). Same shape, same expiry rule,",
+    "same ceiling discipline -- separate map because each section is validated against the en values of",
+    "its own population, and a designer key is not a pack key. Keys are prefixed with their table, e.g.",
+    "\"ENGINE_STRINGS.engine.directory.title\". It ships EMPTY and holds no backlog either."
+  ],
+
+  "waivers": {
+    "search.placeholder": {
+      "en": "Search objects, dashboards, pages, reports…",
+      "reason": "Ellipsis convergence on U+2026 (objectstack#6015 consistency pass). Eight packs followed in this PR; zh already spelled it '搜索对象、仪表板、页面、报表…' with U+2026 and had nothing to change.",
+      "issue": "objectui#3878"
+    },
+    "collaboration.replyingTo": {
+      "en": "Replying to {{name}}…",
+      "reason": "Ellipsis convergence on U+2026 (objectstack#6015 consistency pass). All nine packs already ended this value with U+2026; en was the sole ASCII outlier, so no translation changes.",
+      "issue": "objectui#3878"
+    },
+    "collaboration.replyingToComment": {
+      "en": "Replying to comment…",
+      "reason": "Ellipsis convergence on U+2026 (objectstack#6015 consistency pass). All nine packs already ended this value with U+2026; en was the sole ASCII outlier, so no translation changes.",
+      "issue": "objectui#3878"
+    },
+    "collaboration.commentPlaceholder": {
+      "en": "Add a comment… (use @ to mention)",
+      "reason": "Ellipsis convergence on U+2026 (objectstack#6015 consistency pass). The only mid-sentence case in the sweep, and all nine packs already wrote U+2026 there; en was the sole ASCII outlier, so no translation changes.",
+      "issue": "objectui#3878"
+    },
+    "appManagement.searchPlaceholder": {
+      "en": "Search apps…",
+      "reason": "Ellipsis convergence on U+2026 (objectstack#6015 consistency pass). All nine packs already ended this value with U+2026; en was the sole ASCII outlier, so no translation changes.",
+      "issue": "objectui#3878"
+    },
+    "marketplace.searchPlaceholder": {
+      "en": "Search apps by name or app ID…",
+      "reason": "The 'manifest ID' jargon leaves the marketplace search placeholder (triage call on objectui#10969, item 5). Eight packs followed in this PR; zh already said '按名称或标识搜索应用…' (name or identifier) since objectui#10900 replaced the jargon there, so it had nothing to change.",
+      "issue": "objectui#10969"
+    }
+  },
+
+  "designerWaivers": {}
+}
