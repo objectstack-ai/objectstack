@@ -2116,7 +2116,10 @@ function walkPackageFiles(absDir, dir, ignored) {
       if (isIgnoredPath(ignored, posix.join(dir, childRel))) continue;
       if (entry.isDirectory()) {
         if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name.startsWith('.')) continue;
-        if (depth > 0 && existsSync(join(child, 'package.json'))) continue; // another package's problem
+        // Any depth, since the ui/ import (objectstack#25752): `ui/` is a workspace
+        // member that sits DIRECTLY under the root, so a depth guard here would hand
+        // its root-level scripts and tests to the ROOT package's walk.
+        if (existsSync(join(child, 'package.json'))) continue; // another package's problem
         walk(child, childRel, depth + 1);
       } else if (TEST_FILE.test(entry.name)) {
         testRels.push(childRel);
