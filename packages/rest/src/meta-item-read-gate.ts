@@ -2902,9 +2902,9 @@ export async function translateMetaList(
     if (!locale) return items;
     const { translateMetadataDocument } = await import('@objectstack/spec/system');
     // [#8284 · #20730] One protocol resolution for the whole page, for every
-    // type with a packaged base (object, dashboard, view); the lookup itself is
-    // a synchronous in-memory registry read per element, by that element's own
-    // registry name — a view's qualified `<object>.<viewKey>`.
+    // type with a packaged base (object, dashboard, view, report); the lookup
+    // itself is a synchronous in-memory registry read per element, by that
+    // element's own registry name — a view's qualified `<object>.<viewKey>`.
     const p = PACKAGED_BASE_ACCESSORS.has(metaType) ? await sources.resolveProtocol() : undefined;
     // `getMetaItems` elements are metadata documents (the list envelope is the
     // OUTER `{ type, items }`), so every element translates directly (#5563).
@@ -2929,7 +2929,7 @@ export async function translateMetaList(
  * labels live on the document. A missing bundle is not a bail-out (the
  * built-in fallbacks still apply); no locale is. The i18n service is resolved
  * only for a translatable type, and the protocol only for a type with a
- * packaged base — an object, a dashboard or a view (#8284, #20730:
+ * packaged base — an object, a dashboard, a view or a report (#8284, #20730, #25788:
  * {@link packagedObjectBaseOf}).
  *
  * Moved here, unchanged, from `RestServer.translateMetaItem` (which now
