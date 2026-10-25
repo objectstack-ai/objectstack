@@ -108,6 +108,26 @@
  * given that YOU are moving the pin, has the parser parity been re-verified
  * against what you are moving it to.
  *
+ * ## With no pin: the in-tree oracle (#25712)
+ *
+ * objectui's tree is imported under `ui/` (#25677), and the pin goes away with
+ * it: the renderer that ships is then the copy at `ui/packages/sdui-parser/src`,
+ * built from the same commit as this one. So the gate picks its oracle by what
+ * the tree has (`oracleFor`), and a tree WITH `.objectui-sha` is judged exactly
+ * as above, record and messages unchanged:
+ *
+ *   pin present            → the vendored record, as described above;
+ *   pin absent, `ui/` copy → that copy, read directly with the same reader
+ *                            `--update` records with (same file set, region,
+ *                            code set and containment predicate). The record is
+ *                            not consulted, and both directions are visible: the
+ *                            in-tree copy moving shows here too;
+ *   neither                → REFUSED, naming both. A tree with no renderer copy
+ *                            to agree with is an exit 1, never a pass.
+ *
+ * Retiring the lockstep itself (one parser, the record and this gate deleted)
+ * is #25712 item 3, not this mode.
+ *
  * ## The decomposition that keeps this from crying wolf on day one
  *
  * The same diagnostic code is a quoted literal in this repo and a CONSTANT
@@ -177,6 +197,16 @@ const RECORD_FILE = 'packages/sdui-parser/objectui-lockstep.json';
 
 /** The objectui commit whose console build this platform ships. */
 const PIN_FILE = '.objectui-sha';
+
+/** The directory objectui's tree is imported under (#25677), as a bare segment. */
+const UI_TREE = 'ui';
+
+/**
+ * The renderer's copy in the merged layout — the in-tree oracle. Spelled as one
+ * literal so that `scripts/pm/dispatch-gates.mjs` derives this gate for a diff
+ * under it; the self-test holds it equal to `${UI_TREE}/${PARSER_SRC}`.
+ */
+const UI_PARSER_SRC = 'ui/packages/sdui-parser/src';
 
 /** Where `--update` looks for an objectui checkout, after `OBJECTUI_ROOT`. */
 const OBJECTUI_SIBLING = '../objectui';
@@ -487,6 +517,81 @@ export function judge({ record, ours, livePin }) {
     return findings; // nothing below can be measured against a record that is not one
   }
 
+  findings.push(...unreadableHere(ours));
+  if (findings.length > 0) return findings;
+
+  if (record.recordedAgainstPin !== livePin) {
+    findings.push(
+      `[pin-moved] ${PIN_FILE} is ${livePin.slice(0, 12)}, and the parity record was taken while it was\n`
+      + `    ${record.recordedAgainstPin.slice(0, 12)}. The pin names the objectui build whose RENDERER ships, so a\n`
+      + '    bump is exactly when a parser divergence stops being latent and starts being shipped.\n'
+      + '    Re-record against the objectui checkout the bump already required:  pnpm gen:sdui-lockstep',
+    );
+  }
+
+  const rev = record.objectui.rev.slice(0, 12);
+  findings.push(...driftFindings({
+    ours,
+    theirs: { region: record.grammarRegion, codes: record.diagnosticCodes, containment: record.containmentPredicate },
+    side: {
+      label: 'recorded',
+      region: `objectui's at\n    ${rev}`,
+      containment: `objectui's copy\n    runs at ${rev}`,
+      codes: `objectui's at ${rev}`,
+      only: 'only objectui',
+    },
+  }));
+  return findings;
+}
+
+/**
+ * The verdict with no pin (the merged layout): this copy against the renderer's
+ * copy under `ui/`, read whole by `fingerprintOf` — no record in between. Pure,
+ * like `judge`; the in-tree side is held to the refusals `--update` holds
+ * objectui's side to before it records, so an unreadable copy is never a match.
+ */
+export function judgeInTree({ ours, theirs }) {
+  const findings = [];
+  if (theirs.region === null) {
+    findings.push(
+      `[ui-region-unreachable] ${UI_TREE}/${REGION_FILE} does not contain the delimiter that opens the ported block:\n`
+      + `    ${REGION_DELIMITER}\n`
+      + '    Nothing was compared. The renderer\'s copy must carry the block this copy is held to.',
+    );
+  }
+  if (theirs.unresolved.length > 0 || theirs.codes.length === 0) {
+    findings.push(
+      `[ui-code-set-unreadable] the diagnostic-code set under ${UI_PARSER_SRC} could not be read whole, so no\n`
+      + '    comparison was made:\n'
+      + (theirs.codes.length === 0 ? '      no code found at all\n' : '')
+      + theirs.unresolved.map((u) => `      unresolvable: ${u}`).join('\n'),
+    );
+  }
+  if (theirs.containment?.predicate == null) {
+    findings.push(
+      `[ui-containment-unreachable] ${theirs.containment?.why ?? `no containment reading was taken of ${UI_TREE}/${CONTAINMENT_FILE}`}.\n`
+      + '    Nothing was compared.',
+    );
+  }
+  findings.push(...unreadableHere(ours));
+  if (findings.length > 0) return findings;
+
+  return driftFindings({
+    ours,
+    theirs: { region: theirs.region, codes: theirs.codes, containment: theirs.containment.predicate },
+    side: {
+      label: 'in-tree ',
+      region: `the in-tree copy's\n    (${UI_TREE}/${REGION_FILE})`,
+      containment: `the in-tree copy\n    (${UI_TREE}/${CONTAINMENT_FILE}) runs`,
+      codes: `the in-tree copy's (${UI_PARSER_SRC})`,
+      only: 'only ui/     ',
+    },
+  });
+}
+
+/** This copy's inputs, asserted before any comparison: each finding is a refusal, never a drift. */
+function unreadableHere(ours) {
+  const findings = [];
   if (ours.region === null) {
     findings.push(
       `[region-unreachable] ${REGION_FILE} does not contain the delimiter that opens the ported block:\n`
@@ -515,53 +620,81 @@ export function judge({ record, ours, livePin }) {
       + '    and a copy whose predicate cannot be located is not a copy that agrees.',
     );
   }
-  if (findings.length > 0) return findings;
+  return findings;
+}
 
-  if (record.recordedAgainstPin !== livePin) {
+/**
+ * The three drift comparisons against one reading of the renderer's copy — the
+ * record (pin) or `ui/` itself (in-tree). `side` carries only the words that
+ * name which, so both verdicts compare the same way.
+ */
+function driftFindings({ ours, theirs, side }) {
+  const findings = [];
+  if (ours.region.blob !== theirs.region.blob) {
     findings.push(
-      `[pin-moved] ${PIN_FILE} is ${livePin.slice(0, 12)}, and the parity record was taken while it was\n`
-      + `    ${record.recordedAgainstPin.slice(0, 12)}. The pin names the objectui build whose RENDERER ships, so a\n`
-      + '    bump is exactly when a parser divergence stops being latent and starts being shipped.\n'
-      + '    Re-record against the objectui checkout the bump already required:  pnpm gen:sdui-lockstep',
-    );
-  }
-
-  if (ours.region.blob !== record.grammarRegion.blob) {
-    findings.push(
-      `[grammar-drift] the ported grammar region of ${REGION_FILE} is not byte-identical to objectui's at\n`
-      + `    ${record.objectui.rev.slice(0, 12)}.\n`
+      `[grammar-drift] the ported grammar region of ${REGION_FILE} is not byte-identical to ${side.region}.\n`
       + `      here     ${ours.region.lines} line(s), blob ${ours.region.blob}\n`
-      + `      recorded ${record.grammarRegion.lines} line(s), blob ${record.grammarRegion.blob}\n`
+      + `      ${side.label} ${theirs.region.lines} line(s), blob ${theirs.region.blob}\n`
       + '    Either this copy was edited without the port, or the port was not byte-faithful. Diff the two\n'
       + `    copies' ${REGION_FILE} from the delimiter down.`,
     );
   }
 
-  if (ours.containment.predicate.blob !== record.containmentPredicate.blob) {
+  if (ours.containment.predicate.blob !== theirs.containment.blob) {
     const indent = (t) => t.trimEnd().split('\n').map((l) => `        ${l}`).join('\n');
     findings.push(
-      `[containment-drift] the \`${CONTAINMENT_CODE}\` predicate in ${CONTAINMENT_FILE} is not the one objectui's copy\n`
-      + `    runs at ${record.objectui.rev.slice(0, 12)}, so the save gate and the renderer disagree about which\n`
+      `[containment-drift] the \`${CONTAINMENT_CODE}\` predicate in ${CONTAINMENT_FILE} is not the one ${side.containment}, so the save gate and the renderer disagree about which\n`
       + '    components accept a child list.\n'
       + `      here     blob ${ours.containment.predicate.blob}\n${indent(ours.containment.predicate.text)}\n`
-      + `      recorded blob ${record.containmentPredicate.blob}\n${indent(record.containmentPredicate.text)}`,
+      + `      ${side.label} blob ${theirs.containment.blob}\n${indent(theirs.containment.text)}`,
     );
   }
 
-  const recorded = new Set(record.diagnosticCodes);
+  const recorded = new Set(theirs.codes);
   const mine = new Set(ours.codes);
   const onlyHere = ours.codes.filter((c) => !recorded.has(c));
-  const onlyThere = record.diagnosticCodes.filter((c) => !mine.has(c));
+  const onlyThere = theirs.codes.filter((c) => !mine.has(c));
   if (onlyHere.length > 0 || onlyThere.length > 0) {
     findings.push(
-      `[code-drift] the diagnostic-code sets differ from objectui's at ${record.objectui.rev.slice(0, 12)}.\n`
+      `[code-drift] the diagnostic-code sets differ from ${side.codes}.\n`
       + (onlyHere.length ? `      only here     ${onlyHere.join(', ')}\n` : '')
-      + (onlyThere.length ? `      only objectui ${onlyThere.join(', ')}\n` : '')
+      + (onlyThere.length ? `      ${side.only} ${onlyThere.join(', ')}\n` : '')
       + '    A code on one side only is a dialect: the save gate and the renderer disagree about what a page means.',
     );
   }
 
   return findings;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Choosing the oracle
+
+/**
+ * Which copy of the renderer's parser this tree is judged against. The pin wins
+ * whenever it is present, so a tree that has both (the merged tree before the pin
+ * is deleted) is judged exactly as before the merge.
+ */
+export function oracleFor({ pinPresent, uiPresent }) {
+  if (pinPresent) return 'pin';
+  return uiPresent ? 'in-tree' : 'none';
+}
+
+/**
+ * Gate a tree that has no pin: `{ refusal }` when it has no in-tree copy either,
+ * otherwise both fingerprints and `judgeInTree`'s findings.
+ */
+export function checkWithoutPin(root) {
+  if (oracleFor({ pinPresent: false, uiPresent: existsSync(join(root, UI_PARSER_SRC)) }) === 'none') {
+    return {
+      refusal:
+        `this tree has neither ${PIN_FILE} nor ${UI_PARSER_SRC}, so there is no renderer copy to compare\n`
+        + `  with. With the pin, the renderer's copy is judged through the vendored record (${RECORD_FILE});\n`
+        + `  without it, the renderer's copy is the in-tree one under ${UI_TREE}/, read directly. Nothing was compared.`,
+    };
+  }
+  const ours = fingerprintOf(root);
+  const theirs = fingerprintOf(join(root, UI_TREE));
+  return { ours, theirs, findings: judgeInTree({ ours, theirs }) };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1298,6 +1431,10 @@ function main() {
     update();
     return;
   }
+  if (!existsSync(join(ROOT, PIN_FILE))) {
+    mainWithoutPin();
+    return;
+  }
 
   let record = null;
   try {
@@ -1342,6 +1479,38 @@ function main() {
     '  Why this matters: objectui\'s copy runs in the RENDERER and this one runs in the SAVE GATE. When they\n'
     + '  disagree, a page saves clean and renders inert (#12719) — a surface-dependent failure that reaches an\n'
     + '  author as intermittent, so nothing pushes it back up.\n',
+  );
+  process.exit(1);
+}
+
+/** `main()` for a tree with no pin: the in-tree oracle (see the header). */
+function mainWithoutPin() {
+  const { refusal, ours, theirs, findings } = checkWithoutPin(ROOT);
+  if (refusal) {
+    console.error(`\ncheck-sdui-lockstep: REFUSED — ${refusal}\n`);
+    process.exit(1);
+  }
+
+  if (findings.length === 0) {
+    console.log(
+      `check:sdui-lockstep: OK (in-tree) — this copy is byte-identical to ${UI_PARSER_SRC} over ${ours.region.lines} `
+      + `grammar line(s) [blob ${ours.region.blob.slice(0, 12)}], agrees on all ${ours.codes.length} diagnostic code(s) `
+      + `and on the \`${CONTAINMENT_CODE}\` predicate [blob ${ours.containment.predicate.blob.slice(0, 12)}], `
+      + `across ${ours.files.length} and ${theirs.files.length} non-test source(s).`,
+    );
+    console.log(
+      `  No ${PIN_FILE} in this tree, so the renderer's copy is the in-tree one and ${RECORD_FILE} was not `
+      + 'consulted. Both copies were read now, so either one moving shows here.',
+    );
+    return;
+  }
+
+  console.error(`\ncheck:sdui-lockstep: ${findings.length} finding(s) — the two sdui-parser copies have drifted\n`);
+  for (const finding of findings) console.error(`  ${finding}\n`);
+  console.error(
+    `  Why this matters: the copy under ${UI_TREE}/ runs in the RENDERER and this one runs in the SAVE GATE. When\n`
+    + '  they disagree, a page saves clean and renders inert (#12719). Port the change to the other copy in the\n'
+    + '  same PR.\n',
   );
   process.exit(1);
 }
