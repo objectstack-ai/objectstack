@@ -59,6 +59,12 @@ export interface AdminRescueNote {
   readonly abandoned: readonly string[];
   /** Set when the node declared `onEmptyApprovers: 'fallback'` and it did not help. */
   readonly fallback?: AdminRescueFallback;
+  /**
+   * [#25573] Set when the slate named a person, the request's submitter, and
+   * the node's `excludeSubmitter: true` removed them: the slate named no one
+   * else, which "no approver resolved to a person" would misstate.
+   */
+  readonly submitter_excluded?: true;
 }
 
 /** One catalog sentence and its params. */
@@ -73,8 +79,15 @@ export type ApprovalSentenceRender = (
   params: Readonly<Record<string, string>>,
 ) => string | undefined;
 
-/** The reason's clauses: one per abandoned `type:value` slot, then the fallback's. */
-function reasonClauses(abandoned: readonly string[], fallback: AdminRescueFallback | undefined): Clause[] {
+/**
+ * The reason's clauses: one per abandoned `type:value` slot, then the
+ * submitter's exclusion, then the fallback's.
+ */
+function reasonClauses(
+  abandoned: readonly string[],
+  fallback: AdminRescueFallback | undefined,
+  submitterExcluded?: boolean,
+): Clause[] {
   const clauses: Clause[] = abandoned
     .filter((slot) => !!slot && slot.includes(':'))
     .map((slot): Clause => {
@@ -85,6 +98,7 @@ function reasonClauses(abandoned: readonly string[], fallback: AdminRescueFallba
         ? { id: 'approvalAdminRescuePositionUnheld', params: { value } }
         : { id: 'approvalAdminRescueSlotUnresolved', params: { type, value } };
     });
+  if (submitterExcluded) clauses.push({ id: 'approvalAdminRescueSubmitterExcluded', params: {} });
   if (!clauses.length) clauses.push({ id: 'approvalAdminRescueNoApprover', params: {} });
   if (fallback === 'resolved_to_no_one') clauses.push({ id: 'approvalAdminRescueFallbackUnresolved', params: {} });
   if (fallback === 'not_declared') clauses.push({ id: 'approvalAdminRescueFallbackUndeclared', params: {} });
@@ -97,8 +111,13 @@ const english = (clause: Clause): string => interpolate(enMessages[clause.id], c
  * Why the slate named no one, in English: the audit snapshot's
  * `admin_rescue:reason` and the log lines.
  */
-export function adminRescueReason(abandoned: readonly string[], fallback: AdminRescueFallback | undefined): string {
-  return reasonClauses(abandoned, fallback).map(english).join(enMessages.approvalAdminRescueReasonSeparator);
+export function adminRescueReason(
+  abandoned: readonly string[],
+  fallback: AdminRescueFallback | undefined,
+  submitterExcluded?: boolean,
+): string {
+  return reasonClauses(abandoned, fallback, submitterExcluded)
+    .map(english).join(enMessages.approvalAdminRescueReasonSeparator);
 }
 
 /**
@@ -115,7 +134,7 @@ export function adminRescueNoteText(
   note: Omit<AdminRescueNote, 'action_id'>,
   render?: ApprovalSentenceRender,
 ): string | undefined {
-  const clauses = reasonClauses(note.abandoned, note.fallback);
+  const clauses = reasonClauses(note.abandoned, note.fallback, note.submitter_excluded);
   if (!render) {
     const reason = clauses.map(english).join(enMessages.approvalAdminRescueReasonSeparator);
     return interpolate(enMessages.approvalAdminRescueNote, { reason });
@@ -136,9 +155,12 @@ export function adminRescueNoteOf(snapshot: unknown): AdminRescueNote | undefine
   if (!snapshot || typeof snapshot !== 'object') return undefined;
   const note = (snapshot as Record<string, unknown>)[ADMIN_RESCUE_NOTE_SNAPSHOT_KEY];
   if (!note || typeof note !== 'object') return undefined;
-  const { action_id, abandoned, fallback } = note as Record<string, unknown>;
+  const { action_id, abandoned, fallback, submitter_excluded } = note as Record<string, unknown>;
   if (typeof action_id !== 'string' || !action_id) return undefined;
   if (!Array.isArray(abandoned) || !abandoned.every((slot) => typeof slot === 'string')) return undefined;
   if (fallback !== undefined && fallback !== 'not_declared' && fallback !== 'resolved_to_no_one') return undefined;
-  return { action_id, abandoned, ...(fallback ? { fallback } : {}) };
+  if (submitter_excluded !== undefined && submitter_excluded !== true) return undefined;
+  return {
+    action_id, abandoned, ...(fallback ? { fallback } : {}), ...(submitter_excluded ? { submitter_excluded } : {}),
+  };
 }

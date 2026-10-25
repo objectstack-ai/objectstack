@@ -1030,9 +1030,10 @@ describe('#10243 — the process-local `flowEnabled` map is retired', () => {
     // body moved to: a grep-level pin reads them all, or a moved body is a place
     // the retired mechanism could come back unseen.
     const ENGINE_SOURCES = ['./engine.ts', './flow-registration-checks.ts', './plugin-extension-api.ts', './dag-traversal.ts', './run-history.ts', './run-resume.ts', './dispatch-claims.ts', './flow-definitions.ts', './subflow-guards.ts', './consumed-suspension-restore.ts', './node-text-rendering.ts'];
-    const engineSource = ENGINE_SOURCES.map((path) =>
+    const engineSources = ENGINE_SOURCES.map((path) =>
         readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8'),
-    ).join('\n');
+    );
+    const engineSource = engineSources.join('\n');
 
     it('the identifier no longer exists as engine STATE', () => {
         // A grep-level pin, because the thing being asserted is the absence of
@@ -1051,9 +1052,14 @@ describe('#10243 — the process-local `flowEnabled` map is retired', () => {
         const writes = [...engineSource.matchAll(/this\.flowLedgerDisabled\.(add|delete)\(/g)];
         expect(writes.length).toBeGreaterThan(0);
 
-        const writingMethods = engineSource
-            // A class member, or a moved body's top-level declaration.
-            .split(/\n    (?=[a-zA-Z]|\/\*\*)|\n(?=export function |\/\*\*)/)
+        const writingMethods = engineSources
+            // A class member of `engine.ts`, or a moved body's top-level
+            // declaration. A moved body's statements sit at the four-space
+            // indent a class member's name has in `engine.ts`, so a module is
+            // cut only where a line starts in column 0.
+            .flatMap((source, i) => source.split(
+                ENGINE_SOURCES[i] === './engine.ts' ? /\n    (?=[a-zA-Z]|\/\*\*)|\n(?=export function |\/\*\*)/ : /\n(?=\S)/,
+            ))
             .filter((chunk) => /this\.flowLedgerDisabled\.(add|delete)\(/.test(chunk));
         for (const chunk of writingMethods) {
             expect(

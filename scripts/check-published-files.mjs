@@ -458,6 +458,13 @@ const ROOT_DIR_WATCH_HINTS = [
   'packages/triggers/*',
   'apps/*',
   'examples/*',
+  // The objectui tree's roots (objectstack#25677). `ui/*` stands for the bare
+  // `ui` member (objectui's root manifest), spelled with a separator for the
+  // reason above; the other three match its own `<dir>/*` globs.
+  'ui/*',
+  'ui/packages/*',
+  'ui/apps/*',
+  'ui/examples/*',
 ];
 
 /**
