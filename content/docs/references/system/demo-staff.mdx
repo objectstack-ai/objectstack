@@ -1,0 +1,38 @@
+---
+title: Demo Staff schema — System Protocol reference
+navTitle: Demo Staff
+description: "Demo Staff schemas of the ObjectStack System Protocol: DemoStaff — each property with its type, default and a TypeScript example."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+<Callout type="info">
+**Source:** `packages/spec/src/system/demo-staff.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { DemoStaffSchema } from '@objectstack/spec/system';
+import type { DemoStaff } from '@objectstack/spec/system';
+
+// Validate data
+const result = DemoStaffSchema.parse(data);
+```
+
+---
+
+## DemoStaff
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Display name of the demo account — the value a seed dataset names it by in a sys_user reference such as owner_id |
+| **email** | `string` | ✅ | Sign-in address of the demo account |
+| **position** | `string` | optional | A position this application declares in `positions`, assigned to the demo account |
+| **permissionSets** | `string[]` | optional | Permission sets this application declares in `permissions`, granted to the demo account |
+
+
+---
+

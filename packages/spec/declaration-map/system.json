@@ -117,6 +117,8 @@
     "DatabaseProvider": "system/DatabaseProvider",
     "DatabaseProviderSchema": "system/DatabaseProvider",
     "DeleteObjectOperation": "system/DeleteObjectOperation",
+    "DemoStaff": "system/DemoStaff",
+    "DemoStaffSchema": "system/DemoStaff",
     "DeployBundle": "system/DeployBundle",
     "DeployBundleSchema": "system/DeployBundle",
     "DeployDiff": "system/DeployDiff",
