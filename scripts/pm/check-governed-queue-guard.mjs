@@ -670,13 +670,14 @@ export function codeownersPatternFor(surface) {
  * Every problem is a sentence naming the row or line; the list is whole, never
  * the first hit. Pure.
  */
-export function codeownersMirrorVerdict({ text, approvers = GOVERNED_APPROVERS, repo = SELF_REPO_ID } = {}) {
+export function codeownersMirrorVerdict({ text, approvers = GOVERNED_APPROVERS, repo = SELF_REPO_ID, register = GOVERNED_SURFACES } = {}) {
   const rows = codeownersRows(text);
   const wanted = [...approvers].map((a) => `@${a}`.toLowerCase()).sort();
   const sameOwners = (owners) => JSON.stringify([...owners].map((o) => o.toLowerCase()).sort()) === JSON.stringify(wanted);
   const problems = [];
   // The rows that govern THIS repository, read from the register (ruling B2: the question has a repository in it).
-  const governing = governedSurfacesFor(repo);
+  // `register` is the register's own seam (`governedSurfacesFor`): the self-test hands in rows not on it yet.
+  const governing = governedSurfacesFor(repo, register);
   const tierH = governing.filter((s) => s.tier === GOVERNED_TIER_H);
   const tierHPatterns = tierH.map(codeownersPatternFor);
   for (const surface of tierH) {
@@ -4657,6 +4658,19 @@ export async function selfTest() {
     assert('⛔ a-file-that-never-names-the-constant-is-a-problem', !silent.ok && silent.problems.length === 1 && silent.problems[0].includes('GOVERNED_APPROVERS'), silent.problems.join(' | '));
     const other = codeownersMirrorVerdict({ text: onDisk, approvers: ['someone-else'] });
     assert('⭐ the-approver-list-is-READ-not-restated-another-list-reds-the-file-on-disk', !other.ok && other.problems.length >= live.tierHPatterns.length, String(other.problems.length));
+    // The nested `ui/` workspace rows (#25712), handed in through the register's seam: each lands
+    // Tier H, so each needs its root-anchored `/ui/…` line, and the file on disk carries none yet.
+    const uiRows = GOVERNED_SURFACES.filter((s) => s.id !== 'north-star').map((s) => Object.freeze({
+      ...s, id: `ui-${s.id}`, ...(s.prefix ? { prefix: `ui/${s.prefix}` } : { exact: `ui/${s.exact}` }), glob: `ui/${s.glob}`,
+      tier: GOVERNED_TIER_H, tierRepos: undefined, repos: Object.freeze(['objectstack']),
+    }));
+    const withUi = [...GOVERNED_SURFACES, ...uiRows];
+    const uiLive = codeownersMirrorVerdict({ text: onDisk, register: withUi });
+    assert('⛔ with-the-ui-rows-handed-in-the-file-on-disk-is-short-one-line-per-ui-row', !uiLive.ok && uiLive.problems.length === uiRows.length && uiRows.every((r) => uiLive.problems.some((p) => p.includes(`\`${r.id}\``) && p.includes(`\`/${r.prefix ?? r.exact}\``))), uiLive.problems.join(' | '));
+    assert('the-ui-patterns-are-root-anchored-under-ui-the-ui-claude-tree-included', uiLive.tierHPatterns.slice(live.tierHPatterns.length).join() === '/ui/docs/adr/,/ui/.claude/,/ui/skills/,/ui/AGENTS.md,/ui/CLAUDE.md,/ui/.github/workflows/', uiLive.tierHPatterns.join());
+    const uiFull = `# mirrors GOVERNED_APPROVERS\n${uiLive.tierHPatterns.map((p) => `${p} ${owners}`).join('\n')}\n`;
+    assert('a-fixture-carrying-the-ui-lines-too-passes-against-the-ui-register', codeownersMirrorVerdict({ text: uiFull, register: withUi }).ok);
+    assert('the-ui-rows-govern-objectstack-alone-so-a-sibling-copy-needs-no-ui-line', codeownersMirrorVerdict({ text: full(), repo: 'objectui', register: withUi }).tierHPatterns.every((p) => !p.startsWith('/ui/')));
   }
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────

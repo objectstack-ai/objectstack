@@ -9656,6 +9656,7 @@ export function ignoreVerdicts(paths, { cwd = ROOT } = {}) {
   const r = spawnSync('git', ['check-ignore', '-v', '--non-matching', '--no-index', '--stdin'], {
     cwd,
     encoding: 'utf8',
+    maxBuffer: GIT_MAX_BUFFER_BYTES,
     input: `${unique.join('\n')}\n`,
   });
   if (r.error) throw new Error(`could not run git check-ignore — ${r.error.message}`);
@@ -15045,8 +15046,24 @@ export const DEFAULT_BASE_REMOTE = 'origin';
 export const DEFAULT_BASE_BRANCH = 'main';
 export const DEFAULT_BASE_REF = `${DEFAULT_BASE_REMOTE}/${DEFAULT_BASE_BRANCH}`;
 
+/**
+ * The stdout ceiling every git child of this tool is spawned with.
+ *
+ * `spawnSync`'s default is 1 MiB, and past it node kills the child and hands
+ * back `error.code === 'ENOBUFS'` — which `runGit` turns into a thrown "could
+ * not run git", so the tool refuses instead of answering. `trackedFiles`
+ * (`git ls-files -z`) is the reader that hits it first: this tree's listing is
+ * under the default, and the same tree with the objectui workspace imported
+ * under `ui/` is not (the Lint job's dispatch-gates step went red on ENOBUFS
+ * on the verification run of that import). 64 MiB is headroom for a listing
+ * an order of magnitude past that one; the bound stays finite so a runaway
+ * child is still stopped. Raising it changes no answer on a tree that already
+ * fit — only whether a larger tree gets one.
+ */
+export const GIT_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
+
 function runGit(args, cwd) {
-  const r = spawnSync('git', args, { cwd, encoding: 'utf8' });
+  const r = spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: GIT_MAX_BUFFER_BYTES });
   if (r.error) throw new Error(`could not run git — ${r.error.message}`);
   return { status: r.status ?? 1, stdout: r.stdout ?? '', stderr: (r.stderr ?? '').trim() };
 }

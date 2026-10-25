@@ -101,6 +101,9 @@ import {
     registerConnector,
     registerDegradedConnector,
     assertSameOriginOrFree,
+    unregisterNodeExecutor,
+    unregisterTrigger,
+    unregisterConnector,
 } from './plugin-extension-api.js';
 // [#25222] The DAG traversal's bodies: node execution, edge traversal, regions,
 // run attempts, run variables, and condition and value evaluation. Each
@@ -134,9 +137,11 @@ import {
     finishRefusedRun,
 } from './run-history.js';
 // [#25222] The run context and resume bodies: resolving a run's context,
-// grants and declared lookups; loading, gating and resuming a suspended run;
-// and failing, settling or cancelling one, along with its ancestors. Each
-// `AutomationEngine` method of the same name calls its body.
+// grants and declared lookups; persisting, loading, gating and resuming a
+// suspended run, and forgetting or evicting one; failing, settling or
+// cancelling one, along with its ancestors; and taking a subflow child's
+// parent strand. Each `AutomationEngine` method of the same name calls its
+// body.
 import {
     resolveRunContext,
     seedRunGrants,
@@ -148,16 +153,21 @@ import {
     loadSuspendedRun,
     loadSuspendedRunStrict,
     creditChildRun,
+    resumeInternal,
     failSuspendedRun,
     settleUnresumableSuspension,
     cancelRun,
     cloneVariablesAtPause,
     failAncestors,
+    persistSuspendedRun,
+    forgetSuspendedRun,
+    evictConsumedSuspension,
+    takeSubflowParentStrand,
 } from './run-resume.js';
 // [#25222] The dispatch and suspension claims' bodies: claiming, settling and
-// reading a dispatch, minting a run id, announcing a degraded advance claim and
-// releasing a suspension. Each `AutomationEngine` method of the same name calls
-// its body.
+// reading a dispatch, pruning the expired in-process claims, minting a run id,
+// announcing a degraded advance claim and releasing a suspension. Each
+// `AutomationEngine` method of the same name calls its body.
 import {
     claim,
     claimInProcess,
@@ -166,11 +176,13 @@ import {
     nextRunId,
     warnAdvanceClaimDegraded,
     releaseSuspension,
+    pruneInProcessDispatchClaims,
 } from './dispatch-claims.js';
 // [#25222] The flow definitions' bodies: canonicalising, unregistering,
-// refusing and rolling back a flow, reporting its runtime states and trigger
-// bindings, and the function, connector and credential surfaces a flow reads.
-// Each `AutomationEngine` method of the same name calls its body.
+// withdrawing, refusing, toggling and rolling back a flow, hydrating the
+// durable toggles, reporting a flow's runtime states and trigger bindings, and
+// the function, connector and credential surfaces a flow reads. Each
+// `AutomationEngine` method of the same name calls its body.
 import {
     resolveFunction,
     registerConnectorProvider,
@@ -184,6 +196,10 @@ import {
     flowCredentialHoldings,
     hookSecretResolver,
     rollbackFlow,
+    unregisterConnectorProvider,
+    withdrawFlow,
+    hydrateFlowActivations,
+    toggleFlow,
 } from './flow-definitions.js';
 // [#25222] The subflow guards' bodies: finding and describing disabled or
 // packaged subflows and their callers, and refusing what would reach a disabled
@@ -201,9 +217,9 @@ import {
     rejudgeSubflowCallers,
     refuseCustomerAuthoredToggle,
 } from './subflow-guards.js';
-// [#25222] The consumed-suspension restore's bodies: resolving a consumed
-// suspension's witnesses, and restoring, peeking at or inspecting one. Each
-// `AutomationEngine` method of the same name calls its body.
+// [#25222] The consumed-suspension restore's bodies: journaling a consumed
+// suspension, resolving its witnesses, and restoring, peeking at or inspecting
+// one. Each `AutomationEngine` method of the same name calls its body.
 import {
     rowSupersedesJournal,
     resolveConsumedSuspensionWitnesses,
@@ -211,6 +227,8 @@ import {
     resolveRestoreChain,
     peekConsumedSuspension,
     inspectConsumedSuspension,
+    journalConsumedSuspension,
+    restoreOneConsumedSuspension,
 } from './consumed-suspension-restore.js';
 // [#25222] The DAG traversal's node-level helpers: the node-type vocabulary
 // checks a run makes, a failed node's error variable, and rendering refusal
@@ -1382,7 +1400,7 @@ export function negotiatedServiceLocale(service: RefusalI18nService, requested: 
  * reason both legs converge on that one signal rather than growing a second
  * terminal exit apiece.
  */
-interface ChildRunRefusal {
+export interface ChildRunRefusal {
     /**
      * The child run's own `refusalMessage`, passed through verbatim.
      * `undefined` only when the child carried none — recorded honestly rather
@@ -1436,7 +1454,7 @@ const RETRYABLE_RESUME_REFUSAL_CODES: ReadonlySet<string> = new Set([
 ] satisfies ReadonlyArray<NonNullable<AutomationResult['code']>>);
 
 /** Whether an {@link AutomationResult} code names a resume that never ran. */
-function isRetryableResumeRefusal(code: AutomationResult['code']): boolean {
+export function isRetryableResumeRefusal(code: AutomationResult['code']): boolean {
     return code !== undefined && RETRYABLE_RESUME_REFUSAL_CODES.has(code);
 }
 
@@ -1477,7 +1495,7 @@ function engineBuilt(signal: ResumeSignal): ResumeSignal {
  * DOWN to the child, so shape alone would let a caller's own bag silence the
  * genuine degraded warning. Only the engine can mint the symbol.
  */
-function carriesSubflowChildOutput(signal: ResumeSignal): boolean {
+export function carriesSubflowChildOutput(signal: ResumeSignal): boolean {
     if ((signal as Record<symbol, unknown>)[ENGINE_BUILT_SIGNAL] !== true) return false;
     const output = signal.output;
     return typeof output === 'object' && output !== null && 'output' in output;
@@ -1512,7 +1530,7 @@ function isEngineVariable(name: string): boolean {
  *   signal is never absent here — `resume` normalises a missing one to `{}`
  *   (commit 7307191db), which folds nothing and rejects nothing.
  */
-function applyResumeSignal(
+export function applyResumeSignal(
     variables: Map<string, unknown>,
     signal: ResumeSignal,
     nodeId: string,
@@ -2900,10 +2918,11 @@ export class AutomationEngine implements IAutomationService {
     }
 
     private pruneInProcessDispatchClaims(now: number): void {
-        const cutoff = now - IN_PROCESS_DISPATCH_CLAIM_TTL_MS;
-        for (const [k, rec] of this.inProcessDispatchClaims) {
-            if (rec.at < cutoff) this.inProcessDispatchClaims.delete(k);
-        }
+        // The body lives in ./dispatch-claims.ts (#25222).
+        const host: ThisParameterType<typeof pruneInProcessDispatchClaims> = {
+            inProcessDispatchClaims: this.inProcessDispatchClaims,
+        };
+        pruneInProcessDispatchClaims.call(host, now);
     }
 
     /**
@@ -2983,95 +3002,16 @@ export class AutomationEngine implements IAutomationService {
      * pointed at a table that was never created, every save failing into a warn
      * nobody read, and every in-flight approval zombified by the next restart.
      */
-    private async persistSuspendedRun(run: SuspendedRun): Promise<void> {
-        // [#16129] THE MAP WRITE IS FIRST, and `cacheOnlySuspensions` is written
-        // only after the save below settles => for the whole duration of that
-        // await this entry is in the map and is NOT yet qualified. A concurrent
-        // per-id `loadSuspendedRunStrict` therefore reads a store that
-        // truthfully has no row yet, finds no qualifier, and takes
-        // `evictConsumedSuspension` on a run being parked RIGHT NOW. Reachable
-        // without out-of-band knowledge of the id, because the map write is what
-        // publishes it to `listSuspendedRuns`.
-        //
-        // Bounded, measured, and pinned in
-        // `suspended-run-mid-park-eviction-window.test.ts`: the store-first
-        // strict load keeps the run resumable once the save lands, and the cost
-        // falls entirely on `listSuspendedRuns`, which merely OMITS the run --
-        // inside that listing's declared latitude. Do not widen the marking, add
-        // a lock, or move the save above this line without reading that pin's
-        // header.
-        //
-        // [#16151] The ONE compound case that ESCAPED those bounds — an evicting
-        // read inside the window, and then the save FAILING, leaving the run
-        // with neither a durable row nor a map entry — is closed in the catch
-        // below, which re-seats this entry. The base window itself is
-        // deliberately unchanged: while the save is still in flight a per-id
-        // read still evicts, and bound 1 still carries it.
-        this.suspendedRuns.set(run.runId, run);
-        if (this.store) {
-            try {
-                await this.store.save(run);
-                // [#13617] The store now holds this pause, so it — not this map
-                // — is the answer for it. Cleared here and not only on the
-                // failure path: a re-suspend whose save lands after an earlier
-                // one failed must stop being read out of memory.
-                this.cacheOnlySuspensions.delete(run.runId);
-            } catch (err) {
-                // [#13617] The store was never given the row, so its "no such
-                // run" is silence about this run rather than an answer. This is
-                // what lets `loadSuspendedRunStrict` keep serving it from the
-                // map — the in-process resumability the message below promises.
-                this.cacheOnlySuspensions.add(run.runId);
-                // [#16151] RE-SEAT THE MAP ENTRY — the marking above qualifies
-                // an entry that may no longer be there. The map write at the
-                // top of this method is NOT yet qualified for the whole
-                // duration of the await, so a concurrent per-id
-                // `loadSuspendedRunStrict` reads a store that truthfully has no
-                // row, finds no qualifier, and evicts a run being parked right
-                // now. Compound that with THIS save failing and the run was
-                // left with neither a durable row nor a map entry:
-                // `hasSuspendedRun` answered `false` and `resume` answered
-                // `RUN_NOT_FOUND` — the run lost IN-PROCESS, while the record
-                // below told the operator it was "kept in memory only" and that
-                // they had until the next restart to act.
-                //
-                // Re-seating restores exactly this method's own write, on the
-                // one path where the store refused the row. It cannot resurrect
-                // a CONSUMED suspension: consumption goes through
-                // `forgetSuspendedRun`, which is reachable only once
-                // `loadSuspendedRunStrict` answers for this run, and for the
-                // whole of this await it answers `null` for the reason above.
-                // Nor can it clobber a NEWER entry: `persistSuspendedRun` is the
-                // only writer of this map, and a second park of the same run
-                // needs a resume that the same `null` refuses.
-                //
-                // ⛔ NOT a widening of the cache-only marking, which #16129
-                // forbids taking unilaterally because it would weaken #13617's
-                // store authority: the marking still happens only after the
-                // save has settled, and only when it settled as a FAILURE.
-                this.suspendedRuns.set(run.runId, run);
-                // #6499 — the cause is the datasource DRIVER's own text, so it
-                // goes to the logger's STRUCTURED slot, never spliced into the
-                // message; see `forgetSuspendedRun`'s catch below for the full
-                // mechanism (#6299) — this seam is its nearest twin, on the
-                // same `SuspendedRunStore` driver.
-                //
-                // #4632 verdict: DURABILITY — the level STAYS `error`, where
-                // #4460 put it: the docblock above argues it (#4420 is this
-                // exact seam's accident). Third argument per the `Logger`
-                // contract (`error(message, error?, meta?)`); the `Error` slot
-                // stays empty on purpose (#5575).
-                this.logger.error(
-                    `[automation] failed to persist suspended run '${run.runId}' to the durable store — it is ` +
-                        `kept in memory only: this process keeps it resumable, and hasSuspendedRun() and ` +
-                        `listSuspendedRuns() both still answer for it — if they do not, this run is already ` +
-                        `gone and that is a defect in this engine, not in the store. It will NOT be resumable ` +
-                        `after a restart. Fix the store failure in this record's meta.`,
-                    undefined,
-                    describeThrownForLog(err),
-                );
-            }
-        }
+    private persistSuspendedRun(run: SuspendedRun): Promise<void> {
+        // The body lives in ./run-resume.ts (#25222).
+        const readStore = () => this.store;
+        const host: ThisParameterType<typeof persistSuspendedRun> = {
+            suspendedRuns: this.suspendedRuns,
+            get store() { return readStore(); },
+            cacheOnlySuspensions: this.cacheOnlySuspensions,
+            logger: this.logger,
+        };
+        return persistSuspendedRun.call(host, run);
     }
 
     /**
@@ -3092,7 +3032,7 @@ export class AutomationEngine implements IAutomationService {
      * reads as terminal now and as still-suspended after a restart. See the
      * catch below for the full verdict.
      */
-    private async forgetSuspendedRun(
+    private forgetSuspendedRun(
         run: SuspendedRun,
         reason: SuspensionReleaseReason,
         /**
@@ -3107,64 +3047,16 @@ export class AutomationEngine implements IAutomationService {
          */
         durableRecordAlreadyConsumed = false,
     ): Promise<void> {
-        this.suspendedRuns.delete(run.runId);
-        // [#13617] The qualifier goes with the entry it qualifies — this is the
-        // one choke point every consumption passes through, so nothing can leave
-        // a run marked "the store never took this" after its map entry is gone.
-        this.cacheOnlySuspensions.delete(run.runId);
-        if (this.store && !durableRecordAlreadyConsumed) {
-            try {
-                await this.store.delete(run.runId);
-            } catch (err) {
-                // #6299 — the cause goes to the logger's STRUCTURED slot, never
-                // spliced into the message: it is the datasource DRIVER's own
-                // failure text, we do not control how many lines it has, and
-                // `ObjectLogger.write()` adds exactly one `<ts> <LEVEL>` head
-                // per call — so a newline in it turns this ONE record into
-                // several physical lines of which only the first is greppable.
-                // The family of #5048 / #5575 / #5636 / #5661 / #5737 / #5912 /
-                // #6230, and cloud#971's shape.
-                //
-                // #4632 verdict: DURABILITY — raised from `warn` to `error`, and
-                // deliberately NOT a copy of #6230's "the level stays warn". The
-                // hot cache is dropped on the line ABOVE the try, and this
-                // method is the single choke point every consumption of a
-                // suspension passes through (resume / terminal failure /
-                // cancel), so on this path the suspension is gone in-process
-                // while the durable row SURVIVES. Every caller still reports
-                // success — `resume()` returns a successful result, `cancelRun()`
-                // returns `true`, `recordLog` writes a terminal record — and the
-                // surviving row is read straight back out after the next
-                // restart: `rearmSuspendedWaitTimers` lists it and `resume()`
-                // rehydrates it through `loadSuspendedRunStrict`'s store read,
-                // re-running a continuation that has already run. Nothing
-                // retries this delete. That is the shape the durability gate's
-                // own vocabulary already grades `error` for the metadata store
-                // (`deleteMetaItemFromLoader`, #5259: "the surviving row is read
-                // straight back out of storage … so the 'deleted' item reappears
-                // and survives every restart"). `check:durability-log-level`
-                // cannot see it HERE only because `SuspendedRunStore.delete` is
-                // not in its declared callee vocabulary — which is exactly why
-                // this level is pinned by a test instead.
-                //
-                // THIRD argument, per the `Logger` contract
-                // (`packages/spec/src/contracts/logger.ts`):
-                // `error(message, error?, meta?)`. The `Error` slot is left
-                // empty on purpose (#5575) — a raw `Error` there ships its stack
-                // trace on every record.
-                this.logger.error(
-                    `[automation] suspended run '${run.runId}' was consumed (${reason}) but could NOT be deleted from ` +
-                        `the durable store — the in-memory suspension is already gone while the durable row SURVIVES, ` +
-                        `so this run reads as terminal now and as still-suspended after the next restart, where ` +
-                        `rearmSuspendedWaitTimers lists it and resume() rehydrates it from the store and re-runs a ` +
-                        `continuation that has already run. Nothing retries this delete. Fix the store failure in this ` +
-                        `record's meta, then delete the row for '${run.runId}' by hand.`,
-                    undefined,
-                    describeThrownForLog(err),
-                );
-            }
-        }
-        await this.releaseSuspension(run, reason);
+        // The body lives in ./run-resume.ts (#25222).
+        const readStore = () => this.store;
+        const host: ThisParameterType<typeof forgetSuspendedRun> = {
+            suspendedRuns: this.suspendedRuns,
+            cacheOnlySuspensions: this.cacheOnlySuspensions,
+            get store() { return readStore(); },
+            logger: this.logger,
+            releaseSuspension: (...a) => this.releaseSuspension(...a),
+        };
+        return forgetSuspendedRun.call(host, run, reason, durableRecordAlreadyConsumed);
     }
 
     /**
@@ -3243,9 +3135,14 @@ export class AutomationEngine implements IAutomationService {
      * where the store answered.
      */
     private evictConsumedSuspension(runId: string): void {
-        if (!this.store) return;
-        if (this.cacheOnlySuspensions.has(runId)) return;
-        this.suspendedRuns.delete(runId);
+        // The body lives in ./run-resume.ts (#25222).
+        const readStore = () => this.store;
+        const host: ThisParameterType<typeof evictConsumedSuspension> = {
+            get store() { return readStore(); },
+            cacheOnlySuspensions: this.cacheOnlySuspensions,
+            suspendedRuns: this.suspendedRuns,
+        };
+        evictConsumedSuspension.call(host, runId);
     }
 
     /**
@@ -3492,15 +3389,13 @@ export class AutomationEngine implements IAutomationService {
 
     /** Unregister a node executor (hot-unplug) */
     unregisterNodeExecutor(type: string): void {
-        const executor = this.nodeExecutors.get(type);
-        this.nodeExecutors.delete(type);
-        // Drop the published descriptor (keyed by descriptor.type, which may
-        // differ from the executor type).
-        this.actionDescriptors.delete(type);
-        if (executor?.descriptor) {
-            this.actionDescriptors.delete(executor.descriptor.type);
-        }
-        this.logger.info(`Node executor unregistered: ${type}`);
+        // The body lives in ./plugin-extension-api.ts (#25222).
+        const host: ThisParameterType<typeof unregisterNodeExecutor> = {
+            nodeExecutors: this.nodeExecutors,
+            actionDescriptors: this.actionDescriptors,
+            logger: this.logger,
+        };
+        unregisterNodeExecutor.call(host, type);
     }
 
     /** Register a trigger (called by plugins) */
@@ -3519,32 +3414,13 @@ export class AutomationEngine implements IAutomationService {
 
     /** Unregister a trigger (hot-unplug) */
     unregisterTrigger(type: string): void {
-        // Tear down every flow bound to this trigger before dropping it.
-        for (const [name, boundType] of [...this.boundFlowTriggers]) {
-            if (boundType !== type) continue;
-            try {
-                this.triggers.get(type)?.stop(name);
-            } catch (err) {
-                // #6499 — the thrown text is PLUGIN-SUPPLIED (`FlowTrigger.stop`),
-                // so it goes to the structured slot; see `forgetSuspendedRun`'s
-                // catch above for the full mechanism (#6299).
-                //
-                // #4632 verdict: FUNCTIONAL — stays `warn`: nothing
-                // claimed-persisted is involved. The binding bookkeeping is
-                // dropped either way; the worst case is the trigger's own
-                // subscription staying armed, and a fired flow still lands in
-                // run history visibly, behind execute()'s own guards.
-                this.logger.warn(
-                    `Trigger '${type}' stop('${name}') failed while unregistering the trigger — the flow is ` +
-                        `unbound anyway; whatever the trigger armed for it may keep firing until the process ` +
-                        `restarts. The trigger's own failure is in this record's meta.`,
-                    describeThrownForLog(err),
-                );
-            }
-            this.boundFlowTriggers.delete(name);
-        }
-        this.triggers.delete(type);
-        this.logger.info(`Trigger unregistered: ${type}`);
+        // The body lives in ./plugin-extension-api.ts (#25222).
+        const host: ThisParameterType<typeof unregisterTrigger> = {
+            boundFlowTriggers: this.boundFlowTriggers,
+            triggers: this.triggers,
+            logger: this.logger,
+        };
+        unregisterTrigger.call(host, type);
     }
 
     /**
@@ -3928,8 +3804,12 @@ export class AutomationEngine implements IAutomationService {
 
     /** Unregister a connector (hot-unplug). */
     unregisterConnector(name: string): void {
-        this.connectors.delete(name);
-        this.logger.info(`Connector unregistered: ${name}`);
+        // The body lives in ./plugin-extension-api.ts (#25222).
+        const host: ThisParameterType<typeof unregisterConnector> = {
+            connectors: this.connectors,
+            logger: this.logger,
+        };
+        unregisterConnector.call(host, name);
     }
 
     /**
@@ -4062,8 +3942,12 @@ export class AutomationEngine implements IAutomationService {
 
     /** Unregister a connector provider factory (hot-unplug). */
     unregisterConnectorProvider(providerKey: string): void {
-        this.connectorProviders.delete(providerKey);
-        this.logger.info(`Connector provider unregistered: ${providerKey}`);
+        // The body lives in ./flow-definitions.ts (#25222).
+        const host: ThisParameterType<typeof unregisterConnectorProvider> = {
+            connectorProviders: this.connectorProviders,
+            logger: this.logger,
+        };
+        unregisterConnectorProvider.call(host, providerKey);
     }
 
     /** Resolve a provider factory by key, or `undefined` when none is installed. */
@@ -4378,27 +4262,18 @@ export class AutomationEngine implements IAutomationService {
      * that package, reported at the caller's subflow node.
      */
     withdrawFlow(name: string): void {
-        this.deactivateFlowTrigger(name);
-        this.flows.delete(name);
-        // [ADR-0126 §7.2] `flowLedgerDisabled` is deliberately NOT cleared. It
-        // mirrors a durable row, and unregistering a flow does not delete that
-        // row — so dropping the projection here would silently re-arm a
-        // disabled packaged flow the moment it was re-registered (a hot
-        // reload, a Studio publish, the next boot pull), which is the one
-        // thing the durable switch exists to prevent. The projection is a Set
-        // of names; a genuinely deleted flow leaves one harmless string.
-        this.flowStatusDisabled.delete(name);
-        this.flowVersionHistory.delete(name);
-        // [#17396] Dropped with the flow, unlike `flowLedgerDisabled` above:
-        // that one mirrors a DURABLE row and must survive, while this records
-        // an in-process bind attempt that no longer has a subject.
-        this.policyDisabledFlows.delete(name);
-        this.subflowDeclinedFlows.delete(name);
-        // [#23316] A withdrawal ends a refusal as it ends a registration: the
-        // record's subject is gone. A host that withdraws BECAUSE it refused
-        // records the refusal after this — see {@link recordFlowRefusal}.
-        this.flowRefusals.delete(name);
-        this.logger.info(`Flow unregistered: ${name}`);
+        // The body lives in ./flow-definitions.ts (#25222).
+        const host: ThisParameterType<typeof withdrawFlow> = {
+            deactivateFlowTrigger: (...a) => this.deactivateFlowTrigger(...a),
+            flows: this.flows,
+            flowStatusDisabled: this.flowStatusDisabled,
+            flowVersionHistory: this.flowVersionHistory,
+            policyDisabledFlows: this.policyDisabledFlows,
+            subflowDeclinedFlows: this.subflowDeclinedFlows,
+            flowRefusals: this.flowRefusals,
+            logger: this.logger,
+        };
+        withdrawFlow.call(host, name);
     }
 
     /**
@@ -4777,33 +4652,17 @@ export class AutomationEngine implements IAutomationService {
      * An empty ledger — the stock-boot case — disarms nothing and rebinds
      * nothing, which is §4's "an empty ledger changes nothing anywhere".
      */
-    async hydrateFlowActivations(): Promise<string[]> {
-        if (!this.flowActivationStore) return [];
-        const rows = await this.flowActivationStore.list();
-        const disabled: string[] = [];
-        for (const row of rows) {
-            if (row.active) {
-                this.flowLedgerDisabled.delete(row.name);
-                continue;
-            }
-            this.flowLedgerDisabled.add(row.name);
-            // Only a flow this engine actually holds can be unbound; a row for
-            // a flow this deployment does not ship is kept in the projection
-            // (it costs one string, and the flow may be registered later by a
-            // hot reload) but has nothing to disarm now.
-            if (this.flows.has(row.name)) {
-                this.deactivateFlowTrigger(row.name);
-                disabled.push(row.name);
-            }
-        }
-        // [#20725, ADR-0126 §7.3] The callers of what the ledger just switched
-        // off go back to the arming gate. On a stock boot none is armed yet
-        // (the trigger plugins register at kernel:ready, and the gate judges
-        // them then), so this changes nothing there; a host whose trigger was
-        // registered before the pull would otherwise keep a caller armed onto
-        // a subflow this read has just switched off.
-        for (const name of disabled) this.rejudgeSubflowCallers(name);
-        return disabled;
+    hydrateFlowActivations(): Promise<string[]> {
+        // The body lives in ./flow-definitions.ts (#25222).
+        const readFlowActivationStore = () => this.flowActivationStore;
+        const host: ThisParameterType<typeof hydrateFlowActivations> = {
+            get flowActivationStore() { return readFlowActivationStore(); },
+            flowLedgerDisabled: this.flowLedgerDisabled,
+            flows: this.flows,
+            deactivateFlowTrigger: (...a) => this.deactivateFlowTrigger(...a),
+            rejudgeSubflowCallers: (...a) => this.rejudgeSubflowCallers(...a),
+        };
+        return hydrateFlowActivations.call(host);
     }
 
     /**
@@ -5280,92 +5139,26 @@ export class AutomationEngine implements IAutomationService {
      *   reported flip that did not persist is the failure mode this whole leg
      *   exists to remove.
      */
-    async toggleFlow(name: string, enabled: boolean): Promise<void> {
-        const flow = this.flows.get(name);
-        if (!flow) {
-            throw new Error(`Flow '${name}' not found`);
-        }
-
-        // [#20726, ADR-0126 §7.2] FIRST, ahead of both §7.3 guards: a flow no
-        // package ships is not this door's to switch in either direction, so
-        // neither guard's question arises, the disable guard's run-store read
-        // is never awaited for it, and the refusal lands before the ledger
-        // write and before any in-process change — with a ledger attached or
-        // in the degraded mode without one. Nothing half-flips.
-        this.refuseCustomerAuthoredToggle(name, enabled);
-        // Past the refusal the loader's set names a package, and the ledger row
-        // is attributed to exactly that one — read with the verdict, so the
-        // run-store await below cannot separate the two.
-        const packageOwner = this.packagedFlowOwner(name) as string;
-
-        // [ADR-0126 §7.3] The subflow guard runs in BOTH directions, because
-        // a subflow pair breaks from either end. Disabling a child breaks the
-        // callers that still reach it — armed, or holding a parked run;
-        // re-arming a caller whose child is off breaks the caller itself, at
-        // its subflow node, on the child's refusal. Arming a flow never breaks
-        // the flows that call IT, so enabling a child is not guarded by its
-        // callers.
-        if (enabled) {
-            this.refuseEnableOntoDisabledSubflow(name);
-        } else {
-            // A switched-off caller guards only while it holds a parked run,
-            // so only then are the run stores read — and only that read is
-            // awaited: every other disable flips exactly as it did before,
-            // synchronously up to its durable write. A store that cannot be
-            // listed throws out of `parkedRunsOf` and nothing is written.
-            const callers = this.packagedSubflowCallers(name);
-            const switchedOff = callers.filter((c) => !this.isFlowEnabled(c));
-            const parked = switchedOff.length > 0
-                ? await this.parkedRunsOf(new Set(switchedOff))
-                : new Map<string, string[]>();
-            this.refuseUnderReachingCallers(name, 'disable', callers, parked);
-        }
-
-        // The durable row FIRST. A store that throws aborts the flip with
-        // nothing changed in process, so the engine never reports an
-        // activation state the ledger does not carry.
-        if (this.flowActivationStore) {
-            await this.flowActivationStore.setActive({
-                name,
-                // [#20761] The package the LOADER's set names, never the
-                // definition's stamps — so no row is attributed to a package
-                // from an authoring door. Read once, up top, with the verdict.
-                packageId: packageOwner,
-                active: enabled,
-            });
-        } else {
-            // Degrading to in-process is a legitimate mode for a host with no
-            // ObjectQL — degrading to it while REPORTING durability is not
-            // (the posture this package already takes for suspended runs).
-            // Note the leak commit 02b41232d measured is closed by the route's authority gate,
-            // not by durability, so this degraded mode is not that leak.
-            this.logger.warn(
-                `[Automation] flow '${name}' ${enabled ? 'enabled' : 'disabled'} IN PROCESS ONLY — no activation ledger is ` +
-                `attached (sys_metadata_activation), so this flip will NOT survive a restart.`,
-            );
-        }
-
-        if (enabled) this.flowLedgerDisabled.delete(name);
-        else this.flowLedgerDisabled.add(name);
-
-        this.logger.info(`Flow '${name}' ${enabled ? 'enabled' : 'disabled'}`);
-        // A disabled flow should stop receiving trigger events; a re-enabled one
-        // should resume. execute() also guards disabled flows, but unbinding
-        // avoids firing the trigger (and its event-source subscription) at all.
-        // Re-enabling moves only the LEDGER bit: a flow whose `status` still
-        // disables it stays unarmed, by `activateFlowTrigger`'s enablement gate
-        // — armed, it would only fire runs `execute()` refuses.
-        if (enabled) {
-            this.activateFlowTrigger(name);
-        } else {
-            this.deactivateFlowTrigger(name);
-        }
-        // [#20725, ADR-0126 §7.3] Enabling a subflow arms the packaged callers
-        // the gate declined onto it — through the gate, which still declines
-        // one held back by ANOTHER disabled subflow. (Disabling it re-judges
-        // nothing that the guard above let through: an armed caller refuses
-        // the disable.)
-        this.rejudgeSubflowCallers(name);
+    toggleFlow(name: string, enabled: boolean): Promise<void> {
+        // The body lives in ./flow-definitions.ts (#25222).
+        const readFlowActivationStore = () => this.flowActivationStore;
+        const host: ThisParameterType<typeof toggleFlow> = {
+            flows: this.flows,
+            refuseCustomerAuthoredToggle: (...a) => this.refuseCustomerAuthoredToggle(...a),
+            packagedFlowOwner: (...a) => this.packagedFlowOwner(...a),
+            refuseEnableOntoDisabledSubflow: (...a) => this.refuseEnableOntoDisabledSubflow(...a),
+            packagedSubflowCallers: (...a) => this.packagedSubflowCallers(...a),
+            isFlowEnabled: (...a) => this.isFlowEnabled(...a),
+            parkedRunsOf: (...a) => this.parkedRunsOf(...a),
+            refuseUnderReachingCallers: (...a) => this.refuseUnderReachingCallers(...a),
+            get flowActivationStore() { return readFlowActivationStore(); },
+            logger: this.logger,
+            flowLedgerDisabled: this.flowLedgerDisabled,
+            activateFlowTrigger: (...a) => this.activateFlowTrigger(...a),
+            deactivateFlowTrigger: (...a) => this.deactivateFlowTrigger(...a),
+            rejudgeSubflowCallers: (...a) => this.rejudgeSubflowCallers(...a),
+        };
+        return toggleFlow.call(host, name, enabled);
     }
 
     /** Get flow version history */
@@ -6690,7 +6483,7 @@ export class AutomationEngine implements IAutomationService {
      *   variable map should ever see — the reserved-name guard
      *   (`applyResumeSignal`) polices that map, and a refusal is not a variable.
      */
-    private async resumeInternal(
+    private resumeInternal(
         runId: string,
         // Never `undefined` past the public door: `resume` normalises an
         // absent caller signal to `{}` (commit 7307191db), and the engine's own
@@ -6702,912 +6495,35 @@ export class AutomationEngine implements IAutomationService {
         childSummary?: FlowRunSummary,
         childRefusal?: ChildRunRefusal,
     ): Promise<AutomationResult> {
-        // Idempotency guard (set synchronously, before any await): reject a
-        // concurrent duplicate resume of the same run so side effects can't run
-        // twice. A duplicate that arrives *after* this one finishes finds no
-        // suspended run and returns the "no suspended run" error below.
-        if (this.resuming.has(runId)) {
-            return { success: false, code: 'RESUME_IN_PROGRESS', error: `Run '${runId}' is already being resumed` };
-        }
-        this.resuming.add(runId);
-        try {
-            // Hot path: suspended in this process. Cold path: rehydrate from the
-            // durable store (e.g. the process restarted since the pause, ADR-0019).
-            //
-            // Strict load: a store that cannot be READ must not report as
-            // "no such run" (#4420). A caller that already persisted a decision
-            // needs "retry when the store is back" to be distinguishable from
-            // "this run is gone for good" — same failure, opposite remedy.
-            let run: SuspendedRun | null;
-            try {
-                run = await this.loadSuspendedRunStrict(runId);
-            } catch (err) {
-                const message = (err as Error).message;
-                // #5912 — the LOG record's cause goes to `meta`, never into the
-                // message. `message` is the datasource DRIVER's own failure text
-                // and we do not control how many lines it has;
-                // `ObjectLogger.write()` adds one `<ts> <LEVEL>` head per call, so
-                // a newline in it turns this ONE record into several physical
-                // lines of which only the first is greppable — the family of
-                // #5048 / #5575 / #5636 / #5661 / #5737, and cloud#971's shape.
-                //
-                // Third argument, per the `Logger` contract
-                // (`packages/spec/src/contracts/logger.ts`)
-                // `error(message, error?, meta?)`. NOT the second: that is the
-                // `Error` slot and a raw error there ships its whole stack on
-                // every record (#5575). `runId` stays in the message — it is the
-                // caller's own handle, the same call the family's other seams
-                // make for their ids, not the foreign text this fix is about.
-                //
-                // Level stays `error`: the run is on disk and the resume did not
-                // land, which is #4632's durability degradation exactly.
-                this.logger.error(
-                    `[automation] durable suspended-run store unreachable while resuming '${runId}' — the suspension was ` +
-                        `NOT consumed, so the run stays parked and this resume can be retried verbatim once the store is ` +
-                        `reachable; the caller was told the same via the STORE_UNAVAILABLE result. The store's own failure ` +
-                        `is in this record's meta.`,
-                    undefined,
-                    describeThrownForLog(err),
-                );
-                // The RESULT envelope keeps the cause spliced in, verbatim and
-                // deliberately (#5636 made the same call for `degradedReason`):
-                // this is a structured return value a caller reads as a whole —
-                // over REST it is a JSON string field, never split on newlines —
-                // and PR #5911 already made wait-node put it into `meta` intact.
-                return {
-                    success: false,
-                    code: 'STORE_UNAVAILABLE',
-                    error: `Durable suspended-run store unreachable for run '${runId}' — retry once the store is available: ${message}`,
-                };
-            }
-            if (!run) {
-                return { success: false, code: 'RUN_NOT_FOUND', error: `No suspended run '${runId}'` };
-            }
-            // [#8684] The two NEVER-DISPATCHED exits, classified HERE rather than
-            // guessed at the transport. Both mean the suspension is real but can
-            // never continue — the flow it belongs to is no longer registered, or
-            // the node it parked on was edited away underneath it. Nothing ran,
-            // so neither is a business rejection: they are the same terminal
-            // "this pause is gone for good" class as a missing suspension, and a
-            // transport answers all three **404**.
-            //
-            // Code-less until now, which is what forced the route to either
-            // answer them 200 (the defect this card is about) or sniff the result
-            // for `summary`/`durationMs` to tell them from a run that ran and
-            // failed — the tolerant-consumer shape PD #12 forbids. The producer
-            // is the only component that knows, so it says so.
-            //
-            // Deliberately the EXISTING `RUN_NOT_FOUND` rather than a new code:
-            // the remedy is identical (this run is finished; start a new one),
-            // the consumer branches on the 404 STATUS and not on the code
-            // (objectui's `interpretFlowResponse`), and `error` below still names
-            // which of the three causes it was, verbatim on the wire. A distinct
-            // code would be vocabulary nothing reads — add one the day a caller
-            // needs to branch on the difference.
-            //
-            // [#23963] And the verdict is carried onto the RUN, not only onto
-            // the answer: both exits go through
-            // {@link settleUnresumableSuspension}, which moves the parked row to
-            // `failed` with this same text in `error`. Answering "gone for
-            // good" while the row kept `status: 'paused'` left it resumable on
-            // every surface that reads the row, and outside retention, whose
-            // scope is terminal statuses only.
-            const flow = this.flows.get(run.flowName);
-            if (!flow) {
-                return this.settleUnresumableSuspension(run, `Flow '${run.flowName}' not found for run '${runId}'`);
-            }
-            const node = flow.nodes.find(n => n.id === run.nodeId);
-            if (!node) {
-                return this.settleUnresumableSuspension(
-                    run,
-                    `Suspended node '${run.nodeId}' no longer exists in flow '${run.flowName}'`,
-                );
-            }
-
-            // #4354 — up-bubble: the child that just finished did work this run
-            // is accountable for. Credit it to the step that suspended awaiting
-            // it, before traversal appends anything further.
-            this.creditChildRun(run.steps, run.nodeId, childSummary);
-
-            // [#18714] The refusal this run must end on instead of continuing
-            // past its `subflow` / `map` node, if any. Seeded from the UP-BUBBLE
-            // leg (the child's own frame drove this resume and already knows),
-            // and set below by the DELEGATED leg (this frame drives the child
-            // and reads its answer). Both legs hand it to the ONE throw site
-            // inside the traversal `try` further down, so a refusal leaves this
-            // method through the same `finishRefusedRun` chokepoint every other
-            // producer uses — see `ChildRunRefusal`.
-            let pendingChildRefusal: ChildRunRefusal | undefined = childRefusal;
-
-            // ── Subflow delegation (nested pause): this run is paused at a
-            // `subflow` node whose child run itself suspended. The caller's
-            // signal is meant for the node the CHILD paused on (its screen /
-            // approval / wait), so forward it down. The child resumes with
-            // bubbling off — when it completes, *this* invocation continues the
-            // parent from the subflow node with the child's output, using the
-            // same mapping as the synchronous path.
-            if (typeof run.correlation === 'string' && run.correlation.startsWith('subflow:')) {
-                const childRunId = run.correlation.slice('subflow:'.length);
-                // Capture the child's row BEFORE resuming consumes it — the
-                // output-variable mapping rides on the child's context.
-                const childRun = await this.loadSuspendedRun(childRunId);
-                if (childRun) {
-                    const childRes = await this.resumeInternal(childRunId, signal, true);
-                    if (childRes.status === 'paused') {
-                        // Child paused again (e.g. the next screen of a wizard).
-                        // This run stays suspended; refresh its surfaced screen
-                        // so a re-fetch (getSuspendedScreen) shows the new one.
-                        if (childRes.screen && childRes.screen !== run.screen) {
-                            await this.persistSuspendedRun({ ...run, screen: childRes.screen });
-                        }
-                        return {
-                            success: true,
-                            status: 'paused',
-                            runId,
-                            durationMs: Date.now() - run.startTime,
-                            screen: childRes.screen,
-                            // THIS run's flow, not the child's: the caller
-                            // addressed this run id and its runner names the
-                            // flow it launched. The child only lends a screen.
-                            flowLabel: flow.label,
-                        };
-                    }
-                    // [#14379] A child REFUSAL is not a child failure. The
-                    // codes in {@link RETRYABLE_RESUME_REFUSAL_CODES} are this
-                    // method's own answers for a resume that never ran: the
-                    // child's screen contract is checked BEFORE
-                    // `forgetSuspendedRun` precisely so "a rejected bag leaves
-                    // the pause live and the legitimate submission still lands"
-                    // (#4477), so the child is parked exactly where it was.
-                    //
-                    // Reading those as a terminal failure consumed the PARENT's
-                    // pause over a mistyped form field — and the screen-flow
-                    // path is where a caller holds ONE stable run id, the
-                    // parent's, and posts every wizard step to it. The run was
-                    // gone, the still-paused child orphaned with nothing left
-                    // to bubble into, the caller told `400 FLOW_FAILED` ("it
-                    // ran and was rejected") for something that never ran, and
-                    // their corrected retry on that same id answered
-                    // `RUN_NOT_FOUND`.
-                    //
-                    // The child's envelope is answered VERBATIM but for the
-                    // parent's `durationMs`. Propagating the `code` is half the
-                    // fix: a code-less envelope is exactly what forced the
-                    // transport onto `400 FLOW_FAILED`, and leaving both pauses
-                    // alive while still answering one repairs the state and
-                    // leaves the caller equally misled. The child's `error` is
-                    // the actionable half — `Screen field "kind" is required` —
-                    // where the failure text below names neither the problem
-                    // nor anything a caller can act on. Nothing else moves:
-                    // neither pause is consumed, and the parent's surfaced
-                    // screen needs no refresh because the child did not
-                    // advance.
-                    if (!childRes.success && isRetryableResumeRefusal(childRes.code)) {
-                        return { ...childRes, durationMs: Date.now() - run.startTime };
-                    }
-                    if (!childRes.success) {
-                        const error = `subflow run '${childRunId}' (${childRun.flowName}) failed: ${childRes.error ?? 'unknown error'}`;
-                        // [#15222] This frame consumes its OWN pause here, and
-                        // before this card journalled nothing for it — so a
-                        // child that stranded left a repairable leaf under an
-                        // ancestor no verb could reach. Journalled exactly when
-                        // the child is repairable, asked of the journal rather
-                        // than of the child's `status`: a child that itself
-                        // cascade-failed from a deeper strand carries no status
-                        // word at all (see the return below) and is repairable
-                        // all the same, which is what makes a chain deeper than
-                        // two levels re-armable by induction.
-                        //
-                        // ⛔ And the envelope below is UNCHANGED — no status is
-                        // stamped on it. `'stranded'` belongs to the run that
-                        // consumed its own pause and then threw downstream;
-                        // stamping it here would tell an operator to retry a
-                        // recovery that cannot succeed, because nothing re-arms
-                        // this run by resuming it. What reaches this run is
-                        // {@link restoreConsumedSuspension}, through the
-                        // journal one line up.
-                        await this.failSuspendedRun(
-                            run,
-                            error,
-                            this.consumedSuspensions.has(childRunId) ? childRunId : undefined,
-                        );
-                        return { success: false, error, durationMs: Date.now() - run.startTime, flowLabel: flow.label };
-                    }
-                    // [#18714] DELEGATED-LEG REFUSAL. The child ran to a
-                    // refusing terminal — an `end` declaring
-                    // `outcome: 'refused'`, or a node of its own whose child
-                    // refused — and answered `{ success: true, status:
-                    // 'refused' }`, because *a refusal is a successful
-                    // evaluation that says no*. The branch set above tests only
-                    // `paused` and `!success`, so until this arm existed a
-                    // refused child was neither and fell straight through the
-                    // ordinary success exit below: measured, the parent
-                    // returned `{ success: true, successMessage: … }`, its run
-                    // row recorded `completed`, and the node downstream of the
-                    // `subflow` RAN. That is the identical fail-open shape
-                    // #18110 / #18555 closed on the synchronous leg, still open
-                    // on the leg 「the one a screen flow actually takes」.
-                    //
-                    // ⛔ NOT folded into the `!childRes.success` arm above. That
-                    // arm calls `failSuspendedRun` and records the parent
-                    // `failed`; a refusal is not a failure — it must not be
-                    // routable by a `fault` edge, must not consume retry budget
-                    // and must not be counted in `nodes[].failures`, all of
-                    // which the failure arm would confer. The parent's terminal
-                    // row must read `refused`, the same word the child's does.
-                    //
-                    // Recorded, ⛔ not thrown here. The pause is not consumed
-                    // yet — `claimAdvance` / `forgetSuspendedRun` are still
-                    // below — and a refusal that unwound from this position
-                    // would leave the parent's own suspension live while its
-                    // run row said terminal. The throw site inside the
-                    // traversal `try` is past the consumption, which is why
-                    // both legs converge there.
-                    //
-                    // The mapping below still runs, deliberately: the child's
-                    // declared outputs really were produced and the nodes
-                    // before its refusal really ran, so the parent's answer
-                    // must not depend on HOW the child ended — the same call
-                    // the synchronous `subflow` arm makes when it returns the
-                    // success envelope PLUS `refuse`.
-                    if (childRes.status === 'refused') {
-                        pendingChildRefusal = { message: childRes.refusalMessage };
-                    }
-                    // Child completed — continue below with its output as the
-                    // resume signal (replaces the caller's signal, which the
-                    // child already consumed).
-                    signal = this.buildSubflowResumeSignal(childRun.context, childRes.output);
-                    // #4354 — down-delegation is the other way a child's work
-                    // lands under a parent step written at suspend time.
-                    this.creditChildRun(run.steps, run.nodeId, childRes.summary);
-                } else if (carriesSubflowChildOutput(signal)) {
-                    // The engine-built UP-BUBBLE — the HEALTHY path, and the
-                    // one this `else` used to describe as a degradation. The
-                    // child COMPLETED and `bubbleToParent` resumed this run
-                    // with the child's mapped output, so the miss above is the
-                    // SUSPENSION lookup missing (a completed run has no
-                    // suspension), not the child having disappeared, and the
-                    // parent continues *with* the child's output — which is
-                    // what the old sentence denied outright.
-                    //
-                    // `debug`, for the same reason as the lost-advance-claim
-                    // record further down: an ordinary outcome logged at `warn`
-                    // on every healthy subflow completion is the cry-wolf
-                    // shape — the operator who reads "child run is gone" on
-                    // each one stops reading the line, and the one time it
-                    // means what it says is the time it is ignored. Nothing
-                    // else moves: this branch continues the parent exactly as
-                    // before, and the degraded branch below keeps its text and
-                    // its level.
-                    this.logger.debug(
-                        `[automation] run '${runId}' continues from subflow node '${run.nodeId}' with the output of ` +
-                            `completed child run '${childRunId}' — carried on the engine-built up-bubble signal ` +
-                            `(the child's suspension is consumed, which is why it is not loadable here).`,
-                    );
-                } else {
-                    // The genuinely degraded case, and the only one the
-                    // sentence below was ever true of: nothing suspended under
-                    // the child id AND no carried output, so this run really
-                    // does continue without the child's output. #4632 verdict:
-                    // FUNCTIONAL — stays `warn`.
-                    this.logger.warn(
-                        `[automation] run '${runId}' is paused at subflow node '${run.nodeId}' but child run '${childRunId}' ` +
-                            `is gone — continuing without child output`,
-                    );
-                }
-            }
-
-            // The SCREEN contract (#4477). A run parked on a `screen` node
-            // declared exactly which keys it collects and which are required;
-            // until this ran, `resume` folded any bag at all straight into the
-            // variables, so a caller that skipped the dialog bypassed every
-            // `required` the author wrote. Checked here — beside the engine's
-            // other resume refusals and BEFORE the suspension is consumed — so
-            // a rejected bag leaves the pause live and the legitimate
-            // submission still lands.
-            const screenRefusal = this.refuseInvalidScreenInput(run, runId, signal);
-            if (screenRefusal) return screenRefusal;
-
-            // Restore the variable context and fold the signal in — the ONE
-            // place a resume signal reaches the variable map. Runs BEFORE the
-            // suspension is consumed, so a rejected signal changes nothing:
-            // the pause stays live and the legitimate continuation still lands.
-            const variables = new Map<string, unknown>(Object.entries(run.variables));
-            const rejected = applyResumeSignal(variables, signal, run.nodeId);
-            if (rejected.length) {
-                // #6654 — the rejected names are the CALLER's resume-signal
-                // keys (nothing constrains them against newlines), so they
-                // ride the structured slot, never the message; see
-                // `forgetSuspendedRun`'s catch for the full mechanism (#6299).
-                // The returned INVALID_SIGNAL envelope below is caller-facing
-                // refusal text, not a log record — it keeps naming the
-                // variables (the envelope class is ruled elsewhere).
-                // #4632: FUNCTIONAL — stays `warn`.
-                this.logger.warn(
-                    `[automation] refused resume of run '${runId}': signal writes engine-internal ` +
-                        `variable(s) — the rejected names are in this record's meta.`,
-                    { rejected },
-                );
-                return {
-                    success: false,
-                    code: 'INVALID_SIGNAL',
-                    error:
-                        `Resume signal may not set engine-internal variables (${rejected.join(', ')}) — ` +
-                        `names starting with '$' (or containing '.$') are reserved by the flow engine`,
-                };
-            }
-
-            // [#13909] How long the step log was AT THE PAUSE, read before
-            // anything downstream runs. `steps` below is the SAME array
-            // `traverseNext` appends to, so by the time the catch arm builds a
-            // restore snapshot the pause's own step log is no longer
-            // recoverable from it — this integer is what trims it back. One
-            // `int` on every resume and nothing else: the snapshot itself is
-            // built only on the failure path.
-            //
-            // ⛔ Deliberately NOT a change to the ordering. The consumption
-            // below still precedes the traversal, `forgetSuspendedRun` is
-            // untouched, and `hasSuspendedRun` still answers false for the
-            // whole traversal window (pinned in
-            // `consumed-suspension-restore.test.ts`). That order is RULED,
-            // not inherited: #13937 shape 4 (maintainer 2026-09-01) keeps it
-            // for exactly-once across a crash, excludes the flip (shape 2)
-            // unless a durable claim/lease lands with it, and excludes
-            // consume-then-re-arm (shape 3) outright. The exit from the state
-            // it leaves behind is `restoreConsumedSuspension`, and the state
-            // itself is named on the result (`status: 'stranded'`, below).
-            const stepCountAtPause = run.steps.length;
-            // [#15660] …and the variables AT THE PAUSE, for the same reason and
-            // at the same moment, because `run.steps.length` is not the only
-            // thing the failed attempt can move under the journal.
-            //
-            // `journalConsumedSuspension` promises its snapshot VERBATIM — "the
-            // state at the pause, not the state the failed attempt was working
-            // from" — and delivered that only for the TOP-LEVEL keys. The scope
-            // the downstream nodes run against is built one line below as
-            // `new Map(Object.entries(run.variables))`, which copies the keys
-            // and SHARES every value object. A node that holds state in the
-            // scope and updates it in place — `map` keeps `<nodeId>.$mapState`
-            // and is, by a re-derived census, the only executor that does —
-            // therefore writes straight through into the object the journal
-            // later hands an operator as the pause.
-            //
-            // Measured, not read (`consumed-suspension-snapshot-aliasing.test.ts`):
-            // the durable row held `started: 1` at the pause and the restore put
-            // back `started: 99`. ⛔ And the two placements the card proposed
-            // are both refuted by that same measurement:
-            //   - "deep copy at SNAPSHOT time" — `InMemorySuspendedRunStore`
-            //     already JSON round-trips on save AND load, so this run's
-            //     variables ARE a private deep copy before a single downstream
-            //     node runs. It reproduces anyway: the aliasing that carries the
-            //     mutation is minted HERE, on the resume, not at the suspend.
-            //   - "copy at RESTORE time" — the mutation lands before the node
-            //     throws, so the journal is already corrupt when it is written;
-            //     anything copied at or after that point copies the corruption.
-            // The copy has to be taken before the failed attempt runs, which is
-            // this line.
-            //
-            // Cost, measured rather than assumed (the card flagged it NOT
-            // MEASURED): 5.8 µs for a typical scope, and one suspend+resume
-            // round trip against a configured store already performs FOUR full
-            // clones of this same payload (save ×1, load ×2, recordTerminal ×1),
-            // so this is a fifth on a path whose production cost is a durable
-            // round trip. ⛔ Deliberately NOT the JSON clone the journal's own
-            // docblock ruled out: that objection was that it would run INSIDE a
-            // catch arm already handling a failure, where a circular value would
-            // throw the operator's repair away. Here it is on the happy path,
-            // where a throw is just a value we decline to copy.
-            const variablesAtPause = this.cloneVariablesAtPause(run, runId);
-
-            // Ruling A on `FlowSchema.runAs`: who runs the nodes after this
-            // pause — the decider, when the owning service's signal names one
-            // (with their own grants on a `runAs:'user'` run, as the attribution
-            // user of a still-elevated `runAs:'system'` run); otherwise the
-            // identity the run paused with.
-            // Resolved BEFORE the claim, so nothing here can run after the
-            // suspension is consumed and leave it consumed with no continuation;
-            // the persisted `run.context` is left as it was, and the repair
-            // journal therefore still snapshots the pause exactly as it parked.
-            const segmentContext = await this.resolveDecisionSegmentContext(run, signal);
-
-            // Consume the suspension *before* running downstream work — a run
-            // resumes exactly once per pause, and a duplicate resume after a
-            // partial restart must not double-run side effects. (Folding the
-            // signal above is pure in-memory work, not downstream work.)
-            // This is also where the paused node learns its pause is over and
-            // disarms what it armed on entry (#5512) — see forgetSuspendedRun.
-            //
-            // [#14333] And the consumption is now a CLAIM, not an assertion.
-            // `resuming` above answered "is this process already resuming it";
-            // this answers "did any process get here first", against the shared
-            // store, atomically. Placed exactly where the unconditional consume
-            // was: every refusal above it still refuses without consuming, and
-            // the ordering #13937 ruled to keep is untouched.
-            const claim = await this.claimAdvance(run);
-            if (claim.kind === 'lost') {
-                // An ORDINARY outcome, not a degradation: this is the guard
-                // doing its job, and the caller is told in the result. `debug`
-                // rather than `warn` for exactly that reason — a losing racer
-                // per approval on a busy any-of level would otherwise be a
-                // steady `warn` stream describing correct behaviour.
-                this.logger.debug(
-                    `[automation] resume of run '${runId}' lost the advance claim at node '${run.nodeId}' — ` +
-                        `another replica consumed this suspension first; nothing was dispatched here.`,
-                );
-                // The SAME code the in-process guard answers, deliberately: the
-                // observation differs (another process, not this one) but the
-                // remedy is identical — a concurrent resume already has this
-                // run, the caller's own recorded outcome stands, and nothing
-                // here should be retried. `plugin-approvals` already branches
-                // on it that way (`resumeRecordedOutcome`), and the transport
-                // already maps it to 409. A distinct code would be vocabulary
-                // nothing reads — add one the day a caller needs the
-                // difference.
-                // [#15832] The store's compare-and-set ANSWERED: no row is parked
-                // where this replica read it. Whatever snapshot this process
-                // still holds for the run is stale by construction — it names a
-                // node the run has left — so it stops being published by the two
-                // listings. ⛔ NOT `forgetSuspendedRun`: nothing was consumed
-                // here, and firing that choke point would tear the pause down a
-                // second time in this process on top of the winner's own.
-                this.evictConsumedSuspension(runId);
-                return {
-                    success: false,
-                    code: 'RESUME_IN_PROGRESS',
-                    error:
-                        `Run '${runId}' is already being resumed — another replica consumed its suspension ` +
-                        `at node '${run.nodeId}' first`,
-                };
-            }
-            if (claim.kind === 'unavailable') {
-                // Same envelope, same reason as the strict load's failure
-                // above: existence is UNKNOWN, not "gone for good", and the
-                // identical call is expected to work once the store recovers
-                // (#4420).
-                //
-                // The text states only what is KNOWN. The strict load's failure
-                // can say the suspension was not consumed, because it fails
-                // before anything is consumed; this one cannot — a claim throws
-                // just as readily after a committed delete as before one, so
-                // "NOT consumed" would be a claim about a fact this seam does
-                // not have. What it does know is that this resume did not
-                // continue the run, and that a retry settles the rest.
-                return {
-                    success: false,
-                    code: 'STORE_UNAVAILABLE',
-                    error:
-                        `Durable suspended-run store unreachable while claiming the advance for run '${runId}' — ` +
-                        `this resume did NOT continue the run, and whether the store consumed the suspension is ` +
-                        `UNKNOWN (a failure can arrive after a committed delete). Retry once the store is ` +
-                        `available: a retry that finds the run still parked continues it, and one that finds the ` +
-                        `suspension gone answers RUN_NOT_FOUND: ${claim.message}`,
-                };
-            }
-            await this.forgetSuspendedRun(run, 'resumed', claim.kind === 'claimed');
-
-            const steps = run.steps;
-            const context = segmentContext;
-
-            try {
-                // [#18714] The child this run is parked on REFUSED — on either
-                // resumed leg (see `ChildRunRefusal`). Thrown HERE, and the
-                // position is the point:
-                //
-                //  - Past the consumption. `claimAdvance` and
-                //    `forgetSuspendedRun` have run, so the parent's own pause is
-                //    gone exactly as it is for every other way this resume can
-                //    end. A refusal raised before them would record a terminal
-                //    run while leaving its suspension live in
-                //    `listSuspendedRuns()` — the very leak the up-bubble leg is
-                //    filed for, moved one frame up.
-                //  - Before the traversal. Nothing downstream of the awaiting
-                //    node runs, which is the whole content of "a refusal stops
-                //    the run".
-                //  - As `FlowRefusalSignal`, so the `catch` below converts it
-                //    through `finishRefusedRun` — ONE terminal shape, whichever
-                //    producer raised it. ⛔ Deliberately not a second terminal
-                //    exit of its own: this file's own history is a list of
-                //    outcomes that became a function of WHICH ROUTE a run took.
-                //
-                // `run.nodeId` is the node that was awaiting the child — the
-                // `subflow` / `map` this frame is parked on, the same node the
-                // synchronous leg names on its `FlowRefusalSignal`.
-                if (pendingChildRefusal) {
-                    throw new FlowRefusalSignal(run.nodeId, pendingChildRefusal.message);
-                }
-                // ── Map re-entry (sequential multi-instance, ADR-0037 A2).
-                // A run paused at a `map` node (correlation `map:<childRunId>`)
-                // does NOT continue past the node on resume — it RE-RUNS the
-                // node so the executor can record the just-completed unit and
-                // start the next item. The default path continues past the node.
-                if (typeof run.correlation === 'string' && run.correlation.startsWith('map:')) {
-                    await this.executeNode(node, flow, variables, context, steps);
-                } else {
-                    await this.traverseNext(node, flow, variables, context, steps, signal.branchLabel);
-                }
-
-                // Collect output variables
-                const output: Record<string, unknown> = {};
-                if (flow.variables) {
-                    for (const v of flow.variables) {
-                        if (v.isOutput) output[v.name] = variables.get(v.name);
-                    }
-                }
-                const durationMs = Date.now() - run.startTime;
-                // [#15944] THE RUN IS OVER AND IT SUCCEEDED. Everything from
-                // here to the return is BOOKKEEPING ABOUT that fact, and the
-                // `catch` below this `try` exists for NODE failures — so a
-                // throw out of the history write was handled as though a node
-                // had thrown: the arm journalled a repair snapshot, stamped
-                // `status: 'stranded'`, answered `success: false`, and
-                // {@link restoreConsumedSuspension} then honoured that
-                // snapshot and re-armed the pause, so the NEXT resume RE-RAN
-                // every node after it. Measured: `tail` ran twice.
-                //
-                // The guard restores the invariant `recordLog`'s own doc
-                // states two screens down — "a history write must NEVER block
-                // or break the run that produced it" — which that call was
-                // relied upon to keep and did not.
-                //
-                // Two statements inside `recordLog` reach here on the terminal
-                // path, and neither is hypothetical: `store.recordTerminal`,
-                // whose SYNCHRONOUS throw escapes because the
-                // `void write.catch(...)` beneath it only ever sees a returned
-                // promise's rejection (both shipped stores are `async` and
-                // cannot; the interface is exported, optional, and
-                // host-implementable, and a store returning a non-thenable
-                // makes `write.catch` itself a synchronous TypeError), and the
-                // run-summary line `this.logger.info(line, meta)`, on by
-                // default and calling a HOST-INJECTED logger.
-                //
-                // ⛔ NOT a widening of anything: no exit gains a status it
-                // did not have, the node-failure arm below is untouched, and
-                // the failure is REPORTED rather than swallowed — see the
-                // catch. ⛔ And ⛔ deliberately not fixed at
-                // `restoreConsumedSuspension`: that verb judged correctly on
-                // the evidence it was handed; the evidence is what was wrong,
-                // and no journal is written for a completed run at all now.
-                let logged: ExecutionLogEntry | undefined;
-                try {
-                    logged = this.recordLog({
-                        id: runId,
-                        flowName: run.flowName,
-                        flowVersion: run.flowVersion,
-                        status: 'completed',
-                        startedAt: run.startedAt,
-                        completedAt: new Date().toISOString(),
-                        durationMs,
-                        trigger: buildRunTrigger(context),
-                        steps,
-                        output,
-                    }, context);
-                } catch (bookkeeping) {
-                    // #4632 verdict: DURABILITY, so `error` — the caller is
-                    // told the truthful thing (the run completed), which is
-                    // exactly what makes the rest invisible from the outside:
-                    // the terminal history row never landed, nothing retries
-                    // it, and no envelope carries a word about it. After the
-                    // next restart the run is invisible to the Runs surfaces
-                    // and the approvals sweeps read the hole —
-                    // `inspectStrandedRequests` reads "no suspension + no
-                    // terminal row" as a STRANDED request, and
-                    // `releasePendingForTerminalRuns` reads "no terminal row"
-                    // as still-alive. Consequence and fix in the first line,
-                    // per AGENTS.md. Said ONCE per run, not once per failed
-                    // write.
-                    //
-                    // THIRD argument per `error(message, error?, meta?)`; the
-                    // `Error` slot stays empty on purpose (#5575), and the
-                    // thrown text goes to the structured slot rather than into
-                    // the message (#6499).
-                    this.logger.error(
-                        `[Automation] run '${runId}' of flow '${run.flowName}' COMPLETED successfully but its ` +
-                            `run-history bookkeeping threw, so its terminal history row never landed — nothing ` +
-                            `retries it, the caller is told the run succeeded, and after the next restart this ` +
-                            `run is invisible to the Runs surfaces while the approvals sweeps read it as ` +
-                            `stranded and never-finished. The run itself is COMPLETE and must NOT be repaired ` +
-                            `or re-run. Fix the history failure in this record's meta.`,
-                        undefined,
-                        describeThrownForLog(bookkeeping),
-                    );
-                }
-                // [#15944] Recomputed when the guard above had to abandon
-                // `recordLog`: the same pure function of the same steps that
-                // `recordLog`'s own first statement runs, so the two spellings
-                // cannot disagree. Same shape as the strand arm's below.
-                const summary = logged?.summary ?? summarizeRun(steps);
-
-                // ── Subflow up-bubble (nested pause): this run was a subflow
-                // child whose parent suspended awaiting it. Auto-resume the
-                // parent with our output, mapped like the synchronous path.
-                // Skipped when the DELEGATION path drives the chain (it
-                // continues the parent itself). Best-effort: the child's own
-                // completion stands even if the parent continuation fails.
-                if (!skipBubble) {
-                    await this.bubbleToParent(run, output, summary);
-                }
-
-                // Surface the flow's friendly completion message so a screen-flow
-                // runner shows it instead of a generic "Done". `summary` (#4354)
-                // covers the WHOLE run — the steps before the pause and after it
-                // are one log, so a resumed approval reports what it did in total.
-                return {
-                    success: true,
-                    output,
-                    durationMs,
-                    successMessage: flow.successMessage,
-                    flowLabel: flow.label,
-                    summary,
-                };
-            } catch (err: unknown) {
-                // [#15788] A resumed run reached a refusing `end` — the SECOND
-                // producer, and the one a screen flow actually takes: a wizard
-                // that collects an answer and then refuses on it leaves through
-                // here, never through `execute()`'s exit. Tested first, beside
-                // the re-suspend, for the same reason it is tested first there.
-                if (isRefusalSignal(err)) {
-                    const refused = this.finishRefusedRun({
-                        runId,
-                        flowName: run.flowName,
-                        flowVersion: run.flowVersion,
-                        startedAt: run.startedAt,
-                        durationMs: Date.now() - run.startTime,
-                        steps, flow, variables,
-                        refusalMessage: err.message, context,
-                    });
-                    // [#18714] UP-BUBBLE LEG. This run is terminal and the
-                    // caller holds ITS id — but if it was a subflow CHILD, some
-                    // ancestor is still parked at the `subflow` / `map` node
-                    // that started it, and nothing else in the engine will ever
-                    // move that ancestor: `bubbleToParent` was called on the
-                    // completion path alone, so a child resumed to a refusal
-                    // returned from here having resolved exactly one of the two
-                    // runs it is responsible for. Measured: the child row read
-                    // `refused` while its parent stayed `paused` and stayed in
-                    // `listSuspendedRuns()` indefinitely — a leaked run, not a
-                    // wrong answer, which is why it fails DIFFERENTLY from the
-                    // delegated leg above and needs its own arm.
-                    //
-                    // The same call the completion path makes, with the refusal
-                    // attached: the parent is genuinely resumed — it consumes
-                    // its pause, records its own terminal row and bubbles to
-                    // ITS parent in turn, so a chain of any depth resolves by
-                    // the same induction completions already rely on. ⛔ Not a
-                    // direct walk like `failAncestors`: that verb exists for a
-                    // cascade in which no ancestor can be resumed at all, and
-                    // it records them `failed` — the wrong word here.
-                    //
-                    // `output` and `summary` are the refused run's own, for the
-                    // reason `finishRefusedRun` collects them: the nodes before
-                    // the refusal really ran, and a parent that refuses must
-                    // still be able to report what its child did.
-                    //
-                    // `skipBubble` is honoured exactly as on the completion
-                    // path — under the DELEGATED leg the parent's frame is the
-                    // caller, and it raises its own refusal at the throw site
-                    // above. Bubbling here as well would resume the parent
-                    // twice.
-                    if (!skipBubble) {
-                        await this.bubbleToParent(
-                            run,
-                            (refused.output ?? {}) as Record<string, unknown>,
-                            refused.summary,
-                            { message: err.message },
-                        );
-                    }
-                    return refused;
-                }
-                // Re-suspended at a downstream node: persist a fresh continuation.
-                if (isSuspendSignal(err)) {
-                    const durationMs = Date.now() - run.startTime;
-                    // #7639 — the re-suspend half of the same rule as the
-                    // initial-execution site above: one snapshot, both consumers.
-                    // A multi-stage approval re-pauses HERE on every stage but the
-                    // first, so covering only the other site would leave every
-                    // stage after stage 1 — the ones an operator actually needs to
-                    // inspect — unreadable.
-                    const variablesSnapshot = Object.fromEntries(variables);
-                    await this.persistSuspendedRun({
-                        ...run,
-                        // The segment's identity, not the one the run parked
-                        // with last time: after a decision switch (ruling A on
-                        // `FlowSchema.runAs`) the next pause must continue as
-                        // the decider, whatever resumes it — never fall back to
-                        // the trigger user. Identical to `run.context` when no
-                        // switch happened.
-                        context,
-                        nodeId: err.nodeId,
-                        nodeType: err.nodeType,
-                        variables: variablesSnapshot,
-                        steps,
-                        correlation: err.correlation,
-                        screen: err.screen,
-                    });
-                    this.recordLog({
-                        id: runId,
-                        flowName: run.flowName,
-                        flowVersion: run.flowVersion,
-                        status: 'paused',
-                        startedAt: run.startedAt,
-                        durationMs,
-                        trigger: buildRunTrigger(context),
-                        steps,
-                        variables: variablesSnapshot,
-                    }, context);
-                    return { success: true, status: 'paused', runId, durationMs, screen: err.screen, flowLabel: flow.label };
-                }
-
-                const errorMessage = err instanceof Error ? err.message : String(err);
-                const durationMs = Date.now() - run.startTime;
-                // [#13909] THE seam this card is about. The pause was consumed
-                // above, this node merely threw, and the record below makes the
-                // run terminal — so from here on nothing in the engine can move
-                // it: `resume` answers RUN_NOT_FOUND, `cancelRun` is a no-op on
-                // it, and no other public method takes it anywhere EXCEPT the
-                // deliberate operator exit, {@link restoreConsumedSuspension}.
-                // Journal the suspension that was consumed so that exit has
-                // something to put back.
-                //
-                // ⛔ Not a repair, and nothing here re-arms anything: the run
-                // stays `failed`, no suspension exists after this line, and the
-                // ordering above is untouched. It is the evidence a repair
-                // needs, written at the only moment it still exists.
-                const consumed = this.journalConsumedSuspension(
-                    run,
-                    stepCountAtPause,
-                    errorMessage,
-                    variablesAtPause,
-                );
-                // [#15555] From the line above, "this run is repairable" is a
-                // FACT: a snapshot exists and `restoreConsumedSuspension` puts
-                // it back. Everything from here to the `status: 'stranded'`
-                // stamp below is BOOKKEEPING ABOUT that fact — and none of it
-                // may be allowed to delete the fact by throwing.
-                //
-                // It could, and the direction is the dangerous one. The stamp
-                // is the ONLY thing that tells a consumer the run is
-                // repairable (`plugin-approvals` derives its operator-facing
-                // `repairable` from it verbatim: `status === 'stranded'`), and
-                // two statements in here throw out of the whole arm. Both live
-                // in `recordLog`'s terminal path: the run-summary line
-                // (`logger.info`, on by default) and `store.recordTerminal`,
-                // whose SYNCHRONOUS throw escapes — the `void write.catch(...)`
-                // beneath that call only ever sees a returned promise's
-                // rejection. Then `failAncestors` awaits a walk that can throw.
-                // A throw anywhere in that window replaced a truthful
-                // `repairable: true` with `false`, which does not merely lose
-                // information: it tells an operator NOT to attempt a repair
-                // that succeeds. A false negative on a repair instruction is
-                // worse than silence, and it is the opposite of the direction
-                // everybody checks for.
-                //
-                // [#15944] THE SAME TWO STATEMENTS HAVE A SECOND CONSEQUENCE,
-                // and it is the direction everybody DOES check for. On the
-                // COMPLETION path above, a throw out of the same `recordLog`
-                // fell into this arm on a run whose nodes ALL succeeded — a
-                // false `true`: a journal and a `stranded` stamp for a run
-                // that finished, whose "repair" re-armed it and re-ran every
-                // node after the pause. That half is guarded at its own site
-                // (see the completion path), NOT here: this arm stays the
-                // node-failure arm, and reaching it at all was the defect.
-                //
-                // ⛔ This is NOT "assume repairable when the failure is
-                // unknown" — that would invert the honest default and promise
-                // a repair for a lost run. The guard opens AFTER the journal,
-                // so only a run that demonstrably HAS a snapshot can reach the
-                // stamp: a throw from `journalConsumedSuspension` itself still
-                // propagates, and every exit above the consumption point is
-                // untouched and still carries no status at all.
-                //
-                // ⛔ And the journal is NOT moved down to sit beside the stamp
-                // instead. `recordLog` is what carries the snapshot into the
-                // durable row, so journalling after it would leave a
-                // `recordLog` failure with NO snapshot anywhere — converting
-                // this false negative into a TRUE one by destroying the repair
-                // rather than by reporting it.
-                let logged: ExecutionLogEntry | undefined;
-                try {
-                    logged = this.recordLog({
-                        id: runId,
-                        flowName: run.flowName,
-                        flowVersion: run.flowVersion,
-                        status: 'failed',
-                        startedAt: run.startedAt,
-                        completedAt: new Date().toISOString(),
-                        durationMs,
-                        trigger: buildRunTrigger(context),
-                        steps,
-                        error: errorMessage,
-                    }, context, consumed.run);
-                    // Subflow chain: a child failing terminally fails every
-                    // ancestor awaiting it — they can never be resumed otherwise.
-                    // The delegation path handles its own level (skipBubble).
-                    if (!skipBubble) {
-                        // [#15222] `runId` names the run that stranded two
-                        // statements above, so the walk journals every ancestor
-                        // whose pause this cascade consumes and the chain is
-                        // re-armable to its full depth, leaf-first.
-                        await this.failAncestors(run.context, errorMessage, runId);
-                    }
-                } catch (bookkeeping) {
-                    // #4632 verdict: DURABILITY, so `error` — the caller is
-                    // told a truthful, actionable thing (the run stranded, and
-                    // it is repairable), which is exactly what makes the rest
-                    // invisible from the outside: the terminal history row
-                    // never landed and/or the ancestor cascade stopped
-                    // part-way, nothing retries either, and no envelope
-                    // carries a word about it. Consequence and fix in the
-                    // first line, per AGENTS.md. Said ONCE per stranded run,
-                    // not once per failed write.
-                    //
-                    // THIRD argument per `error(message, error?, meta?)`; the
-                    // `Error` slot stays empty on purpose (#5575), and the
-                    // thrown text goes to the structured slot rather than into
-                    // the message (#6499).
-                    this.logger.error(
-                        `[Automation] run '${runId}' of flow '${run.flowName}' is STRANDED and its ` +
-                            `post-strand bookkeeping threw, so its terminal history row never landed ` +
-                            `and/or its subflow ancestors were not failed — nothing retries either, and ` +
-                            `the run reads healthy to the Runs surfaces and the approvals sweeps. The ` +
-                            `strand itself IS reported and repairable right now: restore it with ` +
-                            `restoreConsumedSuspension('${runId}') before this process restarts, which ` +
-                            `drops the in-memory journal this repair rides on. Fix the failure in this ` +
-                            `record's meta.`,
-                        undefined,
-                        describeThrownForLog(bookkeeping),
-                    );
-                }
-                // Surface the flow's friendly error message (the raw error stays
-                // in `error` for logs/diagnostics).
-                return {
-                    success: false,
-                    error: errorMessage,
-                    durationMs,
-                    // [#13937] STRANDED, said by the producer that knows — the
-                    // services half of the shape-4 ruling (maintainer
-                    // 2026-09-01): the ordering stays, and the condition it
-                    // leaves behind carries the platform-level name #14384 put
-                    // on the contract. Stamped HERE and on no other exit,
-                    // because this is the one exit that journalled a snapshot
-                    // two statements up: the pause a durable decision was
-                    // waiting on is gone, the run is recorded `failed`, and it
-                    // can be re-armed only by {@link restoreConsumedSuspension}
-                    // — never by `resume` (which now answers RUN_NOT_FOUND),
-                    // never automatically. Terminal exactly like `'failed'`
-                    // and distinct from it on purpose: `'failed'` says the run
-                    // ran and was rejected; this says a recorded continuation
-                    // stopped mid-flight and an operator has something to
-                    // repair. The verdict and the journal are one fact stated
-                    // twice — `stranded-run-status.test.ts` holds them equal.
-                    //
-                    // ⚠️ The run's RECORDED status — the log entry above and
-                    // the durable history row — stays `'failed'`: that is
-                    // `ExecutionStatus` (`@objectstack/spec`,
-                    // `automation/execution.zod.ts`), a vocabulary the ruling
-                    // did not widen; the durable discriminator for this
-                    // condition is the snapshot the terminal row carries.
-                    //
-                    // ⛔ The cascade-failed ancestors above are NOT stranded:
-                    // `failSuspendedRun` consumes their pauses and journals
-                    // nothing, so no verb can re-arm them. A different (and
-                    // worse) condition, which this stamp must not claim.
-                    status: 'stranded',
-                    errorMessage: flow.errorMessage,
-                    flowLabel: flow.label,
-                    // [#15555] Recomputed when the guard above had to abandon
-                    // `recordLog`: the same pure function of the same steps
-                    // that `recordLog`'s own first statement runs, so the two
-                    // spellings cannot disagree.
-                    summary: logged?.summary ?? summarizeRun(steps),
-                    // [#24914, ruling B′] As `execute()`'s failure exit: the refusal
-                    // the node after the consumed pause met, off the throw's brand. The
-                    // screen-flow leg (a write behind a screen) reaches its caller HERE.
-                    ...readCarriedRefusal(err),
-                };
-            }
-        } finally {
-            this.resuming.delete(runId);
-        }
+        // The body lives in ./run-resume.ts (#25222).
+        const host: ThisParameterType<typeof resumeInternal> = {
+            resuming: this.resuming,
+            loadSuspendedRunStrict: (...a) => this.loadSuspendedRunStrict(...a),
+            logger: this.logger,
+            flows: this.flows,
+            settleUnresumableSuspension: (...a) => this.settleUnresumableSuspension(...a),
+            creditChildRun: (...a) => this.creditChildRun(...a),
+            loadSuspendedRun: (...a) => this.loadSuspendedRun(...a),
+            resumeInternal: (...a) => this.resumeInternal(...a),
+            persistSuspendedRun: (...a) => this.persistSuspendedRun(...a),
+            failSuspendedRun: (...a) => this.failSuspendedRun(...a),
+            consumedSuspensions: this.consumedSuspensions,
+            buildSubflowResumeSignal: (...a) => this.buildSubflowResumeSignal(...a),
+            refuseInvalidScreenInput: (...a) => this.refuseInvalidScreenInput(...a),
+            cloneVariablesAtPause: (...a) => this.cloneVariablesAtPause(...a),
+            resolveDecisionSegmentContext: (...a) => this.resolveDecisionSegmentContext(...a),
+            claimAdvance: (...a) => this.claimAdvance(...a),
+            evictConsumedSuspension: (...a) => this.evictConsumedSuspension(...a),
+            forgetSuspendedRun: (...a) => this.forgetSuspendedRun(...a),
+            executeNode: (...a) => this.executeNode(...a),
+            traverseNext: (...a) => this.traverseNext(...a),
+            recordLog: (...a) => this.recordLog(...a),
+            bubbleToParent: (...a) => this.bubbleToParent(...a),
+            finishRefusedRun: (...a) => this.finishRefusedRun(...a),
+            journalConsumedSuspension: (...a) => this.journalConsumedSuspension(...a),
+            failAncestors: (...a) => this.failAncestors(...a),
+        };
+        return resumeInternal.call(host, runId, signal, skipBubble, childSummary, childRefusal);
     }
 
     /**
@@ -7925,9 +6841,11 @@ export class AutomationEngine implements IAutomationService {
      * reported on `childRunId`'s own {@link AutomationResult}, unchanged.
      */
     takeSubflowParentStrand(childRunId: string): SubflowParentStrand | undefined {
-        const found = this.subflowParentStrands.get(childRunId);
-        if (found) this.subflowParentStrands.delete(childRunId);
-        return found;
+        // The body lives in ./run-resume.ts (#25222).
+        const host: ThisParameterType<typeof takeSubflowParentStrand> = {
+            subflowParentStrands: this.subflowParentStrands,
+        };
+        return takeSubflowParentStrand.call(host, childRunId);
     }
 
     /**
@@ -8152,24 +7070,13 @@ export class AutomationEngine implements IAutomationService {
         error: string,
         variablesAtPause: SuspendedRun['variables'],
     ): ConsumedSuspension {
-        const consumed: ConsumedSuspension = {
-            run: { ...run, steps: run.steps.slice(0, stepCountAtPause), variables: variablesAtPause },
-            consumedAt: new Date().toISOString(),
-            error,
-            // [#13937] `recordLog` settles this when its write settles.
-            ...(this.store?.recordTerminal ? { persisted: 'pending' as const } : {}),
+        // The body lives in ./consumed-suspension-restore.ts (#25222).
+        const readStore = () => this.store;
+        const host: ThisParameterType<typeof journalConsumedSuspension> = {
+            get store() { return readStore(); },
+            consumedSuspensions: this.consumedSuspensions,
         };
-        this.consumedSuspensions.set(run.runId, consumed);
-        // Oldest first — `Map` iterates in insertion order, and re-`set`ting an
-        // existing key keeps its original position, which is what we want: a
-        // run that strands twice does not jump the queue ahead of one that has
-        // been waiting for an operator longer.
-        while (this.consumedSuspensions.size > MAX_CONSUMED_SUSPENSIONS) {
-            const oldest = this.consumedSuspensions.keys().next().value;
-            if (oldest === undefined) break;
-            this.consumedSuspensions.delete(oldest);
-        }
-        return consumed;
+        return journalConsumedSuspension.call(host, run, stepCountAtPause, error, variablesAtPause);
     }
 
     /**
@@ -8450,240 +7357,27 @@ export class AutomationEngine implements IAutomationService {
      *   of another run's chain. It shapes the trace only; every guard above is
      *   taken identically either way.
      */
-    private async restoreOneConsumedSuspension(
+    private restoreOneConsumedSuspension(
         runId: string,
         options?: { requestedBy?: string; reason?: string },
         chainRestoreOf?: string,
     ): Promise<SuspensionRestoreResult> {
-        // Synchronously, before the first await — the same shape as `resuming`
-        // in `resumeInternal`: a guard set after an await is not a guard.
-        if (this.restoring.has(runId)) {
-            return this.refuseRestore(
-                runId,
-                'RESTORE_IN_PROGRESS',
-                `Another restore of run '${runId}' is already in progress in this process`,
-            );
-        }
-        // ⚠️ The subtle one. `resuming` is set before `resumeInternal`'s first
-        // await and cleared in its `finally`, so this window is exactly
-        // "suspension consumed, outcome not yet decided" — which is what a
-        // resume IN FLIGHT looks like, and is indistinguishable from the
-        // stranded state by any other reading. Re-arming one of these races the
-        // live resume: its traversal would finish and record `completed` while
-        // a paused row it knows nothing about survives, and the next restart
-        // would resume an already-finished run.
-        if (this.resuming.has(runId)) {
-            return this.refuseRestore(
-                runId,
-                'RESUME_IN_PROGRESS',
-                `Run '${runId}' is being resumed right now — its outcome is not decided yet`,
-            );
-        }
-        this.restoring.add(runId);
-        try {
-            // Already resumable? STRICT read: an unreadable store must not read
-            // as "no suspension" here. That degradation is harmless for a
-            // display path and is the one mistake that mints a second pause on
-            // this one.
-            let live: SuspendedRun | null;
-            try {
-                live = await this.loadSuspendedRunStrict(runId);
-            } catch (err) {
-                this.logger.warn(
-                    `[automation] restoreConsumedSuspension('${runId}') could not read the durable suspended-run ` +
-                        `store, so whether this run is still parked is UNKNOWN — the restore was REFUSED rather ` +
-                        `than guessed, because reading an outage as "no suspension" is what would put a second ` +
-                        `resumable pause on a live run. Nothing was written. Fix the store failure in this ` +
-                        `record's meta, then re-issue the restore.`,
-                    describeThrownForLog(err),
-                );
-                return this.refuseRestore(
-                    runId,
-                    'STORE_UNAVAILABLE',
-                    `Durable suspended-run store unreachable for run '${runId}' — whether it is still suspended is unknown`,
-                );
-            }
-            if (live) {
-                return this.refuseRestore(
-                    runId,
-                    'RUN_SUSPENDED',
-                    `Run '${runId}' is suspended at node '${live.nodeId}' and already resumable — nothing to restore`,
-                );
-            }
-
-            // [#13937] Two witnesses of one strand, and neither is trusted
-            // alone — the read is {@link resolveConsumedSuspensionWitnesses},
-            // shared with the read-only {@link inspectConsumedSuspension} so
-            // what that verb calls repairable is what this one restores. The
-            // durable row is loaded HERE because this verb's posture on an
-            // unreadable history is its own: a refusal, never a guess.
-            let terminal: RunRecord | null = null;
-            if (this.store?.loadTerminal) {
-                try {
-                    terminal = await this.store.loadTerminal(runId);
-                } catch (err) {
-                    this.logger.warn(
-                        `[automation] restoreConsumedSuspension('${runId}') could not read the durable run-history ` +
-                            `row, so whether a consumed suspension is recoverable for this run is UNKNOWN — the ` +
-                            `restore was REFUSED rather than reported as "nothing to restore", which is the answer ` +
-                            `an operator would act on by giving up. Nothing was written. Fix the store failure in ` +
-                            `this record's meta, then re-issue the restore.`,
-                        describeThrownForLog(err),
-                    );
-                    return this.refuseRestore(
-                        runId,
-                        'STORE_UNAVAILABLE',
-                        `Durable run-history unreachable for run '${runId}' — whether a consumed suspension survives is unknown`,
-                    );
-                }
-            }
-
-            const { consumed, dropped, staleHot } = this.resolveConsumedSuspensionWitnesses(runId, terminal);
-            // A hot copy of a pause the run has since LEFT — re-arming it
-            // would send the run back through work it already did.
-            if (staleHot) this.consumedSuspensions.delete(runId);
-
-            if (!consumed) {
-                // Nothing to restore — say WHICH nothing. The remedy differs for
-                // every one of these and a single "bad run" refusal would send an
-                // operator looking for the wrong thing.
-                if (dropped) {
-                    return this.refuseRestore(
-                        runId,
-                        'NO_CONSUMED_SUSPENSION',
-                        `Run '${runId}' is recorded 'failed' and its consumed suspension (${dropped.bytes} bytes) was over ` +
-                            `the store's ${dropped.budget}-byte row budget, so it was not persisted — it can be restored ` +
-                            `only by the process that stranded it, while that process is still running`,
-                    );
-                }
-                //
-                // The durable row, when there is one, is the later word on how
-                // the run ended than this process's own log — which may still
-                // say `failed` for a run another replica finished.
-                if (terminal?.status === 'completed') {
-                    return this.refuseRestore(
-                        runId,
-                        'RUN_COMPLETED',
-                        `Run '${runId}' completed — there is no unresumable state to exit`,
-                    );
-                }
-                const logged = await this.getRun(runId);
-                if (!logged) {
-                    return this.refuseRestore(runId, 'RUN_NOT_FOUND', `No run '${runId}' is known`);
-                }
-                if (logged.status === 'completed') {
-                    return this.refuseRestore(
-                        runId,
-                        'RUN_COMPLETED',
-                        `Run '${runId}' completed — there is no unresumable state to exit`,
-                    );
-                }
-                if (logged.status === 'cancelled') {
-                    return this.refuseRestore(
-                        runId,
-                        'RUN_CANCELLED',
-                        `Run '${runId}' was cancelled — restoring it would undo a deliberate decision`,
-                    );
-                }
-                // ⛔ Deliberately does not claim WHICH: "it never paused" and
-                // "its snapshot is gone" are indistinguishable from here, and
-                // guessing would hand an operator a false certainty. The status
-                // actually observed is named instead.
-                return this.refuseRestore(
-                    runId,
-                    'NO_CONSUMED_SUSPENSION',
-                    `Run '${runId}' is recorded '${logged.status}' and no consumed suspension is available for it ` +
-                        `— it never suspended, or its snapshot is no longer held`,
-                );
-            }
-
-            // Claim, then re-arm. No await between the claim and the write.
-            this.consumedSuspensions.delete(runId);
-            await this.persistSuspendedRun(consumed.run);
-
-            // The run IS paused again, so the run log has to say so — otherwise
-            // the repair is invisible on every surface that reads it and the
-            // Runs view keeps calling a resumable run `failed`. This is the
-            // SAME record the resume path writes when a run re-suspends at a
-            // downstream node (`status: 'paused'`, carrying the variable
-            // snapshot, #7639), for the same reason, and `getRun`'s
-            // last-entry-wins order is what makes it the answer.
-            //
-            // ⚠️ Deliberately NOT terminal, so it neither writes a history row
-            // nor clears the snapshot the row carries: until this run reaches a
-            // real terminal state, "it failed mid-resume and was put back" is
-            // the truth, and both halves of it should survive a restart.
-            //
-            // ⚠️ Measured limitation, stated rather than papered over: after a
-            // restart the DURABLE surfaces still read this run `failed`, because
-            // `getRun` / `listRuns` deliberately let a terminal row win over a
-            // paused one (a paused row can outlive the run it describes). The
-            // in-process log entry and the `warn` above are the trace this
-            // ships. The #13937 ruling named the condition on the RESULT
-            // (`status: 'stranded'`, the resume's catch arm), not on the run
-            // row: `ExecutionStatus` carries no such member, so a durable
-            // status that survives the restart is a spec-vocabulary decision
-            // nobody has taken — the row's discriminator stays the snapshot.
-            this.recordLog({
-                id: runId,
-                flowName: consumed.run.flowName,
-                flowVersion: consumed.run.flowVersion,
-                status: 'paused',
-                startedAt: consumed.run.startedAt,
-                durationMs: Date.now() - consumed.run.startTime,
-                trigger: buildRunTrigger(consumed.run.context),
-                steps: consumed.run.steps,
-                variables: consumed.run.variables,
-            }, consumed.run.context);
-
-            // ⚠️ Uncontrolled text — the operator's own words and the original
-            // thrown message — goes to the STRUCTURED slot, never the message
-            // (#6299 family). `warn(message, meta?)`: meta is the SECOND
-            // argument; `warn` has no `Error` slot.
-            this.logger.warn(
-                `[automation] run '${runId}' of flow '${consumed.run.flowName}': an operator RESTORED the ` +
-                    // [#15222] "consumed at" rather than "its resume had
-                    // consumed": an ancestor's pause was consumed by a
-                    // descendant's cascade, not by a resume of its own, and the
-                    // old wording was false for every member of a chain. Which
-                    // of the two it was is not guessed here — `failure` in the
-                    // meta below is the cascade's own text when it was one, and
-                    // it is durable, where a marker on the journal would not be.
-                    `suspension consumed at node '${consumed.run.nodeId}', so the run is resumable ` +
-                    `again. ⚠️ Nothing the failed attempt already did was undone, and the original resume signal ` +
-                    `was NOT replayed — the continuation must be re-issued. Who asked, why, and the failure this ` +
-                    `is an exit from are in this record's meta.` +
-                    (chainRestoreOf === undefined
-                        ? ''
-                        : ` This run was re-armed as one member of the nested chain repaired by the restore of ` +
-                          `run '${chainRestoreOf}' — the continuation is re-issued on THAT run.`),
-                {
-                    runId,
-                    flowName: consumed.run.flowName,
-                    nodeId: consumed.run.nodeId,
-                    nodeType: consumed.run.nodeType,
-                    correlation: consumed.run.correlation,
-                    consumedAt: consumed.consumedAt,
-                    requestedBy: options?.requestedBy ?? 'not recorded',
-                    restoreReason: options?.reason ?? 'not recorded',
-                    failure: consumed.error,
-                    ...(chainRestoreOf === undefined ? {} : { chainRestoreOf }),
-                },
-            );
-
-            return {
-                restored: true,
-                runId,
-                reason:
-                    `Restored the suspension run '${runId}' consumed at node '${consumed.run.nodeId}' — the run is ` +
-                    `resumable again; re-issue the continuation`,
-                flowName: consumed.run.flowName,
-                nodeId: consumed.run.nodeId,
-                consumedAt: consumed.consumedAt,
-            };
-        } finally {
-            this.restoring.delete(runId);
-        }
+        // The body lives in ./consumed-suspension-restore.ts (#25222).
+        const readStore = () => this.store;
+        const host: ThisParameterType<typeof restoreOneConsumedSuspension> = {
+            restoring: this.restoring,
+            refuseRestore: (...a) => this.refuseRestore(...a),
+            resuming: this.resuming,
+            loadSuspendedRunStrict: (...a) => this.loadSuspendedRunStrict(...a),
+            logger: this.logger,
+            get store() { return readStore(); },
+            resolveConsumedSuspensionWitnesses: (...a) => this.resolveConsumedSuspensionWitnesses(...a),
+            consumedSuspensions: this.consumedSuspensions,
+            getRun: (...a) => this.getRun(...a),
+            persistSuspendedRun: (...a) => this.persistSuspendedRun(...a),
+            recordLog: (...a) => this.recordLog(...a),
+        };
+        return restoreOneConsumedSuspension.call(host, runId, options, chainRestoreOf);
     }
 
     /**
