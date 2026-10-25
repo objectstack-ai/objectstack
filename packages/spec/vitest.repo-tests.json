@@ -1,5 +1,4 @@
 [
-  "scripts/build-console-objectstack-root.test.ts",
   "scripts/build-schemas-check-mode.anchor.test.ts",
   "scripts/build-schemas-check-mode.deleted-baseline.test.ts",
   "scripts/build-schemas-check-mode.deletion-proofs.test.ts",
