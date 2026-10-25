@@ -9,10 +9,16 @@ A one-page cheat-sheet for working in the `objectui` monorepo.
 ```bash
 pnpm run setup            # Build @objectstack/* at .objectstack-sha, then install (clean checkout)
 pnpm install              # Install all workspace dependencies (once the pinned build exists)
-pnpm build                # Build every package (turbo, parallel & cached)
-pnpm type-check           # Run tsc --noEmit across the workspace (turbo)
-pnpm lint                 # Run eslint across the workspace
+pnpm exec turbo run build --filter='./*/*' --filter='!@object-ui/site'  # Build every ui package (turbo, parallel & cached)
+pnpm exec turbo run type-check --filter='./*/*'                          # Run tsc --noEmit across the ui packages (turbo)
+pnpm exec turbo run lint --filter='./*/*'                                # Run eslint across the ui packages (turbo)
 ```
+
+Run those three from this directory: turbo reads a `./` filter against the directory it is
+launched from, so the filter above selects every package under `packages/`, `apps/` and
+`examples/`. This tree has no `build`, `type-check` or `lint` script of its own, because it
+is a member of the objectstack workspace and a `turbo run` in a member's script would nest
+inside the root's.
 
 ### Run Docs
 
