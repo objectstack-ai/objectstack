@@ -90,6 +90,23 @@ describe('AppPlugin defers its inline seed while demo accounts are being created
         expect(trigger).toHaveBeenCalledWith('app:seeded', { appId: 'legal-demo', overBudget: false });
     });
 
+    it('armed, two applications: each defers its own seed, and the tally settles once both have landed', async () => {
+        const ctx = makeContext({ armed: true });
+        const second = { id: 'legal-billing', data: [{ object: 'legal_invoice', records: [{ id: 'i1', title: 'Retainer' }] }] };
+
+        await new AppPlugin(bundle()).start(ctx);
+        await new AppPlugin(second).start(ctx);
+
+        expect(insert).not.toHaveBeenCalled();
+        expect(readSeedSettlement(ctx)).toEqual({ pending: 2, inFlight: 2, suppressed: [] });
+        expect(hooks.get('kernel:bootstrapped')).toHaveLength(2);
+
+        for (const handler of hooks.get('kernel:bootstrapped')!) await handler();
+
+        expect(insert.mock.calls.map(([object]) => object).sort()).toEqual(['legal_invoice', 'legal_matter']);
+        expect(readSeedSettlement(ctx)).toEqual({ pending: 0, inFlight: 0, suppressed: [] });
+    });
+
     it.each([
         ['not armed', { armed: false }],
         ['armed by anything but `true`', { armed: 'yes' }],

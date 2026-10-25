@@ -1251,8 +1251,9 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
    * entry here DOES create an account that can sign in — which is exactly why
    * the key is development-only end to end:
    *
-   * - `os build` writes no `demoStaff` into the artifact, so no deployed
-   *   artifact carries it;
+   * - `os build` writes no `demoStaff` into the artifact
+   *   (`objectstack.json`), so a deployment booted from one has none to
+   *   provision;
    * - `@objectstack/plugin-auth` provisions the accounts only on a local
    *   development boot (`os dev`), after the development admin, and a boot
    *   that is not one creates nothing and says why.
@@ -1265,7 +1266,7 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
    * level of the definition the boot loaded, so it is never folded into an
    * assembled package body.
    */
-  demoStaff: z.array(DemoStaffSchema).optional().describe('Demo accounts the development boot creates for the seed data to be dealt to (dev only, never in the built artifact)'),
+  demoStaff: z.array(DemoStaffSchema).optional().describe('Demo accounts the development boot creates for the seed data to be dealt to (dev only, never in the built objectstack.json)'),
 
   /**
    * Compiled Runtime Bundle Reference
@@ -1556,8 +1557,8 @@ const CONCAT_ARRAY_FIELDS = STACK_DEFINITION_KEYS
  *   property of the BOOT, not of a package inside it. `concat` stays at the top
  *   level, where composing two applications keeps both publishers' personas.
  * - `demoStaff`: the demo accounts a DEVELOPMENT boot creates, for the same
- *   reason as `devLogins`, and one more: `os build` writes the key into no
- *   artifact at all, so a body could only ever carry it by hand — and its one
+ *   reason as `devLogins`, and one more: `os build` leaves the key out of the
+ *   artifact it writes, so a body could only ever carry it by hand — and its one
  *   reader, the boot that hands it to `@objectstack/plugin-auth`, reads the top
  *   level of the definition it loaded.
  *

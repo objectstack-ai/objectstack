@@ -346,6 +346,12 @@ export interface AuthPluginOptions extends Partial<AuthConfig> {
  * (`owner_id: 'Legal Counsel 1'`) resolves on the first boot. Decided from
  * configuration alone (`decideDemoStaffEnvironmentGate`), so it is known
  * before any plugin starts.
+ *
+ * Read it as "this boot will run its `kernel:ready` and `kernel:bootstrapped`
+ * hooks and create the accounts there". A host that withholds the boot-phase
+ * hooks (`ObjectKernelConfig.bootPhaseHooks: false`) creates no demo account
+ * and runs no deferred seed either; the kernel's withheld-hooks warning names
+ * the `kernel:bootstrapped` handlers it did not call.
  */
 export interface DemoStaffingService {
   readonly armed: boolean;
@@ -825,7 +831,16 @@ export class AuthPlugin implements Plugin {
     // application's seed (which starts before `kernel:ready`) can wait for the
     // accounts it names. See `DemoStaffingService`.
     const demoStaffDeclared = (this.options.demoStaff?.length ?? 0) > 0;
-    if (demoStaffDeclared) this.demoStaffGate = this.decideDemoStaffEnvironment(requestedPosture);
+    if (demoStaffDeclared) {
+      const baseUrl = this.options.baseUrl;
+      this.demoStaffGate = decideDemoStaffEnvironmentGate({
+        nodeEnv: process.env.NODE_ENV,
+        migrateAndExit: process.env.OS_MIGRATE_AND_EXIT === '1',
+        wallEnforced: postureEnforcesWall(requestedPosture),
+        baseUrl,
+        baseUrlIsLoopback: !!baseUrl && isLoopbackIssuer(baseUrl),
+      });
+    }
     const demoStaffing: DemoStaffingService = { armed: demoStaffDeclared && this.demoStaffGate?.act === true };
     ctx.registerService('demo-staff', demoStaffing);
 
@@ -2423,6 +2438,89 @@ export class AuthPlugin implements Plugin {
   }
 
   /**
+   * Provision the stack's `demoStaff` (`demo-staff.ts` holds the three gates
+   * and the argument for each). Answers what happened — nothing when no entry
+   * is declared, the refusal when a gate refused, the outcome otherwise — so
+   * the boot step is testable without reading log lines.
+   *
+   * A refusal is one line naming the remedy. It is `info` when the boot is not
+   * a development boot at all (production, a migration run), where creating
+   * nothing is the intended outcome; and `warn` on a development boot, where
+   * the developer loses the declared accounts and the seed rows that name
+   * them will not resolve. A per-entry failure is its own `warn`; the other
+   * entries still run.
+   */
+  private async maybeProvisionDemoStaff(
+    ctx: PluginContext,
+  ): Promise<DemoStaffRefusal | DemoStaffOutcome | undefined> {
+    const staff = this.options.demoStaff ?? [];
+    // `init()` decides the environment whenever an entry is declared, so both
+    // are present together or neither is.
+    const environment = this.demoStaffGate;
+    if (staff.length === 0 || !environment) return undefined;
+    const refuse = (refusal: DemoStaffRefusal): DemoStaffRefusal => {
+      const notADevelopmentBoot = refusal.reason === 'not-development' || refusal.reason === 'migrate-and-exit';
+      ctx.logger[notADevelopmentBoot ? 'info' : 'warn'](
+        `[auth] demoStaff: ${staff.length} demo account(s) not created [${refusal.code}] — ${refusal.message}`,
+      );
+      return refusal;
+    };
+
+    if (!environment.act) return refuse(environment.refusal);
+
+    let ql: DemoStaffEngine | undefined;
+    try { ql = ctx.getService<DemoStaffEngine>('objectql'); } catch { ql = undefined; }
+    const priorLogin = await probeDemoStaffPriorLogin(ql, staff.map((entry) => entry.email));
+    if (!priorLogin.act) return refuse(priorLogin.refusal);
+
+    const manager = this.authManager;
+    const api: any = manager ? await manager.getApi() : undefined;
+    if (!manager || !ql || typeof api?.signUpEmail !== 'function') {
+      return refuse({
+        code: 'SERVICE_UNAVAILABLE',
+        status: 503,
+        reason: 'unanswerable',
+        message: 'the auth sign-up pipeline is not available on this boot, so no account can be created through it.',
+      });
+    }
+
+    const password = devSeedAdminPassword();
+    const tenancy = this.tenancy;
+    const outcome = await provisionDemoStaff(staff, {
+      engine: ql,
+      password,
+      // The development admin's door (`maybeSeedDevAdmin`): the real sign-up
+      // pipeline, admitted as the operator class by a ticket for exactly this
+      // address that only this call carries, cleared whatever happens.
+      signUp: async ({ email, password: pw, name }) => {
+        const ticket = manager.stageOperatorProvisioning(email);
+        try {
+          await api.signUpEmail({
+            body: { email, password: pw, name, [AuthManager.OPERATOR_PROVISIONING_TICKET_FIELD]: ticket },
+          });
+        } finally {
+          manager.clearOperatorProvisioning(email);
+        }
+      },
+      defaultOrganizationId: async () => (tenancy ? await tenancy.defaultOrgId() : null),
+    });
+
+    for (const failure of outcome.failed) {
+      ctx.logger.warn(`[auth] demoStaff: ${failure.email} was not provisioned — ${failure.message}`);
+    }
+    if (outcome.created.length > 0 || outcome.assignmentsAdded > 0) {
+      ctx.logger.info(
+        `[auth] demoStaff: ${outcome.created.length} demo account(s) created, ${outcome.present.length} already ` +
+          `present, ${outcome.assignmentsAdded} assignment(s) added — they sign in with the development seed ` +
+          `password (${password}).`,
+      );
+    } else {
+      ctx.logger.debug(`[auth] demoStaff: all ${outcome.present.length} demo account(s) already present`);
+    }
+    return outcome;
+  }
+
+  /**
    * Dev-only admin bootstrap.
    *
    * On an EMPTY database (zero users), provision a well-known, loginable
@@ -2455,94 +2553,6 @@ export class AuthPlugin implements Plugin {
    * admin can never be provisioned in production. Opt out within dev via
    * OS_SEED_ADMIN=0 (or false/off/no).
    */
-  /**
-   * Provision the stack's `demoStaff` (`demo-staff.ts` holds the three gates
-   * and the argument for each). Answers what happened — nothing when no entry
-   * is declared, the refusal when a gate refused, the outcome otherwise — so
-   * the boot step is testable without reading log lines.
-   *
-   * Every refusal is one `warn` naming the remedy: the declared accounts do not
-   * exist on this boot, and the application's seed rows that name them will
-   * not resolve. A per-entry failure is its own `warn`; the other entries
-   * still run.
-   */
-  /** Question 1 of `demo-staff.ts`, over this process's environment and this plugin's base URL. */
-  private decideDemoStaffEnvironment(posture: ReturnType<typeof resolveTenancyPosture>): DemoStaffGateVerdict {
-    const baseUrl = this.options.baseUrl;
-    return decideDemoStaffEnvironmentGate({
-      nodeEnv: process.env.NODE_ENV,
-      migrateAndExit: process.env.OS_MIGRATE_AND_EXIT === '1',
-      wallEnforced: postureEnforcesWall(posture),
-      baseUrl,
-      baseUrlIsLoopback: !!baseUrl && isLoopbackIssuer(baseUrl),
-    });
-  }
-
-  private async maybeProvisionDemoStaff(
-    ctx: PluginContext,
-  ): Promise<DemoStaffRefusal | DemoStaffOutcome | undefined> {
-    const staff = this.options.demoStaff ?? [];
-    if (staff.length === 0) return undefined;
-    const refuse = (refusal: DemoStaffRefusal): DemoStaffRefusal => {
-      ctx.logger.warn(
-        `[auth] demoStaff: ${staff.length} demo account(s) not created [${refusal.code}] — ${refusal.message}`,
-      );
-      return refusal;
-    };
-
-    const environment = this.demoStaffGate ?? this.decideDemoStaffEnvironment(resolveTenancyPosture());
-    if (!environment.act) return refuse(environment.refusal);
-
-    let ql: DemoStaffEngine | undefined;
-    try { ql = ctx.getService<DemoStaffEngine>('objectql'); } catch { ql = undefined; }
-    const priorLogin = await probeDemoStaffPriorLogin(ql, staff.map((entry) => entry.email));
-    if (!priorLogin.act) return refuse(priorLogin.refusal);
-
-    const manager = this.authManager;
-    const api: any = manager ? await manager.getApi() : undefined;
-    if (!manager || !ql || typeof api?.signUpEmail !== 'function') {
-      return refuse({
-        code: 'SERVICE_UNAVAILABLE',
-        status: 503,
-        reason: 'unanswerable',
-        message: 'the auth sign-up pipeline is not available on this boot, so no account can be created through it.',
-      });
-    }
-
-    const password = devSeedAdminPassword();
-    const outcome = await provisionDemoStaff(staff, {
-      engine: ql,
-      password,
-      // The development admin's door (`maybeSeedDevAdmin`): the real sign-up
-      // pipeline, admitted as the operator class by a ticket for exactly this
-      // address that only this call carries, cleared whatever happens.
-      signUp: async ({ email, password: pw, name }) => {
-        const ticket = manager.stageOperatorProvisioning(email);
-        try {
-          await api.signUpEmail({
-            body: { email, password: pw, name, [AuthManager.OPERATOR_PROVISIONING_TICKET_FIELD]: ticket },
-          });
-        } finally {
-          manager.clearOperatorProvisioning(email);
-        }
-      },
-    });
-
-    for (const failure of outcome.failed) {
-      ctx.logger.warn(`[auth] demoStaff: ${failure.email} was not provisioned — ${failure.message}`);
-    }
-    if (outcome.created.length > 0 || outcome.assignmentsAdded > 0) {
-      ctx.logger.info(
-        `[auth] demoStaff: ${outcome.created.length} demo account(s) created, ${outcome.present.length} already ` +
-          `present, ${outcome.assignmentsAdded} assignment(s) added — they sign in with the development seed ` +
-          `password (${password}).`,
-      );
-    } else {
-      ctx.logger.debug(`[auth] demoStaff: all ${outcome.present.length} demo account(s) already present`);
-    }
-    return outcome;
-  }
-
   private async maybeSeedDevAdmin(ctx: PluginContext): Promise<void> {
     // [commit bf8d129b5] Both clauses (and the seeded address below) are resolved by
     // `walled-owner-verification-path.ts`, because the boot check there treats

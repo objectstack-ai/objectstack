@@ -999,11 +999,14 @@ export default class Compile extends Command {
       // `demoStaff` never reaches the artifact. Each entry is an account that
       // can SIGN IN with the development seed password, so the list is a
       // development fixture of the source tree: `os dev` hands it to
-      // plugin-auth off the config it loads, and a deployed artifact — the
-      // unit every production boot runs — carries no trace of it. Removed
-      // here, at the one place the artifact is written, rather than at each
-      // reader: a key that is absent cannot be read by a reader nobody
-      // remembered.
+      // plugin-auth off the config it loads, and the artifact a deployment
+      // boots carries no `demoStaff` to hand over. Removed here, at the one
+      // place the artifact is written, rather than at each reader: a key that
+      // is absent cannot be read by a reader nobody remembered. (The runtime
+      // module, when one is written, bundles the authored config's CODE for
+      // its callables, so the declaration's text travels there as `data` and
+      // `devLogins` do; the module exports only `functions` and `meta`, so no
+      // boot can read the list out of it.)
       delete finalBundle.demoStaff;
       // [#18431] Docs read out of `src/<pkg>/docs/` attach to the body of the
       //     package that owns them — `packages[i].manifest`, ADR-0130 D4 option

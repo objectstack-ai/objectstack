@@ -127,9 +127,9 @@ export function decideDemoStaffEnvironmentGate(env: DemoStaffEnvironment): DemoS
   if (!env.baseUrl || !env.baseUrlIsLoopback) {
     return forbidden(
       'non-loopback-base-url',
-      `the auth base URL (${env.baseUrl ?? 'not configured'}) is not a loopback address, so this server is ` +
-        'published somewhere other people can reach and a known-password account must not exist on it. ' +
-        'Boot with a localhost base URL to create them.',
+      `the auth base URL (${env.baseUrl ?? 'not configured'}) is not a loopback address: this server is ` +
+        'configured to be reached somewhere other than this machine, and a known-password account must not ' +
+        'exist there. Boot with a localhost base URL to create them.',
     );
   }
   return { act: true };
@@ -224,6 +224,13 @@ export interface DemoStaffProvisioningDeps {
   readonly signUp: (account: { email: string; password: string; name: string }) => Promise<void>;
   /** The development seed password every demo account signs in with. */
   readonly password: string;
+  /**
+   * The Default Organization — `tenancy.defaultOrgId()`, `null` when there is
+   * none. Every assignment is written in it: a `sys_user_position` or
+   * `sys_user_permission_set` row without an organization applies in none
+   * (ADR-0131 D1), so there is no unscoped fallback.
+   */
+  readonly defaultOrganizationId: () => Promise<string | null>;
 }
 
 /** What one provisioning pass did, per address. */
@@ -248,33 +255,14 @@ async function findUserIdByEmail(engine: DemoStaffEngine, email: string): Promis
   return id == null ? undefined : String(id);
 }
 
-/**
- * The organization a demo account's assignments belong to: the one it is a
- * member of. Under `single` the membership reconciler binds every new account
- * to the Default Organization during sign-up, so this is that organization; an
- * account with no membership, or several, gets unscoped assignments, which
- * apply in every organization (`grantAppliesInTenant`).
- */
-async function soleMembershipOrganization(engine: DemoStaffEngine, userId: string): Promise<string | undefined> {
+/** Whether the account is a member of the organization — the one its assignments are written in. */
+async function isMemberOf(engine: DemoStaffEngine, userId: string, organizationId: string): Promise<boolean> {
   const rows = await engine.find(
     SystemObjectName.MEMBER,
-    { where: { user_id: userId }, fields: ['organization_id'], limit: 2 },
+    { where: { user_id: userId, organization_id: organizationId }, fields: ['id'], limit: 1 },
     SYSTEM_CTX,
   );
-  const orgs = [...new Set(rows.map((r) => r?.organization_id).filter((o): o is string => typeof o === 'string' && o !== ''))];
-  return orgs.length === 1 ? orgs[0] : undefined;
-}
-
-/** Insert one assignment row unless an identical one exists. Answers whether it inserted. */
-async function ensureAssignment(
-  engine: DemoStaffEngine,
-  object: 'sys_user_position' | 'sys_user_permission_set',
-  row: Record<string, unknown>,
-): Promise<boolean> {
-  const existing = await engine.find(object, { where: row, fields: ['id'], limit: 1 }, SYSTEM_CTX);
-  if (existing.length > 0) return false;
-  await engine.insert(object, row, SYSTEM_CTX);
-  return true;
+  return rows.length > 0;
 }
 
 /**
@@ -289,6 +277,7 @@ export async function provisionDemoStaff(
   const { engine, signUp, password } = deps;
   const outcome: DemoStaffOutcome = { created: [], present: [], failed: [], assignmentsAdded: 0 };
   let assignmentsAdded = 0;
+  let organizationId: string | null | undefined;
 
   for (const entry of staff) {
     const email = entry.email.trim().toLowerCase();
@@ -307,18 +296,43 @@ export async function provisionDemoStaff(
         // otherwise refuse every demo account (no mailbox exists for the link).
         // `isSystem` passes the statically-readonly column, the same doorway the
         // better-auth adapter's own verification write uses.
-        await engine.update(SystemObjectName.USER, { id: userId, email_verified: true }, SYSTEM_CTX);
+        await engine.update('sys_user', { id: userId, email_verified: true }, { context: { isSystem: true } });
       }
 
-      const organizationId = await soleMembershipOrganization(engine, userId);
-      const scope = organizationId ? { organization_id: organizationId } : {};
+      const permissionSets = entry.permissionSets ?? [];
+      if (!entry.position && permissionSets.length === 0) continue;
+      // Asked once, after the first account exists: the Default Organization
+      // may itself have been created by the development admin's sign-up.
+      if (organizationId === undefined) organizationId = await deps.defaultOrganizationId();
+      if (!organizationId) {
+        throw new Error(
+          'there is no Default Organization to assign its position and permission sets in, so none was written',
+        );
+      }
+      // The membership reconciler decides who joins (ADR-0093 D2); this step
+      // never writes a membership. An account the membership policy left out
+      // would hold assignments in an organization it cannot enter.
+      if (!(await isMemberOf(engine, userId, organizationId))) {
+        throw new Error(
+          'the account is not a member of the Default Organization (the membership policy admitted it to none), ' +
+            'so its position and permission sets were not written. Add it to the organization under Setup → ' +
+            'Users, then restart.',
+        );
+      }
+
       if (entry.position) {
-        if (await ensureAssignment(engine, 'sys_user_position', { user_id: userId, position: entry.position, ...scope })) {
+        const row = { user_id: userId, position: entry.position, organization_id: organizationId };
+        const held = await engine.find('sys_user_position', { where: row, fields: ['id'], limit: 1 }, SYSTEM_CTX);
+        if (held.length === 0) {
+          await engine.insert('sys_user_position', row, { context: { isSystem: true } });
           assignmentsAdded++;
         }
       }
-      for (const set of entry.permissionSets ?? []) {
-        if (await ensureAssignment(engine, 'sys_user_permission_set', { user_id: userId, permission_set: set, ...scope })) {
+      for (const set of permissionSets) {
+        const row = { user_id: userId, permission_set: set, organization_id: organizationId };
+        const held = await engine.find('sys_user_permission_set', { where: row, fields: ['id'], limit: 1 }, SYSTEM_CTX);
+        if (held.length === 0) {
+          await engine.insert('sys_user_permission_set', row, { context: { isSystem: true } });
           assignmentsAdded++;
         }
       }

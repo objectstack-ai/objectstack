@@ -132,13 +132,21 @@ describe('the development boot provisions the stack`s demo accounts (#25777)', (
           body: JSON.stringify({ email, password }),
         }),
       );
-    /** Run the boot step again, as the next boot against this database runs it. */
-    const rerun = () =>
-      (auth as unknown as { maybeProvisionDemoStaff(ctx: PluginContext): Promise<StaffingAnswer> })
-        .maybeProvisionDemoStaff({
-          getService: (name: string) => kernel!.getService(name),
-          logger: { info() {}, warn() {}, error() {}, debug() {} },
-        } as unknown as PluginContext);
+    /**
+     * Run the boot step again, as the next boot against this database runs it,
+     * recording what it logged and at which level.
+     */
+    const rerun = async () => {
+      const logs: Array<{ level: string; message: string }> = [];
+      const record = (level: string) => (message: unknown) => logs.push({ level, message: String(message) });
+      const answer = await (auth as unknown as {
+        maybeProvisionDemoStaff(ctx: PluginContext): Promise<StaffingAnswer>;
+      }).maybeProvisionDemoStaff({
+        getService: (name: string) => kernel!.getService(name),
+        logger: { info: record('info'), warn: record('warn'), error: record('error'), debug: record('debug') },
+      } as unknown as PluginContext);
+      return { answer, logs };
+    };
 
     return { ql, staffing, answer, rows, userId, signIn, rerun };
   }
@@ -194,7 +202,7 @@ describe('the development boot provisions the stack`s demo accounts (#25777)', (
     const positionsBefore = await rows('sys_user_position');
     const setsBefore = await rows('sys_user_permission_set');
 
-    expect(await rerun()).toMatchObject({
+    expect((await rerun()).answer).toMatchObject({
       created: [],
       present: ['counsel1@legal.example', 'para1@legal.example'],
       failed: [],
@@ -212,17 +220,54 @@ describe('the development boot provisions the stack`s demo accounts (#25777)', (
     await ql.delete('sys_user_position', { where: { id: position.id }, context: SYS } as never);
     await ql.update('sys_user', { id: counsel, name: 'Renamed by the developer' }, { context: SYS } as never);
 
-    expect(await rerun()).toMatchObject({ created: [], assignmentsAdded: 1 });
+    expect((await rerun()).answer).toMatchObject({ created: [], failed: [], assignmentsAdded: 1 });
     expect((await rows('sys_user', { id: counsel }))[0]!.name).toBe('Renamed by the developer');
     expect((await rows('sys_user_position', { user_id: counsel })).map((r) => r.position)).toEqual(['legal_counsel']);
   }, 30_000);
 
-  it('5. production refuses — PERMISSION_DENIED 403 — and no demo account exists', async () => {
+  it('4b. an account outside the Default Organization gets no assignment, and is reported; the others still run', async () => {
+    const { ql, rows, userId, rerun } = await boot();
+    const counsel = await userId('counsel1@legal.example');
+    const position = (await rows('sys_user_position', { user_id: counsel }))[0]!;
+    const membership = (await rows('sys_member', { user_id: counsel }))[0]!;
+    await ql.delete('sys_user_position', { where: { id: position.id }, context: SYS } as never);
+    await ql.delete('sys_member', { where: { id: membership.id }, context: SYS } as never);
+
+    const { answer, logs } = await rerun();
+    expect(answer).toMatchObject({
+      created: [],
+      present: ['counsel1@legal.example', 'para1@legal.example'],
+      assignmentsAdded: 0,
+    });
+    const failed = (answer as DemoStaffOutcome).failed;
+    expect(failed.map((f) => f.email)).toEqual(['counsel1@legal.example']);
+    expect(failed[0]!.message).toContain('not a member of the Default Organization');
+    // Nothing written for it — an organization-less row would apply nowhere.
+    expect(await rows('sys_user_position', { user_id: counsel })).toEqual([]);
+    expect(logs.filter((l) => l.level === 'warn').map((l) => l.message).join('\n')).toContain(
+      'counsel1@legal.example was not provisioned',
+    );
+  }, 30_000);
+
+  it('5. production refuses — PERMISSION_DENIED 403, at info — and no demo account exists', async () => {
     process.env.NODE_ENV = 'production';
-    const { staffing, answer, rows } = await boot();
+    const { staffing, answer, rows, rerun } = await boot();
     expect(staffing.armed).toBe(false);
     expect(answer).toMatchObject({ code: 'PERMISSION_DENIED', status: 403, reason: 'not-development' });
     expect(await rows('sys_user', { email: { $in: ['counsel1@legal.example', 'para1@legal.example'] } })).toEqual([]);
+    // Creating nothing is the intended outcome of a production boot: said, not warned.
+    const { logs } = await rerun();
+    expect(logs.map((l) => l.level)).toEqual(['info']);
+    expect(logs[0]!.message).toContain('[PERMISSION_DENIED]');
+  }, 30_000);
+
+  it('5b. a migrate-and-exit run refuses whatever NODE_ENV says — PERMISSION_DENIED 403, at info', async () => {
+    process.env.OS_MIGRATE_AND_EXIT = '1';
+    const { staffing, answer, rows, rerun } = await boot();
+    expect(staffing.armed).toBe(false);
+    expect(answer).toMatchObject({ code: 'PERMISSION_DENIED', status: 403, reason: 'migrate-and-exit' });
+    expect(await rows('sys_user', { email: 'counsel1@legal.example' })).toEqual([]);
+    expect((await rerun()).logs.map((l) => l.level)).toEqual(['info']);
   }, 30_000);
 
   it('6. a development server published at a reachable address refuses — PERMISSION_DENIED 403', async () => {
@@ -234,9 +279,11 @@ describe('the development boot provisions the stack`s demo accounts (#25777)', (
 
   it('7. with the admin seed off, a fresh database refuses — PRECONDITION_REQUIRED 428 — so no demo account is promoted', async () => {
     process.env.OS_SEED_ADMIN = '0';
-    const { answer, rows } = await boot();
+    const { answer, rows, rerun } = await boot();
     expect(answer).toMatchObject({ code: 'PRECONDITION_REQUIRED', status: 428, reason: 'no-prior-login' });
     expect(await rows('sys_account')).toEqual([]);
     expect(await rows('sys_user_permission_set', { permission_set: 'admin_full_access' })).toEqual([]);
+    // On a development boot the developer loses the accounts: warned.
+    expect((await rerun()).logs.map((l) => l.level)).toEqual(['warn']);
   }, 30_000);
 });

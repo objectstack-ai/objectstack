@@ -36,8 +36,8 @@ import { strictObject } from '../shared/strict-object';
  * An entry mints an account that can SIGN IN, with a password every developer
  * of the application knows. So:
  *
- * - `os build` never writes this list into the artifact, so a deployed
- *   artifact cannot carry it;
+ * - `os build` never writes this list into the artifact (`objectstack.json`),
+ *   so a deployment booted from one has none to provision;
  * - a boot that is not a local development boot (production, a
  *   migrate-and-exit run, a server whose auth base URL is not a loopback
  *   address, an organization-walled tenancy posture) creates nothing and says
@@ -74,8 +74,9 @@ export const DemoStaffSchema = lazySchema(() => strictObject(
         + 'seed password (`os dev --admin-password`, default `admin123`), so no credential is '
         + 'committed to the application\'s repository.',
       organization:
-        'a demo account joins the deployment\'s Default Organization the way the development admin '
-        + 'does; there is no per-entry organization.',
+        'a demo account\'s position and permission sets are assigned in the deployment\'s Default '
+        + 'Organization, which it joins on sign-up as every new account does; there is no per-entry '
+        + 'organization.',
     },
   },
   {
