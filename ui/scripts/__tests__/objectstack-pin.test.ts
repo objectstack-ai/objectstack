@@ -51,7 +51,6 @@ import {
   tailLines,
   readOverrides,
   readPin,
-  readWorkspace,
   runtimeClosure,
   workspaceGlobs,
 } from '../objectstack-pin.mjs';
