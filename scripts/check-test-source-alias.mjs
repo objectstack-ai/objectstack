@@ -259,7 +259,11 @@
 //     so flagging it would be inventing a failure. Both are accepted; a
 //     type-only clause is accepted as NEITHER, since it never resolves.
 //   - `typeof import('x')` is a TYPE QUERY, erased before anything loads. Never
-//     a finding, and never a compliance token either.
+//     a finding, and never a compliance token either. The same holds for an
+//     `import('x').Member` TYPE REFERENCE — an alias, an annotation — told from
+//     a runtime `import()` by its uncalled member chain (`isImportTypeReference`
+//     says why the tail decides and the head cannot), and for a dynamic form
+//     written as TEXT inside a string or template body (#25766).
 //   - The population is the specifiers THIS package really resolves through
 //     `dist/` — the same measurement `KNOWN_UNALIASED_TEST_IMPORTS` mirrors, at
 //     specifier granularity. A dep already aliased to source still costs a
@@ -346,7 +350,7 @@
 //   node scripts/check-test-source-alias.mjs --self-test
 
 import { readFileSync, readdirSync, statSync, existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
-import { stripComments, maskComments, maskCommentsAndLiterals } from './js-comment-mask.mjs';
+import { stripComments, maskComments, maskCommentsAndLiterals, scanSource } from './js-comment-mask.mjs';
 import { join, resolve, relative, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -836,6 +840,71 @@ const CONTROL_HEADS = new Set(['if', 'for', 'while', 'switch', 'catch', 'with', 
 const TYPE_QUERY_BEFORE = /\btypeof\s*$/;
 
 /**
+ * Is the `import('x')` call ending just before `end` a TYPE REFERENCE — an alias
+ * (`type T = import('x').T`), an annotation (`const s: import('x').Schema = …`),
+ * a union member, an `as`/`satisfies` target? Each is erased by `tsc` exactly as
+ * `typeof import('x')` is, and resolves nothing (#25766).
+ *
+ * Read from what FOLLOWS the call, never from what precedes it. A type reference
+ * is always QUALIFIED (a bare `import('x')` in a type position is a compile
+ * error) and its member chain is never CALLED; a runtime `import()` is awaited,
+ * assigned, passed, or chained into a call (`.then(…)`, `.then<T>(…)`,
+ * `?.then(…)`). The head cannot tell them apart: `{ key: import('x') }` is an
+ * object-literal LOAD behind the same `:` an annotation uses, and a union or a
+ * generic argument has a head no short list names.
+ *
+ * `import(` only — `require('x').member` is the ordinary CJS spelling of a
+ * runtime load. `code` is the masked projection; anything this cannot read
+ * reads as a LOAD, the loud direction.
+ */
+function isImportTypeReference(code, end) {
+  let i = end;
+  const skipSpace = () => {
+    while (i < code.length && /\s/.test(code[i])) i++;
+  };
+  skipSpace();
+  if (code[i] !== '.') return false;
+  while (code[i] === '.') {
+    i++;
+    skipSpace();
+    const start = i;
+    while (i < code.length && /[A-Za-z0-9_$]/.test(code[i])) i++;
+    if (i === start) return false;
+    skipSpace();
+  }
+  if (code[i] === '<') {
+    // `.Box<T>` is a type argument list, `.then<T>(…)` a generic CALL: only the
+    // token after the matching `>` separates them.
+    const close = closingAngle(code, i);
+    if (close < 0) return false;
+    i = close + 1;
+    skipSpace();
+  }
+  return code[i] !== '(';
+}
+
+/**
+ * The `>` closing the `<` at `open`, reading forward. -1 if none. Braces, parens
+ * and brackets inside the argument list are balanced past (`Box<{ a: A; b: B }>`
+ * carries a `;`), and the `>` of a function type's `=>` closes nothing.
+ */
+function closingAngle(code, open) {
+  let angle = 0;
+  let nest = 0;
+  for (let i = open; i < code.length; i++) {
+    const c = code[i];
+    if (c === '(' || c === '[' || c === '{') nest++;
+    else if (c === ')' || c === ']' || c === '}') {
+      if (--nest < 0) return -1;
+    } else if (c === '<') angle++;
+    else if (c === '>' && code[i - 1] !== '=') {
+      if (--angle === 0) return nest === 0 ? i : -1;
+    } else if (c === ';' && nest === 0) return -1;
+  }
+  return -1;
+}
+
+/**
  * Two same-length projections of one source, so a byte offset means the same
  * thing in both: `commentsOnly` keeps every string intact (the import regex has
  * to read the specifier), `codeOnly` masks literal CONTENT as well (the brace
@@ -1002,11 +1071,21 @@ function functionBodyRanges(code) {
  * `moduleScope` is every specifier loaded during COLLECTION — a static import or
  * a module-scope dynamic one; `clocked` is every dynamic load that sits inside a
  * function body, with the line and the spelling the diagnostic quotes. Type-only
- * clauses and `typeof import(…)` queries appear in neither: they never resolve.
+ * clauses, `typeof import(…)` queries and `import(…).Member` type references
+ * appear in neither: they never resolve. Nor does a dynamic form written inside
+ * a string or a template body — a scanner fixture's input is text (#25766).
  */
 function moduleLoadSites(source, ctx = sourceScanContext(source)) {
   const { commentsOnly, codeOnly, ranges } = ctx;
   const inFunction = (index) => ranges.some(([start, end]) => index > start && index < end);
+  // The pattern reads `commentsOnly`, where literal content survives so the
+  // specifier can be read; a keyword the language does not execute is blank in
+  // `codeOnly`. So is a `${…}` interior, which IS executed — `scanSource`'s
+  // `interpolation` array tells the two apart, scanned only when a keyword is
+  // not plain code.
+  let interpolation = null;
+  const executes = (at, keyword) =>
+    codeOnly.startsWith(keyword, at) || (interpolation ??= scanSource(source).interpolation)[at] === 1;
   const moduleScope = new Set();
   const clocked = [];
   IMPORT_PATTERNS.lastIndex = 0;
@@ -1024,7 +1103,9 @@ function moduleLoadSites(source, ctx = sourceScanContext(source)) {
     // The pattern's leading `(?:^|[\s;{(=,])` eats one delimiter unless the match
     // begins the file, so the keyword starts one character in.
     const head = match.index + (/^[a-z]/.test(match[0]) ? 0 : 1);
+    if (!executes(head, match[4] != null ? 'require' : 'import')) continue;
     if (TYPE_QUERY_BEFORE.test(codeOnly.slice(Math.max(0, head - 16), head))) continue;
+    if (match[3] != null && isImportTypeReference(codeOnly, match.index + match[0].length)) continue;
     if (!inFunction(head)) {
       moduleScope.add(spec);
       continue;
@@ -2730,6 +2811,27 @@ function buildFixtureTree() {
       "it('y', async () => loadThing('@fx/core'));\n",
   });
 
+  // (29) A TYPE REFERENCE OR LITERAL TEXT IS NOT A LOAD (#25766). The merged
+  // ui/ tree's three false-positive shapes, end to end: an alias and an
+  // annotation (generic arguments carrying `;` included) inside a test body,
+  // and a dynamic form written as template TEXT, the way a scanner's own test
+  // feeds it input. Each puts its specifier in the measured set, so a reader
+  // that counts it reports it. The module-top alias of `@fx/core` is the other
+  // half: erased, it must not pay for the real load on line 7.
+  fixture(root, 'packages/clocked-type-reference', {
+    'package.json': ARTIFACT_MANIFEST('@fx/clocked-type-reference'),
+    'src/thing.test.ts':
+      "import { it } from 'vitest';\n" +
+      "type Core = import('@fx/core').Alive;\n" +
+      "it('y', async () => {\n" +
+      "  type Log = import('@fx/core/logger').Log;\n" +
+      "  const opts: import('@fx/core/logger').Options<{ a: 1; b: 2 }> = {};\n" +
+      "  const text = `const m = await import('@fx/core/nested');`;\n" +
+      "  const mod: Core = await import('@fx/core');\n" +
+      '  return [opts, text, mod];\n' +
+      '});\n',
+  });
+
   return root;
 }
 
@@ -2762,6 +2864,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the cross-boundary walk (#8351)': 7,
   'the latent half (#9674)': 8,
   'the clocked-window rule (#10126)': 19,
+  'a type reference or literal text is not a load (#25766)': 21,
   'the import clause is bounded to ONE statement (#12555)': 11,
   'the declared population must stay READABLE by the dispatch deriver': 11,
   'the declaration must still BE the workspace (#11510)': 22,
@@ -2770,7 +2873,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 10;
+const SELF_TEST_BATTERY_FLOOR = 11;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -3223,6 +3326,72 @@ function selfTest() {
       clockedIn('packages/clocked-helper-routed-paid/src/thing.test.ts').length === 0,
       'a routed call in a file that already loads the specifier at module top was reported — that is the remedy, not the defect',
     );
+
+    // ── a type reference or literal text is not a load (#25766) ───────────
+    //
+    // End to end first: fixture (29) puts each erased shape's specifier in the
+    // measured set, so only the line-7 load may be reported — and it must BE
+    // reported, because the module-top `type Core = import(…)` paid nothing.
+    battery('a type reference or literal text is not a load (#25766)');
+    const typeRefFile = 'packages/clocked-type-reference/src/thing.test.ts';
+    expect(
+      clockedIn(typeRefFile).every((f) => !f.includes('@fx/core/logger')),
+      'an `import(…).Member` alias or annotation inside a test body was reported as a clocked load — it is erased by tsc',
+    );
+    expect(
+      clockedIn(typeRefFile).every((f) => !f.includes('@fx/core/nested')),
+      'a dynamic import written as TEXT inside a template literal was reported as a clocked load',
+    );
+    expect(
+      clockedIn(typeRefFile).length === 1 && clockedIn(`${typeRefFile}:7`).length === 1,
+      'the real load beside the erased shapes was not reported exactly once — a module-top type alias silenced it, or a type position leaked in',
+    );
+
+    // Then the shape table, read straight off `moduleLoadSites`: no population
+    // filter and no per-specifier dedupe stand between a row and its verdict.
+    // `p` is the specifier under test; `q` marks an erased neighbour.
+    const inBody = (body) => `it('t', async () => {\n${body}\n});\n`;
+    const ERASED = [
+      ['an alias in a test body', inBody("  type T = import('p').T;")],
+      ['an annotation', inBody("  const s: import('p').Schema = {};")],
+      ['an annotation whose type arguments carry `;` and `=>`', inBody("  const s: import('p').Box<{ a: A; f: (x: B) => C }> = make();")],
+      ['a qualified chain, an array and an indexed access', inBody("  let e: import('p').ns.Entry[];\n  let k: import('p').Schema['key'];")],
+      ['a parameter annotation', inBody("  const f = (x: import('p').T) => x;")],
+      ['a dynamic import inside a string', inBody("  const src = \"await import('p')\";")],
+      ['a dynamic import inside a template body', inBody("  const src = `const m = await import('p');`;")],
+      ['a require inside a template body', inBody("  const src = `const x = require('p');`;")],
+    ];
+    for (const [shape, source] of ERASED) {
+      const sites = moduleLoadSites(source);
+      expect(
+        sites.clocked.length === 0 && !sites.moduleScope.has('p'),
+        `${shape} was read as a load — it resolves nothing at run time, so it is neither a finding nor a compliance token`,
+      );
+    }
+    // At module top an alias is not a compliance token either: an exported,
+    // generic alias must not satisfy the rule on the file's behalf.
+    expect(
+      !moduleLoadSites("export type T<X> = import('p').Box<X>;\n").moduleScope.has('p'),
+      'a module-top `export type … = import(…).Member` was read as paying the load during collection',
+    );
+    const LOADS = [
+      ['an assigned, unawaited import', inBody("  const m = import('p');")],
+      ['an object-literal value', inBody("  const holder = { key: import('p') };\n  return holder;")],
+      ['an awaited import', inBody("  await import('p');")],
+      ['a `.then(…)` chain', inBody("  import('p').then((m) => m);")],
+      ['a generic `.then<T>(…)` call', inBody("  import('p').then<unknown>((m) => m);")],
+      ['an optional `?.then(…)` call', inBody("  import('p')?.then((m) => m);")],
+      ['a load inside a template interpolation', inBody('  const s = `${await import(\'p\')}`;')],
+      ['a load right after an erased alias on the same line', inBody("  type T = import('q').T; const m = await import('p');")],
+      ['a CJS `require(…).member`', inBody("  const x = require('p').member;")],
+    ];
+    for (const [shape, source] of LOADS) {
+      const sites = moduleLoadSites(source);
+      expect(
+        sites.clocked.length === 1 && sites.clocked[0].spec === 'p',
+        `${shape} inside a test body was not read as exactly one clocked load — the erasure rule swallowed a real load`,
+      );
+    }
 
     // ── the import clause is bounded to ONE statement (#12555) ────────────
     //
