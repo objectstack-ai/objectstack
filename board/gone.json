@@ -234,5 +234,17 @@
   {
     "number": 21767,
     "note": "transferred to objectstack-ai/objectui#11638; accepted as moved by the maintainer (objectstack#22999)"
+  },
+  {
+    "number": 24176,
+    "note": "transferred to objectstack-ai/cloud#2988; accepted as moved by the maintainer (objectstack#24351)"
+  },
+  {
+    "number": 24525,
+    "note": "transferred to objectstack-ai/cloud#3089; accepted as moved by the maintainer (objectstack#24351)"
+  },
+  {
+    "number": 25584,
+    "note": "transferred to objectstack-ai/objectui#13436; accepted as moved by the maintainer (objectstack#24351)"
   }
 ]
