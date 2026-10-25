@@ -54,7 +54,6 @@ export interface MinimalLogger {
   info?: (msg: any, ...rest: any[]) => void;
   warn?: (msg: any, ...rest: any[]) => void;
   debug?: (msg: any, ...rest: any[]) => void;
-  error?: (msg: any, ...rest: any[]) => void;
 }
 
 /**
