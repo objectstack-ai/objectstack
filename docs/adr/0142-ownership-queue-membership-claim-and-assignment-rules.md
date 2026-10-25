@@ -203,7 +203,8 @@ Every shipped driver therefore answers it, and the contract still allows a drive
 conditional-update contract already: `PATCH` and `DELETE` take an opt-in `If-Match` header or `expectedVersion` token
 (`packages/spec/src/api/protocol.zod.ts`, `packages/rest/src/crud-routes.ts`) and answer **409 `CONCURRENT_UPDATE`** when
 it differs from the row's `updated_at` (`packages/metadata-protocol/src/protocol.ts#ConcurrentUpdateError`) — compared in
-`updateData` over the existence probe, before `engine.update`, so it is compare-then-write, not atomic.
+`updateData` (over the existence probe, before `engine.update`) and in `deleteData` (`assertVersionMatch`, reading the row
+itself), so it is compare-then-write, not atomic.
 
 ### 2. The pull — HotCRM at `8f52859`
 
@@ -573,7 +574,9 @@ at merge (the card's own words; HotCRM `AGENTS.md` rule 2: *merged is not availa
   words co-exist as `sys_team` and `team` do.
 - **Codes** (ADR-0112 D1, D3 — registered in the ledger by the PR): `PERMISSION_DENIED` 403 for a refused claim, release,
   move or supplied queue; `CONCURRENT_UPDATE` 409 for a lost claim race — the ledger's existing code for a write another
-  writer beat, so the verb carries one 409, not two (ADR-0112 D1); one new code, `QUEUE_NOT_FOUND` 422, only for a
+  writer beat, so the verb carries one 409, not two (ADR-0112 D1); the ledger is keyed by the stamping package, and the
+  PR adds the row under `@objectstack/objectql`, where the claim's 409 is raised; one new code, `QUEUE_NOT_FOUND` 422,
+  only for a
   caller-supplied `queue` that resolves nowhere in the row's organization. A rule's unresolved target is never a refusal
   (D5). D3's registration refusal is thrown at `registerObject`, a door Studio and the metadata API reach at request
   time, so it carries the ADR-0112 envelope the registry's other field refusals carry — `INVALID_METADATA`, 422, as
@@ -734,7 +737,7 @@ objection names the number.
 16. **The by-id write precondition (`expect`) is engine-internal — set by the gate for a claim and by the assignment seam
     for the cursor, reachable from no data door — and the data API's existing optimistic concurrency stays where it is.**
     `PATCH` and `DELETE` already take `If-Match` / `expectedVersion` and answer 409 `CONCURRENT_UPDATE`, compared in
-    `updateData` before `engine.update` (Context §1): compare-then-write. The alternative lowers that check onto the same
+    `updateData` / `deleteData` before the engine write (Context §1): compare-then-write. The alternative lowers that check onto the same
     precondition (`expect: { updated_at: <token> }`), making today's optimistic concurrency atomic for every client
     already sending the token; its cost is moving the comparison into the write while preserving what the protocol
     layer settles around it — the probe-first ordering (404 before 409), the token normalisation, and the conflict's
