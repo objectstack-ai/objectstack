@@ -482,6 +482,7 @@ orthogonal to both, and no cell here can carry it; it is written out in
 | Membership key declarations — `userField` / `valueField` columns, one key on one object, a key the registered resolver also owns (save door only) (#25234) | ✓ | ✓ | ✓ | ✓ᵒ |
 | Platform-schedule `create_record` organization (#6285) | — | — | — | ✓ᶠ |
 | Public-form anonymous intake on this deployment's tenancy posture — advisory only (#21476) | — | — | — | ✓ᵛ |
+| Public-form file fields — a form open to anonymous intake whose sections declare a `file`, `image`, `avatar`, `video` or `audio` field (#25650) | ✓ | ✓ | ✓ | ✓ᵛ |
 | Autonumber `{field}` interpolation | ✓ | ✓ | ✓ | ✓ᵒ |
 | Email template HTML hole placements — a hole in a placement the mail renderer's encoding does not suit (#25189) | ✓ | ✓ | ✓ | ✓ᵉ |
 | View references — form targets, view-key collisions (#2554) | ✓ | ✓ | ✓ | — |
@@ -741,7 +742,7 @@ A clean run walks the registry and reports timing:
   Config: /path/to/support-desk/objectstack.config.ts
   Load time: 21ms
   → Validating against ObjectStack Protocol...
-  → Running author-time rules (52)...
+  → Running author-time rules (53)...
   → Checking that every required capability has a provider installable in this edition...
   → Checking package docs (ADR-0046)...
 

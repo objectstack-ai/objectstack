@@ -4609,3 +4609,108 @@ describe('runtime authoring gate on PERMISSION writes — membership-key ownersh
         }
     });
 });
+
+// #25650 — ruling C on #25572: a form open to anonymous intake that declares a
+// file field is refused at publish. `validatePublicFormFileFields` declares
+// `runtimeTypes: ['view']`, and a view write's snapshot carries the live
+// `objects`, so the field's type resolves at this door exactly as it does at
+// `os build`. The lint-level pins (every shape, every file type, the switches)
+// are `@objectstack/lint`'s `validate-public-form-file-fields.test.ts`.
+//
+// ⚠️ This package reaches `@objectstack/lint` through its built `dist/`, so a
+// registry edit is invisible here until `pnpm --filter @objectstack/lint build`
+// has run.
+describe('runtime authoring gate on VIEW writes — a public form declaring a file field (#25650)', () => {
+    const NAME = 'supplier_application';
+    const RULE = 'public-form-file-field';
+    /** A container whose `formViews.apply` is open to anonymous intake. */
+    const container = (fields: unknown[]) => ({
+        list: { type: 'grid', data: { provider: 'object', object: NAME }, columns: [{ field: 'company' }] },
+        formViews: {
+            apply: {
+                type: 'simple',
+                data: { provider: 'object', object: NAME },
+                sections: [{ name: 'about', fields }],
+                sharing: { enabled: true, allowAnonymous: true, publicLink: '/forms/apply' },
+            },
+        },
+    });
+    const withCertificate = () => container([{ field: 'company' }, { field: 'email' }, { field: 'certificate' }]);
+    const withoutCertificate = () => container([{ field: 'company' }, { field: 'email' }]);
+    const supplier = {
+        name: NAME,
+        label: 'Supplier application',
+        tenancy: { enabled: false },
+        fields: {
+            company: { type: 'text', label: 'Company' },
+            email: { type: 'email', label: 'Email' },
+            certificate: { type: 'file', label: 'Certificate' },
+        },
+    };
+
+    function viewProtocol() {
+        const { engine, rows } = makeStubEngine();
+        engine.registry.listItems = (type: string) => (type === 'object' ? [supplier] : []);
+        const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_test') as any;
+        return { protocol, rows };
+    }
+    const saveView = (protocol: any, item: unknown, extra: Record<string, unknown> = {}) =>
+        protocol.saveMetaItem({ type: 'view', name: NAME, item, ...extra });
+    const activeViewRows = (rows: Map<string, Row>) =>
+        Array.from(rows.values()).filter((r) => r.type === 'view' && r.state === 'active');
+
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+
+    it('(a) REFUSES an active save naming the file field at its entry; nothing stored', async () => {
+        const { protocol, rows } = viewProtocol();
+
+        const err = await saveView(protocol, withCertificate()).catch((e: any) => e);
+
+        expect(err, 'the save resolved — the door still publishes the file field').toBeInstanceOf(Error);
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issues = (err.issues ?? []).filter((i: any) => i.rule === RULE);
+        expect(issues, `issues: ${JSON.stringify(err.issues)}`).toHaveLength(1);
+        expect(issues[0].severity).toBe('error');
+        expect(issues[0].path).toContain('formViews.apply.sections[0].fields[2]');
+        expect(issues[0].message).toContain('"certificate"');
+        expect(activeViewRows(rows)).toEqual([]);
+    });
+
+    it('(a) gates the draft → active promotion, so the draft door is no bypass', async () => {
+        const { protocol } = viewProtocol();
+        await expect(saveView(protocol, withCertificate(), { mode: 'draft' })).resolves.toMatchObject({ success: true });
+
+        const err = await protocol.publishMetaItem({ type: 'view', name: NAME }).catch((e: any) => e);
+
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(err.issues.map((i: any) => i.rule)).toContain(RULE);
+    });
+
+    it('(b) the door and `os build` give the same finding', async () => {
+        const { protocol } = viewProtocol();
+        const err = await saveView(protocol, withCertificate()).catch((e: any) => e);
+        const atDoor = (err.issues ?? []).filter((i: any) => i.rule === RULE);
+
+        const stack = { objects: [supplier], views: [{ name: NAME, ...withCertificate() }] };
+        const atBuild = runAuthoringRules('build', { normalized: stack, parsed: stack }).filter((f) => f.rule === RULE);
+
+        expect(atBuild).toHaveLength(1);
+        expect(atDoor).toHaveLength(1);
+        expect(atDoor[0].message).toBe(atBuild[0]!.message);
+        expect(atDoor[0].hint).toBe(atBuild[0]!.hint);
+    });
+
+    it('(c) the same form without the file field saves', async () => {
+        const { protocol, rows } = viewProtocol();
+        await expect(saveView(protocol, withoutCertificate())).resolves.toMatchObject({ success: true });
+        expect(activeViewRows(rows)).toHaveLength(1);
+    });
+});

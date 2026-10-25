@@ -101,7 +101,7 @@ on:
 # fires on a push, and for everything else it is the policy. Two hourly runs
 # overlapping means one of them is over an hour old, and an hour-old
 # measurement of `main` is strictly the worse of the two. Test Core's wall clock
-# is well inside the cadence (~39 shard-minutes across six shards), so this is
+# is well inside the cadence (~39 shard-minutes across the shards), so this is
 # the exceptional path, not the normal one.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.after || github.ref }}
@@ -489,11 +489,11 @@ jobs:
               - 'packages/types/**'
 
   test:
-    # Sharded 6-way BY PACKAGE: a core-touching PR ran the affected suite
-    # ~11½ min on one 4-vCPU runner — the longest pole in the whole workflow —
-    # and at 2 shards the slower shard still ran ~10 min, keeping merge-queue
-    # builds at ~11 min end-to-end (#4859).
-    # scripts/partition-test-shards.mjs splits the package list into six
+    # Sharded 8-way BY PACKAGE (6-way until #25376): a core-touching PR ran
+    # the affected suite ~11½ min on one 4-vCPU runner — the longest pole in
+    # the whole workflow — and at 2 shards the slower shard still ran ~10 min,
+    # keeping merge-queue builds at ~11 min end-to-end (#4859).
+    # scripts/partition-test-shards.mjs splits the package list into eight
     # deterministic bins balanced on MEASURED per-package test duration
     # (scripts/test-shard-timings.json, generated — see #10472 below) and each
     # shard runs its slice through turbo. NOT the dogfood
@@ -504,7 +504,7 @@ jobs:
     # on either shard (three packages have exactly one test file today). See
     # the script header for the verification.
     #
-    # ── WHY SIX AND NOT THREE (#10227) ────────────────────────────────────
+    # ── WHY MORE THAN THREE (#10227) ──────────────────────────────────────
     #
     # The per-package durations this job's logs print are CONTENDED WALL
     # CLOCK, not package cost. `--concurrency=4` on a 4-vCPU runner means up
@@ -522,59 +522,69 @@ jobs:
     # shards means fewer suites per runner AND four more vCPUs per added
     # shard, because every shard gets its own runner.
     #
-    # SIX specifically, and not four or five: sharding is BY PACKAGE, so no
-    # shard can finish faster than the heaviest serial task it carries. On the
-    # current dataset (scripts/test-shard-timings.json, the 21-run refresh at
-    # 040184752c) the heaviest package is `@objectstack/cli` at 1738.88s, and
-    # run whole it is one serial suite with nothing to overlap it: the job
-    # holding it ran 20.5-39.1 min on the 14 runs after that refresh while every
-    # other Test Core job finished within 20.8 (#22075). So it is cut into 3
+    # EIGHT specifically (#25376; six from #22075 until then): sharding is BY
+    # PACKAGE, so no shard can finish faster than the heaviest serial task it
+    # carries. `@objectstack/cli` (2899.02s on the 2026-10-23 dataset) runs as 3
     # file-level slices whenever a run's own list makes it the serial floor
     # (FILE_SHARDED_PACKAGES and planShards() in the script), each slice placed
     # at its PLAIN weight so every bin keeps the whole-package split's density,
     # and no slicing may put a shard past that split's densest bin (the density
-    # cap, 1772.65s today -- densityCap() in the script; the shard-timing drift
-    # check below is why). Re-derived with the partitioner's own planShards()
-    # and balanceOf(), bins of predicted test windows:
+    # cap, densityCap() in the script; the shard-timing drift check below is
+    # why). Re-derived with the partitioner's own planShards() and balanceOf()
+    # on scripts/test-shard-timings.json, bins of predicted test windows:
     #
-    #   4 shards -> max 2658s  mean 2658s  ratio 1.00x
-    #   5 shards -> max 2127s  mean 2126s  ratio 1.00x
-    #   6 shards -> max 1773s  mean 1772s  ratio 1.00x
-    #   7 shards -> max 1522s  mean 1519s  ratio 1.00x
-    #   8 shards -> max 1332s  mean 1329s  ratio 1.00x
-    #  10 shards -> max 1147s  mean 1063s  ratio 1.08x
+    #   4 shards -> max 3733s  mean 3732s  ratio 1.00x   (the CLI runs whole)
+    #   6 shards -> max 2489s  mean 2488s  ratio 1.00x
+    #   7 shards -> max 2136s  mean 2133s  ratio 1.00x
+    #   8 shards -> max 1868s  mean 1866s  ratio 1.00x
+    #   9 shards -> max 1661s  mean 1659s  ratio 1.00x
+    #  10 shards -> max 1607s  mean 1493s  ratio 1.08x
+    #
+    # Bins are not wall. A shard's whole packages run four at a time while a
+    # CLI slice runs as a serial leg after them, so its tests step reads close
+    # to wholeSum / 2.9 + slice. On merge_group run 40155484566 (59 packages
+    # executed, the CLI as 3 slices) that model lands within 6.1% of the
+    # measured step on the four slowest shards (the two light ones never set
+    # the wall); replayed on that run's own list it puts the slowest shard
+    # at ~1696s at six (measured 1794s, a slice shard) and ~1436s at eight,
+    # -15%. Full dataset list -14%; a 21-package merge_group run (40157571602)
+    # -10%, its slice shards at eight carrying almost nothing else. The
+    # partitioner's SHARD_COUNT header carries the arithmetic.
     #
     # ⚠ THE ARGUMENT ABOVE USED TO BE MADE IN TEST-FILE COUNTS (bins
     # 415/389/389/389/389/388, spec carrying 415 of ~2360 files). It is now
     # made in measured seconds, because #10472 replaced the weight input: the
     # file count was a proxy that ran ~2.8x off on @objectstack/cli, and the
     # six perfectly count-balanced bins it produced ran 5.0/6.2/6.3/13.6/6.3/
-    # 9.0 min in run 32428961038. The conclusion (six) survived the re-
-    # measurement; only the units it is argued in changed. Weights now come
-    # from scripts/test-shard-timings.json — see partition-test-shards.mjs.
+    # 9.0 min in run 32428961038. Weights now come from
+    # scripts/test-shard-timings.json — see partition-test-shards.mjs.
     #
-    # AND WHY NOT MORE THAN SIX (#10472 asked for 6 -> 8 to be considered).
-    # The floor is the heaviest single item -- `@objectstack/spec`, 1146.69s,
-    # once the CLI is sliced -- and it does not move when shards are added,
-    # while the mean falls with every shard, so max/mean gets WORSE past the
-    # point where the floor becomes the max (ten shards above). The
+    # AND WHY NOT MORE THAN EIGHT. #10472 asked for 6 -> 8 and was refused
+    # while spec's 1146.69s was the floor; #25376 widened once the CLI was
+    # sliced and spec's 842s repo file was split (#25372). Two floors remain.
+    # In bins, spec's whole 1606.55s binds at ten shards (above), and past it
+    # max/mean gets WORSE with every shard. In wall, a CLI slice (~960-1010s
+    # measured) is serial: at eight the slice shards of a small run already
+    # carry little else, so a ninth shard mostly adds a runner. The
     # partitioner's self-test pins the half of this that can fail: at
     # SHARD_COUNT the heaviest item must sit within 1.3x the mean, and when it
     # stops fitting, slicing it below package granularity is the remedy that
     # failure names.
     #
-    # ⚠ THE COST, stated because it is real: per-shard fixed overhead
-    # (checkout + pnpm/Turbo cache restore + install, ~60s measured on run
-    # 32392712980) is paid once PER SHARD, and the merge queue multiplies it
-    # by the speculative build count. Six shards trade roughly 1.7x the
-    # billed runner-minutes for a shorter critical path. `--concurrency=4` is
-    # deliberately UNCHANGED here: narrower shards may well want a lower
-    # value, but moving both at once makes the next measurement unreadable.
+    # ⚠ THE COST, stated because it is real: per-shard fixed overhead is paid
+    # once PER SHARD, and the merge queue multiplies it by the speculative
+    # build count. Measured over the 512 `Test Core (N/6)` jobs of the window
+    # below, job start to the tests step is 1.6 min median (5.5 p90) and the
+    # tail after it 0.2 min, so two more shards cost ≈ +3.6 runner-min per run
+    # at the median, accepted by the maintainer directive on #25376.
+    # `--concurrency=4` is deliberately UNCHANGED here: narrower shards may
+    # well want a lower value, but moving both at once makes the next
+    # measurement unreadable.
     #
     # Branch protection requires the bare "Test Core" context, which a matrix
     # can never publish again — the test-gate job below carries that name
     # (the #3622 lesson; see dogfood-gate).
-    name: Test Core (${{ matrix.shard }}/6)
+    name: Test Core (${{ matrix.shard }}/8)
     needs: filter
     # "Skip only when the filter EXPLICITLY said no core paths changed" — see
     # THE FILTER CONTRACT on the filter job's outputs (#4928). `scripts` is ORed
@@ -614,25 +624,50 @@ jobs:
     #     (70 packages executed, the CLI as all 3 slices), is within 80% of
     #     50 (40.0).
     #
+    # ⚠ RE-SIZED 50 -> 60 (#25376), with the matrix widened 6 -> 8. The same
+    # tool over the 89 completed, non-cancelled CI runs created 2026-10-24
+    # 03:00Z-2026-10-25 03:45Z (23 merge_group, 39 pull_request, 16 push,
+    # 11 schedule; 512 `Test Core (N/6)` jobs) found 50 already short at six:
+    # worst p + s 40m27s (run 40149547507 `Test Core (1/6)`, a red PR shard;
+    # healthy worst 37m22s, run 40125226571 `Test Core (4/6)`), so the
+    # cap-deferred path needed 60.45m. The slowest shard is the one carrying
+    # a CLI slice; eight shards take it down by 10-15% on the replays in
+    # partition-test-shards.mjs's SHARD_COUNT header, so s is scaled by 0.90
+    # (the smallest gain, the safe side) until a window of eight-shard runs
+    # exists. Five readings, the largest answer wins:
+    #   * the window verdict: p + s + 10m = 2m03s + 34m34s + 10m = 46m37s;
+    #   * the cap-deferred verdict: p + s + 20m = 56m37s, inside 60 by 3m23s;
+    #   * the 80% wall margin: the healthy worst job wall, 37m41s at six, is
+    #     ~34m40s at eight (7m28s + 26m55s + the 0.3m tail), within 80% of 60
+    #     (48.0);
+    #   * the #16465 red line, the slowest shard at or under 70% of its
+    #     timeout: ~34m40s against 42.0;
+    #   * the drift ceiling: that healthy worst step running 1.5x its
+    #     prediction (MAX_MEASURED_OVER_PREDICTED, the DRIFT verdict) lands at
+    #     7m28s + 26m55s x 1.5 = 47.8m, still a reading before the wall rather
+    #     than a kill.
+    # The first full-battery run after landing re-takes these on eight-shard
+    # jobs and is reported on #25376.
+    #
     # ⛔ REVERT CONDITION, restated against measurement, not a card: a value
-    # below 50 is allowed only when, on a re-measured window of Test Core
+    # below 60 is allowed only when, on a re-measured window of Test Core
     # runs (`node scripts/measure-stall-guard-headroom.mjs` over the jobs
     # payloads of every completed pull_request, merge_group, push and
     # schedule run in it), BOTH guard verdicts -- the window path
     # (p + s + 10m) and the cap-deferred path (p + s + 20m) -- land before the
-    # new value on every observation, AND the slowest `Test Core (N/6)` job
+    # new value on every observation, AND the slowest `Test Core (N/8)` job
     # wall is at or under 80% of it. Read the pull_request and merge_group
     # runs, not the hourly schedule alone: scheduled runs mostly replay the
     # cache their commit's push run saved. It carries no other expiry — a
     # raise with no revert condition beside it becomes permanent by
     # forgetting — and the stall guard stays the primary hang detector.
-    timeout-minutes: 50
+    timeout-minutes: 60
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
 
     steps:
       - name: Checkout repository
@@ -780,7 +815,7 @@ jobs:
         run: |
           bash scripts/ci/select-shard-packages.sh
           node scripts/partition-test-shards.mjs "$RUNNER_TEMP/turbo-ls.json" \
-            --shard ${{ matrix.shard }}/6 --exclude @objectstack/dogfood \
+            --shard ${{ matrix.shard }}/8 --exclude @objectstack/dogfood \
             > "$RUNNER_TEMP/shard-packages.txt"
           echo 'Items on this shard (a package name, or a package plus a k/n file-level slice):'
           cat "$RUNNER_TEMP/shard-packages.txt"
@@ -884,7 +919,7 @@ jobs:
       # `--if-ran`: an empty shard exits the step above before turbo runs.
       - name: The Turbo remote cache was on for this shard's closure build
         run: |
-          node scripts/ci/assert-turbo-remote-cache.mjs --site 'Test Core (${{ matrix.shard }}/6) closure' \
+          node scripts/ci/assert-turbo-remote-cache.mjs --site 'Test Core (${{ matrix.shard }}/8) closure' \
             --log .turbo/remote-cache/test-core-closure.json --if-ran \
             --move-summary-to "$RUNNER_TEMP/turbo-remote-cache"
 
@@ -1226,14 +1261,14 @@ jobs:
         run: |
           node scripts/ci/report-test-leftovers.mjs report \
             --before "$RUNNER_TEMP/test-leftovers/before.json" \
-            --label "Test Core (${{ matrix.shard }}/6)"
+            --label "Test Core (${{ matrix.shard }}/8)"
 
       # --summarize above costs nothing at runtime and writes
       # `.turbo/runs/<id>.json`: one per-task record with the execution window
       # turbo actually observed. That file IS the balancing input for the next
       # shard split (scripts/test-shard-timings.json is generated from it), and
       # publishing it here is what keeps the dataset re-measurable instead of
-      # hand-frozen — refreshing it becomes "download these six artifacts from
+      # hand-frozen — refreshing it becomes "download every shard's artifact from
       # any green run and re-run the generator", with no special measurement
       # run and no CI time spent measuring.
       #
@@ -1265,7 +1300,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
-          name: test-core-run-summary-${{ matrix.shard }}-of-6
+          name: test-core-run-summary-${{ matrix.shard }}-of-8
           path: .turbo/runs/
           if-no-files-found: ignore
           retention-days: 1
@@ -1347,11 +1382,11 @@ jobs:
           shopt -s nullglob
           SUMMARIES=(.turbo/runs/*.json)
           if [ "${#SUMMARIES[@]}" -eq 0 ]; then
-            echo "shard-timing-drift: NOT MEASURED -- Test Core (${{ matrix.shard }}/6) wrote no turbo run summary (no packages on this shard)."
+            echo "shard-timing-drift: NOT MEASURED -- Test Core (${{ matrix.shard }}/8) wrote no turbo run summary (no packages on this shard)."
             exit 0
           fi
           node scripts/partition-test-shards.mjs --check-drift "${SUMMARIES[@]}" \
-            --label "Test Core (${{ matrix.shard }}/6)" --event "$GITHUB_EVENT_NAME"
+            --label "Test Core (${{ matrix.shard }}/8)" --event "$GITHUB_EVENT_NAME"
 
       # Runs even when the suite failed — that is when it earns its keep. It
       # answers TWO questions about a red suite, and needs both to be able to
@@ -1423,7 +1458,7 @@ jobs:
       #
       # Cutting tests is decided per test file BY COST, so the cost has to be
       # visible first. This shard reads the timings it already printed and
-      # hands them up; `Test Core` merges the six and publishes the table.
+      # hands them up; `Test Core` merges every shard's and publishes the table.
       #
       # WHERE THE NUMBERS COME FROM, and why no second test run is needed:
       #   per FILE     the vitest module lines already in `test-core.log`.
@@ -1481,7 +1516,7 @@ jobs:
           node scripts/report-test-timings.mjs --capture \
             --log "$RUNNER_TEMP/test-core.log" \
             --summaries .turbo/runs \
-            --shard "${{ matrix.shard }}/6" \
+            --shard "${{ matrix.shard }}/8" \
             --out "$RUNNER_TEMP/test-timings/shard-${{ matrix.shard }}.json"
 
       # 1 day, matching the run-summary upload above: this is an intermediate
@@ -1493,7 +1528,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
-          name: test-core-timings-${{ matrix.shard }}-of-6
+          name: test-core-timings-${{ matrix.shard }}-of-8
           path: ${{ runner.temp }}/test-timings/
           if-no-files-found: ignore
           retention-days: 1
@@ -1529,7 +1564,7 @@ jobs:
         id: prune-turbo-cache
         if: always() && github.event_name == 'push'
         run: |
-          node scripts/ci/prune-turbo-cache.mjs --site 'Test Core (${{ matrix.shard }}/6)' \
+          node scripts/ci/prune-turbo-cache.mjs --site 'Test Core (${{ matrix.shard }}/8)' \
             --cache .turbo/cache --run-summaries .turbo/runs \
             --extra-summaries "$RUNNER_TEMP/turbo-remote-cache"
 
@@ -1556,13 +1591,13 @@ jobs:
       - name: Attest this shard ran and passed
         run: |
           node scripts/check-shard-attestation.mjs --emit \
-            --job test --shard ${{ matrix.shard }} --total 6 \
+            --job test --shard ${{ matrix.shard }} --total 8 \
             --out "$RUNNER_TEMP/shard-attestation"
 
       - name: Publish this shard's attestation
         uses: actions/upload-artifact@v7
         with:
-          name: shard-attest-test-${{ matrix.shard }}-of-6
+          name: shard-attest-test-${{ matrix.shard }}-of-8
           path: ${{ runner.temp }}/shard-attestation/
           if-no-files-found: error
           retention-days: 1
@@ -1671,7 +1706,7 @@ jobs:
             --dir "$OS_ATTEST_DIR" \
             --filter-result "$OS_FILTER_RESULT" \
             --download-outcome "$OS_DOWNLOAD_OUTCOME" \
-            --leg "test/6:$OS_TEST_RESULT"
+            --leg "test/8:$OS_TEST_RESULT"
 
       # ── The timing table this gate publishes (#16454) ─────────────────────
       #

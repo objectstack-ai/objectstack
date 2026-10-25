@@ -21,10 +21,13 @@
   "dependencies": {
     "@objectstack/core": "workspace:*",
     "@objectstack/objectql": "workspace:*",
+    "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
     "pinyin-pro": "^3.29.4"
   },
   "devDependencies": {
+    "@objectstack/driver-sql": "workspace:*",
+    "@objectstack/platform-objects": "workspace:*",
     "@types/node": "^26.6.3",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",
