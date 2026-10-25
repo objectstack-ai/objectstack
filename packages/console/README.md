@@ -4,7 +4,7 @@
 
 This package contains nothing but a prebuilt `dist/` directory: the static
 assets of the ObjectStack runtime Console, built from
-[`ui/apps/console`](../../ui/apps/console) (`@object-ui/console`) in the same
+`ui/apps/console` (`@object-ui/console`) in the same
 commit of this repository as the framework release that ships it.
 
 You never install it directly. `@objectstack/cli` declares it as a
