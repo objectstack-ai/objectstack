@@ -277,7 +277,7 @@ for (const cell of CELLS) {
         );
         expect(run.error, run.error?.message).toBeUndefined();
         expect(run.rawSql).toBe(1);
-        expect(reads.statements.at(-1)).toContain('ORDER BY "total_seconds" ASC');
+        expect(reads.statements[reads.statements.length - 1]).toContain('ORDER BY "total_seconds" ASC');
         expect(run.value!.rows).toEqual([{ category: 'b', total_seconds: -3599.25 }]);
       });
 

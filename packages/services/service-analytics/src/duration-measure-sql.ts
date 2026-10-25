@@ -15,12 +15,20 @@
  * |---|---|---|
  * | `sqlite` | canonical UTC ISO-8601 TEXT | `ROUND((julianday(to) - julianday(from)) * 86400000) / 1000` |
  * | `postgres` | `timestamptz` | `EXTRACT(EPOCH FROM (to - from))`, as double precision |
- * | `mysql` | `DATETIME(3)`, the UTC wall clock | `TIMESTAMPDIFF(MICROSECOND, from, to) / 1000000` |
+ * | `mysql` | `DATETIME(3)`, the UTC wall clock | `TIMESTAMPDIFF(MICROSECOND, from, to) / 1.0E6` |
+ *
+ * Every arm computes in double precision, so the unit division below keeps
+ * the same digits on each. MySQL's divisor is written `1.0E6`, a DOUBLE
+ * literal: `/ 1000000.0` would be exact-value DECIMAL arithmetic, rounded to
+ * `div_precision_increment` places at each division (5000 s in hours: MySQL
+ * `1.38888889`, a double `1.3888888888888888`).
  *
  * SQLite's `julianday` is a double counted from 4714 BC, so its difference
  * carries float noise below the millisecond. Rounded to the millisecond, the
- * resolution every driver stores a datetime at, the three dialects answer the
- * same number for the same instants. The column references arrive already
+ * resolution every driver stores a datetime at, SQLite and PostgreSQL answer
+ * the same number for the same instants, measured live on both
+ * (`dataset-duration-measure.test.ts`). MySQL's arm is pinned as text only;
+ * this package runs no live MySQL. The column references arrive already
  * passed through the host's temporal repair (`coerceTemporalFilterColumn`), so
  * a legacy SQLite column still holding epoch integers reads as canonical text
  * here too.
@@ -39,7 +47,9 @@
  * datasource whose dialect the host cannot name, and the service refuses it.
  *
  * {@link durationMeasureIn} is here too: the one lookup of a duration measure by
- * name, for this face and for the service's gates.
+ * name, for this face and for the service's gates, and {@link durationMeasureKey}
+ * beside it for the readers that key something else (the measure's scoped
+ * filter) by the same name.
  */
 
 import { DATASET_DURATION_UNIT_SECONDS, type DatasetDurationUnit } from '@objectstack/spec/ui';
@@ -47,16 +57,35 @@ import type { DurationMeasureSpec } from './strategies/types.js';
 import type { AnalyticsSqlDialect } from './text-match-sql.js';
 
 /**
- * The duration measure `name` names in a compiled dataset's `durations` (the
- * dataset scope's `measureDurations`), or `undefined`. The one lookup every
- * reader uses, own keys only, so a measure named after an `Object.prototype`
- * member (`constructor`) is never read as a duration it is not.
+ * The key in a compiled dataset's `durations` (the dataset scope's
+ * `measureDurations`) that the member `name` names, or `undefined`. A member
+ * names a duration measure by its bare name or as `<cube>.<name>`, the spelling
+ * the discovery surface lists it under (`AnalyticsService.getMeta`), when the
+ * caller passes the cube's name. Own keys only, so a measure named after an
+ * `Object.prototype` member (`constructor`) is never read as a duration it is
+ * not.
  */
+export function durationMeasureKey(
+  durations: Readonly<Record<string, DurationMeasureSpec>> | undefined,
+  name: string,
+  cubeName?: string,
+): string | undefined {
+  if (!durations || typeof name !== 'string') return undefined;
+  const own = (key: string) => Object.prototype.hasOwnProperty.call(durations, key);
+  if (own(name)) return name;
+  const prefix = cubeName ? `${cubeName}.` : undefined;
+  if (prefix && name.startsWith(prefix) && own(name.slice(prefix.length))) return name.slice(prefix.length);
+  return undefined;
+}
+
+/** The duration measure {@link durationMeasureKey} finds for `name`, or `undefined`. The one lookup every reader uses. */
 export function durationMeasureIn(
   durations: Readonly<Record<string, DurationMeasureSpec>> | undefined,
   name: string,
+  cubeName?: string,
 ): DurationMeasureSpec | undefined {
-  return durations && Object.prototype.hasOwnProperty.call(durations, name) ? durations[name] : undefined;
+  const key = durationMeasureKey(durations, name, cubeName);
+  return key === undefined ? undefined : durations![key];
 }
 
 /** The dialects {@link durationOperandSql} has an arm for. */
@@ -75,7 +104,7 @@ function durationSecondsSql(dialect: DurationSqlDialect, fromSql: string, toSql:
     case 'postgres':
       return `CAST(EXTRACT(EPOCH FROM (${toSql} - ${fromSql})) AS DOUBLE PRECISION)`;
     case 'mysql':
-      return `(TIMESTAMPDIFF(MICROSECOND, ${fromSql}, ${toSql}) / 1000000.0)`;
+      return `(TIMESTAMPDIFF(MICROSECOND, ${fromSql}, ${toSql}) / 1.0E6)`;
   }
 }
 

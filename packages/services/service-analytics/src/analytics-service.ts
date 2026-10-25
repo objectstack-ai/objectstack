@@ -112,7 +112,7 @@ import {
 } from './dimension-labels.js';
 import { evaluateAnalyticsQueryOverRows } from './preview-evaluator.js';
 // [#25778] The one lookup of a dataset duration measure by name.
-import { durationMeasureIn } from './duration-measure-sql.js';
+import { durationMeasureIn, durationMeasureKey } from './duration-measure-sql.js';
 // [#5918] The measure mint refuses a dotted member through the SAME constructor
 // the strategies' member-level refusals use — `INVALID_FIELD` / 400, naming the
 // member as the request spelled it (see `dataset-refusal.ts`'s header for why
@@ -547,10 +547,13 @@ function namedQueryFields(
   };
   // [#25778] A dataset duration measure is absent from the cube (fail-closed,
   // `DatasetScope.measureDurations`), so `name` would read nothing for it. It
-  // reads its two columns, and is judged on both.
+  // reads its two columns, and is judged on both. Resolved FIRST, as the mint,
+  // `assertCallerMembersResolvable` and `NativeSQLStrategy` resolve it: a
+  // dimension may share the measure's name, and that dimension's column is not
+  // what the measure aggregates.
   const durationColumns = (member: string, role: FieldReadRole): boolean => {
-    const duration = durationMeasureIn(datasetScope?.measureDurations, member);
-    if (!duration || declaredMemberEntry(cube, member, 'any')) return false;
+    const duration = durationMeasureIn(datasetScope?.measureDurations, member, cube.name);
+    if (!duration) return false;
     for (const column of [duration.from, duration.to]) {
       const fields = fieldsOfColumnSql(cube, baseObject, column, role, referenceOf);
       if (fields) out.push(...fields);
@@ -572,12 +575,17 @@ function namedQueryFields(
   for (const member of query.measures ?? []) if (!durationColumns(member, 'aggregate')) name(member, 'measure', 'aggregate');
   for (const member of filterMembers((query as { where?: unknown }).where)) name(member, 'any', 'predicate');
   for (const measure of query.measures ?? []) {
-    for (const member of filterMembers(datasetScope?.measureFilters?.[measure])) name(member, 'any', 'predicate');
+    const filterKey = durationMeasureKey(datasetScope?.measureDurations, measure, cube.name) ?? measure;
+    for (const member of filterMembers(datasetScope?.measureFilters?.[filterKey])) name(member, 'any', 'predicate');
   }
   for (const member of filterMembers(datasetScope?.filter)) name(member, 'any', 'predicate');
   const order = (query as { order?: unknown }).order;
   if (order && typeof order === 'object' && !Array.isArray(order)) {
-    for (const key of Object.keys(order)) if (!durationColumns(key, 'predicate')) name(key, 'any', 'predicate');
+    // An order key naming both a duration measure and a declared member is
+    // judged as both.
+    for (const key of Object.keys(order)) {
+      if (!durationColumns(key, 'predicate') || declaredMemberEntry(cube, key, 'any')) name(key, 'any', 'predicate');
+    }
   }
   return [...out.filter((f) => f.object === baseObject), ...out.filter((f) => f.object !== baseObject)];
 }
@@ -2171,7 +2179,7 @@ export class AnalyticsService implements IAnalyticsService {
       // Author-declared measures are not this gate's business. [#25778] A
       // dataset's duration measure is one, declared beside the cube.
       if (authorCube && declaredMemberEntry(authorCube, measure, 'measure')) continue;
-      if (durationMeasureIn(scope.getCompiledDataset(name)?.durations, measure)) continue;
+      if (durationMeasureIn(scope.getCompiledDataset(name)?.durations, measure, name)) continue;
       const inferredSql = inferredCallerMeasureSql(measure, name);
       // `null` — a dotted non-qualifier measure #5918 already refused — and a
       // column reference (`'*'`, a bare identifier, a relationship path) both
@@ -3238,13 +3246,24 @@ export class AnalyticsService implements IAnalyticsService {
       name: cube.name,
       title: cube.title,
       ...(cube.description === undefined ? {} : { description: cube.description }),
-      measures: Object.entries(cube.measures).map(([key, measure]) => ({
-        name: `${cube.name}.${key}`,
-        type: measure.type,
-        title: measure.label,
-        ...(measure.description === undefined ? {} : { description: measure.description }),
-        ...(measure.format === undefined ? {} : { format: measure.format }),
-      })),
+      measures: [
+        ...Object.entries(cube.measures).map(([key, measure]) => ({
+          name: `${cube.name}.${key}`,
+          type: measure.type,
+          title: measure.label,
+          ...(measure.description === undefined ? {} : { description: measure.description }),
+          ...(measure.format === undefined ? {} : { format: measure.format }),
+        })),
+        // [#25778] A registered dataset's duration measures are absent from
+        // `cube.measures` (fail-closed) yet answer on the cube door, so the
+        // discovery surface lists them from the compiled dataset of THIS cube.
+        ...Object.entries(this.compiledDatasetOf(cube)?.durations ?? {}).map(([key, duration]) => ({
+          name: `${cube.name}.${key}`,
+          type: duration.aggregate,
+          title: duration.label ?? key,
+          ...(duration.format === undefined ? {} : { format: duration.format }),
+        })),
+      ],
       dimensions: Object.entries(cube.dimensions).map(([key, dimension]) => ({
         name: `${cube.name}.${key}`,
         type: dimension.type,
@@ -3300,6 +3319,12 @@ export class AnalyticsService implements IAnalyticsService {
 
   // ── Internal ─────────────────────────────────────────────────────
 
+  /** The compiled dataset a registered cube came from, or nothing when another cube took the name. */
+  private compiledDatasetOf(cube: Cube): CompiledDataset | undefined {
+    const compiled = this.datasetRegistry.get(cube.name);
+    return compiled?.cube === cube ? compiled : undefined;
+  }
+
   /**
    * [#25778] Refuse a dataset duration measure the chosen strategy does not
    * serve — `INVALID_FIELD` / 400, naming the measure, before anything runs.
@@ -3318,7 +3343,7 @@ export class AnalyticsService implements IAnalyticsService {
   private assertDurationMeasuresServed(query: AnalyticsQuery, scope: CubeScope, strategy: AnalyticsStrategy): void {
     if (strategy instanceof NativeSQLStrategy) return;
     const durations = scope.getCompiledDataset(query.cube!)?.durations;
-    const measure = (query.measures ?? []).find((m) => durationMeasureIn(durations, m));
+    const measure = (query.measures ?? []).find((m) => durationMeasureIn(durations, m, query.cube));
     if (measure === undefined) return;
     throw invalidMemberError(
       `Measure "${measure}" of dataset "${query.cube}" is a duration, the time between two datetime fields ` +
@@ -3468,7 +3493,7 @@ export class AnalyticsService implements IAnalyticsService {
     const durations = scope.getCompiledDataset(name)?.durations;
     for (const m of query.measures || []) {
       if (cube.measures[m] || extraMeasures[m]) continue;
-      if (durationMeasureIn(durations, m)) continue;
+      if (durationMeasureIn(durations, m, name)) continue;
       const key = mintableMeasureKey(m, name);
       if (cube.measures[key] || extraMeasures[key]) continue;
       // [#21437] A spelling whose source names no field (`_sum`, `*`) is

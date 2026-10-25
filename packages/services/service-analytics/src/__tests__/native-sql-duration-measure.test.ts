@@ -77,8 +77,8 @@ describe('[#25778] NativeSQLStrategy — the duration measure as a statement', (
     ],
     [
       'mysql',
-      'AVG(((TIMESTAMPDIFF(MICROSECOND, opened_at, resolved_at) / 1000000.0) / 3600.0)) AS "avg_hours"',
-      'SUM(CASE WHEN priority = $1 THEN (TIMESTAMPDIFF(MICROSECOND, opened_at, resolved_at) / 1000000.0) END) AS "total_seconds"',
+      'AVG(((TIMESTAMPDIFF(MICROSECOND, opened_at, resolved_at) / 1.0E6) / 3600.0)) AS "avg_hours"',
+      'SUM(CASE WHEN priority = $1 THEN (TIMESTAMPDIFF(MICROSECOND, opened_at, resolved_at) / 1.0E6) END) AS "total_seconds"',
     ],
   ])('%s: the per-dialect difference, divided by the unit, under the aggregate and its measure filter', async (dialect, avg, filteredSum) => {
     const { sql, params } = await native.generateSql(q(), nativeCtx({ dialect }));
@@ -255,6 +255,88 @@ describe('[#25778] AnalyticsService — the gates a duration measure passes thro
     const { service, executed } = makeService({ draftRows });
     const res = await service.queryDataset(dataset, { measures: ['resolution_seconds_sum'], dimensions: ['category'] } as never, MEMBER, { previewDrafts: true });
     expect(res.rows).toEqual([{ category: 'a', resolution_seconds_sum: 5400 }]);
+    expect(executed).toEqual([]);
+  });
+
+  it('a dimension sharing its name does not hide its columns from the read gate', async () => {
+    const shadowed = DatasetSchema.parse({
+      ...DATASET_BASE,
+      dimensions: [...DATASET_BASE.dimensions, { name: 'resolution_seconds_sum', field: 'category', type: 'string' }],
+    });
+    const { service, executed } = makeService({ readable: FIELDS.filter((f) => f !== 'resolved_at') });
+    const err = await refusalOf(service.queryDataset(shadowed, { measures: ['resolution_seconds_sum'], dimensions: ['category'] } as never, MEMBER));
+    expect(err?.code, err?.message).toBe('PERMISSION_DENIED');
+    expect(err?.status).toBe(403);
+    expect(err?.message).toContain('resolved_at');
+    expect(executed).toEqual([]);
+  });
+
+  describe('on the cube door, under the `<cube>.<name>` spelling the discovery surface lists', () => {
+    const listed = DatasetSchema.parse({
+      ...DATASET_BASE,
+      measures: [
+        ...DATASET_BASE.measures,
+        {
+          name: 'high_hours',
+          label: 'High-priority hours',
+          aggregate: 'avg',
+          format: '0.0',
+          filter: { priority: 'high' },
+          duration: { from: 'opened_at', to: 'resolved_at', unit: 'hours' },
+        },
+      ],
+    });
+
+    it('getMeta lists each duration measure with its aggregate, label and format', async () => {
+      const { service } = makeService();
+      service.registerDataset(listed);
+      const [meta] = await service.getMeta(listed.name);
+      expect(meta.measures.filter((m) => m.name !== `${listed.name}.tickets`)).toEqual([
+        { name: 'resolution.resolution_seconds_sum', type: 'sum', title: 'resolution_seconds_sum' },
+        { name: 'resolution.high_hours', type: 'avg', title: 'High-priority hours', format: '0.0' },
+      ]);
+    });
+
+    it('the listed spelling is served as the bare one, its scoped filter included, under the name asked', async () => {
+      const { service, executed } = makeService();
+      service.registerDataset(listed);
+      await service.query({ cube: listed.name, measures: ['resolution.high_hours'], dimensions: ['category'] } as never, MEMBER);
+      expect(executed).toHaveLength(1);
+      expect(executed[0]).toContain('AVG(CASE WHEN priority = $1 THEN ((ROUND((julianday(resolved_at) - julianday(opened_at))');
+      expect(executed[0]).toContain('AS "resolution.high_hours"');
+    });
+
+    it('the read gate and the strategy refusal know the listed spelling too', async () => {
+      const gated = makeService({ readable: FIELDS.filter((f) => f !== 'opened_at') });
+      gated.service.registerDataset(listed);
+      const denied = await refusalOf(gated.service.query({ cube: listed.name, measures: ['resolution.high_hours'] } as never, MEMBER));
+      expect(denied?.code, denied?.message).toBe('PERMISSION_DENIED');
+      expect(denied?.status).toBe(403);
+      expect(gated.executed).toEqual([]);
+
+      const offNative = makeService({ capabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }) });
+      offNative.service.registerDataset(listed);
+      const refused = await refusalOf(offNative.service.query({ cube: listed.name, measures: ['resolution.high_hours'] } as never, MEMBER));
+      expect(refused?.code, refused?.message).toBe('INVALID_FIELD');
+      expect(refused?.status).toBe(400);
+      expect(refused?.member).toBe('resolution.high_hours');
+      expect(offNative.executed).toEqual([]);
+    });
+  });
+
+  it('a field-to-field filter routes the query off the native strategy, and the measure is refused by name', async () => {
+    const { service, executed } = makeService();
+    service.registerDataset(dataset);
+    const err = await refusalOf(
+      service.query({
+        cube: dataset.name,
+        measures: ['resolution_seconds_sum'],
+        where: { resolved_at: { $gt: { $field: 'opened_at' } } },
+      } as never, MEMBER),
+    );
+    expect(err?.code, err?.message).toBe('INVALID_FIELD');
+    expect(err?.status).toBe(400);
+    expect(err?.member).toBe('resolution_seconds_sum');
     expect(executed).toEqual([]);
   });
 

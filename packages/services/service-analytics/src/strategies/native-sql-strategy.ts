@@ -46,7 +46,7 @@ import { type LikeShape } from '../like-pattern.js';
 import { textMatchPredicateSql, sqlDialectFor, type AnalyticsSqlDialect } from '../text-match-sql.js';
 import { whereContainsMembershipSql } from '../contains-membership-sql.js';
 // [#25778] The per-row operand of a dataset duration measure, per dialect.
-import { durationMeasureIn, durationOperandSql, hasDurationSql } from '../duration-measure-sql.js';
+import { durationMeasureIn, durationMeasureKey, durationOperandSql, hasDurationSql } from '../duration-measure-sql.js';
 import { isJsonStoredShape } from '../contains-membership-sql.js';
 import { expandEmptyOperator } from '@objectstack/spec/data';
 import { resolveAnalyticsDateRangeString } from '@objectstack/core';
@@ -798,7 +798,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     const cube = query.cube ? ctx.getCube(query.cube) : undefined;
     if (!cube) return false;
     const durations = (ctx as DatasetScopedStrategyContext).getDatasetScope?.(query.cube!)?.measureDurations;
-    if (!(query.measures ?? []).some((measure) => durationMeasureIn(durations, measure))) return false;
+    if (!(query.measures ?? []).some((measure) => durationMeasureIn(durations, measure, cube.name))) return false;
     return !hasDurationSql(sqlDialectFor(ctx, this.extractObjectName(cube)));
   }
 
@@ -1130,7 +1130,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // its aggregate in the dataset scope; it folds by that aggregate, and it
     // answers a number whatever its aggregate.
     const durations = (ctx as DatasetScopedStrategyContext).getDatasetScope?.(query.cube!)?.measureDurations;
-    const durationOf = (member: string) => durationMeasureIn(durations, member);
+    const durationOf = (member: string) => durationMeasureIn(durations, member, cube.name);
     const folds: Array<readonly [string, number]> = [];
     for (const member of query.measures ?? []) {
       const identity = emptyGroupValueFor(durationOf(member)?.aggregate ?? this.lookupMember(cube, member, 'measure')?.type);
@@ -1294,7 +1294,10 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
         // loop, so its bound values are pushed onto `params` in the order the
         // placeholders appear in the statement — the SELECT list precedes the
         // WHERE clause, and `$n` is positional.
-        const measureFilter = datasetScope?.measureFilters?.[measure];
+        // [#25778] A duration measure named `<cube>.<name>` reads the filter
+        // its dataset scoped under `<name>`.
+        const durationKey = durationMeasureKey(datasetScope?.measureDurations, measure, cube.name);
+        const measureFilter = datasetScope?.measureFilters?.[durationKey ?? measure];
         const predicate = measureFilter
           ? this.compileFilterNode(
               normalizeAnalyticsFilterTree(judgedComparands({ where: measureFilter }, comparandTypeOf), lowering),
@@ -1305,7 +1308,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
               ctx,
             )
           : null;
-        const duration = durationMeasureIn(datasetScope?.measureDurations, measure);
+        const duration = durationKey === undefined ? undefined : datasetScope!.measureDurations![durationKey];
         const aggExpr = duration
           ? this.resolveDurationMeasureSql(cube, measure, duration, tableName, joins, predicate, ctx)
           : this.resolveMeasureSql(cube, measure, tableName, joins, predicate, ctx);

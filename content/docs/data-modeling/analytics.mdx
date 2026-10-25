@@ -107,10 +107,10 @@ in place of `field`:
 ```
 
 - `from` and `to` name two `datetime` fields of the dataset's own object, by
-  their bare names. A relationship path, an expression, or a `date`, `time`,
-  number or text field is refused: `os validate` reports
-  `measure-duration-field-type-refused`, and the dataset compile answers
-  `400 DATASET_INVALID`.
+  their bare names. A relationship path or an expression is refused when the
+  dataset is parsed. A `date`, `time`, number or text field is refused too:
+  `os validate` reports `measure-duration-field-type-refused`, and the dataset
+  compile answers `400 DATASET_INVALID`.
 - `unit` is `seconds`, `minutes`, `hours` or `days`, and the measure answers a
   number of them (`1.5` hours). `aggregate` is `avg`, `min`, `max` or `sum`.
 - A record missing either instant is left out, as a null is left out of an
@@ -119,8 +119,8 @@ in place of `field`:
   nothing.
 - A measure `filter`, and a `derived` measure naming the duration measure in
   `of`, work as they do for any measure.
-- It runs as one SQL statement on SQLite, PostgreSQL and MySQL, and answers the
-  same number on each. A query the service cannot compile to one such
+- It runs as one SQL statement on SQLite, PostgreSQL and MySQL, computed in
+  double precision on each. A query the service cannot compile to one such
   statement is refused with `400 INVALID_FIELD` naming the measure, rather than
   answered another way: a time dimension bucketed by `granularity` (a monthly
   trend), a field-to-field comparison in a filter, an object served through

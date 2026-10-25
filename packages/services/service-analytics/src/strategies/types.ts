@@ -95,6 +95,13 @@ export interface DurationMeasureSpec {
   from: string;
   to: string;
   unit: DatasetDurationUnit;
+  /**
+   * Display only, read by the discovery surface (`AnalyticsService.getMeta`),
+   * which lists the measure though the cube does not carry it: the measure's
+   * resolved `label` and its `format`. No strategy reads either.
+   */
+  label?: string;
+  format?: string;
 }
 
 /** A {@link StrategyContext} that can answer for a compiled dataset (#10298). */

@@ -866,7 +866,7 @@ export function evaluateAnalyticsQueryOverRows(
     for (const m of query.measures) {
       // [#25778] A dataset duration measure, absent from the cube: its
       // aggregate over each row's duration, through the same arms.
-      const duration = durationMeasureIn(durations, m);
+      const duration = durationMeasureIn(durations, m, cube.name);
       if (duration) {
         row[m] = aggregate(g.rows.map((r) => ({ [DURATION_OPERAND]: durationOf(r, duration) })), duration.aggregate, DURATION_OPERAND);
         continue;

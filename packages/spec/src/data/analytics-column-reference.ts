@@ -96,7 +96,7 @@ export const ANALYTICS_COLUMN_PATH = new RegExp(`^${COLUMN_PATH}$`);
  * column of the dataset's OWN object, by its bare name: the slot of a duration
  * measure's `from` / `to` (`DatasetMeasureDurationSchema`,
  * `../ui/dataset.zod.ts`), which reads two columns of the same row. Built from
- * the same identifier as {@link COLUMN_PATH}, never a second spelling of it.
+ * the same identifier as {@link COLUMN_PATH}.
  */
 export const ANALYTICS_BASE_COLUMN = new RegExp(`^${IDENTIFIER}$`);
 

@@ -456,7 +456,12 @@ function assertAggregateFieldTypeCompatible(
   );
 }
 
-/** One column of the base object by its bare name — the spec's `duration.from` / `to` shape. */
+/**
+ * One column of the base object by its bare name — the spec's `duration.from` /
+ * `to` shape (`ANALYTICS_BASE_COLUMN`, which `@objectstack/spec` does not
+ * export). Judged again here because a dataset can reach the compile without
+ * passing the schema.
+ */
 const DURATION_BASE_COLUMN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /**
@@ -519,7 +524,15 @@ function compileDurationMeasure(
       );
     }
   }
-  return { aggregate: aggregate as DurationMeasureSpec['aggregate'], from, to, unit };
+  return {
+    aggregate: aggregate as DurationMeasureSpec['aggregate'],
+    from,
+    to,
+    unit,
+    // [#6761] The same registry-locale label a cube metric gets.
+    label: resolveI18nLabel(measure.label, REGISTRY_LOCALE) ?? measure.name,
+    ...(typeof measure.format === 'string' ? { format: measure.format } : {}),
+  };
 }
 
 /** Map a dataset dimension type to the Cube dimension `type`. */

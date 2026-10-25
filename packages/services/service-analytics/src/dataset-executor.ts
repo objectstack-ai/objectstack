@@ -1196,7 +1196,7 @@ export class DatasetExecutor {
     // aggregate beside it.
     const fillColumns: Record<string, string | undefined> = {};
     for (const m of baseMeasures) {
-      const aggregate = compiled.cube.measures?.[m]?.type ?? durationMeasureIn(compiled.durations, m)?.aggregate;
+      const aggregate = compiled.cube.measures?.[m]?.type ?? durationMeasureIn(compiled.durations, m, compiled.cube.name)?.aggregate;
       fillColumns[m] = aggregate;
       if (selection.compareTo) fillColumns[`${m}__compare`] = aggregate;
     }
