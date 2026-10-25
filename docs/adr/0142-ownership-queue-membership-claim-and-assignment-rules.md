@@ -24,7 +24,7 @@ exists to retire. **This record declares; it implements nothing** — no schema,
   phase is **one** PR.
 
 **Builds on**: [ADR-0019](./0019-approval-as-flow-node.md) (approval is a flow node; approver resolution, `queue`
-included, moved under it verbatim), [ADR-0029](./0029-kernel-object-ownership-and-platform-objects-decomposition.md)
+included, "moved nearly verbatim under the node"), [ADR-0029](./0029-kernel-object-ownership-and-platform-objects-decomposition.md)
 (a capability plugin owns its `sys_*` objects and its behaviour), [ADR-0049](./0049-no-unenforced-security-properties.md)
 (enforced / `experimental` / absent — no fourth state), [ADR-0056](./0056-permission-model-landing-verification.md) D3, D5,
 [ADR-0057](./0057-erp-authorization-core-business-units-and-scope-depth.md) D1, D3, D5 (scope depth on `owner_id`;
@@ -259,7 +259,8 @@ has the two sources `sharing_rule` has (ADR-0131 D6, the 2026-10-19 regime-C not
   use and never materialised as rows (ADR-0131 D2). Managed, read-only, clonable; switched off by an `active` bit of
   `sys_metadata_activation` of type `queue` — regime C exactly as the sharing-rule note charts it. A declared queue's
   members may name **positions only**: a position is a catalog item a package can know by name; a user, team or
-  business unit is an organization's own row (ADR-0086 D1's hybrid line, drawn where that record draws it).
+  business unit is an organization's own row (ADR-0086 D1's hybrid line, drawn where that record draws it; merge
+  question 18).
 - **Authored.** An organization authors its own in `sys_queue` (`managedBy: 'config'`, `organization_id` NOT NULL,
   ADR-0131 D1) with members in `sys_queue_member` rows (one row per member specification: `queue`, `recipient_type`,
   `recipient_id`, `organization_id`). Any of the five set-valued kinds is allowed (D2).
@@ -282,7 +283,8 @@ When no queue service is registered, no queue exists: every queue-dependent admi
 posture: owner enforcement never depends on which plugins loaded), and a stack that declares `queues` or
 `assignmentRules` in a composition that registers no queue service is **refused at boot by name** — by the engine, which
 is always present, at `kernel:ready`, in the fail-fast shape of ADR-0093 D5, naming the key and the missing service — a
-declared queue nothing resolves, or a rule nothing evaluates, is the silently inert instance ADR-0078 forbids. Both keys
+declared queue nothing resolves, or a rule nothing evaluates, is the silently inert instance ADR-0078 forbids (merge
+question 17). Both keys
 join the engine's stack-collection list (`METADATA_ARRAY_KEYS`, beside `sharingRules` and `positions`), and both types
 join the `metadata_type` vocabulary of `sys_metadata_activation`
 (`packages/platform-objects/src/system/sys-metadata-activation.object.ts`). Merge question 2 carries the shape and the
@@ -383,8 +385,9 @@ is refused. Merge question 14 carries the alternatives. Explain gains the reason
 
 **One owner.** The write is conditional on the pre-image — "where `owner_id` is still empty" — so two callers claiming
 at once produce exactly one owner. The engine has no such primitive on its by-id update today (the by-id branch reads the
-prior record and calls `driver.update(object, id, data)`); the PR adds a **by-id write precondition**, an equality
-predicate the caller supplies (`expect: { <field>: <value> }`) with two users: the claim (`{ owner_id: null }`, set by
+prior record and calls `driver.update(object, id, data)`); the PR adds a **by-id write precondition**, an engine-internal
+equality predicate (`expect: { <field>: <value> }`, reachable from no data door — merge question 16) with two users: the
+claim (`{ owner_id: null }`, set by
 the gate on the operation context as it sets the depth today) and D5's cursor (`{ version }`). The engine lowers the
 write to the driver's conditional `updateMany(object, { where: { id, ...expect } }, data)` where the driver has it; one
 affected row is re-read by id and the by-id branch continues unchanged — hooks, formulas, the per-record event, the
@@ -524,10 +527,10 @@ The recipient becomes authorable in the same PR when **all** of the following ho
    look through queues, and the BU-tree module treats a queue with a BU-kind member as BU-tree-reading. A queue recipient
    whose grants are not recomputed when its membership moves is the unbounded revocation gap the BU module's header
    describes, and is not admitted.
-4. The lint red-line table re-decides `queue` where its own comment says to: on a platform-global object
-   (`tenancy.enabled: false`) a queue recipient is admitted when the queue's **declared** members are of the three flat
-   kinds, and refused when any member is a BU kind — the rule the table already applies per kind, read through the queue;
-   an organization-authored queue is not readable at lint time and is judged at runtime by the same predicate.
+4. The lint red-line table re-decides `queue` where its own comment says to: a declared queue's members are positions
+   (D1), a flat kind the table already admits on a platform-global object (`tenancy.enabled: false`), so the `queue`
+   recipient is admitted there at lint time; an organization-authored queue is not readable at lint time, and one whose
+   members include a BU kind is refused on a global object at runtime by the same predicate, read through the queue.
 5. The other readers move with the enum: `SysSharingRule.recipient_type`'s select options (whose comment says `queue`
    "was removed"; `packages/plugins/plugin-sharing/src/field-recipient.test.ts` holds them a superset of the enum), the
    `SharingLevel` comment in `sharing.zod.ts` that cites the drop, `access-level.ts`'s stale sentence, the dogfood
@@ -721,6 +724,27 @@ objection names the number.
     absent and every admission inapplicable (ADR-0078); a suffixed name (`owner_queue`) avoids the collision at the price
     of a less legible column whose name differs from the type's. The recommendation is loud and names the fix; its cost
     is an upgrade-time refusal for an app that already has the field.
+16. **The by-id write precondition (`expect`) is engine-internal: set by the gate for a claim and by the assignment seam
+    for the cursor, reachable from no data door.** Exposing it on the data API (a conditional update, `If-Match`-like,
+    through REST and the SDK) would give every app optimistic concurrency — a real want — at the price of a new request
+    vocabulary through every door, a 409 every client must learn to handle, a spec key and ledger entry of its own, and
+    a platform-wide contract decided on a queue card. The recommendation keeps the primitive private to D4's two users;
+    exposing it later is additive and needs no undo.
+17. **A stack that declares `queues` or `assignmentRules` with no queue service registered is refused at boot, not
+    warned about.** AGENTS.md puts a functional degradation at `warn`, and a loud warning would keep a lean composition
+    booting; but this degraded state is not cosmetic — every insert the rules cover parks nowhere and every claim fails
+    closed, with the declaring package none the wiser — and ADR-0093 D5 is the precedent for failing fast on a degraded
+    middle state. Cost of the recommendation: a composition that ships such a package and deliberately omits
+    `plugin-sharing` cannot boot until it drops the keys or adds the plugin. Cost of the warning: ADR-0078's inert
+    instance, alive for the process's lifetime behind one log line.
+18. **A declared queue's members are positions only; users, teams and business units join a queue through authored
+    `sys_queue_member` rows.** Drafter-derived, not ruled: ADR-0131 D3 makes positions environment-level catalog items
+    and assignments organization rows, ADR-0131 D4 has packages name catalog items by machine name, and ADR-0086 D1
+    calls a packaged sharing rule's recipient that names a real team the config half of a hybrid artifact. The
+    alternative lets a declared queue name any of the five kinds with `os lint` at `warning` — the treatment D5 already
+    gives a declared rule's `assignTo: user` — so a package could ship a desk staffed by a named team; its cost is
+    organization ids inside sealed package metadata that resolve on no other install, and a config binding inside an
+    artifact the organization cannot edit, only clone. Recommendation: positions only.
 
 ---
 
