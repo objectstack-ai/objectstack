@@ -59,7 +59,8 @@ and `refuseCoOwnedObjectNameCollision` in `registry.ts`; the manifest service in
 `@objectstack/metadata-protocol` (`installPackage` in `protocol-package-install.ts`; `resolveWritePackageScope` in
 `protocol.ts`), `@objectstack/runtime` (`POST /api/v1/packages` and `PATCH /api/v1/packages/:id`, `domains/packages.ts`),
 `@objectstack/cloud-connection` (`POST /api/v1/marketplace/install-local`), the `objectui` Console's install refusal
-text, `packages/cli` (`os package publish`), and HotCRM's module split.
+text, `packages/cli` and `packages/lint` (`os package publish`; the `os lint` / `os validate` range rule of D2), and
+HotCRM's module split.
 **Evidence**: every anchor into this repository was read at `origin/main` `47af3dde42`, the base of this record's branch
 (the tree outside `docs/adr/` is identical at the record's head). `objectstack-ai/hotcrm` and `objectstack-ai/cloud` are
 not readable from the drafting session; their facts are cited as the rulings and the HotCRM seat cite them and marked
@@ -77,16 +78,19 @@ added; one gate learns a second source of co-owners:
    `dependencies` declare (transitively), platform objects, and tenant objects that belong to no package. An undeclared
    cross-app reference is refused there today, `422`, with "declare a dependency" as the fix.
 3. **The one new gate is a pre-install check.** Installing a package judges every declared dependency — installed in the
-   target environment (or delivered by the same artifact) and at a version inside the declared range — and otherwise
-   refuses the whole install, before anything registers, with a message naming what is missing (the ruling's example:
-   「请先安装 HotCRM 6.x」). It fills the `dependency_missing` category `AppCompatibilityCheckSchema` has reserved with no
-   producer.
+   target environment at a version inside the declared range, or delivered by the same artifact (presence only: the
+   artifact is one tested unit) — and otherwise refuses the whole install, before anything registers, with a message
+   naming what is missing (the ruling's example: 「请先安装 HotCRM 6.x」). It fills the `dependency_missing` category
+   `AppCompatibilityCheckSchema` has reserved with no producer. The range grammar it reads is stated by the runtime
+   card, and the author's tooling reports an unreadable range before install.
 4. **A package that declares a dependency on an installed package X and uses X's namespace co-owns that namespace with
-   X at the install gate.** One-way: X declares nothing and gains nothing. ADR-0130 D3's per-object-name uniqueness
-   check spans these co-owners across artifacts exactly as it spans co-owners inside one artifact.
+   X at the install gate — and with X's other declared dependents that use it (siblings under one declared parent).**
+   One-way: X declares nothing and gains nothing. ADR-0130 D3's per-object-name uniqueness check spans these co-owners
+   across artifacts exactly as it spans co-owners inside one artifact.
 5. **Deferred, by name, with a trigger each**: uninstall protection, upgrade interception, topological / cascade install,
-   an owner-side publish marker, marketplace version negotiation. **Permissions are unchanged**; record-level semantics
-   across a dependency are an open section, decided with the first consumer.
+   an owner-side publish marker, marketplace version negotiation, and judging a post-install edit of `dependencies`.
+   **Permissions are unchanged**; record-level semantics across a dependency are an open section, decided with the first
+   consumer.
 
 The first consumer is a HotCRM module shipping on its own, revenue first.
 
@@ -153,8 +157,11 @@ installed HotCRM whatever it declares — the HotCRM seat's input 1, confirmed.
 `objectstack-ai/cloud` — **not measured** here.
 
 **In-repo declaring population**: one manifest — `examples/app-multi-package/src/packages/orders/index.ts` declares
-`dependencies: { 'com.example.multi.core': '^1.0.0' }` on the package delivered beside it in the same artifact. HotCRM's
-manifests are **not measured** (the seat's input says every one declares `namespace: 'crm'`).
+`dependencies: { 'com.example.multi.core': '^1.0.0' }` on the package delivered beside it in the same artifact; each of the
+two packages declares its own `version: '1.0.0'` (`examples/app-multi-package/src/packages/core/index.ts`), and
+`composeStacks(…, { manifest: 'preserve' })` (`packages/spec/src/stack.zod.ts#composeStacks`) carries each manifest into
+the artifact as authored. HotCRM's manifests are **not measured** (the seat's input says every one declares
+`namespace: 'crm'`).
 
 ### 2. Why now, and for whom
 
@@ -202,12 +209,17 @@ satisfied when both hold:
    yet "installed" at that moment, and refusing it would refuse `examples/app-multi-package` and every product split under
    ADR-0130. It mirrors the one reader the key already has at install: inside the artifact a declared id is an edge,
    outside it is a question for this check.
-2. **In range.** The installed record's `manifest.version` — or, for a co-delivered package, that package's declared
-   version (one per artifact under ADR-0130 D6) — satisfies `range`, read in the npm semver range grammar
-   `ManifestSchema.dependencies` already documents and `engines.protocol` already uses. A version or range the reader
-   cannot parse does **not** satisfy; the refusal says which side was unreadable. Fail closed: an unread bound is not a
-   bound — deliberately the opposite of the protocol handshake beside it, which admits an unrecognised `engines.protocol`
-   range with a warning (merge question 6 says why).
+2. **In range — for an installed record.** The record's `manifest.version` satisfies `range`, read in the npm semver
+   range grammar `ManifestSchema.dependencies` already documents and `engines.protocol` already uses. A dependency the
+   same artifact delivers is judged for **presence only**: the packages of one artifact each carry their own
+   `manifest.version` (Context §1 — `core` and `orders` both declare `1.0.0`, and `composeStacks` keeps each as
+   authored), so an artifact that bumps its core to `2.0.0` while a module still declares `^1.0.0` would be refused by
+   the platform over a unit its publisher built, versioned and tested as one (ADR-0130 D6). D2 says nothing about such
+   an entry — not a warning either: both packages sit in front of `os lint`, which is where an in-artifact range
+   mismatch is reported (the author-side rule below), and an install is not where an author first hears of it. A
+   version or range the reader cannot parse does **not** satisfy; the refusal says which side was unreadable. Fail
+   closed: an unread bound is not a bound — deliberately the opposite of the protocol handshake beside it, which admits
+   an unrecognised `engines.protocol` range with a warning (merge question 6 says why).
 
 Every record entry is required: the record shape has no optional arm (D8 says how the marketplace shape's `optional`
 projects). Only P's **own** entries are judged — a dependency's dependencies were judged when it was installed.
@@ -234,10 +246,21 @@ sits at each). The check sits beside that handshake:
   hands the artifact to the manifest service — the same placement the picklist and bound-action seals already use in
   `packages/objectql/src/plugin.ts`: "a refused install registers nothing".
 
-One predicate serves every door; ⛔ no door carries its own copy. The range is read by one of the readers the tree already
-has (`packages/core/src/dependency-resolver.ts#SemanticVersionManager`, or
-`packages/metadata-core/src/artifact-forward-conversion.ts#parseRangeFloor` and its siblings), extended if it must be —
-⛔ never a third semver implementation.
+One predicate serves every door; ⛔ no door carries its own copy.
+
+**The range reader, and the grammar it must state.** No package under `packages/` carries a semver library (the root
+`semver` is a devDependency nothing there imports), and the tree's two range readers each read less than the grammar
+the key documents: `packages/core/src/dependency-resolver.ts#SemanticVersionManager` accepts `*`, `latest`, an exact
+version, one `^` `~` `>=` `>` `<=` `<` operator and `a - b`, answers `false` or throws on the rest — `6.x`, a
+space-separated intersection, a `||` union — and its `parse` wants three numeric parts, so `^6` throws;
+`packages/metadata-core/src/artifact-forward-conversion.ts#parseRangeFloor` computes only a lower bound. Two things
+follow. The runtime card **states the grammar the check supports** — at least `^`, `~`, `>=`, an `x` wildcard, `||` and
+the space intersection, so the ruling's own 「HotCRM 6.x」 is readable — by extending one of those readers, ⛔ never a
+third semver implementation. And the author side catches an unreadable `dependencies` range **before** install: an
+`os lint` / `os validate` rule beside the `engines.protocol` reading `os validate` already performs
+(`packages/cli/src/utils/protocol-version-gap.ts#checkProtocolVersionGap`) reports a range outside the stated grammar
+and, inside one artifact, a co-delivered entry whose range the sibling's declared version does not satisfy. Fail-closed
+at install is the backstop, not the place an author learns the grammar.
 
 **Where it does not run — re-registration.** A boot re-registers what an environment already holds: code-composed
 packages through the manifest service at `init`/`start`, the `sys_packages` rehydrate (`packages/services/service-package/src/index.ts`),
@@ -246,6 +269,11 @@ registry incrementally — a code package rehydrated at `start` would read a mar
 `kernel:ready` as absent. Concluding "dependency X is not installed" there and refusing on it is the verdict AGENTS.md's
 *Startup registry reads* section names as a defect. What an install admitted stays admitted; a dependent whose dependency
 has since gone is D3's uninstall-protection item, not a boot refusal.
+
+**Nor the manifest edit.** `PATCH /api/v1/packages/:id` rewrites a stored `dependencies` whole after install, by
+reference to `ManifestSchema.shape.dependencies` and with ⛔ no in-use check (Context §1). It is not an install act, and
+D2 does not run there: an entry added or changed by that door is judged when P is next installed. The hole that leaves —
+a stored declaration nobody judged — is D3's last item, deferred by name (merge question 11).
 
 ### D3 — Deferred, by name, not implemented now
 
@@ -263,6 +291,7 @@ another package.
 | **Topological / cascade install** — installing a set across artifacts in dependency order, or pulling a missing dependency in | The administrator installs dependencies first; D2's refusal names which. Inside one artifact ADR-0130 D5's sort is unchanged | More than one level of standalone modules in a real product |
 | **Owner-side publish marker** — X restricting which of its objects a dependent may reference | Every object of X is referenceable by a declared dependent, under D4 | A third-party dependent on a first-party app — marketplace publishing, D5's end point for ADR-0130 D8 |
 | **Marketplace version negotiation** — choosing versions of X and P that satisfy each other | None; D2 judges the installed version against the declared range, once | Listings carrying more than one installable version of a depended-on app |
+| **Judging a post-install edit** — running D2's predicate on a `PATCH /api/v1/packages/:id` that adds or changes a `dependencies` entry (a fourth door) | The edit is applied as given — that door's standing disposition, ⛔ no in-use check; the entry is unjudged until P is next installed, and the save door keeps admitting an absent dependency as it does today | A stored declaration found unsatisfied after an edit, or the Console offering the edit to authors |
 
 ### D4 — Permissions unchanged; record-level semantics are an open section
 
@@ -290,29 +319,46 @@ against the existing record-access path before its runtime card is cut:
 
 **The relation.** Installed packages P and X are *dependency-declared co-owners* of namespace N when P declares X in
 `manifest.dependencies`, N is P's namespace, N is X's namespace, and N is not a shareable platform namespace
-(`packages/objectql/src/registry.ts#isShareableNamespace`). At the install gate, this relation is a second source of the
-co-owner set ADR-0130 D1 introduced, beside the artifact scope. Nothing else changes:
+(`packages/objectql/src/registry.ts#isShareableNamespace`). **Siblings join it**: an installed package S is also P's
+co-owner of N when S and P each directly declare one installed package Q whose namespace is N — two modules under one
+declared parent. At the install gate, this relation is a second source of the co-owner set ADR-0130 D1 introduced,
+beside the artifact scope. Nothing else changes:
 
 - **One-way.** Only the dependent declares. X declares no dependency on its modules and gains nothing on P's side; P
-  gains admission to the shared namespace and nothing on X's side. The in-tenant trust behind the admission is the
-  administrator's choice to install P beside X — the same trust that admits any package into an environment.
+  gains admission to the shared namespace and nothing on X's side, and a sibling gains the same admission beside P. The
+  in-tenant trust behind the admission is the administrator's choice to install P beside X — the same trust that admits
+  any package into an environment.
 - **The D3 pair holds across artifacts.** ADR-0130 D3 made the namespace relaxation and the per-object-name uniqueness
-  check one change, and the registry reads one co-owner set for both halves; a co-owner by declaration is therefore
-  judged by both. A dependent defining an object name X already owns is refused at install, ahead of any DDL, with the
-  error `refuseCoOwnedObjectNameCollision` already raises for co-owners inside one artifact — `code` and `status`
-  asserted, as ADR-0130 D3's gate test requires.
+  check one change, and the registry reads one co-owner set for both halves; a co-owner by declaration — parent or
+  sibling — is therefore judged by both. A dependent defining an object name X already owns, or a sibling defining a
+  name the other sibling owns, is refused at install, ahead of any DDL, with the error
+  `refuseCoOwnedObjectNameCollision` already raises for co-owners inside one artifact — `code` and `status` asserted, as
+  ADR-0130 D3's gate test requires.
 - **No new manifest field.** The proof is the declaration plus the install act. ADR-0130 D8 stands: no owner or publisher
   field on `ManifestSchema`.
-- **Direct declarations only.** The relation reads P's own `dependencies`, not the transitive closure the save door
-  walks. A package sharing a namespace with several installed packages declares each one; the `NamespaceConflictError` it
-  meets otherwise names the owner it did not declare, and the fix is the declaration. Narrower is the reversible
-  direction.
+- **Direct declarations only.** The relation reads P's own `dependencies` and, for the sibling arm, S's own — never the
+  transitive closure the save door walks. The sibling arm exists because the direct reading alone breaks the second
+  module: revenue and marketing both declare sales, both use `crm`, and neither depends on the other; when marketing
+  installs second the sitting owners of `crm` are {sales, revenue}, marketing declares no revenue, and the gate refuses.
+  The only cure without the arm is to declare revenue, which D2 then requires installed first — modules stop being
+  independently installable from the second one on, and 「每个包可以独立安装」 is lost; the closure does not reach revenue
+  from marketing either. A sitting owner that is neither declared nor a sibling still meets `NamespaceConflictError`
+  naming it, and the fix is the declaration. Narrower is the reversible direction.
 - **Read from either end.** The relation is declared by P alone, and the gate reads it whichever of the pair arrives
-  second. On P's registration the sitting owner X is P's co-owner because P declares X; on X's registration a sitting
-  owner that declares X is X's co-owner for the namespace gate and the uniqueness check alike. This is recognition of one
-  declared fact, not a right X acquires — X still declares nothing — and it is required because registration order at
-  boot is not install order: a rehydrate that registers P before X would otherwise refuse the depended-on app itself.
-  Whether today's rehydrate paths can put P first is the runtime card's first reading (Open items 2).
+  second: on P's registration the sitting owner X is P's co-owner because P declares X; on X's registration a sitting
+  owner that declares X is X's co-owner for the namespace gate and the uniqueness check alike; a sibling is recognised
+  whichever sibling registers second, each reading the other's declaration of Q. This is recognition of one declared
+  fact, not a right X acquires — X still declares nothing — and it is not optional:
+  `packages/objectql/src/registry.ts#installPackage` refuses when any sitting owner of the namespace is neither the
+  installing package nor in the co-owner set (`getNamespaceOwners(...).find(owner => owner !== manifest.id &&
+  !coOwners.has(owner))`), and once revenue is installed it *is* a sitting owner of `crm`. The next upgrade or reinstall
+  of HotCRM arrives second; read from P's side alone, HotCRM itself is refused `NAMESPACE_CONFLICT`, so HotCRM could
+  never be upgraded once a module is installed. Boot order is the second reason: a rehydrate that registers P before X
+  would refuse the depended-on app the same way; whether today's paths can is the runtime card's first reading (Open
+  items 2). One consequence comes free: on such an upgrade the uniqueness check judges X against its co-owner P, so an
+  upgrade of HotCRM that newly defines a `crm_*` name revenue already owns is refused naming revenue — a small upgrade
+  guard D3's interception item does not otherwise give, and the Console's refusal text must say which module holds the
+  name.
 
 **ADR-0130 D8's deferral now ends at marketplace publishing**, not at a module's first standalone artifact. Within one
 tenant, D5 proves co-ownership without an owner field. Across vendors — the moment a module is published to the
@@ -342,18 +388,28 @@ it. Renaming a module's objects to dodge the gate stays refused (ADR-0129; lette
   [`5645322259`](https://github.com/objectstack-ai/objectstack/issues/14488#issuecomment-5645322259) — an artifact installs
   whole, the app package's sets cover every module's objects, nothing composes grants into another package's set, and a
   module carved out as its own artifact ships its own permission sets under ADR-0086 D4; the card is not reopened for
-  that case. That ruling's premise sentence — 「目前的要求是发布物是完整安装的，没有设计单独安装其中 一个模块的需求。」 — is
-  the one the maintainer moved on 2026-10-23 (「而每个包可以独立安装」); its disposition is unchanged and is what D4 above
-  relies on: a standalone module's permission sets are the module author's work, not a platform blocker.
+  that case. That ruling's premise — 「目前的要求是发布物是完整安装的，没有设计单独安装其中 一个模块的需求。」 — is
+  **unchanged** by B′: an artifact still installs whole (ADR-0130 D2 stands), and a module shipped on its own is another
+  artifact, not a partial install of the first. B′ (「而每个包可以独立安装」) takes the path the ruling itself named for
+  that case — a module carved out as its own artifact ships its own permission sets — so the ruling's disposition stands
+  as written and is what D4 above relies on: a standalone module's permission sets are the module author's work, not a
+  platform blocker.
 
 ### D7 — The first consumer: a HotCRM module shipping on its own, revenue first
 
 The scenario this record is accepted against is HotCRM's module split as its `docs/architecture/module-split-plan.md`
 records it — the 2026-09-14 shape: the sales app plus service, revenue and marketing modules (**not re-verified**). The
-revenue module ships as its own artifact, declares `dependencies: { "HOTCRM_SALES_PACKAGE_ID": "HOTCRM_MAJOR_RANGE" }`,
-keeps `namespace: 'crm'` and its `crm_*` object names, and installs beside an installed HotCRM. On an environment
-without HotCRM, or with HotCRM outside the declared range, D2 refuses it naming HotCRM and the range; beside HotCRM, D5
-admits it to `crm` and the uniqueness check refuses any `crm_*` name HotCRM already owns.
+revenue module ships as its own artifact whose consumer-installable package is **`type: 'app'`** — only that type
+installs for a consumer (`packages/spec/src/kernel/plugin.zod.ts#isConsumerInstallable`, ADR-0019 D2); inside the
+combined artifact it is an internal-contribution type under ADR-0130 D2, so the carve-out changes its `type` (the HotCRM
+side **not re-verified**). It declares `dependencies: { "HOTCRM_SALES_PACKAGE_ID": "HOTCRM_MAJOR_RANGE" }`, keeps
+`namespace: 'crm'` and its `crm_*` object names, and installs beside an installed HotCRM. On an environment without
+HotCRM, or with HotCRM outside the declared range, D2 refuses it naming HotCRM and the range; beside HotCRM, D5 admits it
+to `crm` and the uniqueness check refuses any `crm_*` name HotCRM already owns; marketing, shipped the same way, is
+admitted as revenue's sibling. Under ADR-0019 the standalone module is therefore an App in its own right — installed,
+opened and uninstalled as one (D1, D4) — and D4's "set of namespaces" gains a namespace two Apps hold, which the
+registry's `Map<namespace, Set<packageId>>` already represents: uninstalling the module releases its own ownership and
+objects, not the namespace HotCRM still owns.
 
 Until the runtime card ships, composite products keep shipping as one artifact under ADR-0130. That is the state
 hotcrm#2270 packages revenue and marketing in; hotcrm#2271 moves revenue to its own artifact once the check is released.
@@ -365,11 +421,15 @@ closure reads it, D5 reads it. ⛔ No spec shape changes in this record.
 
 The marketplace snapshot's array — `PackageManifestSchema.dependencies` of `PackageDependencySchema` — is a **projection**
 of that record, one entry per key: `packageId` = the key, `versionRange` = the value, `optional` = `false` (the record
-has no optional arm, and D2 treats every entry as required). The runtime card owes:
+has no optional arm, and D2 treats every entry as required). Three things are owed — the first on its own card, the
+other two on the runtime card:
 
 1. **One conversion** from record to array, used by every writer of a snapshot, so a snapshot conforms to its declared
    schema instead of carrying the record shape it carries today (`publish.ts` uploads the compiled artifact as it is).
-   Where the control plane reads `manifest_json` is in `objectstack-ai/cloud`; the card states what it found there.
+   **Its own card** (merge question 9), whose first step reads how the control plane parses
+   `sys_package_version.manifest_json` — in `objectstack-ai/cloud`, not readable here — because changing the snapshot's
+   shape before that reading could break the very reader it is meant to satisfy. Until that card lands, snapshots keep
+   carrying the record shape, as today: no new harm, and D2 reads the manifest record, never the snapshot.
 2. **A stated fate for `optional`.** An `optional: true` entry has no record spelling. Until one is decided, a snapshot
    never produces it and D2 never reads it.
 3. **A stated fate for `AppManifestSchema.dependencies`** (bare ids, no range, no reader outside `packages/spec`): either
@@ -391,11 +451,16 @@ not a declaration, and `PackageDependencySchema`'s own header already tells the 
 - An AI author's undeclared reference stays a loud `422` at the save door, and a missing dependency becomes a loud refusal
   at install, instead of copied objects that drift silently.
 - The work is small and stays small: no new authorable key, no schema change, one predicate at three doors, one more
-  source for one co-owner set.
+  source for one co-owner set (read two ways: a declared parent, a shared declared parent), one author-side lint rule.
+- Two modules of one app install in either order and need not declare each other (the sibling arm), and an upgrade of
+  the app that would take a module's object name is refused for free (D5).
 
 **Negative / costs, stated plainly**
-- Uninstalling or upgrading a depended-on app is not guarded (D3). An administrator can strand a dependent until those
-  items are built; the refusal at install is the only gate, and the refusal's message is the only guidance.
+- Uninstalling or upgrading a depended-on app is not guarded (D3), and a `dependencies` entry edited in after install is
+  not judged until the next install of that package. An administrator can strand a dependent until those items are
+  built; the refusal at install is the only gate, and the refusal's message is the only guidance.
+- The gate's range reader must grow a stated grammar before the first consumer's range is readable; until the author-side
+  rule exists, an unreadable range is refused at install, not reported at build (D2).
 - A standalone module and its app have **separate versions** — the matrix ADR-0130 D6 removed inside one artifact
   returns across artifacts, bounded only by the declared range and judged only at install.
 - D5 lets a module share a vendor's namespace on the administrator's say-so. Inside one tenant that is the install choice
@@ -404,9 +469,10 @@ not a declaration, and `PackageDependencySchema`'s own header already tells the 
 - D4's open section is real work before the first consumer ships: the permission-set discriminator ADR-0086 D4 relied on
   is gone across artifacts.
 
-**Unchanged** — the consumer model (ADR-0019 D1–D4: one app installs, opens, uninstalls), the artifact as a control-plane
-noun (ADR-0130 D2), the one sorter (ADR-0130 D5), one version per artifact (ADR-0130 D6), permission sets (ADR-0086 D4),
-the save door's closure rules, and the compile-time boundary (`os validate` judges neither side).
+**Unchanged** — the consumer model (ADR-0019 D1–D4: one app installs, opens, uninstalls — a standalone module is itself
+an App), the artifact as a control-plane noun that installs whole (ADR-0130 D2), the one sorter (ADR-0130 D5), one
+version per artifact (ADR-0130 D6), permission sets (ADR-0086 D4), the save door's closure rules, the snapshot shape
+(D8, until its own card), and the compile-time boundary (`os validate` judges neither side of a cross-artifact binding).
 
 ---
 
@@ -436,8 +502,9 @@ The letters as filed on #25403 and on ruling `6377678758`:
 
 1. **Record-level semantics across a dependency** — D4's three questions, measured on HotCRM's revenue module.
 2. **Rehydrate order** — whether any boot path (`sys_packages`, the install-local ledger, code packages) can register a
-   dependent before the package it depends on. D5's read-from-either-end rule makes the answer harmless; the card records
-   it.
+   dependent before the package it depends on. D5's read-from-either-end rule makes the answer harmless for a declared
+   pair; the sibling arm reads the parent's namespace from the parent's record, so a boot that registers two siblings
+   before their parent is the case the card measures first.
 3. **Declared ids that are not installable packages.** The key's own documentation example is an npm-style id. The
    in-repo population is one manifest, co-delivered (Context §1). If an id that names no installable package turns up in
    HotCRM's manifests, the card reports it; D2 does not exempt it.
@@ -445,41 +512,61 @@ The letters as filed on #25403 and on ruling `6377678758`:
    warn for a dependent is measured against what the save door's closure and the data door do with a disabled package
    today.
 5. **`optional` and `AppManifestSchema.dependencies`** — D8 items 2 and 3.
+6. **The carved-out module's `type`.** D7 states `type: 'app'`. The card confirms the artifact `os build` writes for a
+   standalone module carries it, and reads what each install door does today with a top-level package of another type
+   (not measured here).
 
 ## Open questions for the maintainer's merge decision
 
 These are the points this record decided where the rulings were silent, listed so the merge is an informed act. Merging
-accepts them; an objection names the number. Items 1–4 shape the mechanism; 5–8 shape D2's refusal; 9 is a sizing
-consequence; 10 is a reading of an earlier ruling.
+accepts them; an objection names the number. Items 1–4 and 11 shape the mechanism; 5–8 shape D2's refusal; 9 is a sizing
+decision; 10 is a reading of an earlier ruling.
 
-1. **D2's second arm** — a dependency delivered by the same artifact counts as present. Without it, judging the whole
-   artifact before anything registers would refuse every ADR-0130 artifact whose modules declare their app; judging per
-   package instead would leave a half-registered artifact behind on refusal.
-2. **D2's placement** — the three install acts only, never boot re-registration. The cost: an environment whose
-   dependency was removed outside an install act boots without complaint (D3's uninstall item).
+1. **D2's second arm — a dependency delivered by the same artifact counts as present, and is judged for presence only.**
+   Without the arm, judging the whole artifact before anything registers would refuse every ADR-0130 artifact whose
+   modules declare their app, and judging per package instead would leave a half-registered artifact behind on refusal.
+   Without the presence-only reading, an artifact whose packages carry their own `manifest.version` (as
+   `examples/app-multi-package`'s do) would be refused by the platform over a range its publisher built and tested as one
+   unit; D2 says nothing about such an entry, and the mismatch is `os lint`'s to report.
+2. **D2's placement** — the three install acts only; never boot re-registration, never the manifest edit (11). The cost:
+   an environment whose dependency was removed outside an install act boots without complaint (D3's uninstall item).
 3. **D5 read from either end** — the gate honours P's declaration on X's registration too. "One-way" is kept for who
-   declares and who gains; recognition from X's side is what keeps a rehydrate from refusing HotCRM itself.
-4. **D5 direct-only** — co-ownership follows P's own declarations, not the transitive closure the save door walks.
+   declares and who gains; recognition from X's side is what lets HotCRM be upgraded or reinstalled at all once a module
+   sits in `crm` (the gate refuses any sitting owner outside the co-owner set), keeps a rehydrate from refusing HotCRM
+   itself, and brings the upgrade guard D5 records.
+4. **D5 direct-only, with the sibling arm** — co-ownership follows P's own declarations and those of a sibling under one
+   declared parent that holds the namespace, never the transitive closure the save door walks. Without the arm the
+   second module of one app is not independently installable; with it there is no new field and no closure walk.
    Narrower is the reversible direction; widening later needs no undo.
 5. **D2's status is 422** — fixed by analogy with `NAMESPACE_CONFLICT`, the sibling refusal at the same gate for a
    conflict with the environment's state; the code itself goes to the ADR-0112 D3 ledger on the runtime card.
-6. **D2 fails closed on an unparseable version or range** — the opposite of `assertProtocolCompat` at the same doors,
-   which admits an unrecognised `engines.protocol` range with a warning so that no artifact already in the field is
-   refused by a parser gap. The reason the policies differ: the handshake grandfathers a fleet of existing artifacts,
-   while a dependency entry is written today by the dependent's own author about one named package (the in-repo
-   population is one manifest), and an unread bound would admit every version — the one outcome the check exists to
-   refuse.
+6. **D2 fails closed on an unparseable version or range, and the grammar is stated** — the opposite of
+   `assertProtocolCompat` at the same doors, which admits an unrecognised `engines.protocol` range with a warning so that
+   no artifact already in the field is refused by a parser gap. The reason the policies differ: the handshake
+   grandfathers a fleet of existing artifacts, while a dependency entry is written today by the dependent's own author
+   about one named package (the in-repo population is one manifest), and an unread bound would admit every version — the
+   one outcome the check exists to refuse. Because the tree's two readers accept less than the documented grammar (`6.x`
+   reads as nothing today), fail-closed is paired with a stated grammar on the runtime card and an author-side rule that
+   reports an unreadable range before install — otherwise the ruling's own example would be refused at the gate it was
+   written for.
 7. **Every record entry is required; the marketplace `optional` arm projects to `false`** — the record shape has no
    optional spelling, and inventing one would be the spec change this record forbids itself.
 8. **Only P's own entries are judged** — a dependency's own dependencies were judged when it was installed; judging them
    again would re-run D2 for packages the administrator already admitted.
-9. **D8 item 1's record-to-array conversion enlarges the runtime card** beyond the ruling's sizing (XS–S for the check,
-   S for the objectql source). The ruling asks the two shapes to be "aligned"; a snapshot that keeps carrying the record
-   shape under an array schema is not aligned, so the conversion is where the alignment lands — the maintainer may cut
-   it as its own card instead.
-10. **The reading that ruling `5645322259`'s premise was moved by B′** (D6; ADR-0130's addendum) — a reconciliation of two
-    maintainer rulings that neither ruling on #25403 makes. It is recorded because a reader of both records would
-    otherwise find them contradicting; the earlier ruling's disposition is untouched.
+9. **D8 item 1's record-to-array conversion is its own card**, not the runtime card's — the ruling's sizing (XS–S for the
+   check, S for the objectql source) is kept, and the conversion waits on one reading: how the control plane parses
+   `sys_package_version.manifest_json` (`objectstack-ai/cloud`, not readable here). Changing the snapshot's shape before
+   that reading could break the reader it is meant to satisfy; until then snapshots carry the record shape as they do
+   today, no new harm.
+10. **The reading of ruling `5645322259`** (D6; ADR-0130's addendum) — its premise is read as unchanged by B′: an
+    artifact installs whole (ADR-0130 D2), a standalone module is another artifact, and B′ takes the carve-out path the
+    ruling itself named. A reconciliation neither ruling on #25403 makes; recorded so a reader of both records does not
+    find them contradicting.
+11. **The post-install edit of `dependencies` is deferred, not a fourth door** — `PATCH /api/v1/packages/:id` rewrites
+    the declaration after install with no in-use check, so an entry added there meets D2 only at the package's next
+    install. Running D2's predicate on that edit is one call at one more door; it is deferred (D3) because B′ named one
+    new gate, and the edit's practical case — an author declaring the package whose object the save door just refused —
+    names a package that is present. The maintainer may take the fourth door instead; it needs no undo.
 
 ---
 
@@ -495,8 +582,9 @@ consequence; 10 is a reading of an earlier ruling.
 - **"`revenue` first per ADR-0130 §1.3(c)"** (ruling `6369704387`): §1.3(c) names CPQ as the module with no sellable
   unit; it does not order HotCRM's modules. Revenue first is HotCRM's own ordering (module-split plan, hotcrm#2271);
   §1.3(c) is the general consequence both serve. No decision moves.
-- **#14488.** Closed `not_planned` 2026-09-12 by ruling `5645322259`, as the HotCRM seat's input 2 says. Its premise
-  sentence has since been moved by the maintainer's B′ ruling; its disposition stands (D6).
+- **#14488.** Closed `not_planned` 2026-09-12 by ruling `5645322259`, as the HotCRM seat's input 2 says. Its premise —
+  an artifact installs whole — is not moved by B′, which takes the carve-out path the ruling itself named; its
+  disposition stands (D6).
 - **ADR numbering.** `0136` and `0140` were taken by proposals that never landed — PR #18480 (closed 2026-09-18,
   superseded by the North Star) and PR #25618 (withdrawn 2026-10-24 by the maintainer's ruling in session) — and are not
   reused; no landed record or open pull request carries either number, and no open pull request carries a new record.
@@ -507,14 +595,24 @@ consequence; 10 is a reading of an earlier ruling.
 ## Execution plan (after acceptance)
 
 1. **Runtime card (XS–S, `domain:services` / objectql), one PR**: D2's predicate at the three install doors, with the
-   `dependency_missing` issues, the ledger-registered code and the Console refusal text; D5's dependency source for the
-   co-owner set, read from either end, with the ADR-0130 D3 gate test extended to a cross-artifact pair (a dependent
-   defining an object name X owns is refused, asserting `code` and `status`); D8's record-to-array conversion. Its first
-   readings: Open items 2, 3 and 4.
-2. **Docs**: the package-authoring guide states how to declare a dependency, what the install refusal means, and that
-   `os validate` cannot see a dependency's objects.
-3. **HotCRM** (its own lane): the D4 readings on the revenue module; hotcrm#2271 ships revenue as its own artifact once
-   (1) is released.
+   `dependency_missing` issues, the ledger-registered code, the stated range grammar and the Console refusal text; D5's
+   dependency source for the co-owner set — declared parent and sibling arm, read from either end — with the ADR-0130 D3
+   gate test extended to a cross-artifact pair and a sibling pair (a dependent defining an object name X owns, and a
+   sibling defining a name the other sibling owns, are refused, asserting `code` and `status`), and the upgrade case (X
+   reinstalled beside its module is admitted; X newly defining a name the module owns is refused); D8 items 2 and 3.
+   Its first readings: Open items 2, 3, 4 and 6.
+2. **Author-side card (XS, `packages/cli` / `packages/lint`)**: the `os lint` / `os validate` rule that reports a
+   `dependencies` range outside the stated grammar and, inside one artifact, a co-delivered entry whose range the
+   sibling's declared version does not satisfy (D2). Released with or before (1), so the first refusal an author meets is
+   at build.
+3. **Snapshot-alignment card (S, `packages/cli`, with a reading in `objectstack-ai/cloud`)**: D8 item 1 — first the
+   control-plane reader of `sys_package_version.manifest_json`, then the one record-to-array conversion. Independent of
+   (1); snapshots keep the record shape until it lands.
+4. **Docs**: the package-authoring guide states how to declare a dependency, the range grammar, what the install refusal
+   means, that two modules of one app need not declare each other, and that `os validate` cannot see a dependency's
+   objects.
+5. **HotCRM** (its own lane): the D4 readings on the revenue module; the carved-out module's `type: 'app'` (D7);
+   hotcrm#2271 ships revenue as its own artifact once (1) is released.
 
 ## References
 
@@ -524,7 +622,8 @@ consequence; 10 is a reading of an earlier ruling.
 - ADR-0019, ADR-0028, ADR-0029, ADR-0048 (and its 2026-08-08 addendum), ADR-0086, ADR-0087, ADR-0112, ADR-0116,
   ADR-0129, ADR-0130
 - `packages/spec/src/kernel/manifest.zod.ts`, `packages/spec/src/system/app-install.zod.ts`,
-  `packages/spec/src/marketplace/package-version.zod.ts`, `packages/spec/src/kernel/package-registry.zod.ts`
+  `packages/spec/src/marketplace/package-version.zod.ts`, `packages/spec/src/kernel/package-registry.zod.ts`,
+  `packages/spec/src/kernel/plugin.zod.ts` (`isConsumerInstallable`)
 - `packages/objectql/src/registry.ts` (`installPackage`, `refuseCoOwnedObjectNameCollision`, `NamespaceConflictError`,
   `uninstallPackage`), `packages/objectql/src/engine.ts` (`registerApp`), `packages/objectql/src/plugin.ts`
 - `packages/metadata-protocol/src/protocol.ts` (`resolveWritePackageScope`),
@@ -533,6 +632,7 @@ consequence; 10 is a reading of an earlier ruling.
   `packages/core/src/dependency-resolver.ts`, `packages/metadata-core/src/artifact-forward-conversion.ts`
 - `packages/runtime/src/domains/packages.ts`, `packages/cloud-connection/src/marketplace-install-local-plugin.ts`,
   `packages/services/service-package/src/index.ts`, `packages/lint/src/rule-explanations.ts`
-  (`list-view-object-outside-closure`), `packages/spec/src/stack.zod.ts`
-- `examples/app-multi-package/src/packages/orders/index.ts`
+  (`list-view-object-outside-closure`), `packages/spec/src/stack.zod.ts` (`composeStacks`),
+  `packages/cli/src/utils/protocol-version-gap.ts` (`checkProtocolVersionGap`)
+- `examples/app-multi-package/src/packages/orders/index.ts`, `examples/app-multi-package/src/packages/core/index.ts`
 - hotcrm `docs/architecture/module-split-plan.md`, hotcrm#2270, hotcrm#2271 (not re-verified)

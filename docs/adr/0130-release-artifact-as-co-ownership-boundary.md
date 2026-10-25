@@ -797,10 +797,12 @@ nothing composes grants into another package's set, and a module carved out as i
 ships its own permission sets under ADR-0086 D4; the card is ⛔ not reopened for that case. The three
 inherited inputs listed under that line remain accurate as history; none is open work.
 
-One sentence of that ruling has since moved, and it is said here so a reader of both records is not
-left to reconcile them: its premise 「目前的要求是发布物是完整安装的，没有设计单独安装其中 一个模块的需求。」 was
-the state on 2026-09-12; the maintainer's B′ ruling of 2026-10-23 (「而每个包可以独立安装」) is the
-requirement it said did not exist. The ruling's disposition is unchanged by that: a standalone
-module's permission sets are the module author's work under ADR-0086 D4, not a platform blocker
-(ADR-0141 D4, D6). What record-level access across a dependency means is ADR-0141 D4's open
-section, decided with the first consumer.
+One sentence of that ruling is read beside B′ here, so a reader of both records is not left to
+reconcile them: its premise 「目前的要求是发布物是完整安装的，没有设计单独安装其中 一个模块的需求。」 is
+unchanged — an artifact installs whole (D2 above stands), and a module shipped on its own under
+ADR-0141 is another artifact, not a partial install of the first. The maintainer's B′ ruling of
+2026-10-23 (「而每个包可以独立安装」) takes the path the ruling itself named for that case: a module
+carved out as its own artifact ships its own permission sets under ADR-0086 D4. The ruling's
+disposition is unchanged: a standalone module's permission sets are the module author's work, not a
+platform blocker (ADR-0141 D4, D6). What record-level access across a dependency means is ADR-0141
+D4's open section, decided with the first consumer.
