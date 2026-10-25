@@ -557,13 +557,12 @@ the list. The lane grows the allowlist a few proven specs at a time (see the wor
 comment), so every promotion would stale a hand-copied enumeration here; it already did
 (objectui#3488).
 
-Backend pins live in `e2e/live/ci/backend.env` and must match the `@objectstack/spec` version the
-pinned build in `pnpm-lock.yaml` declares — bump both in the same PR, or the run proves nothing.
-Since objectui#12957 the lockfile resolves `@objectstack/spec` to a directory built from the commit
-`.objectstack-sha` names (`.objectstack-pin/spec`), and the version is the one that
-directory's committed `package.json` carries (objectui#13008). ⚠️ objectstack moves that string only when it releases, so a
-pin between two releases matches the earlier release's backend by number while the console carries
-later commits; this lane still runs the published backend, and nothing here closes that gap.
+Backend pins live in `e2e/live/ci/backend.env`. Since objectui moved into the objectstack
+repository (objectstack#25803), the console builds against the workspace's own `@objectstack/spec`,
+which the lockfile records as a workspace link with no version, so there is no lockfile version
+for `OBJECTSTACK_VERSION` to match and no test compares the two. ⚠️ This lane still runs the
+published backend at that version against a console built from the current tree, and nothing
+here closes that gap.
 
 `OBJECTSTACK_VERSION` is the only `@objectstack` value that file declares, and moving it is the
 only move. The showcase-app commit the lane sparse-checks-out is **derived**, not pinned:

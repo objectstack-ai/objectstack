@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { lockfilePath as workspaceLockfilePath } from '../workspace-root.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1757,15 +1756,15 @@ describe('ci-cd-pipeline.md — contexts that can never be required (#4170)', ()
  *
  * ## What this asserts, and the one half it deliberately does not
  *
- * ASSERTED: `OBJECTSTACK_VERSION` equals the `@objectstack/spec` version the lockfile
- * resolves, read two independent ways (the resolution keys under `packages:`/`snapshots:`
- * and the `version:` line of every workspace importer) whose union must hold exactly one
- * value. Two readings rather than one because "the resolved version" is only a
- * well-formed question while the tree agrees with itself: a lockfile carrying two
- * `@objectstack/spec` versions has no single number for the pin to match, and naming that
- * is more useful than picking one of them and comparing to it.
+ * RETIRED with the import into objectstack (objectstack#25803): the comparison of
+ * `OBJECTSTACK_VERSION` against the `@objectstack/spec` version the lockfile resolves.
+ * The console now builds against the workspace's own `@objectstack/spec`, a `link:` in
+ * the one lockfile at the monorepo root, so the lockfile carries no spec version for the
+ * pin to match. The guard's own floor named that case ("the dependency is genuinely gone
+ * — in which case the live lane has nothing to pin and this block should go"), and the
+ * page's sentence went with it.
  *
- * ALSO ASSERTED, since objectui#7964: that the file's other pin is GONE. `OBJECTSTACK_REF`
+ * STILL ASSERTED, since objectui#7964: that the file's other pin is GONE. `OBJECTSTACK_REF`
  * used to be a second, hand-moved sha here, carrying a MUST — "always the commit the
  * `@objectstack/cli@${OBJECTSTACK_VERSION}` release tag points at" — that nothing could
  * check, because reading that tag needs the objectstack repository over the network and
@@ -1787,133 +1786,24 @@ describe('ci-cd-pipeline.md — contexts that can never be required (#4170)', ()
  *
  * ## Anti-vacuity
  *
- * Each half is floored. The doc sentence is required to still be on the page, because
- * this whole block is the enforcement of that sentence and a page that stopped making the
- * claim should retire the pin deliberately rather than leave it running on prose nobody
- * reads. The lockfile scan is required to have matched something, so a lockfile format
- * change turns this red instead of green-with-an-empty-set — the failure mode #3451 keeps
- * teaching this page.
+ * The derivation half is pinned by content in both directions: the absent key below is
+ * only a design while start-backend.sh still derives the value, and the derivation only
+ * carries weight while no key overrides it.
  */
 const backendEnvPath = path.join(repoRoot, 'e2e/live/ci/backend.env');
 const startBackendPath = path.join(repoRoot, 'e2e/live/ci/start-backend.sh');
-const lockfilePath = workspaceLockfilePath();
 const backendEnv = fs.readFileSync(backendEnvPath, 'utf8');
 const startBackend = fs.readFileSync(startBackendPath, 'utf8');
-
-/** The page's statement of the rule, whitespace-normalised because the source wraps it. */
-const PIN_RULE_SENTENCE =
-  /Backend pins live in `e2e\/live\/ci\/backend\.env` and must match the `@objectstack\/spec` version the pinned build in `pnpm-lock\.yaml` declares/;
 
 const readEnvKey = (key: string): string | null =>
   backendEnv.match(new RegExp('^' + key + '=(.+)$', 'm'))?.[1].trim() ?? null;
 
-/**
- * Every `@objectstack/spec` version the lockfile resolves, from both spellings.
- *
- * The resolution keys carry the peer-suffixed identity (`17.2.0(ai@…)`) under
- * `snapshots:` and the bare one under `packages:`; the importer entries carry the same
- * value on their `version:` line. Each is truncated at the first `(` so the three
- * spellings collapse to one comparable number.
- *
- * Since objectui#12957 the lockfile resolves the spec to a DIRECTORY of the pinned
- * build (`'@objectstack/spec@file:.objectstack-pin/spec(ai@…)'`) and
- * records no version for it; that resolution is followed to the version the
- * directory's manifest declares. A directory that is not built answers a value no
- * `OBJECTSTACK_VERSION` can equal, naming the missing build.
- */
-function resolvedSpecVersions(): string[] {
-  const lock = fs.readFileSync(lockfilePath, 'utf8');
-  const found = new Set<string>();
-
-  for (const m of lock.matchAll(/^\s{0,4}'?@objectstack\/spec@file:([^'(\s:]+)/gm)) {
-    try {
-      found.add(JSON.parse(fs.readFileSync(path.join(repoRoot, m[1], 'package.json'), 'utf8')).version);
-    } catch {
-      found.add(`(pinned build absent: ${m[1]} — run \`pnpm objectstack:build\`)`);
-    }
-  }
-
-  for (const m of lock.matchAll(/^\s{0,4}'?@objectstack\/spec@([0-9][^'(\s:]*)/gm)) {
-    found.add(m[1]);
-  }
-  for (const m of lock.matchAll(
-    /^\s*'@objectstack\/spec':\s*\n\s*specifier:.*\n\s*version:\s*([0-9][^\s(]*)/gm,
-  )) {
-    found.add(m[1]);
-  }
-  return [...found].sort();
-}
-
 describe('ci-cd-pipeline.md — live-e2e backend pin (#7689)', () => {
-  it('still carries the sentence this block enforces', () => {
-    expect(
-      PIN_RULE_SENTENCE.test(doc.replace(/\s+/g, ' ')),
-      'content/docs/guide/ci-cd-pipeline.md no longer states that the backend pins in ' +
-        '`e2e/live/ci/backend.env` must match the `@objectstack/spec` version in ' +
-        '`pnpm-lock.yaml`. Everything below is the enforcement of that sentence, so losing it ' +
-        'would leave these assertions running on a rule the page stopped teaching. If the rule ' +
-        'was retired, retire this describe with it; if the sentence merely moved or was ' +
-        'reworded, update PIN_RULE_SENTENCE.',
-    ).toBe(true);
-  });
-
-  it('resolves exactly one @objectstack/spec version to compare against', () => {
-    const versions = resolvedSpecVersions();
-
-    expect(
-      versions.length,
-      `Nothing in ${path.relative(repoRoot, lockfilePath)} matched either reading of an ` +
-        '`@objectstack/spec` resolution. That is a green this test must never report: the ' +
-        'comparison below would run against an empty set and pass no matter what ' +
-        '`e2e/live/ci/backend.env` says. Either the dependency is genuinely gone — in which ' +
-        'case the live lane has nothing to pin and this block should go — or the lockfile ' +
-        'format moved and the two regexes above need updating.',
-    ).toBeGreaterThan(0);
-
-    expect(
-      versions,
-      'The lockfile resolves more than one `@objectstack/spec` version:\n' +
-        versions.map((v) => `  - ${v}`).join('\n') +
-        '\n\nThere is then no single "the resolved version" for `OBJECTSTACK_VERSION` to ' +
-        'match, so the live lane cannot be a matched pair against any of them. Resolve the ' +
-        'workspace onto one version first; this test deliberately names the split rather than ' +
-        'picking a winner.',
-    ).toHaveLength(1);
-  });
-
-  it('pins OBJECTSTACK_VERSION to the version the lockfile resolves', () => {
-    const versions = resolvedSpecVersions();
-    if (versions.length !== 1) return; // reported by the test above
-
-    const pinned = readEnvKey('OBJECTSTACK_VERSION');
-    expect(
-      pinned,
-      `${path.relative(repoRoot, backendEnvPath)} declares no OBJECTSTACK_VERSION. ` +
-        '`start-backend.sh` sources this file and installs published `@objectstack/*` at that ' +
-        'value, so an absent key is not a lighter failure than a wrong one.',
-    ).not.toBeNull();
-
-    expect(
-      pinned,
-      `The live-e2e lane is pinned to an unmatched pair:\n` +
-        `  ${path.relative(repoRoot, backendEnvPath)}  OBJECTSTACK_VERSION=${pinned}\n` +
-        `  ${path.relative(repoRoot, lockfilePath)}          @objectstack/spec  ${versions[0]}\n\n` +
-        'content/docs/guide/ci-cd-pipeline.md states the rule: "Backend pins live in ' +
-        '`e2e/live/ci/backend.env` and must match the `@objectstack/spec` version in ' +
-        '`pnpm-lock.yaml` — bump both in the same PR, or the run proves nothing." The header ' +
-        'of backend.env says the same thing in its own words. A run of `Live E2E ' +
-        '(informational)` against this pair therefore carries no information, green or red — ' +
-        'it exercises one published backend against a console built for another.\n\n' +
-        'Fix it in whichever direction the change came from: a lockfile bump must move ' +
-        'OBJECTSTACK_VERSION, and a pin bump must be a lockfile bump. That is the only ' +
-        'value to move — the showcase-app commit follows it on its own, because ' +
-        'start-backend.sh resolves the `@objectstack/cli@$OBJECTSTACK_VERSION` release tag ' +
-        'at boot (objectui#7964). ' +
-        '⛔ Do not resolve this by reverting the pin to whatever was green last: a failing ' +
-        'matched pair carries strictly more information than a green mismatched one ' +
-        '(objectui#7689).',
-    ).toBe(versions[0]);
-  });
+  // Retired with the import into objectstack (objectstack#25803): `still carries the
+  // sentence this block enforces`, `resolves exactly one @objectstack/spec version to
+  // compare against` and `pins OBJECTSTACK_VERSION to the version the lockfile resolves`.
+  // The lockfile resolves the spec as a workspace `link:` and records no version, so the
+  // pair they compared no longer exists; see the docblock above.
 
   // Retired here, deliberately, with objectui#7964: `keeps OBJECTSTACK_REF in the one shape
   // start-backend.sh can fetch`. It asserted that a hand-moved sha was 40 hex characters —

@@ -4,8 +4,10 @@
  * Three layers:
  *   1. the contract readers and the override-set check, on literals — every
  *      refusal paired with the accepted shape beside it;
- *   2. the REAL tree: the root manifest's overrides cover every `@objectstack/*`
- *      name the workspace declares, so none can resolve from npm;
+ *   2. the REAL tree: since the import into objectstack (objectstack#25803) every
+ *      `@objectstack/*` name the workspace declares is a workspace member by
+ *      `workspace:` protocol, nothing is overridden, and no pin manifest is
+ *      committed, so none can resolve from npm;
  *   3. the stand-in path end to end (`OBJECTSTACK_ROOT`), over a throwaway
  *      objectstack-shaped workspace packed by the real `pnpm pack` — the input
  *      objectstack#24306 consumes. No network: nothing is fetched or installed.
@@ -53,6 +55,7 @@ import {
   runtimeClosure,
   workspaceGlobs,
 } from '../objectstack-pin.mjs';
+import { lockfilePath, rootManifest, workspaceGlobs as uiWorkspaceGlobs, workspaceManifestPath } from '../workspace-root.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const SHA = '0123456789abcdef0123456789abcdef01234567';
@@ -387,24 +390,62 @@ describe('the pinned checkout is hermetic (objectui#12957)', () => {
   });
 });
 
-describe('the real tree (objectui#12957)', () => {
-  it('overrides every @objectstack/* package the workspace declares, so none resolves from npm', () => {
-    const manifest = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
-    const overrides = readOverrides(manifest);
-    const declared = declaredObjectstackNames(readWorkspace(repoRoot));
+/**
+ * The real tree, since objectui moved into the objectstack repository under `ui/`
+ * (objectstack#25803). Every `@objectstack/*` package is a member of the same pnpm
+ * workspace there, so the pinned build is not in force: nothing is overridden, no
+ * pin manifest is committed, and what kept objectui off npm is the `workspace:`
+ * protocol. These are the two facts that replace the override-set cases, read off
+ * the same tree; the readers above stay pinned on literals for the script itself.
+ */
+describe('the real tree (objectui#12957, objectstack#25803)', () => {
+  /** The objectui workspace projects, the ui root included, read through workspace-root.mjs. */
+  function uiProjects(): { dir: string; manifest: Record<string, Record<string, string> | undefined> }[] {
+    const projects = [{ dir: '.', manifest: JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) }];
+    for (const glob of uiWorkspaceGlobs(repoRoot)) {
+      const dirs = glob.endsWith('/*')
+        ? fs.readdirSync(path.join(repoRoot, glob.slice(0, -2))).map((name) => path.posix.join(glob.slice(0, -2), name))
+        : [glob];
+      for (const dir of dirs) {
+        const manifestPath = path.join(repoRoot, dir, 'package.json');
+        if (fs.existsSync(manifestPath)) projects.push({ dir, manifest: JSON.parse(fs.readFileSync(manifestPath, 'utf8')) });
+      }
+    }
+    return projects;
+  }
+
+  it('declares every @objectstack/* dependency by workspace protocol, and the lockfile holds no physical copy, so none resolves from npm', () => {
+    const projects = uiProjects();
+    const declared = declaredObjectstackNames(projects);
     expect(declared.size, 'the workspace scan found no @objectstack/* declaration at all').toBeGreaterThan(0);
-    expect([...declared].filter((n) => !overrides.has(n))).toEqual([]);
+    const offWorkspace = projects.flatMap(({ dir, manifest }) =>
+      ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'].flatMap((field) =>
+        Object.entries(manifest[field] ?? {})
+          .filter(([name, range]) => name.startsWith('@objectstack/') && !range.startsWith('workspace:'))
+          .map(([name, range]) => `${dir} ${field} ${name}@${range}`),
+      ),
+    );
+    expect(offWorkspace).toEqual([]);
+    // A `link:` importer entry has no `packages:`/`snapshots:` key; a key at two
+    // spaces under the scope is a registry or `file:` copy beside the workspace one.
+    const lock = fs.readFileSync(lockfilePath(repoRoot), 'utf8');
+    expect(lock.match(/^ {2}'?@objectstack\/[^\s']+/gm) ?? []).toEqual([]);
   });
 
   it('pins one full objectstack sha', () => {
     expect(readPin(repoRoot)).toMatch(/^[0-9a-f]{40}$/);
   });
 
-  it('commits a manifest for every override, under the name it overrides (objectui#13008)', () => {
-    const overrides = readOverrides(JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')));
-    for (const [name, dir] of overrides) {
-      expect(JSON.parse(fs.readFileSync(path.join(repoRoot, PIN_DIR, dir, 'package.json'), 'utf8')).name, dir).toBe(name);
-    }
+  it('overrides no @objectstack/* package and commits no pin manifest (objectui#13008, objectstack#25803)', () => {
+    expect(() => readOverrides(JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')))).toThrow(PinRefusal);
+    expect(() => readOverrides(rootManifest(repoRoot))).toThrow(PinRefusal);
+    // The monorepo keeps its overrides in pnpm-workspace.yaml, not in a `pnpm` field.
+    const overridesBlock = fs.readFileSync(workspaceManifestPath(repoRoot), 'utf8').match(/^overrides:\n((?:[ \t]+.*\n|[ \t]*\n)*)/m);
+    expect(overridesBlock, 'the workspace root declares no overrides block at all').not.toBeNull();
+    expect(overridesBlock![1].match(/^\s+'?@objectstack\/.*$/gm) ?? []).toEqual([]);
+    const tracked = spawnSync('git', ['ls-files', '--', PIN_DIR], { cwd: repoRoot, encoding: 'utf8' });
+    expect(tracked.status).toBe(0);
+    expect(tracked.stdout).toBe('');
   });
 });
 
