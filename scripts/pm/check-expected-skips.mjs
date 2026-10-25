@@ -234,6 +234,8 @@ const FULL_BATTERY_REASON =
  * on nine (the tenth head saw no `labeled` / `edited` event after its last
  * push); `Test Core (…/6)` on the three heads whose diff was outside both the
  * `core` and the `crosspkg` sets. Zero heads carried any other skipped name.
+ * `Console Pin Gate`'s row left with its job when the objectui pin retired
+ * (#25697); the recordings below drop its run the same way.
  *
  * ⛔ Adding a row is a declaration that the skip is BY DESIGN, and the row must
  * name the mechanism — a row added to silence an exit 4 without one is the
@@ -327,13 +329,6 @@ export const EXPECTED_SKIPS = Object.freeze([
     job: 'build-docs',
     gate: { kind: 'filter-output', outputs: ['docs'] },
     reason: "gated on ci.yml's `filter` job `docs` output (apps/docs, content, the lockfile, ci.yml itself); a diff outside it skips the docs build on the PR head",
-  },
-  {
-    name: 'Console Pin Gate',
-    workflow: 'ci.yml',
-    job: 'console-pin',
-    gate: { kind: 'filter-output', outputs: ['console'] },
-    reason: `${FULL_BATTERY_REASON}; on a push it also needs the \`filter\` job's \`console\` output (the \`.objectui-sha\` pin, the console build/probe scripts, and the spec's entry layout: \`packages/spec/package.json\` and \`packages/spec/tsup.config.ts\`)`,
   },
   {
     name: 'Type Check UI',
@@ -1251,7 +1246,9 @@ function fixtureRun(name, conclusion, suite = 1, extra = {}) {
  * on one head. Names, conclusions and check-suite ids VERBATIM from the
  * listing, but for one name: the Test Core matrix template read `/6` then and
  * is re-spelled `/8` here, the matrix #25376 widened, because the roster
- * grades the live name. This is the real shape the roster must accept, kept here so the
+ * grades the live name; and one run is left out, `Console Pin Gate` (skipped,
+ * suite 94769267631), whose job retired with the objectui pin (#25697), so 18
+ * skipped remain. This is the real shape the roster must accept, kept here so the
  * measured family and the declared family cannot drift apart unnoticed.
  */
 const MEASURED_18315 = [
@@ -1271,7 +1268,6 @@ const MEASURED_18315 = [
   ['Check PR Size', 'skipped', 94771343927],
   ['Check PR Size', 'skipped', 94906910103],
   ['Close issues referenced in other repositories', 'success', 94909498693],
-  ['Console Pin Gate', 'skipped', 94769267631],
   ['Dogfood Regression Gate', 'success', 94769267631],
   ['Dogfood Regression Gate (${{ matrix.shard }}/3)', 'skipped', 94769267631],
   ['Dogfood Verify CLI', 'skipped', 94769267631],
@@ -1304,7 +1300,9 @@ function measuredPayload() {
  * Measured 2026-09-30 on PR #20748's head `a84b73af13` (a `create-objectstack`
  * landing, so `scaffold-e2e.yml` ran on `pull_request`): 42 check-runs, 34
  * success / 8 skipped, full `GET /commits/{head}/check-runs` listing. Names,
- * conclusions and check-suite ids VERBATIM. Its one skip outside the listed
+ * conclusions and check-suite ids VERBATIM but for one run left out,
+ * `Console Pin Gate` (skipped, suite 99276458806), whose job retired with the
+ * objectui pin (#25697), so 7 skipped remain. Its one skip outside the listed
  * roster is `Registry canary: ${{ matrix.template }}` (run 36658032070) —
  * the raw pre-expansion name the derived half exists to admit.
  */
@@ -1319,7 +1317,6 @@ const MEASURED_20748 = [
   ['Check PR Size', 'skipped', 99276487096],
   ['Check PR Size', 'success', 99276458818],
   ['Close issues referenced in other repositories', 'success', 99283715448],
-  ['Console Pin Gate', 'skipped', 99276458806],
   ['Dogfood Regression Gate', 'success', 99276458806],
   ['Dogfood Regression Gate (1/3)', 'success', 99276458806],
   ['Dogfood Regression Gate (2/3)', 'success', 99276458806],
@@ -1418,9 +1415,9 @@ export function selfTest() {
   const measured = judgeCheckRuns(measuredPayload());
   t('measured head: judged (no pending run)', measured.kind, 'judged');
   t('measured head: 20 success', measured.success, 20);
-  t('measured head: 19 skipped, every one expected', measured.expected.reduce((n, e) => n + e.count, 0), 19);
+  t('measured head: 18 skipped, every one expected', measured.expected.reduce((n, e) => n + e.count, 0), 18);
   t('measured head: zero unexpected skips', measured.unexpected.length, 0);
-  t('measured head: eleven of eleven rostered names appear', measured.expected.length, 11);
+  t('measured head: ten of ten rostered names appear', measured.expected.length, 10);
   t('measured head: exit 0', verdictExit(measured), 0);
   t('measured head: the multiplicity is reported (Auto Label ×3)', measured.expected.find((e) => e.name === 'Auto Label')?.count, 3);
   t('measured head: the report ends on the OK verdict line', renderReport(measured, { head: 'b671f83b', repo: 'objectstack-ai/objectstack' }).at(-1).startsWith('VERDICT check-expected-skips: OK'), true);
@@ -1600,7 +1597,7 @@ export function selfTest() {
   // ---- the measured #20748 head: the card's pins -------------------------------
   const m20748 = judgeCheckRuns(measured20748Payload(), live.roster);
   t('measured #20748: the raw-named skipped canary judges exit 0 against the joined roster', verdictExit(m20748), 0);
-  t('measured #20748: 8 skipped, every one expected', m20748.expected.reduce((n, e) => n + e.count, 0) === 8 && m20748.unexpected.length === 0, true);
+  t('measured #20748: 7 skipped, every one expected', m20748.expected.reduce((n, e) => n + e.count, 0) === 7 && m20748.unexpected.length === 0, true);
   t('measured #20748: …the canary read as a derived expected skip', m20748.expected.find((e) => e.name === CANARY_RAW_NAME)?.derived, true);
   t('measured #20748: …and the report tags it derived', renderReport(m20748).some((l) => l.includes(CANARY_RAW_NAME) && l.includes('; derived')), true);
   t('measured #20748: the LISTED half alone still answers exit 4 on it (the derivation is what moved it)', judgeCheckRuns(measured20748Payload()).unexpected[0]?.name, CANARY_RAW_NAME);
@@ -1731,7 +1728,7 @@ export function selfTest() {
   console.log(
     `✓ check-expected-skips self-test: ${cases.length} cases pass (the exit register; the roster's shape — reasons, no duplicates, ` +
       'declared gate kinds — and its truth on this checkout\'s workflows, with the audit driven red on a deleted, renamed, un-gated and ' +
-      "re-gated job, a lost || 'true' widening and an unreadable workflow; the judge on the measured 39-run head and on fixtures for an " +
+      "re-gated job, a lost || 'true' widening and an unreadable workflow; the judge on the measured head (38 of its 39 runs) and on fixtures for an " +
       'expected skip, an unexpected skip named as a filter miss, a same-suite failure read as a dependency skip, a raw matrix template, ' +
       'other conclusions, a pending run and an empty head; the derived half — the non-PR-event recogniser admitting only its one shape and ' +
       'refusing a pull_request / push / merge_group term, a negation and every live mixed if:, the raw-name rule, and the derivation ' +
