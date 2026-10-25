@@ -1383,9 +1383,18 @@ export function selfTest() {
     if (!omitUi) {
       write(UI_PARSER_SRC, { 'parse.ts': PARSE_FIXTURE, 'validate.ts': FIXTURE_CONTAINMENT_SLOT, 'codes.ts': FIXTURE_CONSTANT_SIDE, ...ui });
     }
-    return checkWithoutPin(root);
+    // A throw is caught and named, so an ablated guard reds THIS row with its
+    // label rather than crashing the run before the rest report.
+    try {
+      return checkWithoutPin(root);
+    } catch (error) {
+      return { threw: String(error?.message ?? error).split('\n')[0] };
+    }
   };
-  const treeKinds = (result) => (result.refusal ? 'refused' : kinds(result.findings));
+  const treeKinds = (result) => {
+    if (result.threw) return `threw: ${result.threw}`;
+    return result.refusal ? 'refused' : kinds(result.findings);
+  };
   const agreeing = inTree();
   check(
     '⭐ no pin + a ui/ copy that agrees: no finding, so the gate exits 0',
