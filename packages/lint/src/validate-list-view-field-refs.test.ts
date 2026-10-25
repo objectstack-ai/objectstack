@@ -1183,7 +1183,7 @@ describe('[#25786] a grouping level ordered by another field', () => {
     expect(finding.hint).toMatch(/^The field is computed on read and stores no value/);
   });
 
-  it('a dotted `orderBy` is refused at the aggregate door, whatever its head', () => {
+  it('a dotted `orderBy` is refused at the data door\'s ingress, whatever its head', () => {
     const findings = findingsFor(ordered('owner.name'));
     expect(findings.map((f) => [f.rule, f.path, f.severity])).toEqual([
       [LIST_VIEW_FIELD_DOTTED, 'views[0].list.grouping.fields[0].orderBy', 'error'],

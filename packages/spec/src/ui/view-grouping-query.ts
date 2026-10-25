@@ -139,14 +139,23 @@
  *     their maxes — so an outer level's order value is derived from the
  *     leaf rows like its `count`.
  *   * **The operand's type** is the aggregate × field-type table's: `min` /
- *     `max` accept the numeric, temporal and boolean classes and refuse the
- *     string classes (collation-dependent order). The engine's aggregate door
- *     refuses a refused pair with `INVALID_FIELD` / 400; `os validate` refuses
- *     it at authoring (`list-view-group-order-unorderable`). This module has
- *     no field types and judges nothing about them.
+ *     `max` accept the numeric, temporal and boolean classes and refuse every
+ *     other (the string classes for their collation-dependent order, the
+ *     virtual `formula`). Two doors refuse with `INVALID_FIELD` / 400: the
+ *     data door's ingress (`findData`'s field-existence gate) an unknown or
+ *     dotted name, and `engine.aggregate`'s type door a refused type. `os
+ *     validate` refuses all three at authoring. This module has no field
+ *     types and judges nothing about them.
  *   * **What the consumer owes** is stated on `GroupingFieldSchema.orderBy`: a
  *     group whose order value is `null` (every row empty there) sorts last
- *     in both directions, and equal values fall back to the group key.
+ *     in both directions, and equal values fall back to the group key in the
+ *     same direction.
+ *   * **The header set is sorted whole.** The header query is compiled
+ *     unpaged, and the consumer's sort is right only over every group: a
+ *     `limit` on it is sliced by `findData` in the engine's emission order,
+ *     before any sort, so a paged header set honours neither `order` nor
+ *     `orderBy` — the recorded "Header cardinality is unbounded" limit on
+ *     `GroupingConfigSchema`, unchanged here.
  *
  * ## The door — existing, not new
  *

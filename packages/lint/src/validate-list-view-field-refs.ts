@@ -312,14 +312,15 @@
  * A grouping level's `orderBy` names the field whose value orders its groups.
  * Unlike the renderer bindings, it REACHES A DOOR: the group header query
  * (`compileListViewGroupQuery`) carries one `min` / `max` node over it, which
- * `engine.aggregate` executes. Three verdicts, each the door's own:
+ * `engine.aggregate` executes. Three verdicts, each the door's own — two
+ * doors, both `400 INVALID_FIELD`:
  *
- *  - **Existence** — {@link LIST_VIEW_FIELD_UNKNOWN}, `error`: the aggregate
- *    door refuses an unknown column `400 INVALID_FIELD`, so the grouped view
- *    renders no group at all.
+ *  - **Existence** — {@link LIST_VIEW_FIELD_UNKNOWN}, `error`: the data
+ *    door's ingress (`findData`'s `assertAggregationFieldsExist`) refuses an
+ *    unknown operand, so the grouped view renders no group at all.
  *  - **A dotted path** — {@link LIST_VIEW_FIELD_DOTTED} at the `aggregate`
- *    axis: the header query compiles no join, and the door refuses every
- *    dotted aggregation operand by name, whatever its head.
+ *    axis: the header query compiles no join, and the same ingress gate
+ *    refuses every dotted aggregation operand, whatever its head.
  *  - **Orderability** — {@link LIST_VIEW_GROUP_ORDER_UNORDERABLE}, `error`:
  *    the pair `min` / `max` × the field's declared type, asked of the spec's
  *    table (`isAggregateCompatibleWithFieldType`) exactly as the engine's

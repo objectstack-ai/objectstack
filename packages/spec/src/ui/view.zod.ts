@@ -1280,6 +1280,30 @@ function checkGroupingFieldName(raw: string): string | undefined {
     + `statement about the data. ${remedy}`;
 }
 
+/**
+ * Validate one `grouping.fields[].orderBy` name (#25786): the same non-padded
+ * rule as {@link checkGroupingFieldName}, for the same reason — the name is
+ * compiled into the group header query verbatim, here as a `min` / `max`
+ * operand. Returns the author-facing refusal, or `undefined` when it conforms.
+ * The empty string is the schema's `min(1)` and the compiler's
+ * `grouping_order_by_blank`, not this.
+ */
+function checkGroupingOrderByName(raw: string): string | undefined {
+  if (NON_PADDED_FIELD_NAME_PATTERN.test(raw)) return undefined;
+
+  const trimmed = raw.trim();
+  const remedy = trimmed === ''
+    ? 'Name the field to order the groups by, or remove `orderBy` — this value is nothing but whitespace.'
+    : `Write ${JSON.stringify(trimmed)}.`;
+
+  return '`grouping.fields[].orderBy` names the field exactly as it is stored, with no leading or '
+    + `trailing whitespace — received ${JSON.stringify(raw)}. The group header query is compiled `
+    + 'from this string verbatim (`compileListViewGroupQuery` sends it as the operand of the level\'s '
+    + '`min` / `max` node), so a padded spelling names a column no record has: the data door refuses '
+    + 'the header query `400 INVALID_FIELD` and the grouped view renders no group. '
+    + remedy;
+}
+
 /*
  * ---------------------------------------------------------------------------
  * `groupByField` — the same non-padded name rule, three more schemas (#17499)
@@ -1384,7 +1408,11 @@ const groupByFieldCheck = (view: GroupByFieldView) => (raw: string, ctx: z.Refin
  * field-type table (`AGGREGATE_FIELD_TYPE_COMPATIBILITY`, the `min` / `max`
  * row): a numeric, temporal or boolean field — the table refuses the string
  * classes because two backends order strings by two collations — and
- * `os validate` refuses any other (`list-view-group-order-unorderable`).
+ * `os validate` refuses any other (`list-view-group-order-unorderable`). The
+ * name is compiled verbatim, so a padded one is refused here as `field`'s is
+ * (#17360's ruling, {@link checkGroupingOrderByName}). The header set is
+ * sorted whole: a `limit` on the header query slices before any sort (the
+ * "Header cardinality is unbounded" limit on {@link GroupingConfigSchema}).
  */
 export const GroupingFieldSchema = lazySchema(() => strictObject({
   surface: 'this grouping field',
@@ -1405,15 +1433,22 @@ export const GroupingFieldSchema = lazySchema(() => strictObject({
     'Group sort order — applied by the consumer over the header rows (the aggregate query itself sorts '
     + 'nothing): by the group key, or by the `orderBy` value each header row carries when `orderBy` is set',
   ),
-  orderBy: z.string().min(1).optional().describe(
-    'Field whose value orders this level\'s groups, when that is not the grouping field — a field of the '
-    + 'same object; default: the grouping field itself, so the groups order by their own key. The group '
-    + 'header query then carries, per group, the smallest value of this field for `order: asc` and the '
-    + 'largest for `desc` (each group sits where its first row would if the rows were sorted by this field), '
-    + 'and the consumer sorts the header rows by it; a group with no value here sorts last in both '
-    + 'directions, and equal values fall back to the group key. A numeric, temporal or boolean field: '
-    + 'min/max over a string orders by collation, which differs between backends, so the server refuses it',
-  ),
+  orderBy: z.string().min(1)
+    .superRefine((raw, ctx) => {
+      const refusal = checkGroupingOrderByName(raw);
+      if (refusal) ctx.addIssue({ code: 'custom', message: refusal });
+    })
+    .optional()
+    .describe(
+      'Field whose value orders this level\'s groups, when that is not the grouping field — a field of the '
+      + 'same object; default: the grouping field itself, so the groups order by their own key. The group '
+      + 'header query then carries, per group, the smallest value of this field for `order: asc` and the '
+      + 'largest for `desc` (each group sits where its first row would if the rows were sorted by this field), '
+      + 'and the consumer sorts the header rows by it; a group with no value here sorts last in both '
+      + 'directions, and equal values fall back to the group key in the same direction. NO leading or '
+      + 'trailing whitespace (compiled verbatim, as `field` is). A numeric, temporal or boolean field: '
+      + 'min/max over a string orders by collation, which differs between backends, so the server refuses it',
+    ),
   collapsed: z.boolean().default(false).describe('Collapse groups by default (presentation only)'),
 }));
 

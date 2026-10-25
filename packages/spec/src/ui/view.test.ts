@@ -2300,6 +2300,33 @@ describe('GroupingFieldSchema', () => {
     expect(result.error!.issues.map((i) => [i.path.join('.'), i.code])).toEqual([['orderBy', code]]);
   });
 
+  // The name is compiled into the `min` / `max` node verbatim, as `field` is
+  // into `groupBy`, so a padded spelling is refused the same way (#17360's
+  // ruling), not trimmed: it would name a column no record has.
+  it.each([
+    ['leading', ' period_start', 'Write "period_start".'],
+    ['trailing', 'period_start ', 'Write "period_start".'],
+    ['a tab', '\tperiod_start', 'Write "period_start".'],
+    ['whitespace only', ' ', 'nothing but whitespace'],
+  ])('refuses %s whitespace at `orderBy`, by name', (_label, spelling, remedy) => {
+    const result = GroupingFieldSchema.safeParse({ field: 'period_label', orderBy: spelling });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.map((i) => [i.path.join('.'), i.code])).toEqual([['orderBy', 'custom']]);
+    const message = result.error!.issues[0]!.message;
+    expect(message).toContain('grouping.fields[].orderBy');
+    expect(message).toContain(JSON.stringify(spelling));
+    expect(message).toContain(remedy);
+  });
+
+  it('refuses a padded `orderBy` through ListViewSchema at `grouping.fields[N].orderBy`', () => {
+    const result = ListViewSchema.safeParse({
+      columns: ['name'],
+      grouping: { fields: [{ field: 'status' }, { field: 'period_label', orderBy: 'period_start ' }] },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.map((i) => i.path.join('.'))).toEqual(['grouping.fields.1.orderBy']);
+  });
+
   // ==========================================================================
   // [#17360] A padded `field` is REFUSED, not trimmed
   // (objectui#7347 ruling C, decision batch #110 item 5 — refuse at the producer)
