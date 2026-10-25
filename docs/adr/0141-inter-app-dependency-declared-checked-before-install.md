@@ -122,7 +122,8 @@ declared id to `resolvePluginOrder` as an **optional** edge, so the packages of 
 order (ADR-0130 D5) and a declared id that is not in the artifact "is simply not an edge here" — skipped silently, by
 design (its module header says why). No install door asks whether a declared dependency is installed, or at what version.
 `dependency_missing` is an enum value of `packages/spec/src/system/app-install.zod.ts#AppCompatibilityCheckSchema`; across
-the tree it occurs in that schema, its test, the generated JSON schema and the generated reference page — zero producers.
+the tracked tree it occurs in that schema, its test and the generated reference page
+(`content/docs/references/system/app-install.mdx`) — zero producers.
 `packages/core/src/dependency-resolver.ts#SemanticVersionManager` resolves kernel plugins, not installed packages.
 
 **The namespace gate admits co-owners from one source only, and the uniqueness check follows that set.**
@@ -205,7 +206,8 @@ satisfied when both hold:
    version (one per artifact under ADR-0130 D6) — satisfies `range`, read in the npm semver range grammar
    `ManifestSchema.dependencies` already documents and `engines.protocol` already uses. A version or range the reader
    cannot parse does **not** satisfy; the refusal says which side was unreadable. Fail closed: an unread bound is not a
-   bound.
+   bound — deliberately the opposite of the protocol handshake beside it, which admits an unrecognised `engines.protocol`
+   range with a warning (merge question 6 says why).
 
 Every record entry is required: the record shape has no optional arm (D8 says how the marketplace shape's `optional`
 projects). Only P's **own** entries are judged — a dependency's dependencies were judged when it was installed.
@@ -250,7 +252,9 @@ has since gone is D3's uninstall-protection item, not a boot refusal.
 Each item is a decision **not** to build yet, recorded so the next author finds a reason instead of an absence. None is
 rejected; each has a trigger. Meanwhile the ADR-0029 refusal stands unchanged (a package whose object another package
 `extend`s cannot be uninstalled — `packages/objectql/src/registry.ts#uninstallPackage` through `unregisterObjectsByPackage`),
-and it is the only uninstall refusal there is.
+and it is the only refusal that reads another package's relation to the one being removed; the install-local `DELETE`
+door's own refusals (ADR-0131 D12's wall, a request it cannot serve) read the deployment's posture and the request, not
+another package.
 
 | Deferred item | What happens meanwhile | Trigger to build it |
 |:---|:---|:---|
@@ -338,7 +342,7 @@ it. Renaming a module's objects to dodge the gate stays refused (ADR-0129; lette
   [`5645322259`](https://github.com/objectstack-ai/objectstack/issues/14488#issuecomment-5645322259) — an artifact installs
   whole, the app package's sets cover every module's objects, nothing composes grants into another package's set, and a
   module carved out as its own artifact ships its own permission sets under ADR-0086 D4; the card is not reopened for
-  that case. That ruling's premise sentence — 「目前的要求是发布物是完整安装的，没有设计单独安装其中一个模块的需求」 — is
+  that case. That ruling's premise sentence — 「目前的要求是发布物是完整安装的，没有设计单独安装其中 一个模块的需求。」 — is
   the one the maintainer moved on 2026-10-23 (「而每个包可以独立安装」); its disposition is unchanged and is what D4 above
   relies on: a standalone module's permission sets are the module author's work, not a platform blocker.
 
@@ -445,7 +449,8 @@ The letters as filed on #25403 and on ruling `6377678758`:
 ## Open questions for the maintainer's merge decision
 
 These are the points this record decided where the rulings were silent, listed so the merge is an informed act. Merging
-accepts them; an objection names the number.
+accepts them; an objection names the number. Items 1–4 shape the mechanism; 5–8 shape D2's refusal; 9 is a sizing
+consequence; 10 is a reading of an earlier ruling.
 
 1. **D2's second arm** — a dependency delivered by the same artifact counts as present. Without it, judging the whole
    artifact before anything registers would refuse every ADR-0130 artifact whose modules declare their app; judging per
@@ -456,6 +461,25 @@ accepts them; an objection names the number.
    declares and who gains; recognition from X's side is what keeps a rehydrate from refusing HotCRM itself.
 4. **D5 direct-only** — co-ownership follows P's own declarations, not the transitive closure the save door walks.
    Narrower is the reversible direction; widening later needs no undo.
+5. **D2's status is 422** — fixed by analogy with `NAMESPACE_CONFLICT`, the sibling refusal at the same gate for a
+   conflict with the environment's state; the code itself goes to the ADR-0112 D3 ledger on the runtime card.
+6. **D2 fails closed on an unparseable version or range** — the opposite of `assertProtocolCompat` at the same doors,
+   which admits an unrecognised `engines.protocol` range with a warning so that no artifact already in the field is
+   refused by a parser gap. The reason the policies differ: the handshake grandfathers a fleet of existing artifacts,
+   while a dependency entry is written today by the dependent's own author about one named package (the in-repo
+   population is one manifest), and an unread bound would admit every version — the one outcome the check exists to
+   refuse.
+7. **Every record entry is required; the marketplace `optional` arm projects to `false`** — the record shape has no
+   optional spelling, and inventing one would be the spec change this record forbids itself.
+8. **Only P's own entries are judged** — a dependency's own dependencies were judged when it was installed; judging them
+   again would re-run D2 for packages the administrator already admitted.
+9. **D8 item 1's record-to-array conversion enlarges the runtime card** beyond the ruling's sizing (XS–S for the check,
+   S for the objectql source). The ruling asks the two shapes to be "aligned"; a snapshot that keeps carrying the record
+   shape under an array schema is not aligned, so the conversion is where the alignment lands — the maintainer may cut
+   it as its own card instead.
+10. **The reading that ruling `5645322259`'s premise was moved by B′** (D6; ADR-0130's addendum) — a reconciliation of two
+    maintainer rulings that neither ruling on #25403 makes. It is recorded because a reader of both records would
+    otherwise find them contradicting; the earlier ruling's disposition is untouched.
 
 ---
 

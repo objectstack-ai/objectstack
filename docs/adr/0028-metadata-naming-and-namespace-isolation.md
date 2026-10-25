@@ -174,8 +174,9 @@ reference, and the set of legal targets is closed and written in the manifest �
 and the closed set keeps the tenant-style isolation boundary between
 marketplace apps: an app reaches only what it declared. On the enforced
 present-state model (ADR-0129), the runtime save door already judges a package
-write against that closure, and ADR-0141 D2 refuses to install an app whose
-declared dependency is absent or out of range.
+write against that closure, and ADR-0141 D2 decides that installing an app
+whose declared dependency is absent or out of range is refused — a decision
+its runtime card implements; nothing enforces it until that card lands.
 
 ### D5 — The kernel is one unified, reserved namespace (`sys`) with object ownership distributed across first-party plugins
 
