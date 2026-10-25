@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { uiTurboConfigPath } from '../workspace-root.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -29,7 +30,7 @@ import {
  * added to turbo.json is a root change the day it lands.
  */
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const turbo = JSON.parse(fs.readFileSync(path.join(repoRoot, 'turbo.json'), 'utf8')) as {
+const turbo = JSON.parse(fs.readFileSync(uiTurboConfigPath(), 'utf8')) as {
   globalDependencies?: string[];
   tasks: Record<string, { inputs?: string[]; dependsOn?: string[] }>;
 };

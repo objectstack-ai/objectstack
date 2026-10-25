@@ -19,13 +19,22 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-/** Repo root: this file sits at `scripts/__tests__/helpers/`. */
-export const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+import { uiRoot } from '../../ui-root.mjs';
+import { uiTurboConfigPath, workspaceGlobs } from '../../workspace-root.mjs';
 
-const turboConfigPath = path.join(repoRoot, 'turbo.json');
-const workspaceConfigPath = path.join(repoRoot, 'pnpm-workspace.yaml');
+/** Repo root: the objectui tree, standalone or as the monorepo's `ui/`. */
+export const repoRoot = uiRoot();
+
+/**
+ * objectui's OWN task declaration: `turbo.json` at the repo root, or the copy
+ * the cutover parks as `turbo.objectui.json` (a nested turbo.json must `extends`
+ * the root, so under the monorepo the live one is the root's, with these
+ * inputs re-rooted to `$TURBO_ROOT$/ui/...`). These guards pin the shapes
+ * objectui declares, relative to its own tree, so they read this one
+ * (objectstack#25723).
+ */
+const turboConfigPath = uiTurboConfigPath();
 
 /** POSIX-separated, repo-relative. The one path spelling these guards compare in. */
 export function rel(absolute: string): string {
@@ -33,8 +42,9 @@ export function rel(absolute: string): string {
 }
 
 /**
- * Package directories, derived from `pnpm-workspace.yaml` rather than a
- * hardcoded group list.
+ * Package directories, derived from the governing `pnpm-workspace.yaml` rather
+ * than a hardcoded group list, through the one parser in
+ * `scripts/workspace-root.mjs` (relative to `repoRoot` in both layouts).
  *
  * Only the two entry shapes the file actually uses are understood (`dir/*` and
  * a bare `dir`); anything else throws. A workspace layout a guard silently
@@ -42,26 +52,7 @@ export function rel(absolute: string): string {
  * is the failure mode both guards exist to prevent.
  */
 export function workspacePackageDirs(): string[] {
-  const yaml = fs.readFileSync(workspaceConfigPath, 'utf8');
-  const patterns: string[] = [];
-  let inPackages = false;
-  for (const line of yaml.split('\n')) {
-    if (/^packages:\s*$/.test(line)) {
-      inPackages = true;
-      continue;
-    }
-    if (inPackages) {
-      const item = line.match(/^\s+-\s*['"]?([^'"#]+?)['"]?\s*$/);
-      if (item) {
-        patterns.push(item[1]);
-        continue;
-      }
-      if (line.trim() !== '') break;
-    }
-  }
-  if (patterns.length === 0) {
-    throw new Error('pnpm-workspace.yaml must declare at least one package pattern');
-  }
+  const patterns = workspaceGlobs(repoRoot);
 
   const dirs: string[] = [];
   for (const pattern of patterns) {

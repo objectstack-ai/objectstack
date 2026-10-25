@@ -121,6 +121,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { maskComments } from './js-comment-mask.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
+import { workspaceGlobs } from './workspace-root.mjs';
 
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -193,23 +194,17 @@ const TRY_EXTS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'];
 // ---------------------------------------------------------------------------
 
 /**
- * Every workspace package, name -> absolute directory, from the globs
- * `pnpm-workspace.yaml` actually declares. Reading the file rather than
- * hard-coding `packages/`, `apps/`, `examples/` keeps one declaration of what
- * the workspace is; an unsupported glob shape throws instead of being skipped,
- * because a silently narrower workspace makes every package in it read as
- * external — which is to say, as unreachable.
+ * Every workspace package, name -> absolute directory, from the globs the
+ * governing `pnpm-workspace.yaml` actually declares for this tree
+ * (`scripts/workspace-root.mjs`: the objectui root's own file, or the monorepo
+ * root's `ui/...` globs with the prefix stripped -- objectstack#25723). Reading
+ * the file rather than hard-coding `packages/`, `apps/`, `examples/` keeps one
+ * declaration of what the workspace is; an unsupported glob shape throws
+ * instead of being skipped, because a silently narrower workspace makes every
+ * package in it read as external — which is to say, as unreachable.
  */
 export function readWorkspacePackages(root = REPO_ROOT) {
-  const yaml = fs.readFileSync(path.join(root, 'pnpm-workspace.yaml'), 'utf8');
-  const block = yaml.slice(yaml.indexOf('packages:'));
-  const globs = [];
-  for (const line of block.split('\n').slice(1)) {
-    if (/^\S/.test(line)) break;
-    const m = /^\s*-\s*'?"?([^'"\s]+)'?"?\s*$/.exec(line);
-    if (m) globs.push(m[1]);
-  }
-  if (!globs.length) throw new Error('pnpm-workspace.yaml declared no package globs');
+  const globs = workspaceGlobs(root);
 
   const dirs = [];
   for (const glob of globs) {

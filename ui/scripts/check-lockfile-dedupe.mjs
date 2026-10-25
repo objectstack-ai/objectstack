@@ -123,7 +123,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
-import { CACHE_DIR, STAMP_FILE } from './objectstack-pin.mjs';
+import { CACHE_DIR, OVERRIDE_PREFIX, STAMP_FILE } from './objectstack-pin.mjs';
+import { rootManifest, workspaceRoot } from './workspace-root.mjs';
 
 const REPO_ROOT = path.resolve(fileURLToPath(import.meta.url), '..', '..');
 
@@ -332,6 +333,22 @@ export function pinnedBuildMissing(root = REPO_ROOT) {
 }
 
 /**
+ * Whether the workspace resolves any `@objectstack/*` package through the
+ * pinned build -- the manifest pnpm reads overrides from declares a
+ * `file:.objectstack-pin/...` override. Standalone it does, and the stamp
+ * check below applies. Under the objectstack monorepo (objectstack#25723) the
+ * `@objectstack/*` packages are workspace members and no manifest declares the
+ * pin, so there is no build whose absence could make `pnpm dedupe --check`
+ * resolve from the registry; the check is then not a precondition.
+ *
+ * @param {{ pnpm?: { overrides?: Record<string, string> } }} [manifest]
+ * @returns {boolean}
+ */
+export function pinDeclared(manifest = rootManifest()) {
+  return Object.values(manifest?.pnpm?.overrides ?? {}).some((v) => typeof v === 'string' && v.startsWith(OVERRIDE_PREFIX));
+}
+
+/**
  * @param {string[]} argv
  * @returns {number} process exit code
  */
@@ -341,7 +358,7 @@ export function main(argv = process.argv.slice(2)) {
   const annotate = (message) =>
     console.error(`::${reportOnly ? 'warning' : 'error'} title=Lockfile dedupe::${message}`);
 
-  if (pinnedBuildMissing()) {
+  if (pinDeclared() && pinnedBuildMissing()) {
     annotate(
       `could not take a reading — the pinned @objectstack/* build is not in ${CACHE_DIR}, so ` +
         '`pnpm dedupe --check` cannot resolve those packages (objectui#12957). Run `pnpm objectstack:build` ' +
@@ -352,8 +369,9 @@ export function main(argv = process.argv.slice(2)) {
     return reportOnly ? EXIT_CLEAN : EXIT_CANNOT_RUN;
   }
 
+  // At the workspace root: this repository's own, or the monorepo's one level up.
   const run = spawnSync('pnpm', ['dedupe', '--check'], {
-    cwd: REPO_ROOT,
+    cwd: workspaceRoot(),
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
   });

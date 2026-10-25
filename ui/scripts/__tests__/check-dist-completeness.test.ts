@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { uiTurboConfigPath } from '../workspace-root.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -306,7 +307,7 @@ describe('this repository', () => {
   );
 
   it('turbo treats the gate as an input of the builds that run it', () => {
-    const turbo = JSON.parse(fs.readFileSync(path.join(repoRoot, 'turbo.json'), 'utf8'));
+    const turbo = JSON.parse(fs.readFileSync(uiTurboConfigPath(), 'utf8'));
     // Otherwise editing the gate does not invalidate a single cached build, and
     // the new rule is enforced only where nothing was cached.
     expect(turbo.tasks.build.inputs).toContain('$TURBO_ROOT$/scripts/check-dist-completeness.mjs');

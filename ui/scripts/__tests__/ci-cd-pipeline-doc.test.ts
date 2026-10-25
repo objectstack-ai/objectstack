@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { lockfilePath as workspaceLockfilePath } from '../workspace-root.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1795,7 +1796,7 @@ describe('ci-cd-pipeline.md — contexts that can never be required (#4170)', ()
  */
 const backendEnvPath = path.join(repoRoot, 'e2e/live/ci/backend.env');
 const startBackendPath = path.join(repoRoot, 'e2e/live/ci/start-backend.sh');
-const lockfilePath = path.join(repoRoot, 'pnpm-lock.yaml');
+const lockfilePath = workspaceLockfilePath();
 const backendEnv = fs.readFileSync(backendEnvPath, 'utf8');
 const startBackend = fs.readFileSync(startBackendPath, 'utf8');
 

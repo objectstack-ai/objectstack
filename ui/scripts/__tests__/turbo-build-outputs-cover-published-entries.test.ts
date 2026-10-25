@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { uiTurboConfigPath } from '../workspace-root.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -141,7 +142,7 @@ function declaredOutputs(configPath: string): string[] | undefined {
   return config.tasks?.[TASK]?.outputs;
 }
 
-const ROOT_OUTPUTS = declaredOutputs(path.join(repoRoot, 'turbo.json'));
+const ROOT_OUTPUTS = declaredOutputs(uiTurboConfigPath());
 if (!ROOT_OUTPUTS || ROOT_OUTPUTS.length === 0) {
   throw new Error(`turbo.json must declare \`${TASK}\` outputs`);
 }

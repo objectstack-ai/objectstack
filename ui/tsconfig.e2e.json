@@ -23,9 +23,10 @@
 // true, for its whole life. Playwright would never have told anyone.
 //
 // This project is standalone and cheap: it imports no workspace package — every
-// import in it is `@playwright/test`, `./helpers`, or a `node:` builtin — so unlike
-// `tsconfig.vitest-setup.json` it needs no built declarations and can run before,
-// or independently of, any build. `scripts/__tests__/e2e-type-check.test.ts` pins
+// import in it is `@playwright/test`, `./helpers`, a `node:` builtin, or the
+// builtins-only `scripts/ui-root.mjs` (typed through its `.d.mts` twin) — so
+// unlike `tsconfig.vitest-setup.json` it needs no built declarations and can run
+// before, or independently of, any build. `scripts/__tests__/e2e-type-check.test.ts` pins
 // that premise, so if a spec ever imports `@object-ui/*` the wiring has to be
 // reconsidered rather than silently starting to depend on `dist`.
 //
@@ -114,10 +115,11 @@
     // the loader genuinely imposes.
     "isolatedModules": true,
 
-    // No `allowJs`, unlike `tsconfig.scripts.json`: nothing under `e2e/` imports
-    // a `.js`/`.mjs` module and nothing carries a `@ts-expect-error`, so it would
-    // buy nothing while walking into the TS2578 interaction documented in
-    // `apps/console/tsconfig.node.json` (objectui#3513).
+    // No `allowJs`, unlike `tsconfig.scripts.json`: the one `.mjs` module the
+    // specs import (`scripts/ui-root.mjs`, objectstack#25723) is typed by its
+    // hand-written `.d.mts` twin, and nothing carries a `@ts-expect-error`, so
+    // it would buy nothing while walking into the TS2578 interaction documented
+    // in `apps/console/tsconfig.node.json` (objectui#3513).
     "allowJs": false,
 
     // Legal only because this project is standalone — TS6310 forbids `noEmit` on

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { uiTurboConfigPath } from '../workspace-root.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
@@ -278,7 +279,7 @@ describe('turbo `lint` inputs cover every out-of-package file (objectui#4184)', 
  */
 describe('`//#lint:root` hashes the files it lints, never the whole repository (objectui#12276)', () => {
   const ROOT_TASK = '//#lint:root';
-  const turbo = JSON.parse(fs.readFileSync(path.join(repoRoot, 'turbo.json'), 'utf8')) as {
+  const turbo = JSON.parse(fs.readFileSync(uiTurboConfigPath(), 'utf8')) as {
     tasks: Record<string, { cache?: boolean; dependsOn?: string[]; inputs?: string[] }>;
   };
   const inputs = turbo.tasks[ROOT_TASK]?.inputs ?? [];

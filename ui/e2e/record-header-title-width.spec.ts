@@ -3,6 +3,7 @@ import { compile } from 'tailwindcss';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { uiRoot } from '../scripts/ui-root.mjs';
 
 /**
  * GEOMETRY pin for the record-header title/action width arbitration on the two
@@ -46,21 +47,11 @@ import path from 'node:path';
  * produces, not a worst case invented to make a floor look necessary.
  */
 
-const REPO_ROOT = (() => {
-  // Rooted on this file, never on `process.cwd()` — AGENTS.md's
-  // "tests read the filesystem relative to their own file" rule. Bare
-  // `import.meta.url`, walked up; never `new URL(<relative>, import.meta.url)`.
-  let dir = path.dirname(fileURLToPath(import.meta.url));
-  for (let i = 0; i < 10; i++) {
-    try {
-      readFileSync(path.join(dir, 'pnpm-workspace.yaml'), 'utf8');
-      return dir;
-    } catch {
-      dir = path.dirname(dir);
-    }
-  }
-  throw new Error('could not locate the repo root from ' + import.meta.url);
-})();
+// The objectui tree, resolved from `scripts/ui-root.mjs`'s own location -- the
+// one fact true standalone and under the objectstack monorepo's `ui/`. Walking up
+// to `pnpm-workspace.yaml` found the OBJECTSTACK root there (objectstack#25723),
+// and the sources this spec reads live under this tree's `packages/`.
+const REPO_ROOT = uiRoot();
 
 const read = (rel: string) => readFileSync(path.join(REPO_ROOT, rel), 'utf8');
 

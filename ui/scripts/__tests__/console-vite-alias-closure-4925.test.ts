@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { workspaceGlobs } from '../workspace-root.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -111,7 +112,6 @@ import ts from 'typescript';
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const CONSOLE_CONFIG = path.join(repoRoot, 'apps/console/vite.config.ts');
 const CONSOLE_SRC = path.join(repoRoot, 'apps/console/src');
-const WORKSPACE_MANIFEST = path.join(repoRoot, 'pnpm-workspace.yaml');
 
 /** The scope this table is about. Nothing else in it is reconciled here. */
 const SCOPE = '@object-ui/';
@@ -136,32 +136,13 @@ function packageOf(specifier: string): string | undefined {
 /**
  * `pnpm-workspace.yaml`'s `packages:` globs, expanded to `name -> dir`.
  *
- * Parsed as text rather than with a YAML dependency: this is a flat list of
- * scalars under one key, and the gates in this directory read their inputs as
- * text by convention (see `vitest-config-alias-targets-3944.test.ts`).
+ * The globs come from the one text parser in `scripts/workspace-root.mjs`
+ * (objectstack#25723), relative to `repoRoot` in both layouts: this is a flat
+ * list of scalars under one key, and the gates in this directory read their
+ * inputs as text by convention (see `vitest-config-alias-targets-3944.test.ts`).
  */
 function workspacePackages(): Map<string, string> {
-  const source = fs.readFileSync(WORKSPACE_MANIFEST, 'utf8');
-  const globs: string[] = [];
-  let inPackages = false;
-
-  for (const line of source.split('\n')) {
-    if (/^packages:\s*$/.test(line)) {
-      inPackages = true;
-      continue;
-    }
-    if (!inPackages) continue;
-    const item = /^\s+-\s*['"]?([^'"#]+?)['"]?\s*$/.exec(line);
-    if (item) {
-      globs.push(item[1]);
-      continue;
-    }
-    if (/^\S/.test(line)) inPackages = false;
-  }
-
-  if (globs.length === 0) {
-    throw new Error('pnpm-workspace.yaml: no `packages:` entries parsed — the manifest shape changed');
-  }
+  const globs = workspaceGlobs(repoRoot);
 
   const dirs: string[] = [];
   for (const glob of globs) {

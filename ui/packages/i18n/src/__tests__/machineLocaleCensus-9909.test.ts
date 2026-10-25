@@ -66,6 +66,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { workspaceGlobs as readWorkspaceGlobs } from '../../../../scripts/workspace-root.mjs';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -86,12 +87,18 @@ const DEP_FIELDS = ['dependencies', 'devDependencies', 'peerDependencies', 'opti
 /* The population                                                             */
 /* -------------------------------------------------------------------------- */
 
-/** The workspace globs, read from `pnpm-workspace.yaml` rather than restated. */
+/**
+ * The `packages:` globs that describe this tree, relative to `repoRoot`, from
+ * the one parser in `scripts/workspace-root.mjs` (objectstack#25723): read rather
+ * than hardcoded so a new workspace root is covered the day it is added, and
+ * throwing on a shape it does not know rather than skipping it, because a guard
+ * that silently stops looking at part of the workspace goes on reporting
+ * success over a shrinking surface. Where the file is -- the objectui root, or
+ * the monorepo root one level up with its `ui/` prefix stripped -- is the
+ * helper's question, not this file's.
+ */
 function workspaceGlobs(): string[] {
-  const yaml = readFileSync(path.join(repoRoot, 'pnpm-workspace.yaml'), 'utf8');
-  const block = /^packages:\s*\n((?:[ \t]+-[^\n]*\n?)+)/m.exec(yaml);
-  if (!block) return [];
-  return [...block[1].matchAll(/-\s*['"]?([^'"\s#]+)['"]?/g)].map((m) => m[1]);
+  return readWorkspaceGlobs(repoRoot);
 }
 
 function workspacePackageDirs(): string[] {

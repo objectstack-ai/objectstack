@@ -248,6 +248,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { isEntrypoint } from './invoked-as.mjs';
+import { workspaceGlobs as readWorkspaceGlobs } from './workspace-root.mjs';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -269,34 +270,19 @@ export const normalize = (p) => (p.startsWith('./') ? p.slice(2) : p);
 /* -------------------------------------------------------------------------- */
 
 /**
- * The `packages:` globs from `pnpm-workspace.yaml`, read rather than hardcoded
- * so a new workspace root is covered the day it is added. Understands only the
- * two shapes the file uses; anything else THROWS rather than being skipped,
- * because a guard that silently stops looking at part of the workspace goes on
- * reporting success over a shrinking surface.
+ * The `packages:` globs of the workspace file that governs `root`, relative to
+ * `root` -- read rather than hardcoded so a new workspace root is covered the
+ * day it is added, and THROWING on a shape the one parser does not know rather
+ * than skipping it, because a guard that silently stops looking at part of the
+ * workspace goes on reporting success over a shrinking surface. Where that file
+ * is (the objectui root, or the monorepo root one level up) is
+ * `scripts/workspace-root.mjs`'s question (objectstack#25723).
  *
  * @param {string} [root]
  * @returns {string[]}
  */
 export function workspaceGlobs(root = REPO_ROOT) {
-  const yaml = fs.readFileSync(path.join(root, 'pnpm-workspace.yaml'), 'utf8');
-  const lines = yaml.split('\n');
-  const start = lines.findIndex((l) => /^packages:\s*$/.test(l));
-  if (start === -1) throw new Error('pnpm-workspace.yaml no longer declares a top-level `packages:` key.');
-
-  const globs = [];
-  for (const line of lines.slice(start + 1)) {
-    if (/^\s*(#.*)?$/.test(line)) continue;
-    if (!/^\s/.test(line)) break;
-    const match = line.match(/^\s*-\s*['"]?([^'"#\s]+)['"]?\s*(#.*)?$/);
-    if (!match) {
-      throw new Error(
-        `Unparsed entry in pnpm-workspace.yaml \`packages:\`: ${JSON.stringify(line)} — teach this guard the new syntax.`,
-      );
-    }
-    globs.push(match[1]);
-  }
-  return globs;
+  return readWorkspaceGlobs(root);
 }
 
 /** @param {string} [root] @returns {string[]} absolute package directories. */

@@ -113,14 +113,10 @@
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import path from 'node:path';
 import process from 'node:process';
-import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
-
-const REPO_ROOT = path.join(fileURLToPath(new URL('.', import.meta.url)), '..');
-const LOCKFILE = 'pnpm-lock.yaml';
+import { LOCKFILE, lockfilePath, workspaceRoot } from './workspace-root.mjs';
 
 export const EXIT_CLEAN = 0;
 export const EXIT_FINDINGS = 1;
@@ -377,7 +373,7 @@ function readSource(spec) {
   if (spec.includes(':') && !fs.existsSync(spec)) {
     const [rev, file] = [spec.slice(0, spec.indexOf(':')), spec.slice(spec.indexOf(':') + 1)];
     const out = spawnSync('git', ['show', `${rev}:${file}`], {
-      cwd: REPO_ROOT,
+      cwd: workspaceRoot(),
       encoding: 'utf8',
       maxBuffer: 64 * 1024 * 1024,
     });
@@ -394,13 +390,16 @@ function readSource(spec) {
  * @returns {{ base: string, head: string }}
  */
 export function resolveSources(argv) {
-  const head = flagValue(argv, '--head') ?? path.join(REPO_ROOT, LOCKFILE);
+  // The one lockfile sits at the workspace root -- this repository's own, or
+  // the monorepo's one level up (objectstack#25723). `<rev>:<path>` below is
+  // relative to the repository root, which in both layouts is that same directory.
+  const head = flagValue(argv, '--head') ?? lockfilePath();
   const explicitBase = flagValue(argv, '--base');
   if (explicitBase) return { base: explicitBase, head };
 
   const baseRef = flagValue(argv, '--base-ref') ?? 'origin/main';
   const mergeBase = spawnSync('git', ['merge-base', baseRef, 'HEAD'], {
-    cwd: REPO_ROOT,
+    cwd: workspaceRoot(),
     encoding: 'utf8',
   });
   const rev = mergeBase.status === 0 ? mergeBase.stdout.trim() : null;

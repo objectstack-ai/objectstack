@@ -31,6 +31,14 @@ describe('check-ui-root-lookups (objectstack ruling D1)', () => {
     expect(silent).toEqual([]);
   });
 
+  it('reads a marker read inside a dirname walk as the lookup it is, and a data read in a plain loop as data (objectstack#25723)', () => {
+    const head = "import { readFileSync } from 'node:fs';\nimport { dirname, join } from 'node:path';\n";
+    const walk = lookupsIn('e2e/x.spec.ts', `${head}let dir = __dirname;\nfor (let i = 0; i < 10; i++) {\n  try { readFileSync(join(dir, 'pnpm-workspace.yaml'), 'utf8'); break; } catch { dir = dirname(dir); }\n}`);
+    expect(walk.map((h) => h.shape)).toEqual(['marker-walk']);
+    const data = lookupsIn('x.ts', `${head}for (const root of roots) globs.push(readFileSync(join(root, 'pnpm-workspace.yaml'), 'utf8'));`);
+    expect(data).toEqual([]);
+  });
+
   it('finds no lookup outside the helper in this tree, and every allowlist entry is live', () => {
     const result = scan(repoRoot);
     expect(result.scanned).toBeGreaterThan(100);

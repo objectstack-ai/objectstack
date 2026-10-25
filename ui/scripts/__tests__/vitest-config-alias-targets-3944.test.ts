@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { workspaceGlobs as readWorkspaceGlobs } from '../workspace-root.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -506,31 +507,17 @@ interface PackageAliasParseGap {
 const packageAliasParseGaps: PackageAliasParseGap[] = [];
 
 /**
- * The `packages:` globs from `pnpm-workspace.yaml`, read rather than hardcoded
- * so a new workspace root is covered the day it is added. Understands only the
- * two shapes the file uses (`dir/*` and a bare `dir`); anything else throws
- * rather than being skipped, because a guard that silently stops looking at
- * part of the workspace goes on reporting success over a shrinking surface.
+ * The `packages:` globs that describe this tree, relative to `repoRoot`, from
+ * the one parser in `scripts/workspace-root.mjs` (objectstack#25723): read rather
+ * than hardcoded so a new workspace root is covered the day it is added, and
+ * throwing on a shape it does not know rather than skipping it, because a guard
+ * that silently stops looking at part of the workspace goes on reporting
+ * success over a shrinking surface. Where the file is -- the objectui root, or
+ * the monorepo root one level up with its `ui/` prefix stripped -- is the
+ * helper's question, not this file's.
  */
 function workspaceGlobs(): string[] {
-  const yaml = fs.readFileSync(path.join(repoRoot, 'pnpm-workspace.yaml'), 'utf8');
-  const lines = yaml.split('\n');
-  const start = lines.findIndex((l) => /^packages:\s*$/.test(l));
-  if (start === -1) throw new Error('pnpm-workspace.yaml no longer declares a top-level `packages:` key');
-
-  const globs: string[] = [];
-  for (const line of lines.slice(start + 1)) {
-    if (/^\s*(#.*)?$/.test(line)) continue;
-    if (!/^\s/.test(line)) break;
-    const match = line.match(/^\s*-\s*['"]?([^'"#\s]+)['"]?\s*(#.*)?$/);
-    if (!match) {
-      throw new Error(
-        `Unparsed entry in pnpm-workspace.yaml \`packages:\`: ${JSON.stringify(line)} — teach this guard the new syntax.`
-      );
-    }
-    globs.push(match[1]);
-  }
-  return globs;
+  return readWorkspaceGlobs(repoRoot);
 }
 
 function workspacePackageDirs(): string[] {

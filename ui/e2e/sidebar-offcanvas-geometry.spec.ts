@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { uiRoot } from '../scripts/ui-root.mjs';
 
 /**
  * GEOMETRY pin for objectui#11464: the shadcn sidebar's `offcanvas` form drew
@@ -71,20 +72,11 @@ import { fileURLToPath } from 'node:url';
  * below `md` the desktop form is `hidden` anyway.
  */
 
-const REPO_ROOT = (() => {
-  // Rooted on this file, never on `process.cwd()` (AGENTS.md: tests read the
-  // filesystem relative to their own file). Bare `import.meta.url`, walked up.
-  let dir = path.dirname(fileURLToPath(import.meta.url));
-  for (let i = 0; i < 10; i++) {
-    try {
-      readFileSync(path.join(dir, 'pnpm-workspace.yaml'), 'utf8');
-      return dir;
-    } catch {
-      dir = path.dirname(dir);
-    }
-  }
-  throw new Error('could not locate the repo root from ' + import.meta.url);
-})();
+// The objectui tree, resolved from `scripts/ui-root.mjs`'s own location -- the
+// one fact true standalone and under the objectstack monorepo's `ui/`. Walking up
+// to `pnpm-workspace.yaml` found the OBJECTSTACK root there (objectstack#25723),
+// and the sources this spec reads live under this tree's `packages/`.
+const REPO_ROOT = uiRoot();
 
 const source = (rel: string) => path.join(REPO_ROOT, rel);
 

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { lockfilePath } from '../workspace-root.mjs';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -181,7 +182,7 @@ describe('attribution — a version on the line is not automatically the anchor'
 });
 
 describe('the pin, read from two faces', () => {
-  const lock = pinsFromLockfile(fs.readFileSync(path.join(repoRoot, 'pnpm-lock.yaml'), 'utf8'));
+  const lock = pinsFromLockfile(fs.readFileSync(lockfilePath(), 'utf8'));
   const workspaces = execFileSync('git', ['-C', repoRoot, 'ls-files', '--', '*/package.json'], { encoding: 'utf8' })
     .split('\n')
     .filter((f) => /^(packages|apps|examples)\/[^/]+\/package\.json$/.test(f))

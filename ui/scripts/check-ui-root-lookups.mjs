@@ -37,10 +37,16 @@
  *            directly or through a `const` bound earlier in the file;
  *   - FIRES  a `git rev-parse --show-toplevel` / `--git-common-dir` argument;
  *   - FIRES  an import of `find-up` or a call of `findUp(...)`;
- *   - SILENT a `readFileSync` of `pnpm-workspace.yaml`: that reads the
- *            workspace's package globs as DATA from a root already known, and
- *            whether the file exists after the merge is the workspace card's
- *            question, not this one's;
+ *   - FIRES  a `readFileSync` (or any probe above) of a marker INSIDE A LOOP
+ *            whose body steps a directory upward -- `dir = dirname(dir)`,
+ *            `dir = resolve(dir, '..')`: the read is the walk's existence test
+ *            with `try/catch` for the probe. This shape escaped the first
+ *            migration (objectstack#25685) and found the objectstack root from
+ *            five e2e specs on the merged tree (objectstack#25723);
+ *   - SILENT a `readFileSync` of `pnpm-workspace.yaml` outside such a loop:
+ *            that reads the workspace's package globs as DATA from a root
+ *            already known -- `scripts/workspace-root.mjs` is where that root
+ *            is decided;
  *   - SILENT a `.git` entry in a directory skip-list, a fixture that WRITES a
  *            `pnpm-workspace.yaml`, and any mention inside a comment.
  *
@@ -48,8 +54,10 @@
  *
  * Every entry names a file and the reason its probe is not a repo-root lookup
  * (a CLI asking whether the USER's cwd is a workspace; the pin script, which
- * the merge deletes). An entry whose file no longer carries a hit is STALE and
- * reds the run, so the list can only shrink without being tended.
+ * the merge deletes; `scripts/workspace-root.mjs`, whose two probes are
+ * anchored on `uiRoot()` and decide the WORKSPACE root once for every reader).
+ * An entry whose file no longer carries a hit is STALE and reds the run, so the
+ * list can only shrink without being tended.
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -75,6 +83,11 @@ export const MARKERS = new Set(['.git', 'pnpm-workspace.yaml']);
 const MARKER_SEGMENT = /(^|[\\/])(\.git|pnpm-workspace\.yaml)$/;
 const namesMarkerText = (text) => MARKERS.has(text) || MARKER_SEGMENT.test(text);
 const PROBES = new Set(['existsSync', 'statSync', 'lstatSync', 'accessSync']);
+/** Reads that double as a probe when they sit in an upward walk (`try { readFileSync(marker) } catch { dir = dirname(dir) }`). */
+const READS = new Set(['readFileSync', 'readdirSync', 'openSync']);
+/** The calls a walk steps a directory upward with. */
+const UPWARD_STEPS = new Set(['dirname']);
+const PATH_COMBINERS = new Set(['join', 'resolve']);
 const GIT_ROOT_FLAGS = new Set(['--show-toplevel', '--git-common-dir']);
 
 /**
@@ -82,6 +95,10 @@ const GIT_ROOT_FLAGS = new Set(['--show-toplevel', '--git-common-dir']);
  * lookup. Path → reason. A path listed here that carries no hit is stale.
  */
 export const ALLOWLIST = new Map([
+  [
+    'scripts/workspace-root.mjs',
+    "decides the WORKSPACE root for every reader of pnpm-workspace.yaml / pnpm-lock.yaml / the root manifest: one probe at `uiRoot()` and one at its parent, anchored on ui-root.mjs -- never a walk, never the cwd (objectstack#25723)",
+  ],
   [
     'scripts/objectstack-pin.mjs',
     'packs the pin from an objectstack tree and refuses one with no pnpm-workspace.yaml -- a probe of THAT tree, not of this root; the file itself is deleted at cutover',
@@ -141,11 +158,39 @@ function namesMarker(node, binds, depth = 0) {
 }
 
 /**
+ * Whether a call steps a directory upward: `dirname(x)` / `path.dirname(x)`, or
+ * `join(x, '..')` / `resolve(x, '..')` with a literal `..` argument.
+ */
+function stepsUpward(call) {
+  const name = calleeName(call);
+  if (UPWARD_STEPS.has(name)) return true;
+  if (!PATH_COMBINERS.has(name)) return false;
+  return call.arguments.some((a) => (ts.isStringLiteral(a) || ts.isNoSubstitutionTemplateLiteral(a)) && a.text === '..');
+}
+
+/** Whether a loop body reassigns some variable to an upward step: `dir = dirname(dir)`. */
+function loopWalksUpward(loop) {
+  let found = false;
+  const visit = (n) => {
+    if (found) return;
+    if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isCallExpression(n.right) && stepsUpward(n.right)) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(loop.statement);
+  return found;
+}
+
+const isLoop = (node) => ts.isForStatement(node) || ts.isWhileStatement(node) || ts.isDoStatement(node) || ts.isForOfStatement(node) || ts.isForInStatement(node);
+
+/**
  * Every root lookup in one source text.
  *
  * @param {string} file  Path used for reporting and for the script kind.
  * @param {string} text
- * @returns {{ line: number, shape: 'marker-probe' | 'git-toplevel' | 'find-up', text: string }[]}
+ * @returns {{ line: number, shape: 'marker-probe' | 'marker-walk' | 'git-toplevel' | 'find-up', text: string }[]}
  */
 export function lookupsIn(file, text) {
   const kind = /\.tsx$/.test(file) ? ts.ScriptKind.TSX : /\.[cm]?js$/.test(file) ? ts.ScriptKind.JS : ts.ScriptKind.TS;
@@ -159,6 +204,10 @@ export function lookupsIn(file, text) {
       text: node.getText(src).replace(/\s+/g, ' ').slice(0, 120),
     });
   };
+  // The loops enclosing the node being visited, innermost last; a marker read
+  // inside one that steps upward is the walk's existence test, not a data read.
+  const loops = [];
+  const inUpwardWalk = () => loops.some(loopWalksUpward);
   const walk = (node) => {
     if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier) && node.moduleSpecifier.text === 'find-up') {
       record(node, 'find-up');
@@ -167,10 +216,17 @@ export function lookupsIn(file, text) {
       if (name === 'require' && node.arguments[0] && ts.isStringLiteral(node.arguments[0]) && node.arguments[0].text === 'find-up') record(node, 'find-up');
       else if (name === 'findUp' || name === 'findUpSync') record(node, 'find-up');
       else if (PROBES.has(name) && namesMarker(node.arguments[0], binds)) record(node, 'marker-probe');
+      else if (READS.has(name) && namesMarker(node.arguments[0], binds) && inUpwardWalk()) record(node, 'marker-walk');
     } else if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) && GIT_ROOT_FLAGS.has(node.text)) {
       record(node, 'git-toplevel');
     }
-    ts.forEachChild(node, walk);
+    if (isLoop(node)) {
+      loops.push(node);
+      ts.forEachChild(node, walk);
+      loops.pop();
+    } else {
+      ts.forEachChild(node, walk);
+    }
   };
   walk(src);
   return hits;
@@ -229,8 +285,17 @@ export function selfTest() {
   run('`--git-common-dir`', `${head}const common = execFileSync('git', ['rev-parse', '--git-common-dir']);`, 'fires');
   run('an import of find-up', `import { findUp } from 'find-up';\nconst root = await findUp('pnpm-workspace.yaml');`, 'fires');
   run('a statSync probe in a .mjs file', `import { statSync } from 'node:fs';\ntry { statSync(\`\${dir}/.git\`); } catch {}`, 'fires', 'scripts/x.mjs');
+  run(
+    'a readFileSync of the marker as the existence test of a dirname walk (the e2e IIFE, objectstack#25723)',
+    `${head}const REPO_ROOT = (() => {\n  let dir = dirname(__filename);\n  for (let i = 0; i < 10; i++) {\n    try {\n      readFileSync(join(dir, 'pnpm-workspace.yaml'), 'utf8');\n      return dir;\n    } catch {\n      dir = dirname(dir);\n    }\n  }\n  throw new Error('no root');\n})();`,
+    'fires',
+    'e2e/x.spec.ts',
+  );
+  run('a readFileSync of .git in a while loop stepping with resolve(dir, "..")', `import fs from 'node:fs';\nimport path from 'node:path';\nwhile (dir !== '/') { try { fs.readFileSync(path.join(dir, '.git')); break; } catch { dir = path.resolve(dir, '..'); } }`, 'fires');
   // ── SILENT ───────────────────────────────────────────────────────────────
   run('reading the workspace globs as data from a known root', `${head}const yaml = readFileSync(join(repoRoot, 'pnpm-workspace.yaml'), 'utf8');`, 'silent');
+  run('reading the marker as data inside a loop over KNOWN roots (no upward step)', `${head}for (const root of roots) {\n  const yaml = readFileSync(join(root, 'pnpm-workspace.yaml'), 'utf8');\n  globs.push(yaml);\n}`, 'silent');
+  run('an upward walk that reads something other than a marker', `${head}let dir = __dirname;\nwhile (dir !== '/') { try { readFileSync(join(dir, 'package.json')); break; } catch { dir = dirname(dir); } }`, 'silent');
   run('a directory skip-list naming .git', `const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.turbo']);`, 'silent');
   run('a fixture that writes a pnpm-workspace.yaml', `${head}writeFileSync(join(dir, 'pnpm-workspace.yaml'), "packages:\\n  - 'packages/*'\\n");`, 'silent');
   run('a comment that mentions every spelling', `// walks up to .git or pnpm-workspace.yaml, like git rev-parse --show-toplevel or find-up\nexport const x = 1;`, 'silent');

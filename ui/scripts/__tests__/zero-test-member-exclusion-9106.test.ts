@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { workspaceGlobs } from '../workspace-root.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -72,7 +73,6 @@ import { fileURLToPath } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const ROOT_VITEST_CONFIG = path.join(repoRoot, 'vitest.config.mts');
-const WORKSPACE_YAML = path.join(repoRoot, 'pnpm-workspace.yaml');
 
 const TEST_FILE = /\.test\.[cm]?[jt]sx?$/;
 
@@ -113,7 +113,9 @@ type Member = {
 };
 
 /**
- * The workspace globs, read from `pnpm-workspace.yaml` rather than hard-coded.
+ * The workspace globs, read from the governing `pnpm-workspace.yaml` rather than
+ * hard-coded, through the one parser in `scripts/workspace-root.mjs`
+ * (objectstack#25723) -- relative to `repoRoot` in both layouts.
  *
  * The two existing pins in this directory both spell `['packages','apps','examples']`
  * as a literal. That is correct today and silently incomplete the day a fourth
@@ -121,23 +123,7 @@ type Member = {
  * workspace is the failure mode this whole file is about.
  */
 function workspaceGroups(): string[] {
-  const text = fs.readFileSync(WORKSPACE_YAML, 'utf8');
-  const groups: string[] = [];
-  let inPackages = false;
-
-  for (const rawLine of text.split('\n')) {
-    if (/^packages:\s*$/.test(rawLine)) {
-      inPackages = true;
-      continue;
-    }
-    if (inPackages && /^\S/.test(rawLine)) break;
-    if (!inPackages) continue;
-
-    const match = rawLine.match(/^\s*-\s*'?"?([^'"\s]+)"?'?\s*$/);
-    if (match) groups.push(match[1]);
-  }
-
-  return groups;
+  return workspaceGlobs(repoRoot);
 }
 
 /** Every directory in the workspace that actually carries a `package.json`. */

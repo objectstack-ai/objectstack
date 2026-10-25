@@ -61,6 +61,19 @@
  * `inputs` reads every file in the repository, and then EVERY change is a
  * root change -- the rule degrades to the whole workspace, never to a skip.
  *
+ * Which turbo.json: the nearest one upward, through `uiScopedTurboConfig` in
+ * `scripts/workspace-root.mjs` (objectstack#25723). Standalone that is this
+ * repository's own. Under the objectstack monorepo the objectui tree is `ui/`
+ * and its turbo.json is parked (a nested one must `extends` the root), so the
+ * root's is read and narrowed to the objectui SUBSET: its `$TURBO_ROOT$/ui/x`
+ * inputs are the re-rooted spelling of `$TURBO_ROOT$/x` and are read as such,
+ * and every other `$TURBO_ROOT$` input and `globalDependencies` entry is the
+ * monorepo's own and is dropped -- read whole, the rule would widen every
+ * objectui change to the whole monorepo. The changed files are listed
+ * `--relative` to this tree for the same reason: they are matched against
+ * globs that are relative to it, and a change outside the tree is not this
+ * selector's question.
+ *
  * ## The repo-root programs need their packages BUILT, whatever the set
  *
  * The job also compiles programs that sit in no package, after the turbo
@@ -98,6 +111,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
+import { nestedPrefix, uiScopedTurboConfig } from './workspace-root.mjs';
 
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -245,10 +259,15 @@ export function rootProgramPackages(root, tsconfigs = ROOT_PROGRAMS_AFTER_BUILD)
   return [...names].sort();
 }
 
-/** `git diff --name-only <base> <head>`, or a thrown error the caller turns into "no verdict". */
+/**
+ * `git diff --name-only --relative <base> <head>` from `root`, or a thrown error
+ * the caller turns into "no verdict". `--relative` is a no-op when `root` is the
+ * repository root; under the monorepo it lists the paths relative to `ui/`, the
+ * frame the root rule's globs are in.
+ */
 export function changedFiles(root, base, head) {
   execFileSync('git', ['rev-parse', '--verify', '--quiet', `${base}^{commit}`], { cwd: root, stdio: 'ignore' });
-  const out = execFileSync('git', ['diff', '--name-only', base, head], { cwd: root, encoding: 'utf8' });
+  const out = execFileSync('git', ['diff', '--name-only', '--relative', base, head], { cwd: root, encoding: 'utf8' });
   return out.split('\n').map((s) => s.trim()).filter(Boolean);
 }
 
@@ -265,7 +284,11 @@ export function affectedPackages(root, base) {
     maxBuffer: 1 << 28,
   });
   const dry = JSON.parse(out.slice(out.indexOf('{')));
-  return dry.tasks.filter((t) => t.task === 'type-check').map((t) => t.package).sort();
+  // Under the monorepo turbo's dry run spans the whole workspace; only the
+  // tasks of packages under this tree are this selector's answer.
+  const prefix = nestedPrefix(root);
+  const ours = (t) => !prefix || String(t.directory ?? '').startsWith(prefix);
+  return dry.tasks.filter((t) => t.task === 'type-check' && ours(t)).map((t) => t.package).sort();
 }
 
 function parseArgs(argv) {
@@ -297,7 +320,7 @@ export function main(argv, deps = {}) {
     for (const name of rootProgramPackages(root)) log(name);
     return 0;
   }
-  const turbo = JSON.parse(fs.readFileSync(path.join(root, 'turbo.json'), 'utf8'));
+  const turbo = uiScopedTurboConfig(root);
   const rule = rootRule(turbo);
   const changed = deps.changed ?? changedFiles(root, args.base, args.head);
   log(`${changed.length} file(s) changed against ${args.base}.`);

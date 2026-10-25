@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { uiTurboConfigPath } from '../workspace-root.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -378,7 +379,7 @@ describe('the gate is actually wired up (objectui#4471)', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {
     scripts?: Record<string, string>;
   };
-  const turbo = JSON.parse(fs.readFileSync(path.join(repoRoot, 'turbo.json'), 'utf8')) as {
+  const turbo = JSON.parse(fs.readFileSync(uiTurboConfigPath(), 'utf8')) as {
     tasks: Record<string, { cache?: boolean; dependsOn?: string[]; inputs?: string[] }>;
   };
 

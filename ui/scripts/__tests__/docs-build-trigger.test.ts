@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { uiTurboConfigPath } from '../workspace-root.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -259,7 +260,7 @@ const outsideClosureDirs = allWorkspaceDirs.filter(
 
 /** Root-level build inputs `turbo.json` declares for the `build` task. */
 function turboRootBuildInputs(): string[] {
-  const turbo = JSON.parse(fs.readFileSync(path.join(repoRoot, 'turbo.json'), 'utf8')) as {
+  const turbo = JSON.parse(fs.readFileSync(uiTurboConfigPath(), 'utf8')) as {
     tasks?: Record<string, { inputs?: string[] }>;
   };
   const inputs = turbo.tasks?.build?.inputs ?? [];

@@ -102,6 +102,7 @@ import { fileURLToPath } from 'node:url';
 // answers false through a symlink and the gate then does nothing, with exit 0
 // and no output. `scripts/check-entry-guard.mjs` fails on the hand-typed form.
 import { isEntrypoint } from './invoked-as.mjs';
+import { lockfilePath } from './workspace-root.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -1107,7 +1108,7 @@ export function run(root = ROOT, ledger = LEDGER) {
   const files = execFileSync('git', ['-C', root, 'ls-files'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
     .split('\n')
     .filter(Boolean);
-  const lockPins = pinsFromLockfile(readFileSync(join(root, 'pnpm-lock.yaml'), 'utf8'), root);
+  const lockPins = pinsFromLockfile(readFileSync(lockfilePath(root), 'utf8'), root);
   const treePins = pinsFromResolvedTree(root, workspaceDirs(root));
   const { pins, conflicts, unlinked } = reconcilePins(lockPins, treePins);
   const bareMajors = bareMajorsFor(pins, ledger);

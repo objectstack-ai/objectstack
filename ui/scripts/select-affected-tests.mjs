@@ -110,6 +110,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
+import { parseWorkspaceGlobs, workspaceGlobs } from './workspace-root.mjs';
 
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -145,35 +146,12 @@ const RESOLVE_EXTENSIONS = ['', '.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.
 const toPosix = (p) => p.split(path.sep).join('/');
 
 /**
- * The `packages:` globs of `pnpm-workspace.yaml`. Only the shapes this
- * repository writes are read -- `dir/*` and a bare `dir` -- and anything else is
- * a refusal, never a guess (an unread glob would silently drop packages out of
- * the graph).
- *
- * @param {string} text
- * @returns {string[]}
+ * The `packages:` globs of a `pnpm-workspace.yaml` text: the one parser in
+ * `scripts/workspace-root.mjs`, re-exported for this script's callers. Only
+ * `dir/*` and a bare `dir` are read, and anything else is a refusal, never a
+ * guess (an unread glob would silently drop packages out of the graph).
  */
-export function parseWorkspaceGlobs(text) {
-  const globs = [];
-  let inPackages = false;
-  for (const raw of text.split('\n')) {
-    const line = raw.replace(/#.*$/, '').trimEnd();
-    if (!line.trim()) continue;
-    if (/^\S/.test(line)) {
-      inPackages = /^packages:\s*$/.test(line);
-      continue;
-    }
-    if (!inPackages) continue;
-    const m = line.match(/^\s*-\s*['"]?([^'"]+?)['"]?\s*$/);
-    if (!m) throw new Error(`pnpm-workspace.yaml: cannot read the packages entry ${JSON.stringify(raw)}`);
-    if (!/^[A-Za-z0-9._-]+(?:\/\*)?$/.test(m[1])) {
-      throw new Error(`pnpm-workspace.yaml: the packages glob ${JSON.stringify(m[1])} is a shape this reader does not know`);
-    }
-    globs.push(m[1]);
-  }
-  if (globs.length === 0) throw new Error('pnpm-workspace.yaml declares no packages globs');
-  return globs;
-}
+export { parseWorkspaceGlobs };
 
 /**
  * Every workspace package: its name, its repository-relative directory and the
@@ -183,7 +161,9 @@ export function parseWorkspaceGlobs(text) {
  * @returns {Array<{ name: string, dir: string, deps: string[] }>}
  */
 export function listWorkspacePackages(root = REPO_ROOT) {
-  const globs = parseWorkspaceGlobs(fs.readFileSync(path.join(root, 'pnpm-workspace.yaml'), 'utf8'));
+  // Relative to `root` in both layouts: the objectui root's own file, or the
+  // monorepo root's `ui/...` globs with the prefix stripped (objectstack#25723).
+  const globs = workspaceGlobs(root);
   const dirs = [];
   for (const glob of globs) {
     if (glob.endsWith('/*')) {

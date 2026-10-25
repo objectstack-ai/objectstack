@@ -619,6 +619,18 @@ export const UNREACHED_GROUPS = [
       'STRENGTH decision this gate reports and does not take (objectstack ruling D1: objectui as `ui/`).',
     card: 'objectui#13472',
   },
+  {
+    glob: 'scripts/workspace-root.d.mts',
+    reason:
+      'The hand-written declaration twin of `scripts/workspace-root.mjs`, the helper that answers where the ' +
+      "pnpm workspace's root files are in both layouts (objectstack#25723); package tests and the e2e program " +
+      '(both compiled with `allowJs: false`) import it typed through this twin. It holds `export declare` lines ' +
+      'and no executable code, and `scripts/__tests__/workspace-root.test.ts` pins its names to the module\'s ' +
+      'real exports. Declared rather than repaired for the same reason as the row above: reaching a `.d.mts` ' +
+      'means widening a rule-bearing `files` glob to `.mts`, a rule STRENGTH decision this gate reports and ' +
+      'does not take.',
+    card: 'objectui#13472',
+  },
 ];
 
 /**

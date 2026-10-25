@@ -43,6 +43,7 @@ import {
   workspacePackageDirs,
   workspaceSourceAliases
 } from '../utils/workspace-vite.js';
+import { workspaceGlobs, workspaceRoot } from '../../../../scripts/workspace-root.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 /** packages/cli/src/__tests__ -> repo root */
@@ -58,19 +59,16 @@ const BARREL_EXTENSIONS = ['.mjs', '.js', '.mts', '.ts', '.jsx', '.tsx'];
 /**
  * The workspace's package directories, expanded WITHOUT the helper under test.
  *
- * Deliberately hand-rolled and deliberately narrow: it understands the two
- * pattern shapes this repo's manifest actually uses (a `dir/*` fan-out and a
- * literal directory) and throws on anything else, so a manifest that grows a
+ * The globs come from `scripts/workspace-root.mjs`'s text parser -- a different
+ * reader from the YAML-and-glob one under test, and one that understands the
+ * two pattern shapes this repo's manifest actually uses (a `dir/*` fan-out and
+ * a literal directory) and throws on anything else, so a manifest that grows a
  * shape this expectation cannot read fails loudly here instead of quietly
- * agreeing with whatever the helper returned.
+ * agreeing with whatever the helper returned. They are relative to the objectui
+ * tree in both layouts (objectstack#25723).
  */
 function independentWorkspaceDirs(): string[] {
-  const manifest = readFileSync(join(REPO_ROOT, 'pnpm-workspace.yaml'), 'utf-8');
-  const patterns: string[] = [];
-  for (const line of manifest.split('\n')) {
-    const match = /^\s*-\s*['"]?([^'"#\s]+)['"]?\s*$/.exec(line);
-    if (match) patterns.push(match[1]);
-  }
+  const patterns = workspaceGlobs(REPO_ROOT);
   expect(patterns.length).toBeGreaterThan(0);
 
   const dirs: string[] = [];
@@ -109,7 +107,12 @@ function independentAliasablePackages(): Map<string, string> {
   return found;
 }
 
-const aliases = workspaceSourceAliases(REPO_ROOT);
+// The helper under test asks about a pnpm workspace ROOT. Standalone that is
+// this repository's root; under the objectstack monorepo it is the parent, whose
+// `pnpm-workspace.yaml` declares this tree's packages as `ui/packages/*` and so
+// on, and the `@object-ui/*` table it derives is the same set of `src` directories
+// the expectation above expands relative to this tree (objectstack#25723).
+const aliases = workspaceSourceAliases(workspaceRoot(REPO_ROOT));
 
 describe('workspace alias table (objectui#3890)', () => {
   it('covers every @object-ui package the workspace manifest declares', () => {

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { workspaceGlobs as readWorkspaceGlobs } from '../workspace-root.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -77,31 +78,17 @@ function manifest(rel: string): Manifest {
 const rootScripts = new Set(Object.keys(manifest('package.json').scripts ?? {}));
 
 /**
- * The `packages:` globs from `pnpm-workspace.yaml`, read rather than hardcoded, in the
- * shape `package-files-exist.test.ts` and `react-peer-range-norm-3741.test.ts` already
- * use here: understand the two syntaxes the file actually uses and throw on anything
- * else, because a guard that silently stops looking at part of the workspace goes on
- * reporting success over a shrinking surface.
+ * The `packages:` globs that describe this tree, relative to `repoRoot`, from
+ * the one parser in `scripts/workspace-root.mjs` (objectstack#25723): read rather
+ * than hardcoded so a new workspace root is covered the day it is added, and
+ * throwing on a shape it does not know rather than skipping it, because a guard
+ * that silently stops looking at part of the workspace goes on reporting
+ * success over a shrinking surface. Where the file is -- the objectui root, or
+ * the monorepo root one level up with its `ui/` prefix stripped -- is the
+ * helper's question, not this file's.
  */
 function workspaceGlobs(): string[] {
-  const yaml = fs.readFileSync(path.join(repoRoot, 'pnpm-workspace.yaml'), 'utf8');
-  const lines = yaml.split('\n');
-  const start = lines.findIndex((l) => /^packages:\s*$/.test(l));
-  expect(start, '`pnpm-workspace.yaml` must still declare a top-level `packages:` key').toBeGreaterThan(-1);
-
-  const globs: string[] = [];
-  for (const line of lines.slice(start + 1)) {
-    if (/^\s*(#.*)?$/.test(line)) continue;
-    if (!/^\s/.test(line)) break; // a non-indented line ends the block
-    const match = line.match(/^\s*-\s*['"]?([^'"#\s]+)['"]?\s*(#.*)?$/);
-    if (!match) {
-      throw new Error(
-        `Unparsed entry in pnpm-workspace.yaml \`packages:\`: ${JSON.stringify(line)} — teach this guard the new syntax.`,
-      );
-    }
-    globs.push(match[1]);
-  }
-  return globs;
+  return readWorkspaceGlobs(repoRoot);
 }
 
 interface WorkspacePackage {

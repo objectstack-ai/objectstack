@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { uiTurboConfigPath } from '../workspace-root.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { repoRoot } from './helpers/turbo-inputs';
@@ -76,7 +77,7 @@ interface TurboTask {
   readonly inputs?: string[];
 }
 
-const turbo = JSON.parse(fs.readFileSync(path.join(repoRoot, 'turbo.json'), 'utf8')) as {
+const turbo = JSON.parse(fs.readFileSync(uiTurboConfigPath(), 'utf8')) as {
   tasks: Record<string, TurboTask>;
 };
 

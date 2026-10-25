@@ -586,13 +586,14 @@ describe('this repository', () => {
       expect(row.vacuousMatches.length, `ledger row '${row.glob}' declares nothing any more`).toBeGreaterThan(0);
       expect(row.ruleBearingMatches, `ledger row '${row.glob}' over-claims`).toEqual([]);
     }
-    // Predicate 2, same two properties. Its population is two files today --
-    // the vitest config objectui#8337 was filed about, and the declaration twin
-    // `scripts/ui-root.d.mts` that package tests (compiled with `allowJs: false`)
-    // need to import `scripts/ui-root.mjs` typed (objectstack#25685, objectui#13472)
-    // -- and a green here means both are DECLARED rather than invisible.
+    // Predicate 2, same two properties. Its population is three files today --
+    // the vitest config objectui#8337 was filed about, and the declaration twins
+    // `scripts/ui-root.d.mts` and `scripts/workspace-root.d.mts` that package
+    // tests (compiled with `allowJs: false`) need to import those helpers typed
+    // (objectstack#25685, objectui#13472, objectstack#25723) -- and a green here
+    // means all three are DECLARED rather than invisible.
     expect(extensionProbeCollapse(result.reach)).toBeNull();
-    expect(result.unreached).toEqual(['scripts/ui-root.d.mts', 'vitest.config.mts']);
+    expect(result.unreached).toEqual(['scripts/ui-root.d.mts', 'scripts/workspace-root.d.mts', 'vitest.config.mts']);
     // objectui#8369: this run is only a reading of the tree git tracks if the
     // filter was there and could answer both ways.
     expect(result.git.available).toBe(true);

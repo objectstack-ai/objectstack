@@ -22,6 +22,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { lockfilePath } from '../workspace-root.mjs';
 
 import { readWorkflows, repoRoot } from './workflow-checks';
 import { NOT_A_GATE, OPTIONAL_CONTEXTS, REQUIRED_CONTEXTS } from '../dependabot-merge-gate.mjs';
@@ -33,7 +34,7 @@ import {
 } from '../check-lockfile-integrity.mjs';
 
 const GATE = path.join(repoRoot, 'scripts/check-lockfile-integrity.mjs');
-const LOCKFILE = path.join(repoRoot, 'pnpm-lock.yaml');
+const LOCKFILE = lockfilePath();
 const realLock = fs.readFileSync(LOCKFILE, 'utf8');
 
 /** The check-run name the workflow's job produces. */

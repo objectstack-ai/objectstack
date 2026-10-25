@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { uiTurboConfigPath } from '../workspace-root.mjs';
 import { build, resolveConfig } from 'vite';
 import type { InlineConfig } from 'vite';
 import fs from 'node:fs';
@@ -1010,7 +1011,7 @@ describe('objectui#4854: the four flagged surfaces in the console config', () =>
   });
 
   it('declares the var in turbo.json, which strict env mode would otherwise strip', () => {
-    const turbo = JSON.parse(fs.readFileSync(path.join(repoRoot, 'turbo.json'), 'utf8')) as {
+    const turbo = JSON.parse(fs.readFileSync(uiTurboConfigPath(), 'utf8')) as {
       tasks: { build: { env: string[] } };
     };
     // Turbo v2 runs tasks in strict env mode: an undeclared var never reaches
