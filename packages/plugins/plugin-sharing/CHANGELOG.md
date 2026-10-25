@@ -4,7 +4,7 @@
 
 ### Minor Changes
 
-- 3937697: **Shipped in 18.0.0**, whose CHANGELOG missed this entry; listed here one release late.
+- 7cacad5: **Shipped in 18.0.0**, whose CHANGELOG missed this entry; listed here one release late.
   
   feat(plugin-sharing,plugin-approvals,metadata-protocol)!: the organization-less readers of sharing rules, approval units and the seed loader retire (ADR-0131 D2/D8, 18.x step 7)
   
@@ -22,7 +22,7 @@
   - **The scoped seed pre-load reads one thing: its organization's rows.** The second read that collected keys held by organization-less rows, and refused to twin or adopt them, is deleted; a scoped upsert/ignore/update issues no `organization_id IS NULL` read on any path.
   
   Remedy for a database that still holds organization-less rows: `os migrate organization-ownership --out PLAN`, review it, then `os migrate organization-ownership --apply --plan-file PLAN --backup-taken`.
-- 3937697: feat: a holder of the `external` organization role is the EXTERNAL principal — the org-wide default never widens it, and it reaches data only through shares, sharing rules and grant RLS
+- 45f9962: feat: a holder of the `external` organization role is the EXTERNAL principal — the org-wide default never widens it, and it reaches data only through shares, sharing rules and grant RLS
   
   Clause-②: yes (widening: `@objectstack/core` gains `owdForAudience`, `isExternalAudienceContext`, `externalGrantSpeaks` and the two grant-stamp keys; every narrowing below applies only to the `external` role, which no release has shipped yet)
   Metadata-protocol: semantic
@@ -50,7 +50,7 @@
 
 ### Patch Changes
 
-- 3937697: feat: at boot, an administrator is told when a package upgrade renamed, removed or collided with an access item the customer switched off, cloned or authored
+- 54df640: feat: at boot, an administrator is told when a package upgrade renamed, removed or collided with an access item the customer switched off, cloned or authored
   
   Clause-②: yes (widening: plugin-sharing's exported `SharingRuleService` gains `listDeclaredRules()`; the report itself refuses nothing and adds no key, code or setting)
   Metadata-protocol: none
@@ -79,7 +79,7 @@
   "The old name carrying a clone" is carried by the switch-off half. The sanctioned ceremony is clone plus switch-off, and a clone whose base stays on is not a choice a rename un-makes. A read that fails stops the report for that boot, and nothing is judged from an unread store.
   
   - **`@objectstack/plugin-sharing`:** `SharingRuleService.listDeclaredRules()` answers every declared rule with its `packageId`, or `null` when the service reads no declarations.
-- 3937697: fix: no shipped text says the SQL driver reads organization-less rows, and the in-memory HTTP outbox no longer does
+- 0091d84: fix: no shipped text says the SQL driver reads organization-less rows, and the in-memory HTTP outbox no longer does
   
   Clause-②: no (one fix and texts: the in-memory HTTP outbox's `redeliver()` now answers as `SqlHttpOutbox` already did; no accept set, served body or error code of a shipped composition moves)
   
@@ -91,14 +91,14 @@
   - **`@objectstack/lint`.** `os explain unique/legacy-organization-composite` now says that a new row carries its organization wherever the organization object is registered. A composition that registers no organization object still writes rows whose organization column is NULL.
   - **`@objectstack/spec`.** The TSDoc of `SharingRuleRow` no longer calls it a 1-to-1 stored shape: `deploymentWide` has no `sys_sharing_rule` column. The TSDoc of `DriverOptions.tenantIds` and of the events `organizationId` member describe the predicate without a NULL arm.
   - **The other packages.** Code comments only.
-- 3937697: fix(spec,plugin-sharing): the `DataEvent.organizationId` description and the sharing-rule Organization help stop describing organization-less rows that 18.x no longer writes
+- 60b42cd: fix(spec,plugin-sharing): the `DataEvent.organizationId` description and the sharing-rule Organization help stop describing organization-less rows that 18.x no longer writes
   
   Clause-②: no (description and help text only: no response, status, outcome, boot verdict or export moves)
   Metadata-protocol: none (a schema description and a field's help text; nothing a metadata author writes changes)
   
   - **`DataEvent.organizationId` (`@objectstack/spec/api`).** The description said every event on a `single`-posture deployment carries no organization, because nothing stamps the column there. Since 18.x the engine stamps every tenant row on a single-organization deployment with its Default Organization, so those events carry it. The key is now described as absent in two cases: a row of an object outside the wall, and every row of a composition that registers no organization object. The schema itself is unchanged (`z.string().min(1).optional()`).
   - **`sys_sharing_rule.organization_id` (`@objectstack/plugin-sharing`).** The Setup help said "null = global". A stored rule always carries its organization; a rule that applies to every organization is a declared rule. The help now reads "The organization this rule belongs to.", with the translated locales updated to match.
-- 3937697: fix(plugin-sharing): the declared-rule organization walk ends on the rows read, and a row with no readable id answers unknown; texts that still described the retired NULL-organization reading are corrected
+- 24360dc: fix(plugin-sharing): the declared-rule organization walk ends on the rows read, and a row with no readable id answers unknown; texts that still described the retired NULL-organization reading are corrected
   
   Clause-②: no
   Metadata-protocol: none
@@ -107,7 +107,7 @@
   - **`@objectstack/plugin-security`.** The Organization help on `sys_user_position` and `sys_user_permission_set` no longer says an empty value means "global" or "applies in every org context". A grant or assignment applies only in its own organization, and one with no organization applies nowhere. The four locale bundles carry the new text.
   - **`@objectstack/cli`.** `os migrate organization-ownership`'s warning about rows whose owner cannot be derived reads "…while one stays NULL, except on a table whose column is not the tenancy anchor." where it read "(but on a table …)".
   - **`@objectstack/spec`.** Wording only, no schema moves: the upgrade guide's `driver-read-scope-follows-tenant-wall` entry names update and delete "by id or by predicate"; the `sharing-rule-declared-mirror-retired` entry no longer paraphrases ADR-0131 D13 as asking an entry of every retirement; `IEmailService`'s `organizationId` TSDoc no longer says an absent value leaves the row unstamped (the engine stamps the derivable organization or refuses the insert); a TSDoc citation in `schedule-organization.zod.ts` names the run store instead of a deleted file.
-- 3937697: fix: Setup forms show option labels instead of machine values on Business Units, Sharing Rules and Datasources
+- bdf762c: fix: Setup forms show option labels instead of machine values on Business Units, Sharing Rules and Datasources
   
   Clause-②: no
   Metadata-protocol: none
@@ -117,111 +117,111 @@
   - **`@objectstack/spec`:** the `autoMigrate` key of the SQLite, PostgreSQL and MySQL driver configs had no JSON-Schema `title`, so the New datasource form labelled the field with the raw key `autoMigrate`. It is now titled "Auto-migrate schema".
   
   The English labels flow into the generated translation bundles; the existing zh-CN, ja-JP and es-ES option translations are kept.
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
+- Updated dependencies [448374d]
+- Updated dependencies [94842ba]
+- Updated dependencies [7cacad5]
+- Updated dependencies [df8bb40]
+- Updated dependencies [0091d84]
+- Updated dependencies [d5d8146]
+- Updated dependencies [5e9b100]
+- Updated dependencies [7532ea3]
+- Updated dependencies [fde7456]
+- Updated dependencies [b42c621]
+- Updated dependencies [de9cd1f]
+- Updated dependencies [7035682]
+- Updated dependencies [d606fc1]
+- Updated dependencies [a8b44d4]
+- Updated dependencies [78ab647]
+- Updated dependencies [73a2b52]
+- Updated dependencies [5872450]
+- Updated dependencies [9ea5afe]
+- Updated dependencies [72518d2]
+- Updated dependencies [925fd07]
+- Updated dependencies [e7befa7]
+- Updated dependencies [55d7aab]
+- Updated dependencies [5050442]
+- Updated dependencies [2b1382a]
+- Updated dependencies [644e4b2]
+- Updated dependencies [0715fac]
+- Updated dependencies [60b42cd]
+- Updated dependencies [b9a79ef]
+- Updated dependencies [63085c3]
+- Updated dependencies [0b8bce4]
+- Updated dependencies [5d2c5a1]
+- Updated dependencies [066dabc]
+- Updated dependencies [4b8f597]
+- Updated dependencies [688052e]
+- Updated dependencies [6b656bf]
+- Updated dependencies [2069b81]
+- Updated dependencies [157ebd0]
+- Updated dependencies [1862d8d]
+- Updated dependencies [30d21f6]
+- Updated dependencies [eddffc3]
+- Updated dependencies [69712d5]
+- Updated dependencies [dfe60e3]
+- Updated dependencies [e939357]
+- Updated dependencies [045858f]
+- Updated dependencies [baedcec]
+- Updated dependencies [03c12a5]
+- Updated dependencies [f8c5fb3]
+- Updated dependencies [d96f618]
+- Updated dependencies [386f60f]
+- Updated dependencies [28c9a2c]
+- Updated dependencies [2354058]
+- Updated dependencies [ba244f1]
+- Updated dependencies [edcc8ce]
+- Updated dependencies [9340181]
+- Updated dependencies [fccbd9d]
+- Updated dependencies [c8f4c43]
+- Updated dependencies [db9c02a]
+- Updated dependencies [02ad31a]
+- Updated dependencies [03966ce]
+- Updated dependencies [e3aa111]
+- Updated dependencies [863c580]
+- Updated dependencies [7f5b19d]
+- Updated dependencies [504d8b3]
+- Updated dependencies [14e7239]
+- Updated dependencies [fe0ec2b]
+- Updated dependencies [dfab597]
+- Updated dependencies [9127f23]
+- Updated dependencies [3a440b0]
+- Updated dependencies [24360dc]
+- Updated dependencies [ecb4e69]
+- Updated dependencies [8dfd126]
+- Updated dependencies [bda53bb]
+- Updated dependencies [b62f959]
+- Updated dependencies [b964ea1]
 - Updated dependencies [4395cbc]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
-- Updated dependencies [3937697]
+- Updated dependencies [9019af9]
+- Updated dependencies [45f9962]
+- Updated dependencies [e5eab06]
+- Updated dependencies [dc532e8]
+- Updated dependencies [d196748]
+- Updated dependencies [9d96b2b]
+- Updated dependencies [5f30f00]
+- Updated dependencies [7db1697]
+- Updated dependencies [f5b6b3f]
+- Updated dependencies [c109bfc]
+- Updated dependencies [f4112a7]
+- Updated dependencies [f4112a7]
+- Updated dependencies [db1c7cc]
+- Updated dependencies [303aef0]
+- Updated dependencies [b3034ee]
+- Updated dependencies [d12e650]
+- Updated dependencies [830a63a]
+- Updated dependencies [1000cc7]
+- Updated dependencies [ee63b47]
+- Updated dependencies [bdf762c]
+- Updated dependencies [27b3f1f]
+- Updated dependencies [3306cad]
+- Updated dependencies [c898bd8]
+- Updated dependencies [97aa34e]
+- Updated dependencies [832a84e]
+- Updated dependencies [7c68b10]
+- Updated dependencies [915e940]
+- Updated dependencies [025f6de]
 - Updated dependencies [9f39094]
-- Updated dependencies [3937697]
+- Updated dependencies [f7d7403]
   - @objectstack/spec@18.1.0
   - @objectstack/core@18.1.0
   - @objectstack/objectql@18.1.0
