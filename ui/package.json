@@ -181,7 +181,7 @@
     "vite-plugin-compression2": "^2.5.3",
     "vitest": "^4.1.10",
     "vitest-axe": "^0.1.0",
-    "wait-on": "^9.1.0",
+    "wait-on": "^9.5.1",
     "yaml": "^2.9.0"
   },
   "msw": {
