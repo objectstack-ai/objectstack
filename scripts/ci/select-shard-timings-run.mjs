@@ -112,7 +112,7 @@ import { isEntrypoint } from '../invoked-as.mjs';
 // complete run must present; partition-test-shards.mjs owns the split itself and
 // its own self-test reads ci.yml back, so this is a reader's expectation rather
 // than a second declaration of the split.
-export const SHARD_COUNT = 6;
+export const SHARD_COUNT = 8;
 
 const API = 'https://api.github.com';
 
@@ -121,8 +121,8 @@ const API = 'https://api.github.com';
 // and would pass every eligibility and coverage check while measuring a slice.
 export const DEFAULT_RUN_EVENT = 'schedule';
 
-// `Test Core (3/6)` -> 3. Anchored on both ends: a job merely CONTAINING that
-// text (a future "Test Core (3/6) rerun") is not this job, and reading it as one
+// `Test Core (3/8)` -> 3. Anchored on both ends: a job merely CONTAINING that
+// text (a future "Test Core (3/8) rerun") is not this job, and reading it as one
 // would let a run qualify on a job that never ran the suite.
 export function testCoreShard(jobName, shardCount = SHARD_COUNT) {
   const m = /^Test Core \((\d+)\/(\d+)\)$/.exec(String(jobName ?? '').trim());
@@ -132,7 +132,7 @@ export function testCoreShard(jobName, shardCount = SHARD_COUNT) {
   return index >= 1 && index <= shardCount ? index : null;
 }
 
-// `test-core-run-summary-3-of-6` -> 3, by the same anchoring argument.
+// `test-core-run-summary-3-of-8` -> 3, by the same anchoring argument.
 export function summaryArtifactShard(artifactName, shardCount = SHARD_COUNT) {
   const m = /^test-core-run-summary-(\d+)-of-(\d+)$/.exec(String(artifactName ?? '').trim());
   if (!m) return null;
@@ -141,7 +141,7 @@ export function summaryArtifactShard(artifactName, shardCount = SHARD_COUNT) {
   return index >= 1 && index <= shardCount ? index : null;
 }
 
-// `test-core-timings-3-of-6` -> 3: the shard's per-FILE capture
+// `test-core-timings-3-of-8` -> 3: the shard's per-FILE capture
 // (`report-test-timings.mjs --capture`), anchored like the summary matcher.
 // NOT an eligibility input -- the capture step is report-only
 // (`continue-on-error`), so a run can be a complete measurement without one --
@@ -590,28 +590,28 @@ async function selfTest() {
   //    differently-sharded artifact would qualify a run on evidence from a run
   //    that is not this one.
   check(() => {
-    if (testCoreShard('Test Core (3/6)') !== 3) throw new Error('job matcher: the plain shape did not parse');
+    if (testCoreShard('Test Core (3/8)') !== 3) throw new Error('job matcher: the plain shape did not parse');
   });
   check(() => {
-    if (testCoreShard('Test Core (1/6)') !== 1 || testCoreShard('Test Core (6/6)') !== 6) {
+    if (testCoreShard('Test Core (1/8)') !== 1 || testCoreShard('Test Core (8/8)') !== 8) {
       throw new Error('job matcher: an endpoint shard did not parse');
     }
   });
   check(() => {
-    if (testCoreShard('Test Core (0/6)') !== null || testCoreShard('Test Core (7/6)') !== null) {
+    if (testCoreShard('Test Core (0/8)') !== null || testCoreShard('Test Core (9/8)') !== null) {
       throw new Error('job matcher: an out-of-range shard index was accepted');
     }
   });
   check(() => {
-    if (testCoreShard('Test Core (3/6) rerun') !== null) {
+    if (testCoreShard('Test Core (3/8) rerun') !== null) {
       throw new Error('job matcher: a job merely CONTAINING the shape was accepted');
     }
   });
   check(() => {
-    if (testCoreShard('Dogfood (3/6)') !== null) throw new Error('job matcher: a different job was accepted');
+    if (testCoreShard('Dogfood (3/8)') !== null) throw new Error('job matcher: a different job was accepted');
   });
   check(() => {
-    if (testCoreShard('Test Core (3/8)') !== null) {
+    if (testCoreShard('Test Core (3/6)') !== null) {
       throw new Error('job matcher: a job from a different shard count was accepted');
     }
   });
@@ -621,28 +621,28 @@ async function selfTest() {
     }
   });
   check(() => {
-    if (summaryArtifactShard('test-core-run-summary-4-of-6') !== 4) {
+    if (summaryArtifactShard('test-core-run-summary-4-of-8') !== 4) {
       throw new Error('artifact matcher: the plain shape did not parse');
     }
   });
   check(() => {
-    if (summaryArtifactShard('test-core-run-summary-4-of-8') !== null) {
+    if (summaryArtifactShard('test-core-run-summary-4-of-6') !== null) {
       throw new Error('artifact matcher: a different shard count was accepted');
     }
   });
   check(() => {
-    if (summaryArtifactShard('test-core-run-summary-4-of-6-retry') !== null) {
+    if (summaryArtifactShard('test-core-run-summary-4-of-8-retry') !== null) {
       throw new Error('artifact matcher: a longer name was accepted');
     }
   });
   // #22949 ruling E: the per-file capture matcher, anchored the same way --
   // and NOT the run-summary name, which is a different artifact.
   check(() => {
-    if (timingCaptureShard('test-core-timings-2-of-6') !== 2) throw new Error('capture matcher: the plain shape did not parse');
-    if (timingCaptureShard('test-core-timings-2-of-8') !== null || timingCaptureShard('test-core-timings-2-of-6-retry') !== null) {
+    if (timingCaptureShard('test-core-timings-2-of-8') !== 2) throw new Error('capture matcher: the plain shape did not parse');
+    if (timingCaptureShard('test-core-timings-2-of-6') !== null || timingCaptureShard('test-core-timings-2-of-8-retry') !== null) {
       throw new Error('capture matcher: a different shard count or a longer name was accepted');
     }
-    if (timingCaptureShard('test-core-run-summary-2-of-6') !== null || summaryArtifactShard('test-core-timings-2-of-6') !== null) {
+    if (timingCaptureShard('test-core-run-summary-2-of-8') !== null || summaryArtifactShard('test-core-timings-2-of-8') !== null) {
       throw new Error('capture matcher: the run summary and the per-file capture were read as each other');
     }
   });
@@ -650,69 +650,69 @@ async function selfTest() {
   // -- Eligibility. The fixtures are built from the two rejection shapes this
   //    workflow actually meets: a cancelled shard, and an expired artifact.
   const jobs = (conclusions) =>
-    conclusions.map((conclusion, i) => ({ name: `Test Core (${i + 1}/6)`, conclusion, status: 'completed' }));
+    conclusions.map((conclusion, i) => ({ name: `Test Core (${i + 1}/8)`, conclusion, status: 'completed' }));
   const artifacts = (present, expired = []) =>
-    present.map((n) => ({ id: 1000 + n, name: `test-core-run-summary-${n}-of-6`, expired: expired.includes(n) }));
-  const allSix = ['success', 'success', 'success', 'success', 'success', 'success'];
+    present.map((n) => ({ id: 1000 + n, name: `test-core-run-summary-${n}-of-8`, expired: expired.includes(n) }));
+  const allEight = ['success', 'success', 'success', 'success', 'success', 'success', 'success', 'success'];
 
   check(() => {
-    const v = runIsEligible({ jobs: jobs(allSix), artifacts: artifacts([1, 2, 3, 4, 5, 6]) });
+    const v = runIsEligible({ jobs: jobs(allEight), artifacts: artifacts([1, 2, 3, 4, 5, 6, 7, 8]) });
     if (!v.eligible) throw new Error(`eligibility: a complete run was rejected (${v.reasons.join('; ')})`);
   });
   check(() => {
-    const v = runIsEligible({ jobs: jobs(allSix), artifacts: artifacts([1, 2, 3, 4, 5, 6]) });
+    const v = runIsEligible({ jobs: jobs(allEight), artifacts: artifacts([1, 2, 3, 4, 5, 6, 7, 8]) });
     if (v.artifactIds['5'] !== 1005) throw new Error(`eligibility: artifact ids were not returned per shard (${JSON.stringify(v.artifactIds)})`);
   });
   check(() => {
     // #22949 ruling E: the per-file captures ride along per shard, an expired
     // one is left out -- and a run WITHOUT them is still eligible, because the
     // capture step is report-only and the dataset never reads it.
-    const captures = [1, 2, 3, 4, 5].map((n) => ({ id: 2000 + n, name: `test-core-timings-${n}-of-6`, expired: n === 2 }));
-    const v = runIsEligible({ jobs: jobs(allSix), artifacts: [...artifacts([1, 2, 3, 4, 5, 6]), ...captures] });
+    const captures = [1, 2, 3, 4, 5].map((n) => ({ id: 2000 + n, name: `test-core-timings-${n}-of-8`, expired: n === 2 }));
+    const v = runIsEligible({ jobs: jobs(allEight), artifacts: [...artifacts([1, 2, 3, 4, 5, 6, 7, 8]), ...captures] });
     if (!v.eligible || JSON.stringify(v.timingArtifactIds) !== '{"1":2001,"3":2003,"4":2004,"5":2005}') {
       throw new Error(`eligibility: the per-file captures read ${JSON.stringify(v.timingArtifactIds)} (eligible ${v.eligible})`);
     }
-    const none = runIsEligible({ jobs: jobs(allSix), artifacts: artifacts([1, 2, 3, 4, 5, 6]) });
+    const none = runIsEligible({ jobs: jobs(allEight), artifacts: artifacts([1, 2, 3, 4, 5, 6, 7, 8]) });
     if (!none.eligible || Object.keys(none.timingArtifactIds).length !== 0) {
       throw new Error('eligibility: a run without per-file captures was rejected, or invented some');
     }
   });
   check(() => {
-    const cancelled = [...allSix];
+    const cancelled = [...allEight];
     cancelled[2] = 'cancelled';
-    const v = runIsEligible({ jobs: jobs(cancelled), artifacts: artifacts([1, 2, 3, 4, 5, 6]) });
+    const v = runIsEligible({ jobs: jobs(cancelled), artifacts: artifacts([1, 2, 3, 4, 5, 6, 7, 8]) });
     if (v.eligible) throw new Error('eligibility: a run with a CANCELLED shard was accepted');
-    if (!v.reasons.some((r) => r.includes('3/6'))) throw new Error(`eligibility: the cancelled shard was not named (${v.reasons.join('; ')})`);
+    if (!v.reasons.some((r) => r.includes('3/8'))) throw new Error(`eligibility: the cancelled shard was not named (${v.reasons.join('; ')})`);
   });
   check(() => {
     // A cancelled shard that still uploaded its artifact is the exact censored
     // shape: "the artifacts exist" must not be enough on its own.
-    const cancelled = [...allSix];
+    const cancelled = [...allEight];
     cancelled[0] = 'cancelled';
-    const v = runIsEligible({ jobs: jobs(cancelled), artifacts: artifacts([1, 2, 3, 4, 5, 6]) });
+    const v = runIsEligible({ jobs: jobs(cancelled), artifacts: artifacts([1, 2, 3, 4, 5, 6, 7, 8]) });
     if (v.eligible) throw new Error('eligibility: a censored run passed because its artifacts were complete');
   });
   check(() => {
-    const stillRunning = [...allSix];
+    const stillRunning = [...allEight];
     stillRunning[4] = null;
-    const v = runIsEligible({ jobs: jobs(stillRunning), artifacts: artifacts([1, 2, 3, 4, 5, 6]) });
+    const v = runIsEligible({ jobs: jobs(stillRunning), artifacts: artifacts([1, 2, 3, 4, 5, 6, 7, 8]) });
     if (v.eligible) throw new Error('eligibility: a shard with no conclusion was read as a success');
   });
   check(() => {
-    const v = runIsEligible({ jobs: jobs(allSix), artifacts: artifacts([1, 2, 3, 4, 5]) });
+    const v = runIsEligible({ jobs: jobs(allEight), artifacts: artifacts([1, 2, 3, 4, 5, 6, 7]) });
     if (v.eligible) throw new Error('eligibility: a run missing an artifact was accepted');
-    if (!v.reasons.some((r) => r.includes('6-of-6'))) throw new Error(`eligibility: the missing artifact was not named (${v.reasons.join('; ')})`);
+    if (!v.reasons.some((r) => r.includes('8-of-8'))) throw new Error(`eligibility: the missing artifact was not named (${v.reasons.join('; ')})`);
   });
   check(() => {
-    const v = runIsEligible({ jobs: jobs(allSix), artifacts: artifacts([1, 2, 3, 4, 5, 6], [2]) });
+    const v = runIsEligible({ jobs: jobs(allEight), artifacts: artifacts([1, 2, 3, 4, 5, 6, 7, 8], [2]) });
     if (v.eligible) throw new Error('eligibility: an EXPIRED artifact was counted as retained');
   });
   check(() => {
     // A re-run leaves a failed attempt beside the successful one. The shard
     // qualifies on the attempt that succeeded, which is also the one that
     // uploaded the artifact.
-    const withRetry = [...jobs(allSix), { name: 'Test Core (2/6)', conclusion: 'failure', status: 'completed' }];
-    const v = runIsEligible({ jobs: withRetry, artifacts: artifacts([1, 2, 3, 4, 5, 6]) });
+    const withRetry = [...jobs(allEight), { name: 'Test Core (2/8)', conclusion: 'failure', status: 'completed' }];
+    const v = runIsEligible({ jobs: withRetry, artifacts: artifacts([1, 2, 3, 4, 5, 6, 7, 8]) });
     if (!v.eligible) throw new Error(`eligibility: a re-run's earlier failed attempt disqualified the shard (${v.reasons.join('; ')})`);
   });
 
@@ -872,8 +872,8 @@ async function selfTest() {
   const SCHEDULE_RUN_ID = 900;
   const PUSH_RUN_ID = 100;
   const eligiblePayload = {
-    jobs: { jobs: jobs(allSix) },
-    artifacts: { artifacts: artifacts([1, 2, 3, 4, 5, 6]) },
+    jobs: { jobs: jobs(allEight) },
+    artifacts: { artifacts: artifacts([1, 2, 3, 4, 5, 6, 7, 8]) },
   };
   const makeFakeApi = () => {
     const requested = [];
@@ -1007,11 +1007,11 @@ async function selfTest() {
       return { ok: true, status: 200, statusText: 'OK', json: async () => ({ workflow_runs: runsFor(count) }) };
     }
     if (/\/actions\/runs\/\d+\/jobs$/.test(pathname)) {
-      const conclusions = shape === 'eligible' ? allSix : allSix.map(() => 'cancelled');
+      const conclusions = shape === 'eligible' ? allEight : allEight.map(() => 'cancelled');
       return { ok: true, status: 200, statusText: 'OK', json: async () => ({ jobs: jobs(conclusions) }) };
     }
     if (/\/actions\/runs\/\d+\/artifacts$/.test(pathname)) {
-      return { ok: true, status: 200, statusText: 'OK', json: async () => ({ artifacts: artifacts([1, 2, 3, 4, 5, 6]) }) };
+      return { ok: true, status: 200, statusText: 'OK', json: async () => ({ artifacts: artifacts([1, 2, 3, 4, 5, 6, 7, 8]) }) };
     }
     return { ok: false, status: 404, statusText: 'Not Found', json: async () => ({}) };
   };
@@ -1285,7 +1285,7 @@ async function selfTest() {
   const toolPath = (rel) => fileURLToPath(new URL(rel, import.meta.url));
 
   // runs: newest first, each { id, tasks: [[package, seconds, cacheStatus]] }.
-  // Every task lands in shard 1's summary; shards 2-6 carry an empty task list,
+  // Every task lands in shard 1's summary; shards 2-8 carry an empty task list,
   // which is a valid summary that measures nothing.
   const driveGenerate = (runs, committedPackages, workspace = Object.keys(committedPackages)) => {
     const dir = mkdtempSync(join(tmpdir(), 'os-timings-generate-'));
@@ -1306,11 +1306,11 @@ async function selfTest() {
         run_id: r.id,
         head_sha: String(r.id).padStart(40, 'c'),
         created_at: '2026-10-06T00:00:00Z',
-        artifact_ids: Object.fromEntries([1, 2, 3, 4, 5, 6].map((n) => [n, Number(`${r.id}${n}`)])),
+        artifact_ids: Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8].map((n) => [n, Number(`${r.id}${n}`)])),
       }));
       writeFileSync(join(runnerTemp, 'candidates.json'), JSON.stringify(candidatesList));
       for (const r of runs) {
-        for (const n of [1, 2, 3, 4, 5, 6]) {
+        for (const n of [1, 2, 3, 4, 5, 6, 7, 8]) {
           const tasks =
             n !== 1
               ? []
