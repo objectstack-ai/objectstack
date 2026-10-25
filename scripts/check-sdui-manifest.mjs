@@ -55,6 +55,30 @@
  *      This is the only check here that needs an input from outside this tree,
  *      so it is the only one that can report NOT CHECKED — see below.
  *
+ * ## With no pin: the in-tree registry (#25712)
+ *
+ * Once objectui's tree lives under `ui/` and `.objectui-sha` is gone (#25677),
+ * there is no pin to build and no checkout to ask, so the oracle is the
+ * registry in this tree. The mode is decided by `.objectui-sha` alone: with it
+ * present, nothing above reads differently. Without it:
+ *
+ *   1–2. unchanged — the same shape and tamper checks, against a record keyed
+ *        to the in-tree producer (`IN_TREE_RECORD_FIELDS`: the pin-keyed
+ *        fields are not required, the `inTree` block is).
+ *   3.   STALENESS is a SOURCE DIGEST — `registrySourceDigest` over the
+ *        registry packages' `src/` as the index holds them must equal the
+ *        record's `inTree` reading. A registry source edit without
+ *        regeneration reds HERE, and the red prints the one command that
+ *        clears it: the generator, which builds the registry from this tree
+ *        and regenerates. Nothing is built in this gate — the digest is a
+ *        `git ls-files` over the index, with no dist and no node_modules read.
+ *   4.   none. The in-tree `@object-ui/core` version moves with every release
+ *        of the one fixed version group while the registry does not, so the
+ *        record carries it as provenance and the success line prints it.
+ *
+ * No pin AND no in-tree console is RED, naming both: a tree with neither has
+ * nothing to be fresh against, which is a broken tree, not a skip.
+ *
  * ## What this deliberately does NOT do, and where that risk is held
  *
  * No per-PR regeneration: that would put an objectui clone and build (network,
@@ -120,6 +144,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { gitFreeEnv } from './git-env.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
 const DEFAULT_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -213,10 +238,13 @@ export const REGISTRY_MODULES = Object.freeze([
  */
 const PRODUCER = 'scripts/gen-sdui-manifest-node.mjs';
 
+/** The repo helpers the producer (and this gate, which it imports in-tree) import: copied beside it in the self-test's fixtures. */
+const PRODUCER_IMPORTS = ['scripts/git-env.mjs', 'scripts/invoked-as.mjs'];
+
 /**
  * The population this gate reads, declared for `scripts/pm/dispatch-gates.mjs`.
  *
- * `checkTree` opens exactly three files. None of them was visible to the
+ * With a pin, `checkTree` opens exactly three files. None of them was visible to the
  * derivation: it reads SOURCE TEXT, and a literal with no separator is refused
  * by `hintCovers` as too generic (`sdui.manifest.json`), while `.objectui-sha`
  * is not one of the dot-prefixed names the extractor admits and the record path
@@ -233,6 +261,10 @@ const PRODUCER = 'scripts/gen-sdui-manifest-node.mjs';
  * to nothing else.
  *
  * ⛔ Not a whole-tree marker, and not `scripts/**`: three files are three files.
+ * Without a pin it also reads the in-tree console's manifest and the registry
+ * packages under `ui/packages/` (#25712) — the subtree the digest walks, so a
+ * UI package edit derives this gate; on a tree with no `ui/` both hints match
+ * nothing and only display.
  *
  * The self-test derives the coupling from `READ_PATHS` — the same object
  * `checkTree` reads — so a moved or added read reds here rather than leaving the
@@ -560,6 +592,9 @@ export function registrySourceDigest(root) {
   let listing;
   try {
     listing = execFileSync('git', ['-C', root, 'ls-files', '-s', '-z', '--', ...packages.map((dir) => `${dir}/src`)], {
+      // #16644: `-C root` alone names the index read — the self-test hands this
+      // mkdtemp fixtures, and an inherited GIT_DIR / GIT_INDEX_FILE outranks it.
+      env: gitFreeEnv(),
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       maxBuffer: 64 * 1024 * 1024,
@@ -629,6 +664,15 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '--require-objectui turns an unreachable checkout RED': 1,
   'a pinned commit with no packages/core/package.json is RED': 1,
   'the producer, run under a TMPDIR behind a symlink, writes a tree this gate passes': 1,
+  'no pin: an in-tree record over unchanged registry sources passes': 1,
+  'no pin and no in-tree console is RED, naming both': 1,
+  'no pin: a pin-mode record (no inTree block) is RED with the in-tree command': 1,
+  'no pin: a staged registry source edit is RED with the in-tree command': 1,
+  'no pin: an edit the index does not hold is not a registry change': 1,
+  'no pin: a test file or a package the registry does not reach is not a registry change': 1,
+  'no pin: a new workspace edge into the registry is RED': 1,
+  'no pin: a hand-edited artefact is RED': 1,
+  'no pin: the in-tree producer builds, then writes a tree this gate passes': 1,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -637,7 +681,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // the literal above, so the roster falls below this number; the table
 // cross-check in the floor block is the other half, and names WHICH label
 // collided.
-const SELF_TEST_BATTERY_FLOOR = 13;
+const SELF_TEST_BATTERY_FLOOR = 22;
 
 function selfTest() {
   const mk = (mutate, { pin = 'a'.repeat(40), version = '0.0.0-selftest' } = {}) => {
@@ -739,7 +783,7 @@ function selfTest() {
     }
 
     const producerSource = readFileSync(join(DEFAULT_ROOT, PRODUCER), 'utf8');
-    copyFileSync(join(DEFAULT_ROOT, PRODUCER), join(root, PRODUCER));
+    for (const file of [PRODUCER, ...PRODUCER_IMPORTS]) copyFileSync(join(DEFAULT_ROOT, file), join(root, file));
     const parserDist = join(root, 'packages', 'sdui-parser', 'dist');
     mkdirSync(parserDist, { recursive: true });
     writeFileSync(
@@ -779,6 +823,116 @@ function selfTest() {
     return { root, objectuiRoot: tree };
   };
   const produced = mkProduced();
+
+  /**
+   * The merged layout (#25712): no pin, an in-tree console, and one package
+   * per registry name under `ui/packages/`, each with one source — plus
+   * `@object-ui/types`, which `@object-ui/core` reaches through a dependency
+   * (so the closure, not only the seed list, is under test), and
+   * `@object-ui/unrelated`, which nothing reaches. A real git repository: the
+   * digest reads the INDEX, so a stub would leave exactly that reading
+   * unexercised. Every git child here runs with `gitFreeEnv()` (#16644).
+   */
+  const UI_FIXTURE_NAMES = [REGISTRY_CORE, ...REGISTRY_MODULES, '@object-ui/types', '@object-ui/unrelated'];
+  const pkgDir = (name) => join(UI_PACKAGES, name.slice('@object-ui/'.length));
+  const gitIn = (root) => (...args) =>
+    execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: gitFreeEnv() });
+  const mkUiSources = (prefix) => {
+    const root = mkdtempSync(join(tmpdir(), prefix));
+    const git = gitIn(root);
+    git('init', '-q');
+    writeFileSync(join(root, '.gitignore'), 'node_modules/\n');
+    mkdirSync(join(root, UI_CONSOLE), { recursive: true });
+    writeFileSync(join(root, READ_PATHS.console), JSON.stringify({ name: '@object-ui/console', private: true }, null, 2));
+    for (const name of UI_FIXTURE_NAMES) {
+      const dir = join(root, pkgDir(name));
+      mkdirSync(join(dir, 'src'), { recursive: true });
+      const dependencies = name === REGISTRY_CORE ? { '@object-ui/types': 'workspace:*' } : {};
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ name, version: '0.0.0-selftest', dependencies }, null, 2));
+      writeFileSync(join(dir, 'src', 'index.ts'), `export const id = ${JSON.stringify(name)};\n`);
+    }
+    git('add', '-A');
+    return { root, git };
+  };
+  const mkInTree = (mutate) => {
+    const { root, git } = mkUiSources('sdui-manifest-in-tree-');
+    const manifest = { components: { flex: { type: 'flex', inputs: [] } } };
+    const raw = JSON.stringify(manifest, null, 2);
+    mkdirSync(join(root, 'scripts'), { recursive: true });
+    writeFileSync(join(root, READ_PATHS.artefact), raw);
+    const digest = registrySourceDigest(root);
+    writeFileSync(
+      join(root, READ_PATHS.record),
+      JSON.stringify(
+        {
+          source: RECORD_SOURCE,
+          sha256: createHash('sha256').update(raw).digest('hex'),
+          components: 1,
+          inTree: {
+            modulesRoot: UI_CONSOLE,
+            objectuiWorkspaceVersion: '0.0.0-selftest',
+            registryPackages: digest.packages,
+            registrySources: digest.files,
+            registrySourcesSha256: digest.sha256,
+          },
+        },
+        null,
+        2,
+      ),
+    );
+    mutate?.(root, git);
+    return root;
+  };
+  const editRecord = (root, edit) => {
+    const p = join(root, READ_PATHS.record);
+    writeFileSync(p, JSON.stringify(edit(JSON.parse(readFileSync(p, 'utf8'))), null, 2));
+  };
+
+  /**
+   * The PRODUCER's in-tree run (no pin): the real generator, this gate and the
+   * two helpers they import, copied into the merged-layout fixture beside a
+   * stub adapter and a stub `node_modules/.bin/turbo`. The stub is what writes
+   * `@object-ui/core`'s dist into the console, so a producer that skipped its
+   * build exits 1 on the missing dist and the row reads RED (missing artefact)
+   * with the producer's stderr above it.
+   */
+  const mkProducedInTree = () => {
+    const { root } = mkUiSources('sdui-manifest-in-tree-producer-');
+    mkdirSync(join(root, 'scripts'), { recursive: true });
+    for (const file of [PRODUCER, 'scripts/check-sdui-manifest.mjs', ...PRODUCER_IMPORTS]) {
+      copyFileSync(join(DEFAULT_ROOT, file), join(root, file));
+    }
+    const parserDist = join(root, 'packages', 'sdui-parser', 'dist');
+    mkdirSync(parserDist, { recursive: true });
+    writeFileSync(
+      join(parserDist, 'index.mjs'),
+      'export const manifestFromConfigs = (configs) => ({ components: Object.fromEntries(configs.map((c) => [c.type, { type: c.type, inputs: [] }])) });\n',
+    );
+    for (const name of [REGISTRY_CORE, ...REGISTRY_MODULES]) {
+      const pkg = join(root, UI_CONSOLE, 'node_modules', ...name.split('/'));
+      mkdirSync(join(pkg, 'dist'), { recursive: true });
+      writeFileSync(
+        join(pkg, 'package.json'),
+        JSON.stringify({ name, version: '0.0.0-selftest', type: 'module', exports: { '.': { import: './dist/index.js' } } }),
+      );
+      if (name !== REGISTRY_CORE) writeFileSync(join(pkg, 'dist', 'index.js'), 'export {};\n');
+    }
+    const coreDist = `${UI_CONSOLE}/node_modules/${REGISTRY_CORE}/dist`;
+    mkdirSync(join(root, 'node_modules', '.bin'), { recursive: true });
+    writeFileSync(
+      join(root, 'node_modules', '.bin', 'turbo'),
+      '#!/bin/sh\n' +
+        `mkdir -p '${coreDist}' && printf '%s\\n' "export const ComponentRegistry = { getPublicConfigs: () => [{ type: 'selftest_flex' }] };" > '${coreDist}/index.js'\n`,
+      { mode: 0o755 },
+    );
+    const run = spawnSync(process.execPath, [join(root, PRODUCER)], { encoding: 'utf8', env: gitFreeEnv() });
+    if (run.status !== 0) {
+      console.error(`  the in-tree producer exited ${run.status ?? run.signal}:`);
+      for (const line of String(run.stderr ?? run.error ?? '').trim().split('\n')) console.error(`    ${line}`);
+    }
+    return root;
+  };
+  const producedInTree = mkProducedInTree();
 
   const cases = [
     ['green fixture passes', mk(), 0, blind],
@@ -824,6 +978,44 @@ function selfTest() {
     // with the fixture's own objectui as the oracle, so the version leg cannot
     // read `unreachable` and pass by not running.
     ['the producer, run under a TMPDIR behind a symlink, writes a tree this gate passes', produced.root, 0, { objectuiRoot: produced.objectuiRoot, requireObjectui: true }],
+
+    // ── No pin: the in-tree registry (#25712) ──────────────────────────────
+    //
+    // The fifth column is text every problem of a RED row must carry between
+    // them: a red that does not name both missing oracles, or the one command
+    // that clears it, is a red its reader cannot act on.
+    ['no pin: an in-tree record over unchanged registry sources passes', mkInTree(), 0, blind],
+    ['no pin and no in-tree console is RED, naming both', mkInTree((r) => rmSync(join(r, UI_CONSOLE), { recursive: true })), 1, blind, [READ_PATHS.pin, UI_CONSOLE]],
+    // The tree the pin deletion lands on before it regenerates: the record is
+    // the pin producer's, whole and intact, and still not this mode's.
+    ['no pin: a pin-mode record (no inTree block) is RED with the in-tree command', mkInTree((r) => editRecord(r, ({ inTree, ...rest }) => ({
+      objectuiSha: 'a'.repeat(40),
+      ...rest,
+      modulesRoot: `.cache/objectui-${'a'.repeat(12)}/apps/console`,
+      objectuiWorkspaceVersion: '0.0.0-selftest',
+    }))), 1, blind, ['`inTree`', IN_TREE_REGENERATE]],
+    ['no pin: a staged registry source edit is RED with the in-tree command', mkInTree((r, git) => {
+      writeFileSync(join(r, pkgDir('@object-ui/plugin-grid'), 'src', 'index.ts'), 'export const id = "moved";\n');
+      git('add', '-A');
+    }), 1, blind, [IN_TREE_REGENERATE]],
+    ['no pin: an edit the index does not hold is not a registry change', mkInTree((r) => {
+      writeFileSync(join(r, pkgDir('@object-ui/plugin-grid'), 'src', 'index.ts'), 'export const id = "unstaged";\n');
+      writeFileSync(join(r, pkgDir('@object-ui/plugin-grid'), 'src', 'untracked.ts'), 'export {};\n');
+    }), 0, blind],
+    ['no pin: a test file or a package the registry does not reach is not a registry change', mkInTree((r, git) => {
+      mkdirSync(join(r, pkgDir('@object-ui/plugin-grid'), 'src', '__tests__'), { recursive: true });
+      writeFileSync(join(r, pkgDir('@object-ui/plugin-grid'), 'src', '__tests__', 'grid.ts'), 'export {};\n');
+      writeFileSync(join(r, pkgDir('@object-ui/types'), 'src', 'types.spec.tsx'), 'export {};\n');
+      writeFileSync(join(r, pkgDir('@object-ui/unrelated'), 'src', 'more.ts'), 'export {};\n');
+      git('add', '-A');
+    }), 0, blind],
+    ['no pin: a new workspace edge into the registry is RED', mkInTree((r) => {
+      const p = join(r, pkgDir('@object-ui/plugin-grid'), 'package.json');
+      const manifest = JSON.parse(readFileSync(p, 'utf8'));
+      writeFileSync(p, JSON.stringify({ ...manifest, peerDependencies: { '@object-ui/unrelated': 'workspace:*' } }, null, 2));
+    }), 1, blind, [IN_TREE_REGENERATE]],
+    ['no pin: a hand-edited artefact is RED', mkInTree((r) => writeFileSync(join(r, READ_PATHS.artefact), '{"components":{"flex":{"type":"flex"}}}')), 1, blind, [IN_TREE_REGENERATE]],
+    ['no pin: the in-tree producer builds, then writes a tree this gate passes', producedInTree, 0, blind],
   ];
 
   // The ledger this self-test's floor is evaluated against (#13489).
@@ -833,13 +1025,18 @@ function selfTest() {
   };
 
   let failures = 0;
-  for (const [name, root, want, options] of cases) {
+  for (const [name, root, want, options, mustName = []] of cases) {
     registerCase(name);
     const problems = checkTree(root, options);
     const got = problems.length ? 1 : 0;
-    if (got !== want) {
+    const unnamed = got ? mustName.filter((text) => !problems.join('\n').includes(text)) : [];
+    if (got !== want || unnamed.length > 0) {
       failures++;
-      console.error(`✗ self-test: ${name} — expected ${want ? 'RED' : 'GREEN'}, got ${got ? 'RED' : 'GREEN'}`);
+      console.error(
+        got !== want
+          ? `✗ self-test: ${name} — expected ${want ? 'RED' : 'GREEN'}, got ${got ? 'RED' : 'GREEN'}`
+          : `✗ self-test: ${name} — RED, but no problem names ${unnamed.map((text) => JSON.stringify(text)).join(', ')}`,
+      );
       for (const p of problems) console.error(`    ${p}`);
     }
   }
@@ -861,6 +1058,15 @@ function selfTest() {
   if (!ROOT_WATCH_HINTS.filter((h) => !h.replace(/\/\*+$/, '').includes('/')).every((h) => h.endsWith('/**'))) {
     declFail('a repo-ROOT file is declared without the subtree suffix — a bare single-segment literal is '
       + 'refused by hintCovers as too generic, so it would contribute no hint at all.');
+  }
+  // The digest is only a reading of what the producer enumerates while the two
+  // registry lists are one list. The producer refuses a mismatch on its own
+  // in-tree run; this holds it on every run, with or without a pin.
+  const producerList = /const REGISTRY_MODULES = \[([^\]]*)\];/.exec(readFileSync(join(DEFAULT_ROOT, PRODUCER), 'utf8'));
+  const producerModules = producerList ? [...producerList[1].matchAll(/'(@object-ui\/[a-z0-9-]+)'/g)].map((m) => m[1]) : [];
+  if (JSON.stringify(producerModules) !== JSON.stringify(REGISTRY_MODULES)) {
+    declFail(`REGISTRY_MODULES here and in ${PRODUCER} disagree (or its list is unreadable) — the in-tree digest `
+      + 'would describe a different registry than the one the producer enumerates.');
   }
 
   // ── The floor: every declared row RAN, and ran its case (#13489) ───────
@@ -926,7 +1132,9 @@ function selfTest() {
   console.log(
     `✓ check-sdui-manifest self-test: ${cases.length} cases behave (green passes; absence, tamper, moved pin, emptiness, a retired-route record, ` +
       'a version the pin does not declare, and an oracle that cannot answer are RED; an absent oracle is reported, not scored; ' +
-      'the producer, run under a symlinked TMPDIR, writes a tree that passes).',
+      'the producer, run under a symlinked TMPDIR, writes a tree that passes; with no pin, the in-tree registry digest reds a staged ' +
+      'source edit or a new workspace edge and ignores tests, unreached packages and unstaged bytes, no pin and no console is RED ' +
+      'naming both, and the in-tree producer builds, then writes a tree that passes).',
   );
 
   return SELF_TEST_VERDICT;

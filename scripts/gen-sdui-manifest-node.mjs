@@ -9,6 +9,8 @@
  *   pnpm objectui:build                    # build objectui at .objectui-sha into .cache/objectui-<SHA12>/
  *   node scripts/gen-sdui-manifest-node.mjs
  *
+ *   node scripts/gen-sdui-manifest-node.mjs  # no .objectui-sha: builds the in-tree registry, then regenerates
+ *
  * No flags. The modules root is DERIVED from `.objectui-sha` —
  * `.cache/objectui-<SHA12>/apps/console`, the directory `scripts/build-console.sh`
  * materialises — and the version recorded is READ from the tree, so neither can
@@ -63,6 +65,19 @@
  *
  * The runner this spawns is written to a fresh temp dir and removed afterwards:
  * nothing is written into the objectui build tree.
+ *
+ * ## With no pin: the in-tree console (#25712)
+ *
+ * Once objectui's tree lives under `ui/` and `.objectui-sha` is gone (#25677),
+ * the modules root is `ui/apps/console` and the registry is this tree's own.
+ * The run is then one command with no prior step: it builds the registry
+ * closure with turbo (`buildInTree`, a cache hit when nothing moved), refusing
+ * registry sources the index does not hold, then enumerates exactly as above.
+ * The record gains an `inTree` block — the modules root, the version read off
+ * the build (provenance only), and the registry source digest
+ * `scripts/check-sdui-manifest.mjs` recomputes — and keeps the pin-keyed
+ * fields only while the artefact is byte-identical to the one they describe.
+ * With the pin present, nothing here runs differently.
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -71,6 +86,8 @@ import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileS
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
+
+import { gitFreeEnv } from './git-env.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const RECORD_PATH = join(ROOT, 'scripts', 'sdui-manifest.record.json');
@@ -108,9 +125,31 @@ function fail(msg) {
 /** The in-tree console this reads when the tree has no pin (#25712). */
 const UI_CONSOLE = 'ui/apps/console';
 
+/**
+ * The record's `//` note for an in-tree run. A pinned run carries whatever note
+ * the record already has, exactly as before; that note names the pin's build
+ * route, which is false the moment there is no pin, so an in-tree run writes
+ * this one.
+ */
+const IN_TREE_NOTE = [
+  'Provenance record for the repo-root `sdui.manifest.json` (ADR-0080; #12924 wiring ruling 2026-08-29).',
+  "The artefact is the console's public-tier component manifest, generated from THIS tree's registry by",
+  'scripts/gen-sdui-manifest-node.mjs, the one producer (ruling 丙 on #17735): it builds the registry packages under',
+  'ui/packages/, then enumerates them from `inTree.modulesRoot` exactly as ui/apps/console/dev/manifest-dump.tsx',
+  'does: eager-import the 16 registry modules, ComponentRegistry.getPublicConfigs(), manifestFromConfigs from',
+  "@objectstack/sdui-parser. `inTree.registrySourcesSha256` digests those packages' src/ as the index holds them;",
+  '`scripts/check-sdui-manifest.mjs` recomputes it, so a registry source edit without regeneration goes RED there.',
+  '`inTree.objectuiWorkspaceVersion` is provenance, not a verdict (#25712). Pin-keyed fields, where present, say the',
+  'artefact is byte-identical to the one generated at that pin.',
+  'Regenerate + re-record: node scripts/gen-sdui-manifest-node.mjs',
+];
+
 /** Lines of `git status --porcelain` under `dirs` that the INDEX does not hold: unstaged edits and untracked files. */
 function unindexed(dirs) {
   const status = execFileSync('git', ['-C', ROOT, 'status', '--porcelain', '--untracked-files=all', '--', ...dirs], {
+    // #16644: `-C ROOT` alone names the repository — the gate's self-test runs
+    // this file inside a mkdtemp fixture, where an inherited GIT_DIR outranks it.
+    env: gitFreeEnv(),
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
     maxBuffer: 64 * 1024 * 1024,
@@ -337,7 +376,7 @@ const sha256 = createHash('sha256').update(json).digest('hex');
 // moment it is not. `undefined` keys are left out of the JSON.
 const carried = !pinned && record.sha256 === sha256 ? record : {};
 const nextRecord = {
-  '//': record['//'] ?? [],
+  '//': pinned ? record['//'] ?? [] : IN_TREE_NOTE,
   objectuiSha: pinned ? pin : carried.objectuiSha,
   source: SOURCE,
   modulesRoot: pinned ? MODULES_ROOT_REL : carried.modulesRoot,
