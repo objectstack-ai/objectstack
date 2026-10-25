@@ -198,7 +198,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - ③ 中继 `pr_create`/`pr_ready` 命中 Tier H 即向 `GOVERNED_APPROVERS` 中未请/派/审者请审。
 - 作者是审批人 ⇒ 指派它、请其余(请它必 422),否则请全员;速读只点非作者审批人去批。
 - 脱中继开的 PR 无 run 行:交速读前席位恒自读 `requested_reviewers`/`assignees`,⛔ 不只看 run 行。
-- 缺口经中继 `pr_request_reviewers` 补,⛔ 不碰 draft 位;ACCEPT 与轮报点名脱中继作者。
+- 缺口经中继 `pr_request_reviewers`/`assign` 补,⛔ 不碰 draft 位;ACCEPT 与轮报点名脱中继作者。
 - ④ 轮次报告单列 awaiting a human merge。
 - skills 车道自有 PR:纯代码面如 `scripts/pm/` 由本席按达档自审(清单不减)后落地。
 - 受管面两层:Tier S = `.claude/**` 全树,余皆 Tier H 等人批;S 经达档复核 PASS 后 ready → 入队。
