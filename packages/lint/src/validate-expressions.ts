@@ -109,6 +109,9 @@ import {
 // [#24798] A bulk action's `confirmText` is a `template` slot over the closed
 // scope the spec declares for it — judged below by the same template judge.
 import { bulkConfirmTemplateRoots } from '@objectstack/spec/ui';
+// [#24814] An action's copy — `confirmText`, `successMessage`, `errorMessage` —
+// is a `template` slot too, judged in its own module by the same judge.
+import { actionCopyTemplateIssues } from './validate-action-copy-templates.js';
 // [#15137] The `value`-role half. Same two published primitives the engine
 // composes at `registerFlow` (`AutomationEngine.valueEnvelopeRefusals`), in the
 // same order: the SHAPE rule lives in the spec's `FlowValueSlotSchema` (the
@@ -2005,6 +2008,11 @@ export interface StackExpressionOptions {
    * written view's `list` and `listViews` — every other pass reads a
    * collection a view write does not carry.
    *
+   * [#24814] An action's copy pass (`actionCopyTemplateIssues`, errors since
+   * #25680 but for the runner's transitional `${…}` reading) judges an object
+   * write's own `actions[]`; on a `page` write it is the ONLY pass, over the
+   * written page's action rows and inline actions.
+   *
    * The passes over the stack's OTHER collections — flows, the top-level
    * `actions`, sharing rules and hooks — read an empty list on an object
    * write. None of them is the object's own body, the object write's snapshot
@@ -2046,6 +2054,12 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // every other pass reads a collection a view write does not carry, so it
   // returns before them by construction rather than by snapshot shape.
   if (options.runtimeWriteType === 'view') return bulkConfirmTextIssues(stack, { views: true, objects: false });
+  // [#24814] On a `page` write exactly ONE pass judges too — the action copy
+  // pass over the written page's action rows and inline actions
+  // (`validate-action-copy-templates.ts`), whose findings are errors (#25680).
+  if (options.runtimeWriteType === 'page') {
+    return actionCopyTemplateIssues(stack, { actions: false, objects: false, pages: true });
+  }
   const objects = recordsOf(stack.objects);
   const fieldIndex = buildFieldIndex(objects);
   const attachedOnReadIndex = buildAttachedOnReadIndex(objects);
@@ -3467,6 +3481,11 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // `listViews` on every run (an object write included — they are the
   // object's own body), a view's list containers off an object write.
   issues.push(...bulkConfirmTextIssues(stack, { views: !objectWrite, objects: true }));
+  // [#24814] The action copy template slots: an object's own `actions[]` on
+  // every run (an object write included), the top-level `actions` and the
+  // pages' action rows off an object write. Errors since #25680, but for the
+  // runner's transitional `${…}` reading, which stays a warning.
+  issues.push(...actionCopyTemplateIssues(stack, { actions: !objectWrite, objects: true, pages: !objectWrite }));
 
   return issues;
 }

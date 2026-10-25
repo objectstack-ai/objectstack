@@ -391,7 +391,12 @@ export const CEILINGS = new Map([
   // line that binds every seat to the human floor; this branch, merged behind
   // it, lands at 319 − 1 = 318, so the ceiling is the landed count once more.
   // Headroom 0 (lowering is always legitimate).
-  ['.claude/skills/pm-dispatch/SKILL.md', 318],
+  // Raised 318 → 319 (#25663): maintainer ruling 6385407063, option A, verbatim
+  // 「同意 318→319」 (2026-10-24) — the claim template's `Premise:` line, the
+  // reading `dispatch-runbook.md` 派发前置 requires. Measured +1, ceiling +1;
+  // headroom 0. SKILL.md is not a CROSS_FILE_MOVES destination, so no
+  // `ruledRaises` record applies. Landed count, same convention.
+  ['.claude/skills/pm-dispatch/SKILL.md', 319],
   // Raised 223 → 244 by the triage reading-cost card (maintainer ruling
   // 2026-08-20, quoted in the raising PR): three mandated conventions land in
   // the runbook's triage sections. Landed count, headroom 0, same convention.

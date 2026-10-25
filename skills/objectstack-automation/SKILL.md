@@ -317,25 +317,19 @@ binding lives entirely in the flow's **`start` node `config`**.
 
 ### Prerequisite — declare the capabilities your nodes need
 
-Metadata registers without its token; the surface just never runs — two of them
-silently:
+Metadata registers without its `defineStack({ requires })` token; the surface
+just never runs. Two pairs are instead **refused** at `os validate` / `build` /
+`dev` / `serve` (422); neither token implies the other:
 
 | `requires` token | Turns on | Absent ⇒ |
 |:--|:--|:--|
 | `automation` | the flow engine + node executors | flows never execute |
-| `triggers` | `record-*` / schedule / `api` start bindings | flows register, never fire |
+| `triggers` + `automation` | `record-*` / schedule / `api` start bindings | auto-launched flow refused: `STACK_TRIGGER_CAPABILITY_REQUIRED` |
 | `job` | cron cadence + the `timeRelative` sweep | scheduled flows never launch |
 | `queue` | the inbound-webhook consumer | inbound POST answers **503** |
 | `approvals` | `approval` / `approval_revise` (`plugin-approvals`) | no executor for the node type |
 | `messaging` | `notify` delivery to inbox (`sys_inbox_message`) | **silent:** success with `skipped: true` |
-| `webhooks` | `defineStack({ webhooks })` outbound registrations | nothing delivered outbound |
-
-```typescript
-defineStack({
-  // …
-  requires: ['automation', 'triggers', 'job', 'queue', 'approvals', 'messaging'],
-});
-```
+| `webhooks` + `realtime` | `defineStack({ webhooks })` outbound dispatch | declared webhook refused: `STACK_WEBHOOK_CAPABILITY_REQUIRED` |
 
 ### Inbound webhook (`api`) triggers (ADR-0041 Tier 1)
 

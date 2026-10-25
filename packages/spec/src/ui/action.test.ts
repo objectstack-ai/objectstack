@@ -1208,7 +1208,8 @@ describe('ActionSchema - variant', () => {
       icon: 'trash',
     });
     expect(result.variant).toBe('danger');
-    expect(result.confirmText).toBe('Are you sure?');
+    // [#24814] `confirmText` is a `template` slot: the bare string parses to its envelope.
+    expect(result.confirmText).toEqual({ dialect: 'template', source: 'Are you sure?' });
   });
 });
 

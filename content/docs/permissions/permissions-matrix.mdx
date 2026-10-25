@@ -30,6 +30,12 @@ ObjectStack's `ObjectPermission` schema defines these boolean flags for object a
 <Callout type="tip">
 **Super-user bypass:** When `modifyAllRecords` is set it satisfies write checks (`allowEdit`/`allowDelete`, and the lifecycle bit `allowTransfer`) on any record; `viewAllRecords` (or `modifyAllRecords`) satisfies `allowRead` on any record — both bypass ownership and sharing. See `packages/plugins/plugin-security/src/permission-evaluator.ts`.
 
+**Modify All includes delete.** An entry that sets `modifyAllRecords: true` and
+omits `allowDelete` parses to `allowDelete: true`, and an explicit
+`allowDelete: false` beside it is refused at `objects.<object>.allowDelete`,
+because the evaluator would never read it. To let a set edit every record but
+delete none, use the [edit-share recipe](/docs/permissions/sharing-rules#recipe--edit-every-record-delete-none).
+
 **The one exception is `allowExport`.** Neither super-user bit confers it: a
 principal with View/Modify All Data may read every record and still be refused a
 bulk copy of them. Export is an opt-in grant that must be stated explicitly —

@@ -269,6 +269,12 @@ on(['object-master-detail-form'], ['details[].columns[].readonlyWhen.ast', 'deta
 // carries the same engine AST beside `source`.
 on(['object-grid', 'list-view'], ['conditionalFormatting[].condition.ast', 'bulkActionDefs[].visible.ast', 'bulkActionDefs[].confirmText.ast'], EXPRESSION_AST);
 on(['object-kanban'], ['conditionalFormatting[].condition.ast'], EXPRESSION_AST);
+// [#24814] An action row's `confirmText` / `successMessage` / `errorMessage`
+// is a `template` slot too, so each envelope carries the engine AST beside
+// `source` — on the two button rows and on each container member.
+const ACTION_COPY_AST = ['confirmText.ast', 'successMessage.ast', 'errorMessage.ast'];
+on(['action:button', 'action:icon'], ACTION_COPY_AST, EXPRESSION_AST);
+on(['action:group', 'action:menu'], ACTION_COPY_AST.map((path) => `actions[].${path}`), EXPRESSION_AST);
 // The S-forms stage: an inline form field (`customFields[]`, and a section's
 // inline entry) and the form view's `{ field }` entry carry the three `*When`
 // predicates, an option's `visibleWhen` and a grid column's two rules; a

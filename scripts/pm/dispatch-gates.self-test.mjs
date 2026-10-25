@@ -69,6 +69,7 @@ import {
   DURABILITY_SEAM_GATE,
   ESCAPABLE_LITERAL_LEDGER,
   GENERATED_MODULE_SOURCES,
+  GIT_MAX_BUFFER_BYTES,
   HARVEST_SNIPPET,
   INHERITED_POPULATION_MARKER,
   MANDATORY_TIER_GLOBS,
@@ -10907,6 +10908,46 @@ export function selfTest({ tier = 'full' } = {}) {
     absentPathVerdict({ asserted: null, identity: { root: ROOT, head: null, remote: null, slug: null }, paths: [ABSENT] })
       .lines.join('\n').includes('UNVERIFIABLE'),
   );
+
+  slow("a tracked-file listing past spawnSync's default 1 MiB stdout buffer — one temporary index", () => {
+  // ── The git stdout ceiling (objectstack#25712) ────────────────────────────
+  // `git ls-files -z` over this tree plus an imported `ui/` workspace is past
+  // node's default `maxBuffer`, and the child dies with ENOBUFS. The fixture is
+  // an index alone — `update-index --index-info` stages paths with no files on
+  // disk — sized past 1 MiB. The CONTROL spawns the same listing with the
+  // default buffer and must see ENOBUFS, so the pass below cannot be a fixture
+  // that never reached the size.
+  const bufTmp = mkdtempSync(nodePath.join(tmpdir(), 'dispatch-gates-maxbuffer-'));
+  try {
+    const init = spawnSync('git', ['init', '--initial-branch=main', '.'], { cwd: bufTmp, encoding: 'utf8' });
+    if (init.status !== 0) throw new Error(`fixture git init failed: ${init.stderr}`);
+    const EMPTY_BLOB = 'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391';
+    const paths = Array.from({ length: 16000 }, (_, i) =>
+      `ui/packages/fixture-${String(i).padStart(5, '0')}/src/a-long-enough-component-name-for-a-wide-listing.tsx`);
+    const staged = spawnSync('git', ['update-index', '--index-info'], {
+      cwd: bufTmp,
+      encoding: 'utf8',
+      input: paths.map((p) => `100644 ${EMPTY_BLOB} 0\t${p}`).join('\n') + '\n',
+    });
+    if (staged.status !== 0) throw new Error(`fixture git update-index failed: ${staged.stderr}`);
+    const listingBytes = paths.reduce((n, p) => n + Buffer.byteLength(p) + 1, 0);
+    t('the fixture listing is past the 1 MiB default buffer', listingBytes > 1024 * 1024, String(listingBytes));
+    const atDefault = spawnSync('git', ['ls-files', '-z'], { cwd: bufTmp, encoding: 'utf8' });
+    t('CONTROL: the same listing spawned with the default buffer dies with ENOBUFS', atDefault.error?.code === 'ENOBUFS', String(atDefault.error?.code ?? atDefault.status));
+    let listed = null;
+    let thrown = null;
+    try {
+      listed = trackedFiles({ cwd: bufTmp });
+    } catch (e) {
+      thrown = e.message;
+    }
+    t('trackedFiles reads the whole listing instead of refusing on ENOBUFS', thrown === null && listed?.length === paths.length, thrown);
+    t('the listing comes back byte-for-byte, first and last path included', listed?.[0] === paths[0] && listed?.at(-1) === paths.at(-1));
+    t('the ceiling stays finite and above this fixture', Number.isFinite(GIT_MAX_BUFFER_BYTES) && GIT_MAX_BUFFER_BYTES > listingBytes);
+  } finally {
+    rmSync(bufTmp, { recursive: true, force: true });
+  }
+  });
 
   slow("base drift — temporary repositories and spawned children", () => {
   // ── Base drift (#11540) ───────────────────────────────────────────────────

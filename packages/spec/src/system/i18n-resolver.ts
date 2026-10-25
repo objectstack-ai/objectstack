@@ -214,8 +214,14 @@ export interface ActionLike {
    * a resolver answers with ONE locale's string.
    */
   description?: string;
-  confirmText?: string;
-  successMessage?: string;
+  /**
+   * `template` slots (#24814): the bare string, or the parsed
+   * `{ dialect: 'template', source }` envelope a served action carries. A
+   * translation replaces either with the bundle's sentence, a string; with no
+   * translation the authored value is answered as it is.
+   */
+  confirmText?: string | { dialect: 'template'; source: string };
+  successMessage?: string | { dialect: 'template'; source: string };
   /**
    * `ActionSchema.outcomeMessages` — success copy per handler `outcome`,
    * narrowed to `string` values for the same reason `successMessage` is.
@@ -671,13 +677,15 @@ export function resolveActionLabel(
 
 /**
  * Resolve a translated confirmation prompt for an action, returning
- * `undefined` if neither the bundle nor the action defines one.
+ * `undefined` if neither the bundle nor the action defines one. With no
+ * translation the authored value is answered as written — on a parsed action
+ * the `template` envelope (#24814), which the console's runner reads.
  */
 export function resolveActionConfirm(
   bundle: TranslationBundle | undefined,
   action: ActionLike,
   opts?: ResolveOptions,
-): string | undefined {
+): ActionLike['confirmText'] {
   return lookupActionField(bundle, action, 'confirmText', opts) ?? action.confirmText;
 }
 
@@ -749,13 +757,14 @@ export function resolveActionResultDialog<T extends ResultDialogLike>(
 
 /**
  * Resolve a translated success message for an action, returning `undefined`
- * if neither the bundle nor the action defines one.
+ * if neither the bundle nor the action defines one. With no translation the
+ * authored value is answered as written, as {@link resolveActionConfirm} does.
  */
 export function resolveActionSuccess(
   bundle: TranslationBundle | undefined,
   action: ActionLike,
   opts?: ResolveOptions,
-): string | undefined {
+): ActionLike['successMessage'] {
   return (
     lookupActionField(bundle, action, 'successMessage', opts) ??
     action.successMessage
@@ -1491,6 +1500,11 @@ const METADATA_DOCUMENT_TRANSLATORS: Record<
   dataset: translateDataset,
   page: translatePage,
   picklist: translatePicklist,
+  // The security catalog's two display surfaces: the console's `position-ref`
+  // and `permission-ref` pickers list `GET /meta/position` and
+  // `GET /meta/permission`, so registering here is the whole wiring.
+  position: translatePosition,
+  permission: translatePermissionSet,
 };
 
 /**
@@ -2118,6 +2132,91 @@ export function translateDataset<T extends DatasetLike>(
     ...(dimensions !== doc.dimensions ? { dimensions } : {}),
     ...(measures !== doc.measures ? { measures } : {}),
   };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Security catalog resolvers (position / permission set: label + description)
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Minimal shape of a security-catalog document — a position or a permission set. */
+export interface SecurityCatalogItemLike {
+  name: string;
+  label?: string;
+  description?: string;
+  [key: string]: any;
+}
+
+/** The two bundle groups addressing a security-catalog document, by its own name. */
+type SecurityCatalogGroup = 'positions' | 'permissions';
+
+function lookupSecurityCatalogAttr(
+  bundle: TranslationBundle | undefined,
+  group: SecurityCatalogGroup,
+  name: string,
+  attr: 'label' | 'description',
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    const candidate = pickData(bundle, code)?.[group]?.[name]?.[attr];
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+function translateSecurityCatalogItem<T extends SecurityCatalogItemLike>(
+  group: SecurityCatalogGroup,
+  doc: T,
+  bundle: TranslationBundle | undefined,
+  opts?: ResolveOptions,
+): T {
+  if (!doc || typeof doc !== 'object') return doc;
+  const name = doc.name;
+  if (typeof name !== 'string' || name.length === 0 || !bundle) return doc;
+  const label = lookupSecurityCatalogAttr(bundle, group, name, 'label', opts);
+  const description = lookupSecurityCatalogAttr(bundle, group, name, 'description', opts);
+  if (label === undefined && description === undefined) return doc;
+  return {
+    ...doc,
+    ...(label !== undefined ? { label } : {}),
+    ...(description !== undefined ? { description } : {}),
+  };
+}
+
+/**
+ * Apply the active locale to a position metadata document — its `label` and
+ * `description` against `positions.<name>.label` / `.description`. The input
+ * document is not mutated, and it comes back as the same reference when the
+ * bundle carries neither key.
+ *
+ * A position is what an admin assigns a person to and what an approval step
+ * waits on, so it is read next to object, app and flow labels the same bundle
+ * translates. Registered in {@link METADATA_DOCUMENT_TRANSLATORS}, so the REST
+ * boundary localizes every served position (`GET /meta/position`, the list the
+ * console's `position-ref` picker draws) with nothing else to remember.
+ */
+export function translatePosition<T extends SecurityCatalogItemLike>(
+  doc: T,
+  bundle: TranslationBundle | undefined,
+  opts?: ResolveOptions,
+): T {
+  return translateSecurityCatalogItem('positions', doc, bundle, opts);
+}
+
+/**
+ * Apply the active locale to a permission-set metadata document — its `label`
+ * and `description` against `permissions.<name>.label` / `.description` (the
+ * group is spelled as the stack spells the collection). Same posture as
+ * {@link translatePosition}: no mutation, the same reference when nothing
+ * matched, and registered so `GET /meta/permission` (the `permission-ref`
+ * picker's list) is localized at the REST boundary.
+ */
+export function translatePermissionSet<T extends SecurityCatalogItemLike>(
+  doc: T,
+  bundle: TranslationBundle | undefined,
+  opts?: ResolveOptions,
+): T {
+  return translateSecurityCatalogItem('permissions', doc, bundle, opts);
 }
 
 // ────────────────────────────────────────────────────────────────────────────

@@ -608,10 +608,11 @@ function policyGate(
 // `runAs: 'system'` reads the anonymous endpoints that target it.
 //
 // ⛔ Not a mirror of a runtime refusal, unlike the gates above. The endpoint
-// executor's `refusesElevatedSelfTriggeredStart` refuses a non-system caller
-// only for a SELF-TRIGGERED `system` flow (`autolaunched`, `record_change`,
-// `schedule`); a `system` flow of type `api` or `screen` behind an anonymous
-// endpoint executes, elevated. The record places D2b at publish, and this is
+// executor's `flowStartRefusal` refuses a non-system caller
+// for a SELF-TRIGGERED `system` flow (`autolaunched`, `record_change`,
+// `schedule`) and for a flow whose `requiredPermissions` it does not hold; a
+// `system` flow of type `api` or `screen` declaring none, behind an anonymous
+// endpoint, executes, elevated. The record places D2b at publish, and this is
 // that refusal.
 //
 // The prescription is the record's, scenario by scenario: an authenticated

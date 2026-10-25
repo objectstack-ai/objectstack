@@ -86,7 +86,7 @@ one installed. Three sources, in order of authority:
 
 1. **`manifest.engines.protocol`** in the stack config — the declared answer,
    checked by the boot handshake. It is a **range**, not a version: every
-   scaffold and example writes the caret form (`engines: { protocol: '^17' }`),
+   scaffold and example writes the caret form (`engines: { protocol: '^18' }`),
    and an exact `'16.0.0'` is only a range of one. Take the major it *targets* —
    the floor: `'^17'` → `--from 17`, `'>=15 <18'` → `--from 15`, never the
    upper bound.

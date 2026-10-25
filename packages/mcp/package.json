@@ -31,7 +31,7 @@
     "@objectstack/formula": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
-    "zod": "^4.6.5"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@objectstack/lint": "workspace:*",

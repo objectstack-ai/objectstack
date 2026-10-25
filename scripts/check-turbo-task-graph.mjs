@@ -159,7 +159,8 @@
  * this gate read nothing -- never that it found nothing.
  */
 
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -223,6 +224,36 @@ export const DECLARED_WATCH_HINTS = [
   'apps/*/package.json',
   'examples/*/package.json',
 ];
+
+/**
+ * Generic keys that are declared AHEAD of the packages that hold them: the
+ * objectui tree is imported under `ui/` (objectstack#25677), and its packages
+ * spell these task names, which no package of this workspace declares. The
+ * root turbo.json carries their definitions from the wiring PR onwards so the
+ * CI jobs for `ui/` are written once and run on the import commit.
+ *
+ * This is a hold, not an exemption from the rule above, and it has three limits:
+ *
+ *   - it applies ONLY while `UI_IMPORT_MARKER` is absent from the checkout. Once
+ *     `ui/package.json` exists the hold is void and every key below is judged
+ *     like any other generic key, so a key the imported tree does not hold reds
+ *     on the import commit itself;
+ *   - no root script wraps any of these keys, so the shape this limb was written
+ *     for (`pnpm <task>` exiting 0 over nothing, #12373) is not reachable here.
+ *     The only callers are the `ui/` jobs in ci.yml, which skip while the tree
+ *     is absent;
+ *   - a listed key that turbo.json does not carry is itself a finding, so the
+ *     list cannot outlive the entries it holds.
+ *
+ * Retire the whole map, and `UI_IMPORT_MARKER` with it, once the import has
+ * landed: from then on the hold can never apply.
+ */
+export const UI_IMPORT_MARKER = 'ui/package.json';
+export const GENERIC_TASKS_AWAITING_UI_IMPORT = Object.freeze({
+  'type-check': "objectui's per-package tsc script (`type-check`, hyphenated); run by the Type Check UI job",
+  lint: "objectui's per-package eslint script; run by the Lint UI job",
+  'test:dist': "objectui's built-dist suite of @object-ui/components (dependsOn build)",
+});
 
 /** The file this gate judges, as the reader spells it on disk. */
 const TURBO_CONFIG_FILE = 'turbo.json';
@@ -347,17 +378,32 @@ export function holdersOf(task, scriptsByPackage) {
  * @param {Record<string, unknown>} tasks turbo.json's `tasks` table
  * @param {Map<string, Set<string>>} scriptsByPackage package name -> script names
  * @param {Set<string>} rootScripts the ROOT manifest's script names, for `//#<task>`
- * @returns {{ problems: string[], judged: number, genericJudged: number, rootJudged: number }}
+ * @param {Set<string>} [held] generic keys under the `GENERIC_TASKS_AWAITING_UI_IMPORT`
+ *   hold for THIS checkout -- empty once the import marker exists (see `heldGenericTasks`)
+ * @returns {{ problems: string[], judged: number, genericJudged: number, rootJudged: number, heldJudged: number }}
  */
-export function verdict(tasks, scriptsByPackage, rootScripts) {
+export function verdict(tasks, scriptsByPackage, rootScripts, held = new Set()) {
   const problems = [];
   let judged = 0;
   let genericJudged = 0;
   let rootJudged = 0;
+  let heldJudged = 0;
+  for (const key of held) {
+    if (!Object.hasOwn(tasks, key)) {
+      problems.push(
+        `"${key}" is held as awaiting the ui/ import, but ${TURBO_CONFIG_FILE} declares no such key.\n` +
+          `    Delete it from GENERIC_TASKS_AWAITING_UI_IMPORT: a hold over nothing is a leftover.`,
+      );
+    }
+  }
   for (const key of Object.keys(tasks)) {
     const split = splitTaskKey(key);
     if (!split) {
       genericJudged += 1;
+      if (holdersOf(key, scriptsByPackage).length === 0 && held.has(key)) {
+        heldJudged += 1;
+        continue;
+      }
       if (holdersOf(key, scriptsByPackage).length === 0) {
         const declaredAnywhere = new Set();
         for (const scripts of scriptsByPackage.values()) for (const name of scripts) declaredAnywhere.add(name);
@@ -434,7 +480,20 @@ export function verdict(tasks, scriptsByPackage, rootScripts) {
       );
     }
   }
-  return { problems, judged, genericJudged, rootJudged };
+  return { problems, judged, genericJudged, rootJudged, heldJudged };
+}
+
+/**
+ * The generic keys the ui/ import hold covers on the checkout at `root`: every
+ * key of `GENERIC_TASKS_AWAITING_UI_IMPORT` while `UI_IMPORT_MARKER` is absent,
+ * and none at all once it exists.
+ *
+ * @param {string} root
+ * @returns {Set<string>}
+ */
+export function heldGenericTasks(root) {
+  if (existsSync(join(root, UI_IMPORT_MARKER))) return new Set();
+  return new Set(Object.keys(GENERIC_TASKS_AWAITING_UI_IMPORT));
 }
 
 /**
@@ -563,7 +622,13 @@ function main() {
     throw err;
   }
 
-  const { problems, judged, genericJudged, rootJudged } = verdict(tasks, scriptsByPackage, rootScripts);
+  const held = heldGenericTasks(ROOT);
+  const { problems, judged, genericJudged, rootJudged, heldJudged } = verdict(
+    tasks,
+    scriptsByPackage,
+    rootScripts,
+    held,
+  );
 
   if (genericJudged === 0) {
     console.error(
@@ -615,7 +680,12 @@ function main() {
         : '') +
       ` — every package-scoped one names a package that exists (or the root token ` +
       `"${ROOT_PACKAGE_TOKEN}") and a script it declares, and every generic one is declared by at ` +
-      `least one member.`,
+      `least one member` +
+      (heldJudged
+        ? `, except ${heldJudged} held for the ui/ import while ${UI_IMPORT_MARKER} is absent ` +
+          `(${[...held].sort().join(', ')})`
+        : '') +
+      `.`,
   );
 }
 
@@ -659,7 +729,7 @@ function main() {
 // not red. A battery BELOW its floor means cases stopped running; the remedy is
 // to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'check-turbo-task-graph self-test': 49,
+  'check-turbo-task-graph self-test': 56,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -868,6 +938,36 @@ export function selfTest() {
   const notRoot = verdict({ '///#build': {} }, workspace, rootScripts);
   t('a near-miss of the root token is still an unknown package', notRoot.problems.length === 1);
   t('a near-miss of the root token is not in the root population', notRoot.rootJudged === 0);
+
+  // ── The ui/ import hold, both directions ──
+  // Held: a generic key nobody declares is NOT a finding while it is held.
+  const heldGeneric = verdict({ 'type-check': {} }, workspace, rootScripts, new Set(['type-check']));
+  t('a generic key held for the ui/ import is not a finding', heldGeneric.problems.length === 0);
+  t('a held generic key is counted in the held population', heldGeneric.heldJudged === 1);
+  t('a held generic key is still counted in the generic population', heldGeneric.genericJudged === 1);
+  // Not held (the marker exists, so the hold set is empty): the same key reds.
+  const unheldGeneric = verdict({ 'type-check': {} }, workspace, rootScripts, new Set());
+  t('the same key without the hold is a finding again', unheldGeneric.problems.length === 1);
+  // The hold names keys, not a shape: an unlisted inert key beside a held one still reds.
+  const heldBeside = verdict({ 'type-check': {}, 'test:e2e': {} }, workspace, rootScripts, new Set(['type-check']));
+  t('an inert key the hold does not list still reds beside a held one', heldBeside.problems.length === 1
+    && heldBeside.problems[0]?.includes('"test:e2e"'));
+  // A hold over a key turbo.json does not carry is a leftover.
+  const heldNothing = verdict({ build: {} }, workspace, rootScripts, new Set(['type-check']));
+  t('a held key turbo.json does not declare is a finding', heldNothing.problems.length === 1
+    && heldNothing.problems[0]?.includes('a hold over nothing'));
+  // The marker decides: an existing marker empties the hold, an absent one fills it.
+  t('the hold is void on a checkout carrying the import marker', (() => {
+    const dir = mkdtempSync(join(tmpdir(), 'turbo-task-graph-ui-hold-'));
+    try {
+      const without = heldGenericTasks(dir).size;
+      mkdirSync(join(dir, 'ui'));
+      writeFileSync(join(dir, UI_IMPORT_MARKER), '{}');
+      return without === Object.keys(GENERIC_TASKS_AWAITING_UI_IMPORT).length && heldGenericTasks(dir).size === 0;
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  })());
 
   // ── Direction 2: the rule must stay GREEN on every legitimate shape ──
   // `gen:schema` stands where `test:e2e` used to: a generic key held by exactly

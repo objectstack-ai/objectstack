@@ -99,6 +99,14 @@ function newDbFile(): string {
 const rowsOfRaw = (r: unknown): Array<Record<string, unknown>> =>
   Array.isArray(r) ? r : ((r as { rows?: Array<Record<string, unknown>> })?.rows ?? []);
 
+/**
+ * Rows per seeding statement. knex compiles a multi-row SQLite insert as one
+ * `select … union all select …`, so a chunk is bounded by SQLite's
+ * compound-select limit (500 terms) and its bound-variable limit; 200 rows of
+ * five columns clear both.
+ */
+const SEED_CHUNK_ROWS = 200;
+
 /** Build the legacy `sys_account` on `file`, independently of the code under test. */
 async function arrangeAccountTable(
   file: string,
@@ -118,10 +126,14 @@ async function arrangeAccountTable(
     }
     expect(dropped, 'fixture: the declared (provider_id, account_id) unique was built, then removed').toBe(1);
     if (issuerColumn) await knex.raw(`ALTER TABLE ${SYS_ACCOUNT_OBJECT} ADD COLUMN issuer TEXT`);
-    for (const row of rows) {
-      const { issuer, ...rest } = row;
-      await knex(SYS_ACCOUNT_OBJECT).insert(issuerColumn ? { ...rest, issuer } : rest);
-    }
+    // One transaction, in multi-row chunks. Inserted one at a time, each row is
+    // its own autocommit on this file, and its own fsync: the 1,200-row case
+    // spent its budget there under the full battery's load.
+    await knex.batchInsert(
+      SYS_ACCOUNT_OBJECT,
+      rows.map(({ issuer, ...rest }) => (issuerColumn ? { ...rest, issuer } : rest)),
+      SEED_CHUNK_ROWS,
+    );
     const columns = rowsOfRaw(await knex.raw(`PRAGMA table_info('${SYS_ACCOUNT_OBJECT}')`)).map((c) => c.name);
     expect(columns.includes('issuer'), 'fixture: the issuer column is as the case asks').toBe(issuerColumn);
   } finally {

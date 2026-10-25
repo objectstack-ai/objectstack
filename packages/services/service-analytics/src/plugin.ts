@@ -17,6 +17,7 @@ import {
   assertReadScopePlaceholdersResolvable,
 } from './read-scope-sql.js';
 import { readScopeUnresolvedError } from './read-scope-refusal.js';
+import { readAdmissionUnresolvedError } from './read-admission.js';
 // [#16206] The narrowing from a driver's FOUR-name `dialectName` to the THREE
 // this package's config hook declares — see the bridge below.
 import { asAcceptedSqlDialect, type AcceptedSqlDialect } from './text-match-sql.js';
@@ -611,7 +612,7 @@ export class AnalyticsServicePlugin implements Plugin {
           // `getService` answers by throwing. A failed security lookup is a
           // refusal everywhere else in this stack, including the object-level
           // bridge below, which used to be spelled exactly like this one and
-          // now denies.
+          // now refuses (`503 SERVICE_UNAVAILABLE`).
           return {
             kind: 'unusable',
             why:
@@ -653,8 +654,8 @@ export class AnalyticsServicePlugin implements Plugin {
           ctx.logger.error(
             `[Analytics] row-level read scope could not be resolved for "${object}" — ` +
             `refusing the query (fail-closed): ${resolved.why}. ` +
-            'A security service is wired on this deployment, so analytics must not fall ' +
-            'open and serve rows with no row-level policy applied.',
+            'Analytics does not fall open and serve rows with no row-level policy applied ' +
+            'when the "security" service is missing or cannot be used.',
           );
           // [commit 54b3d1d4a] Declared, not bare. `resolveReadScopes` replaces this
           // error with its own on the dataset path, but this provider is read
@@ -712,15 +713,20 @@ export class AnalyticsServicePlugin implements Plugin {
     //              wired-but-broken provider `/data`'s middleware does NOT fall
     //              open either, so admitting here would reopen the exact
     //              divergence between the two doors that this gate closes, and
-    //              silently. It DENIES, fail-closed, and says why at `error`,
-    //              naming the object.
+    //              silently. It REFUSES, fail-closed, and says why at `error`,
+    //              naming the object. It reached no verdict, so it THROWS and
+    //              the gate answers `503 SERVICE_UNAVAILABLE`, not the 403 of
+    //              a denial (#25561).
     //   USABLE   — ask it (below).
     //
     // [#22235] The declaration (the maintainer's ruling): a deployment that
     // registers no security service is REFUSED at this door, fail-closed — the
-    // in-repo kernels throw on the miss, so it lands in UNUSABLE. `/data`
-    // carries no object-level gate on such a deployment, so the two doors do
-    // NOT agree there: a loud deny is preferred over a silent admit. A
+    // in-repo kernels throw on the miss, so it lands in UNUSABLE. [#25561] The
+    // refusal answers `503 SERVICE_UNAVAILABLE` (the service is "not loaded"),
+    // the same as a registered service that is broken: the code moved from
+    // 403, the fail-closed refusal did not. `/data` carries no object-level
+    // gate on such a deployment, so the two doors do NOT agree there: a loud
+    // refusal is preferred over a silent admit. A
     // composition that wants analytics to answer registers a security service,
     // or its host supplies its own `admitObjectRead`.
     // `admission-bridge-resolution.test.ts` pins it on both in-repo kernels.
@@ -818,10 +824,14 @@ export class AnalyticsServicePlugin implements Plugin {
           ctx.logger.error(
             `[Analytics] object-level read admission could not be resolved for "${object}" — ` +
             `denying the query (fail-closed): ${resolved.why}. ` +
-            'A security service is wired on this deployment, so analytics must not fall open: ' +
-            'GET /data/' + object + ' does not.',
+            'The "security" service is missing or cannot be used, so no verdict was reached; ' +
+            'analytics refuses rather than fall open.',
           );
-          return false;
+          // [#25561] A refusal that reached no verdict does not answer as
+          // one: THROW, so the gate answers `503 SERVICE_UNAVAILABLE`, never
+          // the `403 PERMISSION_DENIED` a real denial gets. Declared, not bare,
+          // for the reason the row-scope bridge above gives.
+          throw readAdmissionUnresolvedError(object);
         }
         const svc = resolved.svc;
         if (typeof svc.canReadObject === 'function') {

@@ -465,7 +465,7 @@
         "on-demand chain: POST /api/v1/automation/<name>/trigger for showcase_batch_reminders {params:{tasks:[…]}} (loop), showcase_inquiry_purge (get_record+decision+delete_record — seed at least one closed showcase_inquiry first), showcase_release_signoff {params:{items:[…]}} (map)",
         "browser chain: run the Tasks row action showcase_bulk_reassign → showcase_reassign_wizard (screen + update_record)",
         "approval chain: PATCH a showcase_expense_report to submitted (approval via showcase_expense_signoff); PATCH a showcase_project budget above 100000 to open showcase_budget_approval, then POST /api/v1/approvals/requests/:id/revise so the run parks at the approval_revise node",
-        "webhook chain: POST /api/v1/automation/hooks/showcase_inbound_task_webhook/intake with a valid x-objectstack-signature HMAC (secret 'showcase-webhook-secret') to exercise create_record",
+        "webhook chain: POST /api/v1/automation/hooks/showcase_inbound_task_webhook/intake with a valid x-objectstack-signature HMAC to exercise create_record — the flow names its secret (config.secretRef: 'SHOWCASE_WEBHOOK_SECRET'), so boot with that environment variable set to a value of your choosing and sign with it; unset, the hook answers 503",
         "for EACH variant: GET the owning flow's runs (GET /api/v1/automation/<name>/runs + /runs/:runId) and locate a step whose nodeType equals the variant; record run id, step status, and — for suspending types — the paused-then-resumed transition",
         "screenshot the Runs panel of one composite run (showcase_project_escalation or showcase_fan_out_notify) showing the container-nested steps",
         "unknown-type probe (the late-binding contract, ruled status quo in #7545): POST /api/v1/automation a flow whose one non-start node carries type 'bogus_node' — capture the HTTP status and the server log record the registration emits, then POST /api/v1/automation/<that flow>/trigger and read GET /api/v1/automation/<that flow>/runs/:runId"
@@ -617,10 +617,10 @@
         "time_relative"
       ],
       "steps": [
-        "boot the showcase on its own port and DB (dogfood §0) with OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1 and OS_PORT exported (fixtures.requires — without the first, the schedule and time_relative variants can never fire); sign in as the dev admin",
+        "boot the showcase on its own port and DB (dogfood §0) with OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1, OS_PORT and SHOWCASE_WEBHOOK_SECRET (any value; the api flow's config.secretRef names it) exported (fixtures.requires — without the first, the schedule and time_relative variants can never fire; without the last, the api hook answers 503); sign in as the dev admin",
         "record_change (create leg): POST /api/v1/data/showcase_task with priority='urgent' — showcase_urgent_task_alert fires via record-after-write with previous == null (#3427)",
         "record_change (update leg): POST a normal-priority task, then PATCH priority→'urgent'; also move a task to done — create it with status 'in_review' and its required project (task_status_flow allows done only from in_review, and a create is not transition-checked), then PATCH status→'done' — and confirm a further save WITHOUT a transition fires nothing",
-        "api: POST /api/v1/automation/hooks/showcase_inbound_task_webhook/intake with JSON {title, assignee, project} and header x-objectstack-signature: t=<unix seconds>,v1=<HMAC-SHA256 of '<t>.<raw body>', key 'showcase-webhook-secret'> — signHttpBodyAt(rawBody, 'showcase-webhook-secret', Math.floor(Date.now() / 1000)) from @objectstack/core writes it, and the door refuses a t more than 300 s from the server clock — expect a 202 ACK; then find the created showcase_task",
+        "api: POST /api/v1/automation/hooks/showcase_inbound_task_webhook/intake with JSON {title, assignee, project} and header x-objectstack-signature: t=<unix seconds>,v1=<HMAC-SHA256 of '<t>.<raw body>', key = the value the boot exported as SHOWCASE_WEBHOOK_SECRET, which the flow's config.secretRef names> — signHttpBodyAt(rawBody, process.env.SHOWCASE_WEBHOOK_SECRET, Math.floor(Date.now() / 1000)) from @objectstack/core writes it, and the door refuses a t more than 300 s from the server clock — expect a 202 ACK; then find the created showcase_task",
         "schedule: wait up to ~60s for showcase_scheduled_digest (interval 60000ms) to tick; wait a second interval for a second tick",
         "screen: from /apps/showcase_app/showcase_task run the row action showcase_bulk_reassign, fill the dialog, submit",
         "autolaunched: POST /api/v1/automation/showcase_batch_reminders/trigger {params:{tasks:[…]}}",
@@ -2333,7 +2333,7 @@
         "ref": "packages/services/service-automation/src/flow-cel-current-user.test.ts + packages/services/service-automation/src/flow-cel-record-binding.test.ts + packages/runtime/src/action-flow-elevated-door.test.ts + packages/runtime/src/endpoint-flow-elevated-door.test.ts + packages/services/service-automation/src/builtin/decision-overlapping-edge-conditions.pin.test.ts"
       },
       "source": [
-        "packages/runtime/src/flow-start-admission.ts#refusesElevatedSelfTriggeredStart",
+        "packages/runtime/src/flow-start-admission.ts#flowStartRefusal",
         "packages/services/service-automation/src/engine.ts",
         "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22310-elevated-flow-trigger-door, 22407-flow-door-elevated-start, 19939-flow-value-slot-run-user-refused"
       ],

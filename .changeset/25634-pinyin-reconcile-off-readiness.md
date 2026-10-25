@@ -4,7 +4,7 @@
 
 fix(plugin-pinyin-search): the boot companion pass no longer holds readiness, and an unchanged restart reads no rows
 
-Clause-②: no
+Clause-②: yes
 Metadata-protocol: none
 
 Before this change, `PinyinSearchPlugin` awaited a full walk of every row of every object that carries the `__search` companion inside `kernel:bootstrapped`. The kernel awaits that hook before `kernel:listening`, so the HTTP server opened only after the largest such table had been read. Every restart paid the same walk again, even when nothing had changed. In production, 6.7 M `sys_inbox_message` rows took about 4 min 50 s.

@@ -20,20 +20,23 @@
  *   - the service resolved but exposes NEITHER `canReadObject` NOR `explain`
  *     (UNUSABLE) — it exists and cannot answer.
  *
- * Both UNUSABLE corners DENY, fail-closed, before anything is read, and both say
- * why at `error`. For a wired-but-broken provider, `/data`'s middleware does not
- * fall open either, so admitting here would reopen exactly the divergence
- * between the two doors that this gate closes — and would do it silently.
+ * Both UNUSABLE corners REFUSE, fail-closed, before anything is read, and both
+ * say why at `error`. They reached no verdict, so the refusal answers
+ * `503 SERVICE_UNAVAILABLE`, not a denial's `403 PERMISSION_DENIED` (#25561).
+ * For a wired-but-broken provider, `/data`'s middleware does not fall open
+ * either, so admitting here would reopen exactly the divergence between the
+ * two doors that this gate closes — and would do it silently.
  *
- * ## The declaration: no security service registered ⇒ analytics DENIES
+ * ## The declaration: no security service registered ⇒ analytics REFUSES
  *
  * [#22235] A deployment that registers no security service gets its analytics
  * read queries REFUSED, fail-closed: the kernel's lookup throws, the bridge
- * takes UNUSABLE, the caller gets `PERMISSION_DENIED` / 403 naming the object,
- * and the operator gets an `error` line naming the object and the failed
- * lookup. That is the declared answer, not an accident of how the lookup fails,
- * and it holds even though `/data` carries no object-level gate on such a
- * deployment: a loud deny is preferred over a silent admit. A composition that
+ * takes UNUSABLE, the caller gets `SERVICE_UNAVAILABLE` / 503 naming the object
+ * (#25561: the code moved from 403, the refusal did not), and the operator
+ * gets an `error` line naming the object and the failed lookup. That is the
+ * declared answer, not an accident of how the lookup fails, and it holds even
+ * though `/data` carries no object-level gate on such a deployment: a loud
+ * refusal is preferred over a silent admit. A composition that
  * wants analytics to answer registers a security service, or its host supplies
  * its own `admitObjectRead`. The last block of this file pins it on both
  * in-repo kernels.
@@ -151,13 +154,15 @@ const runProbe = (service: AnalyticsService) =>
 describe('analytics admission bridge — resolving the "security" service', () => {
   // ── The two corners that used to admit silently ────────────────────────────
 
-  it('DENIES when resolving the "security" service THROWS', async () => {
+  it('REFUSES 503 when resolving the "security" service THROWS', async () => {
     const boom = () => { throw new Error('security service is initialising'); };
     const { service, reads, error } = await bootAnalytics(boom);
 
+    // [#25561] No verdict was reached, so the refusal is a fault, not a denial.
     await expect(runProbe(service)).rejects.toMatchObject({
-      code: 'PERMISSION_DENIED',
-      status: 403,
+      code: 'SERVICE_UNAVAILABLE',
+      status: 503,
+      object: 'employer_member',
     });
     // The refusal has to happen BEFORE the statement runs, or it is not a gate.
     expect(reads).toEqual([]);
@@ -168,15 +173,16 @@ describe('analytics admission bridge — resolving the "security" service', () =
     );
   });
 
-  it('DENIES when the "security" service exposes neither canReadObject nor explain', async () => {
+  it('REFUSES 503 when the "security" service exposes neither canReadObject nor explain', async () => {
     // A registered object that is not the contract it claims to be —
     // `explain` is NON-optional on `ISecurityService`, so a conforming
     // provider never lands here.
     const { service, reads, error } = await bootAnalytics(() => ({ getReadFilter: () => undefined }));
 
     await expect(runProbe(service)).rejects.toMatchObject({
-      code: 'PERMISSION_DENIED',
-      status: 403,
+      code: 'SERVICE_UNAVAILABLE',
+      status: 503,
+      object: 'employer_member',
     });
     expect(reads).toEqual([]);
     expect(error.mock.calls.map((c) => String(c[0])).join('\n')).toMatch(
@@ -189,8 +195,8 @@ describe('analytics admission bridge — resolving the "security" service', () =
   it('ADMITS when the context answers the "security" lookup with nothing (ABSENT)', async () => {
     // The ABSENT branch: this double answers the lookup with nothing, which no
     // in-repo kernel does — they throw on a miss (the last block of this file).
-    // Kept as the negative control for the two deny cases above; whether this
-    // branch should deny too is a separate question, not settled here.
+    // Kept as the negative control for the two refusal cases above; whether
+    // this branch should refuse too is a separate question, not settled here.
     const { service, reads } = await bootAnalytics(undefined);
 
     const result = await runProbe(service);
@@ -198,7 +204,7 @@ describe('analytics admission bridge — resolving the "security" service', () =
     expect(reads).toHaveLength(1);
   });
 
-  // ── The two working spellings, so the deny cases cannot pass by refusing all ─
+  // ── The two working spellings, so the refusals cannot pass by refusing all ──
 
   it('asks canReadObject when the service has it, and serves an ADMITTED caller', async () => {
     const canReadObject = vi.fn(() => true);
@@ -238,7 +244,7 @@ describe('analytics admission bridge — resolving the "security" service', () =
   });
 });
 
-// ── The declaration, on the in-repo kernels: no security service ⇒ DENY ──────
+// ── The declaration, on the in-repo kernels: no security service ⇒ REFUSE ────
 
 /**
  * Boots a REAL kernel with a `data` provider and this plugin, and NO security
@@ -271,17 +277,19 @@ describe.each([
   ['ObjectKernel', () => new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false })],
   ['LiteKernel', () => new LiteKernel({ logger: { level: 'silent' } })],
 ] as const)('analytics admission bridge — a real %s that never registers a "security" service', (_name, makeKernel) => {
-  it('DENIES the dataset query fail-closed, before any read, with an error located on the object and the lookup', async () => {
+  it('REFUSES the dataset query 503, fail-closed, before any read, with an error located on the object and the lookup', async () => {
     const { kernel, service, reads, errors, warns } = await bootKernelWithoutSecurity(makeKernel());
 
     // The mechanism the declaration rests on: this kernel answers a lookup for
     // a never-registered name by THROWING, never with nothing.
     expect(() => kernel.getService('security')).toThrow(/'security'/);
 
-    // The caller's refusal: the declared envelope, naming the object.
+    // The caller's refusal: the declared envelope, naming the object. [#25561]
+    // A service that is "not loaded" is the spec's SERVICE_UNAVAILABLE, the
+    // same answer a registered-but-broken one gets.
     await expect(runProbe(service)).rejects.toMatchObject({
-      code: 'PERMISSION_DENIED',
-      status: 403,
+      code: 'SERVICE_UNAVAILABLE',
+      status: 503,
       object: 'employer_member',
     });
     // Refused BEFORE the statement ran.

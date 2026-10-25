@@ -10,7 +10,23 @@ packages:
   - packages/connectors/*
   - apps/*
   - examples/*
+  # The objectui tree, once it is imported under ui/ (objectstack#25677). Until
+  # then these globs match no directory and pnpm resolves exactly the workspace
+  # above: the lockfile, `pnpm install` and `pnpm -r ls` are unchanged. `ui`
+  # itself is a member because objectui's root package.json carries the scripts
+  # its CI runs (`lint:root`, `type-check:e2e`, the `check:*` gates). objectui's
+  # own `docs` workspace entry is not carried: it names no package.
+  # objectui's pnpm overrides and its patchedDependencies entry arrive with the
+  # import, not here: an unused patch fails `pnpm install` and an override
+  # rewrites this lockfile.
+  - ui
+  - ui/packages/*
+  - ui/apps/*
+  - ui/examples/*
 
+# objectui declares no onlyBuiltDependencies of its own (neither in its
+# pnpm-workspace.yaml nor in its package.json `pnpm` field), so the union of
+# the two allowlists is this list unchanged.
 onlyBuiltDependencies:
   - better-sqlite3
   - esbuild
@@ -220,8 +236,8 @@ overrides:
   'minimatch@<11.0.0': '^10.2.3'
   'tar@>=2.0.0 <8.0.0': '^7.5.11'
   'form-data@<5.0.0': '>=4.0.6'
-  'undici@>=7.23.0 <8.0.0': '^7.29.1'
-  'undici@>=8.1.0 <9.0.0': '^8.10.2'
+  'undici@>=7.23.0 <8.0.0': '^7.30.1'
+  'undici@>=8.1.0 <9.0.0': '^8.12.2'
   # better-auth family — kept on one line (see @better-auth/oauth-provider note).
   # Off the 1.7.0-rc.2 prerelease and onto the stable line (#3002). Bounds sit
   # at the MAJOR boundary, so a future advisory lift moves only the TARGET.
@@ -394,7 +410,7 @@ overrides:
   #     The declared ranges go to ^4.13.5 in lockstep for the downstream-install
   #     reason above; the @objectstack/hono PEER range stays ^4.12.8, unchanged,
   #     for the reason above it.
-  'fast-uri@<4.0.0': '^3.1.8'
+  'fast-uri@<4.0.0': '^3.1.9'
   'hono@<5.0.0': '^4.13.5'
   # OSV 2026-08-07 (#6407) — transitive-only, and the same "it has a fix, so
   # take the fix" disposition as the batch above:
@@ -422,7 +438,7 @@ overrides:
   #     ^3.3.3 admits 3.4.16, so this is again a dedupe onto the patched line.
   #     The floor binds this workspace's resolution only; overrides do not
   #     reach downstream installs.
-  'dompurify@<4.0.0': '^3.4.16'
+  'dompurify@<4.0.0': '^3.4.17'
   # OSV 2026-08-08 (#6529) — same "it names a fixed version, so take the fix"
   # disposition as the two batches above; no exemption is involved.
   #   nanoid GHSA-2v37-7h3g-55p8 / CVE-2026-67213 (8.2 high) — a custom
@@ -556,7 +572,7 @@ overrides:
   #     onto the patched line. No 6.x copy resolves anywhere, so no 6.x pin is
   #     written. Transitive-only and dev-only: nothing publishable declares
   #     undici, and both paths reach the tree through devDependencies.
-  'ip-address@<11.0.0': '^10.5.1'
+  'ip-address@<11.0.0': '^10.7.4'
   # OSV 2026-10-06 (#21945, scheduled scan run 37407261685) — one advisory that
   # names a fixed version, so this is the "take the fix" path osv-scanner.toml's
   # header prescribes and NOT an exemption.
@@ -620,3 +636,46 @@ overrides:
   #     at the 2.0.0 major boundary per this block's header rule, never
   #     `<1.11.0`.
   'shell-quote@>=1.8.4 <2.0.0': '^1.11.0'
+  # pnpm audit 2026-10-24 (#25631) — every advisory `pnpm audit` matched on
+  # main 49653f9 (5 critical, 11 high, 10 moderate, 3 low), all but one with a
+  # fixed version, so this is the "take the fix" path osv-scanner.toml's header
+  # prescribes and NOT an exemption. The card's driver is zod: no consumer can
+  # take the GHSA-mrhx-c7xc-m3w5 fix (4.6.6) until this workspace does, because
+  # zod 4.6.6 changed `v4/core`'s declarations and a consumer's newer zod types
+  # stop assigning to ours (objectstack-ai/cloud#3189).
+  #   Declared ranges, moved in the manifests rather than pinned here: zod
+  #     ^4.6.6 in every manifest that declares it (one copy, 4.6.7, the version
+  #     the pinned objectui console already bundles, so the console keeps one
+  #     zod), next 16.4.1 in apps/docs (GHSA-2464-fhr4-w9xw and
+  #     GHSA-673q-mjm6-r5xr critical, GHSA-p3m5-59mp-jv5r high; better-auth's
+  #     optional `next` peer follows it onto 16.4.1), postal-mime ^4.0.8 in
+  #     service-mailbox (GHSA-f2hq-32vh-53cc high), nodemailer ^10.1.4 in
+  #     plugin-email (three moderates).
+  #   Target-only lifts on the entries above, each a dedupe inside its
+  #     dependents' declared ranges: undici ^7.30.1 (provider-utils ^7.29.0)
+  #     and ^8.12.2 (jsdom ^8.10.2) for GHSA-xjj6-f33q-929c high and two
+  #     moderates; dompurify ^3.4.17 (mermaid ^3.3.3) for GHSA-cg2g-xh64-v4q7
+  #     critical, GHSA-mrv2-3pqr-j5jr high and a low; fast-uri ^3.1.9 (ajv
+  #     ^3.0.1) for two moderates and two lows; ip-address ^10.7.4
+  #     (express-rate-limit ^10.2.0) for a moderate.
+  #   body-parser GHSA-27r3-jxmh-p828 (7.5 high) — a compressed body followed
+  #     by trailing bytes crashes the process. One copy, 2.3.0, from express
+  #     5.2.1 (^2.2.1) under @modelcontextprotocol/sdk; 2.4.0 sits inside that
+  #     range, so a dedupe. Transitive-only. The 1.x line (fixed 1.20.9)
+  #     resolves nowhere, so the selector covers the 2.x major alone.
+  #   happy-dom GHSA-834v-8h66-3h79 (8.8 high) — an ESM import alias reaches
+  #     host code. It came in only as vitest's optional `happy-dom: *` peer:
+  #     no manifest declares it and no vitest config picks the happy-dom
+  #     environment (measured). The fix exists only in 21.0.4, a major above
+  #     the 20.10.2 that resolved; with the peer rewritten to ^21.0.4 pnpm no
+  #     longer installs it at all, so the lockfile carries no happy-dom. The
+  #     entry stays as the floor a future declaration lands on.
+  #   NOT cleared: @azure/msal-node GHSA-xcx6-jx8p-x3h5 (high) — 5.4.1 from
+  #     @azure/identity 4.13.1 (^5.1.0) under tedious 18.6.2, driver-sql's
+  #     optional mssql peer. The fix is only in msal-node 7.1.0 and no
+  #     @azure/identity release admits it (4.14.0 and 4.15.0-beta.1 both
+  #     declare ^6.0.0), so clearing it here means forcing two majors past
+  #     identity's declared range on an Azure AD sign-in path no test in this
+  #     workspace runs. Left for #25631's follow-up, not hidden by a pin.
+  'body-parser@>=2.0.0 <3.0.0': '^2.4.0'
+  'happy-dom@>=17.0.0 <22.0.0': '^21.0.4'

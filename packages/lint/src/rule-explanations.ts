@@ -756,6 +756,28 @@ const SECURITY_WILDCARD_VAMA_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const SECURITY_MODIFY_ALL_DELETE_WITHHELD_EXPLANATION: RuleExplanation = {
+  rule: 'security-modify-all-delete-withheld',
+  covers: 'why Modify All cannot withhold delete, and what can',
+  paragraphs: [
+    '`modifyAllRecords` (Modify All Records) is the write bypass for edit, delete and transfer, as ' +
+      'Salesforce\'s Modify All is. The permission evaluator grants delete on the bypass bit before it reads ' +
+      '`allowDelete`, so `allowDelete: false` beside it is never enforced: the holder deletes every record ' +
+      'while the stored set says they cannot.',
+    'The schema refuses the pair at `objects.<object>.allowDelete`, so `os validate`, `os build`, ' +
+      '`defineStack` and a metadata save stop before this rule runs. The rule reaches the doors that do not ' +
+      'parse first: `os lint` on a raw object-literal config, and a direct call of `validateSecurityPosture`.',
+    'To fix it, decide what the set means. If it should delete every record, delete `allowDelete` (an entry ' +
+      'that sets `modifyAllRecords: true` and omits it parses to `allowDelete: true`). If it should edit records ' +
+      'it does not own and delete none, remove `modifyAllRecords`, keep `allowEdit: true` and ' +
+      '`allowDelete: false`, and grant the edit with a `criteria` sharing rule with `accessLevel: \'edit\'` ' +
+      'shared with the position that holds the set. An edit share opens update and never delete (ADR-0111 D3). ' +
+      'The object needs an owner field and an owner-write default (`private` or `public_read`), and the ' +
+      'rule\'s `condition` must be a field predicate every row satisfies, such as `record.id != \'\'`: a literal ' +
+      '`true` lowers to an empty filter, which the sharing service never serves.',
+  ],
+};
+
 const SECURITY_OWD_ALIAS_EXPLANATION: RuleExplanation = {
   rule: 'security-owd-alias',
   covers: 'which sharing values are retired or misplaced',
@@ -1858,6 +1880,12 @@ const FLOW_API_TRIGGER_SECRET_MISSING_EXPLANATION: RuleExplanation = {
       'seconds from its own clock, so a captured post stops verifying. A usable secret is a string that is ' +
       'not blank after trimming, on the start node\'s `config.secret`; absent, blank and non-string are one ' +
       'verdict.',
+    'A flow that ships in a package names its secret instead of carrying it: `config.secretRef` holds the ' +
+      'name the deployment fills (an environment variable of that name in the open tier, or the entry the ' +
+      'host\'s credential resolver serves), never in the platform\'s `OS_` namespace and never beside a ' +
+      'literal `secret`. The engine reads the name at every post, so the value never appears in the ' +
+      'definition or the repository; a post that arrives while the name resolves to nothing is answered ' +
+      '503, never verified against nothing.',
     'The automation engine refuses to register a flow bound to the api trigger without one — a ' +
       'hardcoded check in `registerFlow`, before any trigger is consulted and whatever the flow\'s ' +
       '`status` — and the trigger refuses to arm it, so the flow never receives a post. The `/automation` ' +
@@ -3404,7 +3432,9 @@ const TRANSLATION_TARGET_UNKNOWN_EXPLANATION: RuleExplanation = {
       'entries are declared and translated by the package that owns it. `dashboards.DASH` a ' +
       'dashboard, `.widgets.ID` a widget `id` on it, and `.actions.URL` a header action\'s ' +
       '`actionUrl`, not its label. `picklists.LIST` a picklist\'s `name` that a package of this ' +
-      'stack declares.',
+      'stack declares. `positions.NAME` a position\'s `name` that a package of this stack ' +
+      'declares, or an audience anchor (`everyone`, `guest`); `permissions.NAME` a permission ' +
+      'set\'s `name` that a package of this stack declares.',
     // The terminal toast keys are held to `FLOW_TERMINAL_MESSAGE_KEYS` by the rule's test.
     '`flows.FLOW` a flow\'s machine `name`; `.successMessage` / `.errorMessage` a toast the flow ' +
       'itself authors (a bundle cannot add one); `.screens.NODE` the `id` of a `type: \'screen\'` ' +
@@ -3706,7 +3736,7 @@ const CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION: RuleExplanation = {
     // The positions are held to the rule by its test, each fired.
     'Judged at every position the key is declared: an object\'s `requiredPermissions` (the array ' +
       'form, or each operation of the per-operation map), each field\'s, each object action\'s and ' +
-      'each top-level action\'s, an app\'s and each of its nav entries (through `navigation`, ' +
+      'each top-level action\'s, each flow\'s, an app\'s and each of its nav entries (through `navigation`, ' +
       '`areas`, `tabs`, `children` and `items`), a view\'s (its own, its `config`\'s, its default ' +
       '`list`\'s and each `listViews` entry\'s, on views and on objects) and a dashboard\'s.',
     'A warning, not an error: one package\'s lint cannot see the capabilities other installed ' +
@@ -4887,6 +4917,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [SECURITY_FLS_UNKNOWN_FIELD_EXPLANATION.rule]: SECURITY_FLS_UNKNOWN_FIELD_EXPLANATION,
   [SECURITY_MASTER_DETAIL_UNGRANTED_EXPLANATION.rule]: SECURITY_MASTER_DETAIL_UNGRANTED_EXPLANATION,
   [SECURITY_WILDCARD_VAMA_EXPLANATION.rule]: SECURITY_WILDCARD_VAMA_EXPLANATION,
+  [SECURITY_MODIFY_ALL_DELETE_WITHHELD_EXPLANATION.rule]: SECURITY_MODIFY_ALL_DELETE_WITHHELD_EXPLANATION,
   [SECURITY_OWD_ALIAS_EXPLANATION.rule]: SECURITY_OWD_ALIAS_EXPLANATION,
   [SECURITY_DELEGATION_MISSING_REASON_EXPLANATION.rule]: SECURITY_DELEGATION_MISSING_REASON_EXPLANATION,
   [VISIBILITY_ROOT_MISLAYERED_EXPLANATION.rule]: VISIBILITY_ROOT_MISLAYERED_EXPLANATION,

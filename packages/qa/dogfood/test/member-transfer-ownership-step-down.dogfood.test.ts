@@ -40,6 +40,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
 import { celEngine } from '@objectstack/formula';
+import { templateSlotSource } from '@objectstack/spec/automation';
 import { bootShowcase } from './showcase-boot.js';
 
 const SYSTEM_CTX = { isSystem: true };
@@ -47,8 +48,10 @@ const SYSTEM_CTX = { isSystem: true };
 type ServedAction = {
   name: string;
   label?: string;
-  confirmText?: string;
-  successMessage?: string;
+  // [#24814] `template` slots: a translated sentence is served as a string, an
+  // untranslated one as the parsed `{ dialect: 'template', source }` envelope.
+  confirmText?: unknown;
+  successMessage?: unknown;
   target?: string;
   bodyExtra?: Record<string, unknown>;
   visible?: unknown;
@@ -142,14 +145,15 @@ describe('sys_member.transfer_ownership makes the target an owner; the caller st
     expect(action!.target).toBe('/api/v1/auth/organization/update-member-role');
     expect(action!.bodyExtra).toEqual({ role: 'owner' });
 
-    const copy = [action!.label, action!.confirmText, action!.successMessage].join(' | ');
+    const confirmText = templateSlotSource(action!.confirmText);
+    const copy = [action!.label, confirmText, templateSlotSource(action!.successMessage)].join(' | ');
     // No demotion and no transfer is promised anywhere in the copy.
     expect(copy).not.toMatch(/demot/i);
     expect(copy).not.toMatch(/transfer/i);
     expect(action!.label).toBe('Make Owner');
     // The confirm names the outcome and the real step-down, by the step-down's own label.
-    expect(action!.confirmText).toContain('You stay an owner');
-    expect(action!.confirmText).toContain(served.get('update_member_role')?.label ?? 'update_member_role is not served');
+    expect(confirmText).toContain('You stay an owner');
+    expect(confirmText).toContain(served.get('update_member_role')?.label ?? 'update_member_role is not served');
   });
 
   it('the action, as an owner, makes the target an owner and leaves the caller an owner', async () => {

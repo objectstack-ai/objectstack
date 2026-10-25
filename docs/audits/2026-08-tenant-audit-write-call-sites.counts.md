@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 239 |
-| Object name statically decidable | 162 |
+| Write call sites | 240 |
+| Object name statically decidable | 163 |
 | Object name chosen at run time | 77 |
-| Against a tenancy-enabled object | 161 |
+| Against a tenancy-enabled object | 162 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 180 |
+| Threading a tenant context | 181 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 51 |
 | …and decidably tenancy-enabled | 29 |
-| Threading a decidably elevated context | 136 |
+| Threading a decidably elevated context | 137 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 95 |
 
@@ -90,11 +90,11 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-24 at `e3842ce79`.
+Measured on 2026-10-25 at `ca3ca05b0`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 766 |
+| tracked non-test sources scanned | 768 |
 | engine-shaped types recognised | 87 |
 | declared objects in the registry | 117 |
 | same-named calls subtracted as non-engine | 176 |
@@ -106,7 +106,7 @@ Measured on 2026-10-24 at `e3842ce79`.
 | `packages/plugins/organizations/src/claim-org-seed-ownership.ts` | `update` | `schema.name` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-approvals/src/action-slot-backfill.ts` | `update` | `sys_approval_action` | enabled | elevated | 2 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `update` | `object` | undecidable | context, elevation undecidable | 1 |
-| `packages/plugins/plugin-approvals/src/approval-service.ts` | `insert` | `sys_approval_action` | enabled | elevated | 15 |
+| `packages/plugins/plugin-approvals/src/approval-service.ts` | `insert` | `sys_approval_action` | enabled | elevated | 16 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `delete` | `sys_approval_approver` | enabled | elevated | 2 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `insert` | `sys_approval_approver` | enabled | elevated | 2 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `insert` | `sys_approval_request` | enabled | elevated | 1 |

@@ -227,6 +227,13 @@ export function verifySignature(secret: string, rawBody: string, header: string 
  *                 credential store instead, and the engine's binding reads it
  *                 per post through `resolveSecret`; a post whose secret cannot
  *                 be read is answered `503`, never verified against nothing.
+ *   - `secretRef` — the NAME of the secret, in place of `secret`, for a flow
+ *                 that ships in a package: the deployment fills the name and
+ *                 the automation engine's `resolveSecret` reads it at every
+ *                 post, answering a name with no value `503` like an
+ *                 unreadable held secret. This trigger never reads the name
+ *                 itself — a host that binds without that engine has no
+ *                 `resolveSecret`, and the flow is refused as above.
  */
 export class ApiTrigger implements FlowTrigger {
     readonly type = 'api';
@@ -259,7 +266,9 @@ export class ApiTrigger implements FlowTrigger {
             throw new Error(
                 `[trigger-api] flow '${binding.flowName}' not armed: its start node declares no \`config.secret\`. ` +
                     `An inbound hook is armed only with a per-flow secret that every post is HMAC-verified ` +
-                    `against (ADR-0041) — set a non-blank \`config.secret\` on the flow's start node.`,
+                    `against (ADR-0041) — set a non-blank \`config.secret\` on the flow's start node, or name ` +
+                    `the secret in \`config.secretRef\` and bind the flow through the automation engine, which ` +
+                    `resolves that name at every post.`,
             );
         }
         const queue = `${QUEUE_PREFIX}:${binding.flowName}`;

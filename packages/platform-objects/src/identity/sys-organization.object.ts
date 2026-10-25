@@ -177,9 +177,9 @@ export const SysOrganization = ObjectSchema.create({
       visible: 'features.cloudManaged != true',
       requiresFeature: 'organization',
       requiresMembershipReach: 'invite_member',
-      // `${result.email}`: the invitee's address from the invitation row
+      // `{{ result.email }}`: the invitee's address from the invitation row
       // invite-member answers (see sys_user's mirror).
-      successMessage: 'Invitation sent to ${result.email}',
+      successMessage: 'Invitation sent to {{ result.email }}',
       refreshAfter: true,
       params: [
         // ⚠️ Neither `email` nor `role` is a field of sys_organization, so
@@ -245,7 +245,13 @@ export const SysOrganization = ObjectSchema.create({
       target: '/api/v1/auth/organization/update',
       recordIdParam: 'organizationId',
       bodyShape: { wrap: 'data' },
-      requiresFeature: 'multiOrgEnabled',
+      // [#25347, ruling 6384629949] Gated on the organization CAPABILITY, not
+      // on `multiOrgEnabled`: a `single` deployment has one organization and
+      // this is its only name door (the generic edit keeps `name` readonly,
+      // ADR-0092 D4). Renaming it changes nothing about tenancy, so it is not
+      // a multi-organization action; `update_organization`, which also sends
+      // the slug, stays multi-organization only.
+      requiresFeature: 'organization',
       // The same door as `update_organization`, so the same grades.
       requiresMembershipReach: 'update_organization',
       successMessage: 'Organization renamed',
@@ -299,8 +305,9 @@ export const SysOrganization = ObjectSchema.create({
     // better-auth's adapter (which stamps `isSystem`) still writes them.
     // [#25347] The organization's one name, and its help says what it is not:
     // the product name the console shows is Settings → Branding's
-    // `workspace_name`, a separate home. It names no door: the rename doors are
-    // multi-organization only, so under `single` none is offered.
+    // `workspace_name`, a separate home. It names the door that changes it,
+    // `rename_organization`, offered under every posture with organizations
+    // (`single` included, ruling 6384629949).
     name: Field.text({
       label: 'Name',
       required: true,
@@ -308,7 +315,8 @@ export const SysOrganization = ObjectSchema.create({
       searchable: true,
       maxLength: 255,
       description:
-        'The organization\'s own name. The product name the console shows is a different setting, set in Settings → Branding.',
+        'The organization\'s own name. Change it with Rename Organization at the top of this record. ' +
+        'The product name the console shows is a different setting, set in Settings → Branding.',
       group: 'Identity',
     }),
 

@@ -111,9 +111,9 @@ export const SysMember = ObjectSchema.create({
       // ...and the grades that reach the endpoint (ADR-0108 D1): owner,
       // admin and delegated_admin — a plain member is not offered it.
       requiresMembershipReach: 'invite_member',
-      // `${result.email}`: the invitee's address from the invitation row
+      // `{{ result.email }}`: the invitee's address from the invitation row
       // invite-member answers (see sys_user's mirror).
-      successMessage: 'Invitation sent to ${result.email}',
+      successMessage: 'Invitation sent to {{ result.email }}',
       refreshAfter: true,
       params: [
         { field: 'email', objectOverride: 'sys_invitation', required: true },

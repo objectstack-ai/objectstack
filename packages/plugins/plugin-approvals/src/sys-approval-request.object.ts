@@ -597,11 +597,11 @@ export const SysApprovalRequest = ObjectSchema.create({
       // decide route answers `ApprovalDecisionResult`, whose `request` is the
       // read-back row with its display enrichment, so `record_title` is the
       // same title the inbox row shows (the target record's display field,
-      // else its payload snapshot). `${result.*}` is the success copy's
+      // else its payload snapshot). `{{ result.* }}` is the success copy's
       // declared scope on a `type: 'api'` action: the route's own response.
       // Every action below names the request the same way: each of their
       // routes answers `{ request, … }` with that same read-back row.
-      successMessage: 'Approved "${result.request.record_title}"',
+      successMessage: 'Approved "{{ result.request.record_title }}"',
       refreshAfter: true,
     },
     {
@@ -631,7 +631,7 @@ export const SysApprovalRequest = ObjectSchema.create({
         'has(record.viewer) && has(record.viewer.can_act) && record.viewer.can_act == true' +
         ' || has(record.viewer) && has(record.viewer.can_override) && record.viewer.can_override == true',
       locations: ['record_section', 'list_item'],
-      successMessage: 'Rejected "${result.request.record_title}"',
+      successMessage: 'Rejected "{{ result.request.record_title }}"',
       refreshAfter: true,
     },
     {
@@ -654,7 +654,7 @@ export const SysApprovalRequest = ObjectSchema.create({
         'has(record.viewer) && has(record.viewer.can_act) && record.viewer.can_act == true' +
         ' || has(record.viewer) && has(record.viewer.can_override) && record.viewer.can_override == true',
       locations: ['record_section'],
-      successMessage: 'Reassigned "${result.request.record_title}"',
+      successMessage: 'Reassigned "{{ result.request.record_title }}"',
       refreshAfter: true,
     },
 
@@ -674,7 +674,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       ],
       visible: 'has(record.viewer) && has(record.viewer.can_act) && record.viewer.can_act == true',
       locations: ['record_section'],
-      successMessage: 'Sent "${result.request.record_title}" back for revision',
+      successMessage: 'Sent "{{ result.request.record_title }}" back for revision',
       refreshAfter: true,
     },
     {
@@ -689,7 +689,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       ],
       visible: 'has(record.viewer) && has(record.viewer.can_act) && record.viewer.can_act == true',
       locations: ['record_section'],
-      successMessage: 'Information requested on "${result.request.record_title}"',
+      successMessage: 'Information requested on "{{ result.request.record_title }}"',
       refreshAfter: true,
     },
 
@@ -716,7 +716,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       ],
       visible: 'has(record.status) && record.status == "pending" && has(record.viewer) && has(record.viewer.is_submitter) && record.viewer.is_submitter == true',
       locations: ['record_section'],
-      successMessage: 'Reminder sent for "${result.request.record_title}"',
+      successMessage: 'Reminder sent for "{{ result.request.record_title }}"',
       refreshAfter: true,
     },
     {
@@ -758,7 +758,7 @@ export const SysApprovalRequest = ObjectSchema.create({
         ' && has(record.viewer) && has(record.viewer.is_submitter) && record.viewer.is_submitter == true' +
         ' || has(record.viewer) && has(record.viewer.can_override) && record.viewer.can_override == true',
       locations: ['record_section'],
-      successMessage: 'Recalled "${result.request.record_title}"',
+      successMessage: 'Recalled "{{ result.request.record_title }}"',
       refreshAfter: true,
     },
     {
@@ -773,7 +773,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       ],
       visible: 'has(record.status) && record.status == "returned" && has(record.viewer) && has(record.viewer.is_submitter) && record.viewer.is_submitter == true',
       locations: ['record_section'],
-      successMessage: 'Resubmitted "${result.request.record_title}"',
+      successMessage: 'Resubmitted "{{ result.request.record_title }}"',
       refreshAfter: true,
     },
 
@@ -821,7 +821,7 @@ export const SysApprovalRequest = ObjectSchema.create({
         ' || has(record.status) && record.status == "pending"' +
         ' && has(record.viewer) && has(record.viewer.is_submitter) && record.viewer.is_submitter == true',
       locations: ['record_section'],
-      successMessage: 'Reply posted on "${result.request.record_title}"',
+      successMessage: 'Reply posted on "{{ result.request.record_title }}"',
       refreshAfter: true,
     },
   ],

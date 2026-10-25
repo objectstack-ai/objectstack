@@ -638,6 +638,50 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     covers: ['ui/bulk-action.zod.ts:BulkActionDefSchema.confirmText'],
     note: 'EXPERIMENTAL until the console fills the holes. The spec half declares the slot, its closed scope and the display-value rule a param hole renders; the console half — the dialog rendering the slot through the formula template engine, `count` first and the param roots second — lands in objectui, and this row is re-stated as `enforced` with the fail policy that renderer has once it is measured there. Until then a hole reaches the screen as literal text, as it did before the slot was typed.',
   },
+  // #24814 (ruling A): an action's copy — `confirmText`, `successMessage`, `errorMessage` — became a
+  // `template` slot over the closed scope the console's runner binds, on a registered action
+  // (`actionObject`, which `InlineActionSchema` picks) and on the three page action rows.
+  {
+    id: 'template-action-confirm-text',
+    summary: 'action confirm sentence (Action.confirmText, and the page action rows\' `confirmText`) — `{{ record.* }}` holes, and `{{ params.* }}` beside static values',
+    dialect: 'template', mode: 'interpret', state: 'enforced', failPolicy: 'fail-soft-log',
+    enforcement:
+      'PARSE, measured here: `ui/action-copy-template.ts` `actionCopyTemplateSlot` around `templateExpressionInput`, built at each declaring file, normalizes a bare string to `{dialect:"template",source}`, keeps a blank string as written and (on `Action`) the inline locale map. BUILD-TIME GATE, measured here: lint/validate-action-copy-templates.ts `actionCopyTemplateIssues`, run by `validateStackExpressions` at `objectstack validate` / `compile` and the publish gate (`action`, `object` and `page` writes), judges each sentence with `closedScopeTemplateRefusal` over `actionConfirmTemplateRoots(action)` and then `validateExpression(\'template\', …)` — every finding an ERROR (the publish gate answers 422), but for a `${…}` token over a root `ACTION_COPY_DOLLAR_TRANSITION_ROOTS` names in a sentence with no `{{ }}` hole, which the runner still fills and the doors name as a WARNING. EVALUATOR: console (objectui) `ActionRunner.confirmMessage` → `fillTemplateHoles` → @objectstack/formula `templateEngine.evaluate` over `record` (the dispatched row, else the context record) and `params` (the static values), read at the pinned `.objectui-sha`; a sentence the engine refuses is shown as written, an unbound hole prints empty, and a sentence with no `{{ }}` hole keeps the transitional `${…}` reading',
+    covers: [
+      'ui/action.zod.ts:actionObject.confirmText',
+      'ui/component.zod.ts:ActionButtonPropsSchema.confirmText',
+      'ui/component.zod.ts:ActionIconPropsSchema.confirmText',
+      'ui/component.zod.ts:actionContainerMemberShape.confirmText',
+    ],
+    note: 'Soft on both faces — a refused sentence reads as written and an unbound root as a blank fragment — which is why the doors name both ahead of time. Refused at the doors, not at the parse: each such sentence parsed while the key was a plain string, so a stored one keeps loading until its next save. ⛔ NOT MEASURED HERE: the runner was read at the pin, not run, and the `-log` half of `fail-soft-log` (no log line was found on either face).',
+  },
+  {
+    id: 'template-action-success-message',
+    summary: 'action success toast (Action.successMessage, and the page action rows\' `successMessage`) — `{{ result.* }}` and `{{ record.* }}` holes',
+    dialect: 'template', mode: 'interpret', state: 'enforced', failPolicy: 'fail-soft-log',
+    enforcement:
+      'PARSE and BUILD-TIME GATE: the same as `template-action-confirm-text`, over `ACTION_SUCCESS_TEMPLATE_ROOTS` (`result`, then `record`). EVALUATOR: console (objectui) `ActionRunner.composeSuccessMessage` → `fillTemplateHoles` → @objectstack/formula `templateEngine.evaluate` over `result` (the payload the handler answered) and `record`, read at the pinned `.objectui-sha`; `outcomeMessages[outcome]` outranks it, a blank sentence falls to the runner\'s default text, and a sentence with no `{{ }}` hole keeps the transitional `${result.*}` reading',
+    covers: [
+      'ui/action.zod.ts:actionObject.successMessage',
+      'ui/component.zod.ts:ActionButtonPropsSchema.successMessage',
+      'ui/component.zod.ts:ActionIconPropsSchema.successMessage',
+      'ui/component.zod.ts:actionContainerMemberShape.successMessage',
+    ],
+    note: 'The platform\'s own sentences (`sys_invitation` / `sys_member` / `sys_organization` / `sys_user` `invite_user`, the nine `sys_approval_request` decisions) were converted from `${result.*}` to `{{ result.* }}` on the same change. `outcomeMessages` is NOT this row: it stays a `${result.*}` string. ⛔ NOT MEASURED HERE: the runner was read at the pin, not run, and the `-log` half of `fail-soft-log`.',
+  },
+  {
+    id: 'template-action-error-message',
+    summary: 'page action row failure toast (the rows\' `errorMessage`) — a `template` slot that binds no root',
+    dialect: 'template', mode: 'interpret', state: 'experimental', failPolicy: 'unevaluated',
+    enforcement:
+      'PARSE ONLY in this repo — the rows type the key with the same `template` slot as `template-action-confirm-text`, over `ACTION_ERROR_TEMPLATE_ROOTS`, which is EMPTY. NO EVALUATOR FOUND: the console\'s action runner shows an authored `errorMessage` as written (its envelope\'s `source`) and fills no hole, read at the pinned `.objectui-sha`. At build and at the publish gate the action copy pass names every hole and every `${…}` / `{…}` token in it as literal text, an ERROR',
+    covers: [
+      'ui/component.zod.ts:ActionButtonPropsSchema.errorMessage',
+      'ui/component.zod.ts:ActionIconPropsSchema.errorMessage',
+      'ui/component.zod.ts:actionContainerMemberShape.errorMessage',
+    ],
+    note: 'EXPERIMENTAL until a scope is ruled for the failure toast. `Action.errorMessage` (the registered action\'s) is NOT typed: it stays an `I18nLabel`, outside this family by the ruling, so it declares no expression surface.',
+  },
   {
     id: 'template-notify-content',
     summary: 'flow `notify` node inline content (NotifyConfig.title, .message) — `{{ }}` template holes rendered per run by the formula template engine',

@@ -4422,3 +4422,55 @@ describe('[#22161] one-line fixes — translation-target-unknown', () => {
     expect(text).toContain("a list view's own `tabs` has no renderer");
   });
 });
+
+describe('validateTranslationReferences — the security catalog (positions, permissions)', () => {
+  const stack = (data: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+    positions: [{ name: 'srm_legal_counsel', label: '法务顾问' }],
+    permissions: [{ name: 'srm_contract_reviewer', label: '合同审核', objects: {} }],
+    ...extra,
+    translations: [{ en: data }],
+  });
+
+  it('a declared name is clean', () => {
+    expect(validateTranslationReferences(stack({
+      positions: { srm_legal_counsel: { label: 'Legal Counsel', description: 'Reviews contracts' } },
+      permissions: { srm_contract_reviewer: { label: 'Contract Review' } },
+    }))).toEqual([]);
+  });
+
+  it('a name no package declares is translation-target-unknown, at the picklist list face\'s error', () => {
+    const findings = validateTranslationReferences(stack({
+      positions: { srm_legal_counsle: { label: 'Legal Counsel' } },
+      permissions: { srm_contract_reviewr: { label: 'Contract Review' } },
+    }));
+    expect(findings.map((f) => [f.rule, f.severity, f.path, f.where])).toEqual([
+      [TRANSLATION_TARGET_UNKNOWN, 'error', 'translations[0].en.positions.srm_legal_counsle', 'locale "en" · position "srm_legal_counsle"'],
+      [
+        TRANSLATION_TARGET_UNKNOWN,
+        'error',
+        'translations[0].en.permissions.srm_contract_reviewr',
+        'locale "en" · permission set "srm_contract_reviewr"',
+      ],
+    ]);
+    expect(findings[0].message).toContain('Did you mean "srm_legal_counsel"?');
+    expect(findings[1].message).toContain('Did you mean "srm_contract_reviewer"?');
+  });
+
+  it('judges each group against its own collection — a position name under `permissions` is an orphan', () => {
+    const findings = validateTranslationReferences(stack({ permissions: { srm_legal_counsel: { label: 'x' } } }));
+    expect(findings.map((f) => f.path)).toEqual(['translations[0].en.permissions.srm_legal_counsel']);
+  });
+
+  it('resolves a name a sibling package of the artifact declares', () => {
+    const findings = validateTranslationReferences(stack(
+      { positions: { srm_buyer: { label: 'Buyer' } }, permissions: { srm_buyer_access: { label: 'Buyer access' } } },
+      { packages: [{ manifest: { positions: [{ name: 'srm_buyer', label: '采购员' }], permissions: [{ name: 'srm_buyer_access', objects: {} }] } }] },
+    ));
+    expect(findings).toEqual([]);
+  });
+
+  it('never reports a platform audience anchor', () => {
+    expect(validateTranslationReferences(stack({ positions: { everyone: { label: 'Everyone' }, guest: { label: 'Guest' } } })))
+      .toEqual([]);
+  });
+});

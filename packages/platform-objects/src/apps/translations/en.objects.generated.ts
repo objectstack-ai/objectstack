@@ -139,7 +139,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "Invite User",
         description: "Invite someone by email address. They join this organization with the chosen role when they accept the invitation.",
-        successMessage: "Invitation sent to ${result.email}",
+        successMessage: "Invitation sent to {{ result.email }}",
         params: {
           role: {
             options: {
@@ -528,7 +528,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       name: {
         label: "Name",
-        help: "The organization's own name. The product name the console shows is a different setting, set in Settings → Branding."
+        help: "The organization's own name. Change it with Rename Organization at the top of this record. The product name the console shows is a different setting, set in Settings → Branding."
       },
       slug: {
         label: "Slug",
@@ -576,7 +576,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "Invite User",
         description: "Invite someone by email address. They join this organization with the chosen role when they accept the invitation.",
-        successMessage: "Invitation sent to ${result.email}",
+        successMessage: "Invitation sent to {{ result.email }}",
         params: {
           role: {
             options: {
@@ -663,7 +663,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "Invite User",
         description: "Invite someone by email address. They join this organization with the chosen role when they accept the invitation.",
-        successMessage: "Invitation sent to ${result.email}",
+        successMessage: "Invitation sent to {{ result.email }}",
         params: {
           role: {
             options: {
@@ -793,7 +793,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "Invite User",
         description: "Invite someone by email address. They join this organization with the chosen role when they accept the invitation.",
-        successMessage: "Invitation sent to ${result.email}",
+        successMessage: "Invitation sent to {{ result.email }}",
         params: {
           role: {
             options: {
@@ -868,6 +868,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       update_team: {
         label: "Edit Team",
         successMessage: "Team updated"
+      },
+      add_team_member: {
+        label: "Add Member",
+        successMessage: "Team member added"
       },
       remove_team: {
         label: "Delete Team",

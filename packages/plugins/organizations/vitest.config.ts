@@ -113,6 +113,15 @@ export default defineConfig({
         replacement: path.resolve(__dirname, '../../spec/src/data/index.ts'),
       },
       {
+        // [#25668] A VALUE reach from source: `claim-org-seed-ownership.ts`
+        // asks `analyzeRelationshipTraversals` which fields a stored
+        // expression reads, to route an object whose stored values follow
+        // `owner_id` to the row-by-row claim. Resolved from `dist/`, that
+        // routing would be the last build's member reader.
+        find: /^@objectstack\/formula$/,
+        replacement: path.resolve(__dirname, '../../formula/src/index.ts'),
+      },
+      {
         find: /^@objectstack\/spec\/contracts$/,
         replacement: path.resolve(__dirname, '../../spec/src/contracts/index.ts'),
       },
