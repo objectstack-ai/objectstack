@@ -27,7 +27,7 @@
 //
 //   From CI, no special run needed. Every Test Core shard passes --summarize
 //   and, on merge_group builds, uploads `.turbo/runs/` as the
-//   `test-core-run-summary-<shard>-of-6` artifact.
+//   `test-core-run-summary-<shard>-of-<width>` artifact.
 //
 //   ⚠ ONE RUN IS NOT ENOUGH, AND THIS SENTENCE USED TO SAY IT WAS. It read
 //   "download all six from any green queue build and re-run the generator",
@@ -986,7 +986,7 @@ export function renderSpread({ bySample, dataset }) {
 // if it were. The dataset holds per-PACKAGE weights only; the `Slowest
 // file:` line the ceiling check prints comes from the per-shard captures
 // `report-test-timings.mjs --capture` writes in every Test Core shard and
-// uploads as `test-core-timings-<n>-of-6` -- the SAME runs this refresh reads,
+// uploads as `test-core-timings-<n>-of-<width>` -- the SAME runs this refresh reads,
 // retained exactly as long as their run summaries (1 day). So the refresh lane
 // downloads those captures beside the summaries and this reads them: still a
 // read of an existing measurement, never a second test run. A run whose
@@ -1558,7 +1558,7 @@ export function renderRefreshDiff({ diff, files = null, filesNotMeasured = null,
       ? ` No capture arrived for ${files.runsWithoutCapture.map((r) => `\`${r}\``).join(', ')}, so its files are not in the list.`
       : '';
     out.push(
-      `**Per-file reading:** the window's per-shard captures (\`test-core-timings-N-of-6\`, written by ` +
+      `**Per-file reading:** the window's per-shard captures (\`test-core-timings-N-of-M\`, written by ` +
         `\`report-test-timings.mjs --capture\`), read for ${files.runsRead} of ${files.runsRead + files.runsWithoutCapture.length} run(s): ` +
         `${files.measuredRows} file line(s) measured here; ${files.replayedRows} replayed line(s) left out, because a cache ` +
         `HIT replays a duration measured outside this window.${missing}`
@@ -3573,7 +3573,7 @@ function main() {
       refresh:
         'node scripts/measure-test-shard-timings.mjs [--run <id>] <run-summary.json>... ' +
         '--merge-into scripts/test-shard-timings.json --out scripts/test-shard-timings.json ' +
-        '(summaries: the `test-core-run-summary-<n>-of-6` artifacts of any green run, or a local ' +
+        '(summaries: the `test-core-run-summary-<n>-of-<width>` artifacts of any green run, or a local ' +
         '`pnpm exec turbo run test --concurrency=4 --summarize`. ⚠ ONE RUN COVERS ONLY 2-52 of ~71 ' +
         'packages depending on cache warmth, so feed SEVERAL runs -- a `--run <id>` before each ' +
         'run\'s summaries is REQUIRED, so a sliced package is assembled per run and then medianed ' +

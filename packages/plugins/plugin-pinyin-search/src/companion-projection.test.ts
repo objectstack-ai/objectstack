@@ -159,7 +159,7 @@ describe('backfillSearchCompanion / rebuildSearchCompanion', () => {
       { id: 'd', name: '李雷', __search: null },             // fill (second page)
     ];
     const result = await backfillSearchCompanion(engine as any, undefined, { batchSize: 2 });
-    expect(result).toEqual({ objects: 1, scanned: 4, updated: 2 });
+    expect(result).toEqual({ objects: 1, scanned: 4, updated: 2, pages: 2 });
     const rows = engine._tables.crm_contact;
     expect(rows.find((r) => r.id === 'a')!.__search).toBe('zhangwei zw');
     expect(rows.find((r) => r.id === 'b')!.__search).toBe(null);
@@ -243,7 +243,7 @@ describe('[#10290] negative control — a primary-key-only object is never walke
       { id: 'jwk_2', created_at: '2026-01-02' },
     ];
     const result = await backfillSearchCompanion(engine as any);
-    expect(result).toEqual({ objects: 0, scanned: 0, updated: 0 });
+    expect(result).toEqual({ objects: 0, scanned: 0, updated: 0, pages: 0 });
     expect(engine._finds).toEqual([]);
   });
 
@@ -251,7 +251,7 @@ describe('[#10290] negative control — a primary-key-only object is never walke
     const engine = makeEngine([jwksLegacySchema]);
     engine._tables.sys_jwks = [{ id: 'jwk_1', __search: null }];
     const result = await backfillSearchCompanion(engine as any);
-    expect(result).toEqual({ objects: 0, scanned: 0, updated: 0 });
+    expect(result).toEqual({ objects: 0, scanned: 0, updated: 0, pages: 0 });
     expect(engine._finds).toEqual([]);
   });
 
@@ -276,7 +276,7 @@ describe('[#10290] positive control — titled objects are still backfilled', ()
     ];
     engine._tables.sys_jwks = [{ id: 'jwk_1' }];
     const result = await backfillSearchCompanion(engine as any);
-    expect(result).toEqual({ objects: 1, scanned: 2, updated: 1 });
+    expect(result).toEqual({ objects: 1, scanned: 2, updated: 1, pages: 1 });
     // Only the titled object was queried — the doomed one was never touched.
     expect(new Set(engine._finds)).toEqual(new Set(['crm_contact']));
     expect(engine._tables.crm_contact.find((r) => r.id === 'a')!.__search).toBe('zhangwei zw');

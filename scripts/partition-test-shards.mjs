@@ -59,9 +59,12 @@
 // ratio is what the acceptance bound is written in, so "add shards until it
 // balances" is not merely ineffective here -- it moves the number the wrong
 // way while looking like progress. #10472 asked for 6 -> 8
-// to be considered and the measured answer was no -- see SHARD_COUNT below,
-// where the self-test now pins that arithmetic so the next person gets the
-// answer from a failing assertion instead of from a CI run.
+// to be considered and the measured answer was no, because spec's 1147s was
+// then the floor. #25376 asked again once the CLI was sliced (#22075) and spec's
+// 842s repo file was split (#25372), and the answer became yes -- see
+// SHARD_COUNT below for both readings. The self-test pins that arithmetic, so
+// the next person gets the answer from a failing assertion instead of from a
+// CI run.
 //
 // Run-to-run variance is a SEPARATE and equally large effect, and it is not
 // placement: this job's Turbo cache key is namespaced per shard
@@ -120,11 +123,41 @@ const TIMINGS_PATH = path.join(REPO_ROOT, 'scripts', 'test-shard-timings.json');
 
 // The Test Core shard count, and the ONLY place it is reasoned about.
 // ci.yml spells it three more times (the matrix, the `name:`, and `--shard
-// N/6`); the self-test below reads that workflow back and fails on drift,
+// N/8`); the self-test below reads that workflow back and fails on drift,
 // because a partitioner splitting into a different number of bins than the
 // matrix declares is not a red step anywhere -- it is packages that no shard
-// runs.
-export const SHARD_COUNT = 6;
+// runs. scripts/ci/select-shard-timings-run.mjs spells it once more, but only
+// as its matchers' default: the timings refresh judges each run at the width
+// that run's own `Test Core (N/M)` jobs carry, so a resize leaves the runs
+// from before it readable (#25376).
+//
+// WHY EIGHT (#25376, 6 -> 8). On the committed dataset (the 2026-10-23
+// refresh), bins of predicted test windows, the CLI cut into its 3 slices:
+//
+//    6 shards -> max 2489s  mean 2488s  ratio 1.00x
+//    8 shards -> max 1868s  mean 1866s  ratio 1.00x
+//    9 shards -> max 1661s  mean 1659s  ratio 1.00x
+//   10 shards -> max 1607s  mean 1493s  ratio 1.08x   <- spec's whole weight is the floor
+//
+// Eight keeps one count of headroom below the point where the floor binds. Bin
+// sums are not wall, though: whole packages share a shard four at a time while
+// a CLI slice runs as a serial leg of its own (ci.yml, "Run this shard's
+// tests"), so a shard's step reads close to wholeSum / 2.9 + slice. Calibrated
+// on merge_group run 40155484566 (59 packages executed, the CLI as 3 slices),
+// where it lands within 6.1% of the measured step on the four slowest shards
+// (the three carrying a slice and the heaviest whole-package one; it misreads
+// the two light shards by up to 24%, which never set the wall), and replayed on
+// that run's own list through planRun():
+//
+//    6 shards -> slowest shard ~1696s (measured 1794s, the shard with a slice)
+//    8 shards -> slowest shard ~1436s, -15%
+//
+// The same model gives -14% on the dataset's full list and -10% on a 21-package
+// merge_group run (40157571602), whose CLI slices at 8 carry almost nothing
+// beside them. That last figure is the floor this count cannot move: a CLI
+// slice (~960-1010s measured) is serial, so past eight the slowest shard is
+// the slice and more shards only add runners.
+export const SHARD_COUNT = 8;
 
 // The acceptance bound #10472 set: the slowest shard within ~1.3x the mean.
 // It is a RATIO, not a wall-clock target, which is what makes it stable as the

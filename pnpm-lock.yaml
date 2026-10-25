@@ -1919,6 +1919,9 @@ importers:
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql
+      '@objectstack/spec':
+        specifier: workspace:*
+        version: link:../../spec
       '@objectstack/types':
         specifier: workspace:*
         version: link:../../types
@@ -1926,6 +1929,12 @@ importers:
         specifier: ^3.29.4
         version: 3.29.4
     devDependencies:
+      '@objectstack/driver-sql':
+        specifier: workspace:*
+        version: link:../../drivers/driver-sql
+      '@objectstack/platform-objects':
+        specifier: workspace:*
+        version: link:../../platform-objects
       '@types/node':
         specifier: ^26.6.3
         version: 26.6.3
