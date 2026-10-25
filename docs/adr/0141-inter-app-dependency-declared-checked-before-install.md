@@ -268,7 +268,10 @@ The runtime card gives **one** reader both properties — the handshake family's
 and **states the grammar the check supports**: at least `^`, `~`, `>=`, an `x` wildcard, `||` and the space intersection,
 so the ruling's own 「HotCRM 6.x」 is readable. The drafter's choice is to extend the handshake family in
 `packages/metadata-core`, on which every install door already depends and beside whose `assertProtocolCompat` the check
-sits; ⛔ never a fourth reader. And the author side catches an unreadable `dependencies` range **before** install: an
+sits — as a **sibling function in the same module**, sharing the alternative and comparator parsing, so the handshake's
+own verdicts (compatible, incompatible, admitted with a warning on `no-range` / `unparsed-range`) and ADR-0087 D1's
+never-false-rejection contract are unchanged; ⛔ never a fourth reader. And the author side catches an unreadable
+`dependencies` range **before** install: an
 `os lint` / `os validate` rule beside the `engines.protocol` reading `os validate` already performs
 (`packages/cli/src/utils/protocol-version-gap.ts#checkProtocolVersionGap`) reports a range outside the stated grammar
 and, inside one artifact, a co-delivered entry whose range the sibling's declared version does not satisfy. Fail-closed
@@ -403,9 +406,18 @@ beside the artifact scope. Nothing else changes:
   whose action targets a HotCRM object is refused if its ledger entry is read before HotCRM's. **Decided**: both hydrate
   paths order their batch by `manifest.dependencies` through `resolvePluginOrder`, declared ids as optional edges —
   ADR-0116's one sorter, the reading `packages/core/src/artifact-packages.ts#resolveArtifactPackageEntries` already gives
-  the key inside an artifact — before registering any of it; an id absent from the batch is not an edge. The sibling arm
-  keeps reading Q's namespace from Q's record; ⛔ not a reading that admits a sibling without Q, which would let any two
-  packages sharing a utility dependency co-own a namespace (merge question 12). What a sort inside each path cannot
+  the key inside an artifact — before registering any of it; an id absent from the batch is not an edge. In the
+  install-local path the nodes are ledger entries, each an artifact that may carry several packages: a declared id first
+  resolves to the entry that carries that package, and ids declared between packages of one entry are not edges between
+  entries. **A cycle never costs the batch.** `packages/core/src/plugin-order.ts#resolvePluginOrder` throws on a cycle
+  through either edge kind, and `resolveArtifactPackageEntries` keeps that throw for the packages of one artifact; a
+  hydrate does not inherit it. A cycle is reachable here — two authored packages whose `PATCH` edits declare each other,
+  two marketplace artifacts that declare each other — and both hydrates are per-entry today ("one stale package must not
+  brick the environment", `packages/services/service-package/src/index.ts`), so a sort that threw outside the loop would
+  register nothing, worse than today. The cyclic members degrade to source order for that batch, with the cycle logged
+  as a refusal naming them; the acyclic rest keeps its sorted order, and nothing throws out of the hydrate. The sibling
+  arm keeps reading Q's namespace from Q's record; ⛔ not a reading that admits a sibling without Q, which would let any
+  two packages sharing a utility dependency co-own a namespace (merge question 12). What a sort inside each path cannot
   order — a dependent on one of D2's three paths whose parent hydrates on a later one — is Open items 2.
 
 **ADR-0130 D8's deferral now ends at marketplace publishing**, not at a module's first standalone artifact. Within one
@@ -512,9 +524,9 @@ not a declaration, and `PackageDependencySchema`'s own header already tells the 
   (this record), a cross-package reference is legal exactly when it is declared.
 - An AI author's undeclared reference stays a loud `422` at the save door, and a missing dependency becomes a loud refusal
   at install, instead of copied objects that drift silently.
-- The work is small and stays small: no new authorable key, no schema change, one predicate at three doors, one more
-  source for one co-owner set (read two ways: a declared parent, a shared declared parent), one author-side lint rule,
-  and the one sorter applied inside two hydrate loops.
+- The work is small and stays small — one runtime card of size S and two smaller ones: no new authorable key, no schema
+  change, one predicate at three doors, one more source for one co-owner set (read two ways: a declared parent, a shared
+  declared parent), one author-side lint rule, and the one sorter applied inside two hydrate loops.
 - Two modules of one app install in either order and need not declare each other (the sibling arm), and an upgrade of
   the app that would take a module's object name is refused for free (D5).
 
@@ -630,8 +642,9 @@ sizing decision; 10 is a reading of an earlier ruling.
    optional spelling, and inventing one would be the spec change this record forbids itself.
 8. **Only P's own entries are judged** — a dependency's own dependencies were judged when it was installed; judging them
    again would re-run D2 for packages the administrator already admitted.
-9. **D8 item 1's record-to-array conversion is its own card**, not the runtime card's — the ruling's sizing (XS–S for the
-   check, S for the objectql source) is kept, and the conversion waits on one reading: how the control plane parses
+9. **D8 item 1's record-to-array conversion is its own card**, not the runtime card's — the ruling's own estimate (XS–S
+   for the check, S for the objectql source) is cited as the ruling's; the runtime card is **S** for the reasons the
+   Execution plan states, and the conversion would push it past that. The conversion waits on one reading: how the control plane parses
    `sys_package_version.manifest_json` (`objectstack-ai/cloud`, not readable here). Changing the snapshot's shape before
    that reading could break the reader it is meant to satisfy; until then snapshots carry the record shape as they do
    today, no new harm.
@@ -653,8 +666,10 @@ sizing decision; 10 is a reading of an earlier ruling.
     than giving the sibling arm a reading that admits a sibling without its parent present. The sort is ADR-0116's one
     sorter, already reading this key inside an artifact; the alternative would let any two packages sharing a utility
     dependency co-own a namespace. It also closes the `kernel:ready` seals' order hazard (a module's bound action
-    targeting its app's object). Cost: a sort inside two hydrate loops; a dependent whose parent hydrates on a later
-    path is the card's residual reading (Open items 2).
+    targeting its app's object). The sorter's cycle throw is not inherited: cyclic members of a batch fall back to
+    source order with a logged refusal, and the hydrate never throws — the per-entry tolerance both paths have today
+    stands. Cost: a sort inside two hydrate loops; a dependent whose parent hydrates on a later path is the card's
+    residual reading (Open items 2).
 
 ---
 
@@ -682,15 +697,17 @@ sizing decision; 10 is a reading of an earlier ruling.
 
 ## Execution plan (after acceptance)
 
-1. **Runtime card (XS–S, `domain:services` / objectql), one PR**: D2's predicate at the three install doors, with the
-   `dependency_missing` issues, the ledger-registered code, the range reader (the handshake family in
-   `packages/metadata-core` extended to exact-version granularity, D2) with its stated grammar, and the Console refusal
-   text; D5's dependency source for the co-owner set — declared parent and sibling arm, read from either end — with the
-   ADR-0130 D3 gate test extended to a cross-artifact pair and a sibling pair (a dependent defining an object name X
-   owns, and a sibling defining a name the other sibling owns, are refused, asserting `code` and `status`, the message
-   worded per co-ownership source), and the upgrade case (X reinstalled beside its module is admitted; X newly defining a
-   name the module owns is refused); the dependency sort in the `sys_packages` and install-local rehydrates through
-   `resolvePluginOrder` (D5); D8 items 2 and 3. Its first readings: Open items 2, 3, 4 and 6.
+1. **Runtime card (S, `domain:services` / objectql), one PR** — the ruling estimated XS–S for the check alone; the card
+   as this record leaves it is S: D2's predicate at the three install doors, with the `dependency_missing` issues, the
+   ledger-registered code, the range reader (a sibling of the handshake family in `packages/metadata-core`, exact-version
+   granularity, the handshake's verdicts untouched, D2) with its stated grammar, and the Console refusal text; D5's
+   dependency source for the co-owner set — declared parent and sibling arm, read from either end — with the ADR-0130 D3
+   gate test extended to a cross-artifact pair and a sibling pair (a dependent defining an object name X owns, and a
+   sibling defining a name the other sibling owns, are refused, asserting `code` and `status`, the message worded per
+   co-ownership source), and the upgrade case (X reinstalled beside its module is admitted; X newly defining a name the
+   module owns is refused); the dependency sort in the `sys_packages` and install-local rehydrates through
+   `resolvePluginOrder` (D5), ledger entries as nodes, a cycle degrading to source order with a logged refusal and never
+   throwing out of the hydrate; D8 items 2 and 3. Its first readings: Open items 2, 3, 4 and 6.
 2. **Author-side card (XS, `packages/cli` / `packages/lint`)**: the `os lint` / `os validate` rule that reports a
    `dependencies` range outside the stated grammar and, inside one artifact, a co-delivered entry whose range the
    sibling's declared version does not satisfy (D2). Released with or before (1), so the first refusal an author meets is
