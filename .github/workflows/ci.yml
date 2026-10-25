@@ -150,6 +150,25 @@ jobs:
       # Gates the `test` job ONLY, ORed with `core` — see the `crosspkg`
       # filter below and the `test` job's `if:` (#9829, #10015).
       crosspkg: ${{ steps.changes.outputs.crosspkg || 'true' }}
+      # The objectui tree under `ui/` (objectstack#25677). Three outputs, read
+      # together by the four `* UI` jobs at the bottom of this file:
+      #   ui            — a path under ui/, or a root file the ui jobs build
+      #                   from (the lockfile, the workspace, turbo.json, ci.yml);
+      #   ui_consumers  — one of the seven packages objectui installs from this
+      #                   tree changed, so the Console is compiled (Type Check
+      #                   UI) and built (Build & E2E UI) against the new shape in
+      #                   the PR that moves it;
+      #   ui_tree       — `ui/package.json` exists in this checkout.
+      # `ui_tree` is what keeps the ui jobs SKIPPED, not failed, on a tree that
+      # does not carry ui/ yet: `ui` and `ui_consumers` fall back to 'true' on
+      # merge_group / schedule / dispatch (half 1 below), and on push to main a
+      # spec change sets `ui_consumers`, so neither path output alone can tell a
+      # job there is nothing to build. Its step runs on every event, so the
+      # `|| 'true'` fallback is reached only when this job died before it — and
+      # then THE FILTER CONTRACT's "run everything" is the intended reading.
+      ui: ${{ steps.changes.outputs.ui || 'true' }}
+      ui_consumers: ${{ steps.changes.outputs.ui_consumers || 'true' }}
+      ui_tree: ${{ steps.ui-tree.outputs.present || 'true' }}
       # ── THE FILTER CONTRACT, both halves (#4928) ──────────────────────────
       #
       # Half 1 is the `|| 'true'` above: when in doubt, RUN EVERYTHING. It
@@ -184,6 +203,19 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+
+      # No `if:` on purpose: every event needs this answer, and a skipped step
+      # would hand `ui_tree` the `|| 'true'` fallback on a tree without ui/.
+      - name: Detect the imported ui/ tree
+        id: ui-tree
+        run: |
+          if [ -f ui/package.json ]; then
+            echo 'present=true' >> "$GITHUB_OUTPUT"
+            echo 'ui/package.json is present: the ui jobs are scheduled by the ui / ui_consumers outputs.'
+          else
+            echo 'present=false' >> "$GITHUB_OUTPUT"
+            echo 'ui/package.json is absent: every ui job skips on this run.'
+          fi
 
       # ⭐ SPELLED AS AN ALLOW-LIST, not as `!= 'merge_group'` (#16467). This
       # action reads a diff, and the only two events that hand it one it can
@@ -435,6 +467,26 @@ jobs:
               # narrower audits entry is left as the package that declared it
               # spelled it, exactly as the two narrower `skills/` entries were.
               - 'docs/**'
+            # The objectui tree and the root files the ui jobs build from. A
+            # change to the guard runs the guard, so ci.yml itself is listed.
+            ui:
+              - 'ui/**'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'turbo.json'
+              - '.github/workflows/ci.yml'
+            # The seven packages objectui installs from this tree (the set its
+            # `.objectstack-pin` used to pack). A change here compiles and builds
+            # the Console in the same PR, which is the check Spec Shape Gate runs
+            # hourly against a clone of objectui main until the import retires it.
+            ui_consumers:
+              - 'packages/spec/**'
+              - 'packages/client/**'
+              - 'packages/core/**'
+              - 'packages/formula/**'
+              - 'packages/lint/**'
+              - 'packages/sdui-parser/**'
+              - 'packages/types/**'
 
   test:
     # Sharded 6-way BY PACKAGE: a core-touching PR ran the affected suite
@@ -3222,3 +3274,575 @@ jobs:
         with:
           path: packages/console/dist
           key: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh', 'scripts/assert-console-spec-injection.mjs', 'scripts/console-spec-probes.mjs', 'packages/spec/package.json', 'packages/spec/tsup.config.ts', 'packages/core/package.json', 'packages/types/package.json', 'packages/client/package.json', 'packages/formula/package.json', 'packages/sdui-parser/package.json', 'packages/lint/package.json') }}
+
+  # ── THE ui/ JOBS (objectstack#25697, epic objectstack#25677) ──────────────
+  # objectui is imported under `ui/` as a subtree. These four jobs are its CI,
+  # ported from objectui's own ci.yml (`Type Check`, `Test (shard n/16)`,
+  # `Build & E2E`) and lint.yml (`Lint`), and they land BEFORE the import:
+  #
+  #   - every one is gated on the `filter` job's `ui_tree` output, so on a tree
+  #     without `ui/package.json` it is SKIPPED on every event, never failed —
+  #     see the comment on the `ui` outputs at the top of this file;
+  #   - none is a required context, and none is in an aggregator's `needs:`.
+  #     Joining the required set is the maintainer's ruleset edit at cutover.
+  #
+  # What the port changed, everywhere, and why:
+  #   - objectui's `.objectstack-pin` plumbing (restore / build / save the
+  #     pinned @objectstack build) is gone. The seven packages objectui installs
+  #     are workspace packages here, so each job builds them from this tree with
+  #     turbo instead (its "Build the @objectstack packages objectui consumes"
+  #     step; the seven names match the `ui_consumers` filter).
+  #   - objectui's per-job "Decide whether this change needs a full run" step is
+  #     replaced by the `filter` job's `ui` / `ui_consumers` outputs.
+  #   - objectui's own commands are spelled `pnpm --dir ui run <its alias>`
+  #     (or `pnpm --dir ui exec ...`), so they run with cwd = the objectui root,
+  #     which they assume. ⛔ Not `node scripts/<x>` or `pnpm run <x>` under
+  #     `working-directory: ui`: this repo's workflow gates (check-self-test-
+  #     wired, dispatch-gates' derivation and others) key `scripts/<x>` and
+  #     `pnpm <alias>` against THIS repo's root and do not read
+  #     `working-directory`, so objectui's `scripts/check-entry-guard.mjs`
+  #     would be credited to objectstack's file of the same name, and a name
+  #     only objectui has would read as a missing script;
+  #   - turbo runs from this repo's root with directory filters, because
+  #     `ui/package.json`'s own `lint` / `type-check` scripts are
+  #     `turbo run <task>` and would recurse.
+  #   - objectui's root-only turbo tasks `//#lint:root` and `//#type-check:e2e`
+  #     are steps here (turbo.json carries no dependsOn on a package that does
+  #     not exist yet; turbo refuses the whole run over one).
+  #   - governance steps (the cross-repo closer contract) are not ported; they
+  #     belong to the governance-workflow audit (sub-issue 4 of the epic).
+
+  type-check-ui:
+    name: Type Check UI
+    needs: filter
+    if: ${{ !cancelled() && needs.filter.outputs.ui_tree != 'false' && (needs.filter.outputs.ui != 'false' || needs.filter.outputs.ui_consumers != 'false') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    env:
+      # @object-ui/app-shell's and the Console's tsc need ~2.3 GB and OOM at
+      # Node's default heap (the import spike, objectstack#25678 finding 2).
+      NODE_OPTIONS: --max-old-space-size=4096
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          # The affected scope below asks turbo for the packages changed since
+          # the base commit, which needs the base's history in the clone.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      - name: Restore Turbo cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .turbo/cache
+          key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-${{ github.job }}-
+            ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-build-core-
+
+      # objectui runs this first because it is instant and catches the
+      # structural mistake: turbo skips a package with no `type-check` script,
+      # so without it a package that lacks one reads as passing.
+      - name: Verify type-check coverage
+        run: pnpm --dir ui run type-check:coverage
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The seven packages objectui installs from this tree, and their own
+      # dependencies. The repo-root programs below import them before any
+      # turbo type-check task has built them.
+      - name: Build the @objectstack packages objectui consumes
+        run: |
+          pnpm exec turbo run build --concurrency=4 \
+            --filter=@objectstack/spec... \
+            --filter=@objectstack/client... \
+            --filter=@objectstack/core... \
+            --filter=@objectstack/formula... \
+            --filter=@objectstack/lint... \
+            --filter=@objectstack/sdui-parser... \
+            --filter=@objectstack/types...
+
+      - name: Verify every imported package is declared by the package that ships it
+        run: pnpm --dir ui run check:phantom-deps
+
+      - name: Verify no package imports itself by name
+        run: pnpm --dir ui run check:self-import
+
+      - name: Verify no covered package ships a source file nothing reaches
+        run: pnpm --dir ui run check:unreferenced-sources
+
+      - name: Verify no doc comment prescribes a spelling a shared reader owns
+        run: pnpm --dir ui run check:doc-example-readers
+
+      - name: Verify every handler key a registered renderer reads is declared by its arm
+        run: pnpm --dir ui run check:handler-key-reads
+
+      - name: Verify every object-metadata write door applies the write guard
+        run: pnpm --dir ui run check:metadata-write-doors
+
+      - name: Verify published build tsconfigs exclude tooling directories
+        run: pnpm --dir ui run check:published-tsconfig-exclude
+
+      - name: Verify every sideEffects array names exactly its registering modules
+        run: pnpm --dir ui run check:side-effects-array
+
+      - name: Verify every ElementDataSourceGate wrapper reaches the declaration seam
+        run: pnpm --dir ui run check:element-data-source-declaration
+
+      - name: Verify published ESM packages emit resolvable relative specifiers
+        run: pnpm --dir ui run check:esm-specifiers
+
+      - name: Verify spec-named symbols are derived, not hand-written
+        run: pnpm --dir ui run check:spec-symbols
+
+      - name: Verify action renderers forward every key the runtime reads
+        run: pnpm --dir ui run check:action-forward-parity
+
+      - name: Verify designer field payloads declare only keys FieldSchema accepts
+        run: pnpm --dir ui run check:designer-field-key-parity
+
+      - name: Verify authored icon names are live lucide icons keys
+        run: pnpm --dir ui run check:icon-record-names
+
+      - name: Verify t() call-site keys exist in the en locale pack
+        run: pnpm --dir ui run check:i18n-keys
+
+      - name: Verify changed en strings were followed by the nine translations
+        run: pnpm --dir ui run check:i18n-drift
+
+      - name: Verify the metadata-admin designer string tables stay paired
+        run: pnpm --dir ui run check:i18n-designer-parity
+
+      - name: Type-check the ui scripts
+        run: pnpm --dir ui run type-check:scripts
+
+      - name: Type-check the ui root Vitest config
+        run: pnpm --dir ui run type-check:vitest-config
+
+      # objectui's `//#type-check:e2e` root task, which its turbo.json made a
+      # dependency of every `type-check`; here it is this step.
+      - name: Type-check the ui e2e suite
+        run: pnpm --dir ui run type-check:e2e
+
+      # A pull_request or merge_group run type-checks the ui packages turbo
+      # reports changed since the base, plus their dependents — a change to
+      # one of the seven @objectstack packages selects every ui package that
+      # depends on it, which is how a spec change compiles the Console here.
+      # Every other event, and any run without a base, type-checks every ui
+      # package. The exclusions keep the task on ui packages: this repo's own
+      # packages spell the script `typecheck` and Type Check · workspace in
+      # lint.yml owns them, and `./ui` is objectui's root manifest, whose
+      # `type-check` script is `turbo run type-check` itself.
+      - name: Run type-check over the ui packages
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          QUEUE_BASE: ${{ github.event.merge_group.base_sha }}
+          TURBO_RUN_SUMMARY: 'true'
+        run: |
+          case "$EVENT" in
+            pull_request) base="$PR_BASE" ;;
+            merge_group) base="$QUEUE_BASE" ;;
+            *) base='' ;;
+          esac
+          if [ -n "$base" ]; then
+            echo "Affected scope: ui packages changed since $base, and their dependents."
+            pnpm exec turbo run type-check --concurrency=4 \
+              "--filter=...[$base]" \
+              --filter='!./ui' \
+              --filter='!./packages/**' \
+              --filter='!./apps/**' \
+              --filter='!./examples/**'
+          else
+            echo "Full scope: every ui package ($EVENT run)."
+            pnpm exec turbo run type-check --concurrency=4 \
+              --filter='./ui/packages/*' \
+              --filter='./ui/apps/*' \
+              --filter='./ui/examples/*'
+          fi
+
+      - name: Type-check ui repo-root vitest setup files
+        run: pnpm --dir ui run type-check:vitest-setup
+
+      - name: Save Turbo cache (main only)
+        if: always() && github.event_name == 'push'
+        uses: actions/cache/save@v6
+        with:
+          path: .turbo/cache
+          key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-${{ github.sha }}
+
+  # ── Test UI: the shard count ────────────────────────────────────────────
+  # N = 16, objectui's own matrix, chosen the way scripts/partition-test-shards.mjs
+  # chooses Test Core's: the slowest leg within MAX_SHARD_OVER_MEAN (1.3) of the
+  # mean, and no more legs than that bound and the job timeout need.
+  #
+  # The unit is a FILE here, not a package, because objectui is one vitest root
+  # (`vitest run` with its unit / dom / dom-heavy projects) whose sequencer
+  # (ui/scripts/test-shard-sequencer.mjs) already places files on legs by
+  # measured duration, LPT, from ui/scripts/test-shard-timings.json — the same
+  # algorithm partition-test-shards.mjs runs over packages. Measured over that
+  # dataset (4979 files, 325.7 summed file-minutes, heaviest file 76.6 s):
+  #   - by PACKAGE, @object-ui/app-shell alone is 104.2 of the 325.7 minutes,
+  #     so the 1.3 bound admits at most 4 legs (325.7 x 1.3 / 104.2 = 4.06)
+  #     and every leg would carry ~81 summed minutes;
+  #   - by FILE, LPT gives max/mean = 1.000 at 6, 8, 12, 16 and 24 legs, so the
+  #     bound never binds and N is set by the wall clock: 16 legs carry 20.4
+  #     summed file-minutes each, which objectui's 20-minute timeout was sized
+  #     against (vitest runs those files across the runner's workers).
+  # Raising N past 16 only adds runners; lowering it pushes a leg past the
+  # timeout objectui measured. ⛔ The dataset's keys are paths relative to the
+  # vitest root, so the suite must run with cwd = ui/ (it does, below); run
+  # from this repo's root every key misses and every file weighs the median.
+  #
+  # Every event runs the whole suite. objectui's affected-test selector
+  # (ui/scripts/select-affected-tests.mjs) reads `git diff --name-only`, which
+  # prints paths relative to the GIT root — `ui/packages/...` here — against a
+  # package graph spelled relative to the objectui root, so it is not wired
+  # until objectui's repo-root lookups are migrated (sub-issue 2 of the epic).
+  test-ui:
+    name: Test UI (${{ matrix.shard }}/16)
+    needs: filter
+    if: ${{ !cancelled() && needs.filter.outputs.ui_tree != 'false' && needs.filter.outputs.ui != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      - name: Restore Turbo cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .turbo/cache
+          key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-${{ github.job }}-
+            ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-build-core-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # objectui's suite resolves its own packages from source and the seven
+      # @objectstack packages from their built dist, which the pin used to
+      # supply prebuilt.
+      - name: Build the @objectstack packages objectui consumes
+        run: |
+          pnpm exec turbo run build --concurrency=4 \
+            --filter=@objectstack/spec... \
+            --filter=@objectstack/client... \
+            --filter=@objectstack/core... \
+            --filter=@objectstack/formula... \
+            --filter=@objectstack/lint... \
+            --filter=@objectstack/sdui-parser... \
+            --filter=@objectstack/types...
+
+      # objectui's full-battery runs also pass its per-file timings reporter
+      # and upload the result for the weekly dataset refresh. Both belong to
+      # that refresh workflow, which is in the governance-workflow audit
+      # (sub-issue 4 of the epic); until it is ported the committed dataset
+      # is what the sequencer reads.
+      - name: Run the ui tests (shard ${{ matrix.shard }}/16)
+        run: pnpm --dir ui run test --shard=${{ matrix.shard }}/16 --reporter=default --reporter=github-actions
+
+      - name: Save Turbo cache (main only)
+        if: always() && github.event_name == 'push' && matrix.shard == 1
+        uses: actions/cache/save@v6
+        with:
+          path: .turbo/cache
+          key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-${{ github.sha }}
+
+  lint-ui:
+    name: Lint UI
+    needs: filter
+    if: ${{ !cancelled() && needs.filter.outputs.ui_tree != 'false' && needs.filter.outputs.ui != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      - name: Restore Turbo cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .turbo/cache
+          key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-${{ github.job }}-
+            ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-build-core-
+
+      - name: Verify ui lint coverage
+        run: pnpm --dir ui run lint:coverage
+
+      - name: Verify every ui scripts entry guard goes through one predicate
+        run: |
+          pnpm --dir ui run check:entry-guard --self-test
+          pnpm --dir ui run check:entry-guard
+
+      - name: Verify the ui shell holds the bash 3.2 floor
+        run: |
+          pnpm --dir ui run check:bash32-floor --self-test
+          pnpm --dir ui run check:bash32-floor
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the @objectstack packages objectui consumes
+        run: |
+          pnpm exec turbo run build --concurrency=4 \
+            --filter=@objectstack/spec... \
+            --filter=@objectstack/client... \
+            --filter=@objectstack/core... \
+            --filter=@objectstack/formula... \
+            --filter=@objectstack/lint... \
+            --filter=@objectstack/sdui-parser... \
+            --filter=@objectstack/types...
+
+      # objectui's `//#lint:root` root task, which its turbo.json made a
+      # dependency of every `lint`; here it is this step.
+      - name: Lint the ui repo-root files
+        run: pnpm --dir ui run lint:root
+
+      - name: Lint the ui packages
+        env:
+          TURBO_RUN_SUMMARY: 'true'
+        run: |
+          pnpm exec turbo run lint --concurrency=4 \
+            --filter='./ui/packages/*' \
+            --filter='./ui/apps/*' \
+            --filter='./ui/examples/*'
+
+      - name: Check every vi.mock override matches the declared export shape
+        run: pnpm --dir ui run check:vi-mock-override-shape
+
+      - name: Verify no ui test resolves a repository path from the process cwd
+        run: pnpm --dir ui run check:test-path-roots
+
+      - name: Build the ui CLI the self-check runs
+        run: pnpm exec turbo run build --concurrency=4 --filter='./ui/packages/cli...'
+
+      - name: Verify the ui CLI's own check command passes on the ui tree
+        run: pnpm --dir ui run check
+
+      - name: Save Turbo cache (main only)
+        if: always() && github.event_name == 'push'
+        uses: actions/cache/save@v6
+        with:
+          path: .turbo/cache
+          key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-${{ github.sha }}
+
+  build-e2e-ui:
+    name: Build & E2E UI
+    needs: filter
+    if: ${{ !cancelled() && needs.filter.outputs.ui_tree != 'false' && (needs.filter.outputs.ui != 'false' || needs.filter.outputs.ui_consumers != 'false') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      # The Console's build runs tsc over ~3.5k files and OOMs at Node's default
+      # heap (the import spike, objectstack#25678 finding 2).
+      NODE_OPTIONS: --max-old-space-size=4096
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      - name: Restore Turbo cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .turbo/cache
+          key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-${{ github.job }}-
+            ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-build-core-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the @objectstack packages objectui consumes
+        run: |
+          pnpm exec turbo run build --concurrency=4 \
+            --filter=@objectstack/spec... \
+            --filter=@objectstack/client... \
+            --filter=@objectstack/core... \
+            --filter=@objectstack/formula... \
+            --filter=@objectstack/lint... \
+            --filter=@objectstack/sdui-parser... \
+            --filter=@objectstack/types...
+
+      - name: Build the Console for E2E
+        env:
+          VITE_BASE_PATH: /console/
+        run: pnpm --dir ui/apps/console exec vite build
+
+      - name: Verify the Console build artifact
+        run: |
+          if [ ! -f ui/apps/console/dist/index.html ]; then
+            echo "::error::ui/apps/console/dist/index.html is missing: the Console build produced nothing."
+            exit 1
+          fi
+          echo "Console build artifact is ready."
+
+      - name: Get the Playwright version
+        id: playwright-version
+        run: |
+          set -eo pipefail
+          if ! version=$(pnpm --dir ui list @playwright/test --depth=0 --json | jq -r '.[0].devDependencies["@playwright/test"].version'); then
+            echo "::error::Reading the @playwright/test version failed (pnpm list --json | jq). Refusing to write a Playwright browser cache key from it."
+            exit 1
+          fi
+          if [ -z "$version" ] || [ "$version" = "null" ]; then
+            echo "::error::Could not resolve the @playwright/test version (got: '${version}'). Refusing to write an empty or null version into the Playwright browser cache key."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Playwright browsers
+        id: playwright-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: pnpm --dir ui exec playwright install chromium
+
+      # Run from inside ui/scripts: the script is cwd-agnostic apart from its
+      # `pnpm exec playwright`, which resolves ui/package.json upwards.
+      - name: Ensure Chromium can launch
+        working-directory: ui/scripts
+        run: bash ensure-chromium-ready.sh
+
+      - name: Run the ui E2E tests
+        run: pnpm --dir ui run test:e2e --project=chromium
+
+      - name: Upload failure artefacts
+        if: ${{ !cancelled() && failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ui-e2e-failure-artifacts
+          path: |
+            ui/playwright-report/
+            ui/test-results/
+          retention-days: 14
+
+      - name: Save Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        timeout-minutes: 8
+        continue-on-error: true
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+
+      - name: Save Turbo cache (main only)
+        if: always() && github.event_name == 'push'
+        uses: actions/cache/save@v6
+        with:
+          path: .turbo/cache
+          key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-${{ github.sha }}

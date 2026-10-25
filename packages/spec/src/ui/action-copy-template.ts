@@ -37,13 +37,24 @@ import { InlineLocaleMapSchema } from './i18n.zod';
  * `closedScopeTemplateRefusal` (`automation/flow-text-slot-template.ts`), and
  * then compile it as a template. ⛔ Never a second reading of the dialect.
  *
- * ## Widening only: the blank arm, and warnings at the doors
+ * ## The doors refuse; the parse keeps the blank arm
  *
  * Each key was a plain string (`ActionSchema`'s an `I18nLabel`), so a blank
- * sentence and a sentence carrying a `${…}` or `{x}` token parsed. Both still
- * parse: the slot keeps a blank-string arm, and the doors' findings are
- * WARNINGS — an advisory at the publish gate, never a refusal. Refusing them
- * is a narrowing no ADR-0087 conversion carries, so it is its own card.
+ * sentence and a sentence carrying a `${…}` or `{x}` token parsed. They still
+ * parse: the slot keeps a blank-string arm, because the boot load and the read
+ * path judge a stored row with this parse, and dropping the arm would make a
+ * stored blank sentence an invalid row on load, a narrowing wider than the
+ * doors. The doors refuse instead (#25680): a blank sentence, a hole over a
+ * root the key does not bind, a single-brace `{x}` token, a hole holding logic
+ * or an unknown formatter, and a `${…}` token the runner shows raw are
+ * ERRORS, so `objectstack validate` and `compile` fail and the publish gate
+ * answers its 422. A stored row keeps loading until its next save, and that
+ * save is judged.
+ *
+ * One finding stays a WARNING: a `${…}` token the runner still fills (the
+ * next section), in a sentence with no `{{ }}` hole, over a root
+ * {@link ACTION_COPY_DOLLAR_TRANSITION_ROOTS} names. Refusing it waits for
+ * the runner to retire that reading.
  *
  * ## The `${…}` spelling
  *
@@ -55,6 +66,23 @@ import { InlineLocaleMapSchema } from './i18n.zod';
  * is filled by the template engine alone. The judge reads a `${…}` token with
  * its `$` and prescribes the `{{ }}` hole in its place.
  */
+
+/**
+ * The roots whose `${…}` tokens the console's action runner still fills, per
+ * key, in a sentence with no `{{ }}` hole — measured at objectui
+ * `ActionRunner` (the pinned `.objectui-sha`): `confirmMessage` evaluates a
+ * holeless `confirmText` through its `${…}` expression evaluator over the
+ * runner's context, whose `record` is the record the action runs against;
+ * `composeSuccessMessage` substitutes `${result.*}` alone in a holeless
+ * `successMessage` (any other `${…}` is left as written); an `errorMessage` is
+ * shown as written. A door names a `${…}` token over one of these roots as a
+ * warning and every other one as an error (the module note).
+ */
+export const ACTION_COPY_DOLLAR_TRANSITION_ROOTS: Readonly<Record<ActionCopyKey, readonly string[]>> = Object.freeze({
+  confirmText: Object.freeze(['record']),
+  successMessage: Object.freeze(['result']),
+  errorMessage: Object.freeze([]),
+});
 
 /** The root a `confirmText` / `successMessage` hole names for the record the action runs against. */
 export const ACTION_COPY_RECORD_ROOT = 'record';
@@ -125,9 +153,9 @@ export function actionCopyRefusals(key: ActionCopyKey, options: { localeMap?: bo
  * The slot one copy key declares, around its `template` input: ADR-0032's
  * `template` dialect, the input `TemplateExpressionInputSchema` takes — a bare
  * string is shorthand for `{ dialect: 'template', source }`, an envelope must
- * declare `dialect: 'template'` — then a blank-string arm, so the parse does
- * not narrow (the module note); then, on `ActionSchema`, the inline locale map
- * its `I18nLabel` took.
+ * declare `dialect: 'template'` — then a blank-string arm, so a stored blank
+ * sentence still loads while the doors refuse it (the module note); then, on
+ * `ActionSchema`, the inline locale map its `I18nLabel` took.
  *
  * The `template` input itself is built at each declaring `.zod.ts` file
  * (`templateExpressionInput(ExpressionSchema, actionCopyRefusals(key))`), not
@@ -143,6 +171,7 @@ export function actionCopyTemplateSlot<T extends z.ZodType>(
   const { dialectOnly: refusal } = actionCopyRefusals(key, options);
   // `trim()`'s whitespace set is exactly `\s` (ECMA-262), so this arm takes the blank strings
   // `NON_BLANK_STRING` refuses — as a `pattern` the JSON Schema carries, not a dropped refinement.
+  // Kept so a stored blank sentence still loads; the doors refuse it (#25680, the module note).
   const blank = z.string().regex(/^\s*$/);
   return options.localeMap === true
     ? z.union([template, blank, InlineLocaleMapSchema], { error: () => refusal })
@@ -155,7 +184,13 @@ const GRAMMAR =
   + 'holds no logic (no CEL, no arithmetic).';
 
 const DOORS =
-  'at `objectstack validate`, `compile` and the publish gate, as warnings: the text still parses and saves.';
+  'and refused at `objectstack validate`, `compile` and the publish gate; the text still parses, so a stored one '
+  + 'loads until its next save.';
+
+/** What the confirm and success describes add: the one transitional `${…}` reading the doors only warn about. */
+const transition = (root: string) =>
+  ` A \`\${${root}.*}\` token in a sentence with no \`{{ }}\` hole, which the console's runner still fills, is named `
+  + 'as a warning instead.';
 
 /** `confirmText`'s describe: its roots, by where the action's static values live. */
 export const ACTION_CONFIRM_TEXT_TEMPLATE_DESCRIBE =
@@ -165,7 +200,7 @@ export const ACTION_CONFIRM_TEXT_TEMPLATE_DESCRIBE =
   + 'is an object of static values — `params` (`{{ params.tier }}`); an input list binds nothing, since its values '
   + `are collected after the confirmation. ${GRAMMAR} Example: 'Delete {{ record.name }}?'. A hole over any other `
   + 'root, a `${…}` or single-brace `{x}` token (each named with its `{{ }}` spelling), a hole holding logic or an '
-  + `unknown formatter, and a blank sentence are named ${DOORS}`;
+  + `unknown formatter, and a blank sentence are named ${DOORS}${transition('record')}`;
 
 /** `successMessage`'s describe. */
 export const ACTION_SUCCESS_MESSAGE_TEMPLATE_DESCRIBE =
@@ -174,7 +209,7 @@ export const ACTION_SUCCESS_MESSAGE_TEMPLATE_DESCRIBE =
   + 'the action\'s handler answered (`{{ result.email }}`; for an `api` or `script` action the server response), and '
   + `\`record\`, the record the action ran against. ${GRAMMAR} Example: 'Invitation sent to {{ result.email }}'. A `
   + 'hole over any other root, a `${…}` or single-brace `{x}` token (each named with its `{{ }}` spelling), a hole '
-  + `holding logic or an unknown formatter, and a blank sentence are named ${DOORS}`;
+  + `holding logic or an unknown formatter, and a blank sentence are named ${DOORS}${transition('result')}`;
 
 /** `errorMessage`'s describe: a slot that fills no hole. */
 export const ACTION_ERROR_MESSAGE_TEMPLATE_DESCRIBE =

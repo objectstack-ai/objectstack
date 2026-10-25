@@ -598,6 +598,7 @@
     "SearchIndexConfigSchema (const)",
     "SearchProvider (type)",
     "SearchProviderSchema (const)",
+    "SecurityCatalogItemLike (interface)",
     "SecurityContextConfig (type)",
     "SecurityContextConfigParsed (type)",
     "SecurityContextConfigSchema (const)",
@@ -888,7 +889,9 @@
     "translateMetadataDocument (function)",
     "translateObject (function)",
     "translatePage (function)",
+    "translatePermissionSet (function)",
     "translatePicklist (function)",
+    "translatePosition (function)",
     "translateView (function)",
     "validationMessageTranslationKey (function)",
     "walkAddressedPageComponents (function)"

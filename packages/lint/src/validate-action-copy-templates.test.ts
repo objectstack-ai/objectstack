@@ -6,10 +6,11 @@
 // and `record`, `errorMessage` over nothing. `validateStackExpressions` — the
 // rule `objectstack validate`, `objectstack compile` and the runtime publish
 // gate all run — judges every sentence through the template judge's
-// closed-scope entry, then compiles it as a template. Every finding is a
-// WARNING: each of these texts parsed while the keys were plain strings, and
-// refusing them is its own card. So a pin here asserts `severity: 'warning'`
-// and, at the publish gate, an advisory with no error.
+// closed-scope entry, then compiles it as a template. Every finding is an
+// ERROR (#25680), so the publish gate refuses the write; one stays a WARNING,
+// a `${…}` token the console's runner still fills in a sentence with no
+// `{{ }}` hole (`ACTION_COPY_DOLLAR_TRANSITION_ROOTS`). So a pin here asserts
+// the severity per finding and, at the publish gate, which channel it rides.
 //
 // The gate half drives the REAL dispatch (`runRuntimeAuthoringRules`) with a
 // page write and an action write, because a `runtimeTypes` widening whose
@@ -55,33 +56,51 @@ describe('validateStackExpressions — a registered action\'s copy is judged as 
     }
   });
 
-  it('names a `${…}` token with a WARNING prescribing its `{{ }}` hole, never `${{ … }}`', () => {
+  it('names a `${…}` token the runner still fills with a WARNING prescribing its `{{ }}` hole, never `${{ … }}`', () => {
     const [issue, ...rest] = copyIssues({ objects, actions: [invite({ successMessage: 'Invitation sent to ${result.email}' })] });
     expect(rest).toEqual([]);
     expect(issue!.severity).toBe('warning');
     expect(issue!.where).toBe("stack · action 'invite' successMessage");
     expect(issue!.message).toContain('Write `Invitation sent to ${result.email}` as `Invitation sent to {{ result.email }}`.');
     expect(issue!.message).not.toContain('${{');
-    expect(issue!.message).toMatch(/A warning, not a refusal/);
+    const [confirm] = copyIssues({ objects, actions: [invite({ confirmText: 'Invite ${record.name}?' })] });
+    expect(confirm!.severity).toBe('warning');
   });
 
-  it('names a hole over a root the runner does not bind — `result` in a confirmText', () => {
+  it('refuses a `${…}` token the runner shows raw — off its transitional roots, beside a `{{ }}` hole, or beside a `{x}`', () => {
+    for (const patch of [
+      // `composeSuccessMessage` substitutes `${result.*}` alone.
+      { successMessage: 'Sent for ${record.name}' },
+      // A sentence with a `{{ }}` hole is filled by the template engine alone.
+      { successMessage: 'Sent to {{ result.email }} at ${result.at}' },
+      // The `${…}` evaluator does not bind the static `params`.
+      { confirmText: 'Run for ${params.tier}?', params: { tier: 'gold' } },
+      { confirmText: 'Invite ${record.name} as {role}?' },
+    ]) {
+      const issues = copyIssues({ objects, actions: [invite(patch)] });
+      expect(issues.length, JSON.stringify(patch)).toBe(1);
+      expect(issues[0]!.severity, JSON.stringify(patch)).toBe('error');
+      expect(issues[0]!.message).not.toMatch(/A warning, not a refusal/);
+    }
+  });
+
+  it('refuses a hole over a root the runner does not bind — `result` in a confirmText', () => {
     const [issue] = copyIssues({ objects, actions: [invite({ confirmText: 'Send to {{ result.email }}?' })] });
-    expect(issue!.severity).toBe('warning');
+    expect(issue!.severity).toBe('error');
     expect(issue!.message).toContain("An action's `confirmText` binds only `record`");
     expect(issue!.message).toContain('`{{ result.email }}`');
   });
 
   it('judges each value of a locale map at its own location', () => {
     const issues = copyIssues({ objects, actions: [invite({ successMessage: { en: 'Sent', 'zh-CN': '已发送 {result.email}' } })] });
-    expect(issues.map((i) => i.where)).toEqual(["stack · action 'invite' successMessage.zh-CN"]);
+    expect(issues.map((i) => [i.where, i.severity])).toEqual([["stack · action 'invite' successMessage.zh-CN", 'error']]);
   });
 
-  it('names logic in a hole, an unknown formatter and a blank sentence — all warnings', () => {
-    for (const successMessage of ['{{ result.count * 2 }} sent', '{{ result.email | shout }}', '  ']) {
+  it('refuses a single-brace token, logic in a hole, an unknown formatter and a blank sentence — all errors', () => {
+    for (const successMessage of ['{result.email} sent', '{{ result.count * 2 }} sent', '{{ result.email | shout }}', '', '  ']) {
       const issues = copyIssues({ objects, actions: [invite({ successMessage })] });
       expect(issues.length, successMessage).toBeGreaterThan(0);
-      expect(issues.every((i) => i.severity === 'warning'), successMessage).toBe(true);
+      expect(issues.every((i) => i.severity === 'error'), successMessage).toBe(true);
     }
   });
 
@@ -117,7 +136,17 @@ describe('validateStackExpressions — a page action row\'s copy (#24814)', () =
     ]);
     expect(issues[0]!.message).toContain("binds only `record`, so a hole over any other root");
     expect(issues[1]!.message).toContain('binds no root, so it fills no hole');
-    expect(issues.every((i) => i.severity === 'warning')).toBe(true);
+    expect(issues.every((i) => i.severity === 'error')).toBe(true);
+  });
+
+  it('refuses a `${…}` token in an errorMessage: the runner shows it as written', () => {
+    const issues = copyIssues({
+      objects,
+      pages: [pageWith([{ type: 'action:button', properties: { label: 'Run', actionType: 'script', target: 'run', errorMessage: 'Failed for ${record.name}' } }])],
+    });
+    expect(issues.map((i) => [i.where, i.severity])).toEqual([
+      ["page 'account_home'.regions[0].components[0] (action:button) · errorMessage", 'error'],
+    ]);
   });
 
   it('judges each action:group / action:menu member, an action:icon, and an inline `properties.action`', () => {
@@ -138,6 +167,7 @@ describe('validateStackExpressions — a page action row\'s copy (#24814)', () =
     ]);
     expect(issues[0]!.message).toContain('as `Run {{ record.name }}?`');
     expect(issues[2]!.message).toMatch(/^An action's `confirmText` is blank/);
+    expect(issues.map((i) => i.severity)).toEqual(['warning', 'error', 'error', 'warning']);
   });
 
   it('on a page write runs that pass alone', () => {
@@ -152,16 +182,32 @@ describe('validateStackExpressions — a page action row\'s copy (#24814)', () =
   });
 });
 
-describe('the runtime publish gate — an advisory, never a refusal (#24814)', () => {
+describe('the runtime publish gate — a refusal, but for the runner\'s transitional `${…}` (#24814, #25680)', () => {
   const findings = (type: string, item: unknown) => {
     const { errors, advisories } = runRuntimeAuthoringRules({ type, item, context: { objects } });
     const copy = (f: { where: string }) => /confirmText|successMessage|errorMessage/.test(f.where);
     return { errors: errors.filter(copy), advisories: advisories.filter(copy) };
   };
+  const row = (properties: Record<string, unknown>) =>
+    pageWith([{ type: 'action:button', properties: { label: 'Run', actionType: 'script', target: 'run', ...properties } }]);
 
-  it('a page write carrying a `${…}` confirmText answers one advisory and no error', () => {
-    const page = pageWith([{ type: 'action:button', properties: { label: 'Run', actionType: 'script', target: 'run', confirmText: 'Delete ${record.name}?' } }]);
-    const { errors, advisories } = findings('page', page);
+  it('a page write carrying a single-brace, an unbound or a blank confirmText answers one error and no advisory', () => {
+    for (const confirmText of ['Delete {record.name}?', 'Delete {{ result.name }}?', '']) {
+      const { errors, advisories } = findings('page', row({ confirmText }));
+      expect(errors, confirmText).toHaveLength(1);
+      expect(errors[0]!.where, confirmText).toContain('confirmText');
+      expect(advisories, confirmText).toEqual([]);
+    }
+  });
+
+  it('an action and an object write carrying an unbound successMessage answer one error', () => {
+    const action = invite({ successMessage: 'Sent to {{ owner.email }}' });
+    expect(findings('action', action).errors).toHaveLength(1);
+    expect(findings('object', { ...objects[0], actions: [action] }).errors).toHaveLength(1);
+  });
+
+  it('a page write carrying a transitional `${…}` confirmText answers one advisory and no error', () => {
+    const { errors, advisories } = findings('page', row({ confirmText: 'Delete ${record.name}?' }));
     expect(errors).toEqual([]);
     expect(advisories).toHaveLength(1);
     expect(advisories[0]!.message).toContain('as `Delete {{ record.name }}?`');

@@ -1588,7 +1588,7 @@ export const ReleaseSignoffFlow = defineFlow({
  * or a schedule. The start node's config arms the hook:
  *
  *   POST /api/v1/automation/hooks/showcase_inbound_task_webhook/intake
- *   x-objectstack-signature: t=<unix seconds>,v1=<hmac-sha256 of "<t>.<raw body>", key below>
+ *   x-objectstack-signature: t=<unix seconds>,v1=<hmac-sha256 of "<t>.<raw body>", key = $SHOWCASE_WEBHOOK_SECRET>
  *   { "title": "...", "assignee": "...", "project": "<showcase_project id>" }
  *
  * `signHttpBodyAt(rawBody, secret, Math.floor(Date.now() / 1000))` from
@@ -1619,8 +1619,11 @@ export const InboundTaskWebhookFlow = defineFlow({
       config: {
         triggerType: 'api',
         hookId: 'intake',
-        // Demo secret — real deployments inject this from configuration.
-        secret: 'showcase-webhook-secret',
+        // The secret is NAMED, never written here: the deployment sets the
+        // SHOWCASE_WEBHOOK_SECRET environment variable (or serves that name
+        // from its credential resolver), and the engine reads it at every
+        // post. Until it is set, every post is refused 503.
+        secretRef: 'SHOWCASE_WEBHOOK_SECRET',
       },
     },
     {

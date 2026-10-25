@@ -121,6 +121,8 @@
  *     ^ walked because the ledger's `flows` row is `live` and warns no
  *       author; a group the ledger does warn on is left out of the walk
  *       (see `authorWarnedTranslationGroups`)
+ *   positions.<position>.label / .description
+ *   permissions.<permission_set>.label / .description
  *   metadataForms.<type>.label / .description
  *   metadataForms.<type>.sections.<section>.label / .description
  *   metadataForms.<type>.fields.<dotPath>.label / .helpText / .placeholder
@@ -224,6 +226,8 @@ export interface ExpectedEntry {
     | 'picklist'
     | 'page'
     | 'flow'
+    | 'position'
+    | 'permission'
     | 'metadataType'
     | 'metadataFormSection'
     | 'metadataFormField';
@@ -1373,7 +1377,16 @@ export function collectExpectedEntries(
           { objectName },
         );
 
-        pushOptional(out, ['objects', objectName, 'fields', fieldName, 'help'], field.help ?? field.description, 'field', { objectName });
+        // `inlineHelpText` is the key `FieldSchema` spells help text with, so it
+        // is the authored default-locale text of `help` — after `help`, before
+        // `description` — exactly as the authored label is for `label` (#15711).
+        pushOptional(
+          out,
+          ['objects', objectName, 'fields', fieldName, 'help'],
+          field.help ?? field.inlineHelpText ?? field.description,
+          'field',
+          { objectName },
+        );
         pushOptional(out, ['objects', objectName, 'fields', fieldName, 'placeholder'], field.placeholder, 'field', { objectName });
 
         // Options — accept either `{value, label}[]` arrays or a record map.
@@ -1606,6 +1619,9 @@ export function collectExpectedEntries(
 
   // ── Shared option lists (`picklists.<name>.…`) ────────────────────
   walkPicklists(config, out);
+
+  // ── Security catalog (`positions.<name>.…`, `permissions.<name>.…`) ─
+  walkSecurityCatalog(config, out);
 
   // ── Pages + their `page:header` copy ──────────────────────────────
   const pages: any[] = Array.isArray(config?.pages) ? config.pages : [];
@@ -1841,6 +1857,44 @@ function walkPicklists(config: any, out: ExpectedEntry[]): void {
     const name = extension.extend;
     if (typeof name !== 'string' || name.length === 0) continue;
     walkOptions(name, extension.options);
+  }
+}
+
+// ─── Security catalog (`positions.<name>.…`, `permissions.<name>.…`) ───
+
+/**
+ * Emit the security-catalog copy surface:
+ *
+ *   positions.<name>.label / .description
+ *   permissions.<name>.label / .description
+ *
+ * Read off the stack's `positions[]` and `permissions[]` (the permission-set
+ * collection — the bundle group is spelled as the stack spells it). Both are
+ * served through `translatePosition` / `translatePermissionSet`, registered in
+ * `METADATA_DOCUMENT_TRANSLATORS`, so the REST boundary localizes them; this
+ * pass is the half that writes the skeleton and lets `os i18n check` see the
+ * gap.
+ *
+ * `pushOptional` for every key: a permission set's `label` and both
+ * `description`s are optional at the authoring site, and no renderer fallback
+ * for an absent one is measured, so a string nobody wrote is recorded without
+ * an `inline` and never demanded as a translation. A position's `label` is
+ * required, so it is always authored text.
+ */
+function walkSecurityCatalog(config: any, out: ExpectedEntry[]): void {
+  const groups = [
+    { group: 'positions', items: config?.positions, source: 'position' },
+    { group: 'permissions', items: config?.permissions, source: 'permission' },
+  ] as const;
+  for (const { group, items, source } of groups) {
+    if (!Array.isArray(items)) continue;
+    for (const item of items) {
+      if (!item || typeof item !== 'object') continue;
+      const name = item.name;
+      if (typeof name !== 'string' || name.length === 0) continue;
+      pushOptional(out, [group, name, 'label'], item.label, source);
+      pushOptional(out, [group, name, 'description'], item.description, source);
+    }
   }
 }
 

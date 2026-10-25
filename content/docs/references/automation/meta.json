@@ -13,6 +13,7 @@
     "---Approvals & Jobs---",
     "approval",
     "---More---",
+    "api-trigger-secret-ref",
     "builtin-node-config",
     "flow-function",
     "io-node-config",

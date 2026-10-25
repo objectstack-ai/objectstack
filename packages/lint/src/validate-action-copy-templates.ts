@@ -27,15 +27,21 @@
  * `ACTION_ERROR_TEMPLATE_ROOTS` (none — the runner shows an `errorMessage` as
  * written).
  *
- * ⚠️ Every finding is a WARNING: an advisory at the publish gate, never a
- * refusal, so no command's exit code changes. Each of these texts parsed while
- * the keys were plain strings; refusing them is a narrowing no ADR-0087
- * conversion carries, and it ships as its own card, as the bulk slot's did.
+ * Every finding is an ERROR (#25680): `objectstack validate` and `compile`
+ * fail, and the publish gate answers its 422. Each of these texts parsed while
+ * the keys were plain strings, and it still parses (the slot keeps its blank
+ * arm), so a stored row keeps loading until its next save; the save is judged.
+ * One finding stays a WARNING: a `${…}` token the console's runner still fills
+ * in its transitional reading — a sentence with no `{{ }}` hole whose every
+ * token is `${…}` over a root `ACTION_COPY_DOLLAR_TRANSITION_ROOTS` names for
+ * the key (`dollarOnlyTokenRoots`). Refusing it waits for the runner to retire
+ * that reading; any other `${…}` token is shown raw, so it is an error.
  */
 
 import { validateExpression } from '@objectstack/formula';
-import { closedScopeTemplateRefusal, templateSlotSource } from '@objectstack/spec/automation';
+import { closedScopeTemplateRefusal, dollarOnlyTokenRoots, templateSlotSource } from '@objectstack/spec/automation';
 import {
+  ACTION_COPY_DOLLAR_TRANSITION_ROOTS,
   ACTION_ERROR_TEMPLATE_ROOTS,
   ACTION_SUCCESS_TEMPLATE_ROOTS,
   actionConfirmTemplateRoots,
@@ -63,8 +69,9 @@ const CONTAINER_COMPONENTS: ReadonlySet<string> = new Set(['action:group', 'acti
 /** A blank sentence — `trim()`'s whitespace set is exactly `\s`. */
 const BLANK_TEXT = /^\s*$/;
 
-/** What every finding ends with: it is advice, and why. */
-const ADVISORY = ' A warning, not a refusal: this text parsed while the key was a plain string.';
+/** What the one finding that stays a warning ends with: why it is advice, for now. */
+const TRANSITIONAL = ' A warning, not a refusal, for now: the console\'s runner still fills a `${…}` token over this '
+  + 'root in a sentence with no `{{ }}` hole.';
 
 /** What a blank sentence costs, per key, at the console's runner. */
 const BLANK_COST: Record<CopyKey, string> = {
@@ -74,6 +81,17 @@ const BLANK_COST: Record<CopyKey, string> = {
   errorMessage: 'so the failure toast shows the raw error (or an empty toast, for a whitespace sentence): write the '
     + 'sentence, or remove the key.',
 };
+
+/**
+ * Whether `text` is the one shape the runner still reads in its `${…}`
+ * dialect for `key`: no `{{ }}` hole, and every token a `${…}` over a root it
+ * fills there.
+ */
+function isTransitionalDollar(key: CopyKey, text: string): boolean {
+  const roots = dollarOnlyTokenRoots(text);
+  const fills = ACTION_COPY_DOLLAR_TRANSITION_ROOTS[key];
+  return roots !== undefined && roots.every((root) => fills.includes(root));
+}
 
 /** The roots one key's holes may name, for the action that carries it. */
 function rootsOf(key: CopyKey, action: AnyRec): readonly string[] {
@@ -114,19 +132,23 @@ function judgeAction(
     for (const { at, text } of sentencesOf(action[key], localeMap)) {
       const located = `${where} ${key}${at}`;
       const slot = `An action's \`${key}\``;
-      const warn = (message: string, quoted: string): void => {
-        issues.push({ where: located, message: `${message}${ADVISORY}`, source: quoted, severity: 'warning' });
+      const refuse = (message: string, quoted: string): void => {
+        issues.push({ where: located, message, source: quoted, severity: 'error' });
       };
       if (BLANK_TEXT.test(text)) {
-        warn(`${slot} is blank, ${BLANK_COST[key]}`, text);
+        refuse(`${slot} is blank, ${BLANK_COST[key]}`, text);
         continue;
       }
       const refusal = closedScopeTemplateRefusal(text, { slot, roots: rootsOf(key, action) });
       if (refusal !== undefined) {
-        warn(refusal, text);
+        if (isTransitionalDollar(key, text)) {
+          issues.push({ where: located, message: `${refusal}${TRANSITIONAL}`, source: text, severity: 'warning' });
+        } else {
+          refuse(refusal, text);
+        }
         continue;
       }
-      for (const e of validateExpression('template', text).errors) warn(e.message, e.source);
+      for (const e of validateExpression('template', text).errors) refuse(e.message, e.source);
     }
   }
 }
@@ -142,7 +164,7 @@ export interface ActionCopyTemplateScope {
 }
 
 /**
- * Every warning an action's copy draws across the collections `scope` names
+ * Every finding an action's copy draws across the collections `scope` names
  * (see the module note). An action declared both top-level and on its object
  * (`defineStack` merges one onto the other) is judged once, at the first place
  * it is met — the de-duplication the expression pass's `checkAction` applies.
