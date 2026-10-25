@@ -1003,10 +1003,12 @@ export function selfTest({ tier = 'full' } = {}) {
         'scripts/check-adr-0087-registration.mjs', 'scripts/check-changeset-no-major.mjs']
         .every((script) => valueBearing.some((i) => i.script === script)),
     );
+    // The card named three; the third, `scripts/check-prerelease-pin-watch.mjs
+    // --verbose`, left the tree with prerelease-pin-watch.yml (objectstack#25697),
+    // and the `keyWf` fixture above still carries its shape.
     t(
-      '⭐ …and the three the card called value-bearing that are really LITERAL render as runnable commands instead',
-      ['scripts/check-engine-split-ratio.mjs --days 90', 'scripts/check-required-contexts.mjs --verify-required-set',
-        'scripts/check-prerelease-pin-watch.mjs --verbose']
+      '⭐ …and the two the card called value-bearing that are really LITERAL render as runnable commands instead',
+      ['scripts/check-engine-split-ratio.mjs --days 90', 'scripts/check-required-contexts.mjs --verify-required-set']
         .every((key) => direct.some((i) => i.check === key && i.argvVariables.length === 0)),
     );
     t(
@@ -5754,20 +5756,25 @@ export function selfTest({ tier = 'full' } = {}) {
   //
   // Pinned rather than left to the fixture, because the whole finding was that
   // the FIXTURE-shaped question ("can it follow an indirection?") had a
-  // different answer from the LIVE one. If the console job is renamed or its
-  // filter re-spelled, re-point these cases — do not delete them: they are the
-  // measured statement that a pin bump derives its own gates.
+  // different answer from the LIVE one. If the job is renamed or its filter
+  // re-spelled, re-point these cases — do not delete them: they are the
+  // measured statement that a root file a job filter names derives that job's
+  // own gates. The card's job, `console-pin` (Console Pin Gate) with the pin
+  // file `.objectui-sha`, retired with the objectui pin (objectstack#25697);
+  // they are re-pointed at Build Core, whose `core` filter names root files
+  // outside every package the same way and whose steps run four dist guards.
   const liveCiPops = jobPathPopulations(readFileSync(nodePath.join(ROOT, '.github/workflows/ci.yml'), 'utf8'), 'ci.yml');
-  const livePinJob = liveCiPops.find((p) => p.checks.includes('check:console-sha'));
-  t('the live console job is found by the gate it runs', Boolean(livePinJob));
-  t('and it is named Console Pin Gate — the name branch protection and the Checks tab use', livePinJob?.name === 'Console Pin Gate');
+  const BUILD_CORE_GUARDS = ['check:dts-closure', 'check:dual-build-cjs-loads', 'check:sourcemap-no-sources-content', 'check:lean-entry-closure'];
+  const liveFilteredJob = liveCiPops.find((p) => p.checks.includes('check:lean-entry-closure'));
+  t('the live Build Core job is found by the gate it runs', Boolean(liveFilteredJob));
+  t('and it is named Build Core — the name branch protection and the Checks tab use', liveFilteredJob?.name === 'Build Core');
   t(
-    'its derived population covers the pin file, which is the whole acceptance criterion',
-    Boolean(livePinJob && triggerListCovers(livePinJob.paths, '.objectui-sha')),
+    'its derived population covers a root file outside every package (tsconfig.json), which is the whole acceptance criterion',
+    Boolean(liveFilteredJob && triggerListCovers(liveFilteredJob.paths, 'tsconfig.json')),
   );
   t(
-    'both console gates are reached, not just the one the card named',
-    Boolean(livePinJob?.checks.includes('check:console-sha') && livePinJob?.checks.includes('check:console-injection')),
+    'all four of its dist guards are reached, not just the one it was found by',
+    Boolean(liveFilteredJob && BUILD_CORE_GUARDS.every((c) => liveFilteredJob.checks.includes(c))),
   );
   // The NEGATIVE control, and it is the half that keeps the widening honest: a
   // path in none of the four filters must derive nothing extra. AGENTS.md is a
