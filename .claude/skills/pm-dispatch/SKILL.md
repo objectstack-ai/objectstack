@@ -195,10 +195,10 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - PR 上的标签 = 待维护者审阅,不入六态;与请审同为等人批清单,随获批或撤回判决离开。
 - 批准判定单源 = 队列守卫常量 `GOVERNED_APPROVERS`:授权账户 APPROVED 即算,⛔ 不卡 `commit_id`。
 - 批准后再推亦不过期;席位落地 = 过落地前检、清标、ready、auto-merge,踢出/变基同法。
-- ③ 请审是中继 op:`pr_create`/`pr_ready` 命中 Tier H 即向 `GOVERNED_APPROVERS` 全员请审。
-- 已请审/已指派/已评审者跳过(零写);PR 作者即其一时请审必 422,op 改为 assign 该账户替代。
-- 席位只核对 run 摘要 governed review 行,缺口才手补(免碰 draft 位 REST 路)并在轮次报告点名。
-- ready/draft 走中继 op;MCP 兜底已拒;端点见 rest-channel。
+- ③ 中继 `pr_create`/`pr_ready` 命中 Tier H 即向 `GOVERNED_APPROVERS` 中未请/派/审者请审。
+- 作者是审批人 ⇒ 指派它、请其余(请它必 422),否则请全员;速读只点非作者审批人去批。
+- 脱中继开的 PR 无 run 行:交速读前席位恒自读 `requested_reviewers`/`assignees`,⛔ 不只看 run 行。
+- 缺口经中继 `pr_request_reviewers`/`assign` 补,⛔ 不碰 draft 位;ACCEPT 与轮报点名脱中继作者。
 - ④ 轮次报告单列 awaiting a human merge。
 - skills 车道自有 PR:纯代码面如 `scripts/pm/` 由本席按达档自审(清单不减)后落地。
 - 受管面两层:Tier S = `.claude/**` 全树,余皆 Tier H 等人批;S 经达档复核 PASS 后 ready → 入队。
