@@ -73,6 +73,16 @@ export default defineConfig({
         replacement: path.resolve(__dirname, '../../metadata-protocol/src/index.ts'),
       },
       {
+        // [#25571] `notify-node.ts` counts the per-address email-field limit
+        // with `@objectstack/plugin-auth`'s fixed-window counter, and
+        // `notify-email-field-recipient.integration.test.ts` asserts the Nth
+        // send is refused. Unaliased, the subpath resolves to `dist/`, so the
+        // verdict would depend on build state rather than on the source in this
+        // checkout. Same anchored-regex rule as the entries above.
+        find: /^@objectstack\/plugin-auth\/rate-limit-storage$/,
+        replacement: path.resolve(__dirname, '../../plugins/plugin-auth/src/rate-limit-storage.ts'),
+      },
+      {
         // The two integration suites that boot the real `SecurityPlugin` mount
         // plugin-auth's identity preset (`createIdentityObjectsPlugin()`):
         // `SecurityPlugin` refuses a kernel without the `sys_user` / `sys_member`

@@ -127,6 +127,31 @@ function systemWriteContext(organizationId?: string | null): Record<string, unkn
 }
 
 /**
+ * The bookkeeping context for LOOKING UP a file a record's field references,
+ * carrying the acting organization when the triggering write had one.
+ *
+ * A write references a file only as its own organization can reach it. The
+ * lookup that decides whether a referenced id is a file this platform manages
+ * — and so whether it is claimed, copied and held to its field's declaration —
+ * goes through the same channel {@link systemWriteContext} opens for the copy:
+ * the organization travels as `tenantId`, and the driver's tenant term (the
+ * wall's verdict for the posture in force, ADR-0131 D8) decides which rows the
+ * lookup can see. ⛔ No organization comparison is written here: whether this
+ * object has a tenant column, what a row with no organization means and
+ * whether the posture walls at all (`single` does not) are the platform's
+ * answers, for the same reason the copy is never stamped on the payload.
+ *
+ * A file the lookup cannot see is answered exactly as an id the platform does
+ * not manage: the value is kept as written and nothing is claimed or copied.
+ * No organization ⇒ the key is absent and the lookup reads as it did before.
+ */
+function systemReadContext(organizationId?: string | null): Record<string, unknown> {
+  return typeof organizationId === 'string' && organizationId.length > 0
+    ? { ...SYSTEM_CTX, tenantId: organizationId }
+    : { ...SYSTEM_CTX };
+}
+
+/**
  * The organization the write that triggered this hook is acting in, or `null`.
  *
  * `HookContext.session.organizationId` is the blessed developer-facing name
@@ -510,9 +535,10 @@ async function applyCopyOnClaim(
     for (const token of [...new Set(tokens)]) {
       const row = await engine.findOne('sys_file', {
         where: { id: token },
-        context: { ...SYSTEM_CTX },
+        context: systemReadContext(organizationId),
       });
-      // Unknown id: not a file this platform manages (external/legacy value).
+      // Unknown id: not a file this platform manages (external/legacy value),
+      // or not one the acting organization can reach (`systemReadContext`).
       // Left verbatim — the read resolver ignores it for the same reason.
       if (!row) continue;
 
@@ -565,6 +591,10 @@ async function applyCopyOnClaim(
  * service), and the safe outcome is that the original owner keeps the file —
  * a second record pointing at bytes it does not own is visible to
  * `verify-references`, whereas a silently transferred owner would not be.
+ *
+ * The file is looked up as the acting organization reaches it
+ * ({@link systemReadContext}), the same lookup copy-on-claim made before the
+ * write: a file outside that reach is not claimed.
  */
 async function claimFile(
   engine: FileReferenceEngine,
@@ -573,9 +603,10 @@ async function claimFile(
   object: string,
   recordId: string,
   field: string,
+  organizationId: string | null,
 ): Promise<void> {
-  const row = await engine.findOne('sys_file', { where: { id: fileId }, context: { ...SYSTEM_CTX } });
-  if (!row) return; // not a platform-managed file — nothing to own
+  const row = await engine.findOne('sys_file', { where: { id: fileId }, context: systemReadContext(organizationId) });
+  if (!row) return; // not a platform-managed file the acting organization reaches — nothing to own
   if (row.ref_id != null && !isSameSlot(row, object, recordId, field)) {
     logger.warn(
       `[storage] file reference: ${fileId} is already owned by ` +
@@ -783,10 +814,11 @@ export function installFileReferenceHooks(
       if (fileFields.length === 0) return;
       const recordId = row.id;
       if (recordId == null) return;
+      const organizationId = actingOrganizationOf(ctx);
       for (const field of fileFields) {
         for (const token of [...new Set(idTokensIn(row[field]))]) {
           try {
-            await claimFile(engine, logger, token, object, String(recordId), field);
+            await claimFile(engine, logger, token, object, String(recordId), field, organizationId);
           } catch (err) {
             logger.warn(
               `[storage] file reference: failed to claim ${token} for ${object}/${String(recordId)}.${field} ` +
@@ -832,6 +864,7 @@ export function installFileReferenceHooks(
       // permits is now unreachable on the predicate path.
       if (!ids || ids.length !== 1) return;
       const recordId = String(ids[0]);
+      const organizationId = actingOrganizationOf(ctx);
 
       for (const field of fileFields) {
         // Only a field the write actually TOUCHED can have changed ownership;
@@ -845,7 +878,7 @@ export function installFileReferenceHooks(
           const held = new Set(current.map((r) => String(r.id)));
           for (const token of incoming) {
             if (held.has(token)) continue; // already ours
-            await claimFile(engine, logger, token, object, recordId, field);
+            await claimFile(engine, logger, token, object, recordId, field, organizationId);
           }
         } catch (err) {
           logger.warn(

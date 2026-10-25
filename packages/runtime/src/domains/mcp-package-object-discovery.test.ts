@@ -581,7 +581,9 @@ function actionPackageOf(prefix: string) {
         type: 'script',
         operation: 'update',
         patch: { name: 'done' },
-        ...(exposed ? { ai: { exposed: true, description: `${name} for the test` } } : {}),
+        // [#25649] A package's top-level action is stored as its `ActionSchema`
+        // parse, which holds an AI-exposed action's `description` to 40 characters.
+        ...(exposed ? { ai: { exposed: true, description: `${name}: marks the record done, for the MCP discovery test` } } : {}),
         ...extra,
     });
     return {

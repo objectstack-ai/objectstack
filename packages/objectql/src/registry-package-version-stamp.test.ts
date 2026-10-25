@@ -73,7 +73,7 @@ describe('registry path stamps the package version it is handed', () => {
     const ql = new ObjectQL();
     ql.registerApp({
       ...manifest('2.0.0'),
-      actions: [{ name: 'hc_convert', label: 'Convert', type: 'script' }],
+      actions: [{ name: 'hc_convert', label: 'Convert', type: 'script', target: 'hc_convert_lead' }],
       plugins: [{ name: 'hc_notes', objects: [{ name: 'hc_note', label: 'Note', sharingModel: 'private', fields: { body: { name: 'body', type: 'text', label: 'Body' } } }] }],
     });
 
