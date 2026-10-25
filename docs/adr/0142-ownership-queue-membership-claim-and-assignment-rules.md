@@ -77,8 +77,9 @@ HotCRM was read from a read-only clone of `objectstack-ai/hotcrm` at `8f52859`; 
    form ADR-0057 D3 and ADR-0058 D3 already prescribe for access that follows live membership.
 3. **Claim is an update of `owner_id` to the caller, adjudicated by the existing transfer gate** (step 3.5 of
    `packages/plugins/plugin-security/src/security-plugin-authz-middleware.ts#registerAuthzMiddleware`), which gains two
-   narrow admitted cases: a caller taking an unowned record their write gate already admits (a queue member on a record
-   sitting in their queue is the common case), and an owner releasing their own record back to its queue. The claim is
+   narrow admitted cases: a caller taking an unowned record the sharing service positively admits them to (a queue
+   member on a record sitting in their queue is the common case), and an owner releasing their own record back to its
+   queue. The claim is
    written conditionally on the owner still being empty, so a race has one winner. Moving a record to another queue is a
    transfer-class write and needs `allowTransfer`. Nothing goes around the gate, and no hook spells ownership as a status
    change any more.
@@ -128,8 +129,9 @@ middleware only **stashes** as a depth (`__readScope` / `__writeScope`, step 2.6
 owner match from — `packages/plugins/plugin-sharing/src/sharing-service.ts#buildReadFilter` (the `ownerMatch`, OR'd with
 the caller's `sys_record_share` ids), `packages/plugins/plugin-sharing/src/sharing-service.ts#buildWriteFilter`, and
 `packages/plugins/plugin-sharing/src/sharing-service.ts#checkEdit`, whose ownership fast path
-`packages/plugins/plugin-sharing/src/sharing-service.ts#matchesOwnerScope` *"Returns `false` when the record has no owner
-value"*; every "my records" view filter (`{current_user_id}`); the messaging audience `owner_of:`
+`packages/plugins/plugin-sharing/src/sharing-service.ts#matchesOwnerScope` — shared with `checkDelete` — *"Returns
+`false` when the record has no owner value"*; every "my records" view filter (`{current_user_id}`); the messaging
+audience `owner_of:`
 (`packages/services/service-messaging/src/recipient-resolver.ts#DEFAULT_OWNER_FIELDS`); the ADR-0117 `follow_owner`
 policy (not landed — the column it stamps is "provisioned but inert", the registry's own words); and the seed-ownership
 claim, whose NULL arm since #23354 re-owns only the ids a seed reported landing on, so an unowned row left by a guest or
@@ -278,9 +280,11 @@ The access path (D3) is written where the owner match is built, in `SharingServi
 `plugin-security`'s gate consumes the contract through the kernel for the claim admission (D4) and the explain reasons.
 When no queue service is registered, no queue exists: every queue-dependent admission below fails closed (ADR-0056 D3's
 posture: owner enforcement never depends on which plugins loaded), and a stack that declares `queues` or
-`assignmentRules` in a composition that registers no queue service is **refused at boot by name** — a declared queue
-nothing resolves, or a rule nothing evaluates, is the silently inert instance ADR-0078 forbids. Both types join the
-`metadata_type` vocabulary of `sys_metadata_activation`
+`assignmentRules` in a composition that registers no queue service is **refused at boot by name** — by the engine, which
+is always present, at `kernel:ready`, in the fail-fast shape of ADR-0093 D5, naming the key and the missing service — a
+declared queue nothing resolves, or a rule nothing evaluates, is the silently inert instance ADR-0078 forbids. Both keys
+join the engine's stack-collection list (`METADATA_ARRAY_KEYS`, beside `sharingRules` and `positions`), and both types
+join the `metadata_type` vocabulary of `sys_metadata_activation`
 (`packages/platform-objects/src/system/sys-metadata-activation.object.ts`). Merge question 2 carries the shape and the
 owner together.
 
@@ -342,42 +346,49 @@ seed claim, to ADR-0117's future stamp. Merge question 1 states what the two oth
 
 **Who sees it.** The members of Q read and edit the records sitting in Q through one more pre-resolved membership set,
 `current_user.queues` — the queue names the caller belongs to in the active organization, computed by the queue service
-from the caller's positions, teams and units against the queues' member specifications, and published under that key
-through the `IRlsMembershipResolver` seam so an authored policy or view can read it too. The disjunct
-`owner_id IS NULL AND queue IN (current_user.queues)` lands at the four sites Context §1 names: beside the `ownerMatch`
-of `buildReadFilter`, in `buildWriteFilter`, in `checkEdit` through `matchesOwnerScope` (a sitting record then answers
-`allow`, which lifts the `created_by` floor through `resolvePreImageFloorDrop` with no change there — the guest-written
-case a member edits passes this way), and in the explain engine. This is the form ADR-0057 D3 gives every rollup and
-ADR-0058 D3 names for *"ownership that depends on live role membership"* — not a stored static
-filter, not a materialised share per record per member. It widens **rows, never verbs** (ADR-0111 D3): a member with no
-`allowEdit` on the object still cannot edit a sitting record, and delete is never conferred. On an object whose effective
-model is already open there is nothing to widen. HotCRM's self-limiting rule — shared while unowned, gone the instant a
-claim lands — is this path's semantics, built in. Merge question 3 carries the alternatives.
+from the caller's positions, teams and units against the queues' member specifications; the queue service is the
+registered `IRlsMembershipResolver` for that one key, so an authored policy or view can read it too. The disjunct
+`owner_id IS NULL AND queue IN (current_user.queues)` lands at four sites: beside the `ownerMatch` of `buildReadFilter`;
+in `buildWriteFilter`'s update arm beside the share ids, never its delete arm; in `checkEdit` as a positive basis of its
+own, tested before the public-OWD `abstain` and apart from `matchesOwnerScope`, the fast path `checkDelete` shares; and
+in the explain engine. A sitting record then answers `allow`, which lifts the `created_by` floor through
+`resolvePreImageFloorDrop` with no change there — the guest-written case a member edits passes this way, and on an open
+OWD too, where that floor would otherwise refuse every non-creator. This is the form ADR-0057 D3 gives every rollup and
+ADR-0058 D3 names for *"ownership that depends on live role membership"* — not a stored static filter, not a
+materialised share per record per member. It widens **rows, never verbs** (ADR-0111 D3): a member with no `allowEdit`
+on the object still cannot edit a sitting record, and delete is never conferred — which is why the disjunct stays out of
+the two delete paths. HotCRM's self-limiting rule — shared while unowned, gone the instant a claim lands — is this path's
+semantics, built in. Merge question 3 carries the alternatives.
 
 **The explain engine** reports the new disjunct as its own reason (`queue-membership`) on `read`, `update` and `transfer`,
 so a Console can answer "why can I see this".
 
 ### D4 — Claim, release and move go through the transfer gate
 
-**Claim** is an update of `owner_id` to the caller's own id, by id, on an unowned record the caller can already edit.
-The UPDATE arm of step 3.5 gains one admitted case ahead of the grant check: the pre-image's `owner_id` is empty, the
-supplied `owner_id` is the caller's id as a scalar, and the operation addresses one record by id (a bulk change-set
-carrying `owner_id` keeps failing closed). Who may edit the row was decided one step earlier, at the 2.7 pre-image gate:
-a queue member reaches a sitting record through D3's disjunct, a holder of an `edit` share or of `modifyAllRecords`
-reaches it as today, and nobody else does — so membership is not re-tested here, a record with no `queue` is claimable
-by whoever can edit it, and HotCRM's claimant set (*"a write carrying a real user id claims for that user, whoever they
-are"*) is kept, not narrowed. Under delegation both principals pass the same gate. Merge question 14 carries the
-narrower reading. Explain gains the reason `queue-claim`.
+**Claim** is an update of `owner_id` to the caller's own id, by id, on an unowned record the sharing service positively
+admits. The UPDATE arm of step 3.5 gains one admitted case ahead of the grant check: the pre-image's `owner_id` is empty,
+the supplied `owner_id` is the caller's id as a scalar, the operation addresses one record by id (a bulk change-set
+carrying `owner_id` keeps failing closed), and the sharing verdict step 2.7 already obtained for this row is `allow` — a
+queue member through D3's basis, an `edit` share, or `modifyAllRecords`. A by-id update is reached two more ways, and
+neither licenses a claim: passage through the `created_by` floor where sharing abstains (so a disown stays reversible
+only under the grant), and an app-authored update widener, which retracts the sharing middleware's refusal without
+authorising the write. No membership is re-tested, a record with no `queue` is claimable by whoever holds a positive
+basis, and HotCRM's claimant set (*"a write carrying a real user id claims for that user, whoever they are"*: the agent,
+the manager on the escalation share, the admin) is kept. Under delegation both principals pass the same gate, and the
+delegated by-id write keeps the `created_by` floor whatever the verdict, so a delegated claim of a guest-written record
+is refused. Merge question 14 carries the alternatives. Explain gains the reason `queue-claim`.
 
 **One owner.** The write is conditional on the pre-image — "where `owner_id` is still empty" — so two callers claiming
 at once produce exactly one owner. The engine has no such primitive on its by-id update today (the by-id branch reads the
-prior record and calls `driver.update(object, id, data)`); the PR adds a **by-id write precondition**: the gate records
-the admitted claim on the operation context, as it records the depth today, and the engine's by-id update lowers the
-write to the driver's conditional `updateMany({ id, owner_id: null }, data)` where the driver has it, mapping zero
-affected rows to **409 `RESOURCE_CONFLICT`** ("the record was taken") — a distinction the engine already draws between a
-by-id miss and a predicate update that matched nothing. Hooks see an ordinary by-id update. The cursor of D5 uses the
-same precondition. Where the driver has no `updateMany`, the precondition degrades to the pre-image check and the write
-goes through unconditionally, logged once per process at `warn`; every shipped driver has it (Context §1).
+prior record and calls `driver.update(object, id, data)`); the PR adds a **by-id write precondition**, an equality
+predicate the caller supplies (`expect: { <field>: <value> }`) with two users: the claim (`{ owner_id: null }`, set by
+the gate on the operation context as it sets the depth today) and D5's cursor (`{ version }`). The engine lowers the
+write to the driver's conditional `updateMany(object, { where: { id, ...expect } }, data)` where the driver has it; one
+affected row is re-read by id and the by-id branch continues unchanged — hooks, formulas, the per-record event, the
+roll-up, the response — at the cost of one read; zero rows answer **409 `RESOURCE_CONFLICT`** ("the record was taken"),
+the distinction the engine already draws between a by-id miss and a predicate update that matched nothing. Where the
+driver has no `updateMany`, the precondition degrades to the pre-image check and the write goes through unconditionally,
+logged once per process at `warn`; every shipped driver has it (Context §1).
 
 **Release** is an update of `owner_id` to null by the current owner on a record whose `queue` is set: admitted when the
 pre-image's `owner_id` is the caller and `queue` is unchanged — whether or not the owner is still a member of that queue,
@@ -443,8 +454,8 @@ this is neither.
   locally as rows are assigned; across concurrent inserts the count is approximate, as HotCRM's is today. HotCRM's intake
   arithmetic, as a declaration.
 - `round_robin` — the member after the cursor. The cursor is one row of `sys_assignment_cursor` per (rule, entry,
-  organization), holding the last member id and a version; it advances through D4's by-id precondition ("where the
-  version still equals the one read"), and a lost race re-reads and retries. A member set that changed since the last
+  organization), holding the last member id and a version; it advances through D4's precondition (`expect: { version }`
+  as read), and a lost race re-reads and retries. A member set that changed since the last
   assignment is handled by position: the next member after the last id in the current ordering. Where the driver has no
   `updateMany`, the precondition degrades as D4 says: the cursor advances unconditionally, two concurrent inserts may
   pick the same member, and the platform logs once at `warn` — approximate fairness, visible, never a refused insert
@@ -531,7 +542,7 @@ path. A rule naming a queue shares *its criteria's records* with *the queue's pe
 | `case_auto_assign` — least-loaded over position `service_agent`, open = `status $nin ['resolved','closed']` | a declared queue (members: position `service_agent`) and an `assignment_rule` on `crm_case`, one entry, no criteria, `least_loaded`, `load: record.status != "resolved" && record.status != "closed"` | delete the factory and its hook registration |
 | `lead_auto_assign` — least-loaded over `sales_rep`, open = `is_converted: false` | a queue (position `sales_rep`) and a rule on `crm_lead`, `least_loaded`, `load: record.is_converted == false` | delete the hook; `lead_assignment` is unchanged (it reads the owner the platform chose) |
 | `case_self_claim` + the `claim_case` screen flow writing `status` | the gate's claim admission (D4), with the same claimant set — anyone who can edit the unowned case: the agent through the queue, the manager through the escalation share, the admin through Modify All; reopening a resolved unowned case by claiming it keeps working, since the admission reads no status; the Claim affordance writes `{ owner_id: <self> }` (with or without a status) | delete the factory; re-point the flow or the action; delete `claim-case-one-owner-writer.test.ts`, whose premise inverts |
-| `case_unassigned_triage_sharing` | D3's access path (members see what sits in their queue; it stops at the claim). One difference: the rule hid `resolved` unowned cases; the access path shows every sitting record and the view filters | delete the rule; keep the view's status filter |
+| `case_unassigned_triage_sharing` | D3's access path (members see what sits in their queue; it stops at the claim). One difference: the rule's criteria hid `resolved` and `closed` unowned cases; the access path shows every sitting record and the view filters | delete the rule; keep the view's status filter |
 | the existing ownerless backlog (`owner_id` NULL, no `queue`) | not reached by D3's path until `queue` is set; claimable by whoever can edit it (D4) | one system write under the transfer grant — `queue` = the intake queue where `owner_id IS NULL` — on `crm_case` and `crm_lead`, in the card that adopts the release |
 | `unassigned_triage` view | still valid (`owner_id is_null`); better as `queue equals <intake queue>` plus `owner_id is_null` | re-point the filter |
 | the guest owner strip in `case_sla_defaults` | the platform already refuses a guest-supplied owner (ADR-0138 D1); the strip is redundant, not wrong | HotCRM's call |
@@ -551,7 +562,9 @@ at merge (the card's own words; HotCRM `AGENTS.md` rule 2: *merged is not availa
 - **Codes** (ADR-0112 D1, D3 — registered in the ledger by the PR): `PERMISSION_DENIED` 403 for a refused claim, release,
   move or supplied queue; `RESOURCE_CONFLICT` 409 for a lost claim race; one new code, `QUEUE_NOT_FOUND` 422, only for a
   caller-supplied `queue` that resolves nowhere in the row's organization. A rule's unresolved target is never a refusal
-  (D5); the boot-time and registration-time refusals of D1 and D3 are startup reports, not request codes.
+  (D5). D3's registration refusal is thrown at `registerObject`, a door Studio and the metadata API reach at request
+  time, so it carries the ADR-0112 envelope the registry's other field refusals carry — `INVALID_METADATA`, 422, as
+  `ObjectFieldTypeRefusedError` does; D1's boot refusal is reached by no request and stays a startup report.
 - **Unchanged.** The owner anchor's type and every reader of it; the gate's existing arms; the insert pipeline's order
   (one step is added, none moved); `ownership` tiers; teams never carry capability (ADR-0090 D8 — a queue is a sharing
   and distribution set, bindable to no permission set); the approval node's other types; the `field` recipient; the
@@ -685,16 +698,20 @@ objection names the number.
     forbids. Cost: one more line per rule.
 13. **A member's insert that names a queue is an owned record with a home queue; the INSERT stamp does not stand down.**
     The alternative — suppress the stamp when a member supplies `queue` and no owner, so the record sits at once — gives
-    the Console a one-write "log straight into intake" but adds a membership read to the INSERT arm and a second way to
-    produce an ownerless row without the grant. The recommendation keeps the stamp rule every reader of Context §1
+    the Console a one-write "log straight into intake" at the price of a second way to produce an ownerless row without
+    the grant and a stamp rule that no longer holds for every insert. The recommendation keeps the stamp rule every
+    reader of Context §1
     relies on and today's HotCRM outcome; the cost is two writes (insert, release) for a member who wants the record to
     sit, one for a grant holder.
-14. **Who may claim: anyone whose write gate already admits the unowned pre-image, not queue members only.** This is the
-    first consumer's pinned contract ("whoever they are": the agent through the queue, the manager through the
-    escalation share, the admin), it covers the existing backlog once `queue` is backfilled, and it keeps the admission
-    free of a second membership read. The narrower reading — the caller must be a member of the queue the pre-image
-    names — refuses the escalation desk and every legacy row without a grant, and hands HotCRM a behaviour change to
-    accept. Cost of the recommendation: an `edit` share on an ownerless record is also a licence to own it.
+14. **Who may claim: anyone the sharing service positively admits to the unowned pre-image — queue basis, `edit` share
+    or Modify All — not queue members only, and not mere passage through step 2.7.** This is the first consumer's pinned
+    contract ("whoever they are": the agent through the queue, the manager through the escalation share, the admin), it
+    covers the existing backlog once `queue` is backfilled, and it adds no read: the verdict is already computed. The
+    narrower reading — the caller must be a member of the queue the pre-image names — refuses the escalation desk and
+    every legacy row without a grant. The wider reading — any caller 2.7 passes — would let the creator re-own a
+    disowned record on an object where sharing abstains, with no grant, and let an app-authored update widener license
+    claims by declaration. Cost of the recommendation: an `edit` share on an ownerless record is also a licence to own
+    it, and an app-authored widener alone is not.
 15. **An eligible object that declares its own `queue` field is refused at registration, with a prescription.** `queue`
     is a plain business word; a `user`-owned object with its own `queue` picklist is ordinary modelling, and today
     `applySystemFields` lets a declared `owner_id` win over injection. Copying that rule would leave the anchor silently
@@ -733,18 +750,23 @@ objection names the number.
 
 1. **One PR, spec + server (L; `packages/spec`, `objectql`, `plugin-security`, `plugin-sharing`, `plugin-approvals`,
    `lint`, `qa/dogfood`), on this card** — ruling D5: a spec key lands with its first reader. Spec: the `queue` and
-   `assignment_rule` types and registry entries, the `queues` / `assignmentRules` stack keys, the queue-service contract,
-   `ShareRecipientType` + `queue`, the approver-type changes of D6, `queue` in `PUBLIC_FORM_SERVER_MANAGED_FIELDS`, the
-   ledger entry for `QUEUE_NOT_FOUND`; regenerated artifacts per AGENTS.md's spec table. Server: `sys_queue`,
-   `sys_queue_member`, `sys_assignment_cursor`, the queue service and its `queues` membership-resolver key in
-   `plugin-sharing`, with the access path in `SharingService`'s owner match (D3's four sites); the `queue` column in
-   `applySystemFields` with its writers and the registration refusal for a declared `queue`; the gate's claim / release /
-   move admissions and explain reasons in `plugin-security`; the by-id write precondition, the assignment seam and the
-   two strategies in `objectql` behind the contract; the boot refusal for `queues` / `assignmentRules` without a queue
-   service and the two activation types; the `expandRecipient` branch and both recompute extensions; the approvals branch
-   and the approver lint's group-routed set; the lint red-line row; the dogfood rows; tests for every admission and every
-   refusal, the claim race, the empty pool, the unresolved target, the cursor under concurrency, and both re-admitted
-   members end to end. Changeset: `minor` on every package named, with the two enum additions called out.
+   `assignment_rule` types, their registry entries and their `BUILTIN_METADATA_TYPE_SCHEMAS` bindings
+   (`packages/spec/src/kernel/metadata-type-schemas.ts`), the `queues` / `assignmentRules` stack keys, the queue-service
+   contract, `ShareRecipientType` + `queue`, the approver-type changes of D6, `queue` in
+   `PUBLIC_FORM_SERVER_MANAGED_FIELDS`, the ledger entry for `QUEUE_NOT_FOUND`; two hand-authored liveness ledgers,
+   `packages/spec/liveness/queue.json` and `packages/spec/liveness/assignment_rule.json`, every property classified with
+   evidence (the liveness gate has no generator); regenerated artifacts per AGENTS.md's spec table for the rest. Server:
+   `sys_queue`, `sys_queue_member`, `sys_assignment_cursor`, the queue service and its `queues` membership-resolver key
+   in `plugin-sharing`, with the access path at D3's four sites; the `queue` column in `applySystemFields` with its
+   writers and the registration refusal for a declared `queue`; the gate's claim / release / move admissions and explain
+   reasons in `plugin-security`; in `objectql`, the by-id write precondition with its readback, the assignment seam and
+   the two strategies behind the contract, the two keys in `METADATA_ARRAY_KEYS`, the `kernel:ready` boot refusal and
+   the two activation types; the `expandRecipient` branch and both recompute extensions; the approvals branch and the
+   approver lint's group-routed set; the lint red-line row; the dogfood rows; tests for every admission and every
+   refusal — the form-door strip of `queue`, the registration refusal, the boot refusal, the 409 on a lost claim and the
+   readback on a won one, the empty pool, the unresolved target, the cursor under concurrency, the approver lint's queue
+   case, and both re-admitted members end to end. Changeset: `minor` on every package named, with the two enum additions
+   called out.
 2. **HotCRM card (its own lane; blocked on a published release)**: D8's table — delete `_case-assignment.ts`'s two
    covered factories, `lead_auto_assign`, the triage sharing rule and the inverted test; declare two queues and two
    rules; backfill `queue` on the ownerless backlog; re-point the Claim affordance and the triage view; keep the
@@ -758,9 +780,9 @@ objection names the number.
 
 - [#25769](https://github.com/objectstack-ai/objectstack/issues/25769) — the card; triage grade `6396200200`; the D6
   ruling of 2026-10-25T09:23Z quoted above; #25795 (ruling D5 landed in the pm-dispatch skill)
-- ADR-0019 (approval as flow node), ADR-0029, ADR-0049, ADR-0052, ADR-0056, ADR-0057 (ERP authorization core), ADR-0058,
-  ADR-0073, ADR-0077, ADR-0078, ADR-0086, ADR-0087, ADR-0090, ADR-0105, ADR-0111, ADR-0112, ADR-0117, ADR-0118,
-  ADR-0131, ADR-0138
+- ADR-0019 (approval as flow node), ADR-0029, ADR-0049, ADR-0056, ADR-0057 (ERP authorization core), ADR-0058,
+  ADR-0073, ADR-0077, ADR-0078, ADR-0086, ADR-0087, ADR-0090, ADR-0093 (D5, the fail-fast boot guard), ADR-0105,
+  ADR-0111, ADR-0112, ADR-0117, ADR-0118, ADR-0131, ADR-0138
 - `packages/plugins/plugin-security/src/security-plugin-authz-middleware.ts` (steps 2.6, 2.7, 3.5, the public-form strip),
   `packages/plugins/plugin-security/src/platform-ownership-policies.ts`, `packages/plugins/plugin-security/src/security-plugin-sharing-verdicts.ts`,
   `packages/plugins/plugin-security/src/claim-seed-ownership.ts`, `packages/plugins/plugin-security/src/explain-engine.ts`,
@@ -772,11 +794,13 @@ objection names the number.
   `packages/spec/src/contracts/data-driver.ts`, `packages/spec/src/automation/approval.zod.ts`,
   `packages/spec/src/data/injected-system-column-provenance.ts`, `packages/spec/src/data/hook.zod.ts`,
   `packages/spec/src/identity/position.zod.ts`, `packages/spec/src/kernel/metadata-plugin.zod.ts`,
+  `packages/spec/src/kernel/metadata-type-schemas.ts`, `packages/spec/liveness/README.md`,
   `packages/spec/src/migrations/entries/semantic/17.sharing-rule-recipient-reconcile.ts`
 - `packages/objectql/src/registry.ts` (`applySystemFields`), `packages/objectql/src/engine.ts`,
   `packages/objectql/src/engine-middleware-operation-vocabulary.test.ts`, `packages/core/src/security/effective-object-permissions.ts`,
   `packages/formula/src/cel-to-filter.ts`
-- `packages/plugins/plugin-sharing/src/sharing-service.ts`, `packages/plugins/plugin-sharing/src/sharing-rule-service.ts`,
+- `packages/plugins/plugin-sharing/src/sharing-service.ts`, `packages/plugins/plugin-sharing/src/sharing-plugin.ts`,
+  `packages/plugins/plugin-sharing/src/sharing-rule-service.ts`,
   `packages/plugins/plugin-sharing/src/field-recipient.test.ts`, `packages/plugins/plugin-sharing/src/bu-tree-recompute.ts`,
   `packages/plugins/plugin-sharing/src/recipient-membership-recompute.ts`, `packages/plugins/plugin-sharing/src/declared-sharing-rules.ts`,
   `packages/plugins/plugin-sharing/src/position-graph.ts`, `packages/plugins/plugin-sharing/src/team-graph.ts`,
