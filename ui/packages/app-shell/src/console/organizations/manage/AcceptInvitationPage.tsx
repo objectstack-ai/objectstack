@@ -24,6 +24,12 @@ import { resolveRootUrl } from '../resolveHomeUrl.js';
 type InvitationWithOrg = AuthInvitation & {
   organizationName?: string;
   organizationSlug?: string;
+  /**
+   * The inviting member's email, which better-auth's `get-invitation` adds to
+   * its answer. The route returns no inviter name, so the page names the
+   * inviter by this address (#25886).
+   */
+  inviterEmail?: string;
 };
 
 export function AcceptInvitationPage() {
@@ -225,6 +231,16 @@ export function AcceptInvitationPage() {
                   {resolveOrgRoleLabel(invitation.role, t)}
                 </span>
               </div>
+              {invitation.inviterEmail && (
+                <div className="flex justify-between gap-4 text-sm">
+                  <span className="text-muted-foreground">
+                    {t('organization.accept.invitedBy', { defaultValue: 'Invited by' })}
+                  </span>
+                  <span className="truncate font-medium" data-testid="accept-invitation-inviter">
+                    {invitation.inviterEmail}
+                  </span>
+                </div>
+              )}
               {invitation.expiresAt && (
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">

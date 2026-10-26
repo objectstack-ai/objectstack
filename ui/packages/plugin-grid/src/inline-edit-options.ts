@@ -15,39 +15,12 @@
 import { isInlineExcludedFieldType } from '@object-ui/fields';
 
 /**
- * For a field governed by a `state_machine` validation, the set of values
- * reachable from `currentValue` — the current value itself plus its declared
- * allowed transitions.
- *
- * Returns `null` (= "don't constrain the options") when:
- *  - the object has no `state_machine` validation for the field, or
- *  - the current state isn't declared in the transition map.
- *
- * The second case mirrors the validation engine's lenient "allow" for
- * undeclared from-states (an unconstrained state simply isn't policed), so the
- * editor stays permissive exactly where the server would.
+ * For a field governed by a blocking `state_machine` validation, the values
+ * reachable from the current one. The helper lives in `@object-ui/core` so the
+ * record form and the board read the same transition map the same way
+ * (#25933); it is re-exported here so the grid's import stays as it was.
  */
-export function stateMachineNextValues(
-  objectSchema: unknown,
-  fieldName: string,
-  currentValue: unknown,
-): Set<string> | null {
-  const rules = (objectSchema as { validations?: unknown })?.validations;
-  if (!Array.isArray(rules)) return null;
-  const sm = rules.find(
-    (r): r is { transitions: Record<string, string[]> } =>
-      !!r &&
-      typeof r === 'object' &&
-      (r as { type?: unknown }).type === 'state_machine' &&
-      (r as { field?: unknown }).field === fieldName &&
-      !!(r as { transitions?: unknown }).transitions,
-  );
-  if (!sm) return null;
-  const from = currentValue == null ? '' : String(currentValue);
-  const allowed = sm.transitions[from];
-  if (!Array.isArray(allowed)) return null; // undeclared from-state → unconstrained
-  return new Set<string>([from, ...allowed.map((s) => String(s))]);
-}
+export { stateMachineNextValues } from '@object-ui/core';
 
 /**
  * Field types that can never be edited as a value in an inline cell:

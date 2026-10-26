@@ -3,24 +3,41 @@
   "version": "18.1.0",
   "license": "Apache-2.0",
   "description": "Authentication & Identity Plugin for ObjectStack",
+  "type": "commonjs",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
+  "sideEffects": false,
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.js"
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
     },
     "./rate-limit-storage": {
-      "types": "./dist/rate-limit-storage.d.ts",
-      "import": "./dist/rate-limit-storage.mjs",
-      "require": "./dist/rate-limit-storage.js"
+      "import": {
+        "types": "./dist/rate-limit-storage.d.mts",
+        "default": "./dist/rate-limit-storage.mjs"
+      },
+      "require": {
+        "types": "./dist/rate-limit-storage.d.ts",
+        "default": "./dist/rate-limit-storage.js"
+      }
     },
     "./client-address": {
-      "types": "./dist/client-address.d.ts",
-      "import": "./dist/client-address.mjs",
-      "require": "./dist/client-address.js"
+      "import": {
+        "types": "./dist/client-address.d.mts",
+        "default": "./dist/client-address.mjs"
+      },
+      "require": {
+        "types": "./dist/client-address.d.ts",
+        "default": "./dist/client-address.js"
+      }
     }
   },
   "scripts": {
@@ -68,7 +85,7 @@
   "author": "ObjectStack",
   "repository": {
     "type": "git",
-    "url": "https://github.com/objectstack-ai/objectstack.git",
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
     "directory": "packages/plugins/plugin-auth"
   },
   "homepage": "https://objectstack.ai/docs",

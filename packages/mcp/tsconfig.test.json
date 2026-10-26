@@ -50,7 +50,7 @@
 //   - ⛔ STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`,
 //     `noUnusedParameters`, `noImplicitReturns`, `noFallthroughCasesInSwitch`
 //     and `types: ["node"]` are inherited from `tsconfig.json` and through it
-//     the root config, and none is re-declared here. ⚠️ A child declaring its
+//     the base config, and none is re-declared here. ⚠️ A child declaring its
 //     own `paths` would REPLACE the parent map rather than merge into it, so
 //     this file declares none. Nothing here may loosen a type rule; if a test
 //     does not compile, that is the finding.

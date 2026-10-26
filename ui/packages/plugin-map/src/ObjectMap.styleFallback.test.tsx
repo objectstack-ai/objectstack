@@ -3,8 +3,9 @@
  * Copyright (c) 2024-present ObjectStack Inc.
  *
  * Regression: a failed MapLibre style/tile load used to render a blank map
- * with no indication anything went wrong. `onError` now surfaces a banner,
- * and a schema-configured `style` overrides the public demo default.
+ * with no indication anything went wrong. `onError` now surfaces an alert over
+ * the record list that replaces the map (objectstack#25889), and a
+ * schema-configured `style` overrides the public demo default.
  */
 import React from 'react';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
