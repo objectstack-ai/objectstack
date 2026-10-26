@@ -178,21 +178,38 @@ interface PRE_CONVERGENCE_SelectOptionMetadata {
  * spec's form-view option leaves it out and nothing on the form path read it —
  * not because the comparison was loosened: every OTHER member is still compared
  * invariantly.
+ *
+ * The face is read back on the record's own members (`Pick`), not with the
+ * spec's later additions subtracted by name: a key the spec adds to the option
+ * is not a narrowing, so it is not a red here.
  */
 export type assertionFormFaceKeptEveryMember =
-  Expect< Equal< Omit< SelectOption, 'description' >, Omit< PRE_CONVERGENCE_SelectOption, 'default' > > >;
+  Expect< Equal<
+    Pick< SelectOption, Exclude< keyof PRE_CONVERGENCE_SelectOption, 'default' > >,
+    Omit< PRE_CONVERGENCE_SelectOption, 'default' >
+  > >;
 
 /**
- * …and `description` is ALL it gained since. Written as a set difference so
- * another key cannot ride along silently: add one and this stops being
- * `'description'`.
+ * …and everything it gained since is the spec's: `description`, and no key of
+ * objectui's own. Written as a set difference against the spec's key set, so
+ * a local key cannot ride along silently, while a key the spec adds is not a
+ * red here.
  *
  * EDITED by objectui#12736: it was `'description' | SpecKindKey`. Spec 18's
  * `kind` no longer arrives on the FORM face — the spec's form-view option does
- * not take it — so a `kind` that came back would turn this red.
+ * not take it — and `assertionFormFaceHasNoKindOrDefault` below turns red if
+ * it comes back.
  */
-export type assertionFormFaceGainedOnlyDescription =
-  Expect< Equal< Exclude< keyof SelectOption, keyof PRE_CONVERGENCE_SelectOption >, 'description' > >;
+export type assertionFormFaceGainedOnlySpecKeys =
+  Expect< Equal<
+    Exclude< Exclude< keyof SelectOption, keyof PRE_CONVERGENCE_SelectOption >, keyof SpecSelectOption >,
+    never
+  > >;
+export type assertionFormFaceGainedDescription =
+  Expect< Equal<
+    'description' extends Exclude< keyof SelectOption, keyof PRE_CONVERGENCE_SelectOption > ? true : false,
+    true
+  > >;
 
 /**
  * …and the one member it lost is `default` (objectui#12736). Stated as its own
@@ -207,19 +224,31 @@ export type assertionDescriptionIsOptional =
 
 /**
  * The object-metadata face kept every member it had, at the same type — the
- * no-narrowing half, stated by removing the keys that were added (`default`,
- * and `kind` where the spec declares it) and comparing what is left.
+ * no-narrowing half, stated by reading the face back on the record's own
+ * members, so a key the spec adds since is not a red here.
  */
 export type assertionMetadataFaceKeptEveryMember =
-  Expect< Equal< Omit< SelectOptionMetadata, 'default' | SpecKindKey >, PRE_CONVERGENCE_SelectOptionMetadata > >;
+  Expect< Equal<
+    Pick< SelectOptionMetadata, keyof PRE_CONVERGENCE_SelectOptionMetadata >,
+    PRE_CONVERGENCE_SelectOptionMetadata
+  > >;
 
 /**
- * …and `default` (plus spec 18's `kind`) is ALL it gained. Written as a set
- * difference so another key cannot ride along silently: add one and this
- * stops being `'default' | SpecKindKey`.
+ * …and everything it gained is the spec's: `default` (plus spec 18's `kind`)
+ * and no key of objectui's own. Written as a set difference against the
+ * spec's key set, so a local key cannot ride along silently, while a key the
+ * spec adds is not a red here.
  */
-export type assertionMetadataFaceGainedOnlyDefaultAndKind =
-  Expect< Equal< Exclude< keyof SelectOptionMetadata, keyof PRE_CONVERGENCE_SelectOptionMetadata >, 'default' | SpecKindKey > >;
+export type assertionMetadataFaceGainedOnlySpecKeys =
+  Expect< Equal<
+    Exclude< Exclude< keyof SelectOptionMetadata, keyof PRE_CONVERGENCE_SelectOptionMetadata >, keyof SpecSelectOption >,
+    never
+  > >;
+export type assertionMetadataFaceGainedDefaultAndKind =
+  Expect< Equal<
+    Exclude< 'default' | SpecKindKey, Exclude< keyof SelectOptionMetadata, keyof PRE_CONVERGENCE_SelectOptionMetadata > >,
+    never
+  > >;
 
 /** …and `default` really is optional, so no document that parsed before now fails. */
 export type assertionDefaultIsOptional =

@@ -2,7 +2,9 @@
 // ADR-0090 D12 — delegated administration: scoped admin, no self-escalation.
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import { mapDataError } from '@objectstack/types';
 import { DelegatedAdminGate } from './delegated-admin-gate';
+import { isPermissionDeniedError } from './errors.js';
 import { bindCatalogFromTables, bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
 /**
@@ -1499,8 +1501,9 @@ describe("DelegatedAdminGate — a set that only shares the position's name is n
     expect(row.granted_by).toBe('u_narrow');
   });
 
-  it("CONTROL: refuses an assignment whose LISTED set is outside the allowlist — 403 PERMISSION_DENIED, naming the set", async () => {
-    const err = await deniedOf(() => n.assign('narrow', 'audit_pos'));
+  it("CONTROL: refuses an assignment whose LISTED set is outside the allowlist — 403 DELEGATION_SCOPE_VIOLATION (#26189), naming the set", async () => {
+    const err = await refusalOf(() => n.assign('narrow', 'audit_pos'));
+    expect([err.code, err.status]).toEqual(['DELEGATION_SCOPE_VIOLATION', 403]);
     expect(err.message).toMatch(/position 'audit_pos' distributes permission set 'audit_set', which is not in the scope's allowlist/);
     expect(err.details).toMatchObject({ position: 'audit_pos' });
   });
@@ -1543,5 +1546,152 @@ describe("DelegatedAdminGate — a set that only shares the position's name is n
     const err = await deniedOf(() => delegation('duty_admin'));
     expect(err.message).toMatch(/position 'duty_admin' distributes the admin set 'duty_admin_set' — administration cannot be self-delegated/);
     expect(err.details).toMatchObject({ position: 'duty_admin', permissionSet: 'duty_admin_set' });
+  });
+});
+
+// ── [#26189] A refusal that describes the caller's OWN delegated scope answers
+//    its own code. The split is the ruling's (#26059 Q3, child 3): a unit
+//    outside the subtree, a set not in the allowlist, or a target user outside
+//    the subtree answer `403 DELEGATION_SCOPE_VIOLATION` with the gate's reason
+//    as the message; every other refusal of the gate keeps `403
+//    PERMISSION_DENIED`, opaque to the console (ruling #24914 B′). Each cell is
+//    pinned on the thrown value AND on the REST door's classification
+//    (`mapDataError`), because a message opening with the `[Security] Access
+//    denied` matcher would be re-flattened there.
+
+async function refusalOf(run: () => Promise<unknown>): Promise<any> {
+  try {
+    await run();
+  } catch (e) {
+    return e;
+  }
+  throw new Error('expected the write to be refused, but it was admitted');
+}
+
+function expectScopeViolation(err: any, object: string, reason: RegExp): void {
+  expect([err.code, err.status, err.statusCode], err.message).toEqual(['DELEGATION_SCOPE_VIOLATION', 403, 403]);
+  expect(err.message).toMatch(reason);
+  // The three limbs every PERMISSION_DENIED matcher reads (`isPermissionDeniedError`,
+  // `mapDataError`, `rest/src/security-routes.ts`): code, name and message prefix.
+  expect(err.name).toBe('DelegationScopeViolationError');
+  expect(err.message.startsWith('[Security] Access denied'), 'the PERMISSION_DENIED matcher prefix').toBe(false);
+  expect(isPermissionDeniedError(err)).toBe(false);
+  const wire = mapDataError(err, object);
+  expect([wire.status, wire.body.code]).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
+  expect(wire.body.error).toBe(err.message);
+}
+
+function expectOpaqueDenial(err: any, object: string): void {
+  expect([err.code, err.status], err.message).toEqual(['PERMISSION_DENIED', 403]);
+  expect(isPermissionDeniedError(err)).toBe(true);
+  const wire = mapDataError(err, object);
+  expect([wire.status, wire.body.code]).toEqual([403, 'PERMISSION_DENIED']);
+}
+
+describe('[#26189] DelegatedAdminGate — a scope violation answers DELEGATION_SCOPE_VIOLATION; every other refusal keeps PERMISSION_DENIED', () => {
+  const position = (row: any, operation = 'insert') =>
+    h.gate.assert({ object: 'sys_user_position', operation, data: row, context: h.ctxOf('delegate') });
+  const grant = (row: any) =>
+    h.gate.assert({ object: 'sys_user_permission_set', operation: 'insert', data: row, context: h.ctxOf('delegate') });
+
+  describe('the caller\'s own scope: DELEGATION_SCOPE_VIOLATION, the reason as the message', () => {
+    it('sys_user_position: a business unit outside the subtree', async () => {
+      const err = await refusalOf(() => position({ user_id: 'u_west_1', position: 'sales_rep', business_unit_id: 'bu_west' }));
+      expectScopeViolation(err, 'sys_user_position', /business unit 'bu_west' is outside the delegated subtree \(scope from 'sub_admin'\)/);
+      expect(err.details).toMatchObject({ operation: 'insert', object: 'sys_user_position', position: 'sales_rep' });
+    });
+
+    it('sys_user_position: an existing assignment whose business unit is outside the subtree (the pre-image)', async () => {
+      h.tables.sys_user_position.push({ id: 'a_west', user_id: 'u_west_1', position: 'sales_rep', business_unit_id: 'bu_west' });
+      const err = await refusalOf(() => h.gate.assert({
+        object: 'sys_user_position', operation: 'delete', options: { where: { id: 'a_west' } }, context: h.ctxOf('delegate'),
+      }));
+      expectScopeViolation(err, 'sys_user_position', /the existing assignment's business unit 'bu_west' is outside the delegated subtree/);
+    });
+
+    it('sys_user_position: the position distributes a set not in the allowlist', async () => {
+      const err = await refusalOf(() => position({ user_id: 'u_east_1', position: 'mixed_pos', business_unit_id: 'bu_es' }));
+      expectScopeViolation(err, 'sys_user_position', /position 'mixed_pos' distributes permission set 'finance_admin', which is not in the scope's allowlist/);
+    });
+
+    it('sys_user_permission_set: a set not in the allowlist', async () => {
+      const err = await refusalOf(() => grant({ user_id: 'u_east_1', permission_set: 'finance_admin' }));
+      expectScopeViolation(err, 'sys_user_permission_set', /permission set 'finance_admin' is not in the scope's allowlist/);
+      expect(err.details).toMatchObject({ permissionSet: 'finance_admin' });
+    });
+
+    it('sys_user_permission_set: a target user outside the subtree', async () => {
+      const err = await refusalOf(() => grant({ user_id: 'u_west_1', permission_set: 'sales_user' }));
+      expectScopeViolation(err, 'sys_user_permission_set', /target user 'u_west_1' is outside the delegated subtree/);
+    });
+  });
+
+  describe('every other refusal: PERMISSION_DENIED, unchanged', () => {
+    it('the audience anchor', async () => {
+      expectOpaqueDenial(await refusalOf(() => position({ user_id: 'u_east_1', position: 'everyone', business_unit_id: 'bu_es' })), 'sys_user_position');
+    });
+
+    it('a principal-less write', async () => {
+      expectOpaqueDenial(await refusalOf(() => h.gate.assert({
+        object: 'sys_user_position', operation: 'insert', data: { user_id: 'u_east_1', position: 'sales_rep', business_unit_id: 'bu_es' }, context: {},
+      })), 'sys_user_position');
+    });
+
+    it('sys_member is tenant-only', async () => {
+      expectOpaqueDenial(await refusalOf(() => h.gate.assert({
+        object: 'sys_member', operation: 'insert', data: { user_id: 'u_east_1', role: 'member' }, context: h.ctxOf('delegate'),
+      })), 'sys_member');
+    });
+
+    it('plain CRUD with no scope', async () => {
+      expectOpaqueDenial(await refusalOf(() => h.gate.assert({
+        object: 'sys_user_position', operation: 'insert', data: { user_id: 'u_east_1', position: 'sales_rep', business_unit_id: 'bu_es' }, context: h.ctxOf('crud_only'),
+      })), 'sys_user_position');
+    });
+
+    it('a filter write', async () => {
+      expectOpaqueDenial(await refusalOf(() => h.gate.assert({
+        object: 'sys_user_position', operation: 'delete', options: { where: { position: 'sales_rep' } }, context: h.ctxOf('delegate'),
+      })), 'sys_user_position');
+    });
+
+    it('an unanchored assignment, new or existing', async () => {
+      expectOpaqueDenial(await refusalOf(() => position({ user_id: 'u_east_1', position: 'sales_rep' })), 'sys_user_position');
+      h.tables.sys_user_position.push({ id: 'a_loose', user_id: 'u_east_1', position: 'sales_rep', business_unit_id: null });
+      expectOpaqueDenial(await refusalOf(() => h.gate.assert({
+        object: 'sys_user_position', operation: 'delete', options: { where: { id: 'a_loose' } }, context: h.ctxOf('delegate'),
+      })), 'sys_user_position');
+    });
+
+    it('a scope that does not grant manageAssignments', async () => {
+      const gate = new DelegatedAdminGate({
+        ql: h.ql,
+        resolveSets: async () => [{ name: 'viewer_admin', objects: {}, adminScope: { ...EAST_SCOPE, manageAssignments: false } }],
+      } as any);
+      expectOpaqueDenial(await refusalOf(() => gate.assert({
+        object: 'sys_user_position', operation: 'insert', data: { user_id: 'u_east_1', position: 'sales_rep', business_unit_id: 'bu_es' }, context: h.ctxOf('delegate'),
+      })), 'sys_user_position');
+    });
+
+    it('granting an adminScope not strictly contained by the caller\'s own', async () => {
+      expectOpaqueDenial(await refusalOf(() => grant({ user_id: 'u_east_1', permission_set: 'sub_admin' })), 'sys_user_permission_set');
+    });
+
+    it('a stored grant whose set the catalog does not hold, a grant naming no target user, or one whose target has no business unit', async () => {
+      // An INSERT naming an unknown set is judged by the allowlist (a scope
+      // violation, above); the catalog miss is the PRE-IMAGE's reason.
+      h.tables.sys_user_permission_set = [{ id: 'g_retired', user_id: 'u_east_1', permission_set: 'sales_user_retired' }];
+      expectOpaqueDenial(await refusalOf(() => h.gate.assert({
+        object: 'sys_user_permission_set', operation: 'delete', options: { where: { id: 'g_retired' } }, context: h.ctxOf('delegate'),
+      })), 'sys_user_permission_set');
+      expectOpaqueDenial(await refusalOf(() => grant({ permission_set: 'sales_user' })), 'sys_user_permission_set');
+      expectOpaqueDenial(await refusalOf(() => grant({ user_id: 'u_delegate', permission_set: 'sales_user' })), 'sys_user_permission_set');
+    });
+
+    it('a self-service delegation of duty (ADR-0091 D3)', async () => {
+      expectOpaqueDenial(await refusalOf(() => position({
+        user_id: 'u_east_1', position: 'sales_rep', business_unit_id: 'bu_es', delegated_from: 'u_delegate', reason: 'cover',
+      })), 'sys_user_position');
+    });
   });
 });
