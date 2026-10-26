@@ -103,7 +103,7 @@ describe('ExpressionEvaluator', () => {
   // own literal, so the test fails with the source string as `received`.
   const evaluator = new ExpressionEvaluator({
     data: { name: 'Alice', count: 42, items: [1, 2, 3] },
-    user: { role: 'admin' },
+    user: { position: 'admin' },
   });
 
   it('evaluates template expressions', () => {
@@ -115,7 +115,7 @@ describe('ExpressionEvaluator', () => {
   });
 
   it('evaluates boolean conditions', () => {
-    expect(evaluator.evaluateExpression('user.role === "admin"')).toBe(true);
+    expect(evaluator.evaluateExpression('user.position === "admin"')).toBe(true);
   });
 
   it('handles missing variables safely', () => {

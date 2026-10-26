@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 190 — spawns the real producer once per single-cause fixture: every case runs the real schema generator (build-schemas.ts --check) in its own sandbox git tree, one fixture per cause; measured 2026-10-23 on its first CI reading after #25372 split build-schemas-check-mode.test.ts (run 39963105499, Test Core, head dce4c6406): 147.5 s x 1.25, rounded up; one reading only, its wall tracks the run's load, so re-measure once the window has more
+// test-budget: 310 — spawns the real producer once per single-cause fixture: every case runs the real schema generator (build-schemas.ts --check) in its own sandbox git tree, one fixture per cause, and one generator run is about 7 s of JSON Schema emission and spec module load before any assertion; re-measured 2026-10-26 over the 10 executed readings in refresh PR #25960's window (hourly runs 40200279306 to 40272142430), slowest 241.05 s (run 40204927516) x 1.25, rounded up
 //
 // RETIRED_KEYS_BY_MAJOR rows, judged by exact key: check (b) matches the retired key,
 // not its leaf (#4659); a nested retirement row is judged, not ignored (#17969).

@@ -18,7 +18,10 @@
  *  - the granted sets in served order, the same-named set the position-name
  *    fold grants marked "by name" (objectstack#24757), a declared set unmarked;
  *  - a click anywhere on the row opens the position; a click on the Active
- *    switch is the switch's, and a modified click is the browser's.
+ *    switch is the switch's, and a modified click is the browser's;
+ *  - the served `description` shows in its own column right after Label, under
+ *    the localized header, and a position without one shows the empty cell
+ *    (objectstack#25909).
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, cleanup, screen, waitFor, fireEvent, within } from '@testing-library/react';
@@ -33,6 +36,7 @@ const POSITIONS: Record<string, unknown>[] = [
   {
     name: 'sales_manager',
     label: 'Sales Manager',
+    description: 'Leads the regional sales team and approves its forecasts.',
     _holderCount: 3,
     _grantedPermissionSets: [
       { name: 'crm_sales_user', via: 'definition' },
@@ -177,6 +181,28 @@ describe('the position list reads its two columns from the server (objectstack#2
     expect(within(screen.getByTestId('metadata-row-support_agent')).getByTestId('position-granted-sets'))
       .toHaveTextContent(t('engine.position.grants.none', LOCALE));
     expect(within(screen.getByTestId('metadata-row-auditor')).getByTestId('position-granted-sets')).toHaveTextContent('—');
+  });
+});
+
+describe('the position list shows the served description (objectstack#25909)', () => {
+  it('a Description column right after Label shows the served text, and the empty cell where none is served', async () => {
+    mount();
+    const header = await screen.findByRole('columnheader', { name: t('engine.list.col.description', LOCALE) });
+    const headers = screen.getAllByRole('columnheader');
+    const col = headers.indexOf(header);
+    expect(headers[col - 1]).toHaveTextContent(t('engine.list.col.label', LOCALE));
+    expect(headers[col + 1]).toHaveTextContent(t('engine.list.col._holderCount', LOCALE));
+
+    const cell = (name: string) => screen.getByTestId(`metadata-row-${name}`).querySelectorAll('td')[col] as HTMLElement;
+    await waitFor(() =>
+      expect(cell('sales_manager')).toHaveTextContent('Leads the regional sales team and approves its forecasts.'),
+    );
+    // No description served: the shared empty cell, not a blank and not the
+    // neighbour's text.
+    for (const name of ['support_agent', 'auditor']) {
+      expect(cell(name).querySelector('[data-slot="empty-value"]')).not.toBeNull();
+      expect(cell(name)).toHaveTextContent(/^—$/);
+    }
   });
 });
 

@@ -838,7 +838,7 @@ export const CardSchema = BaseSchema.extend({
 /**
  * Tab Item Schema
  */
-export const TabItemSchema = z.object({
+export const TabItemSchema = z.looseObject({
   value: z.string().describe('Unique tab identifier'),
   label: z.string().describe('Tab label'),
   icon: z.string().optional().describe('Tab icon'),
@@ -910,7 +910,7 @@ export const ScrollAreaSchema = BaseSchema.extend({
 /**
  * Resizable Panel Schema
  */
-export const ResizablePanelSchema = z.object({
+export const ResizablePanelSchema = z.looseObject({
   id: z.string().describe('Unique panel identifier'),
   defaultSize: z.number().optional().describe('Default size (percentage 0-100)'),
   minSize: z.number().optional().describe('Minimum size (percentage 0-100)'),
@@ -976,7 +976,7 @@ export const PageRegionWidthSchema = z.enum(['small', 'medium', 'large', 'full']
  *
  * Tripwire: `__tests__/page-nav-misc-spec-parity.test.ts`.
  */
-export const PageNodeRegionSchema = z.object({
+export const PageNodeRegionSchema = z.looseObject({
   name: z.string().describe('Region name (e.g. "sidebar", "main", "header")'),
   type: z.enum(['header', 'sidebar', 'main', 'footer', 'aside']).optional().describe('Semantic region type'),
   width: z.union([PageRegionWidthSchema, z.string()]).optional().describe('Region width'),
