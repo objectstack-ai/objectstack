@@ -747,7 +747,10 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                    // A real Tab stop, so it is revealed on keyboard focus as
+                    // well as on hover — itself, or anything in its field
+                    // (objectstack#25883). The Button's own ring marks it.
+                    className="h-6 w-6 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity shrink-0"
                     aria-label={t('detail.editInlineHint')}
                     onClick={(e) => {
                       e.stopPropagation();
