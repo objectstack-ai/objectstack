@@ -688,26 +688,28 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         return { handled: true, response: deps.error(actionExec.flowActionUnavailableError(actionDef), 503) };
     }
 
-    const reqBody = body && typeof body === 'object' ? body : {};
-    const recordId = recordIdFromPath ?? reqBody.recordId;
-    // [#25976] The params bag must be an object before the param contract or
-    // any handler reads it. This read used to be
-    // `params && typeof params === 'object' ? params : {}`, so `{"params":"oops"}`
-    // ran the action with an EMPTY bag and an array was handed on as the bag
-    // itself — answered `200` with a started run, exactly like `{"params":{}}`.
-    // Asked through `objectValueFailure`, the check the trigger and resume
-    // doors ask too, and answered the way they answer it. `undefined` is
-    // absent, so a body with no `params` key keeps its empty bag. Before the
-    // param contract, the record load and dispatch: a refused call reads no
-    // row and runs nothing.
+    // [#25976] The body, and then its params bag, must be objects before the
+    // param contract or any handler reads them. These reads used to be
+    // `body && typeof body === 'object' ? body : {}` and
+    // `params && typeof params === 'object' ? params : {}`, so a JSON string
+    // body, an array body and `{"params":"oops"}` all ran the action with an
+    // EMPTY bag, and an array `params` was handed on as the bag itself — each
+    // answered `200` with a started run, exactly like `{"params":{}}`. Asked
+    // through `objectValueFailure`, the check the trigger and resume doors ask
+    // too, and answered the way they answer it. `undefined` / `null` stay the
+    // legal bodyless call and an absent `params` key keeps its empty bag.
+    // Before the param contract, the record load and dispatch: a refused call
+    // reads no row and runs nothing.
+    const invalidBody = (message: string, failure: { field: string; code: 'invalid_type'; message: string }) => ({
+        handled: true,
+        response: deps.error(message, VALIDATION_FAILED_STATUS, validationFailureDetails(validationFailure(message, [failure]))),
+    });
+    const bodyFailure = objectValueFailure('(body)', body ?? {});
+    if (bodyFailure) return invalidBody(`Invalid action body — ${bodyFailure.message}`, bodyFailure);
+    const reqBody = (body ?? {}) as Record<string, any>;
     const paramsFailure = objectValueFailure('params', reqBody.params);
-    if (paramsFailure) {
-        const message = `Invalid action body — \`params\` ${paramsFailure.message}`;
-        return {
-            handled: true,
-            response: deps.error(message, VALIDATION_FAILED_STATUS, validationFailureDetails(validationFailure(message, [paramsFailure]))),
-        };
-    }
+    if (paramsFailure) return invalidBody(`Invalid action body — \`params\` ${paramsFailure.message}`, paramsFailure);
+    const recordId = recordIdFromPath ?? reqBody.recordId;
     const reqParams: Record<string, unknown> = reqBody.params ?? {};
 
     // [ADR-0104 D2] Enforce the declared param contract before the handler

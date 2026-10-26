@@ -281,7 +281,12 @@ const automationDoor = (path: string, method: string, body: unknown, ctx: () => 
     () => automationHarness(opts).dispatcher.handleAutomation(path, method, body, ctx(), undefined);
 
 const CENSUS: CensusCase[] = [
-    // actions.ts `POST /actions/:object/:action` — `params` through `objectValueFailure`
+    // actions.ts `POST /actions/:object/:action` — the body and `params` through `objectValueFailure`
+    {
+        site: 'actions.ts action door — body not an object',
+        run: () => (actionsHarness().dispatcher as any).handleActions('/task/reassign', 'POST', [1, 2], MEMBER()),
+        rows: [{ field: '(body)', code: 'invalid_type' }],
+    },
     {
         site: 'actions.ts action door — `params` not an object',
         run: () => (actionsHarness().dispatcher as any).handleActions('/task/reassign', 'POST', { params: 'oops' }, MEMBER()),

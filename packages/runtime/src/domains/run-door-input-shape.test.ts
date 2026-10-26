@@ -12,7 +12,9 @@
  *    `reqBody.params && typeof reqBody.params === 'object' ? reqBody.params : {}`,
  *    so `{"params":"oops"}` ran the action with an EMPTY bag, and an array was
  *    handed on as the bag itself — measured on a showcase boot as `200` and a
- *    started run, the same answer `{"params":{}}` gets;
+ *    started run, the same answer `{"params":{}}` gets. Its body was read with
+ *    the same truthy-object guard, so a JSON string or array BODY ran the
+ *    action with an empty bag too;
  *  - the trigger door read its body with `body && typeof body === 'object' ? body : {}`,
  *    so a JSON string body dispatched the flow with an empty bag and an array
  *    body forwarded its indices as params (the flat-body branch).
@@ -137,12 +139,29 @@ describe('#25976 — the action door refuses a non-object `params` before anythi
         });
     }
 
+    describe('…and a body that is not a JSON object, the same way', () => {
+        for (const action of [FLOW_ACTION, SCRIPT_ACTION]) {
+            it.each(NON_OBJECTS)(`${action.type} action: refuses a body that is %s — 400 at \`(body)\`, nothing dispatched`, async (_label, body, received) => {
+                const door = actionDoor();
+                const res = await door.call(action.name, body);
+                expect(res.status, `body ${JSON.stringify(body)} answered ${JSON.stringify(res.body)}`).toBe(VALIDATION_FAILED_STATUS);
+                expect(res.body.error.code).toBe('VALIDATION_FAILED');
+                expect(res.body.error.details.fields).toMatchObject([{ field: '(body)', code: 'invalid_type' }]);
+                expect(res.body.error.details.fields[0].message).toBe(`expected an object (a map of names to values), received ${received}`);
+                expect(res.body.error.message).toMatch(/^Invalid action body/);
+                expect(door.automation.execute).not.toHaveBeenCalled();
+                expect(door.ql.executeAction).not.toHaveBeenCalled();
+            });
+        }
+    });
+
     describe('the accepted shapes still run, with the bag they always did', () => {
         const ACCEPTED: Array<[string, unknown, Record<string, unknown>]> = [
             ['an object `params`', { params: { note: 'x' } }, { note: 'x' }],
             ['an empty object `params`', { params: {} }, {}],
             ['no `params` key', {}, {}],
             ['no body at all', undefined, {}],
+            ['a JSON `null` body', null, {}],
         ];
 
         it.each(ACCEPTED)('flow action: %s', async (_label, body, params) => {
