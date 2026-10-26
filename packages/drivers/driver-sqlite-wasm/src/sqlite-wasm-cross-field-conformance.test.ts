@@ -33,6 +33,8 @@ import { parseFilterAST, type FilterCondition } from '@objectstack/spec/data';
 import {
   CROSS_FIELD_AUTHORED_CASES,
   CROSS_FIELD_CASES,
+  CROSS_FIELD_NOW_CASES,
+  CROSS_FIELD_NOW_REFUSALS,
   CROSS_FIELD_OBJECT_FIELDS,
   CROSS_FIELD_OFFSET_CASES,
   CROSS_FIELD_OFFSET_OBJECT_FIELDS,
@@ -220,8 +222,20 @@ describe('[#14104] driver-sqlite-wasm — `addDays` offset push-down conformance
     });
   }
 
-  describe('the offset refusal arm (ADR-0112 envelope, operands withheld)', () => {
-    for (const refusal of CROSS_FIELD_OFFSET_REFUSALS) {
+  // [#25808] The `{ $now, addDays }` anchor on the same fixture: `$now` pinned
+  // to the corpus's instant on both paths, the refusal arm under the offset
+  // arm's withholding contract.
+  for (const testCase of CROSS_FIELD_NOW_CASES) {
+    it(`${testCase.name} — same rows on both paths`, async () => {
+      const expected = [...testCase.expected].sort();
+      const note = testCase.note ? `\n${testCase.note}` : '';
+      expect(memoryIds(testCase.filter), `in-memory evaluator disagreed${note}`).toEqual(expected);
+      expect(await sqlIds(testCase.filter), `wasm push-down disagreed${note}`).toEqual(expected);
+    });
+  }
+
+  describe('the offset and anchor refusal arms (ADR-0112 envelope, operands withheld)', () => {
+    for (const refusal of [...CROSS_FIELD_OFFSET_REFUSALS, ...CROSS_FIELD_NOW_REFUSALS]) {
       it(`${refusal.name} → 400 INVALID_FILTER`, async () => {
         const logged: string[] = [];
         const restore = (driver as unknown as { logger: { warn: (m: string) => void } }).logger;

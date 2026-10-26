@@ -219,6 +219,8 @@
     "NoSQLTransactionOptionsSchema": "data/NoSQLTransactionOptions",
     "NormalizedFilter": "data/NormalizedFilter",
     "NormalizedFilterSchema": "data/NormalizedFilter",
+    "NowAnchor": "data/NowAnchor",
+    "NowAnchorSchema": "data/NowAnchor",
     "ObjectAccessConfig": "data/ObjectAccessConfig",
     "ObjectAccessConfigSchema": "data/ObjectAccessConfig",
     "ObjectCapabilities": "data/ObjectCapabilities",

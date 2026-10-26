@@ -20,6 +20,15 @@
  *     { owner: '{current_user_id}' }
  *       → { owner: 'usr_7f3a…' }
  *
+ * # The `$now` anchor resolves here too
+ *
+ * [#25808] `{ $now: true, addDays: <integer | { $field }> }` (`NowAnchorSchema`)
+ * is the current instant shifted by whole days, the days read from a numeric
+ * column of the same record or written as a literal. Its `$now: true` is a
+ * placeholder like `{now}` and is pinned here to the tree's one instant
+ * (`$now: '2026-10-26T15:41:25.000Z'`); the offset stays for the executor —
+ * see {@link isUnresolvedNowAnchor} for why the literal arm is not collapsed.
+ *
  * # Output form: ISO strings, not driver-native values
  *
  * Date tokens resolve to `YYYY-MM-DD` (or a full ISO timestamp for the
@@ -510,9 +519,72 @@ function hasFilterToken(node: unknown): boolean {
   // is never a placeholder (see `resolveFilterTokens`).
   if (isReadableIds(node)) return false;
   if (node && typeof node === 'object' && !(node instanceof Date)) {
+    // [#25808] An unresolved `$now` anchor is a placeholder by construction.
+    if (isUnresolvedNowAnchor(node)) return true;
     return Object.values(node as Record<string, unknown>).some(hasFilterToken);
   }
   return false;
+}
+
+/**
+ * [#25808] `{ $now: true, addDays }` — the now-anchored comparand
+ * (`NowAnchorSchema`, `@objectstack/spec/data`) as an AUTHOR writes it. It is
+ * a placeholder for the instant the query runs at, and it resolves HERE, beside
+ * `{now}`, to the one instant the whole tree shares: `$now: true` becomes the
+ * pinned ISO instant, and the offset — a literal or a `{ $field }` column
+ * reference — stays as written for the executor, which adds it in the target
+ * column's own form (`driver-sql` per dialect, `@objectstack/formula` in
+ * memory). The anchor is not collapsed to a string even for a literal offset:
+ * whether "now minus 30 days" is an instant or a calendar day is the TARGET
+ * column's question, which this field-agnostic resolver cannot answer — the
+ * executor that reads the column's declaration shifts the instant in that
+ * column's form, so both paths answer the same rows. A node whose `$now` is
+ * already a string is resolved and passes through.
+ *
+ * `true` only — `$now: 'now'`, `$now: 1` are not anchors: left to the
+ * comparand-type door's plain-object refusal, where a malformed one belongs.
+ */
+function isUnresolvedNowAnchor(node: unknown): node is { $now: true; addDays?: unknown } {
+  return !!node && typeof node === 'object' && !Array.isArray(node)
+    && (node as Record<string, unknown>).$now === true;
+}
+
+/**
+ * [#25808] A `$now` anchor with no usable offset, met at resolution. The schema
+ * door refuses it at authoring in the same sentence; this is the runtime twin
+ * for a `where` no face re-validates (`find()` takes one), raised here rather
+ * than resolved to an instant the author never asked for. `INVALID_FILTER` /
+ * 400, the code every comparand door answers with.
+ */
+class MalformedNowAnchorError extends Error {
+  readonly status = 400;
+  readonly code = 'INVALID_FILTER' satisfies StandardErrorCode;
+
+  constructor(detail: string) {
+    super(
+      `A { "$now": true } comparand ${detail}. A now-anchored comparand is ` +
+      '{ "$now": true, "addDays": <offset> }: the current instant shifted by whole days, where ' +
+      'addDays is an integer literal of any sign (a negative value subtracts) or a nested ' +
+      '{ "$field": "numeric_column" } reference to a column of the same record. For the ' +
+      'unshifted instant write the "{now}" placeholder.',
+    );
+    this.name = 'MalformedNowAnchorError';
+  }
+}
+
+/** [#25808] The anchor with its instant pinned — see {@link isUnresolvedNowAnchor}. */
+function resolveNowAnchor(node: { $now: true; addDays?: unknown }, now: Date): Record<string, unknown> {
+  const offset = node.addDays;
+  if (offset === undefined) throw new MalformedNowAnchorError('carries no addDays offset');
+  const isColumn = !!offset && typeof offset === 'object' && !Array.isArray(offset)
+    && typeof (offset as Record<string, unknown>).$field === 'string';
+  if (typeof offset === 'number' ? !Number.isInteger(offset) : !isColumn) {
+    throw new MalformedNowAnchorError(
+      `carries an addDays offset that is neither an integer nor a { "$field" } reference (${JSON.stringify(offset)})`,
+    );
+  }
+  // One instant for the whole tree, in the spelling `{now}` resolves to.
+  return { ...node, $now: now.toISOString() };
 }
 
 /**
@@ -558,6 +630,8 @@ export function resolveFilterTokens<T>(
     if (node && typeof node === 'object') {
       // Dates and other class instances are comparands, not filter structure.
       if (node instanceof Date) return node;
+      // [#25808] The now anchor: its instant pinned, its offset kept.
+      if (isUnresolvedNowAnchor(node)) return resolveNowAnchor(node, pinned.now!);
       const out: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(node as Record<string, unknown>)) out[k] = walk(v);
       return out;
