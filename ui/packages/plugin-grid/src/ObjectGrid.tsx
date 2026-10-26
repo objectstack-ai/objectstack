@@ -500,6 +500,13 @@ const GRID_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'list.firstRunMessage': 'Create your first record to get started.',
   'list.noMatches': 'No matching records',
   'list.viewFilterNoMatchesMessage': 'No records match this view’s filter.',
+  // objectstack#25898 — a grid filtered to the signed-in user, and an
+  // unfiltered grid for a caller who may not create (`ListEmptyState` says
+  // both in the same words).
+  'list.ownedNoneTitle': 'Nothing of yours yet',
+  'list.ownedNoneMessage': 'This view lists only records that are yours, and you don’t have any yet.',
+  'list.noneVisibleTitle': 'No records you can see',
+  'list.noneVisibleMessage': 'There are no records here that you have access to. If you expected to see some, ask your administrator for access.',
   // Heading of the record-detail overlay this grid opens on row click
   // (objectui#3426). Borrowed from the `detail.*` namespace rather than minted
   // as `grid.recordDetail`: `NavigationOverlay` already resolves
@@ -7485,13 +7492,43 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     && holdsNoRows
     && !userQueryEmptiedRows;
   const viewFilterEmptiedRows = schemaFilter !== undefined;
+  // objectstack#25898 — the two cases `ListEmptyState` tells apart, the same
+  // way: a declared filter naming the signed-in user (the "my …" view) emptied
+  // the grid because the caller has none yet; and with no filter, a caller
+  // KNOWN not to hold the create grant (the `listNew` row, asked once the
+  // permission answer has loaded — an unloaded provider answers every grant
+  // closed) is told there is nothing here they can see, never invited to
+  // create the first record.
+  //
+  // The filter is read as `ListEmptyState`'s `filterNamesCurrentUser` reads it,
+  // shape-agnostic: some string comparand is the caller's id (the host usually
+  // resolved the placeholder already) or the `{current_user_id}` placeholder
+  // itself. Neither package depends on the other, so the walk is restated here.
+  const namesCurrentUser = (node: unknown): boolean => {
+    if (typeof node === 'string') {
+      return /^\$?\{current_user_id\}$/.test(node)
+        || (!!filterScope.currentUserId && node === filterScope.currentUserId);
+    }
+    if (Array.isArray(node)) return node.some(namesCurrentUser);
+    if (node && typeof node === 'object') return Object.values(node).some(namesCurrentUser);
+    return false;
+  };
+  const ownFilterEmptiedRows = viewFilterEmptiedRows && namesCurrentUser(schemaFilterSource);
+  const createKnownDenied = perms.isLoaded && !resolveAffordance('listNew', affordanceSource).allowed;
+  const defaultEmptyCopy = ownFilterEmptiedRows
+    ? { title: 'list.ownedNoneTitle', message: 'list.ownedNoneMessage' }
+    : viewFilterEmptiedRows
+      ? { title: 'list.noMatches', message: 'list.viewFilterNoMatchesMessage' }
+      : createKnownDenied
+        ? { title: 'list.noneVisibleTitle', message: 'list.noneVisibleMessage' }
+        : { title: 'list.firstRunTitle', message: 'list.firstRunMessage' };
   const AuthoredEmptyIcon = drawsAuthoredEmptyState ? resolveIcon(authoredEmptyState?.icon) : null;
   const renderedGridContent = drawsDefaultEmptyState ? (
     <DataEmptyState
       data-testid="object-grid-empty-state"
       className="flex-1 min-h-[200px]"
-      title={viewFilterEmptiedRows ? t('list.noMatches') : t('list.firstRunTitle')}
-      description={viewFilterEmptiedRows ? t('list.viewFilterNoMatchesMessage') : t('list.firstRunMessage')}
+      title={t(defaultEmptyCopy.title)}
+      description={t(defaultEmptyCopy.message)}
     />
   ) : drawsAuthoredEmptyState ? (
     <DataEmptyState
