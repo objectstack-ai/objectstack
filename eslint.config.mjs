@@ -4,6 +4,32 @@ import { readFileSync } from 'node:fs';
 
 import tsParser from '@typescript-eslint/parser';
 
+import {
+  COMMENT_SWALLOW_FILES,
+  COMMENT_SWALLOW_MESSAGE,
+  COMMENT_SWALLOW_PATTERNS,
+  QUERY_OPTIONS_ANY_MESSAGE,
+  SLOT_LOOKUP_ANY_MESSAGE,
+  VERIFY_STAND_IN_MESSAGE,
+  commentSwallowPlugin,
+  looksLikeSwallowedCode,
+  queryOptionsPlugin,
+  slotLookupPlugin,
+  verifyStandInPlugin,
+} from './packages/eslint-plugin/src/index.mjs';
+
+// The rules live in packages/eslint-plugin; these names stay exported here for
+// the ratchet scripts that import this config.
+export {
+  COMMENT_SWALLOW_FILES,
+  COMMENT_SWALLOW_MESSAGE,
+  COMMENT_SWALLOW_PATTERNS,
+  QUERY_OPTIONS_ANY_MESSAGE,
+  SLOT_LOOKUP_ANY_MESSAGE,
+  VERIFY_STAND_IN_MESSAGE,
+  looksLikeSwallowedCode,
+};
+
 // Flat ESLint config — guards against memory-bloating import patterns.
 //
 // Background: `export * as Namespace from './sub'` is NOT tree-shakeable in
@@ -142,22 +168,6 @@ const SLOT_LOOKUPS = ['resolveService', 'getService', 'getRequestKernelService']
 // accounted for like every other contracted slot.
 const UNCONTRACTED_SLOTS = ['protocol', 'mcp', 'kernel-resolver', 'scope-manager'].join('|');
 
-// Exported so `scripts/check-slot-lookup-ratchet.mjs` can identify THIS rule's
-// reports among the other `no-restricted-syntax` rules, by exact message —
-// the counter and the rule must never be able to disagree about what counts.
-export const SLOT_LOOKUP_ANY_MESSAGE =
-  'Do not erase a service-lookup result to `any` (`: any`, `as any`, or a ' +
-  '`getService<any>(…)` type argument) — the lookup already returns the slot\'s ' +
-  'contract (#4168/#4176/#4202), and this switches that checking off ' +
-  'for the call site while looking identical to code that has it. Every such ' +
-  'annotation found so far was hiding a real gap, including a project-membership ' +
-  'gate that silently stopped gating and two datasource-registration branches ' +
-  'probing a method no metadata service has (#4251). Pass the slot\'s contract ' +
-  'type instead (`getService<IDataEngine>(\'data\')`). If the slot genuinely has ' +
-  'no contract, add its name to UNCONTRACTED_SLOTS in eslint.config.mjs with a ' +
-  'note, so the exemption is reviewed once and visible in one place — see ' +
-  'issues #4127 and #4251.';
-
 // [#4251] The sweep ratchet, read from `scripts/slot-lookup-baseline.json`.
 //
 // Those files hold pre-existing lookup-erasure sites — `getService<any>(…)`,
@@ -182,126 +192,9 @@ const SLOT_LOOKUP_UNSWEPT = Object.keys(JSON.parse(
   readFileSync(new URL('./scripts/slot-lookup-baseline.json', import.meta.url), 'utf8'),
 ));
 
-// [#4251] The FOURTH erasure shape: the declaration and the lookup split apart.
-//
-//   let ql: any;
-//   try { ql = ctx.getService('objectql'); } catch { /* optional */ }
-//
-// The contract is erased exactly as in `const ql: any = ctx.getService(…)`, and
-// all three selectors below miss it: selector 1 needs the call inside the
-// declarator (here the declarator has no init), selector 2 needs `as`, selector
-// 3 needs a type argument. 23 sites repo-wide used it, 12 of them in files no
-// longer grandfathered — i.e. lint covered them and said nothing. Worse, that
-// number GREW with every batch: sweeping a file removes it from the baseline,
-// and the baseline's monotonicity check means it can never be re-added, so each
-// batch converted more of this shape from "grandfathered" into "silently clean".
-// A ratchet that looks cleaner the more you use it is the #4342 failure again.
-//
-// This is a RULE and not a fourth selector because esquery cannot do it. A
-// selector can match `AssignmentExpression:has(CallExpression[…])`, but it
-// cannot tell which declaration the assigned identifier resolves to — so it
-// would equally flag the correctly-typed form this whole work line is trying to
-// produce (`let i18nService: II18nService | undefined; i18nService = …`, 8 such
-// sites today, in runtime/app-plugin.ts and service-automation among others).
-// Resolving the identifier to its declaration needs SCOPE analysis, which is
-// cheap and needs no type information — so this stays out of the typed-lint
-// pass that the KNOWN RESIDUAL below still waits on.
-const slotLookupPlugin = {
-  rules: {
-    'no-any-assignment': {
-      meta: {
-        type: 'problem',
-        docs: { description: 'Ban assigning a service-lookup result to an `any`-declared variable.' },
-        schema: [],
-        messages: { erased: SLOT_LOOKUP_ANY_MESSAGE },
-      },
-      create(context) {
-        const lookupNames = new Set(SLOT_LOOKUPS.split('|'));
-        const uncontracted = new RegExp(`^(${UNCONTRACTED_SLOTS})$`);
-
-        /** The slot-lookup call inside `node`, or null. Mirrors the selectors' `:has`. */
-        const findLookupCall = (node) => {
-          let found = null;
-          const walk = (n) => {
-            if (found || !n || typeof n.type !== 'string') return;
-            if (
-              n.type === 'CallExpression' &&
-              n.callee?.type === 'MemberExpression' &&
-              lookupNames.has(n.callee.property?.name)
-            ) {
-              // Same exemption channel as the selectors: the slot name is read
-              // off a literal argument, so an UNCONTRACTED_SLOTS lookup is
-              // legitimately `any` and must not be reported.
-              const exempt = n.arguments.some(
-                (a) => a?.type === 'Literal' && uncontracted.test(String(a.value)),
-              );
-              if (!exempt) { found = n; return; }
-            }
-            for (const key of Object.keys(n)) {
-              if (key === 'parent') continue;
-              const child = n[key];
-              if (Array.isArray(child)) child.forEach(walk);
-              else if (child && typeof child.type === 'string') walk(child);
-            }
-          };
-          walk(node);
-          return found;
-        };
-
-        /** True when `name` resolves, in scope, to a variable declared `: any`. */
-        const declaredAny = (name, node) => {
-          let scope = context.sourceCode.getScope(node);
-          for (; scope; scope = scope.upper) {
-            const variable = scope.variables.find((v) => v.name === name);
-            if (!variable) continue;
-            return variable.defs.some(
-              (d) => d.node?.id?.typeAnnotation?.typeAnnotation?.type === 'TSAnyKeyword',
-            );
-          }
-          return false;
-        };
-
-        return {
-          AssignmentExpression(node) {
-            if (node.left.type !== 'Identifier') return;
-            if (!findLookupCall(node.right)) return;
-            if (!declaredAny(node.left.name, node)) return;
-            context.report({ node, messageId: 'erased' });
-          },
-        };
-      },
-    },
-  },
-};
-
 // ---------------------------------------------------------------------------
 // [#4918] Engine query-options `any`-erasure guard.
-//
-// The same failure as the slot-lookup rule above, one layer further in: the
-// contract exists, `tsc` is willing to enforce it, and one annotation switches
-// that off for the call site while looking identical to code that has it.
-//
-// `IDataEngine.find/findOne/count/aggregate` declare their options as
-// `EngineQueryOptions` / `EngineCountOptions` / `EngineAggregateOptions`
-// (`packages/spec/src/contracts/data-engine.ts`), and `IDataDriver` declares the
-// same slots as `QueryAST` + `DriverOptions`. For an INTERNAL caller `tsc` is
-// the ONLY enforced channel on that path: the protocol's ingress normalizer does
-// not run on calls the protocol itself makes to `this.engine.find`, and the
-// options schemas are not `.strict()`, so an unknown key is silently DROPPED
-// rather than rejected. Erase the type and a wrong key becomes a no-op that
-// nothing anywhere reports.
-//
-// #4674 is the bill: two internal queries spelled their sort
-// `{ field, direction: 'desc' }` — another contract's vocabulary — where the
-// QueryAST shape is `SortNodeSchema` = `{ field, order }`. Both drivers
-// normalize off `.order` with no fallback, so both queries ran ASCENDING, and
-// because both carried a `limit` the wrong direction changed WHICH ROWS came
-// back: metadata audit history returned the oldest events (never an object's
-// recent changes) and global search returned the stalest matches. `#4720`
-// restored those two sites, `#4721` closed the external (REST/RPC) callers with
-// a strict schema plus an ingress normalizer, and this rule is the third leg —
-// it stops the erasure regrowing on the internal side.
-const ENGINE_QUERY_READ_METHODS = ['find', 'findOne', 'count', 'aggregate'];
+// The rule and its history: packages/eslint-plugin/src/query-options.mjs.
 
 // Exported so `scripts/check-query-options-erasure-ratchet.mjs` measures the
 // SAME surface this rule blocks. The ratchet lifts these to count the test-side
@@ -344,26 +237,6 @@ export const QUERY_OPTIONS_TEST_GLOBS = [
 // this one is a dedicated rule, so the id is available and is stricter.)
 export const QUERY_OPTIONS_RULE_ID = 'query-options/no-any-erasure';
 
-export const QUERY_OPTIONS_ANY_MESSAGE =
-  'Do not erase an engine query-options value to `any` — not as `find(obj, { … } ' +
-  'as any)`, not as an `orderBy: … as any`, and not as a `const opts: any` that is ' +
-  'then passed as the options argument. `EngineQueryOptions` (and `QueryAST` on the ' +
-  'driver side) already declare every key these methods read, and for an internal ' +
-  'caller `tsc` is the ONLY channel that enforces them: the protocol\'s ingress ' +
-  'normalizer does not run on a direct engine call, and the options schemas are not ' +
-  '`.strict()`, so an unknown key is silently DROPPED, never rejected. That is #4674 ' +
-  '— two queries sorted by `direction` (another contract\'s vocabulary) instead of ' +
-  '`order` (SortNodeSchema\'s), both with a `limit`, so both quietly returned the ' +
-  'OLDEST rows: audit history that never showed an object\'s recent changes, and a ' +
-  'global search that truncated away the freshly-edited records. The declared type ' +
-  'would have rejected `direction` at the call site; the erasure is the only reason ' +
-  'it compiled. Type the value instead (`const opts: EngineQueryOptions = { … }`, or ' +
-  'just drop the assertion — these signatures already infer). If the value is ' +
-  'DELIBERATELY off-contract — a test asserting the engine REJECTS an unknown option ' +
-  '— write `as unknown as EngineQueryOptions`: that names the contract being ' +
-  'bypassed, keeps the rest of the call type-checked, and greps as an intentional ' +
-  'act, none of which a bare `as any` does. See issues #4674, #4720, #4721, #4918.';
-
 // [#4918] The unswept residual, grandfathered BY FILE from
 // `scripts/query-options-erasure-baseline.json` — same mechanism, and same
 // reasoning, as SLOT_LOOKUP_UNSWEPT above: `pnpm lint` runs with
@@ -380,154 +253,9 @@ const QUERY_OPTIONS_UNSWEPT = Object.keys(JSON.parse(
   readFileSync(new URL('./scripts/query-options-erasure-baseline.json', import.meta.url), 'utf8'),
 ).nonTest);
 
-const queryOptionsPlugin = {
-  rules: {
-    'no-any-erasure': {
-      meta: {
-        type: 'problem',
-        docs: { description: 'Ban erasing an engine query-options value to `any`.' },
-        schema: [],
-        messages: { erased: QUERY_OPTIONS_ANY_MESSAGE },
-      },
-      create(context) {
-        const methods = new Set(ENGINE_QUERY_READ_METHODS);
-
-        /**
-         * True when `node` is, or wraps, an `any` assertion.
-         *
-         * Walks the whole assertion chain rather than testing the outermost
-         * node, so `{ … } as any as EngineQueryOptions` is caught too: that
-         * spelling checks the literal against nothing and then re-labels the
-         * result with the contract, which erases the keys exactly as `as any`
-         * does while reading as if it were typed. `as unknown as X` is NOT
-         * matched, on purpose — see the message.
-         */
-        const erasesToAny = (node) => {
-          for (let cur = node; cur; cur = cur.expression) {
-            if (cur.type === 'TSAsExpression' || cur.type === 'TSTypeAssertion') {
-              if (cur.typeAnnotation?.type === 'TSAnyKeyword') return true;
-              continue;
-            }
-            if (cur.type === 'TSNonNullExpression') continue;
-            return false;
-          }
-          return false;
-        };
-
-        /**
-         * True when `name` resolves, in scope, to a local VARIABLE declared
-         * `: any` — the split form (`const opts: any = { … }` … `find(o, opts)`)
-         * that #4674's global-search site actually used.
-         *
-         * Scope analysis, not a name heuristic: a rule keyed on the identifier's
-         * spelling would flag every `const options: any` in the repo whether or
-         * not it ever reaches a query, and miss the ones spelled anything else.
-         * Deliberately restricted to variable declarations — an `: any`
-         * PARAMETER forwarded into a query is a different (and much larger,
-         * mostly test-double) population, out of this cut's scope.
-         */
-        const declaredAnyVariable = (name, node) => {
-          for (let scope = context.sourceCode.getScope(node); scope; scope = scope.upper) {
-            const variable = scope.variables.find((v) => v.name === name);
-            if (!variable) continue;
-            return variable.defs.some(
-              (d) =>
-                d.node?.type === 'VariableDeclarator' &&
-                d.node.id?.typeAnnotation?.typeAnnotation?.type === 'TSAnyKeyword',
-            );
-          }
-          return false;
-        };
-
-        return {
-          CallExpression(node) {
-            if (node.callee?.type !== 'MemberExpression') return;
-            const property = node.callee.property;
-            if (property?.type !== 'Identifier' || !methods.has(property.name)) return;
-
-            node.arguments.forEach((argument, index) => {
-              // Argument 0 is the object/table NAME on every one of these
-              // signatures; the options bags are 1 (the query) and 2
-              // (`BaseEngineOptions` / `DriverOptions`). Starting at 1 is also
-              // what keeps `Array.prototype.find(cb)` — same method name,
-              // callback at index 0 — out of the rule entirely.
-              if (index < 1 || !argument) return;
-              if (erasesToAny(argument)) {
-                context.report({ node: argument, messageId: 'erased' });
-                return;
-              }
-              if (argument.type === 'Identifier' && declaredAnyVariable(argument.name, node)) {
-                context.report({ node: argument, messageId: 'erased' });
-              }
-            });
-          },
-
-          // `orderBy` is scoped in by name because it is the key #4674 was
-          // actually wrong about, and it is erased one level below the argument
-          // — `...(ast.orderBy ? { orderBy: ast.orderBy as any } : {})` sits
-          // inside an otherwise-typed options literal, so the argument-position
-          // check above cannot see it. `SortNodeSchema` is the shape everywhere
-          // this key appears.
-          Property(node) {
-            if (node.computed) return;
-            const key = node.key;
-            const isOrderBy =
-              (key?.type === 'Identifier' && key.name === 'orderBy') ||
-              (key?.type === 'Literal' && key.value === 'orderBy');
-            if (!isOrderBy) return;
-            if (erasesToAny(node.value)) {
-              context.report({ node: node.value, messageId: 'erased' });
-            }
-          },
-        };
-      },
-    },
-  },
-};
-
 // ---------------------------------------------------------------------------
 // [#6399] `@objectstack/verify` structural stand-in erasure guard.
-//
-// The third member of the family above, and the narrowest. `checkReadCoercion`
-// and `checkDateBucketParity` take their driver STRUCTURALLY — `CoercibleDriver`
-// / `BucketableDriver` — so an out-of-tree driver (cloud's `driver-turso` in
-// remote mode) can run the identical contract without importing a concrete
-// driver type. That parameter type is not decoration around the check: for the
-// compile-time half of the conformance it IS the check. Assert the argument and
-// the stand-in stops standing for anything, at that call site, while the code
-// reads exactly like the checked kind.
-//
-// #6354/PR #6396 is the bill: TEN `as never` casts — every call site of both
-// helpers — had switched that half off, long enough that nobody remembered
-// writing them. They were provably dead (removing all ten left three packages'
-// typecheck at exit=0) and the compile-time check they had been hiding is
-// provably live (adding a member no real driver can have turned all ten sites
-// red, 8+2 matching the cast count exactly). Nothing rang for either fact.
-//
-// ⚠️ The cost is highest on the FAKE-driver side. Six of the ten sites pass a
-// hand-written literal; four pass a real driver. A real driver comes from
-// production code and mostly satisfies the stand-in whether or not anyone
-// checks — a hand-written fake is precisely the thing that drifts, and it is
-// the arm an assertion silences most cheaply.
-//
-// Scope is argument 0 — the driver — and nothing else. The options bag is a
-// different type with its own `unknown` slots, and an assertion there is
-// #6394's subject, not this rule's.
-//
-// WHY A DEDICATED RULE, not a widened `check:query-options-erasure`: measured,
-// that ratchet cannot reach these sites at all. `query-options/no-any-erasure`
-// keys on a MEMBER-expression callee named `find|findOne|count|aggregate` and
-// only inspects arguments at index >= 1; every site here is a bare-identifier
-// callee with the driver at index 0. Teaching it the word `never` would have
-// matched zero of the ten while pulling several hundred unrelated `as never`
-// sites into its baseline and blurring what "query/options type erasure" means.
-//
-// WHY NOT a blanket ban on `as never` at call arguments in tests: 550 of the
-// repo's 703 `as never` assertions sit at a call-argument position, 536 of them
-// in test files across 33 packages, and the large majority are legitimate —
-// a negative test constructing input `tsc` is supposed to refuse. That is the
-// same trade-off QUERY_OPTIONS_TEST_GLOBS already resolved the same way: a
-// blocking rule there fights the tests that prove the contract is enforced.
+// The rule and its history: packages/eslint-plugin/src/verify-stand-in.mjs.
 //
 // The guarded set is reconciled against `packages/verify/src` in BOTH
 // directions by `pnpm check:verify-stand-in`, so a third stand-in check cannot
@@ -545,346 +273,12 @@ export const VERIFY_STAND_IN_CHECKS = {
 // QUERY_OPTIONS_RULE_ID.
 export const VERIFY_STAND_IN_RULE_ID = 'verify-stand-in/no-asserted-driver-argument';
 
-export const VERIFY_STAND_IN_MESSAGE =
-  'Do not type-assert the driver argument of a @objectstack/verify conformance check. ' +
-  '`checkReadCoercion(driver)` / `checkDateBucketParity(driver)` declare that parameter as a ' +
-  'structural stand-in (`CoercibleDriver` / `BucketableDriver`) so any driver — including an ' +
-  'out-of-tree one — can run the identical contract; that declaration is the compile-time half ' +
-  'of the conformance, and an assertion on the argument deletes it for this call site while ' +
-  'looking identical to a call that has it. Ten such casts (`as never`, every call site of both ' +
-  'helpers) lived in this repo long enough that nobody remembered writing them — all ten dead, ' +
-  'and the check underneath them alive (#6354 / PR #6396). Six of the ten passed a HAND-WRITTEN ' +
-  'fake driver, which is the arm that actually drifts. Pass the driver unasserted. If it does ' +
-  'not satisfy the stand-in, that is the finding — fix the driver or widen the stand-in ' +
-  'deliberately, in `packages/verify/src`, where the change is reviewed once instead of ' +
-  'silenced per call site. See issues #6354, #6394 and #6399.';
-
-const verifyStandInPlugin = {
-  rules: {
-    'no-asserted-driver-argument': {
-      meta: {
-        type: 'problem',
-        docs: {
-          description:
-            'Ban type-asserting the driver argument of a @objectstack/verify structural conformance check.',
-        },
-        schema: [],
-        messages: { erased: VERIFY_STAND_IN_MESSAGE },
-      },
-      create(context) {
-        const guarded = new Set(Object.keys(VERIFY_STAND_IN_CHECKS));
-
-        /**
-         * True when `node` is, or wraps, ANY type assertion.
-         *
-         * Deliberately wider than `erasesToAny` above: on this argument there is
-         * no assertion worth allowing. `as unknown as BucketableDriver` is the
-         * sanctioned escape for engine query OPTIONS because a test may need
-         * off-contract input on purpose; here the parameter type is the contract
-         * UNDER TEST, so re-labelling the argument with it asserts exactly the
-         * thing the call was supposed to prove. Every one of the ten historical
-         * casts would be re-admitted by an `any`-only test.
-         */
-        const isAsserted = (node) => {
-          for (let cur = node; cur; cur = cur.expression) {
-            if (cur.type === 'TSAsExpression' || cur.type === 'TSTypeAssertion') return true;
-            if (cur.type === 'TSNonNullExpression') continue;
-            return false;
-          }
-          return false;
-        };
-
-        /**
-         * True when `name` resolves, in scope, to a variable declared `: any` or
-         * `: never` — the split form (`const d: any = brokenDriver(); check(d)`),
-         * which erases the stand-in exactly as the inline assertion does and is
-         * the first shape someone reaches for once the inline one is blocked.
-         * Scope analysis, not a name heuristic — same mechanism, and the same
-         * reason, as `slot-lookup/no-any-assignment`.
-         */
-        const declaredErasedVariable = (name, node) => {
-          for (let scope = context.sourceCode.getScope(node); scope; scope = scope.upper) {
-            const variable = scope.variables.find((v) => v.name === name);
-            if (!variable) continue;
-            return variable.defs.some((d) => {
-              const kind = d.node?.id?.typeAnnotation?.typeAnnotation?.type;
-              return (
-                d.node?.type === 'VariableDeclarator' &&
-                (kind === 'TSAnyKeyword' || kind === 'TSNeverKeyword')
-              );
-            });
-          }
-          return false;
-        };
-
-        return {
-          CallExpression(node) {
-            // Bare-identifier callee only. These names are distinctive enough to
-            // treat as reserved, and matching the name rather than the resolved
-            // import is what keeps a re-export or a test-local alias from
-            // quietly leaving the rule behind.
-            if (node.callee?.type !== 'Identifier' || !guarded.has(node.callee.name)) return;
-            const driver = node.arguments?.[0];
-            if (!driver) return;
-            if (isAsserted(driver)) {
-              context.report({ node: driver, messageId: 'erased' });
-              return;
-            }
-            if (driver.type === 'Identifier' && declaredErasedVariable(driver.name, node)) {
-              context.report({ node: driver, messageId: 'erased' });
-            }
-          },
-        };
-      },
-    },
-  },
-};
-
 // ---------------------------------------------------------------------------
 // issue #9758 — a statement swallowed by an unterminated block comment.
 // ---------------------------------------------------------------------------
-//
-// A block comment that is never closed is NOT a syntax error. The next comment
-// terminator in the file closes it — normally the docblock of the following
-// declaration — so the file parses, every gate stays green, and the only
-// symptom is a statement that quietly stopped existing. #9640 is one instance:
-// `export { maskComments };` in `scripts/pm/dispatch-gates.mjs` had been comment
-// TEXT, while that module's own header went on claiming the re-export.
-//
-// The class is invisible to review and trivial to parse: the swallowed line
-// looks like code (textually it IS code) and the terminator looks like it
-// belongs to the docblock below. ESLint already visits every file with a real
-// parser and hands a rule the comment nodes for free, so the checker is the
-// predicate below and nothing else.
-//
-// ## Why a rule here and not a `check:*` family — #9758's question, measured
-//
-// #9758 recorded the class at 1 instance in 4,595 files and asked whether that
-// base rate earns a checker at all. Re-derived on this tree — 4,679 files, a
-// real parser rather than the repo masker — the count is 0: #9640 was the
-// singleton and its PR repaired it.
-//
-// A zero base rate is a real argument against a new gate FAMILY: a script, a
-// workflow step, a required context, its own self-test and watch hints, and one
-// more line of reader attention in every dispatch derivation, all to hold a
-// class nobody trips. It is not an argument against THIS, which is one rule in
-// the file that already carries three inline plugins, under a `pnpm lint` that
-// already parses all 4,679 files. Zero new CI steps, zero new required
-// contexts, zero new check families, zero new dispatch leads.
-// `verify-stand-in/no-asserted-driver-argument` below is the precedent for a
-// guard that starts at a zero baseline: the state worth having is that the
-// count stays 0, and holding a 0 is what a rule is for.
-//
-// ## The false-positive surface, which is the whole risk — measured
-//
-// Commented-out code is legitimate and common, so a predicate that flags every
-// code-shaped line inside a block comment is unshippable. Two facts bound it,
-// both measured over this tree's 21,007 multi-line block comments:
-//
-//   • all 240,529 of their interior source lines carry the `*` prose marker —
-//     not most, all. So exempting marker lines costs no recall on real prose,
-//     and it is what makes the predicate quiet: 540 interior lines ARE
-//     code-shaped (`@example` blocks — `* import { createHonoApp } from …`,
-//     `* export default app;`) and every one of them is a marker line. Without
-//     the exemption those 540 are false positives; with it they are invisible.
-//   • the predicate matches statement SHAPES, not statement keywords. `let`,
-//     `class`, `type`, `import` and `export` are ordinary English words, and a
-//     keyword test flags prose that opens with one. `let us assume…` does not
-//     match `let <ident> [:=]`; `class hierarchies are…` does not match
-//     `class <ident> (extends|implements|{|<)`; `import lists are…` does not
-//     match an import form. Those three are in the pinned cases below.
-//
-// Against those two, plus the block-comment OPENER signature (comments do not
-// nest, so a `/*` at the head of a line inside a comment span is the structural
-// signature of "never closed"), a sweep over 261,536 candidate lines in 4,679
-// files reports 0. So the rule ships with no baseline and no ignores beyond the
-// build directories — there is nothing to grandfather.
-//
-// ## What it cannot see, stated rather than implied
-//
-// ESLint never sees a file that does not parse, so this rule's domain is
-// exactly the SILENT half of the class. When the swallowed span happens to
-// leave behind text that is not valid JavaScript — a glob literal such as
-// `packages/` + `**` + `/*.ts` carries a comment terminator and closes a
-// phantom span mid-token — the parser rejects the file loudly and no checker is
-// needed. That split is also why the predicate is allowed to be narrow: the
-// loud half is already covered, by the compiler.
-//
-// The other half it cannot see is a swallowed line that is neither
-// statement-shaped nor a comment opener — a bare call, a JSX fragment, an
-// object continuation. Widening to "any line inside a block comment without a
-// `*` marker" would catch those and measures 0 on this tree too, but it is a
-// STYLE claim wearing a defect's clothes: it would reject a perfectly ordinary
-// marker-less `/*  TODO: …  */` block, and this repo lints with
-// `--no-inline-config`, so there would be no per-site escape from it. The
-// escape that does exist is the house style itself — prefix the line with `*`.
-
+// The rule and its history: packages/eslint-plugin/src/comment-swallow.mjs.
 /** The rule's own id, exported for the same reason as the two ids above. */
 export const COMMENT_SWALLOW_RULE_ID = 'comment-swallow/no-code-inside-block-comment';
-
-export const COMMENT_SWALLOW_MESSAGE =
-  'This line is inside a block comment, and it is shaped like code. That is the signature of a ' +
-  'block comment that was never closed: an unterminated opener is not a syntax error — the next ' +
-  'comment terminator in the file closes it, usually the docblock of the following declaration — ' +
-  'so the file parses, every gate stays green, and a statement quietly stops existing while the ' +
-  'header above it goes on describing it (#9640: `export { maskComments };` was comment text for ' +
-  'as long as nobody looked). Add the missing terminator to the comment above. If the line really ' +
-  'is prose or a deliberately commented-out example, prefix it with the `*` marker every one of ' +
-  "this tree's 240,529 block-comment lines already carries — that is the exemption, and it is the " +
-  'house style rather than an opt-out. See issues #9640 and #9758.';
-
-/**
- * Statement SHAPES, not statement keywords — see the false-positive section
- * above. Each pattern is anchored on the punctuation that makes the line code
- * rather than a sentence that happens to open with a reserved word.
- */
-export const COMMENT_SWALLOW_PATTERNS = [
-  // `export { a };` / `export * from './x';` / `export default f;`
-  /^export\s*(?:\{|\*|default\b)/,
-  // the four import forms, and none of `import lists are checked elsewhere,`
-  /^import\s*(?:\{|\*|type\s|['"]|[A-Za-z_$][\w$]*\s*(?:,|from\b))/,
-  // a binding: `const x =`, `let { a } =`, `export var n:` — never `let us …`
-  /^(?:export\s+)?(?:const|let|var)\s+(?:[{[]|[A-Za-z_$][\w$]*\s*[:=])/,
-  // `function f(`, `async function* g<`, `export default function h(`
-  /^(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s*\*?\s*[A-Za-z_$][\w$]*\s*[(<]/,
-  // `class C {` / `export abstract class C extends D` — never `class hierarchies …`
-  /^(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+[A-Za-z_$][\w$]*\s*(?:extends\b|implements\b|\{|<)/,
-  // the TypeScript declaration shapes
-  /^(?:export\s+)?(?:declare\s+)?interface\s+[A-Za-z_$][\w$]*\s*(?:extends\b|\{|<)/,
-  /^(?:export\s+)?(?:declare\s+)?(?:const\s+)?enum\s+[A-Za-z_$][\w$]*\s*\{/,
-  /^(?:export\s+)?type\s+[A-Za-z_$][\w$]*\s*[=<]/,
-  // CommonJS, which `scripts/` still writes
-  /^(?:module\.exports|exports\.[A-Za-z_$][\w$]*)\s*=/,
-  // a block-comment OPENER. Comments do not nest, so one that begins a line
-  // inside a comment span is the structural signature of "never closed" — and
-  // in the #9640 shape it is the docblock of the declaration below, which is
-  // exactly the thing that made the defect unreadable.
-  /^\/\*/,
-];
-
-/**
- * True when this source line, taken on its own, reads as code rather than
- * prose. The caller supplies the fact that the line lies inside a block-comment
- * span; this half decides nothing about spans and everything about shape.
- */
-export function looksLikeSwallowedCode(sourceLine) {
-  const text = sourceLine.trim();
-  if (!text || text.startsWith('*')) return false;
-  return COMMENT_SWALLOW_PATTERNS.some((pattern) => pattern.test(text));
-}
-
-/**
- * The extension list is load-bearing and DELIBERATELY wider than the
- * `verify-stand-in` block's: it carries `js`/`jsx`/`mjs`/`cjs`. The only
- * instance this class has ever had on this tree was `scripts/pm/
- * dispatch-gates.mjs`, a `.mjs` file, and a block copied from the
- * `{ts,tsx,mts,cts}` sibling below would have covered every file except the
- * one kind that has actually carried the defect. `assertCommentSwallow` pins
- * it, so the narrowing cannot happen quietly.
- */
-export const COMMENT_SWALLOW_FILES = ['**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}'];
-
-/**
- * The predicate's contract, pinned as cases rather than trusted.
- *
- * A rule with a ZERO baseline is green three ways — the tree is clean, the
- * predicate was edited into matching nothing, or the config block stopped
- * matching files — and `pnpm lint` reports the same nothing in all three. That
- * is the dead-pin shape the three sibling guards in this file each pay a gate
- * script to avoid. This one does not need a gate script: the predicate is a
- * pure function of one line, so its cases can run where the config loads, on
- * every `pnpm lint` in CI and locally, at a cost of ~20 regex tests. The span
- * half needs no pinning — that is the parser's answer, not ours.
- */
-export const COMMENT_SWALLOW_CASES = [
-  // FIRES — the class.
-  ['export { maskComments };', true],              // the #9640 statement itself
-  ['const RE = /a*' + '/;', true],
-  ['  const limit = 10;', true],                   // indented, inside a function body
-  ['module.exports = { a: 1 };', true],
-  ['export type Id = string;', true],
-  ['export function selfTest() {', true],
-  ['import { readFileSync } from "node:fs";', true],
-  ['/** the docblock whose terminator closed the phantom span */', true],
-  // SILENT — prose, and marked-up example code.
-  [' * import { createHonoApp } from "@objectstack/hono";', false],
-  [' * export default app;', false],
-  ['let us assume the value is null, and', false],
-  ['class hierarchies are not the point here;', false],
-  ['import lists are checked elsewhere,', false],
-  ['export the module however you like;', false],
-  ['type checking happens later', false],
-  [' */', false],
-  ['', false],
-];
-
-function assertCommentSwallow() {
-  const wrong = COMMENT_SWALLOW_CASES.filter(([line, expected]) => looksLikeSwallowedCode(line) !== expected);
-  if (wrong.length > 0) {
-    throw new Error(
-      `${COMMENT_SWALLOW_RULE_ID}: the detector no longer matches its pinned cases — ` +
-      `${wrong.length} of ${COMMENT_SWALLOW_CASES.length} disagree, starting with ` +
-      `${JSON.stringify(wrong[0][0])} (expected ${wrong[0][1] ? 'a report' : 'silence'}). ` +
-      'A rule with a zero baseline cannot be trusted to be quiet for the right reason, so this ' +
-      'runs where the config loads. Fix COMMENT_SWALLOW_PATTERNS, or amend the case if the ' +
-      'contract really changed — never delete it to get lint green. See issue #9758.'
-    );
-  }
-  if (!COMMENT_SWALLOW_FILES.some((glob) => /\bmjs\b/.test(glob) && /\bjs\b/.test(glob))) {
-    throw new Error(
-      `${COMMENT_SWALLOW_RULE_ID}: COMMENT_SWALLOW_FILES stopped covering plain JavaScript. The ` +
-      'one instance this class has ever had on this tree was a `.mjs` file under `scripts/`, so a ' +
-      'TypeScript-only scope is a guard that cannot see the only place the defect has occurred. ' +
-      'See issue #9758.'
-    );
-  }
-}
-
-assertCommentSwallow();
-
-const commentSwallowPlugin = {
-  rules: {
-    'no-code-inside-block-comment': {
-      meta: {
-        type: 'problem',
-        docs: {
-          description:
-            'Ban a code-shaped line inside a block-comment span — the signature of a block ' +
-            'comment that was never closed.',
-        },
-        schema: [],
-        messages: { swallowed: COMMENT_SWALLOW_MESSAGE },
-      },
-      create(context) {
-        return {
-          Program() {
-            const { sourceCode } = context;
-            const lines = sourceCode.lines;
-            for (const comment of sourceCode.getAllComments()) {
-              if (comment.type !== 'Block') continue;
-              const { start, end } = comment.loc;
-              if (end.line === start.line) continue;
-              // From the line AFTER the opener through the terminator's own
-              // line. The opener's line is excluded because whatever precedes a
-              // `/*` on it is live code; the terminator's line is INCLUDED
-              // because a span can close mid-line, on a line that is otherwise
-              // a statement — a regex or a glob literal a few lines down
-              // carries a terminator and ends the phantom span right there.
-              for (let line = start.line + 1; line <= end.line; line++) {
-                const text = lines[line - 1];
-                if (text === undefined || !looksLikeSwallowedCode(text)) continue;
-                context.report({
-                  loc: { start: { line, column: 0 }, end: { line, column: text.length } },
-                  messageId: 'swallowed',
-                });
-              }
-            }
-          },
-        };
-      },
-    },
-  },
-};
 
 // ───────────────────────────────────────────────────────────────────────────
 // The trees nothing in this repo ever lints: installed dependencies and build
@@ -1135,7 +529,10 @@ export default [
       // The split-declaration form (#4251) — see `slotLookupPlugin`. Reports the
       // SAME message as the three selectors below, so `check:slot-lookup` counts
       // all four shapes without knowing there are four.
-      'slot-lookup/no-any-assignment': 'error',
+      'slot-lookup/no-any-assignment': ['error', {
+        lookups: SLOT_LOOKUPS.split('|'),
+        uncontracted: UNCONTRACTED_SLOTS.split('|'),
+      }],
       'no-restricted-syntax': ['error',
         {
           // `const svc: any = await deps.resolveService('auth', env)`
@@ -1169,29 +566,6 @@ export default [
   },
   // issue #4918 — engine query-options `any`-erasure guard. Rationale and the
   // #4674 cost are on `QUERY_OPTIONS_ANY_MESSAGE` above.
-  //
-  // This is a dedicated PLUGIN rule and not three more `no-restricted-syntax`
-  // selectors, for two reasons that both matter:
-  //
-  //   1. Flat config does not MERGE rule options. A second block setting
-  //      `no-restricted-syntax` over `packages/**` would REPLACE the
-  //      slot-lookup block's selector list for every file both blocks match —
-  //      silently deleting that rule. The two guards also need independent
-  //      `ignores` (their unswept sets are different files), which one shared
-  //      block cannot give them.
-  //   2. The split form needs SCOPE analysis to resolve an identifier to its
-  //      declaration, which esquery cannot express — the same reason
-  //      `slot-lookup/no-any-assignment` exists. Scope analysis needs no type
-  //      information, so this still runs in the plain (untyped) lint pass.
-  //
-  // KNOWN RESIDUAL, stated rather than implied: an erasure that happens through
-  // a typed indirection — a helper declared `(o, q?: any) => engine.find(o, q)`,
-  // or a wrapper whose own return type is `Promise<any>` — erases the contract
-  // just as effectively and this rule cannot see it (an `: any` PARAMETER
-  // forwarded into a query is a real shape, ~50 sites, almost all of them test
-  // doubles; judging it needs the call graph, not one file's scopes). Same
-  // boundary as the slot-lookup rule's own KNOWN RESIDUAL, and the same answer:
-  // it belongs to a typed-lint pass, not here.
   {
     files: ['packages/**/*.{ts,tsx,mts,cts}'],
     ignores: [
@@ -1240,7 +614,11 @@ export default [
       parserOptions: { ecmaVersion: 'latest', sourceType: 'module' },
     },
     plugins: { 'verify-stand-in': verifyStandInPlugin },
-    rules: { 'verify-stand-in/no-asserted-driver-argument': 'error' },
+    rules: {
+      'verify-stand-in/no-asserted-driver-argument': ['error', {
+        checks: Object.keys(VERIFY_STAND_IN_CHECKS),
+      }],
+    },
   },
   // issue #9758 — a statement swallowed by an unterminated block comment. The
   // rationale, the re-derived base rate and the false-positive bound are all on
@@ -1251,7 +629,7 @@ export default [
   // instance this class has ever had was a `.mjs` file under `scripts/`.
   // Copying the sibling's `{ts,tsx,mts,cts}` scope here would produce a guard
   // that covers 4,326 package files and not the one kind of file the defect has
-  // actually occurred in. `assertCommentSwallow` refuses that narrowing.
+  // actually occurred in. The plugin's tests refuse that narrowing.
   //
   // No baseline and no `ignores` beyond the build directories, for the same
   // reason `verify-stand-in` has none: the tree measures 0 today (261,536

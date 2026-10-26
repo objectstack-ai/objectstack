@@ -323,6 +323,7 @@ export const ModalForm: React.FC<ModalFormProps> = ({
   const previewMode = usePreviewMode();
   const perms = usePermissions();
   const [objectSchema, setObjectSchema] = useState<any>(null);
+  const [formData, setFormData] = useState<Record<string, any>>({});
   // The ONE field-gate step every layout draws through (`gateFormFields`,
   // objectui#10612): FLS drops non-readable fields and disables non-editable
   // ones (`80c54122e`; fail-open when no PermissionProvider is mounted), and
@@ -336,11 +337,12 @@ export const ModalForm: React.FC<ModalFormProps> = ({
         objectName: schema.objectName,
         mode: schema.mode,
         objectSchema,
+        // The persisted record a `state_machine` select narrows by (#25933).
+        previousValues: schema.mode === 'edit' && schema.recordId ? formData : undefined,
       }) as FormField[],
-    [perms, schema.objectName, schema.mode, objectSchema],
+    [perms, schema.objectName, schema.mode, schema.recordId, objectSchema, formData],
   );
   const [formFields, setFormFields] = useState<FormField[]>([]);
-  const [formData, setFormData] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(true);
   // objectui#10682 — the load error, kept per read (the object schema and the
   // record), each written only by the current run of its read and cleared when
