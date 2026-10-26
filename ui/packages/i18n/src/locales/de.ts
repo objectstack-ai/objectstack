@@ -217,6 +217,8 @@ const de = {
     update: "Aktualisieren",
     createSuccess: "{{object}} erfolgreich erstellt",
     updateSuccess: "{{object}} erfolgreich aktualisiert",
+    createdNamed: "{{object}} „{{title}}“ erstellt",
+    updatedNamed: "{{object}} „{{title}}“ aktualisiert",
     created: "Erstellt",
     saved: "Gespeichert",
     savedNamed: "{{title}} gespeichert",

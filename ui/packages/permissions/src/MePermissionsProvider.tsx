@@ -19,7 +19,7 @@ import type {
   PermissionCheckResult,
   FieldLevelPermission,
 } from '@object-ui/types';
-import { objectPermissionGrants } from '@objectstack/spec/security';
+import { objectPermissionGrants, type ObjectPermissionVerbTarget } from '@objectstack/spec/security';
 import { SystemFieldName } from '@objectstack/spec/system';
 import { PermCtx, type PermissionContextValue } from './PermissionContext.js';
 import { createDiscardProofCache } from './discardProofCache.js';
@@ -36,7 +36,11 @@ export interface MePermissionsResponse {
   permissionSets: string[];
   /** [ADR-0066] System capabilities (union of permission-set systemPermissions): manage_users, setup.access, … */
   systemPermissions?: string[];
-  /** object-level perms: { "*": {...}, "account": {...} } */
+  /**
+   * object-level perms: { "*": {...}, "account": {...} }. A row grants only
+   * what the spec's `objectPermissionGrants` reads from it — a bit the row
+   * omits is NOT granted, exactly as the server enforces it.
+   */
   objects: Record<string, {
     allowCreate?: boolean;
     allowRead?: boolean;
@@ -356,18 +360,24 @@ export function MePermissionsProvider({
         //    would brick public forms.
         return data.authenticated !== true;
       }
-      if (action === 'read') return objPerm.allowRead !== false;
-      return action === 'create'
-        ? objPerm.allowCreate !== false
-        : objPerm.allowEdit !== false;
+      // An object row grants an operation only through the spec's own fold —
+      // the one the server's evaluator answers from: a bit that is not
+      // `=== true` is no grant, so a row the server served WITHOUT the bit
+      // (a read-only wildcard copies only its `true` bits) reads as denied.
+      return objectPermissionGrants(
+        objPerm,
+        action === 'read' ? 'allowRead' : action === 'create' ? 'allowCreate' : 'allowEdit',
+      );
     },
   );
 
   const check = CHECK([dataKey], () =>
     (object: string, action: PermissionAction): PermissionCheckResult => {
       if (!data) return { allowed: false, reason: 'permissions-loading' };
-      const objPerm = data.objects?.[object] ?? data.objects?.['*'];
-      const map: Record<string, keyof NonNullable<typeof objPerm>> = {
+      // Same key normalization as checkField: the backend keys objects lowercase.
+      const objKey = (object ?? '').toLowerCase();
+      const objPerm = data.objects?.[objKey] ?? data.objects?.[object] ?? data.objects?.['*'];
+      const map: Record<string, ObjectPermissionVerbTarget> = {
         read: 'allowRead',
         view: 'allowRead',
         create: 'allowCreate',
@@ -382,8 +392,14 @@ export function MePermissionsProvider({
         export: 'allowRead',
       };
       const k = map[action as string] ?? 'allowRead';
-      // Same authentication-gated default as checkField (objectstack-ai/objectstack#2926 ④).
-      const allowed = objPerm ? (objPerm as any)[k] !== false : data.authenticated !== true;
+      // A served row grants only through the spec's fold (`=== true`, plus the
+      // super-user bypasses), exactly as the server's evaluator decides: the
+      // server's plain-wildcard coverage serves a read-only set as
+      // `{ allowRead: true }` with no `allowCreate`, and reading that absent bit
+      // as allowed offered New / Edit / Delete the server refuses with 403.
+      // No row at all keeps the authentication-gated default of checkField
+      // (objectstack-ai/objectstack#2926 ④).
+      const allowed = objPerm ? objectPermissionGrants(objPerm, k) : data.authenticated !== true;
       return { allowed, reason: allowed ? undefined : 'denied-by-permission-set' };
     },
   );

@@ -27,7 +27,6 @@ describe('a metadata-door permission save reaches the security catalog (ADR-0131
   let stack: VerifyStack;
   let admin: string;
   let reader: ReturnType<typeof createSecurityCatalogReader>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let ql: any;
   let userId: string;
 

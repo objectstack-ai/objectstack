@@ -174,6 +174,20 @@ const DOORS: readonly Door[] = [
     secrets: [POLICY_COL, 'secret_undeclared_ref'],
     klass: 'cannot be compiled here',
   },
+  // ── #25808: the now-anchored comparand's two doors ─────────────────────────
+  {
+    builder: 'nowAnchorPositionError',
+    where: () => ({ [POLICY_COL]: { $contains: { $now: true, addDays: 1 } } }),
+    secrets: [POLICY_COL, '$contains'],
+    klass: 'A now-anchored comparand',
+    authorExtendsLog: true,
+  },
+  {
+    builder: 'uncompilableNowAnchorError',
+    where: () => ({ [POLICY_COL]: { $gt: { $now: true, addDays: { $field: 'secret_undeclared_ref' } } } }),
+    secrets: [POLICY_COL],
+    klass: 'A now-anchored comparison',
+  },
   {
     builder: 'jsonColumnOperatorError',
     where: () => ({ [JSON_COL]: { $in: [SECRET] } }),

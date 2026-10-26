@@ -16,7 +16,8 @@
  * same text.
  *
  * The pillar is the real `InterfacesPillar` over a mocked metadata client (the
- * harness of `StudioDesignSurface.surfaceIdentity.test.tsx`). Every nav item
+ * harness of the `StudioDesignSurface.surfaceIdentity` block in
+ * `StudioDesignSurface.railLabels.test.tsx`). Every nav item
  * of the fixture parses against the spec, so each map is an input the
  * designer must handle. The plain-string item is the control in every case.
  */

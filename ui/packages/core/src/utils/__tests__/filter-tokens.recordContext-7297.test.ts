@@ -34,10 +34,11 @@ function resolve(filter: unknown, scope: Record<string, unknown>) {
 }
 
 describe('{record_id} resolves against the record in scope (objectui#7297)', () => {
-  it('is the one record-context token the installed spec declares', () => {
+  it('is a record-context token the installed spec declares', () => {
     // The resolver's `satisfies Record<RecordContextToken, …>` literal reds the
-    // compile on a second one; this states the same ratchet at runtime.
-    expect([...RECORD_CONTEXT_TOKENS]).toEqual(['record_id']);
+    // compile on a second one, so that ratchet lives in the type check; at
+    // runtime only the token this file resolves is asserted (#26238).
+    expect([...RECORD_CONTEXT_TOKENS]).toContain('record_id');
   });
 
   it('resolves in every filter shape, in both spellings', () => {

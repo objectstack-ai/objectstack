@@ -123,10 +123,11 @@ const DECORATED_SERVED = {
 // ---------------------------------------------------------------------------
 
 describe('the instrument', () => {
-  it('is the spec that names the decorations, and it names exactly these two', () => {
+  it('is the spec that names the decorations, and it names these two', () => {
     // Stated before any claim about the fix. If this list grows, the pins below
-    // follow it without an edit — that is why they read it rather than spell it.
-    expect([...METADATA_READ_DECORATIONS]).toEqual(['_diagnostics', '_draft']);
+    // follow it without an edit — that is why they read it rather than spell it,
+    // and why this asserts membership rather than the whole list (#26238).
+    expect([...METADATA_READ_DECORATIONS]).toEqual(expect.arrayContaining(['_diagnostics', '_draft']));
   });
 
   it('refuses each decoration BY NAME — the defect, on the schema', () => {

@@ -110,7 +110,7 @@ describe('objectui#9973 — list-action flow launch that ends refused', () => {
   it("does NOT toast the action's successMessage, does not refresh, and returns silent success", async () => {
     const { result, refreshSpy } = await launch({ success: true, status: 'refused', refusalMessage: SENTENCE });
 
-    expect(result).toEqual({ success: true, silent: true });
+    expect(result).toEqual({ success: true, silent: true, handedOff: true });
     expect((toast as any).success).not.toHaveBeenCalled();
     expect((toast as any).error).not.toHaveBeenCalled();
     expect(refreshSpy).not.toHaveBeenCalled();
@@ -152,7 +152,7 @@ describe('objectui#11092 — a paused list-action launch names the flow by its s
       screen: { nodeId: 'confirm', title: 'Confirm', fields: [] },
     });
 
-    expect(result).toEqual({ success: true, silent: true });
+    expect(result).toEqual({ success: true, silent: true, handedOff: true });
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByRole('heading', { name: 'Confirm' })).toBeTruthy();
     expect(within(dialog).getByText('Duplicate Screening')).toBeTruthy();

@@ -20,6 +20,7 @@ import { installCommentAccessHooks, installCommentReadVisibility } from './comme
 import { admitMentionRecipients } from './mention-recipient-gate.js';
 import { installActivityReadVisibility } from './activity-read-visibility.js';
 import { installActivityFieldRedaction } from './activity-field-redaction.js';
+import { installActivitySummaryLocale } from './activity-summary-message.js';
 import { installAuditLogFieldRedaction } from './audit-log-field-redaction.js';
 import { installAuditLogReadVisibility } from './audit-log-read-visibility.js';
 import type { FieldVisibilitySource } from './served-fields.js';
@@ -59,10 +60,11 @@ export interface AuditPluginOptions {
   /** [#8992] Record-view auditing. Off unless objects are named. */
   readAudit?: AuditPluginReadAuditOptions;
   /**
-   * Host locale resolver: the language this plugin writes its reader-facing
-   * text in — `sys_activity.summary`, and the title of the @mention
-   * notification it emits. Called with the write's organization (`tenantId`)
-   * and user (`userId`; for an @mention title, the mentioned recipient).
+   * Host locale resolver: the language this plugin writes the title of the
+   * @mention notification it emits in. Called with the write's organization
+   * (`tenantId`) and the mentioned recipient (`userId`). [#26167]
+   * `sys_activity.summary` is not written in it: the summary is stored in
+   * English and served in each reader's own locale.
    *
    * **Precedence: host first, settings second.** When given, this resolver is
    * asked first. When it answers nothing (`undefined`, `null` or a blank
@@ -357,9 +359,10 @@ export class AuditPlugin implements Plugin {
           return undefined;
         }
       };
-      // framework#3039 — localize activity summaries to the workspace default
-      // locale (ADR-0053 `localization.locale`). Both seams resolve lazily and
-      // tolerate absence: no i18n / no settings degrades to English summaries.
+      // framework#3039 — localize the collaboration notification titles to the
+      // workspace default locale (ADR-0053 `localization.locale`), and
+      // [#26167] activity summaries to each reader's. Both seams resolve
+      // lazily and tolerate absence: no i18n / no settings degrades to English.
       const getI18n = (): AuditI18nSurface | undefined => {
         try {
           return ctx.getService<AuditI18nSurface>('i18n');
@@ -566,6 +569,12 @@ export class AuditPlugin implements Plugin {
         };
         installActivityFieldRedaction(engine as any, getSecurity, ctx.logger);
         ctx.logger.info('AuditPlugin: sys_activity field redaction installed');
+        // [#26167] …and each kept row's summary is composed in the READER's
+        // language from the code the writer stored beside it. Registered after
+        // the redaction, so it runs inside it: the redaction judges the
+        // composed text by the same declared sources as the stored one.
+        installActivitySummaryLocale(engine as any, getI18n);
+        ctx.logger.info('AuditPlugin: sys_activity reader-language summaries installed');
         // [#21155] The compliance ledger's before/after snapshots take the same
         // narrowing, through the same answer and the same resolver: a ledger
         // reader is not field-unrestricted by default. An auditor who must see

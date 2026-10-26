@@ -17,7 +17,6 @@ const idOf = (r: any) => r?.id ?? r?.record?.id ?? r?.data?.id ?? r;
 
 describe('ADR-0056 Option A — public-form grant (declaration-derived)', () => {
   let stack: VerifyStack;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let ql: any;
 
   beforeAll(async () => {

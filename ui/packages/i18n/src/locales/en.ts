@@ -322,6 +322,12 @@ const en = {
     update: 'Update',
     createSuccess: '{{object}} created successfully',
     updateSuccess: '{{object}} updated successfully',
+    // The console's record-save toasts when the saved record has a display
+    // name (ADR-0079): `{{object}}` is the object label, `{{title}}` the
+    // record's name. A record with no name keeps `createSuccess` /
+    // `updateSuccess` above.
+    createdNamed: '{{object}} "{{title}}" created',
+    updatedNamed: '{{object}} "{{title}}" updated',
     // plugin-form's own feedback chrome (objectui#11039): the success toast
     // a form raises when the author declared no `successMessage` (`created`
     // after a create, `saved` after an edit), the master-detail form's edit
