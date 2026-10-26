@@ -4,6 +4,8 @@
 '@objectstack/lint': minor
 '@objectstack/metadata-protocol': minor
 '@objectstack/rest': minor
+'@object-ui/app-shell': minor
+'@object-ui/i18n': minor
 ---
 
 feat(spec,cli): reports are translatable — `reports.<name>` in the translation bundle
@@ -18,6 +20,7 @@ An app authored in one language listed its reports (`reports[].label`, `reports[
 - **`@objectstack/rest`:** the meta read path supplies that base for `report`, as it does for `dashboard` and `view`.
 - **`@objectstack/lint`:** `translation-target-unknown` reports a `reports.<name>` key that names no report a package of the stack declares, as an error with the nearest declared name.
 - **`@objectstack/cli`:** `os i18n extract` scaffolds `reports.<name>.label` / `.description` from the stack's `reports[]`, and `os i18n check` / `os lint` coverage report an untranslated one in its own bucket (`i18n/missing-report`).
+- **`@object-ui/app-shell`, `@object-ui/i18n`:** the translation designer's preview draws the `reports` group (a "Reports" / 「报表」 category beside the others), and the console's translation loader recognises a payload that carries only `reports`.
 
 Example (`zh-CN` bundle of an English-authored app):
 
