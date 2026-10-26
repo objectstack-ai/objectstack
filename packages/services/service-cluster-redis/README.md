@@ -7,7 +7,7 @@ primitives `IPubSub` / `ILock` / `IKV` / `ICounter` against Redis using
 ## Status: community-optional reference driver
 
 This package is the **reference remote driver** that proves the
-`registerClusterDriver()` SPI. It is **not** on the ObjectStack Cloud or
+`registerClusterDriver()` SPI. It is **not** on the ObjectOS Cloud or
 ObjectOS EE deployment path — both run **Redis-free** (single-node-affinity
 routing + DB-backed queue/coordination). It is maintained as long as the
 cluster driver SPI is stable, but it is **not operated or supported by

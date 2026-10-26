@@ -21,7 +21,7 @@
  * real reason (e.g. a row-level-security denial) instead of swallowing it.
  */
 
-import { isApiAccessDeniedError } from '@object-ui/data-objectstack';
+import { isApiAccessDeniedError } from '@object-ui/core';
 import type { ApiError } from '@objectstack/spec/api';
 
 /**
@@ -259,14 +259,14 @@ export function classifyLoadError(err: unknown): LoadErrorKind {
   }
   const code = typeof e?.code === 'string' ? e.code.toUpperCase() : '';
   // The object's `enable` block withholds this operation — checked FIRST, on
-  // the CODE alone (delegated to the shared predicate so this file and
-  // `@object-ui/data-objectstack` cannot drift on which codes count). Status
-  // cannot carry this verdict: the denial is a 404, the same status a missing
-  // collection and a missing record answer with, and its 405 sibling is the
-  // same status any other method rejection uses. Unlike every kind below it
-  // this one is not about the request, the session or the network — it is a
-  // permanent property of the object, identical for every persona and every
-  // retry (objectui#4408).
+  // the CODE alone (delegated to the shared `@object-ui/core` predicate, which
+  // `@object-ui/data-objectstack` re-exports, so the two cannot drift on which
+  // codes count). Status cannot carry this verdict: the denial is a 404, the
+  // same status a missing collection and a missing record answer with, and its
+  // 405 sibling is the same status any other method rejection uses. Unlike
+  // every kind below it this one is not about the request, the session or the
+  // network — it is a permanent property of the object, identical for every
+  // persona and every retry (objectui#4408).
   if (isApiAccessDeniedError(err)) return 'api-disabled';
   if (status === 403 || code === 'PERMISSION_DENIED' || code === 'FORBIDDEN') return 'forbidden';
   if (status === 401 || code === 'UNAUTHORIZED' || code === 'UNAUTHENTICATED') return 'unauthorized';
