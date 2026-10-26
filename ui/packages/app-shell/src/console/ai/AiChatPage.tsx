@@ -242,8 +242,14 @@ export function hydratedMessagesToChatMessages(messages: HydratedUIMessage[]): C
         // objectui#5695 — a confirm-replay result becomes a terminal state on
         // the original 确认修改 card; it must never rehydrate as an ordinary
         // draft card (a rolled-back publish would get a live Publish button).
-        // Mirrors the live mapper's suppression exactly.
+        // Mirrors the live mapper's suppression exactly, its one exception
+        // included: a drafted whole-app build has no confirm card and keeps
+        // its review, so the thread binds to the package it built
+        // (objectstack#25887, mapMessages `replayedBuildReview`).
         const replayOutcome = detectReplayOutcome(toolCallId, result);
+        const keepsDraftReview =
+          !replayOutcome ||
+          (replayOutcome.kind === 'drafted' && Boolean(detectBuiltAppPackage(result)));
         // objectui#8442 — the two halves of an actionable approval, dropped
         // here until now, and they arrive from DIFFERENT places:
         //   * the AI SDK's `approval` envelope rides the persisted PART (the
@@ -275,7 +281,7 @@ export function hydratedMessagesToChatMessages(messages: HydratedUIMessage[]): C
           ...(result !== undefined ? { result } : {}),
           ...(approval ? { approval } : {}),
           ...(pendingActionId ? { pendingActionId } : {}),
-          ...(draftReview && !replayOutcome ? { draftReview } : {}),
+          ...(draftReview && keepsDraftReview ? { draftReview } : {}),
           ...(proposedPlan ? { proposedPlan } : {}),
           ...(builderHandoff ? { builderHandoff } : {}),
           ...(recordHandoff ? { recordHandoff } : {}),

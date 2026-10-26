@@ -33,6 +33,20 @@ function rowsToList(rows: Row[]): string[] {
   return rows.map((r) => r.value.trim()).filter((v) => v !== '');
 }
 
+/**
+ * The stored value as a list. Some keys accept a bare string as well as a
+ * list — a notify node's `channels` is `string | string[]` in the spec, and the
+ * runtime reads `'email'` as `['email']` — so a non-blank string reads as a
+ * one-entry list (#25999). Reading it as empty showed the field blank, and the
+ * next edit committed a list without the stored entry. A commit writes the
+ * list form, which every such key accepts.
+ */
+function toList(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map((v) => String(v));
+  if (typeof value === 'string' && value.trim() !== '') return [value.trim()];
+  return [];
+}
+
 export interface FlowStringListFieldProps {
   label: string;
   value: unknown;
@@ -57,10 +71,7 @@ export function FlowStringListField({
   emptyLabel,
   required,
 }: FlowStringListFieldProps) {
-  const external = React.useMemo(
-    () => (Array.isArray(value) ? value.map((v) => String(v)) : []),
-    [value],
-  );
+  const external = React.useMemo(() => toList(value), [value]);
   const [rows, setRows] = React.useState<Row[]>(() => toRows(external, []));
   const lastCommitted = React.useRef(JSON.stringify(external));
 

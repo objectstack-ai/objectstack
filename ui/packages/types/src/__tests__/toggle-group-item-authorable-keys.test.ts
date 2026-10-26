@@ -64,18 +64,20 @@ describe('ToggleGroupItem: `icon` is retired from the authoring surface (objectu
     expect(item.value).toBe('list');
   });
 
-  it('drops `icon` when parsing through the Zod mirror', () => {
-    // `z.object` is non-strict, so an authored `icon` is not an error — it is
-    // simply not part of the declared surface any more, and parse output is the
-    // observable statement of what that surface contains.
+  it('keeps `icon` as an undeclared key when parsing through the Zod mirror', () => {
+    // The mirror is non-strict, so an authored `icon` is not an error — it is
+    // simply not part of the declared surface any more. It was DROPPED from the
+    // parse output while the mirror was strip mode; since objectstack#25923 the
+    // mirror is `.passthrough()`, so it rides through undeclared (the strict
+    // authoring face refuses it by name). The shape test below is the statement
+    // of what the declared surface contains.
     const parsed = ToggleGroupItemSchema.parse({
       value: 'list',
       label: 'List',
       icon: 'list',
     });
 
-    expect(parsed).toEqual({ value: 'list', label: 'List' });
-    expect('icon' in parsed).toBe(false);
+    expect(parsed).toEqual({ value: 'list', label: 'List', icon: 'list' });
   });
 
   it('keeps `icon` out of the Zod schema shape', () => {

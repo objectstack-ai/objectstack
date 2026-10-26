@@ -54,7 +54,7 @@ export const ReportAggregationTypeSchema = z.enum(['sum', 'avg', 'min', 'max', '
  * 'owner' }` — the field NAME carries the ownership meaning, the type carries
  * the rendering.
  */
-export const ReportFieldSchema = z.object({
+export const ReportFieldSchema = z.looseObject({
   name: z.string().describe('Field name/identifier'),
   label: z.string().optional().describe('Display label'),
   type: z
@@ -68,7 +68,7 @@ export const ReportFieldSchema = z.object({
     .optional()
     .describe('Field type — drives type-aware cell rendering'),
   options: z
-    .array(z.object({ value: z.union([z.string(), z.number()]), label: z.string(), color: z.string().optional() }))
+    .array(z.looseObject({ value: z.union([z.string(), z.number()]), label: z.string(), color: z.string().optional() }))
     .optional()
     .describe('Options for select/multi_select/status types'),
   referenceTo: z.string().optional().describe('Target object for lookup/reference/master_detail'),
@@ -83,7 +83,7 @@ export const ReportFieldSchema = z.object({
 /**
  * Report Filter Schema
  */
-export const ReportFilterSchema = z.object({
+export const ReportFilterSchema = z.looseObject({
   field: z.string().describe('Field to filter on'),
   operator: z.enum(['equals', 'not_equals', 'contains', 'greater_than', 'less_than', 'between', 'in', 'not_in']).describe('Filter operator'),
   value: z.any().optional().describe('Filter value'),
@@ -93,7 +93,7 @@ export const ReportFilterSchema = z.object({
 /**
  * Report Group By Schema
  */
-export const ReportGroupBySchema = z.object({
+export const ReportGroupBySchema = z.looseObject({
   field: z.string().describe('Field to group by'),
   label: z.string().optional().describe('Display label'),
   sort: z.enum(['asc', 'desc']).optional().describe('Sort direction'),
@@ -102,7 +102,7 @@ export const ReportGroupBySchema = z.object({
 /**
  * Report Section Schema
  */
-export const ReportSectionSchema = z.object({
+export const ReportSectionSchema = z.looseObject({
   type: z.enum(['header', 'summary', 'chart', 'table', 'text', 'page-break']).describe('Section type'),
   title: z.string().optional().describe('Section title'),
   content: z.union([SchemaNodeSchema, z.array(SchemaNodeSchema)]).optional().describe('Section content'),
@@ -115,7 +115,7 @@ export const ReportSectionSchema = z.object({
 /**
  * Report Schedule Schema
  */
-export const ReportScheduleSchema = z.object({
+export const ReportScheduleSchema = z.looseObject({
   enabled: z.boolean().optional().describe('Schedule enabled'),
   frequency: ReportScheduleFrequencySchema.optional().describe('Frequency'),
   dayOfWeek: z.number().optional().describe('Specific day of week (for weekly)'),
@@ -131,7 +131,7 @@ export const ReportScheduleSchema = z.object({
 /**
  * Report Export Config Schema
  */
-export const ReportExportConfigSchema = z.object({
+export const ReportExportConfigSchema = z.looseObject({
   format: ReportExportFormatSchema.describe('Export format'),
   filename: z.string().optional().describe('Filename template'),
   includeHeaders: z.boolean().optional().describe('Include headers'),
@@ -195,7 +195,7 @@ export const ReportComponentSchema = BaseSchema.extend({
   // `ReportViewer` evaluates each rule per cell (`report?.conditionalFormatting`) for
   // the report a `report-viewer` node carries, and that node's `report` member IS
   // this mirror. Restated rule for rule from the interface's inline element type.
-  conditionalFormatting: z.array(z.object({
+  conditionalFormatting: z.array(z.looseObject({
     field: z.string().describe('Field the rule tests'),
     operator: z.enum(['equals', 'not_equals', 'contains', 'greater_than', 'less_than']).describe('Comparison operator'),
     value: z.any().describe('Value the field is compared with'),

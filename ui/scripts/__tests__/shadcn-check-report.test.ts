@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 // Plain-JS CI helper. Its types are INFERRED from the .mjs source by
 // `tsconfig.scripts.json` (`allowJs`), so no `@ts-expect-error` here — see
@@ -48,23 +47,10 @@ import {
  *     marker step names are the one part of the mechanism a rename can break
  *     SILENTLY — a renamed marker reads back as `unknown`, resets the streak,
  *     and the escalation simply never fires again — so they are pinned against
- *     the module's own constants rather than re-spelled.
+ *     the module's own constants rather than re-spelled. The workflow half
+ *     retired with objectstack#25712 (the describe at the end of this file says
+ *     which cases); the constants half stands.
  */
-
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const workflowPath = path.join(repoRoot, '.github/workflows/shadcn-check.yml');
-const workflow = fs.readFileSync(workflowPath, 'utf8');
-
-/**
- * The workflow YAML with whole-line comments removed — the same precaution
- * `docs-links-workflow.test.ts` documents. This file's header prose discusses
- * `continue-on-error` and `timeout-minutes` at length, and a scan that counted
- * those sentences would assert the opposite of the truth.
- */
-const workflowCode = workflow
-  .split('\n')
-  .filter((line) => !/^\s*#/.test(line))
-  .join('\n');
 
 /** A realistic `shadcn:check` capture: 46 components, every fetch refused. */
 const unreachableOutput = Array.from(
@@ -345,59 +331,27 @@ describe('main() — the wiring the workflow actually depends on', () => {
   });
 });
 
-describe('shadcn-check.yml — the gaps, read off the workflow itself', () => {
-  it('gap ②: the job declares a timeout instead of inheriting the 360-minute default', () => {
-    const timeout = workflowCode.match(/^\s*timeout-minutes:\s*(\d+)\s*$/m);
-    expect(timeout, 'a hung 46-request serial check must not be able to burn six hours').not.toBeNull();
-    const minutes = Number(timeout?.[1]);
-    // Generous over the measured worst case (49s observed, ~13min compound
-    // degraded) and far under the default it replaces.
-    expect(minutes).toBeGreaterThan(13);
-    expect(minutes).toBeLessThan(60);
-  });
-
-  it('gap ③: the analyze step no longer hides its exit code behind continue-on-error', () => {
-    expect(workflowCode).toContain('pnpm shadcn:analyze');
-    // Read per STEP: the one cache save this job carries (the pinned @objectstack
-    // build, objectui#12957) must be non-fatal by objectui#7048's rule, so the
-    // key may exist in the file -- never on the analyze step, never on a command.
-    const steps = workflowCode.split(/\n(?=\s+- (?:name|uses|run):)/);
-    const analyze = steps.filter((s) => s.includes('pnpm shadcn:analyze'));
-    expect(analyze).toHaveLength(1);
-    expect(analyze[0]).not.toContain('continue-on-error');
-    for (const s of steps.filter((x) => x.includes('continue-on-error'))) {
-      expect(s, 'only a cache save may be non-fatal here').toMatch(/uses: actions\/cache\/save@/);
-    }
-    // Captured explicitly, the way #3497 captured the check step's.
-    expect(workflowCode).toMatch(/pnpm shadcn:analyze 2>&1 \| tee/);
-  });
-
-  it('gap ①: the marker step names match the module constants exactly', () => {
-    // Pinned against the constants, never re-spelled: a rename on one side only
-    // makes every future run read `unknown`, which resets the streak, which
-    // means the escalation never fires again — and nothing else would notice.
-    expect(workflowCode).toContain(`- name: 'Cross-run marker: registry reachable'`);
-    expect(workflowCode).toContain(`- name: 'Cross-run marker: registry unreachable'`);
+/**
+ * `shadcn-check.yml — the gaps, read off the workflow itself` retired with
+ * objectstack#25712, except the constants half of its marker case below: `gap
+ * ②: the job declares a timeout`, `gap ③: the analyze step no longer hides its
+ * exit code behind continue-on-error`, the workflow half of `gap ①: the marker
+ * step names match the module constants exactly`, `gap ①: the cross-run read
+ * has the permission it needs`, `the classification runs from the tested
+ * module, not from a shell block` and `one channel: the alarm step is still the
+ * single issue writer`. Each read objectui's `shadcn-check.yml`, which runs
+ * nowhere under the monorepo: GitHub runs the root `.github/workflows/` alone,
+ * and no root workflow runs this report. It is row 26 of the objectstack#25697
+ * workflow roster, "kept, follow-up port" (a schedule-only maintenance report);
+ * the port brings these pins back against its root workflow, by path, with the
+ * marker step names it spells.
+ */
+describe('the cross-run marker names', () => {
+  it('gap ①: the module constants are the names the escalation reads back', () => {
+    // Pinned, never re-spelled: a rename on one side only makes every future
+    // run read `unknown`, which resets the streak, which means the escalation
+    // never fires again — and nothing else would notice.
     expect(MARKER_STEPS.reachable).toBe('Cross-run marker: registry reachable');
     expect(MARKER_STEPS.unreachable).toBe('Cross-run marker: registry unreachable');
-    expect(workflowCode).toMatch(/if: steps\.verdict\.outputs\.registry_state == 'reachable'/);
-    expect(workflowCode).toMatch(/if: steps\.verdict\.outputs\.registry_state == 'unreachable'/);
-  });
-
-  it('gap ①: the cross-run read has the permission it needs', () => {
-    expect(workflowCode).toMatch(/^\s*actions:\s*read\s*$/m);
-    expect(workflowCode).toMatch(/^\s*issues:\s*write\s*$/m);
-  });
-
-  it('the classification runs from the tested module, not from a shell block', () => {
-    expect(workflowCode).toContain('node scripts/shadcn-check-report.mjs');
-    expect(fs.existsSync(path.join(repoRoot, 'scripts/shadcn-check-report.mjs'))).toBe(true);
-  });
-
-  it('one channel: the alarm step is still the single issue writer, still not tolerated', () => {
-    const labels = workflowCode.match(/labels: \['maintenance', 'shadcn-sync', 'dependencies'\]/g);
-    expect(labels).toHaveLength(1);
-    expect(workflowCode.match(/github\.rest\.issues\.create\(/g)).toHaveLength(1);
-    expect(workflowCode).toContain(`if: steps.verdict.outputs.alarm == 'true'`);
   });
 });

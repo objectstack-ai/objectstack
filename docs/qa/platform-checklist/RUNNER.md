@@ -208,27 +208,29 @@ contradicts it, and correct it here when it does.
   comparable** to the total rather than merely stale. Name which of the two lines you
   are quoting whenever you cite either.
 
-- **Playwright needs an explicit `executablePath` on these containers.**
-  `@playwright/test` 1.63.0 (the `^1.63.0` `examples/app-showcase/package.json` declares, the
-  only version in the store) resolves chromium build **1243**; only **1194** is installed.
-  Re-measured at `bfc1539fe0`: this entry read 1.62.1 and build 1234 until the tree moved
-  to 1.63.0; `playwright-core` sits only in the pnpm store (there is no root
-  `node_modules/playwright-core`), so the check reads it there.
+- **Playwright's chromium build must match the one the container installed — today it
+  does, and the `/opt/pw-browsers/chromium` alias is the launch path that survives when it
+  stops.** `@playwright/test` 1.63.0 (the `^1.63.0` `examples/app-showcase/package.json`
+  declares, the only version in the store) resolves chromium build **1243**, and
+  `/opt/pw-browsers` now holds `chromium-1243` / `chromium_headless_shell-1243`, with the
+  `chromium` alias resolving into `chromium-1243` (QA run #25812 at `6679644a`; re-read at
+  `cc378e93`). Earlier images held only build 1194, and every launch died until the run
+  passed the alias explicitly. `playwright-core` sits only in the pnpm store (there is no
+  root `node_modules/playwright-core`), so the check reads it there.
   **Check:**
   `grep -A2 '"name": "chromium"' node_modules/.pnpm/playwright-core@*/node_modules/playwright-core/browsers.json`
-  against `ls $PLAYWRIGHT_BROWSERS_PATH` (`/opt/pw-browsers` here, holding
-  `chromium-1194` / `chromium_headless_shell-1194` only). The stock
-  `examples/app-showcase/playwright.config.ts` sets no `executablePath`, so every test
-  dies at browser launch — the error names the **headless-shell** variant it wanted
-  (`Executable doesn't exist at .../chromium_headless_shell-1243/...`), which is the
-  signature to recognise. Pass `launchOptions.executablePath=/opt/pw-browsers/chromium`
-  (for the smoke, `OS_TEST_CHROMIUM_EXECUTABLE_PATH=/opt/pw-browsers/chromium`, which the
-  config reads since #21060) and the same specs pass (verified: Playwright launches through it, reporting Chromium
-  141.0.7390.37, and drives a real page). ⚠️ Use that **alias**, not the versioned
-  `chromium-1194/chrome-linux/chrome` beneath it: `/opt/pw-browsers/chromium` is a
-  symlink maintained by the image build, so it still resolves after the image moves to
-  1243, while the versioned literal stops existing at exactly that moment — and a dead
-  path copied out of this section is the `absence-inference` trap one level up.
+  against `ls $PLAYWRIGHT_BROWSERS_PATH`. While the builds agree, the stock
+  `examples/app-showcase/playwright.config.ts` (no `executablePath`) launches as it is.
+  When they disagree, every test dies at browser launch and the error names the
+  **headless-shell** variant it wanted (`Executable doesn't exist at
+  .../chromium_headless_shell-NNNN/...`), which is the signature to recognise. Then pass
+  `launchOptions.executablePath=/opt/pw-browsers/chromium` (for the smoke,
+  `OS_TEST_CHROMIUM_EXECUTABLE_PATH=/opt/pw-browsers/chromium`, which the config reads since
+  #21060) and the same specs pass. ⚠️ Use that **alias**, never a versioned
+  `chromium-NNNN/...` path beneath it: `/opt/pw-browsers/chromium` is a symlink maintained
+  by the image build, so it follows the image from one build to the next, while a
+  versioned literal stops existing the moment the image moves — and a dead path copied
+  out of this section is the `absence-inference` trap one level up.
   **The discriminator is uniformity:** a launch/environment failure
   takes down the whole run at once (`showcase-smoke.spec.ts` generates one test per
   `SURFACES` entry — 49 today, so "49 failed" means all of them), while a product defect
@@ -273,22 +275,30 @@ contradicts it, and correct it here when it does.
   one is the expensive mistake: the module's own header records that #7516 burned a run
   proving it was an address problem by putting a TCP forwarder on 3000, and #7538 fixed
   the resolution but could not fix a boot that never exports the variable. **Check:**
-  before scoring any connector clause, read the instance's own metadata —
-  `GET /api/v1/meta/connector/showcase_status_api`, field `item.providerConfig.baseUrl`,
-  which is the value `resolveShowcaseSelfUrl()` produced
-  (`examples/app-showcase/src/system/connectors/index.ts`). ⛔ Not
-  `GET /api/v1/automation/connectors`: that route lists registry descriptors — `name`,
-  `label`, `type`, `description`, `icon`, `origin`, `state`, `degradedReason`, `actions`
-  (`getConnectorDescriptors()`, `packages/services/service-automation/src/engine.ts`) —
-  and carries no `baseUrl` at all. On `os dev` the value follows the serving process's
-  environment, not the compiled artifact. Measured on `main` at `2889760a`: `-p 47311`
+  before scoring any connector clause, prove where the live dispatch lands: create a
+  `showcase_task`, read the `showcase_declarative_connector_ping` run it fires, and confirm
+  it completed with a `ping.body` whose uptime matches THIS boot, not another server's.
+  ⛔ Do not read the instance metadata for it: `os dev` boots the prebuilt
+  `dist/objectstack.json` unless `--compile` is passed (`packages/cli/src/commands/dev.ts`),
+  so `GET /api/v1/meta/connector/showcase_status_api`'s `item.providerConfig.baseUrl` can
+  carry the build-time value. QA run #25817 at `6679644a` measured it: with `OS_PORT=41302`
+  exported, that read still answered `http://127.0.0.1:3000`, while the live
+  `connector_action` reached 41302 (`ping.body` uptime matched the boot, and nothing
+  listened on 3000) — so the metadata read misreports the fixture in both directions.
+  ⛔ Nor `GET /api/v1/automation/connectors`: that route lists registry descriptors —
+  `name`, `label`, `type`, `description`, `icon`, `origin`, `state`, `degradedReason`,
+  `actions` (`getConnectorDescriptors()`,
+  `packages/services/service-automation/src/engine.ts`) — and carries no `baseUrl` at all.
+  An older measurement, on `main` at `2889760a`, read the metadata as following the
+  serving environment: `-p 47311`
   alone answered `http://127.0.0.1:3000`, and `showcase_declarative_connector_ping`
   (fired by a `showcase_task` create) failed `fetch failed`; `OS_PORT=47312` with
   `-p 47312` answered `http://127.0.0.1:47312` and the same flow completed, while
-  `dist/objectstack.json` still held `http://127.0.0.1:3000`. Only an artifact-only boot
-  (`os start --artifact`) freezes the value at build time (the `self-url.ts` header). If
-  it names a port your server does not listen on, the fixture is misconfigured, not
-  blocked. **Fix:** boot with `OS_PORT=<port>` exported (or
+  `dist/objectstack.json` still held `http://127.0.0.1:3000`. The `self-url.ts` header
+  still says only an artifact-only boot (`os start --artifact`) freezes the value at build
+  time; at `6679644a` the served metadata was frozen on `os dev` too, which is why the
+  Check reads the dispatch. If the ping does not complete, or its uptime belongs to
+  another server, the fixture is misconfigured, not blocked. **Fix:** boot with `OS_PORT=<port>` exported (or
   `SHOWCASE_SELF_URL=http://127.0.0.1:<port>`) *in addition to* `-p <port>`. ⛔ Do not
   record a connector clause as `blocked(environment)` on the strength of `fetch failed`
   alone.
@@ -429,8 +439,8 @@ contradicts it, and correct it here when it does.
   them.
 
 - **A cold tree cannot boot the app from the console-build recipe alone.**
-  `pnpm objectui:build` runs `scripts/build-console.sh`, which builds the **console**, not
-  the framework CLI. On a fresh tree `packages/cli` has no `dist`, and the bare binary
+  `pnpm console:build` builds the **console** and the packages it depends on, not the
+  framework CLI. On a fresh tree `packages/cli` has no `dist`, and the bare binary
   then answers `Error: command dev not found` (exit 2) — a message that names neither the
   cause nor the fix. **Check:** `node scripts/check-dev-prereqs.mjs`; it reports every
   package whose declared `dist/` entry point is missing, and exits non-zero. **Fix:
@@ -491,33 +501,31 @@ contradicts it, and correct it here when it does.
   by name and exits **1**, where it used to exit **0** in silence — the entry point is
   `packages/cli/bin/run.js`.
 
-- **Some items carry an `automated.ref` that lives ENTIRELY in the `objectui` repo — from
-  this checkout they are neither runnable nor pin-evidenced.** No count is kept here: the
-  set moves with every pin re-point and every `automated` edit, and the count this line
-  used to carry went stale with nothing to notice it (wave anchor #24579). **Find them by
-  the rule, not by a number:** an item is in the set when its `automated.ref` names an
-  objectui path and no path that exists in this checkout. Their refs name only
-  objectui paths (`e2e/live/*.spec.ts`, `e2e/import-console/*`, `e2e/import-harness/*`,
-  and unit suites under `packages/plugin-grid`, `plugin-gantt`, `plugin-calendar`,
-  `plugin-form`, `fields`, `core`, `app-shell`). This repository builds no console bundle
-  and holds none of those specs, so a run here can neither execute the pin nor cite its
-  output. **Every one of those items now says so in its own `fixtures.knownGaps`** — the
-  rediscovery this fact exists to stop (each sweep re-derived it from scratch). ⚠️ The
-  distinction that matters is *exclusive*: items whose `automated.ref` names an
-  objectui spec **alongside** a framework pin (`packages/qa/dogfood/**`,
-  `packages/objectql/**`) are partly runnable here — run the framework half and score the
-  objectui half separately, never one for the other.
+- **An `automated.ref` that names an `objectui` path resolves under `ui/` in this
+  checkout.** objectui was imported into this repository: its specs and unit suites live at
+  `ui/<path>` (`ui/e2e/live/*.spec.ts`, `ui/e2e/import-console/*`, `ui/e2e/import-harness/*`,
+  and unit suites under `ui/packages/plugin-grid`, `plugin-gantt`, `plugin-calendar`,
+  `plugin-form`, `fields`, `core`, `app-shell`), and the console builds from this tree with
+  `pnpm console:build`. There is no pinned objectui revision any more. Some refs and
+  `fixtures.knownGaps` written before the import still spell the path without `ui/`, or
+  still say such a pin is not runnable from this checkout; read the first as `ui/<path>`
+  and the second as stale. A jsdom unit suite runs with
+  `pnpm --filter @object-ui/<pkg> exec vitest run --maxWorkers=2 <file>`; a live e2e spec
+  runs from `ui/` with `pnpm test:e2e:live <spec>` against a live backend and the console
+  dev server (`ui/playwright.live.config.ts` names both). Items whose `automated.ref`
+  names an objectui spec **alongside** a framework pin (`packages/qa/dogfood/**`,
+  `packages/objectql/**`) still score the two halves separately, never one for the other.
 
   **Two honest options, and the run record must say which it took:** (a) drive the item
   **by hand** in the browser against a live boot and score it as a manual browser run —
-  the `automated` field does not make it exempt; or (b) run the pin inside an **objectui
-  checkout at the pinned revision** and cite that output, **naming the revision** (the
-  17.1.0 sweep subject was `9a3daf8d37ad`). ⛔ Never record such an item as covered on the
+  the `automated` field does not make it exempt; or (b) run the pin from this checkout and
+  cite that output, **naming the commit**. ⛔ Never record such an item as covered on the
   strength of the `automated` field alone: an unrun pin is a claim, not evidence — which
   is the same "ticking on a label" failure clause-grained acceptance exists to prevent.
 
 - **A walled boot is a fixture of its own: `os serve` boots `group` and `isolated` once the
-  walled prerequisites are provisioned, and the stock showcase provisions none of them.**
+  walled prerequisites are provisioned, and the stock showcase provisions only the first —
+  the other two are environment variables the run sets.**
   18.0.0 boots a walled posture: under ruling record 6282882793 on the v18 epic it is
   published only after 18.x step 4 (#24580) has merged, and step 4 deleted the boot refusal
   (`walledPostureRefusal()` in `packages/cli/src/commands/serve.ts`). Of the builds published
@@ -531,17 +539,15 @@ contradicts it, and correct it here when it does.
   so a refusal tells the runner what is missing, never that the posture is unsupported:
   1. the multi-org runtime **declared by the app**: `@objectstack/organizations` in the app's
      own `package.json` and installed there. Reachable only through `NODE_PATH` or a hoisted
-     store is refused on purpose (ADR-0093 D5). No example app declares it, so a walled run
-     uses a scratch app that does: a **full copy** of `examples/app-showcase`, `src/`
-     included (without `node_modules`, `.objectstack` or `dist`), whose own `package.json`
-     carries every showcase dependency as a `link:` to its workspace package plus
-     `"@objectstack/organizations": "link:<abs>/packages/plugins/organizations"`, installed
-     from the copy with `pnpm install --ignore-workspace` (QA run #24783). A scratch config
-     that only re-exports the showcase's `objectstack.config.ts` does not boot: a package-file
-     reference resolves against the root being served, and the showcase's OpenAPI connector
-     names its document that way (`spec: './src/system/connectors/status-openapi.json'` in
-     `examples/app-showcase/src/system/connectors/index.ts`, read relative to the package
-     root at materialization, where a missing document fails the boot);
+     store is refused on purpose (ADR-0093 D5). `examples/app-showcase/package.json` now
+     declares it (`workspace:*`), so a walled run boots the showcase from the tree with the
+     posture and the two variables below exported — `OS_TENANCY_POSTURE`,
+     `OS_PLATFORM_OWNER_EMAIL`, `OS_AUTH_MEMBERSHIP_POLICY` — and needs no scratch copy (QA
+     run #25812 at `6679644a`). Before that, QA run #24783 booted a full scratch copy whose
+     own `package.json` linked the runtime in; a copy that only re-exports the showcase's
+     `objectstack.config.ts` still does not boot, because a package-file reference such as
+     the OpenAPI connector's `spec: './src/system/connectors/status-openapi.json'` resolves
+     against the root being served;
   2. `OS_PLATFORM_OWNER_EMAIL`, the deployment's platform administrators: first-registrant
      promotion is off under a wall;
   3. a declared membership policy, `OS_AUTH_MEMBERSHIP_POLICY` (for example `invite-only`).
@@ -558,7 +564,7 @@ contradicts it, and correct it here when it does.
   boot prints `⚠ AuthPlugin skipped — set OS_AUTH_SECRET …` and comes up
   `⚠ Server is ready — DEGRADED: missing core services: auth` (`printServerReady()` in
   `packages/cli/src/utils/format.ts`), not a FATAL: QA run #24783 measured it with
-  `os serve --no-ui` from the scratch app, once with prerequisite 2 absent and once with
+  `os serve --no-ui` from a scratch app, once with prerequisite 2 absent and once with
   prerequisite 3 absent. A production `serve` also needs a stable encryption key,
   `OS_SECRET_KEY` or a key file an earlier boot persisted; without one `LocalCryptoProvider`
   refuses the boot naming `OS_SECRET_KEY`
@@ -576,16 +582,20 @@ contradicts it, and correct it here when it does.
   closed: the showcase declares no `auth.audience`, so `POST /api/v1/auth/sign-up/email`
   answers **`403 SELF_REGISTRATION_CLOSED`** exactly as on a stock boot
   (`decideAudienceAdmission()` in `packages/plugins/plugin-auth/src/audience-posture.ts`; the
-  entry "A stock showcase boot refuses self-registration" above). QA run #24783 minted every
-  walled persona as the operator (the seeded admin, the address `OS_PLATFORM_OWNER_EMAIL`
-  names) with `POST /api/v1/auth/admin/create-user` (`runAdminCreateUser()` in
-  `packages/plugins/plugin-auth/src/admin-user-endpoints.ts`), then had each persona
-  `POST /api/v1/auth/change-password`. Under `invite-only` each lands with
-  `membershipCreated: false` and in no organization (the reconciler's `policy-skip`,
-  `reconcileMembership()` in `packages/plugins/plugin-auth/src/reconcile-membership.ts`); a
-  persona that needs an organization creates its own with
-  `POST /api/v1/auth/organization/create` and switches to it with `set-active` (the next
-  entry).
+  entry "A stock showcase boot refuses self-registration" above). The operator (the seeded
+  admin, the address `OS_PLATFORM_OWNER_EMAIL` names) mints every walled persona with
+  `POST /api/v1/auth/admin/create-user` (`runAdminCreateUser()` in
+  `packages/plugins/plugin-auth/src/admin-user-endpoints.ts`), then has each persona
+  `POST /api/v1/auth/change-password` — but **first creates an organization and makes it
+  current**: `POST /api/v1/auth/organization/create`, then `set-active` (the next entry).
+  Under a wall Create User joins the new user to the operator's CURRENT organization as
+  `member`, `invite-only` included, and an operator with no current organization is refused
+  `400 NO_ACTIVE_ORGANIZATION` with no account created (PR #25626; QA run #25823 met it at
+  `17f8217b`). To place personas in two organizations, switch the operator between them
+  before each create. A persona that needs an organization of its own still creates one
+  with `POST /api/v1/auth/organization/create` and switches to it with `set-active`. QA
+  run #24783's reading — each persona landing with `membershipCreated: false` in no
+  organization — predates that change.
 
   Measured at `45898dbf6`: a scratch app declaring the real runtime, booted by the built CLI
   under `isolated` with the other two set, mounted `Organizations`, answered
@@ -619,22 +629,22 @@ contradicts it, and correct it here when it does.
   passed at `bfc1539fe0`.
 
 - **One container builds one tree at a time: never run `pnpm build` and
-  `pnpm objectui:build` together, and give the heavy steps a concurrency the shell's memory
-  can hold.** `pnpm objectui:build` (`scripts/build-console.sh`) runs `turbo run build` in
-  THIS checkout as well — `@objectstack/spec` when its dist is absent or incomplete,
-  `@objectstack/client`, and every `@objectstack/*` package the objectui pin overrides,
-  declarations included — so a `pnpm build` beside it writes the same `packages/spec/dist`
-  from a second turbo process nothing serialises, and the spec's DTS pass races (the 18.0
-  sweep, #24579 §6). The shell's cgroup is capped near 13.4 GiB (`memory.limit_in_bytes`
-  read `14343688192` on the cgroup `/proc/self/cgroup` names, at `bfc1539fe0`), and the
-  console's dependency build is `turbo run build --filter=@object-ui/console^...` at turbo's
-  default concurrency unless overridden. The 18.0 sweep's runner held both under that cap
+  `pnpm console:build` together, and give the heavy steps a concurrency the shell's memory
+  can hold.** `pnpm console:build` (`turbo run build:dist --filter=@objectstack/console`)
+  runs `turbo run build` for `@object-ui/console` and everything it depends on in THIS
+  checkout — `@objectstack/spec` and `@objectstack/client` among them, declarations
+  included — so a `pnpm build` beside it writes the same `packages/spec/dist` from a second
+  turbo process nothing serialises, and the spec's DTS pass races (the 18.0 sweep, #24579 §6,
+  met it with the retired pin script, which built the same packages). The shell's cgroup is
+  capped near 13.4 GiB (`memory.limit_in_bytes` read `14343688192` on the cgroup
+  `/proc/self/cgroup` names, at `bfc1539fe0`), and the console build runs at turbo's default
+  concurrency unless overridden. The 18.0 sweep's runner held both under that cap
   only at `--concurrency=2`, and the Tier 1 vitest pins only at `--maxWorkers=1`, and was
   killed with exit **137** otherwise (#24579 §6; QA run #24598's environment fingerprint
   records the settings that held; the OOM itself is not re-run here). **Fix:**
-  `pnpm build --concurrency=2` first; then
-  `OBJECTUI_DEPS_BUILD_CMD='pnpm exec turbo run build --concurrency=2 --filter=@object-ui/console^...' pnpm objectui:build`
-  (the override the script's header documents); vitest one package at a time with
+  `pnpm build --concurrency=2` first (it builds the console too); then
+  `pnpm console:build --concurrency=2` (pnpm appends it to the turbo command), which after that
+  build is a cache hit plus a copy; vitest one package at a time with
   `--maxWorkers=1`. ⛔ An exit 137 is the container's memory limit, not a failing test or a
   broken build — re-run narrower before reading anything into it.
 
@@ -686,7 +696,7 @@ contradicts it, and correct it here when it does.
 | trap | what it fakes | counter |
 |---|---|---|
 | `hydration-race` | empty nav/list right after navigation | screenshot first; settle; then read DOM |
-| `stale-console-bundle` | UI bug already fixed upstream in objectui | check against objectui HMR console / fresh build (skill §2). `os dev` refuses to mount a console whose stamp ≠ the `.objectui-sha` pin, so a 404 `/_console/` reads "rebuild with `pnpm objectui:build`", never "console broken" |
+| `stale-console-bundle` | UI bug already fixed upstream in objectui | check against objectui HMR console / fresh build (skill §2). `packages/console/dist` is a gitignored copy that `pnpm build` never refreshes, so a console older than the tree, or a 404 `/_console/`, reads "rebuild with `pnpm console:build`", never "console broken" |
 | `stale-dist` | src edits with no runtime effect | rebuild package + restart before judging |
 | `automation-input` | dead buttons / empty submits caused by the driver | ref-targeted clicks; native setter + input/change events |
 | `shared-browser-tab` | drifting origin, foreign drafts | pin absolute origin; own port/DB (skill §0) |
@@ -736,8 +746,7 @@ The in-environment JSON scratch (RUNNER shape, never committed):
   "scope": "since:v17 + P0",            // the filter that selected items
   "app": "showcase",
   "env": {
-    "framework": "<commit sha>",
-    "objectuiPin": "<.objectui-sha>",   // stale-bundle honesty: record what the console was
+    "framework": "<commit sha>",        // also the console's source: it builds from ui/ in this tree
     "port": 3456, "db": "file:/tmp/<run>/data.db"
   },
   "runner": "<agent/session identifier>",

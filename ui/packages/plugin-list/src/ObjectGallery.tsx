@@ -8,7 +8,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useContext } from 'react';
 import { useDataScope, SchemaRendererContext, useNavigationOverlay, useSafeFieldLabel, useSettledSchema, useDataInvalidation, useFilterScope, useResolvedFilter, usePredicateScope } from '@object-ui/react';
-import { ComponentRegistry, buildExpandFields, getRecordDisplayName, isEmptyValue, isExpandableFieldType, isDeadlineSettled } from '@object-ui/core';
+import { ComponentRegistry, buildExpandFields, getRecordDisplayName, isEmptyValue, isExpandableFieldType, isDeadlineSettled, resolveAffordance, type SchemaLike } from '@object-ui/core';
 import { cn, Card, CardContent, NavigationOverlay } from '@object-ui/components';
 import { usePermissions } from '@object-ui/permissions';
 import type { DataSource, GalleryConfig, ObjectGallerySchema, QueryParams } from '@object-ui/types';
@@ -16,7 +16,7 @@ import { ChevronRight, ChevronDown } from 'lucide-react';
 import { getCellRenderer, resolveCellRendererType, readFileValues } from '@object-ui/fields';
 import { useDisplayLocale } from '@object-ui/i18n';
 import { RecordDetailPanel } from '@object-ui/plugin-detail';
-import { ListEmptyState, hasDeclaredFilter } from './ListEmptyState';
+import { ListEmptyState, hasDeclaredFilter, filterNamesCurrentUser } from './ListEmptyState';
 import { useListViewTranslation } from './ListView';
 
 export interface ObjectGalleryProps {
@@ -672,11 +672,19 @@ export const ObjectGallery: React.FC<ObjectGalleryProps> = (props) => {
     // knows: the `object-gallery` node declares no `emptyState`, there is no
     // search box, user filter or add-record control here, and its own
     // `filter` emptied the list only when the gallery issued the query.
+    // objectstack#25898 — and it says what the caller may do: a filter naming
+    // the signed-in user reads "nothing of yours yet", and a caller known not
+    // to hold the create grant (`listNew`, asked once permissions have loaded)
+    // is not invited to create the first record.
     if (!items.length) {
         return (
             <ListEmptyState
                 hasUserQuery={false}
                 hasBaseFilter={fetchesForItself && hasDeclaredFilter(authoredFilter)}
+                baseFilterNamesCurrentUser={fetchesForItself && filterNamesCurrentUser(authoredFilter, filterScope.currentUserId)}
+                mayCreate={perms.isLoaded && schema.objectName
+                    ? resolveAffordance('listNew', { objectSchema: objectDef as SchemaLike, objectName: schema.objectName, perms }).allowed
+                    : undefined}
                 t={t}
                 displayLocale={displayLocale}
             />

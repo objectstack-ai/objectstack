@@ -5504,6 +5504,100 @@ export function claimedBranches(body) {
   }
   return out;
 }
+
+/**
+ * The race loser's yield line, as `execution-duties.md` 〈认领〉 ③ spells it:
+ * a seat that re-reads the thread after its own claim and finds an earlier
+ * claim answers `already claimed — yielding` and picks another card.
+ *
+ * Read on the comment's FIRST non-blank line only, through `markerMatches` (the
+ * ownership markers' one decoration reading), and ⛔ with no dash or wording
+ * dialect: the em dash is the protocol's spelling, and a hyphen-written yield
+ * is a yield nobody can key on, which keeps today's reading rather than
+ * inventing one.
+ */
+export const CLAIM_YIELD_MARKER = /^\s*>?\s*already claimed — yielding/i;
+
+/**
+ * The session a `Claim:` comment speaks for: the FIRST session id on its first
+ * `Session:` line, or null.
+ *
+ * The first id and not every id, because a dispatch claim names its seat first
+ * and the implementing thread after it ("`session_A` (seat); implementation in
+ * card thread `session_B`"), and only the seat posts the claim it could later
+ * yield. The line prefix is `claimedBranches`'s (bullet, then blockquote), so
+ * the two readers of one claim comment admit the same lines.
+ */
+export function claimSessionId(body) {
+  const line = /^\s*(?:[-*+]\s+)?>?\s*Session\s*:\s*(.*)$/im.exec(String(body ?? ''));
+  if (!line) return null;
+  const id = SEAT_SESSION_ID.exec(line[1] ?? '');
+  return id ? id[0] : null;
+}
+
+/**
+ * Which `Claim:` comments on one thread their OWN session later yielded — a
+ * Set of row indexes — so every claim reader can skip them with one call.
+ *
+ * ## The red this ends
+ *
+ * The race re-read rule makes the loser yield IN A COMMENT, never by deleting
+ * its claim, so a lawful two-seat race leaves two claim comments and the
+ * loser's is the NEWER one. Read as current, it outranked the winner's:
+ * `claimGovernance` judged the yielded claim as the governing one, and
+ * `h46ClaimNamesBranch` still counted it as a claim of the branch that was
+ * never created. The closing-target guard went red on the WINNER's PR, and
+ * green only after the winner re-posted an identical claim by hand.
+ *
+ * ## When a claim counts as yielded — all three, or it still stands
+ *
+ *   1. a comment's first non-blank line reads `CLAIM_YIELD_MARKER`;
+ *   2. that line names EXACTLY ONE distinct session id (`SEAT_SESSION_ID`) —
+ *      the yielding seat's. A yield naming no session, or several, does not
+ *      say who stepped back, so it yields nothing and today's reading holds;
+ *   3. the claim's own session (`claimSessionId`) is that session, and the
+ *      claim PRECEDES the yield — so a `Claim:` the same session posts AFTER
+ *      its yield is a fresh claim, never one it already withdrew.
+ *
+ * ⚠️ Only the yield's first line is read. The measured yield names the WINNING
+ * claim and its session in the body below that line; reading the whole body
+ * would withdraw the winner's claim, which is this defect inverted.
+ *
+ * Precedence is `claimGovernance`'s recency rule: `created_at` when both stamps
+ * parse and differ, thread order otherwise (#4690). Rows may be REST comment
+ * rows or bare bodies — H46 holds bodies in thread order, the guard holds rows —
+ * and both are answered by this one predicate, ⛔ never a second copy.
+ *
+ * @param {Array<string | { body?: string, created_at?: string }>} commentRows
+ * @returns {Set<number>} indexes into `commentRows` of the yielded claims
+ */
+export function yieldedClaimIndexes(commentRows) {
+  const rows = (Array.isArray(commentRows) ? commentRows : []).map((row, index) => {
+    const body = typeof row === 'string' ? row : String(row?.body ?? '');
+    const parsed = Date.parse(typeof row === 'string' ? '' : row?.created_at ?? '');
+    return { body, index, stamp: Number.isFinite(parsed) ? parsed : null };
+  });
+  const precedes = (a, b) =>
+    a.stamp !== null && b.stamp !== null && a.stamp !== b.stamp ? a.stamp < b.stamp : a.index < b.index;
+  const yields = [];
+  for (const row of rows) {
+    const first = row.body.split(/\r?\n/).find((line) => line.trim() !== '') ?? '';
+    if (!markerMatches(CLAIM_YIELD_MARKER, first)) continue;
+    const sessions = new Set(first.match(new RegExp(SEAT_SESSION_ID.source, 'g')) ?? []);
+    if (sessions.size !== 1) continue;
+    yields.push({ ...row, session: [...sessions][0] });
+  }
+  const yielded = new Set();
+  if (yields.length === 0) return yielded;
+  for (const row of rows) {
+    if (!markerMatches(CLAIM_COMMENT_MARKER, row.body)) continue;
+    const session = claimSessionId(row.body);
+    if (session === null) continue;
+    if (yields.some((y) => y.session === session && precedes(row, y))) yielded.add(row.index);
+  }
+  return yielded;
+}
+
 /**
  * The claim state of one card's thread, in TWO parts: what GOVERNS, and what
  * could not be CLASSIFIED.
@@ -5553,6 +5647,14 @@ export function claimedBranches(body) {
  * an older one was branchless: that older claim is spent, governance is
  * correct, and a row about it would be noise on a card with nothing wrong.
  *
+ * ## A yielded claim is not a claim of the card
+ *
+ * A `Claim:` its own session later yielded (`yieldedClaimIndexes`) is skipped
+ * by BOTH readings, before anything else is asked of it: it neither governs
+ * nor counts as the newest claim. Otherwise the race loser's claim — always the
+ * newer of the two — is read as the card's current one, and the winner's PR
+ * reads as a card claimed on a branch that was never created.
+ *
  * @param {{ id?: number, body?: string, created_at?: string }[]} commentRows
  * @returns {{ governing: { branches: string[], createdAt: string|null } | null,
  *   malformed: { id: number|null, createdAt: string|null,
@@ -5572,9 +5674,11 @@ export function claimGovernance(commentRows) {
       : candidate.stamp >= incumbent.stamp);
   let best = null;
   let newest = null;
+  const yielded = yieldedClaimIndexes(rows);
   rows.forEach((row, index) => {
     const body = String(row?.body ?? '');
     if (!markerMatches(CLAIM_COMMENT_MARKER, body)) return;
+    if (yielded.has(index)) return;
     const branches = claimedBranches(body);
     const parsed = Date.parse(row?.created_at ?? '');
     const stamp = Number.isFinite(parsed) ? parsed : null;
@@ -10754,12 +10858,22 @@ export function h46NeedsCardComments(issue) {
  * the decoration a line meant to be grepped attracts. An empty branch is
  * unanswerable rather than unclaimed, and returns false only after the caller
  * has declined to judge on it.
+ *
+ * A claim its own session later yielded (`yieldedClaimIndexes`, over the bodies
+ * in thread order) names no branch here: the race loser's claim must not keep
+ * vouching for a branch that was never created, and the claim it yielded to is
+ * the one this answers about. The skip is the SAME predicate `claimGovernance`
+ * applies, so the patrol row, the closing-target guard and governance can never
+ * disagree about whether a yielded claim still stands.
  */
 export function h46ClaimNamesBranch(commentBodies, branch) {
   const ref = String(branch ?? '');
   if (!ref) return false;
-  return (Array.isArray(commentBodies) ? commentBodies : []).some(
-    (body) => markerMatches(CLAIM_COMMENT_MARKER, String(body ?? '')) && claimedBranches(body).includes(ref),
+  const bodies = Array.isArray(commentBodies) ? commentBodies : [];
+  const yielded = yieldedClaimIndexes(bodies.map((body) => String(body ?? '')));
+  return bodies.some(
+    (body, index) =>
+      !yielded.has(index) && markerMatches(CLAIM_COMMENT_MARKER, String(body ?? '')) && claimedBranches(body).includes(ref),
   );
 }
 
@@ -23911,6 +24025,13 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // twice. A widening whose controls can drift out of the suite is how an
   // alias becomes a wildcard.
   'domain:server lane aliases': 22,
+  // Registered with the yielded-claim reading, 21 cases, pin just under the
+  // count. What this battery floors is a NARROWING of what counts as a claim —
+  // a yielded one no longer does — so the controls that keep it a narrowing
+  // and not a silencer live inside it: the winner's claim that must stand, the
+  // yields that must withdraw nothing (no session, two sessions, a hyphen),
+  // and the re-claim after a yield that must govern again.
+  'Yielded claim reading': 19,
 });
 
 /** The floor on the ROSTER itself — how many batteries must be declared at all. */
@@ -26484,6 +26605,52 @@ async function selfTest() {
   t('H20 claim: an empty thread yields nothing', gov([]), null);
   t('H20 claim: a non-array input does not crash', gov(undefined), null);
   t('H20 claim: the measured age is read back as ~74 minutes', Math.round(claimAgeMinutes(gov(claim8878), NOW_20)), 74);
+
+  // ★ A claim its OWN session later yielded is not the card's claim. The
+  // measured race, its four comments trimmed to the lines the readers read:
+  // seat 1 claims on a card-thread branch, seat 2 claims on a protocol branch
+  // seven minutes later, re-reads and yields, and seat 1 re-posts by hand to
+  // clear the red the yielded claim caused on the winner's PR.
+  const BATTERY_YIELD = 'Yielded claim reading';
+  const yRow = (id, created_at, body) => ({ id, created_at, body });
+  const Y_WIN = 'session_014FZ3TJucS1L7BdMe5DAzXC';
+  const Y_LOSE = 'session_01TsiNYHjuek413vNgFHqcAm';
+  const yClaimA = yRow(6396126096, '2026-10-25T09:47:34Z',
+    `Claim: PM loop round 2 (serial) · 2026-10-25T09:47Z\nSession: \`${Y_WIN}\` (seat); implementation in card thread \`session_01X6Y7QshYEp9SD3ruEazFRS\`\n` +
+      'Branch: `claude/project-thread-biervl` (the card thread\'s harness push branch — the measured platform exception to `claude/issue-<n>-<slug>`)');
+  const yClaimB = yRow(6396193561, '2026-10-25T09:54:58Z',
+    `Claim: PM loop round 1 · 2026-10-25T09:54Z\nSession: \`${Y_LOSE}\`\nBranch: \`claude/issue-25729-adr-tier-row\``);
+  const yYield = yRow(6396249639, '2026-10-25T10:01:06Z',
+    `already claimed — yielding · \`domain:skills#2\` (seat post #19287) · \`${Y_LOSE}\` · 2026-10-25T10:00Z\n\n` +
+      `Claim 6396126096 (\`domain:skills#1\`, \`${Y_WIN}\`, 2026-10-25T09:47Z) precedes this seat's claim 6396193561 (2026-10-25T09:54Z); the earlier claim decides.`);
+  const yRepost = yRow(6396460178, '2026-10-25T10:23:20Z', yClaimA.body.replace('Claim: PM loop round 2 (serial)', 'Claim: PM loop round 2 (serial) · re-posted'));
+  const yRace = [yClaimA, yClaimB, yYield];
+  const yIds = (rows) => [...yieldedClaimIndexes(rows)].map((i) => rows[i].id).join(',');
+  b(BATTERY_YIELD, 'yield: a claim speaks for the FIRST session on its `Session:` line — the seat, not the thread it names after', claimSessionId(yClaimA.body), Y_WIN);
+  b(BATTERY_YIELD, 'yield: …a bulleted `Session:` line reads, with `claimedBranches`\'s prefix', claimSessionId(`Claim: x\n- Session: \`${Y_LOSE}\``), Y_LOSE);
+  b(BATTERY_YIELD, 'yield: …and a claim with no `Session:` line speaks for nobody', claimSessionId('Claim: x\nBranch: `claude/issue-1-a`'), null);
+  b(BATTERY_YIELD, 'yield: the measured race withdraws the LOSER\'s claim alone', yIds(yRace), '6396193561');
+  b(BATTERY_YIELD, 'yield: …not the winner\'s, whose session only the yield\'s BODY names', yieldedClaimIndexes(yRace).has(0), false);
+  b(BATTERY_YIELD, 'yield: the yielded claim no longer GOVERNS — the red on the winner\'s PR was this reading', claimGovernance(yRace).governing, null);
+  b(BATTERY_YIELD, 'yield: …the winner\'s claim is the newest standing one, malformed to this reader (UNDETERMINED, never UNCLAIMED)', claimGovernance(yRace).malformed?.id, 6396126096);
+  b(BATTERY_YIELD, 'yield: the loser\'s branch is no longer named by any claim (H46 and the closing-target guard)', h46ClaimNamesBranch(yRace.map((r) => r.body), 'claude/issue-25729-adr-tier-row'), false);
+  b(BATTERY_YIELD, 'yield: the hand re-post still reads as it did — the newest standing claim, malformed', claimGovernance([...yRace, yRepost]).malformed?.id, 6396460178);
+  const yWinOnIssue = { ...yClaimA, body: yClaimA.body.replace('claude/project-thread-biervl', 'claude/issue-25729-winner') };
+  const yIssueRace = [yWinOnIssue, yClaimB, yYield];
+  b(BATTERY_YIELD, 'yield: control — a winner on a protocol branch GOVERNS once the loser yields', govBranches(yIssueRace), 'claude/issue-25729-winner');
+  b(BATTERY_YIELD, 'yield: …and its branch is named, the loser\'s is not', [h46ClaimNamesBranch(yIssueRace.map((r) => r.body), 'claude/issue-25729-winner'), h46ClaimNamesBranch(yIssueRace.map((r) => r.body), 'claude/issue-25729-adr-tier-row')].join(), 'true,false');
+  const yYieldAs = (firstLine) => ({ ...yYield, body: `${firstLine}\n\n${yYield.body.split('\n').slice(2).join('\n')}` });
+  b(BATTERY_YIELD, 'yield: a yield naming NO session withdraws nothing — today\'s reading holds', yIds([yClaimA, yClaimB, yYieldAs('already claimed — yielding · seat 2')]), '');
+  b(BATTERY_YIELD, 'yield: a yield naming TWO sessions withdraws nothing', yIds([yClaimA, yClaimB, yYieldAs(`already claimed — yielding · \`${Y_LOSE}\` to \`${Y_WIN}\``)]), '');
+  b(BATTERY_YIELD, 'yield: a hyphen-written yield is no dialect', yIds([yClaimA, yClaimB, yYieldAs(`already claimed - yielding · \`${Y_LOSE}\``)]), '');
+  b(BATTERY_YIELD, 'yield: a bold-decorated yield line reads, through `markerMatches`', yIds([yClaimA, yClaimB, yYieldAs(`**already claimed — yielding** · \`${Y_LOSE}\``)]), '6396193561');
+  const yReclaim = yRow(6396500000, '2026-10-25T11:00:00Z', yClaimB.body);
+  b(BATTERY_YIELD, 'yield: a `Claim:` the yielding session posts AFTER its yield stands', yIds([...yRace, yReclaim]), '6396193561');
+  b(BATTERY_YIELD, 'yield: …and governs', govBranches([...yRace, yReclaim]), 'claude/issue-25729-adr-tier-row');
+  b(BATTERY_YIELD, 'yield: precedence is read from the timestamps, not thread order', yIds([...yRace].reverse()), '6396193561');
+  b(BATTERY_YIELD, 'yield: bare bodies in thread order get the rows\' answer (H46 holds bodies)', [...yieldedClaimIndexes(yRace.map((r) => r.body))].join(), [...yieldedClaimIndexes(yRace)].join());
+  b(BATTERY_YIELD, 'yield: a claim with no `Session:` line is never withdrawn', yIds([yRow(1, '2026-10-25T09:00:00Z', 'Claim: x\nBranch: `claude/issue-1-a`'), yYield]), '');
+  b(BATTERY_YIELD, 'yield: a non-array input withdraws nothing and does not crash', yieldedClaimIndexes(undefined).size, 0);
 
   // The gathering policy — what buys a ref read at all.
   t('H20 gate: a dispatched card with an aged claim is a candidate', h20NeedsRefProbe(dispatchedCard(), gov(claim8878), NOW_20), true);
