@@ -161,6 +161,7 @@ function actionsHarness() {
     const action = { name: 'reassign', label: 'Reassign', objectName: 'task', type: 'flow', target: 'welcome_flow' };
     const object = { name: 'task', actions: [action] };
     const ql: any = {
+        executeAction: vi.fn(async () => ({ ok: true })),
         getSchema: (n: string) => (n === 'task' ? object : undefined),
         registry: { getObject: (n: string) => (n === 'task' ? object : undefined), getItem: () => undefined },
         find: async () => [],
