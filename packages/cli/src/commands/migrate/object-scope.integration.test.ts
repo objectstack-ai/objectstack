@@ -47,6 +47,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import Database from 'better-sqlite3';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI_ROOT = resolve(HERE, '..', '..', '..');
@@ -125,26 +126,14 @@ process.exit(0);
 `;
 
 /** The repro's off-shape value, written past the write path: a location keyed the retired way. */
-const OFF_SHAPE_CHILD = `
-const { SqlDriver } = await import('@objectstack/driver-sql');
-const raw = new SqlDriver({ client: 'better-sqlite3', connection: { filename: process.env.FIXTURE_DB }, useNullAsDefault: true });
-await raw.knex('os21644_site').where({ id: 's1' }).update({ geo: JSON.stringify({ latitude: 1, longitude: 2 }) });
-await raw.disconnect();
-process.exit(0);
-`;
-
-/** The flag rows and the app rows, read on a connection of our own. */
-const READ_STATE_CHILD = `
-const { SqlDriver } = await import('@objectstack/driver-sql');
-const raw = new SqlDriver({ client: 'better-sqlite3', connection: { filename: process.env.FIXTURE_DB }, useNullAsDefault: true });
-const k = raw.knex;
-const flags = await k('sys_migration').select('id', 'last_run_at', 'verified_at', 'blocking').orderBy('id');
-const site = await k('os21644_site').select('id', 'geo').orderBy('id');
-const product = await k('os21644_product').select('id', 'image').orderBy('id');
-await raw.disconnect();
-process.stdout.write(JSON.stringify({ flags, site, product }));
-process.exit(0);
-`;
+function writeOffShape(db: string): void {
+  const conn = new Database(db);
+  try {
+    conn.prepare('UPDATE os21644_site SET geo = ? WHERE id = ?').run(JSON.stringify({ latitude: 1, longitude: 2 }), 's1');
+  } finally {
+    conn.close();
+  }
+}
 
 interface Run {
   code: number | null;
@@ -186,10 +175,22 @@ function freshDb(): string {
   return db;
 }
 
+/**
+ * The flag rows and the app rows, read on a connection of our own, in this
+ * process: a child `node` per read cost ~0.5 s each, sixteen times a file.
+ */
 function readState(db: string): State {
-  const out = childNode(READ_STATE_CHILD, { FIXTURE_DB: db });
-  if (out.status !== 0) throw new Error(`could not read the fixture database (status ${out.status})\n${out.stderr}`);
-  return JSON.parse(out.stdout) as State;
+  // Opened as the child it replaces opened it (read-write, knex's default).
+  const conn = new Database(db);
+  try {
+    return {
+      flags: conn.prepare('SELECT id, last_run_at, verified_at, blocking FROM sys_migration ORDER BY id').all() as FlagRow[],
+      site: conn.prepare('SELECT id, geo FROM os21644_site ORDER BY id').all() as State['site'],
+      product: conn.prepare('SELECT id, image FROM os21644_product ORDER BY id').all() as State['product'],
+    };
+  } finally {
+    conn.close();
+  }
 }
 
 function flagRow(state: State, id: string): FlagRow | undefined {
@@ -296,8 +297,7 @@ beforeAll(async () => {
 
   // The measured repro: one off-shape value stored, then a misspelled --object --apply.
   const reproDb = freshDb();
-  const offShape = childNode(OFF_SHAPE_CHILD, { FIXTURE_DB: reproDb });
-  if (offShape.status !== 0) throw new Error(`the off-shape value was not written\n${offShape.stderr}`);
+  writeOffShape(reproDb);
   const reproRightDb = join(dir, 'data', 'repro-right.db');
   copyFileSync(reproDb, reproRightDb);
   reproFullDry = await runCommand('value-shapes', ['--json'], reproDb);

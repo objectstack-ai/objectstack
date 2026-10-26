@@ -416,23 +416,90 @@ async function waitFor(predicate: () => Promise<boolean>, ms = 15_000): Promise<
   return false;
 }
 
+/** The composition, in `bootStack`'s order (header). `hostPlugins` go where `PIN_HANDLER_PLUGIN` goes. */
+async function bootKernel(appConfig: any, hostPlugins: Plugin[]): Promise<any> {
+  const k: any = new ObjectKernel();
+  await k.use(new ObjectQLPlugin());
+  await k.use(new DefaultDatasourcePlugin({ driver: 'sqlite-wasm', config: { filename: ':memory:' } }));
+  await k.use(new HonoServerPlugin({ port: 0 }));
+  await k.use(new AppPlugin(appConfig));
+  await k.use(new PlatformObjectsPlugin());
+  await k.use(new AuthPlugin({ secret: 'reader-seam-21454-secret', autoDefaultOrganization: false }));
+  for (const plugin of hostPlugins) await k.use(plugin);
+  await k.use(new SecurityPlugin(appSecurityPluginOptions(appConfig)));
+  await k.use(new SharingServicePlugin());
+  await k.use(createRestApiPlugin({}));
+  await k.use(createDispatcherPlugin({}));
+  await k.bootstrap();
+  return k;
+}
+
+/**
+ * [#23181] The process's first loads, paid during collection rather than in
+ * `beforeAll` and the first cases' clocks (AGENTS.md: clocked windows measure
+ * behaviour, never loading). Measured isolated on 4 vCPU: the file's first
+ * boot is about 1.3 s slower than a second one in the same process, because
+ * the boot `import()`s better-auth and the services' entries lazily and runs
+ * every path cold; the first sign-in and the first sandboxed body pay their
+ * own first use the same way.
+ *
+ * One throwaway kernel walks those paths once: a boot, the dev administrator's
+ * sign-in, and one sandboxed action body. It is stopped before the file's
+ * `beforeAll` runs. It shares nothing a case asserts on: its app, its database,
+ * its users and its kernel are its own. What outlives it is the process's
+ * state: the module registry, sql.js's and the sandbox's compiled WASM, the
+ * JIT, and each module's once-per-process memos, none of which a case reads.
+ * `NODE_ENV` is put back as found.
+ */
+async function warmUpFirstLoads(): Promise<void> {
+  const before = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'development'; // the dev-admin seed the sign-in reads, as in `beforeAll`
+  let k: any;
+  try {
+    k = await bootKernel(
+      {
+        manifest: { id: 'com.pin.reader21454.warmup', name: 'Warm-up', version: '1.0.0' },
+        objects: [
+          {
+            name: 'warm_note',
+            label: 'Warm note',
+            fields: { title: { type: 'text', label: 'Title' } },
+            actions: [{ name: 'warm_body', label: 'Warm body', type: 'script', body: actionBody('return { ok: true };') }],
+          },
+        ],
+      },
+      [],
+    );
+    const raw = (await k.getServiceAsync('http-server')).getRawApp();
+    const signedIn = await raw.request(`${ORIGIN}${API}/auth/sign-in/email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(ADMIN),
+    });
+    if (!signedIn.ok) throw new Error(`pin warm-up signIn failed: ${signedIn.status} ${await signedIn.text()}`);
+    const { token } = (await signedIn.json()) as { token: string };
+    const ran = await raw.request(`${ORIGIN}${API}/actions/warm_note/warm_body`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ params: {} }),
+    });
+    if (!ran.ok) throw new Error(`pin warm-up body failed: ${ran.status} ${await ran.text()}`);
+  } finally {
+    try { await (await k?.getServiceAsync('http-server'))?.close?.(); } catch { /* best-effort */ }
+    try { await k?.shutdown?.(); } catch { /* best-effort */ }
+    if (before === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = before;
+  }
+}
+
+// At module scope, never in a hook: vitest clocks a hook as it clocks a test.
+await warmUpFirstLoads();
+
 beforeAll(async () => {
   prevNodeEnv = process.env.NODE_ENV;
   process.env.NODE_ENV = 'development'; // the dev-admin seed, as `objectstack dev` / bootStack arm it
 
-  kernel = new ObjectKernel();
-  await kernel.use(new ObjectQLPlugin());
-  await kernel.use(new DefaultDatasourcePlugin({ driver: 'sqlite-wasm', config: { filename: ':memory:' } }));
-  await kernel.use(new HonoServerPlugin({ port: 0 }));
-  await kernel.use(new AppPlugin(PIN_APP));
-  await kernel.use(new PlatformObjectsPlugin());
-  await kernel.use(new AuthPlugin({ secret: 'reader-seam-21454-secret', autoDefaultOrganization: false }));
-  await kernel.use(PIN_HANDLER_PLUGIN);
-  await kernel.use(new SecurityPlugin(appSecurityPluginOptions(PIN_APP)));
-  await kernel.use(new SharingServicePlugin());
-  await kernel.use(createRestApiPlugin({}));
-  await kernel.use(createDispatcherPlugin({}));
-  await kernel.bootstrap();
+  kernel = await bootKernel(PIN_APP, [PIN_HANDLER_PLUGIN]);
 
   httpServer = await kernel.getServiceAsync('http-server');
   app = httpServer.getRawApp();

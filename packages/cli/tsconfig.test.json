@@ -118,12 +118,9 @@
 // than incidental: any error any one of them ever gains is red on arrival. That
 // is the half of this gate that starts working today.
 {
-  "extends": "./tsconfig.json",
+  "extends": ["./tsconfig.json", "../../tsconfig.test.base.json"],
   "compilerOptions": {
-    "noEmit": true,
     "rootDir": "../..",
-    "module": "esnext",
-    "moduleResolution": "bundler",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["node"],
     // [#15004, #15229] FIVE bare-name rules, no star, for the five workspace

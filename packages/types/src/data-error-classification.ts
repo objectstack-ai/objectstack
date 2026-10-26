@@ -1947,16 +1947,11 @@ function classifyDataError(error: any, object?: string): { status: number; body:
         // label (`notNullViolationSite` below is what it asks). What is left
         // here is the column no field declares, where the column is all there
         // is to name, and any driver error a non-engine write lets out.
-        return {
-            status: 400,
-            body: {
-                error: `${field} is required`,
-                code: 'VALIDATION_FAILED',
-                fields: [{ field, code: 'required', message: `${field} is required` }],
-                hint: notNullRefusalHint(field),
-                ...(object ? { object } : {}),
-            },
-        };
+        //
+        // [#26031] The dispatcher's doors answer this arm too, by asking for it
+        // ({@link driverNotNullRefusalAnswer}), so the answer is built where
+        // that question can recognise it.
+        return notNullArmAnswer(field, object);
     }
 
     // [#5462] A driver saying "that relation is missing" is an unknown-OBJECT
@@ -2201,6 +2196,59 @@ function notNullRefusalHint(field: string): string {
         + `If the object declares neither \`required\` nor \`storage: { notNull: true }\` for '${field}', `
         + `the physical schema has drifted from metadata instead: run 'os migrate' to reconcile `
         + `(or reset the dev database).`;
+}
+
+/**
+ * [#26031] The answers {@link classifyDataError}'s NOT NULL arm built, held by
+ * identity so {@link driverNotNullRefusalAnswer} can tell that arm's answer
+ * from every other arm's without reading its shape.
+ */
+const NOT_NULL_ARM_ANSWERS = new WeakSet<object>();
+
+/** The NOT NULL arm's answer: the column's sentence, its `required` field entry and the hint. */
+function notNullArmAnswer(field: string, object: string | undefined): { status: number; body: Record<string, unknown> } {
+    const answer = {
+        status: 400,
+        body: {
+            error: `${field} is required`,
+            code: 'VALIDATION_FAILED',
+            fields: [{ field, code: 'required', message: `${field} is required` }],
+            hint: notNullRefusalHint(field),
+            ...(object ? { object } : {}),
+        },
+    };
+    NOT_NULL_ARM_ANSWERS.add(answer);
+    return answer;
+}
+
+/**
+ * [#26031] `RestServer`'s answer to a driver's NOT NULL refusal that nothing
+ * translated, for a door that does not classify the rest of what it catches:
+ * the NOT NULL arm's `{ status, body }` when classification answers `error`
+ * with that arm, `undefined` for anything else.
+ *
+ * #24768 (ruling A) has the engine refuse a NOT NULL violation on a field the
+ * object declares as its own `ValidationError`, which every door already
+ * answers alike. What still leaves the engine as the driver threw it is a
+ * column no field declares (drift: the field left the metadata and its column
+ * stayed NOT NULL), and `RestServer` answered that with this arm while the
+ * dispatcher's `/data` exit answered `500` and its actions door relayed the
+ * driver's text as a `400 VALIDATION_ERROR`. Those doors ask this, and answer
+ * the body it returns in their own envelope.
+ *
+ * The question is classification's whole answer, not a second reading of the
+ * driver's text: everything ahead of the arm (a declared status, a sandbox
+ * wrapper, a unique violation, an unknown column, …) still decides first, so
+ * this answers exactly where {@link mapDataError} would. The producer's
+ * `userMessage` (the wrapper's half) is not part of it: no driver error carries
+ * one.
+ */
+export function driverNotNullRefusalAnswer(
+    error: unknown,
+    object?: string,
+): { status: number; body: Record<string, unknown> } | undefined {
+    const answer = classifyDataError(error, object);
+    return NOT_NULL_ARM_ANSWERS.has(answer) ? answer : undefined;
 }
 
 // The members above that are not `export`ed where they are declared, but that

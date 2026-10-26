@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 90 — spawns the real producer once per single-cause fixture: five spawns of the source CLI (`os g object foo.bar`, `os g flow foo.bar`, the dry run, `os g object class` and the `order_line` control); each spawn's floor is the source entry loading all 72 commands (about 8.5 s, `os --version` included); slowest CI reading 66.41 s (run 40200279306) in the window of shard-timings refresh run 40275747937 (PR #25960), over 10 s in 5 of 5 runs that executed it, x 1.25, rounded up
 
 /**
  * PIN (#16541) — `os generate` must not EXIT 0 on a name whose emission does

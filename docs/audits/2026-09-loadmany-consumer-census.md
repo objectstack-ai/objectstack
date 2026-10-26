@@ -96,8 +96,9 @@ files that assert today's unkeyed shape.
 test-only fixture doubles (`*.test.ts`, not loaders anyone ships). Each shipped loader's
 `list()`, `loadMany()` and `loadManyKeyed()` were read at the cited lines, then the cost
 claim was **measured**, not guessed — either by counting the calls a fake engine/fs sees,
-or by timing the real implementation. Scripts are committed under `scripts/audits/` (see
-§5) so every number below is re-runnable.
+or by timing the real implementation. Scripts were committed under `scripts/audits/` (see
+§5) so every number below is re-runnable; they were later removed from the tree and are
+held at commit `7111e14ac9`.
 
 | Loader | `listNames` (via `list()`) | `loadManyKeyed` | Cost of `listNames()` + N × by-name `load`/`loadDiagnosed`, vs `loadMany()` |
 |---|---|---|---|
@@ -289,6 +290,8 @@ direct a re-check once the rate limit clears) rather than risk a duplicate.
 ## Commands to re-run every measurement in this census
 
 ```bash
+# The four scripts were removed from the tree; run these from a checkout of commit
+# 7111e14ac9, which holds them: git worktree add --detach ../objectstack-7111e14ac9 7111e14ac9
 # Build the dependency closures this census's scripts import from (dist, not src):
 pnpm --filter '@objectstack/objectql^...' build && pnpm --filter @objectstack/objectql build
 

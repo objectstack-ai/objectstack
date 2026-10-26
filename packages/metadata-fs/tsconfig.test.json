@@ -29,7 +29,7 @@
 //     `.js` import extensions this package must ship. Nothing to fix, so nothing
 //     is changed.
 //   - STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`, `noUnusedParameters`,
-//     `noImplicitReturns` and the rest are inherited from the root config.
+//     `noImplicitReturns` and the rest are inherited from the base config.
 //     Nothing here may loosen a type rule; if a test does not compile, that is
 //     the finding. The five TS6133 this package's TEST_DEBT entry recorded were
 //     `noUnusedLocals` findings and were fixed in the tests, not silenced here.
