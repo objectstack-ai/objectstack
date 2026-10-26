@@ -304,7 +304,7 @@ expect_reason entry_guard "event 'push' is not scoped"
 expect_reason bare_root_worklist "event 'push' is not scoped"
 expect_line 'Gate families: 9 run, 0 skipped'
 
-run_case 'schedule: every family runs (the hourly full run keeps the battery)' "$REPO" schedule '' ''
+run_case 'schedule: every family runs (the 4-hourly full run keeps the battery)' "$REPO" schedule '' ''
 expect_rc 0
 expect_warnings '' ''
 expect_all_run
@@ -321,7 +321,7 @@ expect_all_run
 # The backstop, held over the very change set the PR path now lets the PM
 # self-test skip (#22076): an unscoped event never reads the diff.
 S=$(scenario M:scripts/slot-lookup-baseline.json M:AGENTS.md M:skills/x/SKILL.md)
-run_case 'schedule: a change the PR path skips the PM self-test for still runs it -- the hourly full run is the backstop (#22076 control)' "$REPO" schedule '' ''
+run_case 'schedule: a change the PR path skips the PM self-test for still runs it -- the 4-hourly full run is the backstop (#22076 control)' "$REPO" schedule '' ''
 expect_rc 0
 expect_warnings '' ''
 expect_all_run

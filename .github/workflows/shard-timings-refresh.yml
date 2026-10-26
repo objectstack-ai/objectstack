@@ -70,7 +70,10 @@
 # no refresh because it stamps a fresh `measuredAt` on numbers nobody measured.
 # That script carries the argument and the self-test; this file only drives it.
 #
-# ⚠ WHICH RUNS: THE HOURLY `schedule` RUN OF ci.yml, NEVER A PUSH RUN (#16467).
+# ⚠ WHICH RUNS: THE SCHEDULED RUN OF ci.yml, NEVER A PUSH RUN (#16467). Hourly
+# until #25771 moved it to every 4 hours; the reasoning below is unchanged.
+# Its summaries are retained 4 days (1 day on every other event), so the
+# window still holds about 24 of them.
 # Until #16467 a push to `main` re-ran the FULL Test Core battery, so "a green
 # push run on main" and "a measurement of the workspace" were the same thing.
 # They are not any more: a push run computes its package set with `--affected`
@@ -342,9 +345,9 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           # 24, not 15 (#16467). The window that matters is the artifact
-          # retention window — 1 day — and the runs inside it are now the
-          # hourly scheduled ones, so 24 is "everything still downloadable"
-          # rather than an arbitrary depth. Coverage and sample depth are both
+          # retention window of the scheduled runs — 4 days at one run every
+          # 4 hours since #25771, 1 day at one an hour before it — so 24 is
+          # "everything still downloadable" rather than an arbitrary depth. Coverage and sample depth are both
           # ACCUMULATED across runs (see the next step), so examining fewer
           # than the window holds is samples left on the table; the cost is two
           # API reads per run examined, and the loop below stops at the first
@@ -366,8 +369,8 @@ jobs:
           # landed the hourly run, this lane ran with `event=schedule` before
           # that trigger existed on main, printed "NO ELIGIBLE RUN among the 0"
           # and named three causes none of which had occurred. It also does not
-          # clear at merge — there is a bootstrap window of at least an hour
-          # before the first hourly run finishes.
+          # clear at merge — there is a bootstrap window of up to 4 hours
+          # before the first scheduled run finishes.
           #
           # `|| SELECT_EXIT=$?` and not a bare call: this step runs under
           # `bash -e`, where the non-zero would kill it before the code could
@@ -388,7 +391,7 @@ jobs:
             # summary section and a job-level notice, and every one of them says
             # that a PERSISTENT 3 is a defect rather than a steady state.
             echo "not_measured=true" >> "$GITHUB_OUTPUT"
-            echo "::warning::Shard timings NOT MEASURED: no completed \`schedule\` run of ci.yml exists on main yet. The dataset was left untouched. If this repeats once the hourly full run has been live for a few hours, the trigger is gone or every hourly run is being cancelled — file it."
+            echo "::warning::Shard timings NOT MEASURED: no completed \`schedule\` run of ci.yml exists on main yet. The dataset was left untouched. If this repeats once the scheduled full run has been live for a day, the trigger is gone or every scheduled run is being cancelled — file it."
             {
               echo "### Shard timings: NOT MEASURED (exit 3) — nothing was regenerated, and nothing failed"
               echo
@@ -398,12 +401,12 @@ jobs:
               echo "\`scripts/test-shard-timings.json\` is untouched, which is the correct outcome for this"
               echo "reading, and this job is green because nothing went wrong — not because anything passed."
               echo
-              echo "Expected exactly once: while the hourly full run bootstraps. The trigger has to be on"
-              echo "\`main\` and one run has to finish, and run-summary artifacts live 1 day."
+              echo "Expected exactly once: while the scheduled full run bootstraps. The trigger has to be on"
+              echo "\`main\` and one run has to finish, and run-summary artifacts live 4 days on a scheduled run."
               echo
               echo "⛔ **A PERSISTENT NOT MEASURED IS A DEFECT, NOT A STEADY STATE.** If this section is"
-              echo "still here after the hourly run has been live for a few hours, the \`schedule\` trigger"
-              echo "has been removed from \`ci.yml\` or every hourly run is being cancelled — and the"
+              echo "still here after the scheduled run has been live for a day, the \`schedule\` trigger"
+              echo "has been removed from \`ci.yml\` or every scheduled run is being cancelled — and the"
               echo "balancing dataset is quietly ageing out while this job reports green. File a card."
               echo
               echo "The selector's own refusal text, verbatim:"
@@ -437,7 +440,7 @@ jobs:
       # is a HIT — and the generator refuses hits rather than recording a
       # replayed ~0.1s window as a suite's cost. "Download the shard artifacts
       # from any green run" therefore measures a SLICE of the workspace, never all of it.
-      # Since #16467 the runs read here are the HOURLY `schedule` runs, which are
+      # Since #16467 the runs read here are the `schedule` runs (every 4 hours since #25771), which are
       # the full battery; the accumulation stays because the cache argument above
       # is unchanged by which event ran the suite.
       #
@@ -645,7 +648,7 @@ jobs:
       # The per-file half of the regression readings (#22949 ruling E, item 3).
       # The dataset holds no per-file durations; the window's runs do, in the
       # per-shard captures `report-test-timings.mjs --capture` uploads as
-      # `test-core-timings-N-of-M`, retained 1 day like the run summaries the
+      # `test-core-timings-N-of-M`, retained like the run summaries the
       # generator read. The selector listed their ids beside the summaries'
       # (`timing_artifact_ids`), so this is a read of the SAME runs, never a new
       # measurement, and it feeds the PR body alone.
@@ -845,7 +848,7 @@ jobs:
             echo
             echo "## Source"
             echo
-            echo "Measured across $RUN_COUNT accumulated run(s) of the HOURLY \`schedule\` run of CI on"
+            echo "Measured across $RUN_COUNT accumulated run(s) of the 4-hourly \`schedule\` run of CI on"
             echo "\`main\` — the full-battery run (#16467). A \`push\` run on \`main\` is affected-only and"
             echo "is not a measurement of the workspace, so no push run feeds this file."
             echo
