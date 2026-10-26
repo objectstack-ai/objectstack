@@ -14,7 +14,9 @@
  * Each entry expands into the fields (objects) and top-level keys it adds,
  * changes and removes, lazily fetched on first expand. An entry whose drill-in
  * finds the draft equal to its published version drops the UPDATE mark
- * (objectui#11807): publishing still promotes it, but it changes nothing. This
+ * (objectui#11807): publishing still promotes it, but it changes nothing. What
+ * the platform wrote rather than the author — the system columns it provisions,
+ * the keys it derives — folds into one collapsed line (objectstack#25890). This
  * is the review surface that turns Publish from a leap of faith into an
  * informed click.
  *
@@ -83,7 +85,7 @@ import { MetadataProtectionFields, stripReadDecorations } from '@objectstack/spe
 // objectui#12929 — the ONE discriminator of an authored default's shape, the
 // same function the batch door's backfill judgement calls. Moves nothing onto
 // the eager graph for the reason recorded above (`vendor-objectstack`).
-import { discriminateDefaultValueShape } from '@objectstack/spec/data';
+import { discriminateDefaultValueShape, provisionPrimary } from '@objectstack/spec/data';
 import { diffFields, readFields } from '../views/metadata-admin/previews/object-fields-io.js';
 // objectui#13125 — the Data pillar's rule for a column the platform injected
 // and hides (objectui#11780), reused rather than restated. A leaf module with
@@ -285,6 +287,22 @@ export interface EntryChangeDetail {
     changed: string[];
     removed: string[];
   };
+  /**
+   * What publishing installs that the PLATFORM wrote, not the author: the
+   * system columns it provisions for the object and the keys it derives
+   * (objectstack#25890). Listed once, in a collapsed group of its own, never in
+   * `fields` or `keys` above. Field rows sort before key rows; each sorts by
+   * name. A generated field's label, when it declares one, is in
+   * `fields.labels`.
+   */
+  generated: Array<{ name: string; kind: 'added' | 'changed' | 'removed'; scope: 'field' | 'key' }>;
+  /**
+   * True when there is no published body, so publishing ADDS the item
+   * (objectstack#25890). Its identity keys — `name`, and the `label` the row
+   * already leads with — are then not listed as keys at all: they are the
+   * row, not something the item changes.
+   */
+  isNew: boolean;
 }
 
 /** Stable equality for metadata values (small JSON — order-sensitive is fine). */
@@ -292,12 +310,52 @@ function valueEqual(a: unknown, b: unknown): boolean {
   return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 }
 
-/** True when the detail lists nothing: no field row and no key row. */
+/** True when the detail lists nothing: no field row, no key row and no generated row. */
 function isEmptyChangeDetail(detail: EntryChangeDetail): boolean {
-  const { fields, keys } = detail;
+  const { fields, keys, generated } = detail;
   const fieldRows = fields ? fields.added.length + fields.changed.length + fields.removed.length : 0;
-  return fieldRows + keys.added.length + keys.changed.length + keys.removed.length === 0;
+  return fieldRows + keys.added.length + keys.changed.length + keys.removed.length + generated.length === 0;
 }
+
+/**
+ * The keys a NEW item's row already shows (objectstack#25890): its machine name,
+ * and the label the row leads with (both read off the same draft body). Listed
+ * again under the drill-in they read as two more things the author changed.
+ */
+const NEW_ITEM_ROW_KEYS: ReadonlySet<string> = new Set(['name', 'label']);
+
+/**
+ * Did the platform write this field definition (objectstack#25890)? The spec's own
+ * mark: `system: true`, which `FieldSchema` declares as the auto-injected
+ * system/audit field and tells tools that surface system fields apart from the
+ * author's to branch on. Read as a boolean and nothing else, as the spec
+ * declares it.
+ */
+function isPlatformSystemField(def: Record<string, unknown> | undefined): boolean {
+  return def?.system === true;
+}
+
+/**
+ * Is `body.nameField` the pointer the registry DERIVES, rather than one the
+ * author chose (objectstack#25890)? The `/meta` reads replay the registry's
+ * materialization seam, which stamps `nameField` through `provisionPrimary` in
+ * designate-only mode. The answer is that same function over the body without
+ * the pointer — the registry's own write-side test for the same question — so
+ * no derivation rule is restated here. A pointer naming any other field is the
+ * author's choice and stays an author row; an absent pointer is no stamp.
+ */
+function isDerivedNameField(body: Record<string, unknown>): boolean {
+  const present = body.nameField;
+  if (typeof present !== 'string' || present === '') return false;
+  const withoutPointer = { ...body };
+  delete withoutPointer.nameField;
+  return provisionPrimary(withoutPointer, { synthesize: false }).nameField === present;
+}
+
+/** Top-level keys whose every present value is platform-derived (objectstack#25890). */
+const DERIVED_KEY_TESTS: Readonly<Record<string, (body: Record<string, unknown>) => boolean>> = {
+  nameField: isDerivedNameField,
+};
 
 /**
  * The ADR-0010 protection envelope (`_lock`, `_packageId`, `_provenance`, …),
@@ -351,9 +409,18 @@ function fieldLabelOf(def: Record<string, unknown> | undefined): string | undefi
  * the Data pillar's own test (`isStudioHiddenSystemField`, objectui#11780).
  * The `/meta` reads serve an object with the platform's columns already
  * stamped on, so a NEW object's drill-in listed the search companion
- * `__search` as a field the author added. Only that rule decides: a column
- * the platform injects but does not hide (the audit columns, `owner_id`) is
- * still listed.
+ * `__search` as a field the author added. Only that rule drops a row
+ * outright.
+ *
+ * A column the platform injects but does NOT hide — the audit columns,
+ * `owner_id` — is a row, but not the author's (objectstack#25890): a field this
+ * publish adds or removes whose every definition carries `system: true` moves
+ * to `generated`, the collapsed group of what the platform wrote. So does a
+ * top-level key whose value is the platform's derivation (`nameField`, see
+ * {@link isDerivedNameField}). A system field CHANGED between two bodies stays
+ * an author row: the platform injects the same definition on both reads, so a
+ * difference there is an edit someone made. And a NEW item lists neither its
+ * `name` nor its `label` as a key: its row already shows both.
  *
  * Why not `computeDiffRows` from `LayeredDiff.tsx`, which splits top-level keys
  * the same way: that module imports the metadata-admin string table
@@ -368,6 +435,7 @@ export function computeChangeDetail(
   const pub = withoutProtectionEnvelope(published ?? {});
   const cur = withoutProtectionEnvelope(draft ?? {});
   let fields: EntryChangeDetail['fields'] = null;
+  const generatedFields: EntryChangeDetail['generated'] = [];
   if (pub.fields != null || cur.fields != null) {
     const d = diffFields(pub.fields, cur.fields);
     const pubDefs = fieldDefsByName(pub.fields);
@@ -376,7 +444,10 @@ export function computeChangeDetail(
       const defs = [pubDefs.get(name), curDefs.get(name)].filter((def) => def !== undefined);
       return !(defs.length > 0 && defs.every((def) => isStudioHiddenSystemField(def)));
     };
-    const added = Object.values(d.byName)
+    // objectstack#25890 — added or removed, and the platform's on every side.
+    const platformWrote = (name: string): boolean =>
+      [pubDefs.get(name), curDefs.get(name)].every((def) => def === undefined || isPlatformSystemField(def));
+    const addedAll = Object.values(d.byName)
       .filter((e) => e.status === 'added' && listed(e.name))
       .map((e) => e.name)
       .sort();
@@ -384,30 +455,45 @@ export function computeChangeDetail(
       .filter((e) => e.status === 'changed' && listed(e.name))
       .map((e) => ({ name: e.name, keys: e.changedKeys }))
       .sort((a, b) => a.name.localeCompare(b.name));
-    const removed = d.removed
+    const removedAll = d.removed
       .map((e) => e.name)
       .filter(listed)
       .sort();
+    const added = addedAll.filter((name) => !platformWrote(name));
+    const removed = removedAll.filter((name) => !platformWrote(name));
+    for (const name of addedAll) if (platformWrote(name)) generatedFields.push({ name, kind: 'added', scope: 'field' });
+    for (const name of removedAll) {
+      if (platformWrote(name)) generatedFields.push({ name, kind: 'removed', scope: 'field' });
+    }
+    generatedFields.sort((a, b) => a.name.localeCompare(b.name));
     const labels = new Map<string, string>();
-    for (const name of [...added, ...changed.map((f) => f.name), ...removed]) {
+    for (const name of [...addedAll, ...changed.map((f) => f.name), ...removedAll]) {
       // The draft's definition where there is one: it is what publishing installs.
       const label = fieldLabelOf(curDefs.get(name) ?? pubDefs.get(name));
       if (label !== undefined) labels.set(name, label);
     }
     fields = { added, changed, removed, labels };
   }
+  const isNew = published === null;
   const names = new Set([...Object.keys(pub), ...Object.keys(cur)]);
   names.delete('fields');
+  if (isNew) for (const k of NEW_ITEM_ROW_KEYS) names.delete(k);
   const keys: EntryChangeDetail['keys'] = { added: [], changed: [], removed: [] };
+  const generatedKeys: EntryChangeDetail['generated'] = [];
   for (const k of [...names].sort()) {
     const before = (pub as Record<string, unknown>)[k];
     const after = (cur as Record<string, unknown>)[k];
     if (valueEqual(before, after)) continue;
-    if (before == null) keys.added.push(k);
-    else if (after == null) keys.removed.push(k);
-    else keys.changed.push(k);
+    const kind = before == null ? 'added' : after == null ? 'removed' : 'changed';
+    const derived = Object.prototype.hasOwnProperty.call(DERIVED_KEY_TESTS, k) ? DERIVED_KEY_TESTS[k] : undefined;
+    // Derived only when every body that carries the key carries the derivation.
+    if (derived && [before == null ? null : pub, after == null ? null : cur].every((b) => b === null || derived(b))) {
+      generatedKeys.push({ name: k, kind, scope: 'key' });
+      continue;
+    }
+    keys[kind].push(k);
   }
-  return { fields, keys };
+  return { fields, keys, generated: [...generatedFields, ...generatedKeys], isNew };
 }
 
 /**
@@ -678,14 +764,19 @@ function EntryDetail({
     );
   }
 
-  const { fields, keys } = detail;
+  const { fields, keys, generated, isNew } = detail;
   const hasKeyRows = keys.added.length > 0 || keys.changed.length > 0 || keys.removed.length > 0;
   if (isEmptyChangeDetail(detail)) {
     return (
       <p className="px-2 py-1 text-xs text-muted-foreground">
-        {t('preview.changes.detailNone', {
-          defaultValue: 'No differences detected — the draft matches the published version.',
-        })}
+        {isNew
+          ? // objectstack#25890 — a NEW item with nothing beyond the name and label its row shows.
+            t('preview.changes.detailNewNone', {
+              defaultValue: 'Publishing adds it. It declares nothing beyond its name and label.',
+            })
+          : t('preview.changes.detailNone', {
+              defaultValue: 'No differences detected — the draft matches the published version.',
+            })}
       </p>
     );
   }
@@ -737,7 +828,10 @@ function EntryDetail({
       ))}
       {hasKeyRows && (
         <p className="text-xs text-muted-foreground">
-          {t('preview.changes.detailChangedKeys', { defaultValue: 'Also changed:' })}
+          {isNew
+            ? // objectstack#25890 — every key of a NEW item is new: what it includes, not what else changed.
+              t('preview.changes.detailNewKeys', { defaultValue: 'Includes:' })
+            : t('preview.changes.detailChangedKeys', { defaultValue: 'Also changed:' })}
         </p>
       )}
       {keys.added.map((name) => (
@@ -755,6 +849,55 @@ function EntryDetail({
           − {name}
         </p>
       ))}
+      {generated.length > 0 && <GeneratedGroup rows={generated} labels={fields?.labels} />}
+    </div>
+  );
+}
+
+/**
+ * objectstack#25890 — what the platform wrote into this publish, folded into
+ * one line: the system columns it provisions and the keys it derives. Collapsed
+ * on every open, the confirm posture's too (that posture expands the item rows,
+ * not this group); the toggle shows the rows, read-only, in the same shape as
+ * the author's.
+ */
+function GeneratedGroup({
+  rows,
+  labels,
+}: {
+  rows: EntryChangeDetail['generated'];
+  labels: ReadonlyMap<string, string> | undefined;
+}) {
+  const { t } = useObjectTranslation();
+  const [open, setOpen] = useState(false);
+  return (
+    <div data-testid="draft-generated-group">
+      <button
+        type="button"
+        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+        aria-expanded={open}
+        data-testid="draft-generated-toggle"
+        onClick={() => setOpen((v) => !v)}
+      >
+        {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        {t('preview.changes.generatedGroup', {
+          n: rows.length,
+          defaultValue: 'Generated by the platform ({{n}})',
+        })}
+      </button>
+      {open && (
+        <div className="ml-4 flex flex-col gap-0.5 opacity-80">
+          {rows.map((row) =>
+            row.scope === 'field' ? (
+              <FieldRow key={`g${row.kind}${row.name}`} kind={row.kind} name={row.name} label={labels?.get(row.name)} />
+            ) : (
+              <p key={`gk${row.kind}${row.name}`} className={`font-mono text-xs ${FIELD_ROW_TONE[row.kind]}`}>
+                {FIELD_ROW_MARK[row.kind]} {row.name}
+              </p>
+            ),
+          )}
+        </div>
+      )}
     </div>
   );
 }
