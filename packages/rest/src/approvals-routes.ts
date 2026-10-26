@@ -47,7 +47,7 @@
 // `handleApprovalError` below. Constructor and reader share one module in
 // `@objectstack/types` because the producer is a PLUGIN and rest cannot
 // import one.
-import { strandedDecisionDetails, sendError as sendEnvelopeError } from '@objectstack/types';
+import { strandedDecisionDetails, sendError as sendEnvelopeError, sendOk } from '@objectstack/types';
 import {
     classifiedRefusalAnswer,
     nestedRefusalEnvelope,
@@ -71,6 +71,16 @@ import {
  * here too, and naming a member the class does not have is a compile error.
  * See the module header for why `approvalsServiceProvider` is a getter.
  */
+/**
+ * [#26314] The closed query-parameter set of
+ * `GET {basePath}/approvals/records/:object/:recordId/lock`: EMPTY.
+ * **Measured**: the handler reads the object and the record id from the path
+ * and nothing from the query string, and neither do the helpers it calls
+ * (`resolveExecCtx` reads the session and headers). A name sent there is
+ * refused with the located 400 (AGENTS.md route rule 5), never dropped.
+ */
+export const APPROVAL_RECORD_LOCK_PARAMS: readonly string[] = [];
+
 export interface ApprovalsRouteHost {
     readonly routeManager: RestServer['routeManager'];
     readonly approvalsServiceProvider: RestServer['approvalsServiceProvider'];
@@ -327,6 +337,39 @@ export function registerApprovalsEndpoints(this: ApprovalsRouteHost, basePath: s
             }
         },
         metadata: { summary: 'Get an approval request by id', tags: ['approvals'] },
+    });
+
+    // [#26314] Is this record held by a locking approval — answered to every
+    // caller who can read the record (#25934 ruling A), so a non-participant's
+    // page shows the lock instead of offering an edit the server refuses.
+    // `IApprovalService.getRecordLock` carries the rule: the record is read AS
+    // THE CALLER, and an unreadable record answers `null`, the same as a
+    // record id that does not exist — so this door answers both with the same
+    // 404, and the payload is `{ locked }` alone. Optional on the contract, so
+    // an implementation without it answers 501, never a guess.
+    this.routeManager.register({
+        method: 'GET',
+        path: `${dataPath}/approvals/records/:object/:recordId/lock`,
+        handler: async (req: any, res: any) => {
+            try {
+                const environmentId = isScoped ? req.params?.environmentId : undefined;
+                const context = await this.resolveExecCtx(environmentId, req);
+                if (this.enforceAuth(req, res, context)) return;
+                if (refuseUnknownQueryParams(req, res, APPROVAL_RECORD_LOCK_PARAMS)) return;
+                const svc = await resolveService(environmentId);
+                if (!svc || typeof svc.getRecordLock !== 'function') return respond501(res);
+                const { object, recordId } = req.params;
+                const lock = await svc.getRecordLock(object, recordId, context ?? {});
+                if (!lock) {
+                    sendEnvelopeError(res, 404, 'RECORD_NOT_FOUND', `Record '${recordId}' of '${object}' not found`);
+                    return;
+                }
+                sendOk(res, { locked: lock.locked === true });
+            } catch (error: any) {
+                handleRouteError(res, error);
+            }
+        },
+        metadata: { summary: 'Whether a record is held by a locking approval', tags: ['approvals'] },
     });
 
     // Record a decision on a node-driven request. Both branches funnel
