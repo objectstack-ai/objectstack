@@ -264,21 +264,29 @@ for (const cell of CELLS) {
         const total = await services.native!.queryDataset(DATASET, { measures: ['avg_hours', 'total_seconds'] } as any);
         expect(total.rows).toEqual([{ avg_hours: aggregate(ROWS, 'avg', 'hours'), total_seconds: aggregate(ROWS, 'sum', 'seconds') }]);
 
-        // Group `c` is left out: its sum is SQL NULL until the strategy folds it
-        // to 0, and the dialects order a NULL at opposite ends.
-        const run = await counted(() =>
-          services.native!.queryDataset(DATASET, {
-            measures: ['total_seconds'],
-            dimensions: ['category'],
-            runtimeFilter: { category: { $ne: 'c' } },
-            order: { total_seconds: 'asc' },
-            limit: 1,
-          } as any),
-        );
-        expect(run.error, run.error?.message).toBeUndefined();
-        expect(run.rawSql).toBe(1);
+        // [#25907] Group `c` has no record carrying both columns. Its sum is
+        // answered as 0 in the statement, so it sorts and pages as 0 on both
+        // dialects: ascending it is b (-3599.25), c (0), a (91800). Folded after
+        // the rows came back, SQLite ordered the NULL first and PostgreSQL last.
+        const page = (offset: number) =>
+          counted(() =>
+            services.native!.queryDataset(DATASET, {
+              measures: ['total_seconds'],
+              dimensions: ['category'],
+              order: { total_seconds: 'asc' },
+              limit: 1,
+              offset,
+            } as any),
+          );
+        const first = await page(0);
+        expect(first.error, first.error?.message).toBeUndefined();
+        expect(first.rawSql).toBe(1);
         expect(reads.statements[reads.statements.length - 1]).toContain('ORDER BY "total_seconds" ASC');
-        expect(run.value!.rows).toEqual([{ category: 'b', total_seconds: -3599.25 }]);
+        expect(reads.statements[reads.statements.length - 1]).toContain('COALESCE(SUM(');
+        expect(first.value!.rows).toEqual([{ category: 'b', total_seconds: -3599.25 }]);
+        const second = await page(1);
+        expect(second.error, second.error?.message).toBeUndefined();
+        expect(second.value!.rows).toEqual([{ category: 'c', total_seconds: 0 }]);
       });
 
       it('the cube door serves the registered dataset by name, with the same numbers', async () => {

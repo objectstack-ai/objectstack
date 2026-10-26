@@ -68,19 +68,21 @@ describe('[#25778] NativeSQLStrategy — the duration measure as a statement', (
     [
       'sqlite',
       'AVG(((ROUND((julianday(resolved_at) - julianday(opened_at)) * 86400000.0) / 1000.0) / 3600.0)) AS "avg_hours"',
-      'SUM(CASE WHEN priority = $1 THEN (ROUND((julianday(resolved_at) - julianday(opened_at)) * 86400000.0) / 1000.0) END) AS "total_seconds"',
+      'COALESCE(SUM(CASE WHEN priority = $1 THEN (ROUND((julianday(resolved_at) - julianday(opened_at)) * 86400000.0) / 1000.0) END), 0) AS "total_seconds"',
     ],
     [
       'postgres',
       'AVG((CAST(EXTRACT(EPOCH FROM (resolved_at - opened_at)) AS DOUBLE PRECISION) / 3600.0)) AS "avg_hours"',
-      'SUM(CASE WHEN priority = $1 THEN CAST(EXTRACT(EPOCH FROM (resolved_at - opened_at)) AS DOUBLE PRECISION) END) AS "total_seconds"',
+      'COALESCE(SUM(CASE WHEN priority = $1 THEN CAST(EXTRACT(EPOCH FROM (resolved_at - opened_at)) AS DOUBLE PRECISION) END), 0) AS "total_seconds"',
     ],
     [
       'mysql',
       'AVG(((TIMESTAMPDIFF(MICROSECOND, opened_at, resolved_at) / 1.0E6) / 3600.0)) AS "avg_hours"',
-      'SUM(CASE WHEN priority = $1 THEN (TIMESTAMPDIFF(MICROSECOND, opened_at, resolved_at) / 1.0E6) END) AS "total_seconds"',
+      'COALESCE(SUM(CASE WHEN priority = $1 THEN (TIMESTAMPDIFF(MICROSECOND, opened_at, resolved_at) / 1.0E6) END), 0) AS "total_seconds"',
     ],
   ])('%s: the per-dialect difference, divided by the unit, under the aggregate and its measure filter', async (dialect, avg, filteredSum) => {
+    // [#25907] The `sum` answers its empty-group identity `0` in the statement,
+    // where the order and the window read it; the `avg` has none and keeps NULL.
     const { sql, params } = await native.generateSql(q(), nativeCtx({ dialect }));
     expect(sql).toBe(`SELECT category AS "category", ${avg}, ${filteredSum} FROM "${OBJECT}" GROUP BY category`);
     expect(params).toEqual(['high']);
@@ -110,10 +112,12 @@ describe('[#25778] NativeSQLStrategy — the duration measure as a statement', (
     for (const dialect of ['sqlite', 'postgres', 'mysql']) expect(native.canHandle(q(), nativeCtx({ dialect })), dialect).toBe(true);
   });
 
-  it('presents a client string as a number, and folds an empty sum to 0 while an empty avg stays null', async () => {
+  it('presents a client string as a number; an empty sum arrives as the statement\'s 0 and an empty avg stays null', async () => {
+    // [#25907] Category `c` has no record carrying both columns: the statement
+    // answered `COALESCE(SUM(…), 0)` (above), so the client hands back `'0'`.
     const rows = [
       { category: 'a', avg_hours: '12.75', total_seconds: '91800' },
-      { category: 'c', avg_hours: null, total_seconds: null },
+      { category: 'c', avg_hours: null, total_seconds: '0' },
     ];
     const res = await native.execute(q(), nativeCtx({ dialect: 'postgres', rows }));
     expect(res.rows).toEqual([
