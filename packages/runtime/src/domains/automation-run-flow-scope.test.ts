@@ -172,7 +172,10 @@ describe('#25820 — a flow name that does not own the run is answered as an unk
                 const h = makeHarness();
                 const owned = await send(h, door, OWNER, RUN);
                 expect(owned.status).toBe(door.okStatus);
-                if (door.verb) expect(h[door.verb]).toHaveBeenCalledWith(RUN, ...(door.verb === 'resume' ? [expect.anything()] : [expect.anything()]));
+                if (door.verb) {
+                    expect(h[door.verb]).toHaveBeenCalledTimes(1);
+                    expect(h[door.verb].mock.calls[0]?.[0]).toBe(RUN);
+                }
             });
 
             it('the owner is still checked when `getRun` cannot see the run, through the suspended-run list', async () => {
