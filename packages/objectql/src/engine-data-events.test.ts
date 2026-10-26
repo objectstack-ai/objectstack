@@ -1009,11 +1009,12 @@ describe('#15225 / #15813 — a published BulkDataEvent names the organization t
     // emitted INSIDE the `parse` call — a stamp added onto the envelope after
     // validation would pass every pin above while bypassing the contract.
     const testPath = expect.getState().testPath;
-    if (!testPath) throw new Error('vitest did not report a testPath — cannot locate engine.ts');
-    const src = readFileSync(join(dirname(testPath), 'engine.ts'), 'utf8');
-    const start = src.indexOf('private async publishBulkDataEvent(');
+    if (!testPath) throw new Error('vitest did not report a testPath — cannot locate engine-realtime-publish.ts');
+    // [#25522 cut 4] The body and the resolver moved out of `engine.ts`, whole.
+    const src = readFileSync(join(dirname(testPath), 'engine-realtime-publish.ts'), 'utf8');
+    const start = src.indexOf('export async function publishBulkDataEvent(');
     expect(start).toBeGreaterThan(-1);
-    const body = src.slice(start, src.indexOf('\n  }\n', start));
+    const body = src.slice(start, src.indexOf('\n}\n', start));
     const parseCalls = body.match(/BulkDataEventSchema\.parse\(\{[\s\S]*?\n\s*\}\);/g) ?? [];
     expect(parseCalls).toHaveLength(1);
     expect(parseCalls[0]).toContain('organizationId');

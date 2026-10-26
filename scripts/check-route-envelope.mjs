@@ -994,7 +994,15 @@ const DISPATCHER_DOMAINS = {
   // answer it gives goes through `deps.success` / `deps.error`.
   'catalog-activation.ts': { handBuilt: 0 },
   'data.ts': { handBuilt: 0 },
-  'i18n.ts': { handBuilt: 0 },
+  // [#25785] Was 0. Kind 1: the translation bundle is the one `/i18n` face a
+  // browser revalidates. Its `200` must carry `ETag` and `Cache-Control` and
+  // `deps.success` takes no headers, so the answer is `deps.success`'s envelope
+  // spread with them; a matching `If-None-Match` is a `304`, which has no body
+  // at all and so no envelope a helper could build.
+  'i18n.ts': {
+    handBuilt: 2,
+    note: 'the translations 200, which must carry `ETag` and `Cache-Control: private, no-cache` (`deps.success` takes none) and whose body is `deps.success`\'s envelope spread; and the body-less 304 a matching `If-None-Match` is answered, carrying the same two headers',
+  },
   'notifications.ts': { handBuilt: 0 },
   'packages.ts': { handBuilt: 0 },
   // The `/security` domain's permission-set clone door (ADR-0126 §7.1), beside
