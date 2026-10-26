@@ -1,0 +1,36 @@
+{
+  "number": 25855,
+  "kind": "issue",
+  "title": "ci(ui-merge): `Type Check UI` is red on every PR whose ui affected-scope is empty — `type-check:vitest-setup` compiles against unbuilt `@object-ui/*` dists after turbo built nothing (bill item 49)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:epic",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T00:36:45Z",
+  "updated_at": "2026-10-26T01:21:17Z",
+  "closed_at": "2026-10-26T01:21:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25855",
+  "body": "Filing gate ① (CI gate false-red, reach: PR runs on `main`) + ④: aftercare of the cutover #25752 (`pm:epic`; epic PM `session_01RSDL3SFtJaKzcymvCD8RsU`). Part of #25677. Touches `.github/workflows/ci.yml` = Tier H: GOVERNED_APPROVERS review, the PR stops at draft.\n\n**谁付代价（业务筛）:** the maintainer wants `Type Check UI` in the required set (procedure #25752 step 6) and it was held back at the sitting only because of this red (ruling: add `Lint UI` + `Build & E2E UI` now, `Type Check UI` after the fix). Until then a spec change that breaks the Console compile is caught only by `Build & E2E UI`, and every workflow-only or root-only PR that touches a `ui_consumers` path shows a red check that means nothing.\n\n## Measured\n\n- PR B #25827 head `f973a4f3fd` (workflow + scripts diff, no `ui/` change): `Type Check UI` red. The job's `turbo run type-check --filter=...[<base>]` affected-scope is empty, so 0 tasks execute and nothing under `ui/packages/*/dist` is built; the next step `pnpm --dir ui run type-check:vitest-setup` (`tsc -p tsconfig.vitest-setup.json`) then fails with TS2882 / TS2307 on `@object-ui/components`, `@object-ui/fields`, `@object-ui/plugin-dashboard`, `@object-ui/plugin-grid`, `@object-ui/i18n/locales` — the packages whose `types` point at `dist/`.\n- 4a #25745 head `fb110c2323` (changes `ui/` packages): the same job green — turbo built the affected packages first.\n- #25852 (ui scripts change): see its run for the same shape. The red is a property of the diff, not of the tree.\n\n## Wanted\n\n1. In `ci.yml` `type-check-ui`: either build the packages `tsconfig.vitest-setup.json` resolves before the vitest-setup step (`turbo run build --filter=@object-ui/components --filter=@object-ui/fields --filter=@object-ui/plugin-dashboard --filter=@object-ui/plugin-grid --filter=@object-ui/i18n` with the turbo cache the job already restores), or make `type-check:vitest-setup` resolve those packages from source (`paths` in `ui/tsconfig.vitest-setup.json`) — the seat measures both and says which is cheaper per run; ⛔ do not skip the step or narrow the job's `if:`.\n2. The job's own gate rosters follow (`check-ci-filter-parity`, `check-expected-skips`, `check-step-collectors`, `check-workflow-step-name-quoting`); each `--self-test` 0.\n3. Prove it on this PR (which changes no `ui/` package, so the affected-scope is empty by construction): `Type Check UI` green here = the fix.\n\n## Acceptance\n\n- `Type Check UI` green on this PR and on a `ui/`-touching PR of the same day; the derived gate list for the diff exits 0.\n- On the card: the per-run cost delta of the chosen fix (job duration before/after), so the maintainer can add the context to the required set (a separate settings step, after this merges; the registry row rides the same two-step as the step 6 card).\n\n**Size:** S. **Clause-②:** no. **Metadata-protocol:** none.\n\n## Dedupe\n\n`search_issues` 2026-10-26 00:29Z 「Type Check UI red empty ui affected scope type-check:vitest-setup TS2882 unbuilt @object-ui packages」: 0 hits. Bill item 49 in `/mnt/project-files/d1-merge/out/5-cutover-bill-notes.md` is the only record. **New.**"
+}

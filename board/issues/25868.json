@@ -1,0 +1,32 @@
+{
+  "number": 25868,
+  "kind": "issue",
+  "title": "ci(ui-merge): Test UI runs the whole suite on every pull_request and merge_group run — wire objectui's `ui/scripts/select-affected-tests.mjs` into the merged `ci.yml` now that the repo-root migration it waited on has landed (parent #25677)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:epic",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T01:50:44Z",
+  "updated_at": "2026-10-26T01:56:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25868",
+  "body": "Filing gate ③ (maintainer-directed) + ④: aftercare of the ui/ merge (#25752), part of #25677. Touches `.github/workflows/ci.yml` = Tier H: GOVERNED_APPROVERS review, the PR stops at draft.\n\nMaintainer, 2026-10-26 01:45Z, in the project thread that measured post-merge CI speed: 「创建issue」 (asked after reading the ranked fix list; this is item 2).\n\n**谁付代价（业务筛）:** ui developers. In the objectui repo, a small ui PR ran only the tests its change could reach and finished CI in 3–8 min. In the merged repo, every ui PR runs all 16 Test UI shards (7–14 min each, ~190 runner-min), so a one-file fix waits ~14 min.\n\n## Measured\n\n- objectui `CI`, last 50 PR runs before the freeze: median 12.0 min, p90 14.8 min (n=36 successful). Affected-only runs: 2.8–8.1 min (e.g. 40154823798 2.8, 40159908661 4.2, 40161091709 7.2).\n- objectstack post-merge: Test UI full on every event. In run 40251065567 (ci.yml-only change) the 16 shards took 6.6–12.0 min each, 184 runner-min in total. In run 40248884869 they took 8.5–14.3 min.\n- Vitest in shard 6/16 (run 40248884869): Duration 590 s, of which tests 210 s; import 1148 s and setup 235 s (summed across workers).\n- `ci.yml` (comment above `test-ui`) says: \"Every event runs the whole suite. objectui's affected-test selector (`ui/scripts/select-affected-tests.mjs`) reads `git diff --name-only`, which prints paths relative to the GIT root … so it is not wired until objectui's repo-root lookups are migrated (sub-issue 2 of the epic).\" Those sub-issues are now closed (#25723 2b, #25728 2d with `nestedPrefix()`, #25733 2e). objectui wired the selector in `ui/.github/workflows/ci.yml` (step around line 1276), and `ui/scripts/__tests__/select-affected-tests-wiring.test.ts` pins that wiring.\n\n## Wanted\n\n1. Port objectui's wiring into the root `ci.yml` `test-ui` job: `pull_request` uses the PR base, `merge_group` uses `merge_group.base_sha`, and `mode=full` / `mode=affected` behave as in objectui. Fail open: a selector error means a full run.\n2. Make the selector read git paths relative to `ui/` (the `nestedPrefix()` helper from #25728), and make its `turbo ls --affected` parity test pass in the merged layout.\n3. `push` / `schedule` keep the full battery (maintainer ruling 2026-10-25 Q6-b).\n4. The wiring test follows the root workflow, not the retired ui one. The gate rosters follow; each `--self-test` exits 0.\n\n## Acceptance\n\n- On a one-package ui PR, Test UI runs only the selected files. On the card: shard wall times before and after.\n- A change to `ui/package.json` or `ui/vitest.config.*` still selects `mode=full`.\n\n**Expected saving:** small ui PRs back to ~3–8 min CI; up to ~190 runner-min per run. **Size:** M. **Clause-②:** no. **Metadata-protocol:** none.\n\nAcceptance note (optional, measure only): Test UI time is mostly module import, not tests (import 1148 s vs tests 210 s above). If the seat sees a cheap vitest setting that moves this, report the reading. It is not part of this card.\n\n## Dedupe\n\n`search_issues` 2026-10-26 01:50Z 「wire ui select-affected-tests.mjs Test UI affected selection git root relative paths」: 13 hits. Related ones are closed prerequisites (#25728, #25723, #25733, #25763) or the wiring parent #25697, which carries the comment and no task for this. **New.**\n\nMeasurement report: `/mnt/project-files/d1-merge/out/ci-speed/post-merge-pr-ci-speed.md`."
+}

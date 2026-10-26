@@ -2,8 +2,8 @@
   "number": 25711,
   "kind": "issue",
   "title": "release(ui-merge): one release lane for both scopes — 39 @object-ui packages join the @objectstack fixed group, `packages/console` builds from `ui/apps/console`, both repos' pin scripts and sha files are deleted (parent #25677, 4a/6)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -24,9 +24,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-24T23:00:23Z",
-  "updated_at": "2026-10-25T04:35:14Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-25T23:29:51Z",
+  "closed_at": "2026-10-25T23:29:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 2,
   "locked": false,

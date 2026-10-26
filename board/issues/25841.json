@@ -1,0 +1,32 @@
+{
+  "number": 25841,
+  "kind": "issue",
+  "title": "qa(checklist): cli — 12 ledger edits from the 18.2.0 release sweep (#25807)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "documentation",
+    "domain:devx",
+    "pm:on-hold",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T23:02:25Z",
+  "updated_at": "2026-10-26T00:01:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25841",
+  "body": "Filing gate: maintainer-directed task. Filed by the 18.2.0 release-assessment thread · `session_01G3h9iZTpL8aCiXbfsp8H5u`. ⛔ Not a claim, ⛔ not dispatched.\n\n**Maintainer's words** (project thread, 2026-10-25, verbatim): 22:54Z 「约 300 条清单准确性问题：是不是应该开卡？」, then 22:55Z 「写issue，不派发」.\n\n**Parent:** wave anchor #25807 (18.2.0 release test sweep). RUNNER's extraction obligation parks checklist-accuracy findings on the anchor; the maintainer asked for them as issues, so the wave's findings are split into one card per ledger file and the anchor links each card. This is not a release blocker, so it carries no `target:v18`.\n\n**Reader who acts:** the lane owning `docs/qa/platform-checklist/**` (`domain:devx`). Dedupe (open and closed): no card holds these lines; the 18.0 precedent closed its accuracy rows on its anchor #24579.\n\n## Wanted\n\nFor each line below, edit `docs/qa/platform-checklist/areas/cli.json`: revise the item's text, bump its `revision`, and append a `history` entry citing the run record the line comes from. Keep `pnpm check:platform-checklist` green. A line that turns out to describe a product defect rather than stale text gets its own card instead of a ledger edit.\n\n## Findings (12)\n\n### From #25812 — `priority:P0`, 23 items, at `6679644a`, pin `b41ed7f68956`\n\n- `cli.organization-ownership-ceremony`: planning a raw v17 DB before any v18 boot blocks the apply at the `rewrite` step (resumable after one boot) — put the refused boot before the plan; apply needs `OS_AUTH_SECRET` (or `--dev`) or it blocks at `authored-conversion`; on a real 17.x DB the drop gate's first refusal is `refused_comment_reactions_unconverted`, so `os migrate comment-reactions --apply --yes` (step 4, which also lacks `--yes`) must come before step 3; acc[0] prescribes `--maxWorkers=2`; c5 knownGaps should say a published prerelease CLI is no substitute.\n\n### From #25815 — `release-18.2.0-tier1`, 156 items, at `6679644a`, pin `b41ed7f68956` (clause labels: aK = acceptance[K], nK = negative[K])\n\n- `cli.dev-automigrate-policy` a4/n2: ref names cases 'auto-tightens at boot under autoMigrate: safe when the probe is clean' and 'BLOCKS the tightening on duplicate NULL-organization rows — old index kept, rows reported' in a describe 'bare-composite tightening + duplicate pre-flight (ADR-0120 D4)' — none exist in sql-driver-unique-tenancy.test.ts on this tree; the file now has 'bare composite from a pre-18 database — no tightening proposed (ADR-0131 D1)' asserting zero drift and 'duplicate NULL-organization rows are no longer a blocker — no op proposed, rows and index kept'. The clause text (D4 tighten, blocked report) is stale against ADR-0131 D1\n- `cli.dev-automigrate-policy` a4: a BLOCKED unique create_index is still pinned elsewhere (packages/drivers/driver-sql/src/sql-driver-25031-blocked-unique-apply-limit.test.ts), not in the ref — if a4 is rewritten around it, add it\n- `cli.dev-automigrate-policy` a2: the production case asserts the warning prefix only; the 'Run os migrate deliberately' remedy is unasserted (the ref says so)\n- `cli.meta-package-flags-and-explain` a1: verify names 'server log' as evidence; the pin observes the wire (`?package=` on the PUT) and the door's parsed request instead — equivalent, but no server log is read\n- `cli.migrate-meta-write-stored-and-all` a4: canonicalize-stored-flow.test.ts and refused-shapes.test.ts pin the TODO sink (canonicalizeStoredFlow todos / refused-shape onTodo); no file in the ref runs `os migrate meta --stored` and reads the printed TODO lines\n- `cli.organization-ownership-ceremony` a1: occupancy pin's plan run mocks boot; no pin compares a DB checksum before/after a bare plan run\n- `cli.organization-ownership-ceremony` a2: organization-ownership-apply.generation-1.test.ts › runs every step in order, certifies, and records this release's shape generation in the checkpoint calls apply() over a fake ledger — the CLI's --apply --plan-file --backup-taken exit 0 is not asserted\n- `cli.organization-ownership-ceremony` a3: organization-ownership-boot-guard.test.ts asserts assertOrganizationOwnershipMigrated's error code/message directly; the served-boot error line and the migrated boot's ready line need a live boot\n- `cli.organization-ownership-ceremony` a4: 'checksums before/after' approximated by columnsOf() still containing organization_id and applied: []\n- `cli.scaffold-first-run` ref .github/workflows/scaffold-e2e.yml exists but is a CI workflow, not a vitest/Playwright file: a Tier 1 pin run collects nothing for this item (scores via the workflow's own CI run only)\n\n### From #25817 — `release-18.2.0-manual-set`, 29 items, at `6679644a`, pin `b41ed7f68956`\n\n- `cli.fresh-install-migrate-apply-first`: N1 states scope (the pin's case b), not an outcome, so it can only score skipped. This is the same class revision 3 fixed on the write-door item.\n\n## Acceptance\n\n- Every line above is either applied (item revised, `revision` bumped, `history` cites the record) or answered on this card with the reason it was not.\n- `pnpm check:platform-checklist` is green.\n- The PR links this card and #25807.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 25875,
+  "kind": "issue",
+  "title": "Setup → Audit Log: the From / To filters are native date inputs (mm/dd/yyyy), the last place outside record forms still drawing the browser control after objectui#12642",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "area:i18n",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T14:07:22Z",
+  "updated_at": "2026-10-26T02:00:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25875",
+  "body": "Filing gate **① a user-visible defect with a named landing site**. Batch-of: 2026-10-25 browser pass on @objectstack/* 18.1.0 (second batch, 8 cards). Filed by the maintainer's account (`os-steve`) from the HotCRM pass driven in session `session_01AwpXhq2nFKU6J7GmbCEmZu`; ⛔ not a claim. Grade and routing are objectui triage's.\n\n## What is seen (`@objectstack/console` 18.1.0, zh-CN)\n\nSetup → 诊断 → 审计日志: the filter row's From and To are the browser's native `<input type=\"date\">` with the `mm/dd/yyyy` placeholder and the browser's own picker, while every record form, list filter and action dialog in the same console uses the design-system date picker (the family objectui#12642 closed). On a zh-CN console the native control also shows the OS locale's format, not the console's. [t33-审计日志.png](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/shots/t33-审计日志.png).\n\n`reach:` the public UI, measured once as the dev admin.\n\n## Expected\n\nThe audit-log filter bar uses the same date picker as list filters. (The bar's English labels are the i18n card objectui#13521; this card is the control only.)\n\n## Dedupe\n\nobjectui#12642 (closed) is the family close-out for native date inputs outside record forms and lists action-param dialogs, bulk dialogs, inline editors and list filters; the audit log component is not in its list. No other hit in this batch's searches. Report: [REPORT.md](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/REPORT.md) §7."
+}

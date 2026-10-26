@@ -1,0 +1,34 @@
+{
+  "number": 25852,
+  "kind": "pull_request",
+  "title": "fix(ui-merge): two tests that #25745 broke on main read the merged tree — the Changesets config through changesetConfigPath(), the SDUI html tier by its tags (#25711)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T23:45:28Z",
+  "updated_at": "2026-10-26T01:21:23Z",
+  "closed_at": "2026-10-26T01:21:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T01:21:08Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25852",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6JaoKAHLK79xmvJyPStopRpPQ2)_\n\nPart of #25677\nPart of #25711\n\nClause-②: no\nMetadata-protocol: none\n\nFollow-up to #25745 (4a), per ruling 30 = B: the two Test UI / Test Core reds that #25745 caused once it merged are fixed here, on the same card. Test-only; nothing is released, so this carries `skip-changeset`.\n\n## What changes\n\n**1. Test UI shard 3/16: `ui/packages/cli/src/__tests__/app-generator.test.ts`.** The release-lockstep test read `ui/.changeset/config.json`, which #25745 deleted (Changesets reads one config per repository). It now reads the config through `changesetConfigPath()` from `ui/scripts/workspace-root.mjs`, the helper every other reader of the Changesets config already uses: the tree's own config when standalone, the monorepo root's when nested under `ui/`.\n\n**2. Test Core 5/8: `packages/lint/src/validate-jsx-pages.production-witness.test.ts`.** The witness asserted that the SDUI manifest contains the `html` component. objectui#13449 retired `html`, and the manifest #25745 regenerated from the in-tree `ui/` has 106 components, without it. The witness now pins the html tier by two of its intrinsic tags (`a`, `p`). The shipped pages never used the raw `html` component, and the clean-run witness in the same file still checks them.\n\n## Verification (this branch, on `main` 2a61f08093)\n\n- `app-generator.test.ts`: 48/48 pass. Without fix 1: 1 failed / 47 passed (ENOENT on `ui/.changeset/config.json`).\n- Test UI shard 3/16, built the CI way (the 7-package turbo build, then `pnpm --dir ui run test --shard=3/16`): 361 files passed, 1 skipped; 4,724 tests passed, 102 skipped.\n- `validate-jsx-pages.production-witness.test.ts`: 5/5 pass. Also green: `@objectstack/sdui-parser` 225/225, the cli sdui test files 79/79, app-showcase metric-filter 7/7.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_0149BHSXfCdQywGaLdpRAtWe\n"
+}

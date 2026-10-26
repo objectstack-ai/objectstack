@@ -1,0 +1,36 @@
+{
+  "number": 25857,
+  "kind": "pull_request",
+  "title": "ci(ui-merge): register `Lint UI` and `Build & E2E UI` in REQUIRED_CONTEXTS",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T00:59:33Z",
+  "updated_at": "2026-10-26T01:51:18Z",
+  "closed_at": "2026-10-26T01:49:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-26T01:49:45Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25857",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoVor7wZeUGoT2cwA6ZNospy)_\nFixes #25853\n\nClause-②: no\nMetadata-protocol: none\n\nPart of #25752 (cutover step 6, the repo half). Part of #25677.\n\n**Tier H.** The registry's own exclusivity rule (`statesTheSet`) forces the AGENTS.md merge-queue sentence to name the registry exactly, so this PR touches `AGENTS.md` and `.claude/**`. `check-governed-merges --test` reads GOVERNED, landing tier H(人合). Draft; the seat lands.\n\n## What changed\n\n- `scripts/check-required-contexts.mjs`: two `REQUIRED_CONTEXTS` rows in the shape of the existing five.\n  - `ci.yml` job `lint-ui` publishes `Lint UI`; `carries`: the ESLint + repo-gate family of the `ui/` workspace.\n  - `ci.yml` job `build-e2e-ui` publishes `Build & E2E UI`; `carries`: the Console build from `ui/apps/console` and its Playwright e2e.\n  - `authorized` on both: #25752 step 6, the maintainer's ruling of 2026-10-26T00:25Z in the director thread, verbatim 「加上了」.\n  - The two `statesTheSet` surfaces' `mustName` arrays (AGENTS.md, `platform-readings.md`) gain the same two literals; the history comments read 5→7 by #25853.\n- `AGENTS.md` merge-queue sentence: \"five contexts block\" becomes \"seven\", naming `Lint UI` and `Build & E2E UI`, with \"those five\" → \"those seven\" twice. Line-neutral at headroom 0: the five lines are re-filled in place, no clause dropped, no ceiling raised. 1117 lines before and after; the widest touched line is 102 bytes.\n- `.claude/skills/pm-dispatch/references/platform-readings.md`: the objectstack required-checks reading goes 五个 → 七个 with the two names. Line-neutral: 460 lines before and after, widest touched line 82 bytes, under the 120-byte cap.\n\nBoth new contexts' jobs keep the same `if:` the cutover gave them; when a PR does not touch `ui/` they conclude `skipped`, which satisfies a required check. Assertions 1–9 hold for both rows (same workflow as `Test Core` / `Build Core`, no matrix, no `continue-on-error`, `merge_group:` present, unfiltered `pull_request:`).\n\nNot added, per the card: `Type Check UI` (waits for bill item 49) and `Test UI` (ruled out at the sitting, item 30 B).\n\n## Verification (head aaf6226292)\n\n- `node scripts/check-required-contexts.mjs` → exit 0: `7 required context name(s) pinned across 3 workflow(s); 6 instruction surface(s) scanned`.\n- `node scripts/check-required-contexts.mjs --self-test` → exit 0, 174 assertions.\n- `NODE_OPTIONS=--use-env-proxy node scripts/check-required-contexts.mjs --verify-required-set` on the branch:\n\n```text\nrequired-set sweep: 7 live required context(s) on main, 0 registered-but-not-required, 0 required-but-unpinned.\n  read 1 ruleset(s); 1 active and covering the default branch; strict_required_status_checks_policy: false\n    • ruleset main (id 12119582, Repository-sourced — objectstack-ai/objectstack)\n    required: TypeScript Type Check\n    required: Test Core\n    required: Build Core\n    required: Lint & Repo Gates\n    required: Governed Surface Queue Guard\n    required: Lint UI\n    required: Build & E2E UI\n\n  ✅  the live required set and this registry agree in both directions.\n```\n\n- Derived gates (`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`): 44 commands, all exit 0 on aaf6226292 after `pnpm install --frozen-lockfile` and `pnpm --filter '@objectstack/lint...' build`; `--ran` reconciles 44 derived, 44 run, 0 NOT-MEASURED, 0 UNRUN.\n- Other registry readers checked: `check-aggregator-roster.mjs` keeps its own aggregator subset and neither new job aggregates (`needs: filter` only), so no roster row is owed. `check-governed-merges`, `check-governed-queue-guard` and `ci-failure.mjs` mention the registry in prose only; their self-tests are in the derived list above.\n- Changeset: none. Every path is repo-root tooling or instruction text and ships in no package (`skip-changeset` declared with the PR).\n\n## 维护者速读(草稿)\n\n**改了什么:** 把你在割接当晚加进 `main` 规则集的两个必过检查 `Lint UI`、`Build & E2E UI`,登记进仓库里的必过检查注册表；同时把 AGENTS.md 和 pm-dispatch 读数表里“五个必过检查”的那句话改成七个，名单逐字对上。\n\n**为什么改:** 注册表的作用是：有人改了 CI 里这两个 job 的名字，门禁会立刻变红，而不是让所有 PR 永远卡在“等待检查”。没登记之前，这两个检查只在设置里存在、仓库里没有任何东西守着它们的名字。\n\n**风险与代价(含回滚):** 只改登记和说明文字，不改任何 CI job 本身，不影响构建结果。回滚即 revert 本 PR；不需要动规则集设置。\n\n**席位意见:**\n\n**你要做的:** 审阅后批准合并（os-zhuang 审批即可）。规则集那一半你已经做完，无需再动设置。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012CB8WDTpTbuW2XrEyjKHVo)_\n"
+}

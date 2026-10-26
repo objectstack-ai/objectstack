@@ -1,0 +1,32 @@
+{
+  "number": 25871,
+  "kind": "issue",
+  "title": "zh-CN: the sign-out item reads 「注销」 (reads as cancel-account) in every console user menu — the same pack says 退出登录 elsewhere",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:i18n",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T14:15:05Z",
+  "updated_at": "2026-10-26T01:56:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25871",
+  "body": "Filing gate **① a reproduced UX defect** (class a, public door: the user menu of every console). `reach:` local stack, objectui pin `6f629a7`, zh-CN, 2026-10-25. In both the cloud console's and a hosted environment's avatar menu, the sign-out item reads 「**注销**」. Still so on objectui `main` (`zh.ts:3411`).\n\nBatch-of: 6 · 2026-10-25 desktop E2E, second pass (invite-journey UX, reviewed in-session). Filed at the maintainer's request: 「必要的合理的建议都可以立卡」 / 「体验问题 也请fable 审核是否需要立卡」.\n\n**Business reason.** To zh users 注销 commonly means \"cancel / deregister the account\". On the one menu item everyone uses to leave, that reads as destructive, and some will not click it. That matters on shared computers, where signing out is exactly what we want people to do (see cloud#3279). The same pack already says 退出登录 elsewhere, so this is an inconsistency inside our own strings, not a matter of taste.\n\n**Reader who acts.** The `repo:objectui` ui seat (`area:i18n`): one key.\n\n## Where (objectui pin `6f629a7`)\n- `packages/i18n/src/locales/zh.ts:3180` `user.logout: '注销'` (en `'Log out'`, `en.ts:3694`), drawn by `packages/app-shell/src/layout/AppHeader.tsx:1341`.\n- The same pack: `zh.ts:16` 「请退出登录后重新登录」, `zh.ts:2569` `signOut: '改为退出登录'`.\n- No ruling or glossary entry chose 注销 (the string arrived with `3d58eaa0b`).\n\n## Expected\n`user.logout: '退出登录'`. Check the other zh sign-out keys for the same word.\n\n## Dedupe\n`gh api search/issues` on objectui, incl. closed:\n- `注销`: 65, noise.\n- `logout label zh`: 0.\n- `\"user.logout\"`: 0.\n- `退出登录`: 50, noise; none about this key."
+}

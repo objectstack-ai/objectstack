@@ -1,0 +1,36 @@
+{
+  "number": 25865,
+  "kind": "pull_request",
+  "title": "test(ui): three ui/ script tests spell their temp bases so the whole-tree scratch-dir sweep reads them (PM dispatch-gates red on main)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T01:32:19Z",
+  "updated_at": "2026-10-26T01:51:22Z",
+  "closed_at": "2026-10-26T01:49:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T01:49:45Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25865",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoCtY9d51b1p6bnTRQmr2tqL)_\n\nFixes #25851\nPart of #25677 (cutover aftercare, bill item 50).\n\nClause-②: no\nMetadata-protocol: none\n\n## Why main is red\n\n`Lint · PM dispatch-gates` runs `pnpm check:pm-dispatch-gates`. On `push` and `schedule` that runs both tiers of the battery; on `pull_request` and the merge queue it runs the fast tier only. That is why every PR run of the cutover sitting was green while every push and schedule run since `fd40831416` (#25825) has been red.\n\nJob log of check-run 121332957566 (push run 40247793996, `90a34e2039`), the only two red lines:\n\n```\n✗ every in-tree directory this tree's sources create is covered by a tracked ignore rule, or is tracked itself — EXPOSED: ui/packages/fields/src/hooks (ui/scripts/__tests__/check-node-esm-load.test.ts:141), ui/packages/fields/sub (ui/scripts/__tests__/check-node-esm-load.test.ts:463)\n✗ no mkdtempSync site in this tree takes a base the scan cannot read — UNRESOLVED: ui/scripts/__tests__/markdown-test-inputs.test.ts:131 (a bare relative literal, resolved against a cwd this scan cannot see: ''), ui/scripts/__tests__/select-affected-tests-wiring.test.ts:142 (a bare relative literal, resolved against a cwd this scan cannot see: ''), ui/scripts/__tests__/select-affected-tests-wiring.test.ts:198 (a bare relative literal, resolved against a cwd this scan cannot see: '')\n✗ dispatch-gates self-test: 2 of 2182 case(s) failed.\n```\n\nBoth are slow-tier live-tree cases of the scratch-directory sweep (`exposedScratchDirs` in `scripts/pm/dispatch-gates.mjs`). Since the import it reads `ui/` sources too, and it misreads two spellings in three `ui/` script tests:\n\n1. `check-node-esm-load.test.ts` binds `dir` to a temp directory in most tests (`const dir = tmpdir()`, a local helper over `os.tmpdir()`), and to `path.join(REPO_ROOT, 'packages/fields')` and `'packages/auth'` in two tests that only read package files. The sweep does not track scope and lets an in-tree reading win (its stated bias), so every `mkdirSync(path.join(dir, …))` in the file read as a directory created under `ui/packages/fields`.\n2. `markdown-test-inputs.test.ts` and `select-affected-tests-wiring.test.ts` declare `let scratch = ''` and assign the real base (`mkdtempSync(path.join(tmpdir(), …))`) in `beforeAll`. The empty literal reads as a cwd-relative `mkdtempSync` base, and the two readings disagree, so the site stays unresolved.\n\n## What this changes\n\nThe three test sources only. No gate, fixture, workflow or ignore rule changes, and no test changes behaviour.\n\n- `check-node-esm-load.test.ts`: the two package-reading tests name their binding `pkgDir`.\n- `markdown-test-inputs.test.ts`, `select-affected-tests-wiring.test.ts`: `let scratch: string;`, so the `beforeAll` assignment is the only reading.\n\nThe nine `mkdirSync(path.join(dir, …))` sites in `check-node-esm-load.test.ts` now read as unresolved `mkdirSync` (one `dir` comes from `withTaskLog(…)`, an arrow function the resolver does not follow), the same class line 706 of that file already had. The live case counts only unresolved `mkdtempSync` sites, so they do not red it, and none of them reads as in-tree any more.\n\n## Evidence\n\nAll on this branch's base, main `e167956e`, with `GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push node scripts/pm/check-dispatch-gates.mjs` (the step's second command, both tiers):\n\n| | before (main `e167956e`) | after (this branch, `a5958c7b`) |\n|---|---|---|\n| battery | `✗ dispatch-gates self-test: 2 of 2182 case(s) failed.` (exit 1, the same two lines as CI) | `✓ dispatch-gates self-test: 2182 cases pass.` (exit 0) |\n| live sweep | 2 exposed, 3 unresolved `mkdtempSync` | 0 exposed, 0 unresolved `mkdtempSync` (2388 sites across 18098 tracked sources, 82 in-tree roots) |\n\n- `node scripts/pm/check-dispatch-gates.mjs --self-test` with the push environment: exit 0.\n- `npx vitest run` on the three files (from `ui/`): 3 files, 86 tests pass.\n- `npx tsc -p tsconfig.scripts.json --noEmit` (from `ui/`): 21 errors before and after, all pre-existing unbuilt `@objectstack/spec` subpath errors, none in these files.\n- Derived gates: `dispatch-gates --commands` for the three paths derives 18; all 18 ran, exit 0. `dispatch-gates --ran`: `✓ 18 derived famil(ies) accounted for — 18 run, 0 NOT-MEASURED (a DERIVED zero)`.\n- Since this branch's base, main gained #25852 and #25856. Neither touches these files or adds a `mkdtempSync`/`mkdirSync` call.\n\nThis PR's own CI runs the fast tier only, so it cannot show the fixed cases. The proof is the first green push run of `Lint & Type Check` on main after this lands; its run id goes on #25851.\n\nTier S: three `ui/scripts/__tests__/` files, no governed surface. `skip-changeset`: publishes nothing. The known Test UI 8/16 and 9/16 reds belong to the next 4b PR and are not touched.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01HssnEmZ59WGARsErPSbRpf\n"
+}

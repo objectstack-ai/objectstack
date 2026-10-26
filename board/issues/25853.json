@@ -1,0 +1,36 @@
+{
+  "number": 25853,
+  "kind": "issue",
+  "title": "ci(ui-merge): register `Lint UI` and `Build & E2E UI` in REQUIRED_CONTEXTS — the main ruleset requires both since 2026-10-26 00:25Z and the registry pins neither (parent #25752 step 6, repo half)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:epic",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T00:35:27Z",
+  "updated_at": "2026-10-26T01:51:00Z",
+  "closed_at": "2026-10-26T01:49:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25853",
+  "body": "Filing gate ③ + ④: step 6 of the cutover procedure #25752 (`pm:epic`; epic PM `session_01RSDL3SFtJaKzcymvCD8RsU`). Part of #25752. Part of #25677. ⛔ Not a claim: the coordinator opens the card thread.\n\n**Maintainer's words** (director thread, 2026-10-26 00:25Z, verbatim): 「加上了」 — answering the sitting's step 6 ask to add `Lint UI` and `Build & E2E UI` to the required checks of `main`. The settings half is done; this card is the repo half of the two-step the registry itself prescribes.\n\n**谁付代价（业务筛）:** `scripts/check-required-contexts.mjs` exists so that renaming the job behind a required context cannot detach its gate silently (#6865). Today two live required contexts have no registry row, so a rename of `lint-ui` or `build-e2e-ui` in `ci.yml` would turn every PR permanently-pending (or advisory) with nothing in the tree to say why. Every `ui/` PR from here on merges under these two contexts.\n\n## Measured (2026-10-26 00:27Z, `main` `e167956e3f`)\n\n`NODE_OPTIONS=--use-env-proxy node scripts/check-required-contexts.mjs --verify-required-set`:\n\n```text\nrequired-set sweep: 7 live required context(s) on main, 0 registered-but-not-required, 2 required-but-unpinned.\n  ruleset main (id 12119582, Repository-sourced — objectstack-ai/objectstack)\n  required: TypeScript Type Check · Test Core · Build Core · Lint & Repo Gates · Governed Surface Queue Guard · Lint UI · Build & E2E UI\n  ⛔ direction B — required in the live set, pinned by NO registry row (2): Lint UI · Build & E2E UI\n```\n\nReport-only by design (#9642), so nothing is red; the remedy the sweep names is a `REQUIRED_CONTEXTS` row per context, no settings change.\n\n## Wanted\n\n1. Two rows in `REQUIRED_CONTEXTS` (`scripts/check-required-contexts.mjs`), in the shape of the existing five: `workflow: 'ci.yml'`, `job: 'lint-ui'` / `job: 'build-e2e-ui'`, `context: 'Lint UI'` / `'Build & E2E UI'`, `authorized:` the maintainer's 2026-10-26 00:25Z ruling at #25752 step 6 (quote 「加上了」 and the director-thread date), `carries:` one line each (ui/ lint; the Console build + Playwright e2e from `ui/`).\n2. Whatever the registry's own sweeps then demand: the instruction-surface `mustName` ledger (the sentence that names every required context), the aggregator/step-collector rosters, the `dispatch-gates` self-test specimens that count the registry (`check-governed-merges`, `check-governed-queue-guard`, `ci-failure.mjs` read `REQUIRED_CONTEXTS` — run each `--self-test`).\n3. `node scripts/check-required-contexts.mjs --self-test` 0, `pnpm check:required-contexts` 0, and `--verify-required-set` reads **0 required-but-unpinned, 0 registered-but-not-required** on the branch (needs a token in the seat container; paste the sweep).\n4. ⛔ Do not add `Type Check UI` or `Test UI`: the maintainer added exactly two contexts. `Type Check UI` joins after bill item 49 (its own card); `Test UI` was ruled out at the sitting (item 30 B).\n\n## Acceptance\n\n- The sweep above exits with both directions at 0; the derived gate list for the diff (`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`) exits 0; `--ran` reconciles.\n- If the ledger sentence lives in `AGENTS.md`, the PR is Tier H (say so in the 维护者速读 and stop at draft); otherwise Tier S.\n\n**Size:** S. **Clause-②:** no. **Metadata-protocol:** none.\n\n## Dedupe\n\n`search_issues` 2026-10-26 00:29Z 「required contexts registry Lint UI Build & E2E UI REQUIRED_CONTEXTS row ruleset」: 1 hit, #6865 (closed; the finding that created the registry). No open card. **New.**"
+}

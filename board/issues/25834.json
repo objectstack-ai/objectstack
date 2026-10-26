@@ -1,0 +1,36 @@
+{
+  "number": 25834,
+  "kind": "pull_request",
+  "title": "feat(pm): the governed register gains the six nested ui/ workspace rows",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T21:21:57Z",
+  "updated_at": "2026-10-26T00:24:12Z",
+  "closed_at": "2026-10-26T00:24:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-26T00:24:09Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25834",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoAqVfFyhsxKuFcEP9YTBj25)_\n\nPart of #25712 (4b PR 2b: the governed register learns the `ui/` workspace).\nPart of objectstack#25677.\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读(草稿)\n\n- **改了什么:** 受管面登记表新增 `ui/` 工作区的六行(`ui/docs/adr/**`、`ui/.claude/**`、`ui/skills/**`、`ui/AGENTS.md`、`ui/CLAUDE.md`、`ui/.github/workflows/**`),全部 Tier H,只管 objectstack;CODEOWNERS 同加六行;`AGENTS.md` 第 14 条与 pm-dispatch 技能的路径分叉段写上这六个面。\n- **为什么改:** objectui 合进 `ui/` 之后,它原来自己的受管面不能落空;第 16 项裁决(`ui/.claude/**` 在并入根 `.claude/**` 之前保持 Tier H)。\n- **风险与代价(含回滚):** 两个指令文件都在行数上限,本 PR 不加行、不抬上限,靠原地压缩措辞付账;回滚 = revert 本 PR。`main` 上还没有 `ui/`,这六行在 cutover 之前不命中任何路径。\n- **席位意见:**(留空)\n- **你要做的:** 批准本 PR(Tier H,因为改了 `AGENTS.md`)。\n\n## What changes\n\n- `scripts/pm/check-governed-merges.mjs`: six rows on `GOVERNED_SURFACES`. They are objectui's own register (every root row except the North Star) prefixed with `ui/`, scoped `repos: ['objectstack']`, and all Tier H. `ui/.claude/**` is included, because it stays Tier H until it folds into the root `.claude/**` (Tesla, 2026-10-25, director item 16).\n  - The self-test's `UI_SPECIMENS` rows from PR 1 (#25732) now pin the live rows. The flipped pin is `today-the-register-does-not-know-ui-…`, which becomes `the-register-knows-ui-the-rows-are-live`.\n  - The register seam stays covered by the one register that does not carry the rows.\n  - The counts that read the register move from 7 to 13 for objectstack only. cloud and objectui stay at 7, objectos and hotcrm at 6.\n- `scripts/pm/check-governed-queue-guard.mjs`: the CODEOWNERS mirror pins move to the live rows. With the `/ui/` lines removed, the file on disk is short exactly one line per row. The \"13 surfaces govern objectstack\" head is pinned.\n- `.github/CODEOWNERS`: six `/ui/…` lines routed to every `GOVERNED_APPROVERS` account.\n- `AGENTS.md` Prime Directive #14 and `.claude/skills/pm-dispatch/SKILL.md` (the ACCEPT path fork) name the six globs, as `check:pm-governed-prose` requires.\n  - Both files are at their ceiling (1117/1117 and 319/319 lines). No ceiling was raised; both stay at those line counts, every line at most 120 bytes.\n  - In AGENTS.md the paragraph is re-wrapped over its own ten lines. To make room, four clauses come out, quoted as they stood:\n    1. ` — this file is one —` after `` `CLAUDE.md` `` (`AGENTS.md` is already in the list).\n    2. `; a mixed diff is governed whole on one path hit.` (the next paragraph says it again).\n    3. `When it reds, name the surface here.` (the gate's own message says it).\n    4. `the` and `table` around `` `GOVERNED_SURFACES` ``: \"The register is the `GOVERNED_SURFACES` table in\" now reads \"The register is `GOVERNED_SURFACES` in\".\n  - In SKILL.md, one line is paid by joining the install-surface probe line onto the cross-repo unblock criterion two lines above it, which leaves that line's quoted wording intact.\n\n## Verification\n\n| Gate | `main` + this PR | sitting tree + PR 2a + this PR |\n|---|---|---|\n| `pnpm check:pm-governed-merges` (534 assertions) | 0 | 0 |\n| `node scripts/pm/check-governed-queue-guard.mjs --self-test` (345 cases) | 0 | 0 |\n| `pnpm check:pm-governed-prose` (13 surfaces, both regions) | 0 | 0 |\n| `pnpm check:pm-skill-ratchet` (AGENTS.md 1117/1117, SKILL.md 319/319) | 0 | 0 |\n\n- Derived gates (`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`): 54 families, all exit 0 at this head on `main` `e2aaaf1c07` (after PR 2a #25833). `--ran` reconciles 54 run, 0 NOT-MEASURED, 0 UNRUN. `check:doc-formula-expressions` needs `@objectstack/lint` built first.\n- `node scripts/pm/dispatch-gates.mjs --self-test` (both tiers, run by hand because CI runs the slow tier only on push and schedule): 0, 2182 cases (fast 1917 in 291 s, slow 265 in 875 s), measured on `b00fc55c7d` + this change; the one commit between that and this base is PR 2a, whose three files this PR does not touch.\n\n- On `main` the six rows are inert, because no `ui/` path exists there yet.\n- On the sitting tree (cutover `c326d2fdf1` + 4a `50bd417d30` + `main` + PR 2a), `node scripts/pm/check-governed-merges.mjs --test`:\n  - exits 3 (governed, landing tier H) for `ui/.claude/x`, `ui/AGENTS.md`, `ui/CLAUDE.md`, `ui/docs/adr/0001-x.md`, `ui/skills/objectui/SKILL.md` and `ui/.github/workflows/ci.yml`;\n  - exits 0 (0 of 1 path governed) for `ui/packages/x/src/y.ts`.\n- On the sitting tree, `check:pm-governed-merges`, the queue-guard self-test, `check:pm-governed-prose` and `check:pm-skill-ratchet` all exit 0.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01A6SEitNngAMugGbuJHWsDS\n"
+}

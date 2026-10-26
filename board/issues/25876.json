@@ -1,0 +1,32 @@
+{
+  "number": 25876,
+  "kind": "issue",
+  "title": "console sidebar: a collapsed navigation group shows no child count, so a closed \"市场营销\" or \"报表\" row looks the same whether it holds one entry or ten (console half of hotcrm#2295)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T14:07:12Z",
+  "updated_at": "2026-10-26T02:01:28Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25876",
+  "body": "Filing gate **① a user-visible defect with a named landing site**. Batch-of: 2026-10-25 browser pass on @objectstack/* 18.1.0 (second batch, 8 cards). Filed by the maintainer's account (`os-steve`) from the HotCRM pass driven in session `session_01AwpXhq2nFKU6J7GmbCEmZu`; ⛔ not a claim. Grade and routing are objectui triage's.\n\n## What is seen (HotCRM on `@objectstack/console` 18.1.0)\n\nThe HotCRM sidebar ends with three closed groups 市场营销 / 数据洞察 / 报表, each a label and a chevron. 市场营销 holds one visible entry, 数据洞察 two, 报表 one (the console folds the ten report entries into 全部报表). Nothing on the closed row tells the user which, so new users do not open them: in the pass the dev admin reached 营销活动 and 预测 by URL only. [10-hotcrm-landing.png](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/shots/10-hotcrm-landing.png) (bottom of the rail), [50-account-tall.png](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/shots/50-account-tall.png) (full rail).\n\nhotcrm#2295 takes the app's half (which groups open by default). The console half is here: a closed group carries its visible-child count, and a group whose only child is the synthesized 全部报表 index could render as that single entry instead of a group.\n\n`reach:` the public UI, measured once as the dev admin and once as `na.rep` (same rail shape).\n\n## Expected\n\n- A small count badge on a collapsed group (visible children after `visible` and permission filtering), the pattern the 我的工作 tile on the home page already uses.\n- When the console replaces a report group's children with one index link, draw the group as that single entry.\n\n## Dedupe\n\nMCP `search_issues` objectui \"sidebar collapsed navigation group shows no child count badge\" → 7 hits (#12794, objectstack-ai/objectui#12744 icon-mode rail, objectstack-ai/objectui#11791 studio rail badge, objectstack-ai/objectui#6947 reference rail count …), none about a count on a collapsed group. Report: [REPORT.md](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/REPORT.md) §3.10."
+}

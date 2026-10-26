@@ -1,0 +1,37 @@
+{
+  "number": 25861,
+  "kind": "pull_request",
+  "title": "fix(ui-merge): the CI page and two of its tests stop reading the two workflows #25745 deleted",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T01:16:33Z",
+  "updated_at": "2026-10-26T01:54:29Z",
+  "closed_at": "2026-10-26T01:49:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T01:49:45Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25861",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoAqVfFyhsxKuFcEP9YTBj25)_\n\nPart of #25712 (4b PR 2c: main's red Test UI 8/16 and 9/16 tests read what the tree has).\nPart of objectstack#25677.\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读(草稿)\n\n- **改了什么:** objectui 那份 CI 说明页(`ui/content/docs/guide/ci-cd-pipeline.md`)删掉已被 #25745 删除的两个 workflow(`changeset-release.yml`、`spec-range-floors.yml`)的清单行、章节和 `NPM_TOKEN` 行;两个测试文件不再去读这两个已不存在的文件。\n- **为什么改:** `main` 上 Test UI 8/16 和 9/16 因此是红的(11 个失败)。本 PR 后只剩 1 个:十个嵌套 workflow 还在调用已删除的 `scripts/objectstack-pin.mjs`。这是真问题,由 2d 删除 `ui/.github/workflows/**` 时一并清掉。\n- **风险与代价(含回滚):** 只动一页文档和两个测试,不动任何会运行的代码或受管面;回滚 = revert 本 PR。\n- **席位意见:**(留空)\n- **你要做的:** 无,Tier S,由席位落地。\n\n## 席位核对\n\n(left for the dispatch seat)\n\n## Why\n\nobjectstack#25745 (4a) deleted `ui/.github/workflows/changeset-release.yml` and `ui/.github/workflows/spec-range-floors.yml` when `ui/` took objectstack's one release lane for both scopes. `scripts/ui-import/README.md` recorded that three `ui/scripts/__tests__` files still read them and left them to this card. On `main` (`90a34e20`, `e167956e`), and reproduced locally:\n\n- **Test UI 8/16:** `ci-cd-pipeline-doc.test.ts`, 9 failures (`ENOENT … ui/.github/workflows/changeset-release.yml`; inventory rows for both deleted files).\n- **Test UI 9/16:** `workflow-cache-save-bound.test.ts`, 2 failures (`changeset-release.yml must still define a release: / lane: job`).\n\nThe two workflows stay deleted. Each fix makes the page and the tests describe the tree as it is. Nothing is skipped: rows whose whole subject is gone retire, and the disposition is written beside them.\n\n## What changes\n\n- `ui/content/docs/guide/ci-cd-pipeline.md` (+16 / −240):\n  - The two inventory rows, the `### Changeset Release` section and its four sub-sections, the `### Spec Range Floors` section, and the `NPM_TOKEN` row (its only user was the deleted workflow) are removed.\n  - Historical prose that named `changeset-release.yml` now says \"the Changeset Release workflow\". The page's own test reads every bare `name.yml` as a claim that the file exists.\n  - The two present-tense lists that included `spec-range-floors.yml` drop it.\n  - `## Release Workflows` opens with one paragraph saying the two workflows were deleted by #25745 and that `@object-ui/*` now publishes in objectstack's release lane.\n- `ui/scripts/__tests__/ci-cd-pipeline-doc.test.ts` (+16 / −57). In \"the four sections measured as parity defects\":\n  - the two units (`changeset-release.yml release` and `spec-range-floors.yml`) and their entries in the jobs-per-workflow pin come out;\n  - so does the `lane` exclusion check;\n  - so do the four `DECLARED_NON_RUN_COMMANDS` entries that explained the release job's `publish:` input.\n  - The sweep's inherited-declaration pin goes from five keys to one.\n  - A paragraph beside the set records the retirement. The two parser floors (`> 8`) still hold on what is left.\n- `ui/scripts/__tests__/workflow-cache-save-bound.test.ts` (+11 / −2): `changeset-release.yml::release` (40) and `changeset-release.yml::lane` (20) leave their two derived-ceiling tables. Each removal is recorded the way the file already records `stale.yml::stale`'s: \"re-adding it does not restore a pin\".\n\n## The one red that stays, owned by PR 2d\n\nTest UI 8/16 keeps one failure after this PR: `ui/scripts/__tests__/check-pre-install-import-graph.test.ts` > `finds no pre-install gate reaching a package`.\n\n```\nAssertionError: a script this repository runs before `pnpm install` needs `node_modules` to load: expected [ Array(1) ] to deeply equal []\n+   \"unresolved: scripts/objectstack-pin.mjs\",\n```\n\nThat is a true finding on the tree, not a stale pin. #25745 deleted `ui/scripts/objectstack-pin.mjs`, but ten nested workflows still run `node scripts/objectstack-pin.mjs build` before their install step: `ci.yml`, `docs-deploy.yml`, `lint.yml`, `live-e2e.yml`, `lockfile-dedupe.yml`, `node-esm-load-gate.yml`, `performance-budget.yml`, `published-dist-gate.yml`, `repo-gates.yml` and `shadcn-check.yml` under `ui/.github/workflows/`. Those files are Tier H since #25834, never run nested, and are deleted by PR 2d. Per the dispatcher's ruling, there are no throwaway edits to them here. The finding is the first row of 2d on #25712.\n\n## Verification\n\nRun from `ui/` per `ui/AGENTS.md`:\n\n| Run | This PR | `main` `e167956e` |\n|---|---|---|\n| The three files: `pnpm exec vitest run --project unit scripts/__tests__/ci-cd-pipeline-doc.test.ts scripts/__tests__/workflow-cache-save-bound.test.ts scripts/__tests__/check-pre-install-import-graph.test.ts` | 1 failed / 132 passed (the owned row above) | 12 failed / 121 passed |\n| `ci-cd-pipeline-doc.test.ts` alone | 85 passed | 9 failed |\n| The whole `scripts/__tests__` suite, `--shard=1/2` and `--shard=2/2` | 26 failed / 5,576 passed | — |\n\nOf the 26 suite failures, one is the owned row. The other 25 are `date-only-zone-pins-10183` ×23 and `unit-registry-absence-collision` ×2, and they fail identically on a clean `main` `e167956e` checkout here (25 failed / 19 passed for those two files). Their spawned runs report \"ran no case at all\" on this unbuilt box, so they are not this diff's.\n\nDerived gates (`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` from this diff): 18 families, all exit 0 at this head; `--ran` reconciles 18 run, 0 NOT-MEASURED, 0 UNRUN. The slowest were `check:query-options-erasure` (285 s), `check-comment-mask-corpus` (206 s) and `check:type-check-debt` (185 s).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01A6SEitNngAMugGbuJHWsDS\n"
+}

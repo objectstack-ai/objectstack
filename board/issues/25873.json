@@ -1,0 +1,32 @@
+{
+  "number": 25873,
+  "kind": "issue",
+  "title": "[Decision] The report page offers only \"Edit\": should a shipped report get a time-range filter, export and subscription, and in which order",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "area:reports",
+    "domain:ui",
+    "enhancement",
+    "needs-user-decision",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T14:09:08Z",
+  "updated_at": "2026-10-26T01:58:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25873",
+  "body": "Filing gate **② a decision only the maintainer can make** (new capability; the four facets below). Batch-of: 2026-10-25 browser pass on @objectstack/* 18.1.0 (second batch, 8 cards). Filed by the maintainer's account (`os-steve`) from the HotCRM pass driven in session `session_01AwpXhq2nFKU6J7GmbCEmZu`; ⛔ not a claim.\n\n## 维护者速读\n\n- **事由：** 打开任何一张报表（如 Opportunities by Stage），页面只有标题、一张图、一张表和右上角「编辑」。没有时间范围、没有导出、没有订阅。销售经理拿到报表后最常问的三件事（这是哪段时间？能导出吗？能每周发我吗？）一个都答不了。仪表盘有时间范围筛选，报表没有。\n- **要决定的事：** 要不要给报表页加这三项能力；加的话按什么顺序。每一项都是新的平台面，一经声明就要长期维护。\n- **怎么回：** 回一个字母（A / B / C / D）。\n\n## What was measured\n\n- HotCRM → 报表 → Opportunities by Stage: header 「Opportunities by Stage · Summary of opportunities grouped by stage」, button 「编辑」, one bar chart, one table with 总计. No filter bar, no export, no date range. [94-report-opps-by-stage.png](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/shots/94-report-opps-by-stage.png).\n- Dashboards on the same console carry a date-range chip (本季度 / 近 90 天) and per-dimension filters; the report renderer has neither.\n- The ten HotCRM reports are all-time aggregates; a report that says \"Lead Inflow\" over all time is a different number from last quarter's, and the page cannot say which.\n\n## Governing text\n\n- `@objectstack/spec` report schema (what a report may declare today: dataset, chart, columns, grouping); the dashboard `globalFilters` / `dateRange` already exist on the dashboard schema (objectui#10339 pins its default).\n- pm-dispatch 〈升级与决策〉 facet ④: 创业阶段不扩散 — a new declared surface is a permanent obligation; the recommendation must show pull.\n\n## Options\n\n| option | what it does | what a manager gets | effort |\n|---|---|---|---|\n| **A. Time range only** | reports reuse the dashboard's `dateRange` filter when the dataset has a time dimension; no export, no subscription | answers \"which period\" | spec S + objectui M |\n| **B. Time range + export** | A, plus CSV / XLSX export of the report table through the existing list-export permission | answers \"which period\" and \"can I have it in Excel\" | A + objectui S (export already exists for lists) |\n| **C. All three** | B, plus a scheduled subscription (email the report on a cadence) | the full manager loop | B + objectstack job + messaging M, a new scheduled-work surface |\n| **D. None now** | the report page stays as is; dashboards carry the filters | unchanged | none |\n\nBusiness reading: A = \"a report is a dated query, not a snapshot\"; B = \"a report is something you take to a meeting\"; C = \"a report comes to you\"; D = \"reports are a dashboard appendix\".\n\n## Recommendation\n\n**B.** Two years out the report page should be what every CRM user expects: pick the period, read it, export it. Both halves reuse surfaces the platform already has (the dashboard's date range, the list export and its permission), so B adds almost no new contract. Subscription (C) is the one genuinely new surface (scheduled delivery, recipients, failure handling) and has no customer pull measured yet; it waits.\n\n- Confidence gap: no customer has asked for any of the three in a card the pass could find; the pull is the tester's reading of what a sales manager does with a report.\n- Self-check: looking only at ① → B. Do ②③④ flip it? No; ④ is what keeps C out.\n\nos-decision-facets\n- ① 项目长远合理性：A/B 复用仪表盘的时间范围与列表导出，几乎不新增契约；C 新增定时投递面。\n- ② 实际业务拉动：时间范围与导出是报表的基本动作，缺它们报表只是仪表盘的附录；订阅目前零拉动。\n- ③ 防 AI 犯错：报表声明 dateRange 后，AI 写的「本季度线索」报表才有机器可校验的时间窗，而不是靠标题里的词。\n- ④ 创业阶段不扩散：B 止步于已有面的复用；C 的调度、收件人、失败处理每一项都是永久义务，默认推迟。\n\nPrior rulings read: objectui#10339 (dashboard dateRange default), objectui#11694 (report page first screen), hotcrm#2194 (UX decision batch, no report item) → none rules on report filters; thread: none.\n\n## After the ruling\n\n- A or B: spec card first (report `dateRange` / export flag), then the objectui renderer card; HotCRM declares the range on its ten reports once released.\n- C: as B plus an objectstack card for the scheduled delivery.\n- D: close.\n\nDedupe: MCP `search_issues` objectui \"report page date range filter export subscribe schedule\" → 0 hits. Report: [REPORT.md](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/REPORT.md) §4."
+}
