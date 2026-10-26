@@ -699,12 +699,17 @@ describe('a `types` entry naming a kind nothing produces says so (objectui#5877)
    * turn this red: the census is the diagnostic's input, and it moving without
    * anyone noticing is exactly how the warn would start lying.
    */
-  it('the census — 13 declared kinds, 5 produced, 8 not', () => {
-    expect(declared).toHaveLength(13);
+  it('the census — 5 produced kinds, the declared rest not', () => {
+    // The produced set is this package's and stays exact. The declared set is
+    // the spec's, so it is held by name (#26238): a kind the spec adds lands on
+    // the unproduced side, which is what the diagnostic warns about.
     expect(produced.slice().sort()).toEqual(['comment', 'event', 'field_change', 'system', 'task']);
-    expect(unproduced.slice().sort()).toEqual([
+    for (const kind of [
       'approval', 'call', 'email', 'file', 'note', 'record_create', 'record_delete', 'sharing',
-    ]);
+    ]) {
+      expect(unproduced).toContain(kind);
+    }
+    expect(produced.length + unproduced.length).toBe(declared.length);
   });
 
   it('`system` is PRODUCED — the unmapped fallback is a producer, not a gap', () => {

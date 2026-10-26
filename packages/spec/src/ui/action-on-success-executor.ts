@@ -2,13 +2,14 @@
 
 /**
  * Which executor an action's post-success hop, `onSuccess`, may sit beside:
- * ONE pair and ONE refusal text, read by `ActionSchema` (`action.zod.ts`) and
+ * ONE set and ONE refusal text, read by `ActionSchema` (`action.zod.ts`) and
  * by the page action rows (`component.zod.ts`: `action:button`, `action:icon`
  * and each `action:group` / `action:menu` member).
  *
  * The console's action runner performs the hop after EVERY executor that
- * succeeds. Each branch of `ActionRunner.execute` (a host-registered handler,
- * a built-in, the declarative `operation: 'update'`) ends in
+ * succeeds, unless the success is marked as a hand-off (`flow`, below). Each
+ * branch of `ActionRunner.execute` (a host-registered handler, a built-in, the
+ * declarative `operation: 'update'`) ends in
  * `handlePostExecution`, which hands `onSuccess` to `readOnSuccessNavigation`
  * and `navigateOnSuccess` (the read points are recorded by symbol in
  * `packages/spec/liveness/action.json`, row `onSuccess.navigate`). So the rule is not that the
@@ -18,6 +19,17 @@
  * - `api` and `script` succeed with a result, the call's response or the
  *   handler's return, and `${result.*}` reads it. The hop is declared for
  *   these two ({@link ON_SUCCESS_EXECUTORS}).
+ * - `flow` succeeds with a result too when its run completes: the run's answer,
+ *   the `AutomationResult` both doors serve (`POST /automation/FLOW/trigger`
+ *   and the action route), whose `output` carries the flow's `isOutput`
+ *   variables, so `${result.output.VAR}` reads one. The hop is declared for
+ *   `flow` as well, and it follows the COMPLETED run only. A run that pauses
+ *   at its first screen, or one that ends refused, is a hand-off to a
+ *   follow-up surface (the flow runner, the refusal notice), not a completion:
+ *   the console's launch judge (`judgeFlowLaunch`, app-shell
+ *   `utils/flowResponse.ts`) marks that success `handedOff` and the runner
+ *   performs no hop for it, neither when the surface opens nor when the flow
+ *   runner later finishes the run.
  * - `url`, its runner alias `navigation`, and `form` are themselves
  *   navigations: `executeUrl` and `executeNavigation` hand off to
  *   `navigateTo`, and `executeForm` routes to the form view's `/forms/NAME`
@@ -27,11 +39,6 @@
  *   closes: a saved form with the record, an OK with nothing, a dismissal as a
  *   failure. With no host the runner answers at once. None of it is a result
  *   the contract declares.
- * - `flow` starts a run, and the console's `flow` handler answers success when
- *   the run starts. A run paused at its first screen, or one that ended
- *   refused, answers `{ success: true, silent: true }` (`judgeFlowLaunch`,
- *   app-shell `utils/flowResponse.ts`), so the hop fires while that screen or
- *   the refusal notice is still open.
  *
  * `operation: 'update'` is read BEFORE any executor (`ActionRunner.execute`):
  * the runner performs the declarative write through
@@ -54,19 +61,19 @@
  * half lives in `component.zod.ts`, beside the rows' effective executor.
  *
  * Why a module of its own: `action-target-aliases.ts`'s reason. The two files
- * must read the SAME pair and the same text; `component.zod.ts` already imports
+ * must read the SAME set and the same text; `component.zod.ts` already imports
  * `action.zod.ts`, so neither can live in the rows' file; and exported from
  * `action.zod.ts` they would ride the `ui` barrel into the published API.
  * Reached by relative import only.
  */
 
-/** The two executors the post-success hop is declared beside. */
-export const ON_SUCCESS_EXECUTORS: ReadonlySet<string> = new Set(['api', 'script']);
+/** The three executors the post-success hop is declared beside. */
+export const ON_SUCCESS_EXECUTORS: ReadonlySet<string> = new Set(['api', 'script', 'flow']);
 
 /** What the hop is declared beside, and why: the second sentence of every refusal below. */
 const DECLARED_BESIDE =
-  '`onSuccess` is declared beside `api` and `script` only, whose success carries the result `${result.*}` '
-  + "reads: the call's response, the handler's return.";
+  '`onSuccess` is declared beside `api`, `script` and `flow` only, whose success carries the result '
+  + "`${result.*}` reads: the call's response, the handler's return, the completed run's answer.";
 
 /** The runtime fact every refusal below rests on. */
 const HOPS_AFTER_EVERY_EXECUTOR =
@@ -74,11 +81,11 @@ const HOPS_AFTER_EVERY_EXECUTOR =
 
 /** The prescription for an executor whose success carries no declared result. */
 const MOVE_THE_HOP =
-  'Drop `onSuccess`, or move the hop onto an `api` or `script` action, whose result it reads.';
+  'Drop `onSuccess`, or move the hop onto an `api`, `script` or `flow` action, whose result it reads.';
 
 /**
  * The refusal of an `onSuccess` beside `executor`: a built-in other than `api`
- * / `script`, or `undefined` for a page action row that names no executor.
+ * / `script` / `flow`, or `undefined` for a page action row that names no executor.
  * `subject` opens it ("A `type: 'url'` action's `onSuccess`"), and
  * `executorKey` spells the executor the no-executor prescription asks for
  * (`actionType` on a page node, `type` on a member).
@@ -107,16 +114,11 @@ export function onSuccessBesideExecutorRefusal(
       return `${subject} would follow a result the contract does not declare: a \`modal\` action opens a `
         + `dialog, whose success is whatever the dialog's host answers, and ${HOPS_AFTER_EVERY_EXECUTOR}. `
         + `${DECLARED_BESIDE} ${MOVE_THE_HOP}`;
-    case 'flow':
-      return `${subject} would follow the flow's start, not a result: the console answers a \`flow\` action's `
-        + 'success when the run starts, even for a run paused at its first screen or one that ended refused, and '
-        + `${HOPS_AFTER_EVERY_EXECUTOR}, so the hop fires while that screen or the refusal notice is still open. `
-        + `${DECLARED_BESIDE} ${MOVE_THE_HOP}`;
     case undefined:
       return `${subject} has no executor to follow: the row names none, and the console's action runner `
         + 'performs the post-success hop after the executor it runs succeeds. '
-        + `${DECLARED_BESIDE} Declare the executor whose success the hop follows, \`${executorKey}: 'api'\` or `
-        + `\`${executorKey}: 'script'\`, or drop \`onSuccess\`.`;
+        + `${DECLARED_BESIDE} Declare the executor whose success the hop follows, \`${executorKey}: 'api'\`, `
+        + `\`${executorKey}: 'script'\` or \`${executorKey}: 'flow'\`, or drop \`onSuccess\`.`;
     default:
       return `${subject} would follow a result the contract does not declare: a \`${executor}\` action's `
         + `success carries none, and ${HOPS_AFTER_EVERY_EXECUTOR}. ${DECLARED_BESIDE} ${MOVE_THE_HOP}`;

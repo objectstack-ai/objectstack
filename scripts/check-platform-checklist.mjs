@@ -7,7 +7,8 @@
 // ## The failure this exists for
 //
 // Release verification used to live in one-off surfaces: a hand-written table
-// per release (docs/plans/release-15.1-test-plan.md) and a checkbox issue per
+// per release (docs/plans/release-15.1-test-plan.md, as of commit df8aac41) and
+// a checkbox issue per
 // release (#3358). Both worked once and then rotted: items could not be reused
 // across releases, results were checkboxes with no revision to pin them to, and
 // every fixture gap the run discovered (#3408 phone persona never seeded, #3409

@@ -110,11 +110,11 @@ describe('the fold`s output is authorable (objectui#5435)', () => {
     it('reads a non-empty spec vocabulary that contains all three adopted keys', () => {
       const specKeys = Object.keys(UserActionsConfigSchema.shape).sort();
 
-      expect(specKeys.length).toBe(11);
-      expect(specKeys).toEqual([
-        'addRecordForm', 'buttons', 'editInline', 'filter', 'group', 'hideFields',
-        'refresh', 'rowColor', 'rowHeight', 'search', 'sort',
-      ]);
+      // Membership, not the spec's whole key list (#26238): every toggle the
+      // fold emits must be a key the spec declares, and that is all it needs.
+      for (const key of ['filter', 'group', 'hideFields', 'rowColor', 'rowHeight', 'search', 'sort']) {
+        expect(specKeys).toContain(key);
+      }
 
       // The card's whole subject: these were absent at 17.0.0.
       for (const key of ADOPTED_KEYS) expect(specKeys).toContain(key);

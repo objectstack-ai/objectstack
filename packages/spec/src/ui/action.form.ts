@@ -121,9 +121,11 @@ export const actionForm = defineForm({
         { field: 'errorMessage', helpText: 'Error message shown when the action fails, in place of the raw error.' },
         // #21863 (ruling 5995552118, 1A) — the two post-success keys, each with
         // the control ruling 5861442317 already gave its shape, so no designed
-        // control. Both are gated on the two types the parse admits them on
+        // control. Each is gated on the types the parse admits it on
         // (`refuseInertOutcomeMessages` and the `onSuccess` type refinement in
-        // `action.zod.ts`): only `api` and `script` have a server response.
+        // `action.zod.ts`): `outcomeMessages` on `api` and `script`, whose
+        // server response names an outcome; `onSuccess` on those two and on
+        // `flow`, whose completed run answers with its `isOutput` variables.
         //
         // `outcomeMessages` is a record keyed by outcome name, so G1's `json`,
         // the face `patch` and `bodyExtra` carry.
@@ -133,7 +135,7 @@ export const actionForm = defineForm({
         {
           field: 'onSuccess',
           type: 'composite',
-          visibleWhen: "data.type == 'api' || data.type == 'script'",
+          visibleWhen: "data.type in ['api','script','flow']",
           helpText: 'Navigation after the action succeeds: the route to open, and where to open it.',
           fields: [
             { field: 'navigate', type: 'text', required: true, helpText: 'Route or URL template opened after the action succeeds. It may interpolate ${param.*} (the values the params dialog collected), ${ctx.*} (origin, apiBase, user, org, recordId, selection) and ${result.*} (the server response, e.g. ${result.id}). A relative value is an in-app route.' },

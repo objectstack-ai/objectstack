@@ -41,7 +41,6 @@ describe('dogfood: dimension-label lookup is RLS-scoped to the referenced object
     adminToken = await stack.signIn();
     memberToken = await stack.signUp('lbl-member@verify.test');
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ql = await stack.kernel.getServiceAsync<any>('objectql');
     const sys = { context: { isSystem: true } };
     const uid = async (email: string): Promise<string> => {

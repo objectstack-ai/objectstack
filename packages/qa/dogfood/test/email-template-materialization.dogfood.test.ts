@@ -72,11 +72,9 @@ describe('objectstack verify EMAIL TEMPLATE: authored template materializes and 
   });
 
   it('materializes no row: the registry serves the authored item beside the built-in it overrides', async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const engine = (await stack.kernel.getServiceAsync('objectql')) as any;
     expect(await engine.find('sys_email_template', { context: SYSTEM_CTX })).toEqual([]);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const protocol = (await stack.kernel.getServiceAsync('protocol')) as any;
     const listed = await protocol.getMetaItemsForExecution({ type: 'email_template' });
     const slot = (listed.items as Array<Record<string, unknown>>)
@@ -89,7 +87,6 @@ describe('objectstack verify EMAIL TEMPLATE: authored template materializes and 
   });
 
   it('renders the authored template through sendTemplate — the built-in copy does not reach the wire', async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const email = (await stack.kernel.getServiceAsync('email')) as any;
 
     const result = await email.sendTemplate({
@@ -108,7 +105,6 @@ describe('objectstack verify EMAIL TEMPLATE: authored template materializes and 
   });
 
   it('still renders the built-in member where the app declares none (the zh-CN send)', async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const email = (await stack.kernel.getServiceAsync('email')) as any;
 
     const result = await email.sendTemplate({
@@ -130,7 +126,6 @@ describe('objectstack verify EMAIL TEMPLATE: authored template materializes and 
     });
     expect(put.status, await put.clone().text()).toBe(200);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const email = (await stack.kernel.getServiceAsync('email')) as any;
     const result = await email.sendTemplate({
       to: 'someone@example.com',

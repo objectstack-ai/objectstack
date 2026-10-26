@@ -1,5 +1,8 @@
 # Changelog
 
+> **Current release notes live in [`content/docs/releases/`](content/docs/releases).** This file
+> keeps the historical entries below and is no longer extended.
+
 All notable changes to the ObjectStack Protocol will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
@@ -1593,7 +1596,7 @@ Followup to M10.30a. Walked every Setup menu in a real tenant; produced verdict 
 > deprecations/retirements, and additions to the authorable surface — so this file again
 > does what its header promises. Releases `4.0.2`–`9.11.0` remain documented in the
 > per-package changelogs. For every `10.x → 11.x` migration step see
-> [docs/upgrading-to-11.md](./docs/upgrading-to-11.md); the compatibility gates that
+> [docs/upgrading-to-11.md](https://github.com/objectstack-ai/objectstack/blob/df8aac41f2d9d14db04afdfe48511216419dafc0/docs/upgrading-to-11.md); the compatibility gates that
 > govern what may break and when are ADR-0059, and the upgrade-communication contract is
 > ADR-0087.
 
@@ -1706,7 +1709,7 @@ never as per-surface hint blocks (#2521).
 ## [11.1.0] — 2026-06-28
 
 Completes the 11.0 breaking line (see
-[docs/upgrading-to-11.md](./docs/upgrading-to-11.md)).
+[docs/upgrading-to-11.md](https://github.com/objectstack-ai/objectstack/blob/df8aac41f2d9d14db04afdfe48511216419dafc0/docs/upgrading-to-11.md)).
 
 ### Removed
 - **`DriverInterface` type alias** (deprecated in 11.0) — use `IDataDriver` (same
@@ -1726,7 +1729,7 @@ Completes the 11.0 breaking line (see
 ## [11.0.0] — 2026-06-27
 
 **Major.** Every breaking change of the 11 line, each with a concrete migration, is in
-[docs/upgrading-to-11.md](./docs/upgrading-to-11.md) (also covering the package-level
+[docs/upgrading-to-11.md](https://github.com/objectstack-ai/objectstack/blob/df8aac41f2d9d14db04afdfe48511216419dafc0/docs/upgrading-to-11.md) (also covering the package-level
 breaks outside the spec surface: Hono-only HTTP adapters, `client-react` canonical query
 fields, `OS_*` env renames).
 

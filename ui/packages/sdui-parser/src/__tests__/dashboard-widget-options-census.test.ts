@@ -93,10 +93,13 @@ describe('leg 1 — the spec side of the pin', () => {
     expect((parsed as { data: Record<string, unknown> }).data.__census_probe).toBe(1);
   });
 
-  it('declared keys are exactly the pinned spec set', () => {
+  it('declared keys include the pinned spec set', () => {
     // Derivation guard for everything below: a schema that stopped exporting
     // `shape` (or renamed keys) must fail HERE, not let ⊆-checks pass on [].
-    expect(declaredKeys).toEqual(['dateGranularity', 'limit', 'sortBy', 'sortOrder', 'stageOrder']);
+    // Membership (#26238): a key the spec adds is judged by the next case.
+    for (const key of ['dateGranularity', 'limit', 'sortBy', 'sortOrder', 'stageOrder']) {
+      expect(declaredKeys).toContain(key);
+    }
   });
 
   it('every declared key is accepted, and no undeclared key is — not even the retired `description`', () => {

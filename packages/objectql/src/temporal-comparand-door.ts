@@ -338,6 +338,20 @@ function isFieldReference(value: unknown): boolean {
 }
 
 /**
+ * [#25808] A `{ $now: true, addDays }` anchor is not a literal either: `$now`
+ * is `true` as written and the tree's pinned instant (an ISO string) once
+ * `resolveFilterTokens` has run, and the instant it names is the server's own
+ * clock, which is always inside the four-digit years this door guards. The
+ * `addDays` half is judged where the `{ $field, addDays }` pair's is (the
+ * having judge, the `where` compiler), not here.
+ */
+function isNowAnchor(value: unknown): boolean {
+  if (!isFilterNode(value)) return false;
+  const anchor = (value as { $now?: unknown }).$now;
+  return anchor === true || typeof anchor === 'string';
+}
+
+/**
  * Walk one `FilterCondition` and return the FIRST comparand a declared temporal
  * field's storage rule cannot read, or `null`.
  *
@@ -424,7 +438,7 @@ function judgeFieldComparands<H>(
   // backend agrees with.
   const keys = Object.keys(spec);
   if (!keys.some((k) => k.startsWith('$'))) return null;
-  if (isFieldReference(spec)) return null;
+  if (isFieldReference(spec) || isNowAnchor(spec)) return null;
   for (const op of keys) {
     if (!op.startsWith('$')) continue;
     if (!scope.judgesOperator(op)) continue;
@@ -451,7 +465,7 @@ function judgeComparand(
   value: unknown,
   path: string,
 ): UninterpretableTemporalComparand | null {
-  if (isFieldReference(value)) return null;
+  if (isFieldReference(value) || isNowAnchor(value)) return null;
   if (!isUninterpretableTemporalComparand(kind, value)) return null;
   return { field, kind, value, path };
 }

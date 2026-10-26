@@ -37,7 +37,6 @@ const AI_KEY = 'expand-18x-not-a-real-api-key';
 const WORKSPACE = 'Expand 18x Workspace';
 const SYSTEM = { context: { isSystem: true } };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const rowsOf = (body: any): any[] => (Array.isArray(body) ? body : (body?.records ?? body?.data ?? []));
 
 function boot(databaseFile: string): Promise<VerifyStack> {

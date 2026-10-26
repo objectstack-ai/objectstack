@@ -45,7 +45,8 @@ describe('PACKAGE_SOURCES is the closed set the spec declares (objectui#12790)',
 
   it('equals the `source` options on both stage branches of the served row', () => {
     const branches = InstalledPackageAtEitherStageSchema.options;
-    expect(branches).toHaveLength(2);
+    // Non-vacuity floor for the loop; the branch count is the spec's (#26238).
+    expect(branches.length).toBeGreaterThan(0);
     for (const branch of branches) {
       expect(sorted(branch.shape.source.options)).toEqual(sorted(PACKAGE_SOURCES));
     }

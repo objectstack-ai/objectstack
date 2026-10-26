@@ -19,7 +19,7 @@ import {
   SQL_CONST_TRUE,
   type NormalizedFilterNode,
 } from './filter-normalizer.js';
-import { findCrossFieldComparand, isFieldReference } from '../comparand-shape.js';
+import { findCrossFieldComparand, isFieldReference, isNowAnchor } from '../comparand-shape.js';
 import {
   assertReadScopeAdmittedByEngine,
   assertReadScopeCannotVacate,
@@ -2190,7 +2190,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       // would fail on its single most important spelling. Its five siblings
       // (`$ne`/`$gt`/`$gte`/`$lt`/`$lte`) were never affected: they emit their
       // operator explicitly two lines down.
-      case 'equals': return isFieldReference(v0) ? { $eq: v0 } : v0;
+      // [#25808] …and for a now-anchored comparand, for the same reason: the
+      // bare `{ at: { $now, addDays } }` is a field-spec object whose keys no
+      // backend reads as an equality; `{ $eq: … }` is the spelling that compiles.
+      case 'equals': return isFieldReference(v0) || isNowAnchor(v0) ? { $eq: v0 } : v0;
       case 'notEquals': return { $ne: v0 };
       case 'gt': return { $gt: v0 };
       case 'gte': return { $gte: v0 };
