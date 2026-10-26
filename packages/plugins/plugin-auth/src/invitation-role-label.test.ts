@@ -67,7 +67,10 @@ async function invite(opts: {
   getI18n?: () => unknown;
   /** The INVITER's browser language — better-auth hands this callback its request. */
   header?: string;
-  /** better-auth's `invitation.expiresAt`; omitted = the row carries none. */
+  /**
+   * better-auth's `invitation.expiresAt`; omitted = a real expiry (the row
+   * always carries one), passed as `undefined` = the row carries none.
+   */
   expiresAt?: unknown;
 }) {
   const { betterAuth } = await import('better-auth');
@@ -106,7 +109,11 @@ async function invite(opts: {
         id: 'inv1',
         organizationId: 'o1',
         role: opts.role,
-        ...(opts.expiresAt !== undefined ? { expiresAt: opts.expiresAt } : {}),
+        ...('expiresAt' in opts
+          ? opts.expiresAt !== undefined
+            ? { expiresAt: opts.expiresAt }
+            : {}
+          : { expiresAt: new Date('2031-03-04T05:06:07.000Z') }),
       },
       organization: { name: 'Northwind' },
       inviter: { user: { email: 'dana@example.com', name: 'Dana' } },
@@ -314,9 +321,22 @@ describe('#25802 — the sender hands the template the invitation expiry', () =>
   it.each([
     ['no expiry', undefined],
     ['an unreadable one', 'not-a-date'],
-  ])('%s is left out rather than invented, and the mail still goes', async (_label, expiresAt) => {
-    const { input } = await invite({ role: 'member', deployment: 'en-US', expiresAt });
+  ])('%s is left out rather than invented, with one warn naming the invitation and the refusal', async (_label, expiresAt) => {
+    // The template declares `expiresAt` required, so the real email service
+    // refuses this send (`MISSING_VARIABLES`, pinned in plugin-email's
+    // `auth-templates-locales.test.ts`); the warn makes the lost mail visible.
+    const { input, warns } = await invite({ role: 'member', deployment: 'en-US', expiresAt });
     expect(Object.prototype.hasOwnProperty.call(input.data, 'expiresAt')).toBe(false);
+    const named = warns.filter((w) => w.msg.includes('carries no readable expiry'));
+    expect(named).toHaveLength(1);
+    expect(named[0]!.msg).toContain("invitation 'inv1'");
+    expect(named[0]!.msg).toContain('will be refused and not sent');
+    expect(named[0]!.meta).toMatchObject({ invitationId: 'inv1' });
+  });
+
+  it('a readable expiry logs no expiry warn', async () => {
+    const { warns } = await invite({ role: 'member', deployment: 'en-US' });
+    expect(warns.filter((w) => w.msg.includes('carries no readable expiry'))).toHaveLength(0);
   });
 });
 

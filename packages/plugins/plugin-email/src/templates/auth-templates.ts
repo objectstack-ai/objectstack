@@ -373,10 +373,14 @@ This invitation expires on {{ expiresAt | datetime:long }}.`,
     // through the `datetime:long` formatter, so the date reads in the row's
     // own locale and the reference timezone the send names — and the long
     // style prints that zone, so the reader is never left guessing it.
+    // Required: the engine has no conditionals, so every body states the
+    // expiry unconditionally, and a send without it would ship a dangling
+    // "expires on ." sentence. Declared required, it is refused loudly
+    // (`MISSING_VARIABLES`) instead.
     {
       name: 'expiresAt',
       type: 'date',
-      required: false,
+      required: true,
       description: 'When the invitation expires (ISO-8601 instant), rendered in the mail locale',
     },
   ],

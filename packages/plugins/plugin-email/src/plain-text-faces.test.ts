@@ -100,6 +100,7 @@ const LINK_SENDS = [
       role: 'member',
       acceptUrl: LINK,
       appName: 'Acme',
+      expiresAt: '2031-03-04T05:06:07.000Z',
     },
   },
   { template: 'auth.magic_link', data: { magicLinkUrl: LINK, expiresInMinutes: 10, appName: 'Acme' } },

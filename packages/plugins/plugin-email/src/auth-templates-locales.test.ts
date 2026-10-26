@@ -126,6 +126,7 @@ const DATA: Record<TemplateName, Record<string, unknown>> = {
     role: 'admin',
     acceptUrl: 'https://acme.test/accept/INV1',
     appName: 'Acme',
+    expiresAt: '2031-03-04T05:06:07.000Z',
   },
   'auth.two_factor_otp': {
     otp: '482915',
@@ -409,6 +410,22 @@ describe('#25802 — the invitation states its expiry in the mail locale', () =>
   it('the reference timezone the send names moves the wall-clock, and the zone is named', async () => {
     const { text } = await renderInvitationFaces('zh-CN', INVITATION_FACTS, 'Asia/Shanghai');
     expect(text).toContain('此邀请将于 2031年3月4日 GMT+8 13:06:07 过期。');
+  });
+
+  it.each(SUPPORTED_LOCALES)('%s: a send without expiresAt is refused (MISSING_VARIABLES), never sent with a dangling sentence', async (locale) => {
+    // The engine has no conditionals, so every body states the expiry; the
+    // row declares the variable required and the service refuses the send.
+    const transport = new CaptureTransport();
+    const svc = new EmailService({
+      transport,
+      defaultFrom: { address: 'no-reply@acme.test' },
+      templateLoader: seededLoader,
+    });
+    const { expiresAt: _omitted, ...withoutExpiry } = INVITATION_FACTS;
+    await expect(
+      svc.sendTemplate({ template: 'auth.invitation', to: 'recipient@acme.test', locale, data: withoutExpiry }),
+    ).rejects.toThrow(/^MISSING_VARIABLES: expiresAt$/);
+    expect(transport.sent).toHaveLength(0);
   });
 
   it('a zh-CN invitation carries no English expiry sentence', async () => {
