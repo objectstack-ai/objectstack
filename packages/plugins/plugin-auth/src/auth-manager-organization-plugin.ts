@@ -623,6 +623,12 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
             role: roleLabel,
             acceptUrl,
             appName: this.getAppName(),
+            // When the link stops working (better-auth's window, 48 h by
+            // default): every body says so, so an invitation opened late is
+            // not a surprise at the accept page. Handed over as an ISO-8601
+            // instant; the template's `datetime` formatter renders it in the
+            // mail's locale. Omitted rather than invented when unreadable.
+            ...invitationExpiryArg(invitation.expiresAt),
           },
           relatedObject: 'sys_invitation',
           relatedId: invitation.id,
@@ -680,4 +686,18 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
     );
   }
   return organizationPlugin;
+}
+
+/**
+ * The `expiresAt` fragment of the invitation mail's data: the invitation's
+ * expiry as an ISO-8601 instant, or nothing when the value does not read as a
+ * date. better-auth hands the callback a `Date`; a string or epoch number is
+ * read the same way. A value that is not a real instant is left out rather
+ * than rendered as `Invalid Date`, and the template variable is optional, so
+ * the mail still goes.
+ */
+function invitationExpiryArg(expiresAt: unknown): { expiresAt?: string } {
+  if (!(expiresAt instanceof Date) && typeof expiresAt !== 'string' && typeof expiresAt !== 'number') return {};
+  const instant = new Date(expiresAt);
+  return Number.isNaN(instant.getTime()) ? {} : { expiresAt: instant.toISOString() };
 }
