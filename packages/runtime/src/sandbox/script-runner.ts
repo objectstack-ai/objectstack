@@ -269,6 +269,27 @@ export interface ScriptContext {
    */
   referentialCascadeDelete?: boolean;
   /**
+   * The engine's write provenance, marshalled for the HOOK face (#25905) —
+   * WHERE this write came from, as opposed to WHO is calling ({@link session}).
+   * Mirrors the declared `HookContextSchema.provenance`
+   * (`@objectstack/spec/data`), which objectql's `buildProvenance()` stamps from
+   * the server-built execution context on every write assembly site.
+   *
+   * Projected to the three declared members, each copied only in its declared
+   * shape (a string) and absent otherwise; the whole key is ABSENT when none
+   * survives, which is what the engine face carries on a write with no origin
+   * (a plain REST write). Read it as `ctx.provenance?.flowRunId`.
+   *
+   * Server-stamped, never client-supplied: the engine builds it from the
+   * execution context, never from the write's payload, so a payload key named
+   * `provenance` stays a field on `ctx.input` and never reaches this member.
+   * And read-only in the VM: `installCtx` grafts it frozen, so a body cannot
+   * drift its own copy either. Not an authorization input — no security
+   * middleware reads it, and neither does anything a body writes back.
+   * Absent on the action face.
+   */
+  provenance?: { flowRunId?: string; attributedUserId?: string; performedByClientId?: string };
+  /**
    * The caller's options bag, PROJECTED to the two members ADR-0058's D2
    * declares visible to the `before*` phase — `multi` and `where` — for the
    * HOOK face (#11552). `installCtx` grafts it onto the VM's `ctx.input` as a

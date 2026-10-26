@@ -1217,7 +1217,10 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // authored in all three locales.
       // 679 since the flow form offers `requiredPermissions` (who may start the
       // flow) — one row label, authored in all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(679);
+      // 680 since the dataset form's measures repeater offers `duration` (the
+      // time between two datetime fields) — one row label, authored in all
+      // three locales.
+      expect(translated.length, `${locale} positive control`).toBe(680);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

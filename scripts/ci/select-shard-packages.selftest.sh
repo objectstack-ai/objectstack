@@ -367,7 +367,7 @@ expect_turbo 'affected only' "$(affected_call "$C1")"
 expect_union 'not reached' ''
 
 # ── the full-battery events (#16467) ────────────────────────────────────────
-# `schedule` is the hourly full run and `workflow_dispatch` is the same battery
+# `schedule` is the 4-hourly full run and `workflow_dispatch` is the same battery
 # on demand. Neither carries a diff base, and neither may acquire one by
 # accident: both cases below hand the script every base variable it knows and
 # pin that it still asks `turbo ls` for the whole workspace.

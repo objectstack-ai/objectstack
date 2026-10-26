@@ -56,7 +56,10 @@
  * `find` on the referenced object per grouped field (the same resolution
  * `ObjectChart` applies to a grouped series); a failed resolution keeps the id
  * rather than failing the grid. Ordering the groups is the consumer's too:
- * `useGroupedData` applies `GroupingField.order` over the header set.
+ * `useGroupedData` applies `GroupingField.order` over the header set — by the
+ * group key, or, for a level naming an `orderBy` (objectstack#25786), by the
+ * `min` / `max` column the header query compiles for it, read under the name
+ * `listViewGroupOrderColumn` gives it.
  *
  * ## An answer is held against the question it answers (objectui#11574)
  *
@@ -87,7 +90,7 @@ import {
   type ListViewGroupQuerySource,
 } from '@objectstack/spec/ui';
 import { isExpandableFieldType } from '@object-ui/core';
-import { serverSummaryOf, type GroupAggregationConfig, type UsableGroupingField } from './useGroupedData';
+import { groupOrderByOf, serverSummaryOf, type GroupAggregationConfig, type UsableGroupingField } from './useGroupedData';
 
 /**
  * `aggregations` as the summary columns the header query compiles from. An
@@ -104,9 +107,25 @@ function summaryColumnsOf(aggregations: GroupAggregationConfig[] | undefined): N
   return out as NonNullable<ListViewGroupQuerySource['columns']>;
 }
 
-/** The grouping block the two compilers read, keyed on field names alone. */
-function groupingOf(fields: readonly UsableGroupingField[]): ListViewGroupQuerySource['grouping'] {
-  return { fields: fields.map((f) => ({ field: f.field })) } as ListViewGroupQuerySource['grouping'];
+/**
+ * One grouping level as the HEADER query compiles it (objectstack#25786): the
+ * field, plus — when the level orders by another field — that `orderBy` and
+ * the `order` that picks its `min` (asc) or `max` (desc) node. A level ordered
+ * by its own key carries the name alone, so flipping its `order` re-asks
+ * nothing: the header query sorts nothing, the grid does.
+ */
+type HeaderLevel = { field: string; orderBy?: string; order?: 'asc' | 'desc' };
+
+function headerLevelOf(f: UsableGroupingField): HeaderLevel {
+  const orderBy = groupOrderByOf(f);
+  return orderBy === undefined
+    ? { field: f.field }
+    : { field: f.field, orderBy, order: f.order === 'desc' ? 'desc' : 'asc' };
+}
+
+/** The grouping block the two compilers read. */
+function groupingOf(levels: readonly HeaderLevel[]): ListViewGroupQuerySource['grouping'] {
+  return { fields: levels.map((level) => ({ ...level })) } as ListViewGroupQuerySource['grouping'];
 }
 
 export interface ServerGroupHeadersInput {
@@ -191,8 +210,9 @@ export function useServerGroupHeaders(input: ServerGroupHeadersInput): ServerGro
   const [state, setState] = useState<HeldHeaders>(IDLE_HELD);
 
   // Keyed on CONTENT, never on the identity of an object a host may rebuild
-  // every render (AGENTS.md #10).
-  const fieldsKey = JSON.stringify(fields.map((f) => f.field));
+  // every render (AGENTS.md #10). The levels as the header query compiles
+  // them: a level's `orderBy` adds a column to its answer (objectstack#25786).
+  const levelsKey = JSON.stringify(fields.map(headerLevelOf));
   const whereKey = JSON.stringify(where ?? null);
   const searchKey = JSON.stringify(
     search
@@ -213,7 +233,7 @@ export function useServerGroupHeaders(input: ServerGroupHeadersInput): ServerGro
   // they compile with. `reloadKey` is not in it — a refresh asks the same
   // question again — and neither is `referenceKey`, which labels the keys of
   // the same answer.
-  const question = JSON.stringify([objectName ?? null, fieldsKey, whereKey, searchKey, aggregationsKey]);
+  const question = JSON.stringify([objectName ?? null, levelsKey, whereKey, searchKey, aggregationsKey]);
 
   useEffect(() => {
     if (!canAsk || !dataSource || !objectName) {
@@ -228,9 +248,10 @@ export function useServerGroupHeaders(input: ServerGroupHeadersInput): ServerGro
     setState((prev) => (prev.question === question
       ? { ...prev, loading: true, error: null }
       : { ...PENDING, question }));
-    const fieldNames: string[] = JSON.parse(fieldsKey);
+    const levels: HeaderLevel[] = JSON.parse(levelsKey);
+    const fieldNames = levels.map((level) => level.field);
     const references: Array<[string, string | null] | null> = JSON.parse(referenceKey);
-    const grouping = groupingOf(fieldNames.map((field) => ({ field })));
+    const grouping = groupingOf(levels);
     const columns = JSON.parse(aggregationsKey) as NonNullable<ListViewGroupQuerySource['columns']>;
     const composedWhere = JSON.parse(whereKey) as FilterCondition | null;
     const searched = JSON.parse(searchKey) as { search: string; searchFields?: string[] } | null;
@@ -289,7 +310,7 @@ export function useServerGroupHeaders(input: ServerGroupHeadersInput): ServerGro
     })();
 
     return () => { cancelled = true; };
-  }, [canAsk, dataSource, objectName, question, fieldsKey, whereKey, searchKey, aggregationsKey, referenceKey, reloadKey]);
+  }, [canAsk, dataSource, objectName, question, levelsKey, whereKey, searchKey, aggregationsKey, referenceKey, reloadKey]);
 
   // Read in the render the question changes, not one render late: the
   // state still holds the previous question's answer until the effect

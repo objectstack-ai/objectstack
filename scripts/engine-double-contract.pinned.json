@@ -4487,6 +4487,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/services/service-automation/src/builtin/notify-written-address-channels.integration.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/services/service-automation/src/builtin/notify-zero-delivery-visibility.integration.test.ts",
       "verb": "findOne",
       "pinned": 1

@@ -2009,7 +2009,7 @@ export interface StackExpressionOptions {
    * collection a view write does not carry.
    *
    * [#24814] An action's copy pass (`actionCopyTemplateIssues`, errors since
-   * #25680 but for the runner's transitional `${…}` reading) judges an object
+   * #25680, a holeless `${…}` sentence included since #25709) judges an object
    * write's own `actions[]`; on a `page` write it is the ONLY pass, over the
    * written page's action rows and inline actions.
    *
@@ -3483,8 +3483,8 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   issues.push(...bulkConfirmTextIssues(stack, { views: !objectWrite, objects: true }));
   // [#24814] The action copy template slots: an object's own `actions[]` on
   // every run (an object write included), the top-level `actions` and the
-  // pages' action rows off an object write. Errors since #25680, but for the
-  // runner's transitional `${…}` reading, which stays a warning.
+  // pages' action rows off an object write. Errors since #25680, a holeless
+  // `${…}` sentence included since #25709.
   issues.push(...actionCopyTemplateIssues(stack, { actions: !objectWrite, objects: true, pages: !objectWrite }));
 
   return issues;

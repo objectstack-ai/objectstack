@@ -45,7 +45,7 @@
 
 import type { ObjectStackProtocolImplementation, PackagePersistService } from './protocol.js';
 import { packagePersistFailureError } from './protocol.js';
-import { assertProtocolCompat } from '@objectstack/metadata-core';
+import { assertDeclaredDependencies, assertProtocolCompat } from '@objectstack/metadata-core';
 // [#24086] The install door's own manifest declaration — `ManifestSchema` with
 // `scope` narrowed to `project` — judged whole at the top of `installPackage`.
 import { PackageInstallManifestSchema } from '@objectstack/spec/api';
@@ -257,6 +257,19 @@ export async function installPackage(
     // schema/renderer crash. Packages with no range are grandfathered (warn
     // only); an unparsed range never causes a false rejection.
     assertProtocolCompat(manifest);
+
+    // ADR-0141 D2 — the pre-install dependency check, beside the handshake and
+    // as early: every `manifest.dependencies` entry must name a package
+    // installed at a version inside its range (this primitive delivers one
+    // package, so nothing else is co-delivered), or the install is refused
+    // `422 DEPENDENCY_MISSING` naming every unmet entry, before the registry
+    // write and the persist below. One predicate for every install door
+    // (`@objectstack/metadata-core`); ⛔ it does not run at the manifest edit
+    // (`updatePackage`) or at the boot rehydrate, which are not install acts.
+    assertDeclaredDependencies({
+        delivered: [manifest],
+        getInstalled: (id) => this.engine.registry.getPackage?.(id),
+    });
 
     // [#21243] What the registry holds for this id BEFORE the write, so a
     // failed persist below can put exactly that back. Read here because the
