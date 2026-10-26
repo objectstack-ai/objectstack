@@ -133,6 +133,12 @@ import {
   dispatchPerRowBeforeHooks,
   inAfterAbortUnit,
 } from './engine-hook-dispatch.js';
+// [#25522 cut 7] The raw-command and transaction-routing bodies; the methods of
+// the same names below hand each body the members it reads (`ExecuteTransactionsHost`).
+import { enforceTransactionOrigin, execute, warnTransactionUnsupported } from './engine-execute-transactions.js';
+// [#25522 cut 8] The compatibility-API bodies; the methods of the same names
+// below hand each body the members it reads (`CompatibilityApiHost`).
+import { getConfigs, introspectDatasource, registerObject, removePackage, syncObjectSchema, syncSchemas } from './engine-compatibility-api.js';
 import { ExecutionContext, ExecutionContextSchema, type InstalledPackageSource } from '@objectstack/spec/kernel';
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
@@ -184,7 +190,7 @@ import {
 import { WriteEpoch, isWriteEpochOperation } from './write-epoch.js';
 import { bridgeAuthzInvalidation } from './authz-invalidation-bridge.js';
 import { SummaryRecomputeError, type SummaryRecomputeFailure } from './summary-errors.js';
-import { CrossDatasourceTransactionWriteError, TransactionUnsupportedError } from './transaction-errors.js';
+import { TransactionUnsupportedError } from './transaction-errors.js';
 import {
   aggregateSummaryValue,
   summaryEmptySetValue,
@@ -21780,61 +21786,15 @@ export class ObjectQL implements IObjectQLEngine {
    * whenever feasible — they auto-apply tenancy + soft-delete + audit warnings.
    */
   async execute(command: any, options?: Record<string, any>): Promise<any> {
-      // Driver selection priority:
-      //   1. options.object  → route via getDriver(objectName)
-      //   2. options.datasource → explicit driver name
-      //   3. default driver (set via datasourceMapping or defaultDriver)
-      // This lets system services (e.g. PackageService, AuditService) issue raw
-      // SQL against the control-plane / default DB without having to know the
-      // object name behind every CREATE TABLE / SELECT statement.
-      let driver: IDataDriver | undefined;
-      if (options?.object) {
-          driver = this.getDriver(options.object);
-      } else if (options?.datasource && this.drivers.has(options.datasource)) {
-          driver = this.drivers.get(options.datasource);
-      } else if (this.defaultDriver && this.drivers.has(this.defaultDriver)) {
-          driver = this.drivers.get(this.defaultDriver);
-      } else if (this.drivers.size === 1) {
-          // Single registered driver — unambiguously the right one.
-          driver = this.drivers.values().next().value;
-      }
-
-      if (!driver) {
-          throw new Error(
-              'Execute requires options.object to select a driver, or a default driver to be configured. ' +
-              'Configure datasourceMapping with `default: true` or pass `{ object }` / `{ datasource }` in options.',
-          );
-      }
-      if (!driver.execute) {
-          throw new Error('Selected driver does not implement execute()');
-      }
-
-      // Support both call shapes:
-      //   execute('SELECT ...', { args: [...] })
-      //   execute({ sql: 'SELECT ...', args: [...] })
-      let rawCommand: any = command;
-      let params: any[] | undefined = options?.args ?? options?.params;
-      if (command && typeof command === 'object' && !Array.isArray(command) && 'sql' in command) {
-          rawCommand = command.sql;
-          if (params === undefined) {
-              params = command.args ?? command.params;
-          }
-      }
-
-      // [#21274] A boundary outside the middleware seam: the raw command's
-      // bound `params` are the caller's values, and the driver's refusal
-      // carries the dialect error on its `cause`.
-      //
-      // [#21345] And the one door whose statement the engine did not compose:
-      // it may open with a word the shared leak predicate does not list (a
-      // common-table-expression form, a dialect's upsert or merge verb), so
-      // the cut must not wait for the predicate to recognise it. The door
-      // knows it sent a statement, and says so.
-      try {
-          return await driver.execute(rawCommand, params, options);
-      } catch (e) {
-          throw redactPropagatedDriverFault(e, { statementSent: true });
-      }
+      // [#25522 cut 7] The body moved to `engine-execute-transactions.ts` (see `ExecuteTransactionsHost`).
+      const readDrivers = () => this.drivers;
+      const readDefaultDriver = () => this.defaultDriver;
+      const host: ThisParameterType<typeof execute> = {
+        getDriver: (...a) => this.getDriver(...a),
+        get drivers() { return readDrivers(); },
+        get defaultDriver() { return readDefaultDriver(); },
+      };
+      return execute.call(host, command, options);
   }
 
   /**
@@ -22051,32 +22011,14 @@ export class ObjectQL implements IObjectQLEngine {
    * doubles, foreign engines) reach it on EVERY call.
    */
   private warnTransactionUnsupported(datasource: string | undefined, declaredUnsupported = false): void {
-    const name = datasource ?? '<no default datasource>';
-    if (this.transactionUnsupportedReported.has(name)) return;
-    this.transactionUnsupportedReported.add(name);
-    // [#18063] The two reasons reach the same degrade and must not read the
-    // same. Telling an operator a Turso REMOTE datasource "has no
-    // beginTransaction" sends them looking for a missing method on a class that
-    // publishes one; the fix for that reason is a different transport, not a
-    // different driver.
-    const cause = declaredUnsupported
-      ? `driver '${name}' declares supports.transactionsUnsupported — its transport cannot carry a ` +
-        'transaction handle even though it inherits beginTransaction'
-      : `driver '${name}' has no beginTransaction`;
-    const remedy = declaredUnsupported
-      ? 'Point this datasource at a transport that honours transactions (for libSQL: the local or ' +
-        'embedded-replica mode rather than the remote one), or have the caller fail '
-      : 'Register a driver that implements beginTransaction for this datasource, or have the caller fail ';
-    this.logger.warn(
-      `transaction() requested a transaction but ${cause} — ` +
-        'running WITHOUT transaction or rollback. Every write the callback makes commits as it executes, ' +
-        'so a later throw leaves the earlier ones PERSISTED even though the call rejects as if the whole ' +
-        'unit of work had been undone; no caller is told, and the records stay behind. ' +
-        remedy +
-        "closed itself when it cannot tolerate losing atomicity (batchData's atomic gate, ADR-0119 D4, is " +
-        'the pattern). Reported once per driver per engine instance.',
-      { datasource: name, declaredUnsupported },
-    );
+    // [#25522 cut 7] The body moved to `engine-execute-transactions.ts` (see `ExecuteTransactionsHost`).
+    const readTransactionUnsupportedReported = () => this.transactionUnsupportedReported;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof warnTransactionUnsupported> = {
+      get transactionUnsupportedReported() { return readTransactionUnsupportedReported(); },
+      get logger() { return readLogger(); },
+    };
+    return warnTransactionUnsupported.call(host, datasource, declaredUnsupported);
   }
 
   /**
@@ -22128,31 +22070,16 @@ export class ObjectQL implements IObjectQLEngine {
     driver: IDataDriver,
     operation: 'insert' | 'update' | 'delete',
   ): void {
-    const scope = this.txStore.getStore()?.scope;
-    // No engine-owned transaction in scope (or a handle threaded explicitly by
-    // the sandbox trio, which this store never sees) — nothing to be outside
-    // of. See `transactionCoversDriverFor` for why that limit is declared.
-    if (!scope) return;
-    // Identity, not name: this is about riding the same connection.
-    if (driver === scope.driver) return;
-    const target = this.datasourceNameOf(driver);
-
-    if (!this.isSystemLedgerObject(objectName)) {
-      throw new CrossDatasourceTransactionWriteError(objectName, operation, target, scope.datasource);
-    }
-
-    if (scope.reportedOutOfScope.has(target)) return;
-    scope.reportedOutOfScope.add(target);
-    this.logger.debug(
-      `${operation} of '${objectName}' inside transaction() is routed to datasource '${target}' while the ` +
-        `transaction is open on '${scope.datasource}' — executing it OUTSIDE the transaction, on its own ` +
-        'connection (ADR-0057 §3.6 system ledger — the one class carved out of the cross-datasource write ' +
-        'refusal). It commits independently and will ' +
-        'SURVIVE a rollback of this transaction: an audit/telemetry/event row may describe a write that was ' +
-        'undone. That is the decided direction of error for an append-only ledger — an extra reconcilable ' +
-        'row beats a missing row for a write that did commit. Said once per transaction per datasource.',
-      { object: objectName, operation, datasource: target, transactionDatasource: scope.datasource },
-    );
+    // [#25522 cut 7] The body moved to `engine-execute-transactions.ts` (see `ExecuteTransactionsHost`).
+    const readTxStore = () => this.txStore;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof enforceTransactionOrigin> = {
+      get txStore() { return readTxStore(); },
+      datasourceNameOf: (...a) => this.datasourceNameOf(...a),
+      isSystemLedgerObject: (...a) => this.isSystemLedgerObject(...a),
+      get logger() { return readLogger(); },
+    };
+    return enforceTransactionOrigin.call(host, objectName, driver, operation);
   }
 
   // ============================================
@@ -22172,15 +22099,12 @@ export class ObjectQL implements IObjectQLEngine {
     packageId: string = '__runtime__',
     namespace?: string
   ): string {
-    // Auto-assign field names from keys
-    if (schema.fields) {
-      for (const [key, field] of Object.entries(schema.fields)) {
-        if (field && typeof field === 'object' && !('name' in field)) {
-          (field as any).name = key;
-        }
-      }
-    }
-    return this._registry.registerObject(schema, packageId, namespace);
+    // [#25522 cut 8] The body moved to `engine-compatibility-api.ts` (see `CompatibilityApiHost`).
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof registerObject> = {
+      get _registry() { return readRegistry(); },
+    };
+    return registerObject.call(host, schema, packageId, namespace);
   }
 
   /**
@@ -22208,14 +22132,12 @@ export class ObjectQL implements IObjectQLEngine {
    * Matches @objectql/core getConfigs() API.
    */
   getConfigs(): Record<string, ServiceObject> {
-    const result: Record<string, ServiceObject> = {};
-    const objects = this._registry.getAllObjects();
-    for (const obj of objects) {
-      if (obj.name) {
-        result[obj.name] = obj;
-      }
-    }
-    return result;
+    // [#25522 cut 8] The body moved to `engine-compatibility-api.ts` (see `CompatibilityApiHost`).
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof getConfigs> = {
+      get _registry() { return readRegistry(); },
+    };
+    return getConfigs.call(host);
   }
 
   /**
@@ -22248,14 +22170,12 @@ export class ObjectQL implements IObjectQLEngine {
    * unchanged.
    */
   async introspectDatasource(datasource: string): Promise<SpecIntrospectedSchema> {
-    const driver = this.drivers.get(datasource);
-    if (!driver) {
-      throw new Error(`[ObjectQL] Datasource '${datasource}' has no registered driver to introspect.`);
-    }
-    if (typeof driver.introspectSchema !== 'function') {
-      throw new Error(`[ObjectQL] Driver for datasource '${datasource}' does not support introspectSchema().`);
-    }
-    return driver.introspectSchema();
+    // [#25522 cut 8] The body moved to `engine-compatibility-api.ts` (see `CompatibilityApiHost`).
+    const readDrivers = () => this.drivers;
+    const host: ThisParameterType<typeof introspectDatasource> = {
+      get drivers() { return readDrivers(); },
+    };
+    return introspectDatasource.call(host, datasource);
   }
 
   /**
@@ -22287,69 +22207,15 @@ export class ObjectQL implements IObjectQLEngine {
    * (`ObjectQLPlugin.syncRegisteredSchemas`) binds it.
    */
   async syncSchemas(): Promise<void> {
-    const allObjects = this._registry.getAllObjects();
-    for (const obj of allObjects) {
-      const driver = this.getDriverForObject(obj.name);
-      if (!driver) continue;
-      // [#21777] Same predicate and same treatment as the boot sync. The remote
-      // owns this object's schema, so `syncSchema` would be refused
-      // (`ExternalSchemaModeViolationError` on an external-schema datasource).
-      // Logging that refusal at the #4632 ERROR below was a false durability
-      // alarm, because nothing was meant to be created. The DDL-free binding
-      // still runs, because an object registered at runtime has no other way
-      // to its remote table: without it every read resolves to a table named
-      // after the object.
-      if (isFederatedObject(obj)) {
-        if (typeof (driver as any).registerExternalObject !== 'function') {
-          this.logger.debug('Driver does not support registerExternalObject, skipping external object', {
-            object: obj.name,
-            driver: (driver as any).name,
-          });
-          continue;
-        }
-        try {
-          await (driver as any).registerExternalObject(obj);
-          this.logger.debug('Federated object is not a DDL target — bound to its remote table without DDL', {
-            object: obj.name,
-            driver: (driver as any).name,
-          });
-        } catch (e: unknown) {
-          this.logger.warn('Failed to register external object metadata', {
-            object: obj.name,
-            driver: (driver as any).name,
-            error: e instanceof Error ? e.message : String(e),
-          });
-        }
-        continue;
-      }
-      const tableName = StorageNameMapping.resolveTableName(obj);
-      if (typeof (driver as any).syncSchemasBatch === 'function' && (driver as any).supports?.batchSchemaSync) {
-        // Already handled per-driver below; skip individual call
-      }
-      if (typeof (driver as any).syncSchema === 'function') {
-        try {
-          await (driver as any).syncSchema(tableName, obj);
-        } catch (e: unknown) {
-          // #4632 — this catch used to be empty, with the comment "log
-          // suppressed to avoid noise on already-synced tables". Suppressing an
-          // already-synced no-op is not what it did: `syncSchema` is required to
-          // be idempotent (see this method's doc comment), so a driver that
-          // reaches this catch did NOT sync. The only callers are runtime
-          // installs — marketplace plugin install, template seeding — which go
-          // on to INSERT into a table this failure means does not exist, and
-          // then report the install as successful. Nothing that claims to be
-          // persisted afterwards is.
-          this.logger.error(
-            `Schema sync FAILED for object '${obj.name}' — its table/collection was NOT created or altered, yet the object is ` +
-              `registered and will be written to: those writes will fail, or drop the columns that were never created. ` +
-              `Any seeding or install step that continues past this point is not durable. ` +
-              `Fix the driver error below, then re-run the install/sync.`,
-            e as Error,
-            { object: obj.name, tableName, driver: (driver as any)?.name },
-          );
-        }
-      }
-    }
+    // [#25522 cut 8] The body moved to `engine-compatibility-api.ts` (see `CompatibilityApiHost`).
+    const readRegistry = () => this._registry;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof syncSchemas> = {
+      getDriverForObject: (...a) => this.getDriverForObject(...a),
+      get _registry() { return readRegistry(); },
+      get logger() { return readLogger(); },
+    };
+    return syncSchemas.call(host);
   }
 
   /**
@@ -22362,23 +22228,13 @@ export class ObjectQL implements IObjectQLEngine {
    * table when absent (and alters to add new columns).
    */
   async syncObjectSchema(objectName: string): Promise<void> {
-    const obj = this._registry.getObject(objectName) as any;
-    if (!obj) return;
-    const driver = this.getDriverForObject(objectName);
-    if (!driver) return;
-    // Federated (external) object (ADR-0015): register read metadata WITHOUT DDL
-    // (its remote schema is owned externally). This is what an app's onEnable
-    // calls after registering a late external driver so coercion maps + the
-    // physical-table mapping exist for queries. See SqlDriver.registerExternalObject.
-    if (isFederatedObject(obj)) {
-      if (typeof (driver as any).registerExternalObject === 'function') {
-        await (driver as any).registerExternalObject(obj);
-      }
-      return;
-    }
-    if (typeof (driver as any).syncSchema !== 'function') return;
-    const tableName = StorageNameMapping.resolveTableName(obj);
-    await (driver as any).syncSchema(tableName, obj);
+    // [#25522 cut 8] The body moved to `engine-compatibility-api.ts` (see `CompatibilityApiHost`).
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof syncObjectSchema> = {
+      getDriverForObject: (...a) => this.getDriverForObject(...a),
+      get _registry() { return readRegistry(); },
+    };
+    return syncObjectSchema.call(host, objectName);
   }
 
   /**
@@ -22432,17 +22288,15 @@ export class ObjectQL implements IObjectQLEngine {
    * Remove all hooks, actions, and objects contributed by a package.
    */
   removePackage(packageId: string): void {
-    // Remove hooks
-    for (const [key, handlers] of this.hooks.entries()) {
-      const filtered = handlers.filter(h => h.packageId !== packageId);
-      if (filtered.length !== handlers.length) {
-        this.hooks.set(key, filtered);
-      }
-    }
-    // Remove actions
-    this.removeActionsByPackage(packageId);
-    // Remove objects
-    this._registry.unregisterObjectsByPackage(packageId, true);
+    // [#25522 cut 8] The body moved to `engine-compatibility-api.ts` (see `CompatibilityApiHost`).
+    const readHooks = () => this.hooks;
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof removePackage> = {
+      removeActionsByPackage: (...a) => this.removeActionsByPackage(...a),
+      get hooks() { return readHooks(); },
+      get _registry() { return readRegistry(); },
+    };
+    return removePackage.call(host, packageId);
   }
 
   /**

@@ -45,21 +45,15 @@
  *   .github/workflows/dependabot-auto-merge.yml the header's "does NOT do" list
  *   scripts/dependabot-merge-gate.mjs           "declared = enforced"
  *
- * ⛔ One carrier was deliberately left standing by objectui#9502, and it was
- * not an oversight:
- *
- *   AGENTS.md                             "从仓内读不到"
- *
- * AGENTS.md is GOVERNED surface -- an agent drafts it, an authorised approver
- * lands it -- so objectui#9502 did not touch it. Its parenthetical also covered
- * who may BYPASS the ruleset, and bypass actors are not carried by
- * `GET /rules/branches/{branch}`, the endpoint this file reads. objectui#9520
- * ruled on it as a governed change of its own and split it along that line:
- * the required-checks half now points at this file, and "从仓内读不到" stays on
- * the bypass-actors half alone, where it was measured true -- the ruleset
- * endpoint answers a seat's token with `current_user_can_bypass` and no
- * `bypass_actors` key. ⛔ That kept half is not a missed repair. Nothing in this
- * tree re-derives it, either.
+ * A fourth carrier, AGENTS.md's ruleset bullet, was left standing by
+ * objectui#9502 (governed surface) and split by objectui#9520: its
+ * required-checks half pointed here, and "从仓内读不到" stayed on its
+ * bypass-actors half, where it was measured true -- bypass actors are not
+ * carried by `GET /rules/branches/{branch}`, the endpoint this file reads. The
+ * bullet left with objectstack#25712, when `ui/AGENTS.md` stopped restating the
+ * root `AGENTS.md`'s merge-queue rules (that file names the required set the
+ * merged repository's queue enforces); no carrier in this tree says the
+ * ruleset cannot be read any more.
  *
  * The WRITE half of every one of them is still true and this file does not
  * touch it. ⛔ This script never writes: no enrolment, no removal, no ruleset

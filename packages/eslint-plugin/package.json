@@ -1,0 +1,35 @@
+{
+  "name": "@objectstack/eslint-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "The four custom ESLint rules the root `eslint.config.mjs` registers for this repository's own code: slot-lookup, query-options, verify-stand-in and comment-swallow. Not published, no build step, plain ESM so `pnpm lint` loads it on every Node the repo supports. The root config imports the source path relatively, never this bare name.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.mjs"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "@typescript-eslint/parser": "^8.70.1",
+    "eslint": "^10.11.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.11"
+  },
+  "keywords": [
+    "objectstack",
+    "eslint",
+    "eslintplugin"
+  ],
+  "author": "ObjectStack",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/objectstack-ai/objectstack.git",
+    "directory": "packages/eslint-plugin"
+  },
+  "homepage": "https://objectstack.ai/docs",
+  "bugs": "https://github.com/objectstack-ai/objectstack/issues"
+}

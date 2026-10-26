@@ -57,6 +57,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import { ComponentRegistry } from '@object-ui/core';
 import { PredicateScopeProvider } from '@object-ui/react';
+import { toast } from '../../../ui/sonner';
 // Module-scope import (not `beforeAll`) — objectui#3010/#3021.
 import '../../../renderers';
 
@@ -206,6 +207,42 @@ describe('#6237 — a tab predicate gates the whole tab', () => {
     fireEvent.click(submitBtn());
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(document.body.textContent).not.toMatch(/required/i);
+  });
+
+  it('a SERVER rejection of a hidden tab\'s field is said at form level — no input can carry it (objectstack#25874)', async () => {
+    // The invalid-submit toast that used to name every rejected field is gone:
+    // a drawn field carries its own message. A field on a hidden tab has no
+    // drawn input, so its rejection must not be taken over as "marked inline"
+    // — the form-level banner says the server's sentence instead.
+    const toastError = vi.spyOn(toast, 'error').mockImplementation(() => 'id' as never);
+    const message = 'Salary is required';
+    const fields = [{ field: 'salary', code: 'required', message }];
+    const onSubmit = vi.fn().mockRejectedValue(
+      Object.assign(new Error(message), {
+        code: 'VALIDATION_FAILED',
+        httpStatus: 400,
+        details: { error: message, code: 'VALIDATION_FAILED', fields, object: 'crm_employee' },
+      }),
+    );
+    renderForm(
+      {
+        fields: FIELDS(),
+        fieldTabs: TABS(GATE),
+        showSubmit: true,
+        submitLabel: 'Save',
+        onSubmit,
+      },
+      DENIED,
+    );
+    expect(member(/salary/i)).toBeNull();
+    fireEvent.click(submitBtn());
+
+    await waitFor(() => expect(screen.getByText(message)).toBeTruthy());
+    expect(toastError).toHaveBeenCalledTimes(1);
+    expect(String(toastError.mock.calls[0][0])).toBe(message);
+    // The hidden tab is never activated to "reveal" a field it cannot draw.
+    expect(trigger()).toBeNull();
+    expect(screen.getByRole('tab', { name: /basics/i })).toHaveAttribute('data-state', 'active');
   });
 
   it('control: the SAME required field on a VISIBLE (even inactive) tab still blocks the submit', async () => {

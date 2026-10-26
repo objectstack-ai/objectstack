@@ -46,8 +46,14 @@ import Database from 'better-sqlite3';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI_ROOT = resolve(HERE, '..', '..', '..');
+/**
+ * The source entry, spawned by this process's own `node`, as the family's other spawners
+ * (`data-commands.absent-database`, `object-scope`, `unmapped-columns`) spawn it. Not through
+ * the `tsx` binary: the entry, its `src/` and its pinned `NODE_ENV=development` are the same
+ * either way, and the wrapper only adds a second process and its own transform, ~3.4 s of
+ * every spawn (#23181 slice 12: `tsx bin/run-dev.js --version` 8.28-8.44 s, `node` 4.93-4.99 s).
+ */
 const RUN_DEV = resolve(CLI_ROOT, 'bin', 'run-dev.js');
-const TSX = resolve(CLI_ROOT, '..', '..', 'node_modules', '.bin', 'tsx');
 const CASE_TIMEOUT_MS = 300_000;
 
 /** The one table outside the object set (`PackageServicePlugin.start()`'s raw DDL; see the boot-parity pin). */
@@ -116,7 +122,7 @@ const BOOT_STREAM_TAIL = 8_000;
  * there at `error`), and an assertion that failed without it left the CI log unable to confirm or refute one.
  */
 function serveBoot(f: Fixture, extra: NodeJS.ProcessEnv = {}): string {
-  const boot = spawnSync(TSX, [RUN_DEV, 'serve', '--no-server', '--no-ui', '--no-console', '--port', '0'], {
+  const boot = spawnSync(process.execPath, [RUN_DEV, 'serve', '--no-server', '--no-ui', '--no-console', '--port', '0'], {
     cwd: f.dir, env: childEnv(f, { ...extra, OS_MIGRATE_AND_EXIT: '1' }), encoding: 'utf8', timeout: 240_000,
   });
   const output =
@@ -130,7 +136,7 @@ function serveBoot(f: Fixture, extra: NodeJS.ProcessEnv = {}): string {
 const afterBoot = (bootOutput: string, what: string): string => `${what}\n${bootOutput}`;
 
 function command(f: Fixture, argv: string[], extra: NodeJS.ProcessEnv = {}): { exit: number | null; payload: any } {
-  const run = spawnSync(TSX, [RUN_DEV, 'migrate', ...argv], { cwd: f.dir, env: childEnv(f, extra), encoding: 'utf8', timeout: 240_000 });
+  const run = spawnSync(process.execPath, [RUN_DEV, 'migrate', ...argv], { cwd: f.dir, env: childEnv(f, extra), encoding: 'utf8', timeout: 240_000 });
   let payload: any;
   try { payload = JSON.parse(run.stdout); } catch { payload = { unparsed: `${run.stdout}\n${run.stderr}`.slice(-800) }; }
   return { exit: run.status, payload };

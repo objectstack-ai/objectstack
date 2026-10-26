@@ -155,7 +155,10 @@ is a structured spreadsheet — you never hand-write JSON:
   bits (Transfer / Restore / Purge), and View All / Modify All, with per-row
   bulk buttons (Read / CRUD / All / None) and the object's sharing baseline
   (OWD) shown alongside.
-- **Field-level security** — expand an object for per-field Read / Edit.
+- **Field-level security** — expand an object for per-field Read / Edit, and
+  a **When (edit)** condition that locks a field for this set's holders once a
+  record reaches a stage — see the recipe
+  [Lock fields for a position once a record reaches a stage](/docs/permissions/access-recipes#data-lock-fields-for-a-position-once-a-record-reaches-a-stage).
 - **Capabilities** — named grants like `manage_users` or `studio.access`.
 
 Prefer the smallest change that works, in this order: **bind an existing set

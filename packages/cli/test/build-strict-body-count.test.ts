@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 110 — spawns the real producer once per single-cause fixture: six spawns of the source CLI, `os build --strict-body` over the zero control, the one and four fixtures in the text and `--json` faces, and the `functions`-entry stack; each spawn's floor is the source entry loading all 72 commands (about 8.5 s, `os --version` included); slowest CI reading 82.44 s (run 40204927516) in the window of shard-timings refresh run 40275747937 (PR #25960), over 10 s in 3 of 3 runs that executed it, x 1.25, rounded up
 
 /**
  * [#22839] `objectstack build --strict-body` counts callables, and its

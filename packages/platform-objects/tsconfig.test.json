@@ -35,7 +35,7 @@
 //     stops requiring `.js` on this package's own `src` relative imports in this
 //     program; nothing is lost, because leg 1 still compiles `src` under
 //     NodeNext and is where that rule is enforced.
-//   - `lib: ["ES2022"]`: the root config's `lib` is ES2020 while vitest runs on
+//   - `lib: ["ES2022"]`: the base config's `lib` is ES2020 while vitest runs on
 //     a Node with ES2022 builtins, so the gap reports as TS2550 about the CHECK.
 //     Measured effect today: **zero**. Fidelity, not error reduction.
 //   - ⛔ STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`,
@@ -85,13 +85,7 @@
 // on 2026-09-18 (#18373). That file's #12511 doc-block, which had the numbers,
 // is readable at `03b7b8187^`.
 {
-  "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "noEmit": true,
-    "module": "esnext",
-    "moduleResolution": "bundler",
-    "lib": ["ES2022"]
-  },
+  "extends": ["./tsconfig.json", "../../tsconfig.test.base.json"],
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
 }

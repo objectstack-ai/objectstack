@@ -1,21 +1,11 @@
+// The workspace ROOT's own type-check program: `scripts/` and the top-level
+// configs, everything outside packages/apps/examples/ui. It is NOT the shared
+// base — packages extend `tsconfig.base.json` — so the Node environment below
+// reaches this program and nothing else.
 {
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2020",
-    "module": "NodeNext",
-    "lib": ["ES2020"],
-    "ignoreDeprecations": "6.0",
-    "declaration": true,
-    "declarationMap": true,
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "moduleResolution": "NodeNext",
-    "resolveJsonModule": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true
+    "types": ["node"]
   },
   "exclude": [
     "node_modules",
