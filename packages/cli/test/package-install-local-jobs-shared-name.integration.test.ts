@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 140 — spawns the real producer once per single-cause fixture: two `os start` boots of the tsx source entry on one home (the hot installs and an uninstall, then the rehydrate and a second uninstall) and three `os package install` runs, one per package sharing the job name; slowest CI reading 110.4 s (run 38332198724, the card's window; 107.1 s in hourly full battery run 40290659753) x 1.25, rounded up
 
 /**
  * #21602 — two install-local packages that declare the SAME job name both keep
