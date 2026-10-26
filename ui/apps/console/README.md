@@ -136,7 +136,7 @@ Console App
 
 | Document | Description |
 |----------|-------------|
-| [Roadmap](../../ROADMAP.md) | Pointer to where plans and their status are tracked |
+| [Roadmap](../../ROADMAP.md) | Repo-wide development plan — the Console phases and their status live here |
 | [Getting Started Guide](../../content/docs/guide/console.md) | User-facing documentation |
 | [Architecture Guide](../../content/docs/guide/console-architecture.md) | Technical deep-dive |
 | [UI Improvement Proposal](./docs/UI_IMPROVEMENT_PROPOSAL.md) | Modern UI design improvements for metadata inspector |
