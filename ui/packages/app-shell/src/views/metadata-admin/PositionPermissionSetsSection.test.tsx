@@ -19,7 +19,7 @@ import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, within, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 /** The sets the stubbed server serves, by name. */
 const SERVED: Record<string, Record<string, unknown>> = {
@@ -58,10 +58,20 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+/**
+ * Mounted as the console mounts the page: the element of the `metadata/:type/:name`
+ * route (`AppContent.tsx`), since a path-relative link resolves against the
+ * matched route's pathname.
+ */
 function mount(permissionSets: unknown) {
   render(
     <MemoryRouter initialEntries={['/apps/setup/metadata/position/sales_rep?scope=environment']}>
-      <PositionPermissionSetsSection name="sales_rep" draft={{ name: 'sales_rep', permissionSets }} />
+      <Routes>
+        <Route
+          path="/apps/:appName/metadata/:type/:name"
+          element={<PositionPermissionSetsSection name="sales_rep" draft={{ name: 'sales_rep', permissionSets }} />}
+        />
+      </Routes>
     </MemoryRouter>,
   );
 }
