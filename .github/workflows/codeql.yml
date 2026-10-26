@@ -1,22 +1,24 @@
 name: CodeQL Security Analysis
 
 # Deliberately NOT on pull_request: the analysis took ~4½ runner-minutes per
-# PR sync, and everything a PR introduces is analyzed on main within minutes
-# of the merge anyway (multi-agent merge cadence). Alerts surface on main's
-# runs + the weekly deep pass instead of blocking/occupying PR runners.
-# If branch protection ever required the "Analyze (javascript)" check, that
-# requirement must be dropped along with this trigger.
+# PR sync. If branch protection ever required the "Analyze (javascript)" check,
+# that requirement must be dropped along with this trigger.
+#
+# DAILY, not on every push to main (#25771, maintainer ruling Q6 = C). The push
+# trigger ran 100 analyses in 25.9 h, 86 of them cancelled by the next merge,
+# and each one competed with PR and merge-queue runners. One daily run of
+# `main` analyzes everything that landed the day before; the Monday deep pass
+# it replaces ran the same query suite, so it folds into the daily one.
+# `workflow_dispatch` re-analyzes `main` on demand, e.g. after landing a fix.
 on:
-  push:
-    branches:
-      - main
   schedule:
-    # Run at 02:00 UTC every Monday
-    - cron: '0 2 * * 1'
+    # 02:00 UTC every day
+    - cron: '0 2 * * *'
+  workflow_dispatch:
 
-# A superseded analysis of an outdated commit has no value — cancel it. A newer
-# main push cancels only an in-flight main analysis (the newer commit still
-# gets analyzed).
+# A superseded analysis of an outdated commit has no value — cancel it. An
+# on-demand run cancels an in-flight analysis of the same ref (the newer
+# `main` head still gets analyzed).
 concurrency:
   group: codeql-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true

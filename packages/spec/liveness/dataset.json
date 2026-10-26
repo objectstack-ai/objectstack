@@ -128,6 +128,29 @@
           "evidence": "packages/services/service-analytics/src/dataset-compiler.ts#compileDataset (`derived.push({ name: m.name, op: m.derived.op, of: m.derived.of })` — both members read here, and a derived measure is deliberately NOT compiled into a Cube metric); packages/services/service-analytics/src/dataset-executor.ts#evaluateDerivedMeasures (post-aggregation arithmetic row by row, driven from `compiled.derived`)",
           "note": "post-aggregation arithmetic (ratio/sum/difference/product) over base measures; {op, of} both consumed. 2026-08-28: RE-ANCHORED (commit 9ee2dcfbd) and REPOINTED — `:247` had rotted onto a BLANK LINE, and the compiler leg (where `{op, of}` are actually read off the authored key) was uncited. Re-closed by hand against c459da6bc; DATED for the first time (this file carried no `verifiedAt` anywhere, which the review accepting that re-anchoring sorts as OLDEST).",
           "verifiedAt": "2026-08-28"
+        },
+        "duration": {
+          "status": "live",
+          "evidence": "packages/services/service-analytics/src/dataset-compiler.ts#compileDurationMeasure (`from`, `to`, `unit` and the measure's `aggregate` read off the authored key into the dataset scope's `measureDurations`; each column judged `datetime` against the declaration, `400 DATASET_INVALID` otherwise); packages/services/service-analytics/src/duration-measure-sql.ts#durationOperandSql (the per-row `to - from` per SQL dialect, divided by the unit's seconds, which `NativeSQLStrategy` wraps in the aggregate)",
+          "note": "[#25778] aggregated time between two datetime columns of one record; {from, to, unit} all consumed. Served by the native-SQL strategy and the draft preview; the service refuses it `400 INVALID_FIELD` on any other strategy. Live on SQLite and PostgreSQL in dataset-duration-measure.test.ts.",
+          "verifiedAt": "2026-10-25",
+          "children": {
+            "from": {
+              "status": "live",
+              "evidence": "packages/services/service-analytics/src/dataset-compiler.ts#compileDurationMeasure (`duration.from` checked as one bare column name and judged `datetime` against the object's declaration, `400 DATASET_INVALID` otherwise, then carried into `measureDurations`); packages/services/service-analytics/src/strategies/native-sql-strategy.ts#resolveDurationMeasureSql (the column qualified, temporal-repaired and passed to `durationOperandSql` as the start instant)",
+              "verifiedAt": "2026-10-25"
+            },
+            "to": {
+              "status": "live",
+              "evidence": "packages/services/service-analytics/src/dataset-compiler.ts#compileDurationMeasure (`duration.to` checked as one bare column name and judged `datetime` against the object's declaration, `400 DATASET_INVALID` otherwise, then carried into `measureDurations`); packages/services/service-analytics/src/strategies/native-sql-strategy.ts#resolveDurationMeasureSql (the column qualified, temporal-repaired and passed to `durationOperandSql` as the end instant)",
+              "verifiedAt": "2026-10-25"
+            },
+            "unit": {
+              "status": "live",
+              "evidence": "packages/services/service-analytics/src/duration-measure-sql.ts#durationOperandSql (divides the per-row seconds by `DATASET_DURATION_UNIT_SECONDS[unit]`); packages/services/service-analytics/src/preview-evaluator.ts#durationOf (the same division on the draft preview)",
+              "verifiedAt": "2026-10-25"
+            }
+          }
         }
       }
     }

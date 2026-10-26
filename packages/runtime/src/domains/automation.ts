@@ -80,6 +80,38 @@ import { carryForwardRedactedValues, redactMetadataItem } from '@objectstack/met
 import type { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 
 /**
+ * [#9416, #25821] The value-shape check for a body key whose value must be a
+ * JSON object (a map of names to values): the resume door's `inputs`,
+ * `variables` and `output`, and the trigger door's `params`. ONE function, so
+ * the two doors of one engine ask the same question and answer it in the same
+ * words — a second spelling of it is how they disagreed.
+ *
+ * Returns the located `fields[]` entry (ADR-0114 `invalid_type`) for a value
+ * that is not an object, `undefined` otherwise. `undefined` counts as ABSENT,
+ * never mis-shaped: `JSON.stringify` drops such a key, so no HTTP caller can
+ * send one, and the in-process spelling `{ key: maybeUndefined }` means "not
+ * sent". An explicit `null` IS refused — JSON can express it, and it is the
+ * value that used to be dropped most quietly of all.
+ *
+ * The received-type wording is spelled here rather than borrowed from the
+ * resume arm's `jsonTypeOf`, whose note keeps that namer local to the arm: what
+ * is shared is this one refusal, not a formatter.
+ */
+function objectValueFailure(
+    field: string,
+    value: unknown,
+): { field: string; code: 'invalid_type'; message: string } | undefined {
+    if (value === undefined) return undefined;
+    if (value !== null && typeof value === 'object' && !Array.isArray(value)) return undefined;
+    const received = value === null ? 'null' : Array.isArray(value) ? 'an array' : `a ${typeof value}`;
+    return {
+        field,
+        code: 'invalid_type',
+        message: `expected an object (a map of names to values), received ${received}`,
+    };
+}
+
+/**
  * Translate a trigger request body into the canonical `AutomationContext` the
  * engine expects, and forward the caller's resolved identity.
  *
@@ -114,9 +146,31 @@ import type { ObjectStackProtocolImplementation } from '@objectstack/metadata-pr
  * [#19846] It also states `callerParamKeys` — which keys of the params bag the
  * caller supplied, as opposed to the row id this builder seeds — so every route
  * sharing it carries the same caller-provenance signal.
+ *
+ * [#25821] A `params` that is not a JSON object is refused here, thrown as the
+ * validation failure both dispatcher exits and the endpoint executor answer as
+ * `400 VALIDATION_FAILED` + `fields[]`. Every door that builds its context here
+ * calls this before `execute()`, so a refused trigger dispatches nothing and
+ * leaves no run row. See {@link objectValueFailure}.
  */
 export function buildAutomationContext(body: any, context: HttpProtocolContext): Record<string, unknown> {
     const ctxBody = body && typeof body === 'object' ? body : {};
+    // [#25821] The params bag must be an object before anything is read from
+    // it. The read below used to be `params && typeof params === 'object'`, so
+    // a string became an EMPTY bag and the flow ran with no inputs, an array
+    // was spread into an index-keyed bag, and a falsy value (`null`, `0`,
+    // `false`, `""`) took the flat-body branch, which forwarded the body's
+    // other keys instead. The resume door refuses the same class on its own
+    // object-valued keys (#9416); this asks its question through the same
+    // function. `undefined` is absent, as there — the flat-body branch below
+    // still serves a body with no `params` key.
+    const paramsFailure = objectValueFailure('params', ctxBody.params);
+    if (paramsFailure) {
+        throw validationFailure(
+            `Invalid trigger body — \`params\` ${paramsFailure.message}`,
+            [paramsFailure],
+        );
+    }
     // `{recordId, objectName, params}` (the UI/SDK request shape) → the
     // canonical AutomationContext shape:
     //  - `recordId` is exposed in `params.recordId` AND aliased to
@@ -125,13 +179,11 @@ export function buildAutomationContext(body: any, context: HttpProtocolContext):
     //  - `objectName` maps to the canonical `object` field.
     const recordId = ctxBody.recordId;
     const objectName = ctxBody.objectName ?? ctxBody.object;
-    const baseParams: Record<string, any> = (ctxBody.params && typeof ctxBody.params === 'object')
-        ? { ...ctxBody.params }
-        : {};
+    const baseParams: Record<string, any> = ctxBody.params !== undefined ? { ...ctxBody.params } : {};
     // Back-compat: when callers POST a flat body (no `params` wrapper),
     // forward unknown top-level keys as flow params so the original
     // `{ foo: 'bar' }` payload is not silently dropped.
-    if (!ctxBody.params) {
+    if (ctxBody.params === undefined) {
         const reserved = new Set(['recordId', 'objectName', 'object', 'event', 'params']);
         for (const [k, v] of Object.entries(ctxBody)) {
             if (reserved.has(k)) continue;
@@ -3352,17 +3404,13 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // commit a4331227b pinned; before `resume()`, so nothing reaches the
                 // engine until the body is legal and the suspension stays
                 // intact for a corrected retry.
+                //
+                // The object-valued keys go through `objectValueFailure`, the
+                // one check the trigger door's `params` asks too (#25821).
                 const valueFailures: Array<{ field: string; code: 'invalid_type'; message: string }> = [];
                 for (const key of ['inputs', 'variables', 'output']) {
-                    const v = b[key];
-                    if (v === undefined) continue;
-                    if (v === null || typeof v !== 'object' || Array.isArray(v)) {
-                        valueFailures.push({
-                            field: key,
-                            code: 'invalid_type',
-                            message: `expected an object (a map of names to values), received ${jsonTypeOf(v)}`,
-                        });
-                    }
+                    const failure = objectValueFailure(key, b[key]);
+                    if (failure) valueFailures.push(failure);
                 }
                 if (b.branchLabel !== undefined && typeof b.branchLabel !== 'string') {
                     valueFailures.push({

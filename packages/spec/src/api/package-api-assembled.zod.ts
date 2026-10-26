@@ -37,8 +37,8 @@ import {
  * `@objectstack/spec/api` (#17517), that tree became part of every bundle of the
  * entry — and a browser module that imported two string constants from
  * `./sortability.zod` paid for all of it, roughly doubling its gzipped bundle,
- * because the entry ships as one self-contained bundle and little of that tree
- * can be dropped by a consumer's tree-shaking. The maintainer ruling on #18576
+ * because the entry links every chunk its module graph touches and little of
+ * that tree can be dropped by a consumer's tree-shaking. The maintainer ruling on #18576
  * (letter B) removed the cost rather than watching it: the browser-facing
  * `./api` no longer carries these declarations, and this entry does.
  *

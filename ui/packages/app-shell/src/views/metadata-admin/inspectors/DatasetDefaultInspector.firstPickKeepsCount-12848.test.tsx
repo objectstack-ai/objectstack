@@ -170,6 +170,8 @@ describe('objectChangePatch moves a dataset between objects (objectui#12848)', (
       { name: 'amount_sum', aggregate: 'sum', field: 'amount' },
       { name: 'won_count', aggregate: 'count', filter: { stage: 'won' } },
       { name: 'won_rate', derived: { op: 'ratio', of: ['won_count', 'deal_count'] } },
+      // objectstack#25778: no `field`, yet `from` / `to` name two of the old object's fields.
+      { name: 'avg_days_to_close', aggregate: 'avg', duration: { from: 'created_at', to: 'closed_at', unit: 'days' } },
     ],
   };
 
