@@ -3549,35 +3549,6 @@ const fr = {
   cloudWorkspaceTimezoneNotice: {
     seeded: "Le fuseau horaire de l’environnement a été défini sur {{zone}} d’après votre navigateur lors de sa création. Vous pouvez le modifier dans Paramètres → Localisation.",
   },
-  ai: {
-    nlQuery: {
-      placeholder: "Posez une question sur vos données…",
-      ask: "Demander",
-      results: "Résultats",
-      match: "Correspondance : {{percent}}",
-      simulatedSummary: "Résultats pour : {{query}}",
-      noResults: "Aucun enregistrement correspondant",
-      recentQueries: "Requêtes récentes",
-    },
-    formAssist: {
-      title: "Suggestions de l’IA",
-      suggestionCount: "{{count}} suggestions",
-      suggestionCount_one: "{{count}} suggestion",
-      suggestionCount_many: "{{count}} de suggestions",
-      suggestionCount_other: "{{count}} suggestions",
-      applyAll: "Tout appliquer",
-      confidence: "Confiance : {{percent}}",
-      appliedCount: "{{count}} suggestions appliquées",
-      appliedCount_one: "{{count}} suggestion appliquée",
-      appliedCount_many: "{{count}} de suggestions appliquées",
-      appliedCount_other: "{{count}} suggestions appliquées",
-    },
-    recommendations: {
-      title: "Recommandations",
-      generating: "Génération des recommandations…",
-      empty: "Aucune recommandation disponible",
-    },
-  },
   aiApprovals: {
     title: "Approbations IA",
     description: "Actions proposées par un agent IA qui nécessitent une validation humaine avant exécution.",
