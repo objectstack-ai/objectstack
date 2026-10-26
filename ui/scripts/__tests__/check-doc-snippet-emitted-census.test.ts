@@ -25,6 +25,7 @@ import {
   listEmittedSources,
   scanEmittedTemplates,
 } from '../check-doc-snippet-types.mjs';
+import { jobBlock, rootCi, uiRun, UI_JOBS, withoutComments } from './helpers/root-ci';
 
 /**
  * objectui#7864 — the emitted-code census.
@@ -404,20 +405,31 @@ describe('on this repository — the walk is non-vacuous and reaches both known 
   });
 });
 
+/**
+ * The home is the repository root's `ci.yml` now (objectstack#25712). GitHub
+ * runs only the root `.github/workflows/`, and objectstack#25902 ported
+ * objectui's `repo-gates.yml` into the root `lint-ui` job, which runs the
+ * census and the gate through the `check:doc-snippets` alias, after the build
+ * that serves them. The pins read that job by path, and the alias case ties the
+ * spelling to this script.
+ */
 describe('wiring — a census nothing runs is not a census', () => {
-  const workflow = fs.readFileSync(
-    path.join(repoRoot, '.github/workflows/repo-gates.yml'),
-    'utf8',
-  );
+  const workflow = withoutComments(jobBlock(rootCi(), UI_JOBS.lint));
+  const ALIAS = 'check:doc-snippets';
 
-  it('runs the census in the workflow that already builds this gate\'s closure', () => {
-    expect(workflow).toContain('--emit-census');
+  it('the alias the job runs is this script', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
+    expect(pkg.scripts[ALIAS]).toBe(`node ${SCRIPT}`);
+  });
+
+  it('runs the census in the job that already builds this gate\'s closure', () => {
+    expect(workflow).toContain(`${uiRun(ALIAS)} --emit-census`);
   });
 
   it('runs it AFTER the build and BEFORE the blocking gate, so a red gate cannot hide the number', () => {
-    const build = workflow.indexOf('turbo run build');
-    const census = workflow.indexOf(`node ${SCRIPT} --emit-census`);
-    const gate = workflow.search(new RegExp(`run: node ${SCRIPT.replace(/[.\\/]/g, '\\$&')}\\s*$`, 'm'));
+    const build = workflow.indexOf('id: ui-gate-build');
+    const census = workflow.indexOf(`${uiRun(ALIAS)} --emit-census`);
+    const gate = workflow.search(new RegExp(`run: ${uiRun(ALIAS).replace(/[.\\/:-]/g, '\\$&')}\\s*$`, 'm'));
     expect(build).toBeGreaterThan(-1);
     expect(census).toBeGreaterThan(build);
     expect(

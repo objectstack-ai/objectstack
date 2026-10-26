@@ -256,24 +256,19 @@ jobs:
     name: Regenerate the shard-timings dataset
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Reads only. The push, the PR and its label go out on the fleet App token
+    # the write step mints (see "WHOSE IDENTITY OPENS THE PR" at that step),
+    # never on this run's own `GITHUB_TOKEN`.
     permissions:
-      # Declaring any `permissions:` block drops every scope not listed, so all
-      # three are spelled even though only two are writes.
-      contents: write # push the bot branch
-      pull-requests: write # open the PR and add its label
+      contents: read # the checkout, and `git show HEAD:` of the committed dataset
       actions: read # list runs, read jobs, download run-summary artifacts
     steps:
+      # No persisted credential: the one push goes out on the fleet token
+      # (`gh auth setup-git` in the write step), never on `GITHUB_TOKEN`.
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
-          # A PAT when one exists, the Actions token otherwise — the same choice
-          # cut-rc.yml makes, for the same reason, and the difference is stated
-          # in the PR body rather than left to be discovered: a PR opened with
-          # the Actions `GITHUB_TOKEN` starts NO workflow runs (GitHub's
-          # recursion guard), so with the fallback credential the refresh PR
-          # arrives with no CI of its own until someone pushes to it or reopens
-          # it. With the PAT its checks run immediately.
-          token: ${{ secrets.RELEASE_PUSH_TOKEN || github.token }}
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -710,7 +705,6 @@ jobs:
           RUN_COUNT: ${{ steps.generate.outputs.run_count }}
           HEAD_SHA: ${{ steps.generate.outputs.head_sha }}
           PARTITIONER_EXIT: ${{ steps.bins.outputs.partitioner_exit }}
-          USED_PAT: ${{ secrets.RELEASE_PUSH_TOKEN != '' }}
         run: |
           set -euo pipefail
 
@@ -907,14 +901,9 @@ jobs:
               echo "reports and stops, because both are decisions."
               echo
             fi
-            if [ "$USED_PAT" != "true" ]; then
-              echo "## No checks will start on this PR by themselves"
-              echo
-              echo "It was opened with the Actions \`GITHUB_TOKEN\`, and GitHub's recursion guard means a"
-              echo "PR opened that way triggers no workflow runs. Push any commit to the branch, or close"
-              echo "and reopen the PR, to start CI."
-              echo
-            fi
+            echo "Pushed and opened as the fleet App (\`objectstack-fleet[bot]\`, #25936), so this PR's"
+            echo "own events start CI: no push or reopen is needed to get its checks."
+            echo
             # ⛔ No closing keyword is emitted here, in any form. GitHub's
             # parser matches `fixes`/`closes`/`resolves` plus a number and
             # ignores every negation around them, so even a sentence saying a
@@ -923,6 +912,64 @@ jobs:
             echo "Refs #16464, #16173, #16222."
           } > "$RUNNER_TEMP/pr-body.md"
           echo "Composed a $(wc -l < "$RUNNER_TEMP/pr-body.md")-line pull request body."
+
+      # WHOSE IDENTITY OPENS THE PR (#25936)
+      # ------------------------------------
+      # GitHub starts no workflow run for an event raised by a run's own
+      # `GITHUB_TOKEN` (its recursion guard). This lane used to push and open
+      # with that token whenever no PAT was configured, and none was: every
+      # refresh PR arrived with no CI and sat until a seat pushed to it (#24467,
+      # 2026-10-19, ten days; #25960, 2026-10-26, started only by a relay
+      # `pr_update_branch`). A refresh can move pin 3c's slice count, so a PR
+      # nobody's CI reads is exactly the one that needs reading.
+      #
+      # So the acts that leave the runner are done as the fleet App
+      # (`objectstack-fleet[bot]`), whose events DO start workflows: the two
+      # steps below mint a token from the organization variable
+      # `OS_FLEET_APP_ID` and secret `OS_FLEET_PRIVATE_KEY` with
+      # `actions/create-github-app-token`, the pair and action
+      # fleet-write.yml mints with, and the one ui/'s refresh already took
+      # (objectui#13362). The token is narrowed to this repository and to
+      # contents (push the bot branch) + pull-requests (open the PR, add its
+      # label), exists only in the write step's `env:`, and is revoked by the
+      # action's post step. No `workflows` grant: the branch is cut from the
+      # checked-out `main` and adds one commit that touches only the dataset,
+      # so the push carries no workflow-file change.
+      #
+      #   ⛔ No fallback to `GITHUB_TOKEN` and no PAT. A missing credential is a
+      #      red run that names it, never a quiet return to a PR with no CI.
+      #   ⛔ A `pull_request` run mints nothing and never reads the App secret:
+      #      its write step is the dry run, and nothing it does leaves the
+      #      runner.
+      - name: Check the fleet App credential is visible to this repository
+        id: credential
+        if: steps.compare.outputs.changed == 'true' && github.event_name != 'pull_request'
+        env:
+          HAS_APP_ID: ${{ vars.OS_FLEET_APP_ID != '' }}
+          HAS_PRIVATE_KEY: ${{ secrets.OS_FLEET_PRIVATE_KEY != '' }}
+        run: |
+          # Read as booleans, never printed: a red that names the missing half
+          # beats create-github-app-token's own error, which does not.
+          if [ "$HAS_APP_ID" != 'true' ] || [ "$HAS_PRIVATE_KEY" != 'true' ]; then
+            echo "::error title=Shard timings refresh::The fleet App credential is not visible to this repository (OS_FLEET_APP_ID set: $HAS_APP_ID; OS_FLEET_PRIVATE_KEY set: $HAS_PRIVATE_KEY). Nothing was pushed (#25936)."
+            exit 1
+          fi
+          # The token's one repository, by name: the action takes names
+          # without the owner, and an empty list would widen it to every
+          # repository the installation covers.
+          echo "repository=${GITHUB_REPOSITORY#*/}" >> "$GITHUB_OUTPUT"
+
+      - name: Mint the fleet App token, narrowed to this repository
+        id: fleet
+        if: steps.compare.outputs.changed == 'true' && github.event_name != 'pull_request'
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.OS_FLEET_APP_ID }}
+          private-key: ${{ secrets.OS_FLEET_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ steps.credential.outputs.repository }}
+          permission-contents: write # push the bot branch
+          permission-pull-requests: write # open the PR and add its label
 
       # The WRITE — and, on a `pull_request` run of this lane, its rehearsal.
       #
@@ -956,7 +1003,11 @@ jobs:
           # refuses any other spelling, and refuses 'false' on a `pull_request`
           # run, so no edit to this line can make a pull request push.
           DRY_RUN: ${{ github.event_name == 'pull_request' }}
-          GH_TOKEN: ${{ secrets.RELEASE_PUSH_TOKEN || github.token }}
+          # The fleet App token on every live run. A dry run mints none, so it
+          # holds the run's own read-only token as a stand-in that `outward`
+          # never hands to a network act; a live run with no minted token is
+          # empty here and the guard below reds it.
+          GH_TOKEN: ${{ github.event_name == 'pull_request' && github.token || steps.fleet.outputs.token }}
           # Every variable the script expands that the runner does not provide.
           # The commit message is the dataset's provenance and names all four:
           # ⛔ never drop one from the message to get a green run.
@@ -1004,8 +1055,11 @@ jobs:
           }
 
           BRANCH="claude/shard-timings-refresh-$RUN_ID"
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          # The checkout persisted no credential; this points git's helper at
+          # GH_TOKEN, the fleet token, for the one push below.
+          outward gh auth setup-git
+          git config user.name 'objectstack-fleet[bot]'
+          git config user.email '332303061+objectstack-fleet[bot]@users.noreply.github.com'
           git switch -c "$BRANCH"
           git add scripts/test-shard-timings.json
           # Separate -m flags rather than one embedded newline: a YAML-indented

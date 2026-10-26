@@ -3766,6 +3766,7 @@ export class AuthPlugin implements Plugin {
             runAdminImportUsers(
             {
               getAuthApi: () => this.authManager!.getApi() as any,
+              getAuthContext: () => this.authManager!.getAuthContext(),
               getDataEngine: () => this.authManager!.getDataEngine(),
               ...(typeof metaReader?.getMetaItem === 'function'
                 ? { getMetaItem: (ref: { type: string; name: string }) => metaReader.getMetaItem(ref) }
