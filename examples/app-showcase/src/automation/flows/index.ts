@@ -1344,15 +1344,19 @@ export const InvoiceDualSignoffFlow = defineFlow({
       label: 'Notify: Cleared',
       config: {
         topic: 'invoice.signoff',
-        // The INVOICE's own owner, not `record.account.owner` (#7381).
-        // `showcase_account` has no `owner` field at all — its people-ish keys
-        // are `billing_email` and the injected `owner_id` — so that hop resolved
-        // to nothing however the relation was hydrated, and the notify node
-        // refuses a run with no recipients: approving the demo stranded its run
-        // instead of delivering this message. `showcase_invoice.owner` is the
-        // seeded rep (the same RLS anchor the contributor permission set uses),
-        // which is who "your invoice cleared sign-off" is addressed to anyway.
-        recipients: [{ dialect: 'cel', source: 'has(record.owner) ? record.owner : null' }],
+        // [#25758] The organization's owners (`sys_member.role` `owner`), the
+        // Default Organization's admin on a dev boot, who also holds the
+        // finance and legal positions that clear the seeded request.
+        //
+        // Not `record.owner`: the seeded invoices' owners (ada@, linus@,
+        // grace@example.com) are deliberately NOT users — they are the
+        // fixture of the ADR-0055 isolation demo, where an operator signs UP
+        // as one of them (`demo-personas.ts`, `inert-wirings.test.ts` §5) —
+        // and an inbox-only node fails on an address no user holds, so
+        // approving the seeded invoice stranded the run here. Not
+        // `record.account.owner` either (#7381): `showcase_account` has no
+        // `owner` field, so that hop resolved to nothing.
+        recipients: 'role:owner',
         channels: ['inbox'],
         severity: 'info',
         // The expanded relation is read HERE — `{{ record.account.name }}` is what
