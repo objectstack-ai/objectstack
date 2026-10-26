@@ -460,7 +460,7 @@ if (pinned) {
   console.error(
     `✓ ${recordMoved ? 're-recorded' : 'left unchanged'} scripts/sdui-manifest.record.json in-tree — ${SOURCE} ${MODULES_ROOT_REL}, ` +
       `@object-ui/core workspace version ${nextRecord.inTree.objectuiWorkspaceVersion}` +
-      (carried.sha256 ? ` (artefact unchanged since ${nextRecord.generatedAt}, so the record is carried)` : '') +
+      (carried.sha256 ? ` (artefact unchanged since ${nextRecord.generatedAt}: its date and version are carried)` : '') +
       '; ' +
       (carried.objectuiSha ? `pin fields kept (artefact unchanged since pin ${carried.objectuiSha.slice(0, 12)})` : 'no pin fields'),
   );
