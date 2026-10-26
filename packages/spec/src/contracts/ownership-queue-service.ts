@@ -42,6 +42,9 @@ import type { QueueMemberType } from '../security/queue.zod.js';
 /** Kernel service name the ownership-queue service registers under. ⛔ Not `queue` — see the module header. */
 export const OWNERSHIP_QUEUE_SERVICE = 'ownership-queue';
 
+/** Which reader an expansion is for — see {@link IOwnershipQueueService.expandMembers}. */
+export type QueueExpansionPurpose = 'access' | 'addressing';
+
 /** One member specification: a recipient kind and the value that kind takes in a sharing rule. */
 export interface QueueMemberSpec {
   type: QueueMemberType;
@@ -81,8 +84,20 @@ export interface IOwnershipQueueService {
    * The queue's members in `organizationId`: the union of each member
    * specification's expansion, de-duplicated and ordered by user id
    * ascending. `[]` for an empty queue and for a name that resolves nowhere.
+   *
+   * `purpose` carries the platform's split between the two kinds of reader
+   * (maintainer ruling 2026-08-15: "Access-conferring paths filter
+   * deactivated positions; addressing paths do not"). `'access'`, the
+   * default, drops the holders of a position the activation ledger switches
+   * off — the sitting-record path, the claim, the assignment pool and the
+   * sharing recipient all confer access. `'addressing'` keeps them — the
+   * approver slate routes work, and dropping holders there is fail-open.
    */
-  expandMembers(name: string, organizationId: string | null): Promise<string[]>;
+  expandMembers(
+    name: string,
+    organizationId: string | null,
+    options?: { purpose?: QueueExpansionPurpose },
+  ): Promise<string[]>;
 
   /** Is `userId` a member of the queue named `name` in `organizationId`? `false` when the name resolves nowhere. */
   isMember(userId: string, name: string, organizationId: string | null): Promise<boolean>;
@@ -93,4 +108,12 @@ export interface IOwnershipQueueService {
    * `current_user.queues`. Ordered by name.
    */
   queuesOf(userId: string, organizationId: string | null): Promise<string[]>;
+
+  /**
+   * The declared queue named `name` — `null` when no package declares it or
+   * the activation ledger switches it off. Optional: the activation door looks
+   * a `queue` row's subject up through it, and answers 503 when the
+   * registered service does not carry it.
+   */
+  declaredQueueNamed?(name: string): Promise<{ name: string; packageId?: string } | null>;
 }

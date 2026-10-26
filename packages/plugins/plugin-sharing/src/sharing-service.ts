@@ -11,7 +11,9 @@ import type {
   GrantShareInput,
   ShareAccessLevel,
   SharingWriteVerdict,
+  IOwnershipQueueService,
 } from '@objectstack/spec/contracts';
+import { resolveInjectedColumnProvenance } from '@objectstack/spec/data';
 import {
   normalizeTenancyPosture,
   postureEnforcesWall,
@@ -190,6 +192,9 @@ function nonUserRecipientTypeRemedy(value: unknown): string {
  */
 const OWNER_FIELD = 'owner_id';
 
+/** [ADR-0142 D3] The ownership-queue column, injected beside `owner_id`. */
+const QUEUE_FIELD = 'queue';
+
 /**
  * Effective sharing model — collapses the authorable OWD vocabulary onto the
  * three behaviours this service enforces:
@@ -309,6 +314,18 @@ const RECORD_ORGANIZATION_READ_FAILED: RecordOrganizationReading = { kind: 'read
 
 function hasOwnerField(schema: any): boolean {
   return Boolean(schema?.fields && OWNER_FIELD in schema.fields);
+}
+
+/**
+ * [ADR-0142 D3] Does the object carry the platform's own `queue` column, with
+ * storage behind it? Provenance, not presence: the column is injected on
+ * exactly the `ownership: 'user'` objects (a declared `queue` on one of those
+ * is refused at registration), and on an ADR-0015 federated object the
+ * injected column has no storage, so a predicate over it could never resolve.
+ */
+function hasQueueColumn(schema: any): boolean {
+  if (!schema?.fields || !(QUEUE_FIELD in schema.fields)) return false;
+  return resolveInjectedColumnProvenance(schema, QUEUE_FIELD) === 'injected-provisioned';
 }
 
 /**
@@ -491,6 +508,13 @@ export interface SharingServiceOptions {
    * refuses: an unresolvable posture must not be read as "no wall, carry on".
    */
   tenancy?: () => SharingTenancyProbe | null | undefined;
+  /**
+   * [ADR-0142 D3] The ownership-queue service, resolved at use. A record whose
+   * `owner_id` is empty and whose `queue` names a queue the caller belongs to
+   * is readable and editable by the caller — the access path's fifth basis.
+   * Absent, no record sits anywhere: the basis fails closed.
+   */
+  ownershipQueues?: () => Pick<IOwnershipQueueService, 'queuesOf' | 'isMember'> | null | undefined;
   /** [#5103] Optional logger for the record-delete cascade / orphan sweep. */
   logger?: {
     info?: (msg: any, ...rest: any[]) => void;
@@ -540,7 +564,15 @@ export class SharingService implements ISharingService {
   private readonly hierarchyResolver?: () => IHierarchyScopeResolver | null | undefined;
   private readonly securityService?: () => SharingSecurityProbe | null | undefined;
   private readonly tenancy?: () => SharingTenancyProbe | null | undefined;
+  private readonly ownershipQueues?: SharingServiceOptions['ownershipQueues'];
   private readonly logger?: SharingServiceOptions['logger'];
+
+  /**
+   * [ADR-0142 D3] `current_user.queues`, resolved once per request context:
+   * the same context object is threaded through every gate one operation
+   * touches, so a find and its per-record checks resolve membership once.
+   */
+  private readonly callerQueueMemo = new WeakMap<object, Promise<string[]>>();
 
   /**
    * [#8418] Objects that have already reported {@link
@@ -567,6 +599,7 @@ export class SharingService implements ISharingService {
     this.hierarchyResolver = options.hierarchyResolver;
     this.securityService = options.securityService;
     this.tenancy = options.tenancy;
+    this.ownershipQueues = options.ownershipQueues;
     this.logger = options.logger;
     this.bypassObjects = new Set([
       'sys_record_share',
@@ -659,17 +692,13 @@ export class SharingService implements ISharingService {
     });
 
     const grantedIds: string[] = grantedRecordIds(grants);
-
-    if (grantedIds.length === 0) {
-      return ownerMatch;
-    }
-
-    return {
-      $or: [
-        ownerMatch,
-        { id: { $in: grantedIds } },
-      ],
-    };
+    // [ADR-0142 D3] Beside the owner match: the records sitting in a queue the
+    // caller belongs to.
+    const queueMatch = await this.queueSittingMatch(schema, context);
+    const disjuncts: unknown[] = [ownerMatch];
+    if (queueMatch) disjuncts.push(queueMatch);
+    if (grantedIds.length > 0) disjuncts.push({ id: { $in: grantedIds } });
+    return disjuncts.length === 1 ? ownerMatch : { $or: disjuncts };
   }
 
   /**
@@ -738,9 +767,85 @@ export class SharingService implements ISharingService {
       context: SYSTEM_CTX,
     });
     const grantedIds: string[] = grantedRecordIds(grants);
+    // [ADR-0142 D3] The update arm only: a queue member edits what sits in the
+    // queue and deletes none of it (rows, never verbs — the delete arm above
+    // returned before this line).
+    const queueMatch = await this.queueSittingMatch(schema, context);
+    const disjuncts: unknown[] = [ownerMatch];
+    if (queueMatch) disjuncts.push(queueMatch);
+    if (grantedIds.length > 0) disjuncts.push({ id: { $in: grantedIds } });
+    return disjuncts.length === 1 ? ownerMatch : { $or: disjuncts };
+  }
 
-    if (grantedIds.length === 0) return ownerMatch;
-    return { $or: [ownerMatch, { id: { $in: grantedIds } }] };
+  /**
+   * [ADR-0142 D3] The queue names the caller belongs to in the active
+   * organization — `current_user.queues` — memoised on the request context.
+   * `[]` with no queue service, no user, or for the guest; a failed
+   * resolution is `[]` too (the basis fails closed).
+   */
+  callerQueues(context: ExecutionContext): Promise<string[]> {
+    const queues = this.ownershipQueues?.();
+    if (!queues || !context?.userId || isGuestPrincipal(context)) return Promise.resolve([]);
+    const key = context as unknown as object;
+    let pending = this.callerQueueMemo.get(key);
+    if (!pending) {
+      pending = queues.queuesOf(String(context.userId), context.tenantId ? String(context.tenantId) : null)
+        .catch((err: unknown) => {
+          this.logger?.warn?.(
+            '[sharing] queue membership could not be resolved — records sitting in queues are not reachable '
+              + 'through the queue for this request',
+            { userId: context.userId, error: err instanceof Error ? err.message : String(err) },
+          );
+          return [];
+        });
+      this.callerQueueMemo.set(key, pending);
+    }
+    return pending;
+  }
+
+  /**
+   * [ADR-0142 D3] The read / update-arm disjunct
+   * `owner_id IS NULL AND queue IN (current_user.queues)`, or `null` when the
+   * object has no provisioned `queue` column or the caller sits in no queue.
+   */
+  private async queueSittingMatch(schema: any, context: ExecutionContext): Promise<Record<string, unknown> | null> {
+    if (!hasQueueColumn(schema)) return null;
+    const names = await this.callerQueues(context);
+    if (names.length === 0) return null;
+    return { [OWNER_FIELD]: null, [QUEUE_FIELD]: names.length === 1 ? names[0] : { $in: names } };
+  }
+
+  /**
+   * [ADR-0142 D3] Does `(object, recordId)` sit in a queue the caller belongs
+   * to? Membership is asked in the record's own organization (the active one
+   * when the row carries none, and never one the request is not in) — one
+   * holder check, not the caller's whole queue set.
+   */
+  private async sitsInCallersQueue(
+    schema: any,
+    object: string,
+    recordId: string,
+    context: ExecutionContext,
+  ): Promise<boolean> {
+    if (!hasQueueColumn(schema) || !context?.userId || isGuestPrincipal(context)) return false;
+    const queues = this.ownershipQueues?.();
+    if (!queues) return false;
+    const rows = await this.engine.find(object, {
+      where: { id: recordId },
+      fields: ['id', OWNER_FIELD, QUEUE_FIELD, 'organization_id'],
+      limit: 1,
+      context: SYSTEM_CTX,
+    });
+    const row = Array.isArray(rows) ? (rows[0] as Record<string, unknown> | undefined) : undefined;
+    if (!row || (row[OWNER_FIELD] != null && row[OWNER_FIELD] !== '')) return false;
+    const queue = row[QUEUE_FIELD];
+    if (typeof queue !== 'string' || queue === '') return false;
+    // A row of another organization is never reached through a queue of this
+    // one: membership is per organization, and the request's is the active one.
+    const rowOrg = row.organization_id == null || row.organization_id === '' ? null : String(row.organization_id);
+    const activeOrg = context.tenantId ? String(context.tenantId) : null;
+    if (rowOrg && activeOrg && rowOrg !== activeOrg) return false;
+    return queues.isMember(String(context.userId), queue, rowOrg ?? activeOrg);
   }
 
   /**
@@ -928,6 +1033,12 @@ export class SharingService implements ISharingService {
     try {
       const schema = this.engine.getSchema?.(object);
       if (!schema) return 'abstain';
+      // [ADR-0142 D3] A record sitting in a queue the caller belongs to is a
+      // POSITIVE basis of its own — tested before the public-OWD abstain, so on
+      // an open OWD too the answer is `allow` (which lifts the platform's
+      // `created_by` floor for a member), and apart from `matchesOwnerScope`,
+      // whose fast path `checkDelete` shares: the basis never reaches delete.
+      if (await this.sitsInCallersQueue(schema, object, recordId, context)) return 'allow';
       // [Ruling of record 6355206139] The EXTERNAL OWD floor (buildReadFilter).
       const model = owdForPrincipal(schema, context, object, 'write');
       if (model === 'public') return 'abstain';
