@@ -91,6 +91,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
         data-testid="inline-probe"
         data-approval-is-submitter={String(inline?.approvalIsSubmitter)}
         data-approval-pending={String(inline?.approvalPending)}
+        data-approval-recall-drawn-by-host={String(inline?.approvalRecallDrawnByHost)}
       />
     );
   };
@@ -284,5 +285,32 @@ describe('record page → band: who may see recall (objectui#6464)', () => {
     // that keeps the band up with no approvals row behind it.
     const probe = await settledProbe(true);
     expect(probe.getAttribute('data-approval-is-submitter')).toBe('undefined');
+  });
+});
+
+/**
+ * Recall is drawn ONCE per page (objectstack#25877). The page's declared
+ * decision bar carries `approval_recall`, so whenever the page mounts that bar
+ * it must tell the band below to keep its lock badge only, and whenever it
+ * does not, the band stays the recall lever. `DetailView.approvalRecallHostDrawn`
+ * measures the band; this measures the seam.
+ */
+describe('record page → band: who draws recall (objectstack#25877)', () => {
+  it('tells the band the page draws recall when the decision bar is up', async () => {
+    stubApprovalsApi(pendingRequest({ viewer: { can_act: false, is_submitter: true, can_override: false } }));
+    renderRecordPage();
+
+    const probe = await settledProbe(true);
+    await waitFor(() =>
+      expect(probe.getAttribute('data-approval-recall-drawn-by-host')).toBe('true'),
+    );
+  });
+
+  it('leaves the band as the recall lever when there is no approvals API', async () => {
+    stubApprovalsApi(null, 404);
+    renderRecordPage();
+
+    const probe = await settledProbe(true);
+    expect(probe.getAttribute('data-approval-recall-drawn-by-host')).toBe('false');
   });
 });

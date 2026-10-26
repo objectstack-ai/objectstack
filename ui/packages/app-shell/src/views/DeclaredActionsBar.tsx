@@ -32,7 +32,12 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import {
+  Badge,
   Button,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
   Separator,
   cn,
   hasDeclaredVisibilityGate,
@@ -54,7 +59,7 @@ import {
 import type { ActionDef } from '@object-ui/core';
 import type { ConsoleActionDispatch } from '../consoleActionDispatch.js';
 import { useObjectTranslation } from '@object-ui/i18n';
-import { Loader2, ShieldAlert } from 'lucide-react';
+import { Loader2, MoreHorizontal, ShieldAlert } from 'lucide-react';
 import { useConsoleActionRuntime } from '../hooks/useConsoleActionRuntime.js';
 import { useAdapter } from '../providers/AdapterProvider.js';
 // Straight from `@object-ui/react`, NOT through `../providers/MetadataProvider`
@@ -74,7 +79,12 @@ import {
   readDecisionOutputRegistry,
 } from '../utils/decisionOutputParams.js';
 import { getIcon } from '../utils/getIcon.js';
-import { isOverrideDecision, bypassedApproverNames } from '../utils/approvalOverride.js';
+import {
+  actionAdmittedByOverride,
+  bypassedApproverNames,
+  isOverrideDecision,
+  isOverrideOnlyViewer,
+} from '../utils/approvalOverride.js';
 import {
   approverCopyFrom,
   approverDisplay,
@@ -117,6 +127,26 @@ export interface DeclaredActionsBarProps {
    * returns null when empty), so the host never gets an orphan divider.
    */
   label?: string;
+  /**
+   * Fold the admin-override levers into one menu for a viewer who holds no
+   * approver slot but may override (objectstack#25877).
+   *
+   * For that viewer every lever the override flag admits — approve, reject,
+   * reassign, and recall, whose gate ORs the flag in too — is the exception
+   * path, and a row of them drawn as buttons is the most prominent thing on
+   * the page. With this set, such a viewer sees one status line instead
+   * (pending, and who the step waits on), the levers the override flag does
+   * NOT admit (reply) as buttons, and the folded ones behind a single marked
+   * menu. The set is read off each action's own `visible` gate
+   * (`actionAdmittedByOverride`), not off a name list, so a lever shipped as
+   * metadata alone folds the same way.
+   *
+   * Placement only: every folded lever keeps its own `visible` / `disabled` /
+   * capability gates, its override framing and its dialog, and the request it
+   * sends is unchanged. A viewer who CAN act (the approver) and any viewer the
+   * server sent no `viewer` block for render exactly as without it.
+   */
+  foldOverrides?: boolean;
 }
 
 /**
@@ -148,7 +178,13 @@ const DeclaredActionButton: React.FC<{
   action: ActionDef;
   objectName: string;
   record: any;
-}> = ({ action, objectName, record }) => {
+  /**
+   * Draw the lever as an item of the override menu instead of a button
+   * (objectstack#25877). Every gate, label and dispatch above the render is
+   * shared, so the two forms cannot disagree about what the lever does.
+   */
+  asMenuItem?: boolean;
+}> = ({ action, objectName, record, asMenuItem = false }) => {
   const { execute } = useAction();
   const [loading, setLoading] = useState(false);
   // Localize the SERVER-DECLARED strings through the `_actions.<name>.*`
@@ -227,6 +263,7 @@ const DeclaredActionButton: React.FC<{
   const isDisabledPred = useCondition(toPredicateInput(action.disabled), predicateRecord);
   // Called up here with the other hooks: the `visible` gate below returns early.
   const reasonId = React.useId();
+  const labelId = React.useId();
 
   /**
    * Is the button this viewer is looking at an ADMIN OVERRIDE (objectui#5178)?
@@ -513,6 +550,48 @@ const DeclaredActionButton: React.FC<{
     ? String(t('actions.notAvailableForRecord', { defaultValue: 'Not available for this record' }))
     : undefined;
 
+  if (asMenuItem) {
+    // The menu form of the same lever (objectstack#25877). Shaped like the
+    // page header's overflow items (`PageHeaderActions`): `preventDefault` on
+    // select keeps the menu mounted while the action's own dialog takes over,
+    // and a disabled item states its reason as a visible second line, because
+    // a tooltip inside a menu is unreachable from the keyboard (a disabled
+    // item is skipped by arrow-key focus).
+    return (
+      <DropdownMenuItem
+        disabled={disabledByPredicate || loading}
+        aria-labelledby={disabledReason ? labelId : undefined}
+        aria-describedby={disabledReason ? reasonId : undefined}
+        onSelect={(event) => {
+          event.preventDefault();
+          void handleClick();
+        }}
+        className={cn(
+          'gap-2',
+          isOverride && 'text-amber-700 focus:text-amber-800 dark:text-amber-400 dark:focus:text-amber-300',
+        )}
+        data-testid={`declared-action-${action.name}`}
+        data-override-decision={isOverride ? 'true' : undefined}
+      >
+        {loading
+          ? <Loader2 className="h-4 w-4 animate-spin" />
+          : isOverride
+            ? <ShieldAlert className="h-4 w-4" />
+            : iconName
+              ? React.createElement(getIcon(iconName), { className: 'h-4 w-4' })
+              : null}
+        {disabledReason ? (
+          <span className="flex min-w-0 flex-col">
+            <span id={labelId}>{label}</span>
+            <span id={reasonId} className="text-xs text-muted-foreground">{disabledReason}</span>
+          </span>
+        ) : (
+          <span>{label}</span>
+        )}
+      </DropdownMenuItem>
+    );
+  }
+
   const button = (
     <Button
       type="button"
@@ -579,6 +658,51 @@ const DeclaredActionButton: React.FC<{
 };
 
 /**
+ * The status line that replaces the override levers for a viewer who holds no
+ * approver slot (objectstack#25877): the request is pending, and who the step
+ * waits on, by name.
+ *
+ * The names are the same slate, resolved the same way, as the override notice
+ * each folded lever shows (`bypassedApproverNames` over the shared approver
+ * directory), so the line and the dialog never name different people. An
+ * unstaffed step has no one to name, and then the line says pending alone.
+ */
+const ApprovalWaitingStatus: React.FC<{ record: any }> = ({ record }) => {
+  const { t } = useObjectTranslation();
+  const refs = useMemo(() => unresolvedApproverRefs(record), [record]);
+  const directory = useApproverDirectory(refs);
+  const names = useMemo(() => {
+    const copy = approverCopyFrom(t as unknown as Parameters<typeof approverCopyFrom>[0]);
+    const shown = bypassedApproverNames(record, (id) => {
+      const display = approverDisplay(id, { resolved: directory[id], copy });
+      return display.detail ? `${display.label} · ${display.detail}` : display.label;
+    });
+    return Array.from(new Set(shown));
+  }, [record, directory, t]);
+  return (
+    <div
+      className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm"
+      data-testid="declared-actions-approval-status"
+    >
+      <Badge
+        variant="outline"
+        className="border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300"
+      >
+        {String(t('approvalsInbox.statusPending', { defaultValue: 'Pending' }))}
+      </Badge>
+      {names.length > 0 && (
+        <span className="min-w-0 text-muted-foreground">
+          {String(t('approvalsInbox.waitingOn', { defaultValue: 'Waiting on' }))}{' '}
+          <span className="text-foreground">
+            {names.join(String(t('approvalsInbox.approverNameSeparator', { defaultValue: ', ' })))}
+          </span>
+        </span>
+      )}
+    </div>
+  );
+};
+
+/**
  * The located set, capability-gated — and the toolbar it draws.
  *
  * ## Why this is a component at all, and why it lives HERE
@@ -629,21 +753,94 @@ const DeclaredActionButton: React.FC<{
  * declared capability, and gets no new exposure either.
  */
 const DeclaredActionsToolbar: React.FC<
-  Pick<DeclaredActionsBarProps, 'objectName' | 'record' | 'className' | 'label'> & {
+  Pick<DeclaredActionsBarProps, 'objectName' | 'record' | 'className' | 'label' | 'foldOverrides'> & {
     /** The located set, pre-filtered by `location` / `exclude`, ungated. */
     actions: ActionDef[];
   }
-> = ({ actions, objectName, record, className, label }) => {
+> = ({ actions, objectName, record, className, label, foldOverrides }) => {
   const { t } = useObjectTranslation();
   const mayInvoke = useCapabilityGate();
   const permitted = useMemo(
     () => actions.filter((action) => mayInvoke(action.requiredPermissions)),
     [actions, mayInvoke],
   );
+  // objectstack#25877 — which of the permitted levers fold into the override
+  // menu. Only for a viewer admitted through the override door alone
+  // (`can_act: false`, `can_override: true`), and only the levers whose own
+  // gate ORs that flag in; everything else stays a button. The split runs on
+  // the capability-gated set, so a lever the gate removed is in neither half.
+  const folded = useMemo(
+    () => (foldOverrides && isOverrideOnlyViewer(record)
+      ? permitted.filter((action) => actionAdmittedByOverride(action))
+      : []),
+    [foldOverrides, record, permitted],
+  );
 
   // Nothing this viewer may invoke renders nothing — no toolbar chrome, no
   // orphan divider, same degrade as "nothing declared at this location".
   if (permitted.length === 0) return null;
+
+  if (folded.length > 0) {
+    const inline = permitted.filter((action) => !folded.includes(action));
+    const overrideMenuLabel = String(t('approvalsInbox.viaOverrideChip', { defaultValue: 'Admin override' }));
+    return (
+      <div className={cn('space-y-2', className)} data-approval-override-folded="">
+        {label && (
+          <>
+            <Separator />
+            <div className="text-xs font-medium text-muted-foreground">{label}</div>
+          </>
+        )}
+        <div className="flex flex-row flex-wrap items-center gap-2">
+          <ApprovalWaitingStatus record={record} />
+          <div
+            role="toolbar"
+            aria-label={label || t('common.actions')}
+            className="ml-auto flex flex-row flex-wrap items-center gap-2"
+          >
+            {inline.map((action) => (
+              <DeclaredActionButton
+                key={action.name}
+                action={action}
+                objectName={objectName}
+                record={record}
+              />
+            ))}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                {/* One marked control for the whole exception path: the
+                    override shield the folded levers wear, in the same amber,
+                    beside the overflow glyph. */}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1 px-2 border-amber-500/60 text-amber-700 hover:bg-amber-50 hover:text-amber-800 dark:text-amber-400 dark:hover:bg-amber-500/10 dark:hover:text-amber-300"
+                  aria-label={overrideMenuLabel}
+                  title={overrideMenuLabel}
+                  data-testid="declared-actions-override-menu"
+                >
+                  <ShieldAlert className="h-4 w-4" />
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-48">
+                {folded.map((action) => (
+                  <DeclaredActionButton
+                    key={action.name}
+                    action={action}
+                    objectName={objectName}
+                    record={record}
+                    asMenuItem
+                  />
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={cn('space-y-2', className)}>
@@ -676,6 +873,7 @@ export function DeclaredActionsBar({
   exclude,
   className,
   label,
+  foldOverrides,
 }: DeclaredActionsBarProps) {
   const dataSource = useAdapter();
   // Fetch the object def (and its declared actions) unless the host passed
@@ -730,6 +928,7 @@ export function DeclaredActionsBar({
         record={record}
         className={className}
         label={label}
+        foldOverrides={foldOverrides}
       />
       {runtime.dialogs}
     </ActionProvider>

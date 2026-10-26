@@ -1683,6 +1683,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // This gates the AFFORDANCE only. `canEdit` / `approvalLocked` below are
   // untouched by it, and the recall endpoint authorizes the recall itself.
   const approvalIsSubmitter = isSubmitterOf(approvals.pendingRequest, user?.id);
+  // Does this page mount the pending request's declared decision bar
+  // (objectui#3055)? That bar carries the declared `approval_recall`, so when
+  // it is up the DetailView approval band must not draw a second Recall
+  // (objectstack#25877): one predicate decides both, so the bar and the band
+  // cannot disagree about which of them owns the lever.
+  const approvalBarMounted = approvals.available && !!approvals.pendingRequest;
 
   // A decision landed through the declared-action bar (objectui#3055). The
   // action itself already POSTed and the runtime already toasted; what the HOST
@@ -3676,6 +3682,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           approvalReadAnswered={approvals.answered}
           approvalProgress={approvalProgress}
           approvalIsSubmitter={approvalIsSubmitter}
+          approvalRecallDrawnByHost={approvalBarMounted}
           lockedReason={t('detail.lockedTooltip', {
             defaultValue: 'This record has a pending approval request; editing is locked',
           })}
@@ -3808,8 +3815,16 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   renders a richer remind (throttle-aware copy, timeline
                   refresh), and `exclude` is how a host keeps one of an
                   object's declared actions in its own UI without the bar
-                  double-rendering it. */}
-              {approvals.available && approvals.pendingRequest && (
+                  double-rendering it.
+
+                  objectstack#25877 — for an administrator who is NOT an
+                  approver, the override levers (approve / reject / reassign
+                  in their name, and recall) are the exception path, so
+                  `foldOverrides` collapses them into one status line and one
+                  marked menu; the approver's own bar is unchanged. The bar is
+                  also the page's one Recall: `approvalBarMounted` tells the
+                  DetailView band below to keep its lock badge only. */}
+              {approvalBarMounted && (
                 <DeclaredActionsBar
                   className="mb-4"
                   objectName={SYS_APPROVAL_REQUEST_OBJECT}
@@ -3817,6 +3832,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   location={RECORD_APPROVAL_ACTION_LOCATION}
                   exclude={[...RECORD_APPROVAL_EXCLUDED_ACTIONS]}
                   onDone={handleApprovalActionDone}
+                  foldOverrides
                 />
               )}
               <RelatedRecordActionsBridge
