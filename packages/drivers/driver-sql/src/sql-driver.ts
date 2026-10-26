@@ -111,22 +111,13 @@ import { temporalStorageForm } from '@objectstack/core';
 import {
   buildIndexName,
   diffManagedIndexes,
-  diffManagedTable,
-  diffUnbuildableIndexes,
-  driftKey,
-  expectedIndexes,
   fieldHasColumn,
   GLOBAL_TENANT,
   canonicalIndexKey,
-  carriesNullSafeTenantKeyPart,
-  ceremonyOwnedDropFinding,
-  isCeremonyOwnedColumnDrop,
   hashShadowColumnFor,
   parseHashShadowKeyParts,
   indexedKeyColumns,
-  isIndexDriftOp,
   isUniqueScopeDeclared,
-  legacyUniqueReplacements,
   normalizeDeclaredIndex,
   organizationKeyPartSql,
   uniqueIndexesFromFields,
@@ -136,17 +127,11 @@ import {
   type DriftOp,
   type PhysicalIndex,
   type SqlDialectName,
-  type PhysicalColumn,
   type PendingSchemaWork,
 } from './schema-drift.js';
 // [#15989] The ADR-0104 column step's per-dialect statements. Built here, run
 // by `os migrate files-to-references --apply` — see {@link SqlDriver.planMediaColumnMove}.
 import {
-  isJsonColumnType,
-  mediaColumnMoveDialect,
-  mediaColumnMovePlan,
-  type MediaColumnMovePlan,
-  type MediaColumnMoveRefusal,
   type MediaColumnMoveScan,
 } from './media-column-move.js';
 import {
@@ -196,7 +181,9 @@ import {
 // restore (`applyIndexDriftOp`, `restoreBareIndexAfterFailedTighten`) beside them.
 // [#25521 cut 9] The unique pre-flight and the declared-index sync too
 // (`applyNullSafeUniquePreflight`, `syncDeclaredIndexes`, `createNullSafeUniqueIndex`).
-import { applyDriftOpInPlace, applyIndexDriftOp, applyNullSafeUniquePreflight, createNullSafeUniqueIndex, rebuildSqliteTablePatched, restoreBareIndexAfterFailedTighten, syncDeclaredIndexes } from './sql-driver-schema-sync.js';
+// [#25521 cut 10] And the drift pipeline that drives them (`detectTableDrift`, `detectTableIndexDrift`,
+// `detectManagedDrift`, `planMediaColumnMove`, `reconcileAndWarnDrift`, `applyMigrationEntries`).
+import { applyDriftOpInPlace, applyIndexDriftOp, applyMigrationEntries, applyNullSafeUniquePreflight, createNullSafeUniqueIndex, detectManagedDrift, detectTableDrift, detectTableIndexDrift, planMediaColumnMove, rebuildSqliteTablePatched, reconcileAndWarnDrift, restoreBareIndexAfterFailedTighten, syncDeclaredIndexes } from './sql-driver-schema-sync.js';
 import { makeDatabaseDirectory, probeAbsentSqliteDatabaseFile, SqliteDatabaseFileError } from './sqlite-database-file.js';
 import { jsonMembershipPredicate } from '@objectstack/core';
 import knex, { Knex } from 'knex';
@@ -14180,63 +14167,23 @@ export class SqlDriver implements IDataDriver {
    * object it is diffing, and falling back to the last-synced set would make a
    * removed `indexes[]` undetectable as an orphan.
    */
-  protected async detectTableDrift(
+  protected detectTableDrift(
     tableName: string,
     fields: Record<string, any>,
     declaredIndexes?: any[],
   ): Promise<ManagedDriftEntry[]> {
-    const cols = await this.introspectColumns(tableName);
-    const physical: PhysicalColumn[] = cols.map((c) => ({
-      name: c.name,
-      type: c.type,
-      nullable: c.nullable,
-      maxLength: c.maxLength,
-      // The raw, dialect-decorated DEFAULT — the only evidence that a column was
-      // created by a build which turned a `defaultValue` runtime token into a
-      // literal (#4560).
-      defaultValue: c.defaultValue,
-    }));
-    // #12732: `diffManagedTable`'s varchar-length branch asks `createColumn`'s
-    // own read-only mirror (`varcharColumnChars`) whether it would even build
-    // a varchar for a given field — and for the text family that answer needs
-    // keyedness (commit d0e3a885b), the same input `initObjects` / `ensureShardTable`
-    // already resolve via `indexedKeyColumns` before any DDL. Resolved here
-    // too so the DIFFER'S expectation, not only the DDL, agrees with keyed
-    // columns.
-    const keyedColumns = indexedKeyColumns({
-      table: tableName,
-      fields,
-      tenantField: this.resolveTenantField(tableName),
-      declaredIndexes,
-    });
-    const out = diffManagedTable({
-      table: tableName,
-      fields,
-      columns: physical,
-      dialect: this.dialectName,
-      keyedColumns,
-      varcharColumnChars: (field, keyed) => this.varcharColumnChars(field, keyed),
-      // ADR-0104: the media family's column shape is this deployment's fact,
-      // not the type's — the differ must ask the arm the emitter just used.
-      fileColumnsMoved: this.fileColumnsMoved,
-      // ADR-0131 D10 (ruling record 6269955919, ② A): the tenant column's
-      // NOT NULL is the organization-ownership ceremony's, not drift.
-      ceremonyOwnedNullability: this.resolveTenantField(tableName),
-    });
-    // [ADR-0131 D1] A physically NOT NULL tenant column is its own proof that
-    // the NULL-safe and the plain tenant key part are one constraint here.
-    const tenantField = this.resolveTenantField(tableName);
-    const tenantColumnNotNull = !!tenantField && cols.some((c) => c.name === tenantField && c.nullable === false);
-    out.push(
-      ...(await this.detectTableIndexDrift(
-        tableName,
-        fields,
-        declaredIndexes,
-        new Set(cols.map((c) => c.name)),
-        tenantColumnNotNull,
-      )),
-    );
-    return out;
+    // [#25521 cut 10] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readDialectName = () => this.dialectName;
+    const readFileColumnsMoved = () => this.fileColumnsMoved;
+    const host: ThisParameterType<typeof detectTableDrift> = {
+      detectTableIndexDrift: (...a) => this.detectTableIndexDrift(...a),
+      get dialectName() { return readDialectName(); },
+      get fileColumnsMoved() { return readFileColumnsMoved(); },
+      introspectColumns: (...a) => this.introspectColumns(...a),
+      resolveTenantField: (...a) => this.resolveTenantField(...a),
+      varcharColumnChars: (...a) => this.varcharColumnChars(...a),
+    };
+    return detectTableDrift.call(host, tableName, fields, declaredIndexes);
   }
 
   /**
@@ -14253,45 +14200,23 @@ export class SqlDriver implements IDataDriver {
    * as the plain column new DDL keys. The certification is asked only when a
    * physical index carries that form and the column is not NOT NULL already.
    */
-  protected async detectTableIndexDrift(
+  protected detectTableIndexDrift(
     tableName: string,
     fields: Record<string, any>,
     declaredIndexes: any[] | undefined,
     physicalColumns: Set<string>,
     tenantColumnNotNull = false,
   ): Promise<ManagedDriftEntry[]> {
-    const tenantField = this.resolveTenantField(tableName);
-    const physical = await this.introspectIndexes(tableName);
-    const tenantKeyCertified =
-      tenantColumnNotNull ||
-      (carriesNullSafeTenantKeyPart(physical, tenantField) && (await this.isTenantKeyCertified()));
-    const entries = diffManagedIndexes({
-      table: tableName,
-      expected: expectedIndexes({ table: tableName, fields, tenantField, declaredIndexes, physicalColumns }),
-      // `declaredIndexes` goes to BOTH: it is what the table should have, and
-      // therefore also what must never be mistaken for legacy debt (#3955).
-      legacy: legacyUniqueReplacements({ table: tableName, fields, tenantField, physicalColumns, declaredIndexes }),
-      physical,
-      // Indexes the framework built through raw DDL on this boot are its own to
-      // manage — never this differ's to propose dropping (#4884).
-      runtimeCreated: this.runtimeCreatedIndexes.get(tableName),
-      // Lets the differ recognise the NULL-safe organization key part as the
-      // sync's own vocabulary (ADR-0120 D3).
-      tenantField,
-      tenantKeyCertified,
-    });
-    // ADR-0120 D4: the duplicate pre-flight probe decides each NULL-safe
-    // unique op's fate — clean data upgrades the pure tightening to `safe`
-    // (dev autoMigrate may apply it); duplicates block the op with a row
-    // report. Data-dependent, so it runs HERE, not in the pure differ.
-    await this.applyNullSafeUniquePreflight(entries);
-    // The declared indexes `expectedIndexes` leaves out because a key column
-    // will never materialize (a misspelt name, a virtual `formula` field).
-    // `syncDeclaredIndexes` skips each one at `error` on every sync, and this
-    // is its plan-side face: a report-only entry, so `os migrate plan` shows
-    // the unenforced declaration instead of reporting nothing.
-    entries.push(...diffUnbuildableIndexes({ table: tableName, fields, tenantField, declaredIndexes, physicalColumns }));
-    return entries;
+    // [#25521 cut 10] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readRuntimeCreatedIndexes = () => this.runtimeCreatedIndexes;
+    const host: ThisParameterType<typeof detectTableIndexDrift> = {
+      applyNullSafeUniquePreflight: (...a) => this.applyNullSafeUniquePreflight(...a),
+      introspectIndexes: (...a) => this.introspectIndexes(...a),
+      isTenantKeyCertified: (...a) => this.isTenantKeyCertified(...a),
+      resolveTenantField: (...a) => this.resolveTenantField(...a),
+      get runtimeCreatedIndexes() { return readRuntimeCreatedIndexes(); },
+    };
+    return detectTableIndexDrift.call(host, tableName, fields, declaredIndexes, physicalColumns, tenantColumnNotNull);
   }
 
   /**
@@ -14393,30 +14318,20 @@ export class SqlDriver implements IDataDriver {
    *   last synced (captured in {@link managedObjectFields} /
    *   {@link managedObjectIndexes}).
    */
-  async detectManagedDrift(
+  detectManagedDrift(
     objects?: Array<{ name: string; fields?: Record<string, any>; indexes?: any[] }>,
   ): Promise<ManagedDriftEntry[]> {
-    const tables = new Map<string, { fields: Record<string, any>; indexes?: any[] }>();
-    if (objects) {
-      for (const o of objects) {
-        tables.set(StorageNameMapping.resolveTableName(o), {
-          fields: o.fields ?? {},
-          indexes: o.indexes,
-        });
-      }
-    } else {
-      for (const [t, f] of this.managedObjectFields) {
-        tables.set(t, { fields: f, indexes: this.managedObjectIndexes.get(t) });
-      }
-    }
-
-    const out: ManagedDriftEntry[] = [];
-    for (const [tableName, meta] of tables) {
-      if (!(await this.knex.schema.hasTable(tableName))) continue;
-      out.push(...(await this.detectTableDrift(tableName, meta.fields, meta.indexes)));
-    }
-    out.sort((a, b) => (a.table === b.table ? (a.column ?? '').localeCompare(b.column ?? '') : a.table.localeCompare(b.table)));
-    return out;
+    // [#25521 cut 10] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readKnex = () => this.knex;
+    const readManagedObjectFields = () => this.managedObjectFields;
+    const readManagedObjectIndexes = () => this.managedObjectIndexes;
+    const host: ThisParameterType<typeof detectManagedDrift> = {
+      detectTableDrift: (...a) => this.detectTableDrift(...a),
+      get knex() { return readKnex(); },
+      get managedObjectFields() { return readManagedObjectFields(); },
+      get managedObjectIndexes() { return readManagedObjectIndexes(); },
+    };
+    return detectManagedDrift.call(host, objects);
   }
 
   /**
@@ -14453,82 +14368,20 @@ export class SqlDriver implements IDataDriver {
    *    naming the dialect. ⛔ MySQL lands here on purpose: #17788 owns its
    *    statement order, on a real instance.
    */
-  async planMediaColumnMove(): Promise<MediaColumnMoveScan> {
-    const dialect = mediaColumnMoveDialect(this.dialectName);
-    if (!dialect) {
-      return {
-        dialect: this.dialectName,
-        plans: [],
-        refusals: [
-          {
-            table: '*',
-            column: '*',
-            reason: 'dialect_not_supported',
-            // ⛔ No tracker id in the string: this `detail` reaches an operator
-            // reading a migration report, who has no tracker to resolve one
-            // against (`check:doc-authoring`). The card that owns the MySQL
-            // leg is #17788; the reader who can resolve that reads this line.
-            detail:
-              `the ADR-0104 column step has no measured statement for dialect '${this.dialectName}'. ` +
-              'The MySQL leg is tracked separately and is settled against a real instance, because ' +
-              'its statement ORDER is what the ADR leaves open; no other dialect has been ' +
-              'rehearsed. Nothing was planned and nothing ran.',
-          },
-        ],
-      };
-    }
-
-    const plans: MediaColumnMovePlan[] = [];
-    const refusals: MediaColumnMoveRefusal[] = [];
-
-    for (const [tableName] of this.managedObjectFields) {
-      const columns = this.mediaFields[tableName];
-      if (!columns || columns.length === 0) continue;
-      if (!(await this.knex.schema.hasTable(tableName))) continue;
-
-      let physical: IntrospectedColumn[];
-      try {
-        physical = await this.introspectColumns(tableName);
-      } catch (e: any) {
-        refusals.push({
-          table: tableName,
-          column: '*',
-          reason: 'introspection_failed',
-          detail:
-            `could not read the physical columns of '${tableName}' (${e?.message ?? e}), so the ` +
-            'shape of its media columns is unknown and no statement can be chosen for them.',
-        });
-        continue;
-      }
-      const byName = new Map(physical.map((c) => [c.name, c]));
-
-      for (const column of columns) {
-        const found = byName.get(column);
-        if (!found) {
-          refusals.push({
-            table: tableName,
-            column,
-            reason: 'column_absent',
-            detail:
-              `'${tableName}.${column}' is declared as a media field but the datastore has no such ` +
-              'column, so there is nothing here to move and nothing that could be verified moved.',
-          });
-          continue;
-        }
-        plans.push(
-          mediaColumnMovePlan(
-            dialect,
-            isJsonColumnType(found.type) ? 'retype' : 'unquote',
-            tableName,
-            column,
-          ),
-        );
-      }
-    }
-
-    plans.sort((a, b) => (a.table === b.table ? a.column.localeCompare(b.column) : a.table.localeCompare(b.table)));
-    refusals.sort((a, b) => (a.table === b.table ? a.column.localeCompare(b.column) : a.table.localeCompare(b.table)));
-    return { dialect, plans, refusals };
+  planMediaColumnMove(): Promise<MediaColumnMoveScan> {
+    // [#25521 cut 10] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readDialectName = () => this.dialectName;
+    const readKnex = () => this.knex;
+    const readManagedObjectFields = () => this.managedObjectFields;
+    const readMediaFields = () => this.mediaFields;
+    const host: ThisParameterType<typeof planMediaColumnMove> = {
+      get dialectName() { return readDialectName(); },
+      introspectColumns: (...a) => this.introspectColumns(...a),
+      get knex() { return readKnex(); },
+      get managedObjectFields() { return readManagedObjectFields(); },
+      get mediaFields() { return readMediaFields(); },
+    };
+    return planMediaColumnMove.call(host);
   }
 
   /**
@@ -14536,68 +14389,27 @@ export class SqlDriver implements IDataDriver {
    * auto-reconcile the *safe* (loosening) subset when `autoMigrate==='safe'`,
    * then WARN once per remaining divergence with an actionable hint.
    */
-  protected async reconcileAndWarnDrift(
+  protected reconcileAndWarnDrift(
     tableName: string,
     fields: Record<string, any>,
     declaredIndexes?: any[],
   ): Promise<void> {
-    let drift: ManagedDriftEntry[];
-    try {
-      drift = await this.detectTableDrift(tableName, fields, declaredIndexes);
-    } catch (e: any) {
-      this.logger.warn(`[schema-drift] could not introspect '${tableName}' for drift detection`, e?.message ?? e);
-      return;
-    }
-    if (drift.length === 0) return;
-
-    const autoOn = this.autoMigrate === 'safe' && this.schemaMode === 'managed';
-    if (autoOn && this.isProductionEnv()) {
-      this.logger.warn(
-        `[schema-drift] autoMigrate='safe' is ignored under NODE_ENV=production — schema is never auto-altered in production. Run 'os migrate' deliberately.`,
-      );
-    } else if (autoOn) {
-      const safe = drift.filter((d) => d.category === 'safe');
-      if (safe.length > 0) {
-        try {
-          const { applied } = await this.applyMigrationEntries(safe, { allowDestructive: false });
-          for (const d of applied) {
-            // ⛔ Call through the PROPERTY, never an extracted `(a ?? b)(…)`
-            // reference: that evaluates to the bare function and invokes it with
-            // `this === undefined`, which `@objectstack/core`'s class-based
-            // `ObjectLogger` throws on — its `info`/`warn` reach for `this.write`
-            // (#12792). ⛔ And NOT routed through {@link logDurabilityFailure}:
-            // this line reports a reconcile that SUCCEEDED, so its channel is
-            // `info`, and the durability channel would escalate a functional
-            // report to `error` — the over-application AGENTS.md warns trains
-            // everyone to skim `error`. Keep the level, the fallback AND the
-            // receiver.
-            const reconciled = `[schema-drift] auto-reconciled ${d.op.type} on ${d.table}.${d.column ?? ''}`;
-            if (this.logger.info) this.logger.info(reconciled);
-            else this.logger.warn(reconciled);
-          }
-          // Re-detect so the warnings below reflect the post-reconcile state.
-          drift = await this.detectTableDrift(tableName, fields, declaredIndexes);
-        } catch (e: any) {
-          this.logger.warn(`[schema-drift] dev auto-reconcile failed for '${tableName}' — falling back to warning`, e?.message ?? e);
-        }
-      }
-    }
-
-    // [ADR-0131 D10 item 5] An `organization_id` drop is the ownership
-    // ceremony's until the database is certified: `--allow-destructive` is
-    // refused there, so the line names the ceremony instead. Asked once per
-    // table, and only when such a drop is about to be warned.
-    let certified: boolean | undefined;
-    for (const d of drift) {
-      const k = driftKey(d);
-      if (this.driftWarned.has(k)) continue;
-      this.driftWarned.add(k);
-      if (isCeremonyOwnedColumnDrop(d) && !(certified ??= await this.isTenantKeyCertified())) {
-        this.logger.warn(`[schema-drift] ${ceremonyOwnedDropFinding(d)}`);
-        continue;
-      }
-      this.logger.warn(`[schema-drift] ${d.message}`);
-    }
+    // [#25521 cut 10] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readAutoMigrate = () => this.autoMigrate;
+    const readDriftWarned = () => this.driftWarned;
+    const readLogger = () => this.logger;
+    const readSchemaMode = () => this.schemaMode;
+    const host: ThisParameterType<typeof reconcileAndWarnDrift> = {
+      applyMigrationEntries: (...a) => this.applyMigrationEntries(...a),
+      get autoMigrate() { return readAutoMigrate(); },
+      detectTableDrift: (...a) => this.detectTableDrift(...a),
+      get driftWarned() { return readDriftWarned(); },
+      isProductionEnv: (...a) => this.isProductionEnv(...a),
+      isTenantKeyCertified: (...a) => this.isTenantKeyCertified(...a),
+      get logger() { return readLogger(); },
+      get schemaMode() { return readSchemaMode(); },
+    };
+    return reconcileAndWarnDrift.call(host, tableName, fields, declaredIndexes);
   }
 
   /**
@@ -14611,87 +14423,24 @@ export class SqlDriver implements IDataDriver {
    * @returns the entries actually applied and those skipped (e.g. destructive
    *   without `allowDestructive`, or unsupported on the dialect).
    */
-  async applyMigrationEntries(
+  applyMigrationEntries(
     entries: ManagedDriftEntry[],
     opts: { allowDestructive?: boolean } = {},
   ): Promise<{ applied: ManagedDriftEntry[]; skipped: ManagedDriftEntry[] }> {
-    this.assertSchemaMutable('reconcileManagedSchema');
-    const allowDestructive = opts.allowDestructive === true;
-
-    const applied: ManagedDriftEntry[] = [];
-    const skipped: ManagedDriftEntry[] = [];
-
-    const candidates = entries.filter((d) => {
-      if (d.category === 'destructive' && !allowDestructive) {
-        skipped.push(d);
-        return false;
-      }
-      return true;
-    });
-    if (candidates.length === 0) return { applied, skipped };
-
-    // Index ops (#3728) are portable DDL on every dialect — no ALTER COLUMN, no
-    // SQLite table rebuild — so they take their own path. Column ops run FIRST:
-    // a `drop_column` takes its indexes with it, and on SQLite the rebuild
-    // re-materializes the whole index set from metadata, which may already
-    // satisfy the index entries below (they are idempotent, so that is fine).
-    const columnEntries = candidates.filter((d) => !isIndexDriftOp(d.op));
-    const indexEntries = candidates.filter((d) => isIndexDriftOp(d.op));
-
-    // Group by table — SQLite reconciles a whole table in one rebuild.
-    const byTable = new Map<string, ManagedDriftEntry[]>();
-    for (const d of columnEntries) {
-      (byTable.get(d.table) ?? byTable.set(d.table, []).get(d.table)!).push(d);
-    }
-
-    for (const [table, ents] of byTable) {
-      try {
-        if (this.isSqlite) {
-          // `applied` means "this op happened", not "a rebuild ran" — every
-          // consumer reads it that way (`reconcileAndWarnDrift` logs
-          // "auto-reconciled <op> on <table>", the artifact boot gate prints
-          // "↪ migrated <op>"). The rebuild honours four op types and
-          // IGNORES the rest (#11722), so reporting the whole batch applied
-          // turned an op that never happened into a green log line: the
-          // finding is still there on the next boot, reports as drift again,
-          // and is "migrated" again — a loop with no failing signal anywhere
-          // in it. So only the entries the rebuild actually acted on are
-          // reported applied, and the remainder is skipped and logged in the
-          // SAME words the in-place arm uses for an op its dialect cannot do
-          // ({@link applyDriftOpInPlace}).
-          const honoured = new Set(await this.rebuildSqliteTablePatched(table, ents));
-          for (const d of ents) {
-            if (honoured.has(d)) {
-              applied.push(d);
-              continue;
-            }
-            this.logger.warn(
-              `[schema-drift] ${d.op.type} on ${d.table}.${d.column ?? ''} is unsupported on dialect '${this.dialectName}' — skipped`,
-            );
-            skipped.push(d);
-          }
-        } else {
-          for (const d of ents) {
-            const ok = await this.applyDriftOpInPlace(d.op);
-            (ok ? applied : skipped).push(d);
-          }
-        }
-      } catch (e: any) {
-        this.logger.warn(`[schema-drift] failed to reconcile '${table}'`, e?.message ?? e);
-        for (const d of ents) if (!applied.includes(d)) skipped.push(d);
-      }
-    }
-
-    for (const d of indexEntries) {
-      try {
-        const ok = await this.applyIndexDriftOp(d.op);
-        (ok ? applied : skipped).push(d);
-      } catch (e: any) {
-        this.logger.warn(`[schema-drift] failed to reconcile index on '${d.table}'`, e?.message ?? e);
-        skipped.push(d);
-      }
-    }
-    return { applied, skipped };
+    // [#25521 cut 10] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readDialectName = () => this.dialectName;
+    const readIsSqlite = () => this.isSqlite;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof applyMigrationEntries> = {
+      applyDriftOpInPlace: (...a) => this.applyDriftOpInPlace(...a),
+      applyIndexDriftOp: (...a) => this.applyIndexDriftOp(...a),
+      assertSchemaMutable: (...a) => this.assertSchemaMutable(...a),
+      get dialectName() { return readDialectName(); },
+      get isSqlite() { return readIsSqlite(); },
+      get logger() { return readLogger(); },
+      rebuildSqliteTablePatched: (...a) => this.rebuildSqliteTablePatched(...a),
+    };
+    return applyMigrationEntries.call(host, entries, opts);
   }
 
   /**
