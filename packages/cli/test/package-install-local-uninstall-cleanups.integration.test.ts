@@ -59,9 +59,9 @@
  * package — `@objectstack/cloud-connection` and `@objectstack/metadata-protocol`
  * included — resolved through its `exports` to `dist/`, so an ablation of either
  * package's source reaches this file only after that package is rebuilt. Every
- * boot runs in `beforeAll`; the `it`s only read what the phases recorded. The
- * four orders run at once, each in its own cwd and home: one order's steps
- * run in sequence, and no order reads another's.
+ * boot runs in `beforeAll`; the `it`s only read what the phases recorded. Each
+ * order has its own cwd and home and runs its steps in sequence; two orders run
+ * at a time, and no order reads another's.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -352,10 +352,9 @@ beforeAll(async () => {
 
   // The four orders share nothing but the two package directories they read:
   // each has its own cwd, home and ledger, and every boot binds a
-  // kernel-assigned port. So they run at once, and the file waits for the
-  // longest one rather than for their sum. Inside an order every step still
-  // waits for the one before it.
-  await allPhases([
+  // kernel-assigned port. Inside an order every step still waits for the one
+  // before it.
+  const [hot, restarted, reseed, reinstall]: Array<() => Promise<void>> = [
     // ── order 1: hot install → DELETE → restart ────────────────────────────
     async () => {
       const hotDir = join(root, 'hot');
@@ -427,6 +426,14 @@ beforeAll(async () => {
       };
       await stopGroup(h.child);
     },
+  ];
+  // Two orders at a time, paired so each pair is four boots and three installs.
+  // ⛔ Not all four at once: every live `os start` holds well over a gigabyte,
+  // and four of them beside the package's other workers ran a 15 GB box out of
+  // memory (exit 137, SIGKILL).
+  await allPhases([
+    async () => { await hot(); await reseed(); },
+    async () => { await restarted(); await reinstall(); },
   ]);
 }, 9 * BOOT_TIMEOUT_MS);
 
