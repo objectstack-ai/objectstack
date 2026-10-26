@@ -352,3 +352,161 @@ describe('ADR-0130 D1 — the relaxation does not widen the same-id reinstall ex
     expect(caught?.status).toBe(422);
   });
 });
+
+describe('ADR-0141 D5 — a declared dependency is a second co-owner source, judged by both halves of the pair', () => {
+  /**
+   * The same pair as above, across artifacts. Each package below arrives as
+   * its OWN artifact through the real load path, so the artifact scope never
+   * names the other package: whatever admits it is the declaration.
+   *
+   *   - `com.acme.crm` (X) owns namespace `crm` and `crm_account`;
+   *   - `com.acme.crm.revenue` (P) declares X and uses `crm`;
+   *   - `com.acme.crm.marketing` (S) declares X and uses `crm` — P's sibling
+   *     under one declared parent, declaring nothing about P.
+   */
+  const kernels: ObjectKernel[] = [];
+
+  const freshManifestService = async () => {
+    const k = await bootKernel();
+    kernels.push(k);
+    return { svc: k.getService('manifest') as ManifestService, registry: engineOf(k).registry };
+  };
+
+  afterEach(async () => {
+    while (kernels.length) {
+      const k = kernels.pop()!;
+      if (k.getState() === 'running') await k.shutdown();
+    }
+  });
+
+  const module = (id: string, objectName: string, dependencies: Record<string, string> = { 'com.acme.crm': '^1.0.0' }) => ({
+    id,
+    name: id.replace(/\W/g, '_'),
+    version: '1.0.0',
+    type: 'module',
+    namespace: 'crm',
+    dependencies,
+    objects: [
+      { name: objectName, label: objectName, fields: { total: { name: 'total', label: 'Total', type: 'number' } } },
+    ],
+  });
+  const revenue = (objectName = 'crm_invoice') => module('com.acme.crm.revenue', objectName);
+  const marketing = (objectName = 'crm_campaign') => module('com.acme.crm.marketing', objectName);
+
+  it('THE PAIRING GATE ACROSS ARTIFACTS — given the gate admits a dependent sharing its parent\'s namespace, a dependent defining a name the parent owns is REFUSED', async () => {
+    // ── Half 1: the relaxation. Without the declaration this is the
+    // different-artifacts refusal pinned above.
+    const admitting = await freshManifestService();
+    expect(await registerAndCatch(admitting.svc, crmCore())).toBeUndefined();
+    expect(await registerAndCatch(admitting.svc, revenue())).toBeUndefined();
+    expect(admitting.registry.getNamespaceOwners('crm').sort()).toEqual(['com.acme.crm', 'com.acme.crm.revenue']);
+    expect(admitting.registry.getObjectOwner('crm_account')?.packageId).toBe('com.acme.crm');
+    expect(admitting.registry.getObjectOwner('crm_invoice')?.packageId).toBe('com.acme.crm.revenue');
+
+    // ── Half 2: the uniqueness check follows the widened set.
+    const refusing = await freshManifestService();
+    expect(await registerAndCatch(refusing.svc, crmCore())).toBeUndefined();
+    const refused = await registerAndCatch(refusing.svc, revenue('crm_account'));
+    expect(refused).toBeInstanceOf(ArtifactObjectNameConflictError);
+    expect(refused?.code).toBe('DUPLICATE_ARTIFACT_OBJECT_NAME');
+    expect(refused?.status).toBe(422);
+    const err = refused as ArtifactObjectNameConflictError;
+    expect(err.coOwnership).toBe('dependency');
+    expect(err.existingPackageId).toBe('com.acme.crm');
+    expect(err.incomingPackageId).toBe('com.acme.crm.revenue');
+    // Worded for its source: a cross-artifact refusal never claims one artifact.
+    expect(err.message).toContain('declared dependency');
+    expect(err.message).not.toContain('same artifact');
+    expect(err.message).not.toContain('one release artifact');
+    expect(refusing.registry.getPackage('com.acme.crm.revenue')).toBeUndefined();
+  });
+
+  it('admits a sibling under the same declared parent, and refuses a sibling defining a name the other sibling owns', async () => {
+    const admitting = await freshManifestService();
+    expect(await registerAndCatch(admitting.svc, crmCore())).toBeUndefined();
+    expect(await registerAndCatch(admitting.svc, revenue())).toBeUndefined();
+    // The sitting owners of `crm` are now {crm, revenue}; marketing declares no
+    // revenue, and the sibling arm is what admits it.
+    expect(await registerAndCatch(admitting.svc, marketing())).toBeUndefined();
+    expect(admitting.registry.getNamespaceOwners('crm').sort())
+      .toEqual(['com.acme.crm', 'com.acme.crm.marketing', 'com.acme.crm.revenue']);
+
+    const refusing = await freshManifestService();
+    expect(await registerAndCatch(refusing.svc, crmCore())).toBeUndefined();
+    expect(await registerAndCatch(refusing.svc, revenue())).toBeUndefined();
+    const refused = await registerAndCatch(refusing.svc, marketing('crm_invoice'));
+    expect(refused?.code).toBe('DUPLICATE_ARTIFACT_OBJECT_NAME');
+    expect(refused?.status).toBe(422);
+    const err = refused as ArtifactObjectNameConflictError;
+    expect(err.coOwnership).toBe('sibling');
+    expect(err.existingPackageId).toBe('com.acme.crm.revenue');
+    expect(err.incomingPackageId).toBe('com.acme.crm.marketing');
+    expect(err.message).toContain('com.acme.crm');
+    expect(err.message).not.toContain('one release artifact');
+    expect(refusing.registry.getPackage('com.acme.crm.marketing')).toBeUndefined();
+  });
+
+  it('reads the relation from either end: the parent registering second beside its dependent is admitted (a boot that hydrates P before X)', async () => {
+    const { svc, registry } = await freshManifestService();
+    expect(await registerAndCatch(svc, revenue())).toBeUndefined();
+    expect(await registerAndCatch(svc, crmCore())).toBeUndefined();
+    expect(registry.getNamespaceOwners('crm').sort()).toEqual(['com.acme.crm', 'com.acme.crm.revenue']);
+  });
+
+  it('upgrade: the parent re-registered beside its module is admitted; a parent newly defining a name the module owns is refused naming the module', async () => {
+    const { svc, registry } = await freshManifestService();
+    expect(await registerAndCatch(svc, crmCore())).toBeUndefined();
+    expect(await registerAndCatch(svc, revenue())).toBeUndefined();
+
+    expect(await registerAndCatch(svc, { ...crmCore(), version: '1.1.0' })).toBeUndefined();
+    expect(registry.getPackage('com.acme.crm')?.manifest?.version).toBe('1.1.0');
+
+    const grabbing = {
+      ...crmCore(),
+      version: '1.2.0',
+      objects: [
+        ...crmCore().objects,
+        { name: 'crm_invoice', label: 'Invoice (core)', fields: { amount: { name: 'amount', label: 'Amount', type: 'number' } } },
+      ],
+    };
+    const refused = await registerAndCatch(svc, grabbing);
+    expect(refused?.code).toBe('DUPLICATE_ARTIFACT_OBJECT_NAME');
+    expect(refused?.status).toBe(422);
+    const err = refused as ArtifactObjectNameConflictError;
+    expect(err.coOwnership).toBe('dependency');
+    expect(err.existingPackageId).toBe('com.acme.crm.revenue');
+    expect(err.incomingPackageId).toBe('com.acme.crm');
+    expect(registry.getObjectOwner('crm_invoice')?.packageId).toBe('com.acme.crm.revenue');
+  });
+
+  it('still refuses a sharer that is neither declared nor a sibling, and names the declaration as the fix', async () => {
+    const { svc } = await freshManifestService();
+    expect(await registerAndCatch(svc, crmCore())).toBeUndefined();
+    const refused = await registerAndCatch(svc, module('com.other.crm.addon', 'crm_lead', {}));
+    expect(refused).toBeInstanceOf(NamespaceConflictError);
+    expect(refused?.code).toBe('NAMESPACE_CONFLICT');
+    expect(refused?.status).toBe(422);
+    expect(refused?.message).toContain('manifest.dependencies');
+  });
+
+  it('never admits two siblings whose declared parent is absent, or whose shared parent uses another namespace', async () => {
+    // The sibling arm reads Q's namespace from Q's installed record: two
+    // modules sharing a declaration of a package that is not installed — or of a
+    // utility under its own namespace — co-own nothing.
+    const absentParent = await freshManifestService();
+    expect(await registerAndCatch(absentParent.svc, revenue())).toBeUndefined();
+    const refusedAbsent = await registerAndCatch(absentParent.svc, marketing());
+    expect(refusedAbsent?.code).toBe('NAMESPACE_CONFLICT');
+    expect(refusedAbsent?.status).toBe(422);
+
+    const utility = await freshManifestService();
+    expect(await registerAndCatch(utility.svc, {
+      id: 'com.acme.util', name: 'acme_util', version: '1.0.0', type: 'module', namespace: 'util', objects: [],
+    })).toBeUndefined();
+    const onUtil = { 'com.acme.util': '^1.0.0' };
+    expect(await registerAndCatch(utility.svc, module('com.acme.crm.revenue', 'crm_invoice', onUtil))).toBeUndefined();
+    const refusedUtility = await registerAndCatch(utility.svc, module('com.acme.crm.marketing', 'crm_campaign', onUtil));
+    expect(refusedUtility?.code).toBe('NAMESPACE_CONFLICT');
+    expect(refusedUtility?.status).toBe(422);
+  });
+});
