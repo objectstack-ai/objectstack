@@ -69,6 +69,11 @@ afterEach(() => {
 /** The published item reads sent for `name` (no `state=draft`). */
 const publishedReads = (name: string) =>
   requests.filter((u) => u.includes(`/meta/object/${name}`) && !u.includes('state=draft'));
+/**
+ * The draft reads sent for `name`. Counted as "at least one", never exactly:
+ * the sheet's security-posture lint reads each object draft too, once its
+ * rule module has loaded, so the total depends on that load's timing.
+ */
 const draftReads = (name: string) =>
   requests.filter((u) => u.includes(`/meta/object/${name}`) && u.includes('state=draft'));
 
@@ -83,7 +88,7 @@ describe('objectstack-ai/objectstack#25894 — a NEW draft is not asked for its 
     await waitFor(() => expect(screen.getAllByTestId('draft-entry-detail')).toHaveLength(DRAFT_ROWS.length));
     await waitFor(() => expect(publishedReads('st_queue')).toHaveLength(1));
 
-    expect(draftReads('st_ticket'), 'the drill-in never ran: the harness is dead').toHaveLength(1);
+    expect(draftReads('st_ticket').length, 'the drill-in never ran: the harness is dead').toBeGreaterThan(0);
     expect(publishedReads('st_ticket')).toEqual([]);
     expect(publishedReads('st_queue')[0]).toContain(`package=${PKG}`);
     expect(screen.getByText('New')).toBeInTheDocument();
@@ -105,7 +110,7 @@ describe('objectstack-ai/objectstack#25894 — a NEW draft is not asked for its 
 
     answer();
     await waitFor(() => expect(publishedReads('st_queue')).toHaveLength(1));
-    await waitFor(() => expect(draftReads('st_ticket')).toHaveLength(1));
+    await waitFor(() => expect(draftReads('st_ticket').length).toBeGreaterThan(0));
     expect(publishedReads('st_ticket')).toEqual([]);
   });
 
