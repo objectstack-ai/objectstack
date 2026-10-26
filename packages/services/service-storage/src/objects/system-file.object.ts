@@ -160,6 +160,27 @@ export const SystemFile = ObjectSchema.create({
       group: 'Field Reference',
     }),
 
+    // [#26046] The record whose field last owned this file, kept when that
+    // record lets it go (the ownership columns above are cleared then). A file
+    // a record let go is read by that record's rule until a writer who may
+    // read it claims it again, or it is collected — never by the weaker rule
+    // of a file no record ever held. Cleared by the next claim. NULL on every
+    // file no record has let go. Never a holder: the reap guard reads the
+    // ownership columns above, not these.
+    released_ref_object: Field.text({
+      label: 'Released From Object',
+      maxLength: 128,
+      description: 'Short object name of the record that last owned this file, after it let the file go',
+      group: 'Field Reference',
+    }),
+
+    released_ref_id: Field.text({
+      label: 'Released From Record',
+      maxLength: 64,
+      description: 'Primary key of the record that last owned this file, after it let the file go',
+      group: 'Field Reference',
+    }),
+
     metadata: Field.text({
       label: 'Metadata (JSON)',
     }),

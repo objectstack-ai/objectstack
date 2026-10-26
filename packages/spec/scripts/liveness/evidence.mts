@@ -22,19 +22,38 @@
 // (`object.enable.clone` → a file that moved repos) sat there unnoticed.
 //
 // So: extract path-shaped tokens properly, and honour the cross-repo attribution
-// the entries already write ("objectui: …"). What's left is signal.
+// the entries already write ("cloud: …", and "objectui: …" until the renderer
+// merged in as `ui/` — see RETIRED_REALMS). What's left is signal.
 
-/** Top-level directories of THIS repo — the anchor for a repo-relative path claim. */
-export const REPO_ROOTS = ['apps', 'content', 'docker', 'docs', 'examples', 'packages', 'scripts', 'skills'];
+/**
+ * Top-level directories of THIS repo — the anchor for a repo-relative path claim.
+ * `ui` is the renderer, merged in from the objectui repo (#25677): its paths are
+ * cited `ui/packages/…` and resolve like any other.
+ */
+export const REPO_ROOTS = ['apps', 'content', 'docker', 'docs', 'examples', 'packages', 'scripts', 'skills', 'ui'];
 
 /**
  * Realm markers an evidence string may use to attribute a path to another repo.
- * `objectui` is the renderer repo; `cloud` is the closed EE runtime. `framework`
- * switches back explicitly. These are already the house convention in prose —
- * this makes them machine-read instead of decorative.
+ * `cloud` is the closed EE runtime. `framework` switches back explicitly. These
+ * are already the house convention in prose — this makes them machine-read
+ * instead of decorative.
  */
-export const FOREIGN_REALMS = ['objectui', 'cloud', 'ee'];
+export const FOREIGN_REALMS = ['cloud', 'ee'];
 export const LOCAL_REALM = 'framework';
+
+/**
+ * Realm markers that USED to name another repo and now name a directory of this
+ * one, mapped to that directory. `objectui` merged in as `ui/` (#25677, #25712).
+ * A path still attributed to it is neither foreign nor local: counted foreign it
+ * would never fail, and read as local it would resolve against the wrong root —
+ * both trees have a `packages/core/`, so `objectui: packages/core/…` could pass
+ * on a file that never was the reader. So it is a bucket of its own, and the
+ * gate fails on it with the in-repo spelling as the remedy. A path already
+ * spelled `ui/…` is in-repo whatever prose precedes it: `objectui` survives in
+ * history prose ("read at objectui @sha"), and that word must not re-attribute
+ * the in-repo path after it.
+ */
+export const RETIRED_REALMS: Readonly<Record<string, string>> = { objectui: 'ui' };
 
 /**
  * Paths that are repo-rooted in shape but never present in the OPEN edition.
@@ -85,11 +104,23 @@ export interface EvidenceAnchor {
   symbol: string;
 }
 
+/** A path attributed to a retired realm: `objectui: packages/x.ts`, now `ui/packages/x.ts`. */
+export interface RetiredPointer {
+  /** The retired realm marker, lower-cased (`objectui`). */
+  realm: string;
+  /** The path exactly as attributed to it. */
+  path: string;
+  /** The same path spelled in-repo — the remedy the gate prints. */
+  inRepo: string;
+}
+
 export interface EvidenceScan {
   /** Repo-rooted paths attributed to THIS repo — these must resolve. */
   local: string[];
   /** Paths attributed to another repo (realm marker or foreign prefix) — not resolved here. */
   foreign: string[];
+  /** Paths attributed to a realm that merged into this repo (RETIRED_REALMS) — these FAIL. */
+  retired: RetiredPointer[];
   /**
    * The subset of `local` whose citation names a line, paired with that line —
    * the only citations a line-bound check can falsify. Deduped on `path:line`,
@@ -156,11 +187,11 @@ function bareToken(raw: string): TokenParts {
 }
 
 /**
- * Split an evidence string into local vs foreign path claims.
+ * Split an evidence string into local vs foreign (vs retired-realm) path claims.
  *
- * A realm marker (`objectui:`, `(objectui`, `cloud:`) attributes the paths that
- * FOLLOW it, and its scope ends at the next clause boundary (`;` or a closing
- * paren) — so `"objectui X gates … (plugin-audit, packages/plugins/…/y.ts) …"`
+ * A realm marker (`cloud:`, `(cloud`, and the retired `objectui:`) attributes the
+ * paths that FOLLOW it, and its scope ends at the next clause boundary (`;` or a
+ * closing paren) — so `"cloud X gates … (plugin-audit, packages/plugins/…/y.ts) …"`
  * still resolves the framework path in the trailing clause. Anything that is not
  * repo-rooted (`app-shell/MetadataProvider.tsx`, `action-button/-group`) is
  * prose and is neither resolved nor reported.
@@ -170,18 +201,21 @@ export function scanEvidence(evidence: string): EvidenceScan {
   const foreign: string[] = [];
   const citations: EvidenceCitation[] = [];
   const anchors: EvidenceAnchor[] = [];
+  const retired: RetiredPointer[] = [];
   let realm = LOCAL_REALM;
 
   for (const raw of String(evidence).split(/\s+/)) {
     const { path: token, line, anchor } = bareToken(raw);
     const asRealm = token.toLowerCase();
 
-    if (FOREIGN_REALMS.includes(asRealm)) { realm = asRealm; continue; }
+    if (FOREIGN_REALMS.includes(asRealm) || Object.hasOwn(RETIRED_REALMS, asRealm)) { realm = asRealm; continue; }
     if (asRealm === LOCAL_REALM) { realm = LOCAL_REALM; continue; }
 
     if (PATH_RE.test(token)) {
       const isForeignPath = FOREIGN_PATH_PREFIXES.some((p) => token.startsWith(p));
-      if (realm !== LOCAL_REALM || isForeignPath) foreign.push(token);
+      const into = Object.hasOwn(RETIRED_REALMS, realm) ? RETIRED_REALMS[realm] : null;
+      if (into !== null && !token.startsWith(`${into}/`)) retired.push({ realm, path: token, inRepo: `${into}/${token}` });
+      else if (into === null && (realm !== LOCAL_REALM || isForeignPath)) foreign.push(token);
       else {
         local.push(token);
         // Every token is scanned, so a multi-citation entry ("…file.ts:267 (prose)
@@ -201,6 +235,7 @@ export function scanEvidence(evidence: string): EvidenceScan {
   return {
     local: dedupe(local),
     foreign: dedupe(foreign),
+    retired: dedupeRetired(retired),
     localCitations: dedupeCitations(citations),
     localAnchors: dedupeAnchors(anchors),
   };
@@ -214,6 +249,16 @@ function dedupeCitations(cs: EvidenceCitation[]): EvidenceCitation[] {
   const seen = new Set<string>();
   return cs.filter((c) => {
     const k = `${c.path}:${c.line}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
+function dedupeRetired(rs: RetiredPointer[]): RetiredPointer[] {
+  const seen = new Set<string>();
+  return rs.filter((r) => {
+    const k = `${r.realm}:${r.path}`;
     if (seen.has(k)) return false;
     seen.add(k);
     return true;
@@ -237,7 +282,7 @@ export interface EvidenceCheck extends EvidenceScan {
 
 /** Scan an evidence string and resolve its local paths against the filesystem. */
 export function checkEvidence(evidence: unknown, exists: (path: string) => boolean): EvidenceCheck {
-  if (typeof evidence !== 'string') return { local: [], foreign: [], localCitations: [], localAnchors: [], missing: [] };
+  if (typeof evidence !== 'string') return { local: [], foreign: [], retired: [], localCitations: [], localAnchors: [], missing: [] };
   const scan = scanEvidence(evidence);
   return { ...scan, missing: scan.local.filter((p) => !exists(p)) };
 }

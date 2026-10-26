@@ -111,10 +111,10 @@ describe('the governed surface is the ruled definition, and it is real', () => {
 
   /**
    * The one row whose directory left this tree: objectstack#25712 deleted
-   * `ui/.github/workflows/`, which GitHub never ran under the monorepo. ⚠️ PENDING
-   * the maintainer's call on objectstack#25712, since the row is objectui#12255's
-   * ruling: drop it, keep it as below, or retire this register for the root one
-   * (sub-issue 4).
+   * `ui/.github/workflows/`, which GitHub never ran under the monorepo. The row is
+   * objectui#12255's ruling, and the maintainer kept it on objectstack#25712
+   * (2026-10-26, option b): it stays, read through the root register below. Whether
+   * this register retires for the root one is sub-issue 4's question.
    */
   const MOVED = 'workflows';
 

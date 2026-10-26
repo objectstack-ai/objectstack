@@ -180,7 +180,11 @@ describe('objectui#11261 — a dimensionless chart renders one mark per measure'
     // A dimensionless bar used to be a tile that showed its comparison as a
     // delta. As a chart it keeps asking for one, so the overlay has to draw.
     const container = await renderChart(
-      { id: 'rc', type: 'bar', dataset: 'sales', values: ['revenue', 'cost'], compareTo: { kind: 'previousPeriod' } },
+      {
+        id: 'rc', type: 'bar', dataset: 'sales', values: ['revenue', 'cost'],
+        // A comparison is asked only over a dated window (objectstack#25970).
+        filter: { close_date: { $gte: '2026-04-01', $lte: '2026-06-30' } }, compareTo: { kind: 'previousPeriod' },
+      },
       [{ revenue: 510000, cost: 120000, revenue__compare: 400000, cost__compare: 100000 }],
     );
     await waitFor(() => expect(barMarks(container)).toBe(4));
