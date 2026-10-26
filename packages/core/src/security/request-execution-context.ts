@@ -271,7 +271,7 @@ export async function resolveRequestExecutionContext(
   if (authz.userId) {
     if (input.localization !== 'withhold') {
       const settings = await Promise.resolve(input.localization.settings()).catch(() => undefined);
-      localization = await resolveLocalizationContext({ ql, settings, tenantId: authz.tenantId, userId: authz.userId });
+      localization = await resolveLocalizationContext({ ql, settings, organizationId: authz.tenantId, userId: authz.userId });
     }
     authGate = await decideAuthGate(input, authz, sessionApi);
   }

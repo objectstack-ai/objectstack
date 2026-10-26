@@ -211,7 +211,8 @@ registerMetadataResource({
 
 // objectstack#25333 — the position list says who holds each position and which
 // permission sets it grants, both served by the server (`?include=grants`) from
-// the reader the authorization resolver enforces with.
+// the reader the authorization resolver enforces with. objectstack#25909 — and
+// the position's served `description`, the permission-set list's column.
 registerMetadataResource({
   type: 'position',
   domain: 'security',
@@ -219,6 +220,7 @@ registerMetadataResource({
   listColumns: [
     { key: 'name', label: 'Name', width: '20%' },
     { key: 'label', label: 'Label', width: '20%' },
+    { key: 'description', label: 'Description' },
     {
       key: '_holderCount',
       label: 'Holders',

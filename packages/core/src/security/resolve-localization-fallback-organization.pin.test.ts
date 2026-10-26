@@ -90,8 +90,8 @@ afterEach(() => {
 describe('the direct localization fallback reads the caller organization only (ADR-0131 D8)', () => {
   it('settings service absent: each organization reads its own row, never the first row of another', async () => {
     const ql = makeQl(TWO_ORGS);
-    expect((await resolveLocalizationContext({ ql, tenantId: 'org_a' })).timezone).toBe('Europe/Paris');
-    expect((await resolveLocalizationContext({ ql, tenantId: 'org_b' })).timezone).toBe('Asia/Tokyo');
+    expect((await resolveLocalizationContext({ ql, organizationId: 'org_a' })).timezone).toBe('Europe/Paris');
+    expect((await resolveLocalizationContext({ ql, organizationId: 'org_b' })).timezone).toBe('Asia/Tokyo');
     // The organization is in the query itself, not only compared afterwards.
     expect(ql.settingQueries.map((w) => w?.organization_id)).toEqual(['org_a', 'org_b']);
   });
@@ -99,12 +99,12 @@ describe('the direct localization fallback reads the caller organization only (A
   it('settings service throwing (the organization source\'s AuthzStoreUnavailableError) reads the same way', async () => {
     const settings = throwingSettings(new AuthzStoreUnavailableError('sys_organization', new Error('down')));
     const ql = makeQl(TWO_ORGS);
-    expect((await resolveLocalizationContext({ ql, settings, tenantId: 'org_a' })).timezone).toBe('Europe/Paris');
+    expect((await resolveLocalizationContext({ ql, settings, organizationId: 'org_a' })).timezone).toBe('Europe/Paris');
   });
 
   it('an organization with no row of its own gets the built-in default, not another organization\'s row', async () => {
     const ql = makeQl({ sys_organization: [{ id: 'org_a' }, { id: 'org_c' }], sys_setting: [tz('org_a', 'Europe/Paris')] });
-    expect((await resolveLocalizationContext({ ql, tenantId: 'org_c' })).timezone).toBe('UTC');
+    expect((await resolveLocalizationContext({ ql, organizationId: 'org_c' })).timezone).toBe('UTC');
   });
 
   it('the organization is compared in memory too — an engine that drops the filter still cannot leak', async () => {
@@ -114,12 +114,12 @@ describe('the direct localization fallback reads the caller organization only (A
       const { organization_id: _dropped, ...where } = options?.where ?? {};
       return base.find(object, { ...options, where });
     } };
-    expect((await resolveLocalizationContext({ ql, tenantId: 'org_a' })).timezone).toBe('Europe/Paris');
+    expect((await resolveLocalizationContext({ ql, organizationId: 'org_a' })).timezone).toBe('Europe/Paris');
   });
 
   it('a row with no organization is not an organization\'s fallback', async () => {
     const ql = makeQl({ sys_organization: [{ id: 'org_a' }], sys_setting: [tz(null, 'America/New_York')] });
-    expect((await resolveLocalizationContext({ ql, tenantId: 'org_a' })).timezone).toBe('UTC');
+    expect((await resolveLocalizationContext({ ql, organizationId: 'org_a' })).timezone).toBe('UTC');
   });
 });
 
@@ -158,7 +158,7 @@ describe('a caller that names no organization (ADR-0131 D9)', () => {
     it(`behind a wall (\`${posture}\`), a caller that names its organization still reads its own row`, async () => {
       vi.stubEnv('OS_TENANCY_POSTURE', posture);
       const ql = makeQl(TWO_ORGS);
-      expect((await resolveLocalizationContext({ ql, tenantId: 'org_b' })).timezone).toBe('Asia/Tokyo');
+      expect((await resolveLocalizationContext({ ql, organizationId: 'org_b' })).timezone).toBe('Asia/Tokyo');
     });
   }
 
