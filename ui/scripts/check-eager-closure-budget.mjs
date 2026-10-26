@@ -1367,8 +1367,44 @@ import { isEntrypoint } from './invoked-as.mjs';
  * 347,000 ceiling; the other three budgeted chunks did not move, so
  * {@link PER_CHUNK_GZIP_CEILINGS} and {@link PER_CHUNK_BASELINE} stand. Not
  * {@link REGRESSION_THIS_GATE_MUST_CATCH_BYTES}. No exemption was added.
+ *
+ * ## ⭐ RE-PINNED AFTER THE SPEC SHARED CHUNKS AND THE MOVE INTO objectstack (objectstack#25925)
+ *
+ * From 3,579,945 to 2,489,948: down by 1,089,997 bytes, exactly what the
+ * closure lost between {@link BASELINE}'s previous reading (`b6f11d3`,
+ * 3,072,056 across 85 of 2291 chunks) and `main` at `cc378e93` (1,982,059
+ * across 85 of 2387). Lowered by that amount, as the objectui#13410 entry
+ * above was: ⛔ not re-derived as the new reading plus half a regression and
+ * ⛔ not rounded. Left where it was, the ceiling sat 1560.4 KB over the
+ * reading, 2.25x {@link REGRESSION_THIS_GATE_MUST_CATCH_BYTES}, and
+ * {@link evaluateHeadroomSensitivity} called it blind (exit 2) on `main`:
+ * that is the re-pin the gate asked for.
+ *
+ * The `cc378e93` reading: `pnpm --filter '@object-ui/console^...' build`,
+ * then `CI=true pnpm exec vite build` in `ui/apps/console` (exit 0, both
+ * under `scripts/pm/os-verify-lock.sh`), reading
+ * `ui/apps/console/dist/eager-closure.json`. Almost all of the drop is
+ * `vendor-objectstack`, 1,531,986 at {@link PER_CHUNK_BASELINE} to 507,716.
+ *
+ * ⚠️ The two readings are two trees, ⛔ not a control and a change: between
+ * them `@objectstack/spec` moved to one shared-chunk ESM graph (`3a2d38c6e2`),
+ * so the bundler can merge the copies each self-contained subpath entry used
+ * to carry (the duplication objectstack#25925 names), and objectui moved into
+ * this repository as `ui/`, so `@objectstack/*` resolves from the workspace
+ * instead of a pinned build. How the drop splits between those is NOT
+ * MEASURED.
+ *
+ * Headroom 507,889 bytes = 0.71x {@link REGRESSION_THIS_GATE_MUST_CATCH_BYTES}
+ * over {@link BASELINE}: exactly the headroom the objectui#13410 entry left,
+ * because the ceiling came down by the aggregate's own delta.
+ *
+ * What moved with it: `vendor-objectstack`'s row in
+ * {@link PER_CHUNK_GZIP_CEILINGS} and {@link PER_CHUNK_BASELINE}, which the
+ * same run called blind (1.91x). Not the other three per-chunk rows, which
+ * stayed in range; not {@link REGRESSION_THIS_GATE_MUST_CATCH_BYTES}. No
+ * exemption was added.
  */
-export const MAX_EAGER_CLOSURE_GZIP_BYTES = 3_579_945;
+export const MAX_EAGER_CLOSURE_GZIP_BYTES = 2_489_948;
 
 /**
  * The measurement the ceiling above was derived from. Exported so the two
@@ -1380,6 +1416,17 @@ export const MAX_EAGER_CLOSURE_GZIP_BYTES = 3_579_945;
 export const BASELINE = Object.freeze({
   /**
    * `emitEagerClosureReport`'s `eagerGzipBytes` on this commit.
+   *
+   * `cc378e93` is `main` in this repository, re-pinned with the ceiling it was
+   * lowered with (the objectstack#25925 entry on
+   * {@link MAX_EAGER_CLOSURE_GZIP_BYTES} carries the instrument and the reading
+   * it superseded, ⛔ not restated here). Measured on `main` itself, not on a
+   * branch commit: the pull request that re-pins it edits this file only, which
+   * reaches no bundler input, so it cannot move the figure it pins.
+   *
+   * ⚠️ The paragraph below describes the reading this one superseded, the
+   * previous baseline `b6f11d3` (3,072,056 across 85 of 2291 chunks), kept as
+   * its provenance.
    *
    * `b6f11d3` is objectui#13410's branch commit: `main` at `7981384` plus the
    * change that takes the chat UI out of the first load, re-pinned with the
@@ -1547,10 +1594,10 @@ export const BASELINE = Object.freeze({
    * and not from `main` once it is squash-merged — the dead end objectui#9355
    * added `squashMerge` below to route around.
    */
-  gzipBytes: 3_072_056,
+  gzipBytes: 1_982_059,
   chunks: 85,
-  totalChunks: 2291,
-  commit: 'b6f11d3',
+  totalChunks: 2387,
+  commit: 'cc378e93',
 
   /**
    * The squash merge that carried the reading above onto `main`, recorded when
@@ -1560,7 +1607,9 @@ export const BASELINE = Object.freeze({
    *
    * `null` since objectui#10996, and `null` again after objectui#11101,
    * objectui#11438, objectui#11717, objectui#11798, objectui#11854,
-   * objectui#11939, objectui#12030 and objectui#13410, deliberately. This field can only ever be BACK-FILLED: a squash sha does
+   * objectui#11939, objectui#12030 and objectui#13410, deliberately; and `null`
+   * after objectstack#25925 because its reading was taken on `main` itself,
+   * which a `main` checkout resolves without a handle. This field can only ever be BACK-FILLED: a squash sha does
    * not exist until the pull request merges, so the change that re-pins the
    * field above ⛔ cannot write its own here. ⛔ Do not guess one: a wrong sha in
    * this position is worse than an absent one, because it RESOLVES, and a
@@ -2147,7 +2196,17 @@ export const PER_CHUNK_GZIP_CEILINGS = Object.freeze({
   //
   // ⚠️ RAISED ×1.20 by objectui#12653 (2026-10-16), the maintainer's 20%
   // ruling, from 1,555,705 (the entry on MAX_EAGER_CLOSURE_GZIP_BYTES).
-  'vendor-objectstack': 1_867_000,
+  //
+  // ⭐ LOWERED by objectstack#25925, from 1,867,000 by exactly the 1,024,270
+  // bytes this chunk lost between the baseline below and `main` at `cc378e93`
+  // (1,531,986 to 507,716; the objectstack#25925 entry on
+  // MAX_EAGER_CLOSURE_GZIP_BYTES names the instrument and the two changes that
+  // fall between them). Left where it was, the line sat 1327.4 KB over the
+  // reading, 1.91x REGRESSION_THIS_GATE_MUST_CATCH_BYTES, and the sensitivity
+  // half called it blind. Headroom 335,014 bytes = 0.47x
+  // REGRESSION_THIS_GATE_MUST_CATCH_BYTES over the baseline below, what this
+  // key had before, kept to the byte.
+  'vendor-objectstack': 842_730,
   // ⭐ LOWERED, and RE-KEYED, by objectui#7479 — this line used to read
   // `'i18n-locales': 465_000` and budget TEN catalogues. Nine of them are
   // `import()`ed on demand now, so the chunk that name pointed at no longer
@@ -2318,12 +2377,14 @@ export const PER_CHUNK_GZIP_CEILINGS = Object.freeze({
  * the same build, when the objectstack#22044 payback lowered both lines; the
  * other three keys moved by at most 846 bytes across its two builds and stayed
  * where they were. objectui#13410 re-pinned the aggregate onto
- * BASELINE's `b6f11d3` and left every key where it was: across its two builds
+ * `b6f11d3` and left every key where it was: across its two builds
  * `vendor-objectstack`, `framework` and `i18n-locale-en` moved by 0 bytes and
  * `ui-components` by +12,267 (the markdown modules its entry on
  * {@link MAX_EAGER_CLOSURE_GZIP_BYTES} attributes), every ceiling stayed in
- * range, and no ceiling moved. `vendor-objectstack` is therefore still the
- * `5488ae7` reading moved by objectui#12626's measured delta. The aggregate is the later reading for every other key:
+ * range, and no ceiling moved. objectstack#25925 re-pinned the aggregate onto
+ * BASELINE's `cc378e93` and `vendor-objectstack` with it, from the same build,
+ * when both lines had drifted blind; the other three keys stayed in range and
+ * where they were. The aggregate is the later reading for every other key:
  * `bbf6b02d9` (2026-09-13, objectui#9251) for `ui-components`, and `3f775eeb8`
  * for `framework`. ⚠️ `i18n-locale-en`'s commit was `755d34a5f` when it
  * was taken and the aggregate has moved on since, which is exactly why the two
@@ -2399,7 +2460,11 @@ export const PER_CHUNK_BASELINE = Object.freeze({
   // PER_CHUNK_GZIP_CEILINGS). ⚠️ So this is no longer one build's reading: it
   // is the `5488ae7` reading plus the next.2 bump's measured delta, which
   // keeps the ceiling-minus-baseline gap this key carried.
-  'vendor-objectstack': 1_531_986,
+  //
+  // Re-pinned by objectstack#25925 onto `cc378e93`, the same console build as
+  // BASELINE above, from 1,531,986 to that build's 507,716, with its ceiling.
+  // It is one build's reading again.
+  'vendor-objectstack': 507_716,
   // `755d34a5f` (objectui#7479) — the SAME console build as
   // BASELINE above, so the two are directly comparable, and the same instrument
   // and container as the control build it is subtracted from. It supersedes
