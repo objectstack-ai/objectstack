@@ -5285,12 +5285,13 @@ export default class Serve extends Command {
 
         // ── Console portal ──────────────────────────────────────────
         // The opinionated, fork-ready runtime console (`@objectstack/console`,
-        // the build of objectstack-ai/objectui's console app this framework
-        // vendors at its `.objectui-sha` pin) mounts under `/_console/`. When
+        // the build of this workspace's `ui/apps/console` that
+        // `pnpm console:build` vendors) mounts under `/_console/`. When
         // present, it owns the root `/` redirect (preferred default UI). It is
         // optional — we only mount it when the package resolves and a
         // pre-built `dist/` is present, and — in dev — only when that build
-        // matches the repo's objectui pin (#7752). Every other boot that wants
+        // matches any objectui pin found above it (#7752; the framework repo
+        // itself carries none since #25745). Every other boot that wants
         // a Console gets a responder on those same routes instead, so
         // `/_console/` answers `503` naming the remedy its boot message prints
         // rather than a bare 404 (#22420): the drift refusal; a package with no
