@@ -51,7 +51,6 @@
     "census:tsconfig-test-parity": "node scripts/tsconfig-test-parity-census.mjs",
     "census:cross-file-line-citations": "node scripts/cross-file-line-citation-census.mjs",
     "census:dollar-dialect-aliases": "node scripts/dollar-dialect-alias-census.mjs",
-    "census:changeset-polarity": "node scripts/changeset-polarity-census.mjs",
     "check:new-line-citations": "node scripts/check-new-cross-file-line-citations.mjs",
     "check:control-bytes": "node scripts/check-control-bytes.mjs",
     "check:published-dist": "node scripts/check-published-dist-tooling.mjs",
