@@ -74,11 +74,21 @@ import { isObjectDefaultRowScopePolicy } from './object-default-row-scope.js';
 type RlsDropReason = CelFilterFailReason | 'empty-membership' | 'unknown-field' | 'refused-comparand';
 
 /** A dropped policy's cause: the compiler's reason plus its human `detail`. */
-interface RlsDropCause {
+export interface RlsDropCause {
   reason: RlsDropReason;
   /** The compiler's `detail` — names the variable path, the member index, the bound. */
   detail: string;
 }
+
+/**
+ * [#25866] {@link RLSCompiler.compileRowPredicate}'s answer: the ONE
+ * predicate's filter, judged by the same field guard and comparand faces a
+ * `check` clause passes, or the cause it produced none — which the caller
+ * reads as "this row cannot be judged" and applies the entry as its lock.
+ */
+export type RlsRowPredicateOutcome =
+  | { filter: Record<string, unknown>; cause?: undefined }
+  | { filter: null; cause: RlsDropCause };
 
 /** {@link RLSCompiler.compileExpressionOutcome}'s answer: the filter, or why there is none. */
 type RlsCompileOutcome =
@@ -892,42 +902,14 @@ export class RLSCompiler {
   private static readonly WARNED_DENIALS_MAX = 500;
 
   /**
-   * Compile RLS policies into a query filter for the given user context.
-   * Multiple policies for the same object/operation are OR-combined (any match allows access).
-   *
-   * Return-value semantics:
-   * - `null`   → no policies applicable → caller applies no RLS filter.
-   * - non-null → caller AND's it onto the existing where clause.
-   * - {@link RLS_DENY_FILTER} → policies were defined but none could be
-   *   compiled (e.g. wildcard `tenant_isolation` against a user with no
-   *   active organization). The caller must treat this as "deny by
-   *   default" — its `id` comparison naturally yields zero rows on
-   *   select/update/delete, which is the safe fail-closed answer.
-   *
-   * `fieldGuard` is the object's declared-column set. When supplied, a policy
-   * whose compiled predicate names a column the object does not declare is
-   * DROPPED — in every position and every polarity, judged on the compiled
-   * tree rather than on the predicate's text ({@link judgeCompiledFields}) —
-   * and joins the same fail-closed path as any other dropped policy. It is the
-   * ONE seam both faces pass through: the read layer compiles `using` here and
-   * the ADR-0058 D4 write gate compiles `check` here, so the two can no longer
-   * disagree about what a phantom column means. Omit it and the compile behaves
-   * exactly as it did before the guard existed.
-   *
-   * [#20212] Every compiled policy filter also passes the platform's two shared
-   * comparand faces ({@link judgeCompiledComparands}), with or without a
-   * `fieldGuard`. A policy they refuse is DROPPED onto the same fail-closed
-   * path, for the same one-seam reason: read and check cannot disagree about a
-   * comparand no backend agrees on.
+   * The `current_user` a predicate resolves against, built from the request's
+   * execution context. ONE builder for {@link compileFilter} (an RLS policy's
+   * `using` / `check`) and {@link compileRowPredicate} (a field permission
+   * entry's `when`, #25866): the vocabulary a `when` may name is the
+   * vocabulary an RLS predicate may name, by construction, and the reserved-key
+   * refusal below holds for both.
    */
-  compileFilter(
-    policies: RowLevelSecurityPolicy[],
-    executionContext?: ExecutionContext,
-    clause: 'using' | 'check' = 'using',
-    fieldGuard?: RlsFieldGuard,
-  ): Record<string, unknown> | null {
-    if (policies.length === 0) return null;
-
+  private static userContextOf(executionContext?: ExecutionContext): RLSUserContext {
     const userCtx: RLSUserContext = {
       id: executionContext?.userId,
       organization_id: executionContext?.tenantId,
@@ -991,6 +973,80 @@ export class RLSCompiler {
         }
       }
     }
+    return userCtx;
+  }
+
+  /**
+   * [#25866] Compile ONE row predicate — a field permission entry's `when`,
+   * authored in the same canonical CEL as `rowLevelSecurity[].using` — for
+   * judging a row IN PROCESS (`storedFormCheckJudge` over
+   * `matchesFilterCondition`, the write gate's `check` judge), never for a
+   * query rewrite.
+   *
+   * Same compile as a policy takes through {@link compileFilter}: the same
+   * `current_user` ({@link userContextOf}), the same field-existence judge on
+   * the compiled tree ({@link judgeCompiledFields}, when a `fieldGuard` is
+   * supplied) and the same comparand faces in the `check` clause's position
+   * ({@link judgeCompiledComparands}, in-process evaluation). What it does NOT
+   * do is the policy list's part: no OR-combination, no applicable count, no
+   * deny sentinel and no fail-closed WARN — the ONE predicate's filter comes
+   * back, or the cause it produced none, and the caller decides what an
+   * unjudgeable row means for the entry (its lock).
+   */
+  compileRowPredicate(
+    expression: string,
+    executionContext?: ExecutionContext,
+    fieldGuard?: RlsFieldGuard,
+  ): RlsRowPredicateOutcome {
+    const outcome = this.compileExpressionOutcome(expression, RLSCompiler.userContextOf(executionContext));
+    if (!outcome.filter) return outcome;
+    if (fieldGuard) {
+      const verdict = judgeCompiledFields(outcome.filter, fieldGuard);
+      if (!verdict.ok) return { filter: null, cause: { reason: 'unknown-field', detail: verdict.detail } };
+    }
+    const comparands = judgeCompiledComparands(outcome.filter, rlsLowering(fieldGuard), fieldGuard?.number, 'check');
+    if (!comparands.ok) return { filter: null, cause: { reason: 'refused-comparand', detail: comparands.detail } };
+    return { filter: comparands.filter };
+  }
+
+  /**
+   * Compile RLS policies into a query filter for the given user context.
+   * Multiple policies for the same object/operation are OR-combined (any match allows access).
+   *
+   * Return-value semantics:
+   * - `null`   → no policies applicable → caller applies no RLS filter.
+   * - non-null → caller AND's it onto the existing where clause.
+   * - {@link RLS_DENY_FILTER} → policies were defined but none could be
+   *   compiled (e.g. wildcard `tenant_isolation` against a user with no
+   *   active organization). The caller must treat this as "deny by
+   *   default" — its `id` comparison naturally yields zero rows on
+   *   select/update/delete, which is the safe fail-closed answer.
+   *
+   * `fieldGuard` is the object's declared-column set. When supplied, a policy
+   * whose compiled predicate names a column the object does not declare is
+   * DROPPED — in every position and every polarity, judged on the compiled
+   * tree rather than on the predicate's text ({@link judgeCompiledFields}) —
+   * and joins the same fail-closed path as any other dropped policy. It is the
+   * ONE seam both faces pass through: the read layer compiles `using` here and
+   * the ADR-0058 D4 write gate compiles `check` here, so the two can no longer
+   * disagree about what a phantom column means. Omit it and the compile behaves
+   * exactly as it did before the guard existed.
+   *
+   * [#20212] Every compiled policy filter also passes the platform's two shared
+   * comparand faces ({@link judgeCompiledComparands}), with or without a
+   * `fieldGuard`. A policy they refuse is DROPPED onto the same fail-closed
+   * path, for the same one-seam reason: read and check cannot disagree about a
+   * comparand no backend agrees on.
+   */
+  compileFilter(
+    policies: RowLevelSecurityPolicy[],
+    executionContext?: ExecutionContext,
+    clause: 'using' | 'check' = 'using',
+    fieldGuard?: RlsFieldGuard,
+  ): Record<string, unknown> | null {
+    if (policies.length === 0) return null;
+
+    const userCtx = RLSCompiler.userContextOf(executionContext);
 
     const filters: Record<string, unknown>[] = [];
     /**

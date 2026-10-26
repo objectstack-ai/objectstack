@@ -62,7 +62,7 @@ import type { TenancyPosture } from '@objectstack/spec/security';
 import { registerStorageFamily } from './storage-routes.js';
 import type { FileReadVerdict, StorageGatedSessionReader, StorageUploadSession } from './storage-routes.js';
 import { installAttachmentLifecycleHooks, createSysFileReapGuard, createUploadSessionReapGuard, findFileHolder, findHeldFiles } from './attachment-lifecycle.js';
-import { installFileReferenceHooks } from './file-reference-lifecycle.js';
+import { installFileReferenceHooks, type FileReferenceReadAuthorizer } from './file-reference-lifecycle.js';
 import { installAttachmentAccessHooks, installAttachmentReadVisibility } from './attachment-access-hooks.js';
 import { contributeAttachmentDeleteFloorAlternate } from './attachment-delete-floor-alternate.js';
 import { FileAttachmentService, type FileAttachmentEngine } from './file-attachment-service.js';
@@ -526,7 +526,16 @@ export class StorageServicePlugin implements Plugin {
         // the file into the declared grace window (#3459 PR-5b); the reap
         // guard below re-verifies the ownership columns — and re-reads the
         // deployment flag, fresh — before any byte is deleted.
-        installFileReferenceHooks(engine as any, () => this.storage, ctx.logger);
+        //
+        // [#25692] A write claims or copies only a file its caller may read:
+        // the hooks ask the download door's own judgement, bound here from the
+        // live registry, so the reference rule and the door cannot diverge.
+        installFileReferenceHooks(
+          engine as any,
+          () => this.storage,
+          ctx.logger,
+          buildFileReferenceReadAuthorizer(toGateRegistry(ctx), engine),
+        );
         // "Is anything still holding this tombstone?" for RECORD FILE-FIELD
         // HYDRATION (commit c3c72a4bc). The download path got this question in #10246;
         // the record read kept the older `status === 'committed'` rule, so one
@@ -1528,63 +1537,7 @@ function buildFileReadAuthorizer(
       });
       if (!context?.userId) return 'unauthenticated';
 
-      // Uploader / owner may always download.
-      if (file.owner_id && String(file.owner_id) === String(context.userId)) return 'allow';
-
-      // Field-owned (ADR-0104 D3 wave 2): exactly ONE record's field holds
-      // this file, so access is that record's READ access — never a union.
-      // The verdict is `readableFieldOwners`, asked for this one owner: the
-      // same function record file-field hydration asks (#22637), so the bytes
-      // and the metadata of a field-owned file have one authority.
-      if (file.ref_object && file.ref_id != null && file.ref_id !== '') {
-        const ownerId = String(file.ref_id);
-        const readable = await readableFieldOwners(registry, engine, String(file.ref_object), [ownerId], context);
-        return readable.has(ownerId) ? 'allow' : 'deny';
-      }
-
-      // [#25693] Unclaimed (neither an attachments scope nor a field owner):
-      // no parent record to derive access from, so the file is read as every
-      // other organization-scoped row is — within the caller's organization,
-      // by the organization wall's own verdict ({@link isWithinCallerOrganization}).
-      if (file.scope !== 'attachments') {
-        return (await isWithinCallerOrganization(engine, file.id, context, tenancyServiceResolver(registry)))
-          ? 'allow'
-          : 'deny';
-      }
-
-      // Otherwise: readable via any parent record this file is attached to.
-      const links = (await (engine as any).find('sys_attachment', {
-        where: { file_id: file.id },
-        fields: ['parent_object', 'parent_id'],
-        limit: 500,
-        context: { isSystem: true },
-      })) as Array<Record<string, unknown>>;
-
-      const byObject = new Map<string, Set<string>>();
-      for (const link of links) {
-        const po = link.parent_object;
-        const pid = link.parent_id;
-        if (typeof po !== 'string' || !po || po === 'sys_attachment') continue;
-        if (pid === undefined || pid === null || pid === '') continue;
-        let ids = byObject.get(po);
-        if (!ids) byObject.set(po, (ids = new Set()));
-        ids.add(String(pid));
-      }
-      for (const [parentObject, idSet] of byObject) {
-        const ids = [...idSet];
-        try {
-          const visible = (await (engine as any).find(parentObject, {
-            where: { id: { $in: ids } },
-            fields: ['id'],
-            limit: ids.length,
-            context,
-          })) as Array<Record<string, unknown>>;
-          if (visible.length) return 'allow';
-        } catch {
-          // unknown/failing parent object — try the next
-        }
-      }
-      return 'deny';
+      return await judgeFileRead(registry, engine, file, context);
     } catch (err) {
       // [commit 6a180e42d] A permission-store outage is not a read verdict. Re-raised so
       // the file-read door answers the 503 it is instead of a silent 'deny'
@@ -1597,6 +1550,122 @@ function buildFileReadAuthorizer(
       // the record.
       if (isApiKeyLifecycleRefusalError(err)) throw err;
       return 'deny'; // fail closed
+    }
+  };
+}
+
+/**
+ * The download door's verdict on ONE file for a caller it has already
+ * resolved — every arm after the door's own `'unauthenticated'` answer. Read
+ * by two doors, so that one file has one access rule (ADR-0104 D3):
+ *
+ *  - {@link buildFileReadAuthorizer}, for a download, under the context it
+ *    resolved from the request;
+ *  - [#25692] {@link buildFileReferenceReadAuthorizer}, for a record write
+ *    about to claim or copy the file, under the write's own caller context. A
+ *    write may take a file only as its caller may read it, so holding a file's
+ *    id is never holding its bytes.
+ *
+ * `context` carries a `userId`: both callers answer a caller without one
+ * before asking. Throws what its reads throw (an authorization-store outage
+ * from the posture read, a failed row read); each caller decides what a throw
+ * means at its own door.
+ */
+async function judgeFileRead(
+  registry: StorageGateRegistry,
+  engine: IDataEngine,
+  file: FileRecord,
+  context: ExecutionContext,
+): Promise<'allow' | 'deny'> {
+  // Uploader / owner may always download.
+  if (file.owner_id && String(file.owner_id) === String(context.userId)) return 'allow';
+
+  // Field-owned (ADR-0104 D3 wave 2): exactly ONE record's field holds
+  // this file, so access is that record's READ access — never a union.
+  // The verdict is `readableFieldOwners`, asked for this one owner: the
+  // same function record file-field hydration asks (#22637), so the bytes
+  // and the metadata of a field-owned file have one authority.
+  if (file.ref_object && file.ref_id != null && file.ref_id !== '') {
+    const ownerId = String(file.ref_id);
+    const readable = await readableFieldOwners(registry, engine, String(file.ref_object), [ownerId], context);
+    return readable.has(ownerId) ? 'allow' : 'deny';
+  }
+
+  // [#25693] Unclaimed (neither an attachments scope nor a field owner):
+  // no parent record to derive access from, so the file is read as every
+  // other organization-scoped row is — within the caller's organization,
+  // by the organization wall's own verdict ({@link isWithinCallerOrganization}).
+  if (file.scope !== 'attachments') {
+    return (await isWithinCallerOrganization(engine, file.id, context, tenancyServiceResolver(registry)))
+      ? 'allow'
+      : 'deny';
+  }
+
+  // Otherwise: readable via any parent record this file is attached to.
+  const links = (await (engine as any).find('sys_attachment', {
+    where: { file_id: file.id },
+    fields: ['parent_object', 'parent_id'],
+    limit: 500,
+    context: { isSystem: true },
+  })) as Array<Record<string, unknown>>;
+
+  const byObject = new Map<string, Set<string>>();
+  for (const link of links) {
+    const po = link.parent_object;
+    const pid = link.parent_id;
+    if (typeof po !== 'string' || !po || po === 'sys_attachment') continue;
+    if (pid === undefined || pid === null || pid === '') continue;
+    let ids = byObject.get(po);
+    if (!ids) byObject.set(po, (ids = new Set()));
+    ids.add(String(pid));
+  }
+  for (const [parentObject, idSet] of byObject) {
+    const ids = [...idSet];
+    try {
+      const visible = (await (engine as any).find(parentObject, {
+        where: { id: { $in: ids } },
+        fields: ['id'],
+        limit: ids.length,
+        context,
+      })) as Array<Record<string, unknown>>;
+      if (visible.length) return 'allow';
+    } catch {
+      // unknown/failing parent object — try the next
+    }
+  }
+  return 'deny';
+}
+
+/**
+ * [#25692] The file-reference lifecycle's read verdict
+ * (`FileReferenceReadAuthorizer`): "may the caller of this record write read
+ * the file its field is about to reference?", answered by the download door's
+ * own judgement ({@link judgeFileRead}) under the write's caller context.
+ *
+ * The door's arms before the judgement, in the door's order: a `public_read`
+ * file is anyone's; a caller with no user (an anonymous write) reads no other
+ * file. The door's wiring fact is read per write, as the door reads it: a
+ * kernel with no `auth` service binds no download gate, every file is served
+ * there, and so every file may be referenced — the reference rule is never
+ * stronger or weaker than the door it mirrors.
+ *
+ * A throw is not a verdict. An authorization-store outage is re-raised so the
+ * write fails as the outage it is, never as an answer about the file; every
+ * other fault fails closed, as at the door.
+ */
+function buildFileReferenceReadAuthorizer(
+  registry: StorageGateRegistry,
+  engine: IDataEngine,
+): FileReferenceReadAuthorizer {
+  return async (file, context) => {
+    if (!resolveGateAuthService(registry)) return true;
+    if (file.acl === 'public_read') return true;
+    if (!context?.userId) return false;
+    try {
+      return (await judgeFileRead(registry, engine, file as unknown as FileRecord, context)) === 'allow';
+    } catch (err) {
+      if (isAuthzStoreUnavailableError(err)) throw err;
+      return false; // fail closed
     }
   };
 }

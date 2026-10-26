@@ -1206,6 +1206,22 @@ function buildSandboxContext(
     if ('where' in bag) inputOptions.where = bag.where;
   }
 
+  // [#25905] The declared write provenance (`HookContextSchema.provenance`),
+  // carried across the sandbox boundary BY CONTRACT, so a lowered body can tell
+  // a flow data node's write (`flowRunId`) from a user's own write exactly as an
+  // in-process handler does. Projected member by member, each in its declared
+  // shape (a string) only — the same unrecognised-shape rule as `dispatch`
+  // above — and the whole key left ABSENT when nothing survives, which is what
+  // the engine face carries on a write with no origin. The source is the
+  // engine's own `buildProvenance()` output, read off the execution context and
+  // never off the payload, so nothing a request submits reaches it.
+  const provenanceRaw = engineCtx?.provenance;
+  const provenance = declaredStringMarks({
+    flowRunId: provenanceRaw?.flowRunId,
+    attributedUserId: provenanceRaw?.attributedUserId,
+    performedByClientId: provenanceRaw?.performedByClientId,
+  });
+
   return {
     input: inputSnapshot ?? {},
     // Preserve `undefined` for `previous` on insert events so hooks can
@@ -1255,8 +1271,25 @@ function buildSandboxContext(
     // keeps no envelope key for this fact at all, so `ctx.api` carries nothing
     // a body could sniff instead.
     ...(engineCtx?.referentialCascadeDelete === true ? { referentialCascadeDelete: true } : {}),
+    provenance,
     crypto: globalThis.crypto,
   };
+}
+
+/**
+ * The string-valued members of `marks`, or `undefined` when none is a string —
+ * so a member in any other shape is left absent rather than guessed at, and an
+ * all-absent envelope is no envelope at all.
+ */
+function declaredStringMarks<K extends string>(
+  marks: Record<K, unknown>,
+): Partial<Record<K, string>> | undefined {
+  const out: Partial<Record<K, string>> = {};
+  for (const key of Object.keys(marks) as K[]) {
+    const value = marks[key];
+    if (typeof value === 'string') out[key] = value;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 function buildActionSandboxContext(

@@ -17,6 +17,7 @@ export type {
 
 import type { FilterCondition, ValueShapeFieldDef } from '@objectstack/spec/data';
 import type { IObjectQLEngine, StrategyContext } from '@objectstack/spec/contracts';
+import type { DATASET_DURATION_AGGREGATES, DatasetDurationUnit } from '@objectstack/spec/ui';
 
 /**
  * [#19995] The engine's judge-only `where` admission, as the contract declares
@@ -65,6 +66,42 @@ export interface DatasetScope {
   filter?: FilterCondition;
   /** Per-measure scoped filters, keyed by measure name. */
   measureFilters?: Record<string, FilterCondition>;
+  /**
+   * [#25778] The dataset's duration measures, keyed by measure name — the
+   * second half of a compiled dataset the Cube cannot carry. A cube metric
+   * names ONE column; a duration reads two, so a duration measure is
+   * deliberately ABSENT from `cube.measures` and present here only.
+   *
+   * Absent rather than approximated, so it fails closed: a reader that does
+   * not know this channel finds no such measure and refuses it (`INVALID_FIELD`
+   * / 400), where a cube metric standing in for it (an aggregate over one of
+   * its columns) would have answered an instant, or the average year (#16737),
+   * under the duration's name. The readers that DO serve it: the native-SQL
+   * strategy (`duration-measure-sql.ts`), the draft-preview evaluator, and the
+   * service's own gates (the field-level read gate, the measure mint, the
+   * strategy-route refusal).
+   */
+  measureDurations?: Record<string, DurationMeasureSpec>;
+}
+
+/**
+ * [#25778] One compiled duration measure: the time from `from` to `to` — two
+ * `datetime` columns of the dataset's base object — on each record, in `unit`,
+ * reduced by `aggregate`. The dataset's `duration` key (`@objectstack/spec/ui`,
+ * `DatasetMeasureDurationSchema`) with the measure's aggregate beside it.
+ */
+export interface DurationMeasureSpec {
+  aggregate: (typeof DATASET_DURATION_AGGREGATES)[number];
+  from: string;
+  to: string;
+  unit: DatasetDurationUnit;
+  /**
+   * Display only, read by the discovery surface (`AnalyticsService.getMeta`),
+   * which lists the measure though the cube does not carry it: the measure's
+   * resolved `label` and its `format`. No strategy reads either.
+   */
+  label?: string;
+  format?: string;
 }
 
 /** A {@link StrategyContext} that can answer for a compiled dataset (#10298). */

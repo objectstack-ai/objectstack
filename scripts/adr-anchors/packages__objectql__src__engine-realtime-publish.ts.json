@@ -1,0 +1,7 @@
+{
+  "file": "packages/objectql/src/engine-realtime-publish.ts",
+  "adrs": [
+    "ADR-0131"
+  ],
+  "invariant": "ADR-0131 D8 (one predicate, computed once) on the realtime exit: `bulkEventOrganizationId` stamps `BulkDataEvent.organizationId` from the tenant wall's RECORDED verdict on the operation context (`tenantLayer0Verdict`) and nothing else — never re-derived from posture, the context's `tenantId` / `accessible_org_ids`, or the object schema's tenancy clauses, and never a second query on the publish path. `organization` names one organization; `organizations` names one only when the set has exactly one member; `none`, `deny`, no verdict, or a value that does not parse is ABSENT, never a guess. The per-record twin `eventOrganizationId` reads the written row's own tenant column through `resolveTenantFieldName`, never the caller's organization, and both go through the one `eventOrganizationValue` coercion ladder."
+}

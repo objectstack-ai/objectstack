@@ -343,6 +343,19 @@ export function validateDatasetReferences(stack: AnyRec): DatasetRefFinding[] {
         `Bind the measure to a field on "${object}", or to a ` +
           `\`relationship[.relationship].field\` path whose prefix is declared in \`include\`.`,
       );
+      // [#25778] A duration measure's two columns, each a field of the base
+      // object by its bare name (the spec refuses a path at parse).
+      const duration = isRec(measure.duration) ? measure.duration : undefined;
+      for (const slot of ['from', 'to'] as const) {
+        checkFieldPath(
+          duration?.[slot],
+          `${where} › measure "${name}"`,
+          `${dsPath}.measures[${i}].duration.${slot}`,
+          `duration ${slot}`,
+          DATASET_FIELD_UNKNOWN,
+          `Name a \`datetime\` field on "${object}" by its bare name.`,
+        );
+      }
     });
 
     // ── (4) filter KEYS, on the dataset scope filter and on every measure ──

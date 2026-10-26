@@ -167,7 +167,7 @@
 #
 # ⛔ So a defect these families would have caught can now first appear on
 # `main` instead of on the PR that wrote it. What keeps that bounded is the
-# unscoped half, unchanged by this: `push` on main and the hourly scheduled run
+# unscoped half, unchanged by this: `push` on main and the 4-hourly scheduled run
 # take the `*)` branch above and run the whole battery, and lint.yml's `on:`
 # block owns that argument. Widening this set further -- moving another step
 # behind the selector, or making one of these read-sets smaller -- is again a
@@ -195,7 +195,7 @@
 #
 # For a MODIFICATION that is the ratchet-grade claim, not #19498's weaker one:
 # no case reads these files' bytes or anything computed from them, so no case
-# can change verdict. What moves from PR time to push-on-main and the hourly
+# can change verdict. What moves from PR time to push-on-main and the 4-hourly
 # run is the NAME half -- an ADDED file in these two classes, which the
 # tracked-name sweep sees and which, like an added file in every other class
 # since #19498, is judged here by its class and not its status.
@@ -504,7 +504,7 @@ family_reads() {
       # for the compound-anchor sweep, the nested .gitignore files the
       # exposed-scratch-dir sweep consults, and the tracked NAME sweep that
       # made an ADDED path anywhere run it. Those reads are real; they run on
-      # push-on-main and on the hourly full run, and not on a PR.
+      # push-on-main and on the 4-hourly full run, and not on a PR.
       case "$path" in
         scripts/pm/*|.claude/skills/pm-dispatch/*) return 0 ;;
       esac

@@ -432,7 +432,7 @@ They are camelCase, and the record body travels **inside `payload`**, never at t
   and `payload`, so a client written from the old fences reads `msg.subscription_id` and `msg.data`
   and gets `undefined` on both. `changes` is real but sits **one level down**, on the `DataEvent`
   inside `payload`, and it carries the write's own patch — a flat `{ field: newValue }` map
-  (`publishDataEvent`, `packages/objectql/src/engine.ts`), not the `old` / `new` pairs this page
+  (`publishDataEvent`, `packages/objectql/src/engine-realtime-publish.ts`), not the `old` / `new` pairs this page
   used to show; read the post-state from `payload.after`. `reason` is declared nowhere in the
   protocol at all — see **Subscribe to Query Results** below.
 </Callout>

@@ -211,7 +211,7 @@
  * produce it. Derived and read are pinned TO EACH OTHER instead:
  * `ANALYSED_PACK_OBJECT_IMPORTERS` below lists exactly the paths these bullets
  * analyse, and `scripts/__tests__/check-i18n-dead-keys.test.ts` fails when the
- * derived non-test set and that list disagree in either direction. A sixth
+ * derived non-test set and that list disagree in either direction. An unlisted
  * importer therefore turns a test red instead of joining the silence, which is
  * the failure this section had: not a wrong number, an UNCLASSIFIED READER.
  *
@@ -267,6 +267,21 @@
  *     default away from its call site, and both go dark to every leg while a
  *     shipping component still renders them — and that edit would read as a
  *     tidy-up.
+ *   - `packages/app-shell/src/utils/flowResponse.ts` — reads ONE key, the
+ *     record form's permission line, for a failed flow run whose write node was
+ *     refused, through `getLoadedBuiltInLocales()` and never a static pack
+ *     import. Three chains, each written straight off the call so the
+ *     derivation can follow them: the active tag and its base language are
+ *     RUNTIME-indexed (opaque rows, class 1 below, like `outboundAgentText`),
+ *     and the `en` fallback is spelled in full and resolves to that leaf. It is
+ *     a TWO-segment key, under the property-chain leg's three-segment floor,
+ *     so that leg is blind to it; the full-key probe sees it only because the
+ *     same dotted key is spelled in this file's own comments. ⇒ covered BY
+ *     COINCIDENCE, the same tier as the two bullets above. Nothing is at risk
+ *     today for a second, unrelated reason: the record form reads the same key
+ *     as a literal `t()` argument, so the AST pass keeps it live. Drop both the
+ *     comment spelling and the form's call and this read goes dark while a
+ *     failed flow still shows it.
  *
  * The rest of the matches are TEST-only importers, deliberately not listed one
  * by one. A key read only by a test is not a key a user can see, so a test
@@ -743,6 +758,7 @@ export const ANALYSED_PACK_OBJECT_IMPORTERS = Object.freeze([
   'packages/plugin-grid/demo/main.tsx',
   'packages/plugin-grid/demo/bulk-actions.tsx',
   'packages/react/src/utils/nonGridRowCeiling.tsx',
+  'packages/app-shell/src/utils/flowResponse.ts',
 ]);
 
 /** A path is a TEST importer when it lives in a `__tests__` directory or is

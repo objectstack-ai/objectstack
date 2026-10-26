@@ -2069,6 +2069,9 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "measures.derived": {
         label: "派生元"
+      },
+      "measures.duration": {
+        label: "所要時間"
       }
     }
   },

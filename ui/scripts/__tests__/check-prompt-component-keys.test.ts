@@ -23,6 +23,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -39,12 +40,15 @@ import {
   partitionRegistry,
   placeholderSites,
   promptFiles,
+  promptsRoot,
   scanPromptKeys,
   scanPromptSections,
 } from '../check-prompt-component-keys.mjs';
 import { INDIRECT_REGISTRATIONS, deriveRegistryKeys } from '../check-doc-component-types.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+/** The repository root, whose `.github/prompts/` the live prompts sit in (objectstack#25712). */
+const livePrompts = promptsRoot(repoRoot);
 const SCRIPT = 'scripts/check-prompt-component-keys.mjs';
 
 interface Finding {
@@ -270,12 +274,29 @@ describe('the repository this gate guards', () => {
   });
 
   it('has a prompt surface with Keys bullets in it', () => {
-    expect(promptFiles(repoRoot).length).toBeGreaterThan(0);
-    expect(scanPromptKeys(repoRoot).bullets).toBeGreaterThan(0);
+    expect(promptFiles(livePrompts).length).toBeGreaterThan(0);
+    expect(scanPromptKeys(livePrompts).bullets).toBeGreaterThan(0);
+  });
+
+  it('reads the prompts at the repository root, and no copy is left under the objectui root', () => {
+    // objectstack#25712 moved them from `ui/.github/prompts/` to the root
+    // `.github/prompts/`, where VS Code reads prompt files. A second copy left
+    // behind would be the stale twin the next edit lands in.
+    expect(livePrompts).toBe(path.resolve(repoRoot, '..'));
+    expect(fs.existsSync(path.join(livePrompts, PROMPT_DIR))).toBe(true);
+    expect(promptFiles(repoRoot), 'a prompt file is still under the objectui root').toEqual([]);
   });
 
   it('passes — every key the prompts teach is answered by a real renderer', () => {
-    expect((analyze(repoRoot) as { findings: Finding[] }).findings).toEqual([]);
+    expect((analyze(repoRoot, { promptsRoot: livePrompts }) as { findings: Finding[] }).findings).toEqual([]);
+  });
+
+  it('passes as CI runs it — the bare command reads the repository root prompts', () => {
+    // The root `Lint UI` job runs `pnpm --dir ui run check:prompt-keys` with no
+    // arguments, so the CLI's own default is the code path that gates.
+    const out = execFileSync('node', [SCRIPT], { cwd: repoRoot, encoding: 'utf8' });
+    expect(out).toMatch(/^Scanned [1-9]\d* prompt file\(s\) under \.github\/prompts/);
+    expect(out).toContain('OK  Every key taught as available');
   });
 });
 
@@ -526,7 +547,7 @@ describe('`Protocol Placeholders:` is judged the other way round', () => {
 // ── 7. the live tree, under the widened model ────────────────────────────────
 
 describe('the prompt surface this gate now reads', () => {
-  const scan = () => scanPromptKeys(repoRoot) as {
+  const scan = () => scanPromptKeys(livePrompts) as {
     sites: { key: string; label: string; expect: string; scope: string }[];
     bullets: number;
     blocks: number;
@@ -572,7 +593,7 @@ describe('the prompt surface this gate now reads', () => {
     for (const tombstone of ['user:profile', 'ai:chat_window', 'view:kanban', 'view:gantt', 'view:map']) {
       expect(taught.has(tombstone), `${tombstone} must stay in prose, never in a judged list`).toBe(false);
     }
-    const prompt = fs.readFileSync(path.join(repoRoot, PROMPT_DIR, 'component.prompt.md'), 'utf8');
+    const prompt = fs.readFileSync(path.join(livePrompts, PROMPT_DIR, 'component.prompt.md'), 'utf8');
     for (const tombstone of ['user:profile', 'ai:chat_window', 'view:kanban']) {
       expect(prompt, `${tombstone} tombstone must still be written down`).toContain(`\`${tombstone}\``);
     }
@@ -682,7 +703,7 @@ describe('a `## N.` section\'s `### X.` headings must run A, B, C, … without a
 // ── 9. the live tree, under the letter-run pin ───────────────────────────────
 
 describe('the letter runs on the live prompt surface', () => {
-  const sections = () => scanPromptSections(repoRoot) as {
+  const sections = () => scanPromptSections(livePrompts) as {
     file: string;
     section: string;
     entries: { letter: string; line: number; text: string }[];

@@ -22,8 +22,14 @@
  * the same floor as the metadata it translates. A client renders its sign-in
  * page from its own built-in strings and reads this domain once it holds a
  * session.
+ *
+ * The translation bundle is the one face a browser revalidates: it carries an
+ * `ETag` and `Cache-Control: private, no-cache`, and a matching
+ * `If-None-Match` is answered `304` with no body (#25785, see
+ * {@link translationsAnswer}).
  */
 
+import { createHash } from 'node:crypto';
 import {
     resolveLocale,
     shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
@@ -56,6 +62,85 @@ function readQueryLocale(deps: DomainHandlerDeps, query: any): { locale: any } |
         };
     }
     return { locale: raw[0] };
+}
+
+/**
+ * [#25785] The bundle's cache directive. `no-cache` lets the browser store the
+ * bundle but makes it ask again on every use, so an unchanged bundle costs a
+ * `304` and a changed one (an authored translation, a package installed) is
+ * served the moment it changes; a TTL would pin the old strings until it ran
+ * out. `private`, because the bundle is served to a signed-in caller only (see
+ * the floor in {@link handleI18nRequest}) and names the application's own
+ * objects: no shared cache may keep it.
+ */
+const TRANSLATIONS_CACHE_CONTROL = 'private, no-cache';
+
+/**
+ * One request header, read from either shape a transport hands in: a Fetch
+ * `Headers` (the `@objectstack/hono` catch-all hands its raw `Request`) or a
+ * plain record (`plugin-hono-server`'s `IHttpRequest`). `Headers.get` answers
+ * `null` for an absent header; that is folded to `undefined`, the record's
+ * absence, and a repeated header in the record shape is one comma list, as
+ * RFC 9110 §5.3 reads it.
+ */
+function requestHeader(headers: unknown, lower: string): string | undefined {
+    if (!headers || typeof headers !== 'object') return undefined;
+    const h = headers as { get?: unknown } & Record<string, unknown>;
+    const raw = typeof h.get === 'function' ? (h.get as (name: string) => unknown).call(headers, lower) : h[lower];
+    if (typeof raw === 'string') return raw;
+    if (Array.isArray(raw)) return raw.filter((v) => typeof v === 'string').join(', ');
+    return undefined;
+}
+
+/**
+ * [#25785] Does `If-None-Match` name the representation this request would be
+ * served? RFC 9110 §13.1.2: a comma list of entity tags compared WEAKLY (the
+ * `W/` prefix is ignored on both sides), or `*`, which any current
+ * representation matches. A malformed member matches nothing, so the caller is
+ * served the full bundle: the safe direction.
+ */
+function ifNoneMatchHits(header: string | undefined, etag: string): boolean {
+    if (header === undefined) return false;
+    const opaque = etag.replace(/^W\//, '');
+    return header.split(',').some((member) => {
+        const tag = member.trim();
+        return tag === '*' || tag.replace(/^W\//, '') === opaque;
+    });
+}
+
+/**
+ * [#25785] Answer a translations read with its validator. Every console open
+ * read the whole locale bundle again (80–88 KB compressed on a hosted tenant)
+ * because nothing let the browser revalidate it.
+ *
+ * ⛔ The ONE invariant: the validator is a hash of the bytes this answer
+ * serves — the whole success envelope, `locale` and `requestedLocale`
+ * included — computed on every request. A `304` is answered only on an exact
+ * match over those bytes, so a caller is only ever pinned to the bundle it
+ * really holds, whatever changed underneath it (an authored translation, a
+ * package, the environment the request resolved to). Hashing anything cheaper
+ * than the body — a version counter, the bundle object's identity — would
+ * break that silently: a missed bump is a stale `304`, and nothing reports it.
+ * It is weak (`W/`) because it vouches for the JSON, not for the encoding a
+ * compressing layer puts on the wire.
+ *
+ * The `304` carries the same `ETag` and `Cache-Control` the `200` would
+ * (RFC 9110 §15.4.5) and no body: `body` is left out, which both transports
+ * write as a body-less response (`JSON.stringify(undefined)` is `undefined`),
+ * pinned over a real socket in `i18n-translations-etag.hono.integration.test.ts`.
+ */
+function translationsAnswer(
+    deps: DomainHandlerDeps,
+    data: Record<string, unknown>,
+    context: HttpProtocolContext,
+): HttpDispatcherResult {
+    const response = deps.success(data);
+    const etag = `W/"${createHash('sha256').update(JSON.stringify(response.body)).digest('base64url')}"`;
+    const headers = { ETag: etag, 'Cache-Control': TRANSLATIONS_CACHE_CONTROL };
+    if (ifNoneMatchHits(requestHeader(context?.request?.headers, 'if-none-match'), etag)) {
+        return { handled: true, response: { status: 304, headers } };
+    }
+    return { handled: true, response: { ...response, headers } };
 }
 
 export function createI18nDomain(deps: DomainHandlerDeps): DomainRoute {
@@ -154,11 +239,11 @@ export async function handleI18nRequest(
             const resolved = resolveLocale(locale, availableLocales);
             if (resolved && resolved !== locale) {
                 translations = i18nService.getTranslations(resolved);
-                return { handled: true, response: deps.success({ locale: resolved, requestedLocale: locale, translations }) };
+                return translationsAnswer(deps, { locale: resolved, requestedLocale: locale, translations }, context);
             }
         }
 
-        return { handled: true, response: deps.success({ locale, translations }) };
+        return translationsAnswer(deps, { locale, translations }, context);
     }
 
     // GET /i18n/labels/:object/:locale  OR  /i18n/labels/:object?locale=xx

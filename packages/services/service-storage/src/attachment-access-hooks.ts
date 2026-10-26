@@ -268,7 +268,10 @@ function asIdList(id: unknown): Array<string | number> | null {
  * context resolved for the object of the CURRENT operation, which here is
  * `sys_attachment`. Every gate in this module asks about the PARENT record's
  * object, never about `sys_attachment`, so carrying any of them across is one
- * object's widening applied to another object's question.
+ * object's widening applied to another object's question. [#25692] The
+ * file-reference lifecycle reads a record write's caller through the same
+ * {@link callerContext}, for the same reason: it asks about a FILE's owning
+ * record, never about the object being written.
  *
  * [#7145] The general rule — which keys those are, why they are dropped by
  * PREFIX rather than by a name list, and why the copy is load-bearing in both
@@ -318,7 +321,7 @@ function asIdList(id: unknown): Array<string | number> | null {
  * object's grant. Where that judgement is not served, record sharing is asked
  * with no depth, so its owner-match stays at its narrowest (`own`) — the safe
  * direction. */
-function callerContext(ctx: any): ExecutionContext {
+export function callerContext(ctx: any): ExecutionContext {
   const exec = ctx?.input?.options?.context;
   if (exec && typeof exec === 'object') {
     return withoutOperationPrivateKeys(exec as Record<string, unknown>);

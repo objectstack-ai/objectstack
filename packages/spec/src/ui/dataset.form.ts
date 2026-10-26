@@ -91,6 +91,7 @@ export const datasetForm = defineForm({
             { field: 'format', label: 'Format' },
             { field: 'currency', label: 'Currency' },
             { field: 'derived', label: 'Derived From' },
+            { field: 'duration', label: 'Duration' },
           ],
         },
       ],

@@ -18238,10 +18238,11 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
  *
  * ⚠️ EVERY CALL THIS TABLE AND {@link ALL_CONVERSIONS} MAKE AT MODULE LOAD
  * CARRIES AN `@__PURE__` ANNOTATION — a major's `inApplicationOrder(…)` and
- * the flattening below, and the next major's when it opens. Each published
- * entry is one flat file (`tsup.config.ts`, `splitting: false`), so a
- * consumer's bundler keeps every top-level call it cannot prove pure, together
- * with everything that call references. Unmarked, these two initializers kept
+ * the flattening below, and the next major's when it opens. The entries share
+ * one module graph (`tsup.config.ts`, `oneModuleGraph`), and every entry whose
+ * graph reaches this module links the chunk it ships in, so a consumer's
+ * bundler keeps every top-level call it cannot prove pure, together with
+ * everything that call references. Unmarked, these two initializers kept
  * the whole table in every bundle of every entry whose graph reaches this
  * module — every conversion, and the view, field, page-component, dashboard,
  * chart and report schemas the conversions read. `./shared` is one of those

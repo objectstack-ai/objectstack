@@ -47,6 +47,10 @@ vi.mock('@monaco-editor/react', () => {
   };
 });
 
+// The bundled Monaco loads: the page's probe awaits plugin-editor's
+// `configureBundledMonaco` before `loader.init()` (its own suite drives it).
+vi.mock('@object-ui/plugin-editor', () => ({ configureBundledMonaco: () => Promise.resolve() }));
+
 import { JsonSourceEditor } from './JsonSourceEditor';
 
 describe('JsonSourceEditor — lazy Monaco export shape', () => {

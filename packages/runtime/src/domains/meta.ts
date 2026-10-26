@@ -176,12 +176,14 @@ import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.
  * decision. Its signature is DECLARED — on `ObjectStackProtocolImplementation`
  * itself — so it is `Pick`ed from that class, never restated: a rename at the
  * producer is a compile error here, the same move `domains/automation.ts`
- * makes for `packagedBaseRefusal`.
+ * makes for `packagedBaseRefusal`. [#25783] So is `getMetaItemsForExecution`,
+ * the undecorated list the read gates' object list asks
+ * ({@link metaItemReadGateSources}).
  */
 export type MetaDomainProtocol =
     Partial<Pick<MetadataProtocol,
         'getMetaTypes' | 'getMetaItems' | 'getMetaItem' | 'saveMetaItem' | 'getMetaItemLayered'>>
-    & Partial<Pick<ObjectStackProtocolImplementation, 'declinesStoredRow'>>
+    & Partial<Pick<ObjectStackProtocolImplementation, 'declinesStoredRow' | 'getMetaItemsForExecution'>>
     & {
         /** ⚠️ Undeclared request shapes — see "Where the ledger honestly ends". */
         listDrafts?(request: any): Promise<any>;
@@ -519,7 +521,16 @@ function metaItemReadGateSources(
             return mayWriteItem === undefined || !caller ? caller : { ...caller, mayWriteItem };
         },
         resolveSecurityService: () => deps.resolveService(context, 'security'),
-        listMetaItems: (type) => (typeof protocol?.getMetaItems === 'function' ? protocol.getMetaItems({ type }) : undefined),
+        // [#25783] The `object` list on the protocol's execution face where it
+        // has one, as `RestServer.metaListSource` reads it: its readers judge
+        // each object's `enable` and serve none of it, and the served face
+        // diagnosed every object on every `/meta/app` read.
+        listMetaItems: (type) => {
+            if (type === 'object' && typeof protocol?.getMetaItemsForExecution === 'function') {
+                return protocol.getMetaItemsForExecution({ type });
+            }
+            return typeof protocol?.getMetaItems === 'function' ? protocol.getMetaItems({ type }) : undefined;
+        },
         serviceProbe: () => async (name: string) => {
             try {
                 return (await deps.resolveService(context, name)) != null;

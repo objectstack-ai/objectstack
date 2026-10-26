@@ -44,7 +44,7 @@
  *
  * ## Two design decisions, and the defect each one prevents
  *
- * **The population is DERIVED from `.github/workflows/`, never hard-coded.** A
+ * **The population is DERIVED from the workflows, never hard-coded.** A
  * hard-coded list of scripts rots the first time someone moves a step above
  * `pnpm install` -- which is exactly the edit that needs catching. So this gate
  * parses every workflow, and for every job compares each step's index against
@@ -74,14 +74,41 @@
  * or `process.exit`. A gate that runs nine other gates to decide whether they
  * could run is a much larger blast radius than the question deserves.
  *
+ * ## Which workflows: the repository root's (objectstack#25712)
+ *
+ * GitHub runs only the repository root's `.github/workflows/`. Since objectui
+ * moved under `ui/` (objectstack#25825), its own `ui/.github/workflows/` runs
+ * nowhere. A population derived from there measured steps that never run, and
+ * it went red on one of them: ten of those dead steps still named the deleted
+ * `scripts/objectstack-pin.mjs`. So the workflows are read from
+ * `workflowRoot()`, the parent of this file's root, and only the steps there
+ * that run an objectui gate count. The root workflows spell those in two ways,
+ * and both are read:
+ *
+ *   - `pnpm --dir ui run <alias>`, the spelling the root `ci.yml` prescribes for
+ *     objectui's commands. The alias is resolved through `ui/package.json`'s
+ *     `scripts`, and every `node scripts/<x>` in its body is a row, since an
+ *     alias runs with cwd = the objectui root;
+ *   - `node ui/scripts/<x>`, or `pnpm --dir ui exec node scripts/<x>`.
+ *
+ * A bare `node scripts/<x>` in a root workflow is objectstack's OWN script,
+ * resolved against the repository root, and is not in this population.
+ * Crediting it to `ui/scripts/` would judge a file of the same name that the
+ * step never runs; the root `ci.yml` header names the same trap for the
+ * gates there.
+ *
  * ## This gate satisfies its own rule, by construction
  *
- * `repo-gates.yml` runs this file before its install step, so this
- * file is IN its own derived population and walks itself. Its graph is
+ * This file runs before an install wherever it is wired, as every gate it
+ * judges does, so its own graph is held to the same floor. Its graph is
  * `node:fs`, `node:module`, `node:path`, `node:url`, plus `./invoked-as.mjs`
  * and `./js-comment-mask.mjs`, whose own graphs are builtins only. Nothing here
- * may grow a package import without the gate reporting itself -- which is the
- * intended arrangement, not a coincidence to be preserved by hand.
+ * may grow a package import without its test reporting it.
+ *
+ * ⚠️ Today it is not in its own DERIVED population. Its home was objectui's
+ * `repo-gates.yml`, and it joins the root `Lint UI` job, ahead of that job's
+ * install, when `ui/.github/workflows/` is deleted (objectstack#25712; the
+ * root `ci.yml` marks the place). Until then its test walks its graph directly.
  *
  * ## What is deliberately NOT judged
  *
@@ -93,7 +120,7 @@
 
 import { readFileSync, readdirSync } from 'node:fs';
 import { isBuiltin } from 'node:module';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
@@ -101,12 +128,23 @@ import { scanSource } from './js-comment-mask.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-/** The repository root -- this file lives at `scripts/` depth 0. */
+/** The objectui root -- this file lives at `scripts/` depth 0 under it. */
 export function repoRoot() {
   return resolve(HERE, '..');
 }
 
+/**
+ * The repository root whose `.github/workflows/` GitHub runs: the parent of the
+ * objectui root since the monorepo merge (objectstack#25825).
+ */
+export function workflowRoot(root = repoRoot()) {
+  return resolve(root, '..');
+}
+
 const WORKFLOW_DIR = '.github/workflows';
+
+/** The objectui root as the root workflows spell it in a path. */
+const UI_DIR = 'ui';
 
 // ---------------------------------------------------------------------------
 // A workflow parser that needs no YAML package
@@ -300,7 +338,8 @@ function shellCode(run) {
 const INSTALL_RE = /(?:^|[;&|(])\s*(?:pnpm|npm|yarn|bun)\s+(?:install|ci|i)(?:\s|$)/m;
 
 /**
- * `node scripts/whatever.mjs`, allowing `node --flag script.mjs`.
+ * `node scripts/whatever.mjs`, allowing `node --flag script.mjs`, read in an
+ * objectui `package.json` alias body, which runs with cwd = the objectui root.
  *
  * Deliberately looser than `INSTALL_RE`: any whitespace will do before `node`,
  * so a wrapped invocation (`xargs node scripts/x.mjs`, a `bash -c "..."`) is
@@ -310,8 +349,49 @@ const INSTALL_RE = /(?:^|[;&|(])\s*(?:pnpm|npm|yarn|bun)\s+(?:install|ci|i)(?:\s
  */
 const NODE_SCRIPT_RE = /(?:^|[\s;&|(])node\s+(?:--[^\s]+\s+)*(scripts\/[A-Za-z0-9._/-]+\.(?:mjs|cjs|js))/g;
 
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 /**
- * Every step that runs a `scripts/` JavaScript file before the first
+ * The objectui gates one root workflow step runs, in the order it runs them.
+ *
+ * The two spellings the header names, with the same loose left edge as
+ * `NODE_SCRIPT_RE`: `node <ui>/scripts/<x>` (or `pnpm --dir <ui> exec node
+ * scripts/<x>`), and `pnpm --dir <ui> run <alias>` resolved through `aliases`.
+ * An alias that does not exist, or whose body runs no `node scripts/<x>`,
+ * contributes nothing: the first fails its step loudly in CI, and the second has
+ * no JavaScript graph to walk, like any other non-`node` step.
+ *
+ * @param {string} code  A step's `run:` with its shell comment lines dropped.
+ * @param {{ uiDir: string, aliases: Record<string, string> }} options
+ * @returns {Array<{ script: string, alias: string | null }>}
+ */
+function uiInvocations(code, { uiDir, aliases }) {
+  const ui = escapeRe(uiDir);
+  const pnpmUi = String.raw`pnpm\s+(?:--dir(?:=|\s+)|-C\s*)${ui}`;
+  const flags = String.raw`(?:--[^\s]+\s+)*`;
+  // `node <ui>/scripts/<x>`, or `pnpm --dir <ui> exec node scripts/<x>`. A bare
+  // `node scripts/<x>` matches neither: it is the root's own script.
+  const direct = new RegExp(
+    String.raw`(?:^|[\s;&|(])(?:node\s+${flags}${ui}\/|${pnpmUi}\s+exec\s+node\s+${flags})(scripts\/[A-Za-z0-9._/-]+\.(?:mjs|cjs|js))`,
+    'g',
+  );
+  const viaAlias = new RegExp(String.raw`(?:^|[\s;&|(])${pnpmUi}\s+run\s+([A-Za-z0-9:._-]+)`, 'g');
+
+  /** @type {Array<{ at: number, script: string, alias: string | null }>} */
+  const hits = [];
+  for (const m of code.matchAll(direct)) hits.push({ at: m.index ?? 0, script: m[1], alias: null });
+  for (const m of code.matchAll(viaAlias)) {
+    const body = Object.hasOwn(aliases, m[1]) ? aliases[m[1]] : null;
+    if (typeof body !== 'string') continue;
+    for (const n of shellCode(body).matchAll(NODE_SCRIPT_RE)) {
+      hits.push({ at: m.index ?? 0, script: n[1], alias: m[1] });
+    }
+  }
+  return hits.sort((a, b) => a.at - b.at).map(({ script, alias }) => ({ script, alias }));
+}
+
+/**
+ * Every step that runs an objectui `scripts/` JavaScript file before the first
  * `pnpm install` in its own job.
  *
  * A job with NO install at all counts entirely: every `node` step in it is a
@@ -319,10 +399,14 @@ const NODE_SCRIPT_RE = /(?:^|[\s;&|(])node\s+(?:--[^\s]+\s+)*(scripts\/[A-Za-z0-
  * built that way before objectui#12214 folded most of them into
  * `repo-gates.yml`, whose gates sit before its install step instead.
  *
+ * `uiDir` is the objectui root as the workflows spell it, and `aliases` is its
+ * `package.json` `scripts`; `scan()` passes both for the real tree.
+ *
  * @param {Array<{ file: string, text: string }>} workflows
- * @returns {Array<{ workflow: string, job: string, step: number, stepName: string, script: string }>}
+ * @param {{ uiDir?: string, aliases?: Record<string, string> }} [options]
+ * @returns {Array<{ workflow: string, job: string, step: number, stepName: string, script: string, alias: string | null }>}
  */
-export function derivePreInstallSteps(workflows) {
+export function derivePreInstallSteps(workflows, { uiDir = UI_DIR, aliases = {} } = {}) {
   const found = [];
 
   for (const { file, text } of workflows) {
@@ -336,15 +420,16 @@ export function derivePreInstallSteps(workflows) {
         // entry-guard step runs `--self-test` and then the gate itself, and two
         // identical rows would read as two steps.
         const seen = new Set();
-        for (const m of code[i].matchAll(NODE_SCRIPT_RE)) {
-          if (seen.has(m[1])) continue;
-          seen.add(m[1]);
+        for (const { script, alias } of uiInvocations(code[i], { uiDir, aliases })) {
+          if (seen.has(script)) continue;
+          seen.add(script);
           found.push({
             workflow: file,
             job: job.id,
             step: i,
             stepName: job.steps[i].name,
-            script: m[1],
+            script,
+            alias,
           });
         }
       }
@@ -354,7 +439,7 @@ export function derivePreInstallSteps(workflows) {
   return found;
 }
 
-/** Read `.github/workflows/` from disk, sorted so output is stable. */
+/** Read `<root>/.github/workflows/` from disk, sorted so output is stable. */
 export function readWorkflows(root) {
   const dir = join(root, WORKFLOW_DIR);
   return readdirSync(dir)
@@ -479,12 +564,25 @@ export function walkImportGraph(entry, { read }) {
 // The scan
 // ---------------------------------------------------------------------------
 
+/** The objectui root's `package.json` `scripts`, the aliases a root step can run. */
+export function readAliases(root) {
+  try {
+    const scripts = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).scripts;
+    return scripts && typeof scripts === 'object' ? scripts : {};
+  } catch {
+    return {};
+  }
+}
+
 /**
- * @param {string} root
+ * @param {string} root  The objectui root: the scripts and aliases are read here.
+ * @param {{ workflows?: string }} [options]  Where `.github/workflows/` is read;
+ *   `workflowRoot(root)` by default.
  * @returns {{ steps: ReturnType<typeof derivePreInstallSteps>, scripts: string[], modules: string[], findings: Array<{ script: string, chain: string[], specifier: string, kind: 'package' | 'unresolved' }> }}
  */
-export function scan(root) {
-  const steps = derivePreInstallSteps(readWorkflows(root));
+export function scan(root, { workflows = workflowRoot(root) } = {}) {
+  const uiDir = relative(workflows, root).split('\\').join('/');
+  const steps = derivePreInstallSteps(readWorkflows(workflows), { uiDir, aliases: readAliases(root) });
   const scripts = [...new Set(steps.map((s) => s.script))].sort();
 
   const read = (rel) => {
@@ -507,7 +605,8 @@ export function scan(root) {
   return { steps, scripts, modules: [...modules].sort(), findings };
 }
 
-const describe = (s) => `${s.workflow} : ${s.job} (step ${s.step}) -> ${s.script}`;
+const describe = (s) =>
+  `${s.workflow} : ${s.job} (step ${s.step}) -> ${s.script}` + (s.alias ? ` (via \`${s.alias}\`)` : '');
 
 function main() {
   const result = scan(repoRoot());
@@ -558,16 +657,19 @@ Two ways out, and repairing the import is not this gate's job:
     worth paying.
 
 \`node scripts/check-pre-install-import-graph.mjs --list\` prints the derived
-population and every module walked. The population is DERIVED from
-${WORKFLOW_DIR}/ on every run, so moving a step across an install
-changes it — nothing here is a hard-coded list to keep in sync.`);
+population and every module walked. The population is DERIVED from the
+repository root's ${WORKFLOW_DIR}/ on every run, so moving a step across an
+install changes it — nothing here is a hard-coded list to keep in sync.`);
 
   process.exit(1);
 }
 
 function list() {
   const result = scan(repoRoot());
-  console.log(`Derived from ${WORKFLOW_DIR}/ — steps running a scripts/ gate before any pnpm install:\n`);
+  console.log(
+    `Derived from the repository root's ${WORKFLOW_DIR}/ — steps running an objectui scripts/ gate ` +
+      'before any pnpm install:\n',
+  );
   for (const s of result.steps) console.log(`    ${describe(s)}`);
   console.log(`\n${result.steps.length} step(s), ${result.scripts.length} distinct script(s).\n`);
   console.log('Modules reached by the walk:\n');
@@ -600,19 +702,21 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
       - name: Gate
-        run: node scripts/probe-before.mjs
+        run: node ui/scripts/probe-before.mjs
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Late gate
-        run: node scripts/probe-after.mjs
+        run: node ui/scripts/probe-after.mjs
   never-installs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
       - name: Gate
-        run: node scripts/probe-no-install.mjs
+        run: pnpm --dir ui run probe:no-install
 `;
-  const derived = derivePreInstallSteps([{ file: 'probe.yml', text: WF }]);
+  const derived = derivePreInstallSteps([{ file: 'probe.yml', text: WF }], {
+    aliases: { 'probe:no-install': 'node scripts/probe-no-install.mjs' },
+  });
   const scripts = derived.map((s) => s.script);
 
   t(
@@ -643,14 +747,14 @@ jobs:
         run: |
           # pnpm install --frozen-lockfile   <- a SHELL comment, not an install
           echo "about to run the gate"
-          node scripts/probe-block.mjs
+          node ui/scripts/probe-block.mjs
       - name: Browsers are not node_modules
-        run: pnpm exec playwright install chromium
+        run: pnpm --dir ui exec playwright install chromium
       - name: Still pre-install
-        run: node scripts/probe-after-playwright.mjs
+        run: node ui/scripts/probe-after-playwright.mjs
       - name: Commented out
         run: |
-          # node scripts/probe-commented.mjs
+          # node ui/scripts/probe-commented.mjs
           echo done
 `;
   const block = derivePreInstallSteps([{ file: 'block.yml', text: BLOCK }]).map((s) => s.script);
@@ -669,6 +773,46 @@ jobs:
     'a commented-out invocation is not a step that runs a gate',
     !block.includes('scripts/probe-commented.mjs'),
     block.join(', '),
+  );
+
+  // -- the root workflows' spellings (objectstack#25712) -------------------
+  const ROOT = `jobs:
+  j:
+    steps:
+      - name: The root's own gate
+        run: node scripts/root-own.mjs
+      - name: Through an alias
+        run: pnpm --dir ui run probe:alias --self-test
+      - name: Through exec
+        run: pnpm --dir ui exec node scripts/probe-exec.mjs
+      - name: An alias that runs no node script
+        run: pnpm --dir ui run probe:vitest
+      - name: An alias that does not exist
+        run: pnpm --dir ui run probe:missing
+`;
+  const rooted = derivePreInstallSteps([{ file: 'root.yml', text: ROOT }], {
+    aliases: { 'probe:alias': 'node scripts/probe-alias.mjs', 'probe:vitest': 'vitest run' },
+  });
+  const rootScripts = rooted.map((s) => s.script);
+  t(
+    'a `pnpm --dir ui run <alias>` step is read through the objectui package.json',
+    rooted.some((s) => s.script === 'scripts/probe-alias.mjs' && s.alias === 'probe:alias'),
+    JSON.stringify(rooted),
+  );
+  t(
+    '`pnpm --dir ui exec node scripts/<x>` runs from the objectui root, so it counts',
+    rootScripts.includes('scripts/probe-exec.mjs'),
+    rootScripts.join(', '),
+  );
+  t(
+    "a bare `node scripts/<x>` in a root workflow is the root's own script, not objectui's",
+    !rootScripts.includes('scripts/root-own.mjs'),
+    rootScripts.join(', '),
+  );
+  t(
+    'an alias that runs no `node scripts/`, or does not exist, contributes no row',
+    rooted.length === 2,
+    rootScripts.join(', '),
   );
 
   // -- the walk ------------------------------------------------------------
@@ -762,7 +906,7 @@ function runSelfTest() {
   }
   console.log(
     `✓ check-pre-install-import-graph self-test: ${cases.length} cases pass ` +
-      `(derivation boundary, block scalars, one-hop package, masked prose, cycles).`,
+      `(derivation boundary, block scalars, root spellings, one-hop package, masked prose, cycles).`,
   );
 }
 

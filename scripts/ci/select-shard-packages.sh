@@ -35,7 +35,7 @@
 #                 A ZERO before sha (a branch's first push, or a force-push that
 #                 rewrote history) has no previous commit to diff from and falls
 #                 back to the FULL list, loudly.
-#   schedule      the FULL list. This is the hourly run (#16467) that keeps
+#   schedule      the FULL list. This is the 4-hourly run (#16467, #25771) that keeps
 #   workflow_     "main is green" a statement about the WHOLE workspace, and it
 #     dispatch    -- not the push run -- is the measurement the shard-timings
 #                 refresh reads (scripts/ci/select-shard-timings-run.mjs).
@@ -279,7 +279,7 @@ else
   # refresh reads. Both halves of that are retired (#16467): the full run cost
   # ~90 machine-hours a day to re-test a tree the merge group had just verified,
   # and 36 of 60 of those runs never finished, so it was not ground truth for
-  # anything -- the HOURLY `schedule` run is, and `scripts/ci/select-shard-
+  # anything -- the 4-HOURLY `schedule` run is, and `scripts/ci/select-shard-
   # timings-run.mjs` now reads that event by name. Since #16467 a push lands
   # here only when its `before` sha is absent, zero, or unresolvable, and says
   # so just below; merge groups likewise since #16453. What still takes this

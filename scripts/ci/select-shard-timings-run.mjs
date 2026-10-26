@@ -19,9 +19,9 @@
 //      Test Core finishes: 36 of the last 60 push runs were censored that way.
 //      Such a run leaves SOME artifacts, so "the artifacts exist" is not the
 //      test -- every one of the run's Test Core jobs must have concluded
-//      `success`. The hourly run this now reads has its OWN concurrency group
+//      `success`. The scheduled run this now reads has its OWN concurrency group
 //      (#16467, `github.event_name` is in ci.yml's key), so a merge cannot
-//      censor it -- but a second hourly run can, which is why this test stays.
+//      censor it -- but a second scheduled run can, which is why this test stays.
 //
 //   2. CACHE REPLAYS. A run whose shard jobs all concluded `success` can still
 //      have replayed most of the workspace from the turbo cache: shards were
@@ -34,7 +34,8 @@
 //      catches this, and it catches it by looking at what was MEASURED rather
 //      than at a duration threshold nobody can defend.
 //
-//   3. EXPIRED ARTIFACTS. Retention is 1 day, so the eligible window is
+//   3. EXPIRED ARTIFACTS. Retention is 4 days on a scheduled run (1 day on
+//      every other event, #25771), so the eligible window is
 //      genuinely short and an empty candidate list is a normal Monday if main
 //      was quiet -- it is reported as a loud, named refusal rather than as a
 //      no-op, because "no PR opened" and "no run was good enough" must not read
@@ -63,8 +64,8 @@
 // one package at a time, which is exactly the silent rot this lane exists to
 // end.
 //
-// So the event is named, and it is the HOURLY SCHEDULED RUN: `schedule` on
-// ci.yml, minute 0, the one event the selection script treats as FULL by
+// So the event is named, and it is the SCHEDULED RUN: `schedule` on ci.yml,
+// minute 0 every 4 hours (hourly until #25771), the one event the selection script treats as FULL by
 // construction. `DEFAULT_RUN_EVENT` below is that name, spelled once.
 //
 // Usage:
@@ -441,17 +442,17 @@ export async function listCandidates({
 // exist. So the two outcomes are split, with two exits and two messages:
 //
 //   EMPTY CANDIDATE LIST -- the API has no completed run of this event at all.
-//     The PREREQUISITE (an hourly run has happened, recently enough to still
+//     The PREREQUISITE (a scheduled run has happened, recently enough to still
 //     hold its artifacts) is NOT MET, nothing was measured, and the code is the
 //     repo-wide `EXIT_PREREQUISITE_NOT_MET` -- ⛔ never a finding's
-//     `EXIT_FINDINGS`. This is the bootstrap window: at least an hour between
-//     the trigger landing and the first hourly run finishing.
+//     `EXIT_FINDINGS`. This is the bootstrap window: up to 4 hours between
+//     the trigger landing and the first scheduled run finishing.
 //
 //   CANDIDATES EXISTED, NONE WAS ELIGIBLE -- every one really was censored,
 //     failed, or lost its artifacts. That IS a finding, it keeps exit 1, and it
 //     keeps the sentence naming those causes, because now they are justified.
 //
-// ⛔ A persistent NOT MEASURED is NOT a steady state. Once the hourly run has
+// ⛔ A persistent NOT MEASURED is NOT a steady state. Once the scheduled run has
 // been live for a while, "zero completed schedule runs" stops meaning bootstrap
 // and starts meaning the trigger was removed or every run is being cancelled --
 // a defect to file, not a green day. Both the message below and the workflow
@@ -468,13 +469,13 @@ export function noCandidatesText({ event, workflow, limit }) {
     '\n  so no run was censored, none failed, and none lost its artifacts. The dataset was left exactly' +
     '\n  as it is, which is the correct outcome for this reading.' +
     '\n' +
-    `\n  Expected while the hourly \`${event}\` run is bootstrapping: the trigger has to land on main and` +
-    '\n  one run has to finish before anything is downloadable, and run-summary artifacts are retained' +
-    '\n  for 1 day.' +
+    `\n  Expected while the scheduled \`${event}\` run is bootstrapping: the trigger has to land on main and` +
+    '\n  one run has to finish before anything is downloadable, and a scheduled run\'s run-summary' +
+    '\n  artifacts are retained for 4 days.' +
     '\n' +
     '\n  ⛔ PERSISTENTLY NOT MEASURED IS A DEFECT, NOT A STEADY STATE. If this keeps saying zero after' +
-    `\n  the hourly run has been live for a few hours, the \`${event}\` trigger is gone from ${workflow} or` +
-    '\n  every hourly run is being cancelled -- and the balancing dataset is quietly ageing out. File it.' +
+    `\n  the scheduled run has been live for a day, the \`${event}\` trigger is gone from ${workflow} or` +
+    '\n  every scheduled run is being cancelled -- and the balancing dataset is quietly ageing out. File it.' +
     '\n' +
     `\n  (Exit code ${EXIT_PREREQUISITE_NOT_MET}, distinct from a finding's ${EXIT_FINDINGS} -- capture it BEFORE any pipe:` +
     '\n  `node scripts/ci/select-shard-timings-run.mjs --candidates > /tmp/candidates.log 2>&1; echo "EXIT=$?"`.' +
@@ -489,7 +490,7 @@ export function noEligibleRunText({ examined, event, workflow }) {
   return (
     `select-shard-timings-run: NO ELIGIBLE RUN among the ${examined} most recent completed ` +
     `\`${event}\` runs of ${workflow} on main. Every one was censored, failed, or has lost its ` +
-    'run-summary artifacts to the 1-day retention window. This is a refusal, not a no-op: nothing ' +
+    'run-summary artifacts to the retention window (4 days on a scheduled run). This is a refusal, not a no-op: nothing ' +
     'was regenerated.'
   );
 }
@@ -501,7 +502,7 @@ export function noEligibleRunText({ examined, event, workflow }) {
 export async function runCandidates({ repo, token, limit, event, workflow = 'ci.yml', fetchImpl = fetch }) {
   const notes = [
     `select-shard-timings-run: examining the ${limit} most recent completed \`${event}\` runs of ` +
-      `${workflow} on main. The hourly \`schedule\` run is the FULL battery; a \`push\` run has been ` +
+      `${workflow} on main. The \`schedule\` run is the FULL battery; a \`push\` run has been ` +
       'affected-only since #16467 and is not a measurement of the workspace.',
   ];
   const examined = await listCandidates({ repo, token, limit, event, workflow, fetchImpl });
@@ -1059,7 +1060,7 @@ async function selfTest() {
     if (DEFAULT_RUN_EVENT === 'push') throw new Error('default event: the affected-only event is back as the default');
   });
 
-  // THE READING: by default the selector asks for the hourly scheduled run and
+  // THE READING: by default the selector asks for the scheduled run and
   // gets it, and never asks for a push run at all.
   const defaultCall = await call();
   check(() => {

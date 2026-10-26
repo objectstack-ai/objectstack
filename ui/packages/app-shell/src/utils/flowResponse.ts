@@ -112,6 +112,19 @@
  * beats N dialects). If it is absent the message degrades to the envelope's own
  * `error.message`, never to silence.
  *
+ * ## A refusal met inside the run reads like the same refusal on a save (objectstack#24914)
+ *
+ * `message` names node ids and object API names, in English: a duplicate met
+ * by a `create_record` node read `Node 'create_account' failed:
+ * create_record(crm_account) failed: …`. Ruling B′ gave the run the record
+ * save's two carriers — the producer-marked `userMessage` (the envelope's top
+ * level on a 400, `AutomationResult.userMessage` on a 200) and `innerRefusal`
+ * (`error.details` on a 400, the run's own member on a 200: the node's refusal
+ * in its wire `code`, `message` already without the prefixes). Both failure
+ * arms read them through {@link flowFailureMessage}, between the authored
+ * `errorMessage` and `message`, and render the inner refusal by the record
+ * form's rule. `message` itself is untouched on the wire.
+ *
  * ## A LAUNCH is judged here too, not just interpreted (objectui#9973)
  *
  * Classifying the response was never the whole rule. The two launch handlers
@@ -200,6 +213,8 @@
 
 import { actionCopySource, actionErrorDetail } from '@object-ui/core';
 import type { ActionResult } from '@object-ui/core';
+import { getLoadedBuiltInLocales } from '@object-ui/i18n';
+import { declaredUserMessage, isPermissionError } from '@object-ui/react';
 import { errorCodeIs } from '@object-ui/types';
 import type { AutomationResult } from '@objectstack/spec/contracts';
 import { translateFlow, type TranslationBundle } from '@objectstack/spec/system';
@@ -301,14 +316,72 @@ export type FlowResponseOutcome<S = unknown> =
     | ({ kind: 'done'; data: FlowRunResult | undefined; successMessage?: string } & Pick<AutomationResult, 'flowLabel'>);
 
 /**
- * A flow declares a friendly `errorMessage`; prefer it — translated, when the
- * bundle carries `flows.FLOW.errorMessage` (objectui#12075) — over the raw
- * `error`, then fall back to the label. `actionErrorDetail` guarantees a string.
+ * What a failed run's message is read from. On a 200 every member is the run's
+ * own (`AutomationResult`); on a 400 `FLOW_FAILED` `errorMessage` and
+ * `innerRefusal` are `error.details`' (`FlowFailureDetailsSchema`) and
+ * `userMessage` is the envelope's top level (`ApiErrorSchema.userMessage`).
  */
-function flowFailureMessage(data: FlowRunResult, fallback: string, copy: FlowCopyLocale | undefined): string {
-    const friendly = data.errorMessage;
+interface FlowFailureCarriers {
+    errorMessage?: unknown;
+    /** Already read by `declaredUserMessage`, so non-empty or `null`. */
+    userMessage: string | null;
+    innerRefusal?: unknown;
+}
+
+/** The one subtree of a resident catalogue {@link permissionDeniedLine} reads. */
+type PermissionLinePack = { form?: { noPermissionToSave?: unknown } } | undefined;
+
+/**
+ * The record form's permission line (`form.noPermissionToSave`) in `locale`,
+ * read from the RESIDENT built-in catalogue — exact tag first, then its base
+ * language, the registry's own order (the same read `LoadingScreen` makes).
+ * The active language's catalogue is resident whenever the console runs in
+ * it; anything else answers the resident `en` catalogue, which always is.
+ * The literal is the last resort only for a registry that answers neither.
+ *
+ * Each read is one chain off `getLoadedBuiltInLocales()`, never a local
+ * binding of its result, so `scripts/check-i18n-dead-keys.mjs` derives the
+ * `en` read as a read of `form.noPermissionToSave` and the active-language
+ * reads as runtime-indexed; its header bullet for this file says which leg
+ * sees what.
+ */
+function permissionDeniedLine(locale: string | undefined): string {
+    const usable = (line: unknown): string | undefined =>
+        typeof line === 'string' && line.trim() ? line : undefined;
+    const base = locale ? locale.toLowerCase().split('-')[0] : undefined;
+    return (
+        (locale ? usable((getLoadedBuiltInLocales()[locale] as PermissionLinePack)?.form?.noPermissionToSave) : undefined)
+        ?? (base ? usable((getLoadedBuiltInLocales()[base] as PermissionLinePack)?.form?.noPermissionToSave) : undefined)
+        ?? usable((getLoadedBuiltInLocales().en as PermissionLinePack)?.form?.noPermissionToSave)
+        ?? "You don't have permission to save this record."
+    );
+}
+
+/**
+ * A failed run's message, by the record-save rule (objectstack#24914 ruling
+ * B′): the flow's authored `errorMessage` — translated when the bundle carries
+ * `flows.FLOW.errorMessage` (objectui#12075) — then the producer-marked
+ * `userMessage`, then the refusal the run's write node met (`innerRefusal`,
+ * whose `message` the spec serves without the node and operation prefixes),
+ * then the run's own `message`.
+ *
+ * The inner refusal is rendered exactly as the record form renders the same
+ * refusal on a save: a permission denial (`isPermissionError`) becomes the
+ * form's localized permission line instead of server prose (objectstack#3821),
+ * anything else reads its own sentence. `message` stays the last rung, so a
+ * run that met no refusal still says something, never nothing.
+ */
+function flowFailureMessage(failure: FlowFailureCarriers, message: string, copy: FlowCopyLocale | undefined): string {
+    const friendly = failure.errorMessage;
     if (typeof friendly === 'string' && friendly.length > 0) return translatedFlowMessage('errorMessage', friendly, copy);
-    return actionErrorDetail(data, fallback);
+    if (failure.userMessage) return failure.userMessage;
+    const inner = failure.innerRefusal as { code?: unknown; message?: unknown } | null | undefined;
+    if (inner && typeof inner === 'object' && typeof inner.code === 'string') {
+        const refusal = { code: inner.code, message: typeof inner.message === 'string' ? inner.message : '' };
+        if (isPermissionError(refusal)) return permissionDeniedLine(copy?.locale);
+        if (refusal.message.trim()) return refusal.message;
+    }
+    return message;
 }
 
 /**
@@ -355,10 +428,15 @@ export function interpretFlowResponse<S = unknown>(
         // authorable `errorMessage` stays preferred for it; the envelope's own
         // `message` is the fallback. See the header note.
         if (res.status === 400 && errorCodeIs(json?.error, 'FLOW_FAILED')) {
+            const details = errorEnvelopeDetails(json);
             return {
                 kind: 'failed',
                 error: flowFailureMessage(
-                    errorEnvelopeDetails(json),
+                    {
+                        errorMessage: details.errorMessage,
+                        userMessage: declaredUserMessage(json?.error),
+                        innerRefusal: details.innerRefusal,
+                    },
                     actionErrorDetail(json, `${label} failed`),
                     copy,
                 ),
@@ -402,7 +480,15 @@ export function interpretFlowResponse<S = unknown>(
     if (data.success === false || data.status === 'failed') {
         return {
             kind: 'failed',
-            error: flowFailureMessage(data, `${label} failed`, copy),
+            error: flowFailureMessage(
+                {
+                    errorMessage: data.errorMessage,
+                    userMessage: declaredUserMessage(data),
+                    innerRefusal: data.innerRefusal,
+                },
+                actionErrorDetail(data, `${label} failed`),
+                copy,
+            ),
             retryable: false,
         };
     }
