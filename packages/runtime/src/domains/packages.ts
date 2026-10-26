@@ -48,6 +48,7 @@ import {
     isDependencyMissingError,
     isProtocolIncompatibleError,
     protocolIncompatibleAnswer,
+    type InstalledDependencyRecord,
 } from '@objectstack/metadata-core';
 // [#7560] ADR-0070's read-only-package rule — the SAME predicate the metadata
 // authoring path asks before refusing a write INTO a platform package
@@ -1474,7 +1475,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     // this arm is an install act exactly as the primitive is.
                     assertDeclaredDependencies({
                         delivered: [manifest],
-                        getInstalled: (id) => registry.getPackage(id),
+                        getInstalled: (id) => registry.getPackage(id) as InstalledDependencyRecord | undefined,
                     });
                     // [#23972] The same origin the protocol primitive stamps:
                     // a package installed through this door is authored.
