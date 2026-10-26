@@ -28,7 +28,16 @@ import { CONSUMER_INSTALLABLE_TYPES } from '../kernel/plugin.zod';
  * 5. Review    → Platform conducts automated + manual review
  * 6. Publish   → Approved listing goes live on marketplace
  * ```
- * 
+ *
+ * ## What a published package declares
+ * Exactly one anchor-safe default permission set (ADR-0090 D5): `isDefault: true`,
+ * and `describeAnchorForbiddenBits(set, 'everyone')` from `@objectstack/spec/security`
+ * returns `null`. That set is the one mechanism by which default access reaches the
+ * members an organization invites; a package that declares none reaches no invited
+ * member until an admin assigns a set to each person. Lint rule
+ * `security-anchor-high-privilege` refuses an `isDefault` set that is not anchor-safe;
+ * no gate refuses a package that declares none, or more than one.
+ *
  * ## Platform Management Flow
  * ```
  * 1. Receive   → Accept submissions from verified publishers
