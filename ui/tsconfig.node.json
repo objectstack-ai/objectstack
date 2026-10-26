@@ -1,0 +1,33 @@
+// Editor / reference config only. NO script runs this project — not
+// package.json, not turbo.json, not CI. (`apps/console/tsconfig.node.json` is a
+// DIFFERENT file of the same name; that one IS built, by the console's
+// `type-check`. Don't let a grep hit there convince you this one has a runner.)
+//
+// `noEmit` below is load-bearing, not cruft — DO NOT REMOVE IT. This file
+// declares no `include`, so it compiles the ENTIRE repository, and
+// `tsconfig.tier-base.json` turns on `declaration` / `declarationMap` / `sourceMap`
+// with NO `outDir`. So one stray `tsc -p tsconfig.node.json` used to write
+// ~5,850 `.js` / `.d.ts` / `.map` files next to every source across
+// `packages/`, `apps/`, `examples/`, `scripts/` and the repo root, none of them
+// gitignored. During objectui#3515 a throwaway `git add -A` then swallowed
+// 402,729 insertions across 5,838 files — and worse, the emitted `.js` carry
+// JSX (they came from `.tsx` inputs) and rolldown resolves `src/lib/utils.js`
+// in preference to `src/lib/utils.tsx`, so `@object-ui/components:build` failed
+// with 165 "Unexpected JSX expression" errors that read like "your change broke
+// the build" while having nothing to do with any change. objectui#3549.
+//
+// Legal here because this project is standalone: nothing `references` it, so
+// TS6310 does not apply. Same argument `tsconfig.scripts.json` and
+// `tsconfig.vitest-setup.json` each make for themselves.
+//
+// Note this changes EMIT only, not checking. The project still reports its
+// pre-existing ~23.9k errors; that backlog is deliberately out of scope here
+// (objectui#3515 rejected "widen the root config and give it a runner" for
+// exactly that reason).
+{
+  "extends": "./tsconfig.tier-base.json",
+  "compilerOptions": {
+    "lib": ["ES2020"],
+    "noEmit": true
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "type": "view-switcher",
+  "variant": "tabs",
+  "position": "top",
+  "defaultView": "grid",
+  "views": [
+    {
+      "type": "grid",
+      "label": "Grid",
+      "schema": {
+        "type": "text",
+        "content": "Grid content"
+      }
+    },
+    {
+      "type": "kanban",
+      "label": "Kanban",
+      "schema": {
+        "type": "text",
+        "content": "Kanban content"
+      }
+    },
+    {
+      "type": "calendar",
+      "label": "Calendar",
+      "schema": {
+        "type": "text",
+        "content": "Calendar content"
+      }
+    }
+  ]
+}

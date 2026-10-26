@@ -1,0 +1,54 @@
+{
+  "type": "page",
+  "pageType": "home",
+  "title": "Dashboard",
+  "description": "Monitor your business metrics in real-time",
+  "children": [
+    {
+      "type": "grid",
+      "columns": 4,
+      "gap": 4,
+      "className": "mb-6",
+      "children": [
+        {
+          "type": "statistic",
+          "label": "Revenue",
+          "value": "$45,231",
+          "trend": "up",
+          "description": "+20.1%"
+        },
+        {
+          "type": "statistic",
+          "label": "Orders",
+          "value": "2,350",
+          "trend": "up",
+          "description": "+180"
+        },
+        {
+          "type": "statistic",
+          "label": "Customers",
+          "value": "12,543",
+          "trend": "up",
+          "description": "+573"
+        },
+        {
+          "type": "statistic",
+          "label": "Active",
+          "value": "573",
+          "trend": "neutral",
+          "description": "No change"
+        }
+      ]
+    },
+    {
+      "type": "card",
+      "title": "Recent Activity",
+      "children": [
+        {
+          "type": "text",
+          "content": "Activity content..."
+        }
+      ]
+    }
+  ]
+}

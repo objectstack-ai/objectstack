@@ -613,14 +613,15 @@ Record grouping configuration — SERVER-SIDE: the set of groups and every numbe
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **fields** | `{ field: string; order?: Enum<'asc' \| 'desc'>; collapsed?: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field); the same order as the group header query's `groupBy` |
+| **fields** | `{ field: string; order?: Enum<'asc' \| 'desc'>; orderBy?: string; collapsed?: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field); the same order as the group header query's `groupBy` |
 
 ### Nested Shape: `GroupingConfig.fields[number]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field name to group by — one `groupBy` column of the group header query; the header row carries its raw stored value (null for the empty group). NO leading or trailing whitespace: the name is compiled into the aggregate query verbatim, so a padded spelling buckets every row into one empty group instead of grouping them. |
-| **order** | `Enum<'asc' \| 'desc'>` | optional (default: `"asc"`) | Group sort order — applied by the consumer over the header rows (the aggregate query carries no orderBy) |
+| **order** | `Enum<'asc' \| 'desc'>` | optional (default: `"asc"`) | Group sort order — applied by the consumer over the header rows (the aggregate query itself sorts nothing): by the group key, or by the `orderBy` value each header row carries when `orderBy` is set |
+| **orderBy** | `string` | optional | Field whose value orders this level's groups, when that is not the grouping field — a field of the same object; default: the grouping field itself, so the groups order by their own key. The group header query then carries, per group, the smallest value of this field for `order: asc` and the largest for `desc` (each group sits where its first row would if the rows were sorted by this field), and the consumer sorts the header rows by it; a group with no value here sorts last in both directions, and equal values fall back to the group key in the same direction. NO leading or trailing whitespace (compiled verbatim, as `field` is). A numeric, temporal or boolean field: min/max over a string orders by collation, which differs between backends, so the server refuses it |
 | **collapsed** | `boolean` | optional (default: `false`) | Collapse groups by default (presentation only) |
 
 
@@ -633,7 +634,8 @@ Record grouping configuration — SERVER-SIDE: the set of groups and every numbe
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field name to group by — one `groupBy` column of the group header query; the header row carries its raw stored value (null for the empty group). NO leading or trailing whitespace: the name is compiled into the aggregate query verbatim, so a padded spelling buckets every row into one empty group instead of grouping them. |
-| **order** | `Enum<'asc' \| 'desc'>` | optional (default: `"asc"`) | Group sort order — applied by the consumer over the header rows (the aggregate query carries no orderBy) |
+| **order** | `Enum<'asc' \| 'desc'>` | optional (default: `"asc"`) | Group sort order — applied by the consumer over the header rows (the aggregate query itself sorts nothing): by the group key, or by the `orderBy` value each header row carries when `orderBy` is set |
+| **orderBy** | `string` | optional | Field whose value orders this level's groups, when that is not the grouping field — a field of the same object; default: the grouping field itself, so the groups order by their own key. The group header query then carries, per group, the smallest value of this field for `order: asc` and the largest for `desc` (each group sits where its first row would if the rows were sorted by this field), and the consumer sorts the header rows by it; a group with no value here sorts last in both directions, and equal values fall back to the group key in the same direction. NO leading or trailing whitespace (compiled verbatim, as `field` is). A numeric, temporal or boolean field: min/max over a string orders by collation, which differs between backends, so the server refuses it |
 | **collapsed** | `boolean` | optional (default: `false`) | Collapse groups by default (presentation only) |
 
 
@@ -1018,7 +1020,7 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **fields** | `{ field: string; order?: Enum<'asc' \| 'desc'>; collapsed?: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field); the same order as the group header query's `groupBy` |
+| **fields** | `{ field: string; order?: Enum<'asc' \| 'desc'>; orderBy?: string; collapsed?: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field); the same order as the group header query's `groupBy` |
 
 ### Nested Shape: `ListView.rowColor`
 
@@ -1395,7 +1397,7 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **fields** | `{ field: string; order?: Enum<'asc' \| 'desc'>; collapsed?: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field); the same order as the group header query's `groupBy` |
+| **fields** | `{ field: string; order?: Enum<'asc' \| 'desc'>; orderBy?: string; collapsed?: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field); the same order as the group header query's `groupBy` |
 
 ### Nested Shape: `ObjectListView.rowColor`
 

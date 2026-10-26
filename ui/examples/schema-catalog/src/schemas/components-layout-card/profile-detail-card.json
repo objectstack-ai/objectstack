@@ -1,0 +1,144 @@
+{
+  "type": "card",
+  "className": "max-w-lg mx-auto",
+  "header": [
+    {
+      "type": "flex",
+      "properties": {
+        "align": "center",
+        "gap": 3,
+        "children": [
+          {
+            "type": "avatar",
+            "fallback": "AJ",
+            "className": "h-12 w-12"
+          },
+          {
+            "type": "stack",
+            "gap": 1,
+            "children": [
+              {
+                "type": "text",
+                "content": "Alice Johnson",
+                "className": "text-lg font-semibold"
+              },
+              {
+                "type": "text",
+                "content": "Admin · Joined Jan 2024",
+                "className": "text-sm text-muted-foreground"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "children": [
+    {
+      "type": "stack",
+      "gap": 3,
+      "children": [
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 2,
+            "children": [
+              {
+                "type": "text",
+                "content": "Email",
+                "className": "text-sm text-muted-foreground w-24"
+              },
+              {
+                "type": "text",
+                "content": "alice@example.com",
+                "className": "text-sm"
+              }
+            ]
+          }
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 2,
+            "children": [
+              {
+                "type": "text",
+                "content": "Phone",
+                "className": "text-sm text-muted-foreground w-24"
+              },
+              {
+                "type": "text",
+                "content": "+1 (555) 123-4567",
+                "className": "text-sm"
+              }
+            ]
+          }
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 2,
+            "children": [
+              {
+                "type": "text",
+                "content": "Department",
+                "className": "text-sm text-muted-foreground w-24"
+              },
+              {
+                "type": "text",
+                "content": "Engineering",
+                "className": "text-sm"
+              }
+            ]
+          }
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 2,
+            "children": [
+              {
+                "type": "text",
+                "content": "Location",
+                "className": "text-sm text-muted-foreground w-24"
+              },
+              {
+                "type": "text",
+                "content": "San Francisco, CA",
+                "className": "text-sm"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "type": "flex",
+      "properties": {
+        "justify": "end",
+        "gap": 2,
+        "children": [
+          {
+            "type": "button",
+            "label": "Edit",
+            "variant": "outline",
+            "size": "sm",
+            "icon": "pencil"
+          },
+          {
+            "type": "button",
+            "label": "Delete",
+            "variant": "destructive",
+            "size": "sm",
+            "icon": "trash"
+          }
+        ]
+      },
+      "className": "pt-4 border-t mt-4"
+    }
+  ]
+}

@@ -1,0 +1,84 @@
+{
+  "name": "@object-ui/plugin-form",
+  "version": "18.1.0",
+  "type": "module",
+  "license": "MIT",
+  "description": "Form plugin for Object UI",
+  "main": "dist/index.umd.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "sideEffects": [
+    "./dist/index.js",
+    "./dist/index.umd.cjs",
+    "./src/index.tsx"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.umd.cjs"
+    }
+  },
+  "scripts": {
+    "build": "vite build",
+    "test": "vitest run --root ../.. packages/plugin-form/",
+    "type-check": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@object-ui/components": "workspace:*",
+    "@object-ui/core": "workspace:*",
+    "@object-ui/fields": "workspace:*",
+    "@object-ui/i18n": "workspace:*",
+    "@object-ui/permissions": "workspace:*",
+    "@object-ui/react": "workspace:*",
+    "@object-ui/types": "workspace:*",
+    "@objectstack/spec": "workspace:^",
+    "lucide-react": "^1.43.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@object-ui/data-objectstack": "workspace:*",
+    "@object-ui/test-support": "workspace:*",
+    "@vitejs/plugin-react": "^6.0.5",
+    "msw": "^2.15.0",
+    "typescript": "^6.0.3",
+    "vite": "^8.2.1",
+    "vite-plugin-dts": "^5.0.3"
+  },
+  "keywords": [
+    "objectui",
+    "sdui",
+    "schema-driven-ui",
+    "react",
+    "tailwind",
+    "shadcn",
+    "objectstack",
+    "plugin",
+    "form",
+    "validation",
+    "react-hook-form"
+  ],
+  "author": "ObjectStack Team <team@objectstack.ai>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
+    "directory": "ui/packages/plugin-form"
+  },
+  "bugs": {
+    "url": "https://github.com/objectstack-ai/objectui/issues"
+  },
+  "homepage": "https://www.objectui.org/docs/plugins/plugin-form",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ]
+}

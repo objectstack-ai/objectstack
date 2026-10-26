@@ -1,0 +1,71 @@
+---
+title: "Email Field"
+description: "Email input with validation"
+---
+
+The Email Field component provides a text input with built-in email validation and formatting.
+
+## Basic Usage
+
+<SchemaExample id="fields-email/basic-email-field" />
+
+## Required Email
+
+<SchemaExample id="fields-email/required-email" />
+
+## Field Schema
+
+An email field is authored as `EmailFieldMetadata` (`@object-ui/types`), which is the
+source of truth for the key set: it extends `BaseFieldMetadata` with a single length
+bound, `@objectstack/spec`'s own `FieldSchema.maxLength`, typed by reference.
+Address-shape validation is the widget's, not a metadata key.
+
+```ts
+import type { EmailFieldMetadata } from '@object-ui/types';
+
+const contactEmail: EmailFieldMetadata = {
+  type: 'email',
+  name: 'contact_email',
+  label: 'Email Address',
+  placeholder: 'name@example.com',
+  required: true,
+  maxLength: 254,
+};
+```
+
+The value being edited, and the `className` / `disabled` a host supplies, are **not**
+metadata keys — they are runtime widget props. See [Field Widget Props](/docs/fields/widget-props).
+
+## Validation
+
+The email field automatically validates:
+- Proper email format (user@domain.com)
+- Presence of @ symbol
+- Valid domain structure
+- No spaces or invalid characters
+
+## Cell Renderer
+
+In tables/grids, email addresses are clickable links:
+
+```ts
+import { EmailCellRenderer } from '@object-ui/fields';
+
+// Renders as: <a href="mailto:user@example.com">user@example.com</a>
+// Clicking opens default email client
+```
+
+## Use Cases
+
+- **User Registration**: Account email addresses
+- **Contact Forms**: Customer contact information
+- **Support**: Support ticket emails
+- **Notifications**: Email notification addresses
+- **Team Members**: Team member email addresses
+
+## Features
+
+- **Autocomplete**: Browser email autocomplete
+- **Validation**: Real-time email format validation
+- **Clickable Links**: Email links in read-only mode
+- **Accessible**: Proper ARIA labels and keyboard navigation

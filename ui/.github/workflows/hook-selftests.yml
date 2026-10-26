@@ -1,0 +1,207 @@
+name: Hook Self-Tests
+
+# The standing caller for `.claude/hooks/*.selftest.sh` — objectui#5754.
+#
+# ── The gap this closes ─────────────────────────────────────────────────────
+#
+# `.claude/hooks/guard-main-checkout-bash.sh` and `.claude/hooks/guard-shared-stash.sh`
+# are the PreToolUse guards behind the rule both `CLAUDE.md` files state as binding —
+# worktree-first, and never `git stash` (see those files' "⛔" sections, and
+# AGENTS.md §9). Each ships a hermetic self-test matrix
+# (`guard-main-checkout-bash.selftest.sh`, `guard-shared-stash.selftest.sh`) that
+# needs only `jq` and `git` — no install, no build, no network — and both files'
+# own headers say to run the matching self-test after touching the hook. Nothing
+# ever did: `git grep -rn selftest .github/workflows/` returned no matches before
+# this workflow existed. A hook is not imported by any package, so no unit test,
+# type check, or lint reaches it either (`eslint.config.js` is scoped to
+# `**/*.{ts,tsx}` throughout, and there is no `shellcheck` anywhere in this repo).
+# The self-test matrix was therefore exercised only when a human — or an agent —
+# remembered, in both repos, and a regression in either direction is invisible
+# until it bites: fail-open silently stops guarding the shared checkout, fail-closed
+# trains an operator onto the `OS_ALLOW_MAIN_EDITS=1` / `OS_ALLOW_STASH=1` escape
+# hatch, switching the guard off for the whole command. Neither shows up in a PR.
+#
+# ── What this job is, and is not ────────────────────────────────────────────
+#
+# This is a RUNNER, not a rewrite of what it runs. It does not touch the hooks or
+# their self-tests — `.claude/**` is governed surface, and the self-test matrices
+# already assert their own pass/fail per case; this job only gives that matrix
+# a caller that runs on every PR the matrix could catch a regression on, and
+# turns "which self-tests failed" into a red check instead of scrollback nobody
+# reads. If a self-test itself is ever found broken, that is a finding for a
+# *separate* PR against the governed surface, not something to patch here.
+#
+# ── ⭐ DISCOVERED at run time, never listed (objectui#6906) ──────────────────
+#
+# The single `run:` step below finds its matrices with
+# `find .claude/hooks -type f -name '*.selftest.sh'`. It used to be a hand-kept
+# ENUMERATION of one `run:` step per matrix, and that shape was this workflow's
+# own defect one level up: the name at the top of this file claims to be the
+# standing caller for all of them, and nothing made the claim true. A new matrix
+# shipped UNCALLED until someone remembered to edit this file — measured, not
+# argued: `guard-tree-enum.selftest.sh` landed in both repos on the same card and
+# objectstack's collector picked it up with no workflow edit, while here it had
+# to be added by hand.
+#
+# That defect is structural rather than carelessness, and the header below
+# already named the cause: this file is a RUNNER, so the matrices it calls are
+# meant to grow in `.claude/**` WITHOUT this file being touched (both #6042 /
+# PR #6087 and #5789 / PR #6046 do exactly that, and are right to). Discovery is
+# what finally makes that independence hold for a whole new matrix FILE and not
+# only for cases inside an existing one. It also unblocks #6451 —
+# `guard-main-checkout.sh` has no self-test at all, and whoever writes that
+# matrix would otherwise have to remember this file or watch their work never
+# run.
+#
+# `find`, not a flat glob, so a matrix in a subdirectory is not a silent miss
+# either. Ported from objectstack's collector in its `lint.yml`
+# ("Claude hook guard self-tests"), including both of the load-bearing
+# properties below — a port that drops either is worse than no change.
+#
+#   ⭐ 1. An EMPTY discovery is RED, not green. A renamed, moved or deleted
+#         directory would otherwise make this step pass by running nothing,
+#         which is the identical green line this whole workflow exists to
+#         distrust: a step that verified nothing is not a pass. The count is
+#         printed on success too, so a SHRINKING set is visible in the log
+#         rather than inferred.
+#
+#   ⭐ 2. Collected, not sequenced. A `run:` block executes under `bash -e`, so
+#         a bare `for … do "$selftest"; done` would abort at the FIRST red
+#         matrix and leave the rest unrun — neither green nor red, and nothing
+#         in the log tells those apart. The matrices are independent by
+#         construction (each builds its own throwaway fixture), so collecting
+#         loses nothing and the step still FAILS when any of them does, naming
+#         every one that failed. ⛔ Do not "simplify" it into a bare loop.
+#
+# ── Why path-filtered, unlike the control-byte gate ─────────────────────────
+#
+# The control-byte gate (`control-bytes.yml`, a step of `repo-gates.yml` since
+# objectui#12214) explains at length why IT carries no `paths`
+# filter: a markdown-only PR can trip a raw control byte just as easily as a
+# TypeScript one, so an unfiltered gate is the only kind that can see it. That
+# reasoning does not transfer here — the self-tests build their own hermetic
+# git fixtures and assert the CURRENT hook script's behaviour; nothing about a
+# docs-only or dependency-bump PR can move that needle. So this workflow mirrors
+# `changeset-guard.yml`'s shape instead: it fires only on a PR (or push to `main`)
+# that touches `.claude/hooks/**` or this workflow file itself.
+#
+# ── Cost — a dated measurement, not a live claim ─────────────────────────────
+#
+# Measured 2026-08-24 on `origin/main` @ 53dc89db8:
+# `guard-main-checkout-bash.selftest.sh` (100 cases) ~3.2s wall,
+# `guard-shared-stash.selftest.sh` (32 cases) ~0.6s wall. Both need only `jq`
+# and `git`, both preinstalled on `ubuntu-latest` — no `setup-node`, no
+# install, no build.
+#
+# Those counts stay, and the distinction is deliberate (objectui#6089): a
+# measurement is HISTORY. It is read together with its date and its sha, and a
+# matrix that grows afterwards does not make it false — it makes it older. Both
+# have grown since (121 and 41 as of 2026-08-31, plus a third matrix), which is
+# exactly what a dated measurement is allowed to do. A step NAME, by contrast,
+# is a LIVE CLAIM about the run it labels, so it carries no count at all. See
+# the next section.
+#
+# ── Why the step name carries no case count ──────────────────────────────────
+#
+# The `run:` step below is named for what it does and nothing else. Do not add
+# "(N cases)" or "(N matrices)" to it — this file used to name one step per
+# matrix WITH its case count, and it was the declared≠actual shape:
+#
+#   - Nothing derived those numbers and nothing re-checked them. A step name
+#     has no runtime behaviour, so a wrong count never turns a check red; it
+#     just shows a wrong number on the checks page, which is the one place a
+#     reviewer actually looks.
+#   - The number is already published by the only thing that cannot get it
+#     wrong: the step prints how many matrices it discovered, and each run's
+#     own tail prints `N passed, N failed`, produced by the matrix being
+#     counted.
+#   - Where a count belongs beside prose, the hook header owns it WITH the
+#     recipe to re-derive it: `guard-shared-stash.sh` states its total, how to
+#     re-derive it (`grep -c '^expect ' <selftest>` plus the inline specials)
+#     and that it must equal the run's tail. `guard-main-checkout-bash.sh`
+#     describes its matrix with no count at all. A second copy here would be a
+#     second thing to keep in sync, and the one with no recipe behind it.
+#
+# The same reasoning is why `scripts/dependabot-merge-gate.mjs`'s
+# `OPTIONAL_CONTEXTS` description of this check is count-free, and must stay so.
+#
+# ── Fail-closed, deliberately ────────────────────────────────────────────────
+#
+# Each self-test script already exits non-zero on any failing case (its own
+# `pass`/`fail` tally), and the collector below propagates that into the step's
+# own exit status, so the job — and therefore the workflow — goes red the moment
+# any matrix regresses. A gate that ran these and reported without failing the
+# build would reproduce exactly the defect this workflow exists to close.
+# ⛔ Never let the collector swallow an exit code: a green step over a red
+# self-test looks identical to success.
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - '.claude/hooks/**'
+      - '.github/workflows/hook-selftests.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.claude/hooks/**'
+      - '.github/workflows/hook-selftests.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: hook-selftests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  hook-selftests:
+    name: Hook Self-Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      # Every matrix under `.claude/hooks/` is hermetic: it builds its own
+      # throwaway git repo, worktree and non-repo directory under $TMPDIR, and
+      # exits non-zero on any failing case. Discovery + the two load-bearing
+      # properties are argued in the header sections above — read them before
+      # editing this block.
+      - name: Claude hook guard self-tests
+        run: |
+          mapfile -t selftests < <(find .claude/hooks -type f -name '*.selftest.sh' | sort)
+          if [ "${#selftests[@]}" -eq 0 ]; then
+            echo "Hook self-tests — DISCOVERED NOTHING under .claude/hooks/."
+            echo "This step verified nothing, which is a failure and not a pass:"
+            echo "the matrices were moved, renamed or deleted. Re-point the search"
+            echo "above rather than deleting the step."
+            exit 1
+          fi
+          echo "discovered ${#selftests[@]} hook self-test(s):"
+          printf '  %s\n' "${selftests[@]}"
+          echo ""
+          failed=""
+          run_self_test() {
+            echo "-- $*"
+            if "$@"; then
+              echo "PASS  $*"
+            else
+              echo "FAIL  $*"
+              failed="${failed}  $*"$'\n'
+            fi
+            return 0
+          }
+          for selftest in "${selftests[@]}"; do
+            run_self_test "$selftest"
+          done
+          if [ -n "$failed" ]; then
+            echo ""
+            echo "Hook self-tests — the following FAILED:"
+            printf "%s" "$failed"
+            exit 1
+          fi
+          echo ""
+          echo "Hook self-tests — all ${#selftests[@]} ran and passed"

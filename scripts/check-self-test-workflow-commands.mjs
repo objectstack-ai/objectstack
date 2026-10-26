@@ -35,11 +35,11 @@
  * safe by indenting it or by burying it in prose.
  *
  * **2. The `::...::` form is parsed only at LINE START.** Measured against the
- * same population: `scripts/check-prerelease-pin-watch.mjs --self-test` prints
- * two lines carrying `::error::` and `::warning::` mid-sentence on every PR,
- * and its check run carries zero annotations. Those two lines are inert where
- * they sit and one re-indentation away from not being; this gate reddens at the
- * moment they move, which is the moment they start lying.
+ * same population: `scripts/check-prerelease-pin-watch.mjs --self-test` (since
+ * retired, #25697) printed two lines carrying `::error::` and `::warning::`
+ * mid-sentence on every PR, and its check run carried zero annotations. Such a
+ * line is inert where it sits and one re-indentation away from not being; this
+ * gate reddens at the moment one moves, which is the moment it starts lying.
  *
  * ⚠️ Neither fact is inferable from a local run — the transformation happens on
  * a runner and nowhere else. That is exactly why the property needs a gate

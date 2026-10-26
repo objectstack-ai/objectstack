@@ -314,10 +314,10 @@ export function hasConsoleDist(consolePath: string): boolean {
 // ─── "No dist" remedy — named for where the server runs ─────────────
 
 /** The framework repo's root script that builds `packages/console/dist`. */
-const CONSOLE_BUILD_SCRIPT = 'objectui:build';
+const CONSOLE_BUILD_SCRIPT = 'console:build';
 
 /**
- * The directory whose `package.json` declares `objectui:build` for this
+ * The directory whose `package.json` declares `console:build` for this
  * console package, or `null`.
  *
  * Only the NEAREST `package.json` above `consolePath` is asked. In the
@@ -327,8 +327,7 @@ const CONSOLE_BUILD_SCRIPT = 'objectui:build';
  * intermediate directories carry none — so a project that merely sits inside
  * a framework checkout is never told to run a script that does not build the
  * console it actually resolved. The signal is the script itself rather than
- * the repo's layout or its `.objectui-sha` pin, so the remedy is named only
- * where it exists.
+ * the repo's layout, so the remedy is named only where it exists.
  */
 function findConsoleBuildRoot(consolePath: string): string | null {
   let dir = path.dirname(consolePath);
@@ -358,7 +357,7 @@ function findConsoleBuildRoot(consolePath: string): string | null {
  * Three places reach it, and each gets the remedy that works there:
  *
  *   - the framework repo, where `packages/console/dist` is a gitignored build
- *     that `pnpm build` never produces — `pnpm objectui:build`, run at the
+ *     that `pnpm build` never produces — `pnpm console:build`, run at the
  *     root it was found under (it is a root script, so it does not resolve
  *     from the example directory `pnpm dev` runs in);
  *   - anywhere else, where the Console arrives prebuilt as
@@ -391,7 +390,7 @@ function describeConsoleDistMissing(consolePath: string | null, hostPaths: boole
     return (
       `Console dist not found at ${path.relative(buildRoot, dist)} — \`pnpm build\` does not produce it. ` +
       `Build it with \`pnpm ${CONSOLE_BUILD_SCRIPT}\` in ${hostPaths ? buildRoot : 'the root of the ObjectStack checkout this server runs from'} ` +
-      `(uses a ../objectui checkout if present, else clones objectui at the pinned commit — needs network).`
+      `(builds ui/apps/console, then copies its dist into packages/console).`
     );
   }
   return `Console dist not found${hostPaths ? ` at ${dist}` : ''} — ${reinstall}`;

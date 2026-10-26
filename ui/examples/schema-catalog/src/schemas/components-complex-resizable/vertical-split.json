@@ -1,0 +1,40 @@
+{
+  "type": "resizable",
+  "direction": "vertical",
+  "minHeight": "400px",
+  "className": "rounded-lg border",
+  "panels": [
+    {
+      "defaultSize": 60,
+      "content": [
+        {
+          "type": "box",
+          "className": "p-4 h-full bg-blue-50",
+          "children": [
+            {
+              "type": "text",
+              "content": "Top Panel",
+              "className": "font-semibold"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "defaultSize": 40,
+      "content": [
+        {
+          "type": "box",
+          "className": "p-4 h-full bg-green-50",
+          "children": [
+            {
+              "type": "text",
+              "content": "Bottom Panel",
+              "className": "font-semibold"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

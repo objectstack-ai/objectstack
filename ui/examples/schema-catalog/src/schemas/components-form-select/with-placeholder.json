@@ -1,0 +1,18 @@
+{
+  "type": "select",
+  "placeholder": "Select...",
+  "options": [
+    {
+      "label": "Red",
+      "value": "red"
+    },
+    {
+      "label": "Green",
+      "value": "green"
+    },
+    {
+      "label": "Blue",
+      "value": "blue"
+    }
+  ]
+}

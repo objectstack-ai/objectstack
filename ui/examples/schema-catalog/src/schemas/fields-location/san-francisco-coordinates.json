@@ -1,0 +1,18 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "defaultValues": {
+    "store_location": {
+      "lat": 37.7749,
+      "lng": -122.4194
+    }
+  },
+  "fields": [
+    {
+      "name": "store_location",
+      "label": "Store Location",
+      "type": "location"
+    }
+  ]
+}

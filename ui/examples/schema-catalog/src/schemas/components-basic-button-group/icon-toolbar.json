@@ -1,0 +1,16 @@
+{
+  "type": "button-group",
+  "variant": "outline",
+  "size": "sm",
+  "buttons": [
+    {
+      "label": "Copy"
+    },
+    {
+      "label": "Cut"
+    },
+    {
+      "label": "Paste"
+    }
+  ]
+}

@@ -211,10 +211,11 @@ export const ROOT_FILE_WATCH_HINTS = ['turbo.json/**', 'package.json/**'];
  * `<package>#<task>` key inert, which is precisely what this gate judges --
  * derived no lead to this gate at all.
  *
- * ## Why three patterns and not eleven
+ * ## Why seven patterns and not fifteen
  *
- * `pnpm-workspace.yaml` lists eleven member globs, nine of them under
- * `packages/`. `packages/**` + one glob for each of the two roots outside it
+ * `pnpm-workspace.yaml` lists fifteen member entries, nine of them under
+ * `packages/` and four for the objectui tree under `ui/`. `packages/**` + one
+ * glob for each of the two other roots + the four `ui/` entries as written
  * covers every member manifest and nothing else; `--self-test` holds that
  * against the enumerator's live answer in BOTH directions, so a twelfth glob in
  * the workspace file reds here rather than going quiet.
@@ -223,6 +224,12 @@ export const DECLARED_WATCH_HINTS = [
   'packages/**/package.json',
   'apps/*/package.json',
   'examples/*/package.json',
+  // The objectui tree under `ui/` (objectstack#25677): its root manifest is a
+  // member (`ui`) beside the three member globs under it.
+  'ui/package.json',
+  'ui/packages/*/package.json',
+  'ui/apps/*/package.json',
+  'ui/examples/*/package.json',
 ];
 
 /**

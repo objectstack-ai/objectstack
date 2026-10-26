@@ -1,0 +1,16 @@
+{
+  "name": "@object-ui/example-hello-world",
+  "version": "3.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@object-ui/components": "workspace:*",
+    "@object-ui/core": "workspace:*",
+    "@object-ui/react": "workspace:*",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "scripts": {
+    "lint": "eslint ."
+  }
+}

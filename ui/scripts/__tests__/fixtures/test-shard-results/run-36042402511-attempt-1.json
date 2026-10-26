@@ -1,0 +1,133 @@
+{
+  "provenance": "objectui merge_group run 36042402511, attempt 1 (head c510101c8f, PR objectui#10316): GET /repos/objectstack-ai/objectui/actions/runs/36042402511/attempts/1/jobs?per_page=100, the endpoint and query fetchRunJobs() sends, answered on 2026-09-29 (total_count 16). Fields trimmed to id, name, status, conclusion, started_at, completed_at; nothing else edited. This is the settled answer. The answer the aggregator read at 2026-09-24T18:47:14Z differed in one field only, which the test derives from the job log (objectui#10931).",
+  "jobs": [
+    {
+      "id": 107777511605,
+      "name": "Build & E2E",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-24T18:36:26Z",
+      "completed_at": "2026-09-24T18:37:35Z"
+    },
+    {
+      "id": 107777511761,
+      "name": "Test (shard 1/8)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-24T18:36:26Z",
+      "completed_at": "2026-09-24T18:46:56Z"
+    },
+    {
+      "id": 107777511844,
+      "name": "Test (dist pins)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-24T18:36:25Z",
+      "completed_at": "2026-09-24T18:37:48Z"
+    },
+    {
+      "id": 107777511878,
+      "name": "Changeset Fixed Group Check",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-24T18:36:25Z",
+      "completed_at": "2026-09-24T18:36:36Z"
+    },
+    {
+      "id": 107777511897,
+      "name": "Test (shard 6/8)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-24T18:36:25Z",
+      "completed_at": "2026-09-24T18:46:21Z"
+    },
+    {
+      "id": 107777511902,
+      "name": "Build Docs",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-24T18:36:25Z",
+      "completed_at": "2026-09-24T18:41:10Z"
+    },
+    {
+      "id": 107777511933,
+      "name": "Test (shard 4/8)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-24T18:36:25Z",
+      "completed_at": "2026-09-24T18:47:02Z"
+    },
+    {
+      "id": 107777511963,
+      "name": "Test (shard 5/8)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-24T18:36:26Z",
+      "completed_at": "2026-09-24T18:46:44Z"
+    },
+    {
+      "id": 107777511988,
+      "name": "Test (shard 8/8)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-24T18:36:26Z",
+      "completed_at": "2026-09-24T18:45:52Z"
+    },
+    {
+      "id": 107777512002,
+      "name": "Test (shard 7/8)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-24T18:36:25Z",
+      "completed_at": "2026-09-24T18:44:02Z"
+    },
+    {
+      "id": 107777512066,
+      "name": "Test (shard 3/8)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-24T18:36:25Z",
+      "completed_at": "2026-09-24T18:44:04Z"
+    },
+    {
+      "id": 107777512087,
+      "name": "Test (shard 2/8)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-24T18:36:26Z",
+      "completed_at": "2026-09-24T18:46:08Z"
+    },
+    {
+      "id": 107777512092,
+      "name": "Type Check",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-24T18:36:25Z",
+      "completed_at": "2026-09-24T18:46:59Z"
+    },
+    {
+      "id": 107777513116,
+      "name": "Test (coverage shard ${{ matrix.shard }}/4)",
+      "status": "completed",
+      "conclusion": "skipped",
+      "started_at": "2026-09-24T18:36:23Z",
+      "completed_at": "2026-09-24T18:36:23Z"
+    },
+    {
+      "id": 107777514457,
+      "name": "Test (coverage)",
+      "status": "completed",
+      "conclusion": "skipped",
+      "started_at": "2026-09-24T18:36:23Z",
+      "completed_at": "2026-09-24T18:36:23Z"
+    },
+    {
+      "id": 107781652735,
+      "name": "Test",
+      "status": "completed",
+      "conclusion": "failure",
+      "started_at": "2026-09-24T18:47:04Z",
+      "completed_at": "2026-09-24T18:47:15Z"
+    }
+  ]
+}

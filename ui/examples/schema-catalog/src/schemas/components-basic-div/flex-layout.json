@@ -1,0 +1,20 @@
+{
+  "type": "flex",
+  "properties": {
+    "gap": 4,
+    "children": [
+      {
+        "type": "card",
+        "className": "w-20 h-20 bg-blue-500"
+      },
+      {
+        "type": "card",
+        "className": "w-20 h-20 bg-green-500"
+      },
+      {
+        "type": "card",
+        "className": "w-20 h-20 bg-purple-500"
+      }
+    ]
+  }
+}

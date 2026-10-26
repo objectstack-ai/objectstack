@@ -1,0 +1,15 @@
+{
+  "title": "Layout",
+  "pages": [
+    "box",
+    "container",
+    "card",
+    "grid",
+    "flex",
+    "stack",
+    "tabs",
+    "aspect-ratio",
+    "page",
+    "semantic"
+  ]
+}

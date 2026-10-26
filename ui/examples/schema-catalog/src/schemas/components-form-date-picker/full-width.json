@@ -1,0 +1,5 @@
+{
+  "type": "date-picker",
+  "placeholder": "Pick a date",
+  "className": "w-full"
+}

@@ -1,0 +1,38 @@
+{
+  "type": "stack",
+  "gap": 4,
+  "children": [
+    {
+      "type": "flex",
+      "properties": {
+        "gap": 2,
+        "wrap": true,
+        "children": [
+          {
+            "type": "button",
+            "label": "Submit",
+            "variant": "default",
+            "icon": "send"
+          },
+          {
+            "type": "button",
+            "label": "Save Draft",
+            "variant": "outline",
+            "icon": "save"
+          },
+          {
+            "type": "button",
+            "label": "Delete",
+            "variant": "destructive",
+            "icon": "trash"
+          },
+          {
+            "type": "button",
+            "label": "Cancel",
+            "variant": "ghost"
+          }
+        ]
+      }
+    }
+  ]
+}

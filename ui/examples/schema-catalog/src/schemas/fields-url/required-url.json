@@ -1,0 +1,14 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "fields": [
+    {
+      "name": "portfolio",
+      "label": "Portfolio URL",
+      "type": "url",
+      "placeholder": "https://yoursite.com",
+      "required": true
+    }
+  ]
+}

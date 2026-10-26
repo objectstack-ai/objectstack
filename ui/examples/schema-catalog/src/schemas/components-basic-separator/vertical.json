@@ -1,0 +1,20 @@
+{
+  "type": "flex",
+  "properties": {
+    "gap": 4,
+    "children": [
+      {
+        "type": "text",
+        "content": "Left"
+      },
+      {
+        "type": "separator",
+        "orientation": "vertical"
+      },
+      {
+        "type": "text",
+        "content": "Right"
+      }
+    ]
+  }
+}

@@ -1,0 +1,4 @@
+{
+  "type": "markdown",
+  "content": "## Task List\n\n- [x] Completed task\n- [ ] Pending task\n- [ ] Another pending task\n\n## Code Block\n\n```javascript\nfunction greet(name) {\n  console.log(`Hello, ${name}!`);\n}\n```"
+}

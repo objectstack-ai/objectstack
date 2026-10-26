@@ -1,0 +1,429 @@
+{
+  "type": "container",
+  "maxWidth": "6xl",
+  "padding": 0,
+  "children": [
+    {
+      "type": "box",
+      "className": "text-center mb-12",
+      "children": [
+        {
+          "type": "text",
+          "content": "Simple, Transparent Pricing",
+          "className": "text-3xl font-bold mb-2"
+        },
+        {
+          "type": "text",
+          "content": "Choose the plan that's right for you",
+          "className": "text-muted-foreground"
+        }
+      ]
+    },
+    {
+      "type": "grid",
+      "columns": {
+        "xs": 1,
+        "md": 3
+      },
+      "gap": 8,
+      "children": [
+        {
+          "type": "card",
+          "className": "border-2",
+          "children": [
+            {
+              "type": "stack",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "stack",
+                  "gap": 2,
+                  "children": [
+                    {
+                      "type": "text",
+                      "content": "Starter",
+                      "className": "text-xl font-semibold"
+                    },
+                    {
+                      "type": "text",
+                      "content": "Perfect for individuals",
+                      "className": "text-sm text-muted-foreground"
+                    }
+                  ]
+                },
+                {
+                  "type": "flex",
+                  "properties": {
+                    "align": "baseline",
+                    "children": [
+                      {
+                        "type": "text",
+                        "content": "$9",
+                        "className": "text-4xl font-bold"
+                      },
+                      {
+                        "type": "text",
+                        "content": "/month",
+                        "className": "text-muted-foreground ml-1"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "type": "button",
+                  "label": "Get Started",
+                  "variant": "outline",
+                  "className": "w-full"
+                },
+                {
+                  "type": "separator"
+                },
+                {
+                  "type": "stack",
+                  "gap": 2,
+                  "children": [
+                    {
+                      "type": "flex",
+                      "properties": {
+                        "align": "center",
+                        "children": [
+                          {
+                            "type": "icon",
+                            "icon": "check",
+                            "className": "h-4 w-4 text-primary mr-2"
+                          },
+                          {
+                            "type": "text",
+                            "content": "Up to 10 projects",
+                            "className": "text-sm"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "type": "flex",
+                      "properties": {
+                        "align": "center",
+                        "children": [
+                          {
+                            "type": "icon",
+                            "icon": "check",
+                            "className": "h-4 w-4 text-primary mr-2"
+                          },
+                          {
+                            "type": "text",
+                            "content": "5GB storage",
+                            "className": "text-sm"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "type": "flex",
+                      "properties": {
+                        "align": "center",
+                        "children": [
+                          {
+                            "type": "icon",
+                            "icon": "check",
+                            "className": "h-4 w-4 text-primary mr-2"
+                          },
+                          {
+                            "type": "text",
+                            "content": "Email support",
+                            "className": "text-sm"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "card",
+          "className": "border-2 border-primary shadow-lg",
+          "children": [
+            {
+              "type": "stack",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "stack",
+                  "gap": 2,
+                  "children": [
+                    {
+                      "type": "flex",
+                      "properties": {
+                        "align": "center",
+                        "justify": "between",
+                        "children": [
+                          {
+                            "type": "text",
+                            "content": "Pro",
+                            "className": "text-xl font-semibold"
+                          },
+                          {
+                            "type": "badge",
+                            "label": "Popular",
+                            "variant": "default"
+                          }
+                        ]
+                      },
+                      "className": "mb-1"
+                    },
+                    {
+                      "type": "text",
+                      "content": "For growing teams",
+                      "className": "text-sm text-muted-foreground"
+                    }
+                  ]
+                },
+                {
+                  "type": "flex",
+                  "properties": {
+                    "align": "baseline",
+                    "children": [
+                      {
+                        "type": "text",
+                        "content": "$29",
+                        "className": "text-4xl font-bold"
+                      },
+                      {
+                        "type": "text",
+                        "content": "/month",
+                        "className": "text-muted-foreground ml-1"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "type": "button",
+                  "label": "Get Started",
+                  "variant": "default",
+                  "className": "w-full"
+                },
+                {
+                  "type": "separator"
+                },
+                {
+                  "type": "stack",
+                  "gap": 2,
+                  "children": [
+                    {
+                      "type": "flex",
+                      "properties": {
+                        "align": "center",
+                        "children": [
+                          {
+                            "type": "icon",
+                            "icon": "check",
+                            "className": "h-4 w-4 text-primary mr-2"
+                          },
+                          {
+                            "type": "text",
+                            "content": "Unlimited projects",
+                            "className": "text-sm"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "type": "flex",
+                      "properties": {
+                        "align": "center",
+                        "children": [
+                          {
+                            "type": "icon",
+                            "icon": "check",
+                            "className": "h-4 w-4 text-primary mr-2"
+                          },
+                          {
+                            "type": "text",
+                            "content": "50GB storage",
+                            "className": "text-sm"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "type": "flex",
+                      "properties": {
+                        "align": "center",
+                        "children": [
+                          {
+                            "type": "icon",
+                            "icon": "check",
+                            "className": "h-4 w-4 text-primary mr-2"
+                          },
+                          {
+                            "type": "text",
+                            "content": "Priority support",
+                            "className": "text-sm"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "type": "flex",
+                      "properties": {
+                        "align": "center",
+                        "children": [
+                          {
+                            "type": "icon",
+                            "icon": "check",
+                            "className": "h-4 w-4 text-primary mr-2"
+                          },
+                          {
+                            "type": "text",
+                            "content": "Advanced analytics",
+                            "className": "text-sm"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "card",
+          "className": "border-2",
+          "children": [
+            {
+              "type": "stack",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "stack",
+                  "gap": 2,
+                  "children": [
+                    {
+                      "type": "text",
+                      "content": "Enterprise",
+                      "className": "text-xl font-semibold"
+                    },
+                    {
+                      "type": "text",
+                      "content": "For large organizations",
+                      "className": "text-sm text-muted-foreground"
+                    }
+                  ]
+                },
+                {
+                  "type": "flex",
+                  "properties": {
+                    "align": "baseline",
+                    "children": [
+                      {
+                        "type": "text",
+                        "content": "$99",
+                        "className": "text-4xl font-bold"
+                      },
+                      {
+                        "type": "text",
+                        "content": "/month",
+                        "className": "text-muted-foreground ml-1"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "type": "button",
+                  "label": "Contact Sales",
+                  "variant": "outline",
+                  "className": "w-full"
+                },
+                {
+                  "type": "separator"
+                },
+                {
+                  "type": "stack",
+                  "gap": 2,
+                  "children": [
+                    {
+                      "type": "flex",
+                      "properties": {
+                        "align": "center",
+                        "children": [
+                          {
+                            "type": "icon",
+                            "icon": "check",
+                            "className": "h-4 w-4 text-primary mr-2"
+                          },
+                          {
+                            "type": "text",
+                            "content": "Unlimited everything",
+                            "className": "text-sm"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "type": "flex",
+                      "properties": {
+                        "align": "center",
+                        "children": [
+                          {
+                            "type": "icon",
+                            "icon": "check",
+                            "className": "h-4 w-4 text-primary mr-2"
+                          },
+                          {
+                            "type": "text",
+                            "content": "500GB storage",
+                            "className": "text-sm"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "type": "flex",
+                      "properties": {
+                        "align": "center",
+                        "children": [
+                          {
+                            "type": "icon",
+                            "icon": "check",
+                            "className": "h-4 w-4 text-primary mr-2"
+                          },
+                          {
+                            "type": "text",
+                            "content": "24/7 phone support",
+                            "className": "text-sm"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "type": "flex",
+                      "properties": {
+                        "align": "center",
+                        "children": [
+                          {
+                            "type": "icon",
+                            "icon": "check",
+                            "className": "h-4 w-4 text-primary mr-2"
+                          },
+                          {
+                            "type": "text",
+                            "content": "Custom integrations",
+                            "className": "text-sm"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

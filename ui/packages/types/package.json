@@ -1,0 +1,111 @@
+{
+  "name": "@object-ui/types",
+  "version": "18.1.0",
+  "description": "Pure TypeScript type definitions for Object UI - The Protocol Layer",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./base": {
+      "types": "./dist/base.d.ts",
+      "import": "./dist/base.js"
+    },
+    "./layout": {
+      "types": "./dist/layout.d.ts",
+      "import": "./dist/layout.js"
+    },
+    "./form": {
+      "types": "./dist/form.d.ts",
+      "import": "./dist/form.js"
+    },
+    "./data-display": {
+      "types": "./dist/data-display.d.ts",
+      "import": "./dist/data-display.js"
+    },
+    "./feedback": {
+      "types": "./dist/feedback.d.ts",
+      "import": "./dist/feedback.js"
+    },
+    "./overlay": {
+      "types": "./dist/overlay.d.ts",
+      "import": "./dist/overlay.js"
+    },
+    "./navigation": {
+      "types": "./dist/navigation.d.ts",
+      "import": "./dist/navigation.js"
+    },
+    "./complex": {
+      "types": "./dist/complex.d.ts",
+      "import": "./dist/complex.js"
+    },
+    "./data": {
+      "types": "./dist/data.d.ts",
+      "import": "./dist/data.js"
+    },
+    "./zod": {
+      "types": "./dist/zod/index.zod.d.ts",
+      "import": "./dist/zod/index.zod.js"
+    },
+    "./internal/retired-field-keys": {
+      "types": "./dist/internal/retired-field-keys.d.ts",
+      "import": "./dist/internal/retired-field-keys.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc && vite build && node ../../scripts/check-dist-completeness.mjs",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "type-check": "tsc --noEmit && tsc -p tsconfig.examples.json && tsc -p tsconfig.test.json",
+    "test": "vitest run --root ../.. packages/types/",
+    "lint": "eslint ."
+  },
+  "keywords": [
+    "object-ui",
+    "types",
+    "typescript",
+    "schema",
+    "json-schema",
+    "protocol",
+    "objectui",
+    "sdui",
+    "schema-driven-ui",
+    "react",
+    "tailwind",
+    "shadcn",
+    "objectstack"
+  ],
+  "author": "Object UI Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
+    "directory": "ui/packages/types"
+  },
+  "dependencies": {
+    "@objectstack/spec": "workspace:^",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@object-ui/test-support": "workspace:*",
+    "typescript": "^6.0.3",
+    "vite": "^8.2.1"
+  },
+  "bugs": {
+    "url": "https://github.com/objectstack-ai/objectui/issues"
+  },
+  "homepage": "https://www.objectui.org/docs/api/schema-reference",
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -105,8 +105,13 @@
  *    ships to consumers no repo sweep can see; the changeset carries their
  *    migration. This census bounds the first-party population only.
  *  - **`objectui` is a RECORDED constant, not a live scan.** A test in this
- *    repo cannot read that checkout. `OBJECTUI_CENSUS` carries the revision it
- *    was measured at and the command that reproduces it.
+ *    repo could not read that checkout. Since objectui was imported under `ui/`
+ *    (objectstack#25803) it can, but the walk still skips the top-level `ui/`:
+ *    reading it would make `ui/**` an input of `@objectstack/client#test`,
+ *    and ci.yml's `crosspkg` filter does not cover that path yet
+ *    (`check-ci-filter-parity`). `OBJECTUI_CENSUS` is re-recorded at the
+ *    imported revision, and the live scan returns with the card that adds the
+ *    path to that filter.
  *  - **The ratchet in section 3 is only as live as turbo's cache — for the
  *    trees still undeclared.** This suite walks the whole workspace, while
  *    `@objectstack/client#test` declares as inputs its own package plus the
@@ -199,9 +204,18 @@ interface Site {
     index: number;
 }
 
+/**
+ * [#25803] Top-level directories of THIS repository the walk does not enter:
+ * the imported objectui tree, recorded as `OBJECTUI_CENSUS` instead (see the
+ * header). Matched at the repository root only, never as a name at any depth
+ * the way `SKIP_DIRS` is: `packages/spec/src/ui` is this census's own ground.
+ */
+const SKIP_TOP_LEVEL = new Set(['ui']);
+
 function walk(dir: string, acc: string[] = []): string[] {
     for (const entry of readdirSync(dir)) {
         if (SKIP_DIRS.has(entry)) continue;
+        if (dir === REPO_ROOT && SKIP_TOP_LEVEL.has(entry)) continue;
         const p = join(dir, entry);
         let st;
         try { st = statSync(p); } catch { continue; }
@@ -566,41 +580,31 @@ const LEDGER: readonly LedgerRow[] = [
 ];
 
 /**
- * `objectui` @ b84dc1854922c266850d6e573daf3ad59cbd0623 (origin/main,
- * 2026-08-31). Recorded, not live-scanned — a test here cannot read that
- * checkout. Reproduce with `OBJECTUI_CENSUS_COMMAND`.
+ * `objectui` @ 9e1fe032866965c7cb0460cff2b6af09350236b7, the revision imported
+ * under `ui/` (objectstack#25803; first recorded at b84dc18549, 2026-08-31).
+ * Recorded, not live-scanned: the walk skips `ui/` (see the header). Reproduce
+ * with `OBJECTUI_CENSUS_COMMAND`; the file count is the walk's own rule applied
+ * to the tracked `ui/` tree.
  *
- * ⭐ The single production call site in either reachable repo, and it SURVIVES
- * the convergence untouched. `aggregate()` feeds the resolved value through a
- * tolerant chain that accepts both spellings:
- *
- *     const rawRows = Array.isArray(data) ? data
- *       : data?.rows        && Array.isArray(data.rows)        ? data.rows        // post-#13079: this branch
- *       : data?.data        && Array.isArray(data.data)        ? data.data
- *       : data?.data?.rows  && Array.isArray(data.data.rows)   ? data.data.rows   // pre-#13079: this branch
- *       : data?.results     && Array.isArray(data.results)     ? data.results
- *       : [];
- *
- * Before #13079 branch 4 matched; after it branch 2 matches. ⚠️ It survives
- * by DEFENSIVE CODING, not by a designed migration path — the adapter was
- * written tolerant because the producer was ambiguous, which is the shape a
- * contract-first fix removes rather than relies on. Ruling item 3: objectui#7028
- * tightens the chain to the single post-unwrap spelling, time-gated behind
- * this convergence landing and objectui taking the SDK version — the chain is
- * load-bearing until then, so it is deliberately NOT part of this change.
+ * ⭐ The single production call site in either tree. `aggregate()` used to feed
+ * the resolved value through a tolerant chain that accepted both the
+ * pre-#13079 envelope and the post-unwrap `AnalyticsResult`. objectui#7028, the
+ * tightening this record named as owed, has landed: the adapter reads `rows`
+ * off the post-unwrap result and throws `AnalyticsResultShapeError` on any
+ * other shape, so it is payload-dependent and reads no envelope.
  */
 const OBJECTUI_CENSUS = {
-    revision: 'b84dc1854922c266850d6e573daf3ad59cbd0623',
-    filesScanned: 4024,
+    revision: '9e1fe032866965c7cb0460cff2b6af09350236b7',
+    filesScanned: 7954,
     sdkCallSites: 1,
     productionCallSites: 1,
     wouldBreak: 0,
-    site: 'packages/data-objectstack/src/index.ts:4846 (analytics.query, via this.client)',
+    site: 'ui/packages/data-objectstack/src/index.ts:6625 (analytics.query, via this.client)',
     tighteningOwner: 'objectui#7028',
 } as const;
 
 const OBJECTUI_CENSUS_COMMAND =
-    "git -C <objectui> grep -nE 'analytics\\s*\\.\\s*(query|meta|explain)\\s*\\(|automation\\s*\\.\\s*trigger\\s*\\(' origin/main -- '*.ts' '*.tsx' '*.js'";
+    "git grep -nE 'analytics\\s*\\.\\s*(query|meta|explain)\\s*\\(|automation\\s*\\.\\s*trigger\\s*\\(' HEAD -- 'ui/*.ts' 'ui/*.tsx' 'ui/*.js'";
 
 /**
  * ⛔ `objectstack-ai/cloud` is NOT MEASURED — see the header. Post-#13079
@@ -819,6 +823,9 @@ describe('#13079 §3 — every call site is classified', () => {
         // The three above are LEDGER sums and cannot move on a census reading;
         // this one is census-derived, so it carries the note. [#13874]
         expect(sdkSites.length, literalNote()).toBe(28);
+        // [#25803] 28 -> 29 first-party SDK sites since the objectui import: the
+        // walk's 28 plus the recorded objectui one, which it does not enter.
+        expect(sdkSites.length + OBJECTUI_CENSUS.sdkCallSites, literalNote()).toBe(29);
     });
 });
 
@@ -859,7 +866,11 @@ describe('#13079 §5 — what was NOT measured', () => {
         expect(OBJECTUI_CENSUS.wouldBreak).toBe(0);
         expect(OBJECTUI_CENSUS.revision).toMatch(/^[0-9a-f]{40}$/);
         expect(OBJECTUI_CENSUS.tighteningOwner).toBe('objectui#7028');
-        expect(OBJECTUI_CENSUS_COMMAND).toContain('origin/main');
+        expect(OBJECTUI_CENSUS.site.startsWith('ui/')).toBe(true);
+        expect(OBJECTUI_CENSUS_COMMAND).toContain("'ui/*.ts'");
+        // [#25803] And the walk really does not enter it, so the record is the
+        // only reading of that tree here.
+        expect(CENSUS.sites.some((s) => s.file.startsWith('ui/'))).toBe(false);
     });
 
     it('⛔ cloud is NOT MEASURED, ruled so, and must not be read as clean', () => {

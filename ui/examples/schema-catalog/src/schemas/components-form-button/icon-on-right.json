@@ -1,0 +1,7 @@
+{
+  "type": "button",
+  "label": "Download",
+  "icon": "download",
+  "iconPosition": "right",
+  "variant": "outline"
+}

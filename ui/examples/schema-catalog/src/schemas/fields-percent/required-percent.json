@@ -1,0 +1,14 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "fields": [
+    {
+      "name": "discount",
+      "label": "Discount Rate",
+      "type": "percent",
+      "required": true,
+      "scale": 2
+    }
+  ]
+}

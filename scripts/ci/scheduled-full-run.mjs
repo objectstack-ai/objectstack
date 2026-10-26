@@ -11,9 +11,8 @@
 // Half 3 (#22998) is the READER the full battery gained when PR and queue runs
 // became the fast set: release.yml's `full-battery` job runs `--release-gate`
 // before the `release` environment approval, and the publish lane refuses
-// unless the newest full-battery runs of `CI`, `Lint & Type Check` and
-// `Spec Shape Gate` at or before the version commit concluded `success`. See
-// HALF 3 below.
+// unless the newest full-battery runs of `CI` and `Lint & Type Check` at or
+// before the version commit concluded `success`. See HALF 3 below.
 //
 // ## Why one file holds the first two halves
 //
@@ -753,14 +752,14 @@ export function renderBody({
 // ---------------------------------------------------------------------------
 //
 // A PR or queue build carries the FAST SET since #22998 (ci.yml's THE TWO
-// SPEEDS); the dogfood, temporal and console-pin legs run only on `main`'s
+// SPEEDS); the dogfood and temporal legs run only on `main`'s
 // push, hourly schedule and dispatch runs. "Tested before a release" is
 // therefore a statement about those runs, and this half makes it a gate:
 // release.yml's `full-battery` job, which `publish` needs, so a refusal here
 // means no deployment is queued at the `release` environment at all.
 //
-// THE SELECTION RULE, per workflow (`CI`, `Lint & Type Check`, `Spec Shape
-// Gate`), pinned below:
+// THE SELECTION RULE, per workflow (`CI`, `Lint & Type Check`), pinned
+// below:
 //
 //   1. candidates are runs whose event is `schedule` or `push`, on `main`,
 //      `completed`, whose head is the release commit or one of its first-parent
@@ -788,12 +787,11 @@ export function renderBody({
 export const RELEASE_GATE_WORKFLOWS = Object.freeze([
   Object.freeze({ file: 'ci.yml', name: 'CI' }),
   Object.freeze({ file: 'lint.yml', name: 'Lint & Type Check' }),
-  // The spec shape gate (ruling B, comment 6145029395 on #23238): objectui
-  // `main` compiled against the spec built from the commit, hourly on `main`.
-  // It has no `push` trigger, so only its `schedule` runs qualify here; a run
-  // whose every diagnostic is a registered retirement concluded `success` and
-  // counts as green, an unregistered break concluded `failure` and refuses.
-  Object.freeze({ file: 'spec-shape-gate.yml', name: 'Spec Shape Gate' }),
+  // `Spec Shape Gate` (spec-shape-gate.yml) was the third row: objectui `main`
+  // compiled hourly against the spec built from the commit. It retired with
+  // the objectui import (objectstack#25697): the Console is a workspace under
+  // `ui/`, so ci.yml's `Type Check UI` compiles it against the spec in the PR
+  // that moves the shape, and CI's own runs carry that verdict here.
 ]);
 
 // The events that carry the full battery on `main`, and the one conclusion that
@@ -1853,10 +1851,10 @@ async function selfTest() {
   const recorded = JSON.parse(
     readFileSync(fileURLToPath(new URL('../fixtures/release-full-battery/runs-2026-10-12.json', import.meta.url)), 'utf8')
   );
-  // The recording predates the Spec Shape Gate and holds runs of exactly the
-  // two workflows it names. The cases below judge those two, EXPLICITLY -- the
-  // roster, not the fixture, decides what a release reads -- and the two cases
-  // after them pin that the default roster now reads the third.
+  // The recording holds runs of exactly the two workflows the roster names.
+  // The cases below judge those two, EXPLICITLY -- the roster, not the
+  // fixture, decides what a release reads -- and the firing control after the
+  // first pins that the default roster reads both of them and nothing else.
   const recordedWorkflows = RELEASE_GATE_WORKFLOWS.filter(({ file }) => Object.hasOwn(recorded.runs, file));
   const recordedVerdict = (fromIndex) =>
     releaseGateVerdict({ history: recorded.firstParent.slice(fromIndex), runsByWorkflow: recorded.runs, workflows: recordedWorkflows });
@@ -1866,13 +1864,18 @@ async function selfTest() {
     }
   });
   await check(() => {
-    // FIRING CONTROL for the registration: over the SAME recording, the full
-    // roster refuses release commit 0524c1619b naming Spec Shape Gate alone --
-    // the third workflow is read, and a workflow with no run is a refusal.
-    const v = releaseGateVerdict({ history: recorded.firstParent, runsByWorkflow: recorded.runs });
-    if (v.ok || v.refusals.length !== 1 || !v.refusals[0].startsWith('Spec Shape Gate: no completed')) {
-      throw new Error(`recorded: the default roster must refuse for Spec Shape Gate alone, got ${v.refusals.join(' | ')}`);
+    // FIRING CONTROL for the roster: over the SAME recording with lint.yml's
+    // runs taken away, the default roster refuses release commit 0524c1619b
+    // naming Lint & Type Check alone -- the second workflow is read, and a
+    // workflow with no run is a refusal. With the recording whole it passes,
+    // so the default roster reads no workflow the recording lacks.
+    const { 'lint.yml': _lintRuns, ...withoutLint } = recorded.runs;
+    const v = releaseGateVerdict({ history: recorded.firstParent, runsByWorkflow: withoutLint });
+    if (v.ok || v.refusals.length !== 1 || !v.refusals[0].startsWith('Lint & Type Check: no completed')) {
+      throw new Error(`recorded: the default roster must refuse for Lint & Type Check alone, got ${v.refusals.join(' | ')}`);
     }
+    const whole = releaseGateVerdict({ history: recorded.firstParent, runsByWorkflow: recorded.runs });
+    if (!whole.ok) throw new Error(`recorded: the default roster must pass 0524c1619b on the whole recording, refused: ${whole.refusals.join(' | ')}`);
   });
   await check(() => {
     // Release commit 0524c1619b: both workflows' nearest verdict is green.
@@ -1936,14 +1939,12 @@ async function selfTest() {
     ...extra,
   });
   const pick = (runs) => selectFullBatteryRun({ history: H, runs, workflowFile: 'ci.yml' })?.run.id ?? null;
-  const shapeGreen = [run(8, 0, 'success')];
-  const both = (ciRuns, lintRuns, shapeRuns = shapeGreen) =>
+  const both = (ciRuns, lintRuns) =>
     releaseGateVerdict({
       history: H,
       runsByWorkflow: {
         'ci.yml': ciRuns,
         'lint.yml': lintRuns.map((r) => ({ ...r, path: '.github/workflows/lint.yml' })),
-        'spec-shape-gate.yml': shapeRuns.map((r) => ({ ...r, path: '.github/workflows/spec-shape-gate.yml' })),
       },
     });
   await check(() => {
@@ -2008,29 +2009,29 @@ async function selfTest() {
     if (releaseGateVerdict({ history: [], runsByWorkflow: {} }).ok) throw new Error('synthetic: an empty history passed');
   });
   await check(() => {
-    // The third workflow: a red Spec Shape Gate refuses alone, with CI and Lint green.
-    const v = both([run(1, 0, 'success')], [run(2, 0, 'success')], [run(3, 0, 'failure')]);
-    if (v.ok || v.refusals.length !== 1 || !v.refusals[0].startsWith('Spec Shape Gate:') || !v.refusals[0].includes('failure')) {
-      throw new Error(`synthetic: a red Spec Shape Gate did not refuse alone (${v.refusals.join(' | ')})`);
+    // The other direction: a red CI refuses alone, with Lint green.
+    const v = both([run(1, 0, 'failure')], [run(2, 0, 'success')]);
+    if (v.ok || v.refusals.length !== 1 || !v.refusals[0].startsWith('CI:') || !v.refusals[0].includes('failure')) {
+      throw new Error(`synthetic: a red CI run did not refuse alone (${v.refusals.join(' | ')})`);
     }
   });
   await check(() => {
-    // ...and no Spec Shape Gate run at all refuses too: an unread gate is not a green one.
-    const v = both([run(1, 0, 'success')], [run(2, 0, 'success')], []);
-    if (v.ok || v.refusals.length !== 1 || !v.refusals[0].startsWith('Spec Shape Gate: no completed')) {
-      throw new Error(`synthetic: a missing Spec Shape Gate run did not refuse naming it (${v.refusals.join(' | ')})`);
+    // ...and no Lint & Type Check run at all refuses too: an unread gate is not a green one.
+    const v = both([run(1, 0, 'success')], []);
+    if (v.ok || v.refusals.length !== 1 || !v.refusals[0].startsWith('Lint & Type Check: no completed')) {
+      throw new Error(`synthetic: a missing Lint & Type Check run did not refuse naming it (${v.refusals.join(' | ')})`);
     }
   });
   await check(() => {
-    // ...while a `workflow_dispatch` run of it is not a full-battery run (same rule as the other two).
-    const v = both([run(1, 0, 'success')], [run(2, 0, 'success')], [run(3, 0, 'failure', { event: 'workflow_dispatch' }), run(4, 1, 'success')]);
-    if (!v.ok) throw new Error(`synthetic: a dispatch run of Spec Shape Gate was read as full battery (${v.refusals.join(' | ')})`);
+    // ...while a `workflow_dispatch` run of it is not a full-battery run (same rule as CI's).
+    const v = both([run(1, 0, 'success')], [run(3, 0, 'failure', { event: 'workflow_dispatch' }), run(4, 1, 'success')]);
+    if (!v.ok) throw new Error(`synthetic: a dispatch run of Lint & Type Check was read as full battery (${v.refusals.join(' | ')})`);
   });
 
   battery('release gate: the read path retries a transient answer, inside one budget per run');
   // The four pins the card names, driven through `runReleaseGate` -- the
   // refusal text and the exit included -- with no network and no wall-clock
-  // backoff: `fetchImpl` is a stub over the six listings (three workflows x two
+  // backoff: `fetchImpl` is a stub over the four listings (two workflows x two
   // events) and `sleep` records the backoff it was asked for.
   const RETRY = BOARD_READ_RETRY;
   const listingUrl = (file, event, page = 1) =>
@@ -2104,7 +2105,7 @@ async function selfTest() {
     if (g.exit !== 0 || !g.lines.at(-1)?.startsWith('scheduled-full-run --release-gate: PASS') || g.verdict?.lines.length !== RELEASE_GATE_WORKFLOWS.length) {
       throw new Error(`read path: a 502 then a 200 must be measured and pass, got exit ${g.exit}: ${g.said}`);
     }
-    if (g.calls.length !== 7 || g.calls.filter((u) => u === listingUrl('lint.yml', 'schedule')).length !== 2 || g.slept.join() !== '500') {
+    if (g.calls.length !== 5 || g.calls.filter((u) => u === listingUrl('lint.yml', 'schedule')).length !== 2 || g.slept.join() !== '500') {
       throw new Error(`read path: expected one retry after one 500 ms backoff, got ${g.calls.length} requests, slept ${g.slept.join(',') || 'never'}`);
     }
   });
@@ -2124,7 +2125,7 @@ async function selfTest() {
       onLint(at) && at.n === 1 ? { body: { workflow_runs: [] }, bodyThrows: connectionFailure('UND_ERR_SOCKET') } : null
     );
     for (const [label, g] of [['a connection reset', reset], ['a socket closed mid-body', cut]]) {
-      if (g.exit !== 0 || g.calls.length !== 7 || g.slept.join() !== '500') {
+      if (g.exit !== 0 || g.calls.length !== 5 || g.slept.join() !== '500') {
         throw new Error(`read path: ${label}, then a 200, must be measured and pass, got exit ${g.exit} after ${g.calls.length} requests: ${g.said}`);
       }
     }
@@ -2138,7 +2139,7 @@ async function selfTest() {
       if (at.page === 1) return { body: { workflow_runs: filler } };
       return at.n === 1 ? { status: 503 } : null;
     });
-    if (g.exit !== 0 || g.calls.filter((u) => u === listingUrl('ci.yml', 'schedule', 2)).length !== 2 || g.calls.length !== 8) {
+    if (g.exit !== 0 || g.calls.filter((u) => u === listingUrl('ci.yml', 'schedule', 2)).length !== 2 || g.calls.length !== 6) {
       throw new Error(`read path: a transient 503 on page 2 must be retried and measured, got exit ${g.exit} after ${g.calls.length} requests: ${g.said}`);
     }
   });
@@ -2164,7 +2165,7 @@ async function selfTest() {
   });
   await check(async () => {
     // ⛔ An unread battery is never a green one: a persistent transient answer
-    // on ANY of the six listings refuses NOT MEASURED, exit 3.
+    // on ANY of the four listings refuses NOT MEASURED, exit 3.
     const persistent = [
       ['HTTP 500', { status: 500 }],
       ['HTTP 502', { status: 502 }],
@@ -2228,22 +2229,24 @@ async function selfTest() {
   // PIN 4 -- ONE budget per gate run, shared across every workflow x event x
   // page it reads; never one per `readRuns` call.
   await check(async () => {
-    // ⭐ Every listing answers 502 once, then 200. Six reads want six retries;
-    // the run allows four, so the FIFTH listing's first 502 is final.
-    const g = await readPathGate((at) => (at.n === 1 ? { status: 502 } : null));
+    // ⭐ Every listing answers 502 twice, then 200. Four reads want eight
+    // retries; the run allows four, which the first two listings spend (two
+    // each, inside their three attempts), so the THIRD listing's first 502 is
+    // final.
+    const g = await readPathGate((at) => (at.n <= 2 ? { status: 502 } : null));
     const want = `-> HTTP 502 after 1 attempt (this run's budget of ${RETRY.retriesPerRun} retries is spent)`;
-    if (g.exit !== EXIT_PREREQUISITE_NOT_MET || g.slept.length !== RETRY.retriesPerRun || g.calls.length !== 2 * RETRY.retriesPerRun + 1) {
+    if (g.exit !== EXIT_PREREQUISITE_NOT_MET || g.slept.length !== RETRY.retriesPerRun || g.calls.length !== RETRY.retriesPerRun + 3) {
       throw new Error(`read path: a flapping API must spend the run's ${RETRY.retriesPerRun} retries and then refuse, got exit ${g.exit} after ${g.calls.length} requests and ${g.slept.length} backoff(s): ${g.said}`);
     }
-    if (!g.lines[0]?.startsWith(`${NOT_MEASURED}GET ${listingUrl('spec-shape-gate.yml', 'schedule')} ${want}`)) {
+    if (!g.lines[0]?.startsWith(`${NOT_MEASURED}GET ${listingUrl('lint.yml', 'schedule')} ${want}`)) {
       throw new Error(`read path: the refusal must name the listing whose 502 met a spent budget, got ${g.said}`);
     }
   });
   await check(async () => {
     // ...and the budget is exactly that, not tighter: four listings that blip
     // once each are still measured.
-    const g = await readPathGate((at) => (at.n === 1 && at.file !== 'spec-shape-gate.yml' ? { status: 502 } : null));
-    if (g.exit !== 0 || g.slept.length !== RETRY.retriesPerRun || g.calls.length !== 6 + RETRY.retriesPerRun) {
+    const g = await readPathGate((at) => (at.n === 1 ? { status: 502 } : null));
+    if (g.exit !== 0 || g.slept.length !== RETRY.retriesPerRun || g.calls.length !== 4 + RETRY.retriesPerRun) {
       throw new Error(`read path: ${RETRY.retriesPerRun} blips in one run must all be retried and measured, got exit ${g.exit} after ${g.calls.length} requests: ${g.said}`);
     }
   });

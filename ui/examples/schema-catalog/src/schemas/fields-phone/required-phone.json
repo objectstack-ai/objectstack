@@ -1,0 +1,14 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "fields": [
+    {
+      "name": "contact_phone",
+      "label": "Contact Phone",
+      "type": "phone",
+      "placeholder": "Enter phone number",
+      "required": true
+    }
+  ]
+}

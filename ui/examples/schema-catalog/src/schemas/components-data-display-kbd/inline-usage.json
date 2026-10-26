@@ -1,0 +1,24 @@
+{
+  "type": "flex",
+  "properties": {
+    "align": "center",
+    "gap": 2,
+    "children": [
+      {
+        "type": "text",
+        "content": "Press"
+      },
+      {
+        "type": "kbd",
+        "keys": [
+          "Ctrl",
+          "S"
+        ]
+      },
+      {
+        "type": "text",
+        "content": "to save"
+      }
+    ]
+  }
+}

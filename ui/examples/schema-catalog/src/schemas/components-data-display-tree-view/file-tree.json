@@ -1,0 +1,45 @@
+{
+  "type": "tree-view",
+  "title": "File Explorer",
+  "nodes": [
+    {
+      "id": "1",
+      "label": "Documents",
+      "icon": "folder",
+      "children": [
+        {
+          "id": "1-1",
+          "label": "Resume.pdf",
+          "icon": "file"
+        },
+        {
+          "id": "1-2",
+          "label": "Cover Letter.docx",
+          "icon": "file"
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "label": "Photos",
+      "icon": "folder",
+      "children": [
+        {
+          "id": "2-1",
+          "label": "Vacation.jpg",
+          "icon": "file"
+        },
+        {
+          "id": "2-2",
+          "label": "Family.jpg",
+          "icon": "file"
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "label": "README.md",
+      "icon": "file"
+    }
+  ]
+}

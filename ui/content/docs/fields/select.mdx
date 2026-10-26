@@ -1,0 +1,202 @@
+---
+title: "Select Field"
+description: "Dropdown selection field with single or multiple options"
+---
+
+The Select Field component provides a dropdown for selecting one or more options from a predefined list.
+
+## Basic Usage
+
+<SchemaExample id="fields-select/basic-select" />
+
+## With Colors
+
+<SchemaExample id="fields-select/colored-options" />
+
+## Multiple Selection
+
+<SchemaExample id="fields-select/multi-select" />
+
+## Cascading & Role-Gated Options
+
+An option can carry a `visibleWhen` CEL predicate — it is offered only when the
+predicate is TRUE. The predicate is evaluated against the **live record** plus
+**`current_user`**, the same engine and binding environment as a field-level
+`visibleWhen`. This single mechanism covers two needs:
+
+- **Cascading / dependent options** — narrow a child list by a parent field
+  (country → province → city).
+- **Role / context gating** — offer an option only to certain users.
+
+Declare the sibling field(s) a select reacts to with `dependsOn`. While any is
+empty the control is **gated** (a "Select country first" hint) instead of
+showing an unfiltered list; once the parent changes, the list re-evaluates and
+any now-invalid selection is **cleared automatically** (no stale "China +
+California" pair). The clear is saved like any other edit: a single select (or
+radio) is emptied to `null`, which a save writes as "clear the stored value", and
+a multiple select keeps only the values still offered.
+
+### Cascading (country → province)
+
+<SchemaExample id="fields-select/cascading-options" />
+
+```json
+{
+  "type": "form",
+  "fields": [
+    { "name": "country", "label": "Country", "type": "select", "options": [
+      { "label": "China", "value": "cn" },
+      { "label": "United States", "value": "us" }
+    ]},
+    { "name": "province", "label": "Province", "type": "select", "dependsOn": "country", "options": [
+      { "label": "Zhejiang",   "value": "zj", "visibleWhen": "record.country == 'cn'" },
+      { "label": "Guangdong",  "value": "gd", "visibleWhen": "record.country == 'cn'" },
+      { "label": "California",  "value": "ca", "visibleWhen": "record.country == 'us'" },
+      { "label": "Texas",       "value": "tx", "visibleWhen": "record.country == 'us'" }
+    ]}
+  ]
+}
+```
+
+Chain a third level (`city`, `dependsOn: "province"`) the same way — the gate and
+cascade-clear propagate down the chain.
+
+### Role-gated option
+
+<SchemaExample id="fields-select/role-gated-options" />
+
+```json
+{ "name": "visibility", "type": "select", "options": [
+  { "label": "Private (only me)", "value": "private" },
+  { "label": "My team", "value": "team" },
+  { "label": "Whole organization", "value": "org" },
+  { "label": "Public — external", "value": "public", "visibleWhen": "'admin' in current_user.positions" }
+]}
+```
+
+> **Security — hiding is UX, not authorization.** A `visibleWhen` on an option
+> only removes it from the dropdown on the client; a determined caller can still
+> submit the value. When an option is gated for **access-control** reasons the
+> **server must also reject** writes of that value (the rule-validator evaluates
+> the picked value's `visibleWhen`). Use option `visibleWhen` for convenience and
+> cascades freely; for real authorization, pair it with server-side enforcement.
+
+### When to use options vs. a lookup
+
+`visibleWhen` options are for **small, static dictionaries** (category →
+subcategory, a handful of provinces). When the data is large, changes over time,
+or is shared across forms (real country/province/city tables, org units, product
+catalogs), model each level as a **`lookup`** with `dependsOn` instead — the
+candidate query is filtered server-side and paginated. See
+[Lookup Field](/docs/fields/lookup).
+
+## Field Schema
+
+A select field is authored as `SelectFieldMetadata` (`@object-ui/types`), which is the
+source of truth for the key set: it extends `BaseFieldMetadata` with the option list
+and the multiple/searchable switches. Each option is a `SelectOptionMetadata`, so the
+options are checked by the same compiler that checks the field.
+
+```ts
+import type { SelectFieldMetadata } from '@object-ui/types';
+
+const status: SelectFieldMetadata = {
+  type: 'select',
+  name: 'status',
+  label: 'Status',
+  placeholder: 'Select a status',
+  required: true,
+  multiple: false,
+  searchable: true,
+  options: [
+    { label: 'Draft', value: 'draft', color: 'gray' },
+    { label: 'Active', value: 'active', color: 'blue' },
+    // Offered only when the predicate is true, evaluated against the live record.
+    { label: 'Archived', value: 'archived', color: 'red', visibleWhen: "current_user.is_admin" },
+    { label: 'Locked', value: 'locked', disabled: true },
+  ],
+};
+```
+
+### A blank `label` falls back to the `value`
+
+`label` is **required** on an option and an empty string is a legal value for it —
+`@objectstack/spec`'s `SelectOptionSchema` accepts `{ "value": "low", "label": "" }`
+and refuses an option with no `label` key at all. An option authored that way (the
+field designer writes it whenever you fill only the value box) is therefore a document
+the platform stores and serves, and every option widget — `select`, `multiselect`,
+`radio`, `checkboxes` — **displays its `value`** for it rather than an empty row, on
+both the editable and the read-only path
+(`20b507aff`). A label that
+is only whitespace is treated the same way.
+
+This is a display fallback, not a repair: the stored option keeps its empty `label`.
+Author a real label whenever the value is not something you want a person to read —
+`low` is a tolerable row, `acct_st_2` is not.
+
+Cascading option lists are driven by a sibling field's value, declared with
+`dependsOn` — a `BaseFieldMetadata` member every field type inherits
+([objectui#6153](https://github.com/objectstack-ai/objectui/issues/6153)), in the
+shape `@objectstack/spec` declares at field level: an **array** of controlling
+field names, or `{ field, param }` entries when the remote parameter name differs
+from the local field name. While any controlling value is empty the widget is
+gated; once it is set, each option's `visibleWhen` decides whether it is offered,
+and a selection the parent no longer offers is cleared.
+
+```ts
+import type { SelectFieldMetadata } from '@object-ui/types';
+
+const province: SelectFieldMetadata = {
+  type: 'select',
+  name: 'province',
+  label: 'Province',
+  dependsOn: ['country'],
+  options: [
+    { label: 'Zhejiang', value: 'zj', visibleWhen: "record.country == 'cn'" },
+    { label: 'California', value: 'ca', visibleWhen: "record.country == 'us'" },
+  ],
+};
+```
+
+A bare parent name (`dependsOn: "country"`, as in the form schema above) is the
+**form-level** shape, `FormField.dependsOn`; on field metadata the spec accepts
+only the array, and `SelectFieldMetadata` refuses the string for the same reason.
+The metadata key wins over the `dependsOn` widget prop a host may pass.
+[objectui#7357](https://github.com/objectstack-ai/objectui/issues/7357) retired
+objectui's snake_case twin `depends_on`, which was never a `@objectstack/spec`
+key; `dependsOn` is the only spelling any widget reads. Metadata that still
+spells it the old way has no effect — rename it.
+
+The value being edited, and the `className` / `disabled` a host supplies, are **not**
+metadata keys — they are runtime widget props. See [Field Widget Props](/docs/fields/widget-props).
+
+## Available Colors
+
+- `gray` - Default neutral color
+- `red` - For errors, urgent items
+- `orange` - For warnings, high priority
+- `yellow` - For pending, attention needed
+- `green` - For success, completed
+- `blue` - For info, in progress
+- `indigo` - For special items
+- `purple` - For creative, design
+- `pink` - For featured items
+
+## Cell Renderer
+
+In tables/grids, select values are displayed as colored badges:
+
+```ts
+import { SelectCellRenderer } from '@object-ui/fields';
+
+// Single value: Colored badge
+// Multiple values: Multiple badges in a row
+```
+
+## Use Cases
+
+- **Status Fields**: Order status, task status
+- **Categories**: Product categories, content types
+- **Tags**: Multi-tag selection
+- **Priorities**: Task or ticket priorities
+- **Roles**: User roles or permissions

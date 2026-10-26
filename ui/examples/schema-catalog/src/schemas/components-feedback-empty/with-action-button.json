@@ -1,0 +1,11 @@
+{
+  "type": "empty",
+  "icon": "folder-plus",
+  "title": "No projects yet",
+  "description": "Get started by creating your first project",
+  "action": {
+    "type": "button",
+    "label": "Create Project",
+    "variant": "default"
+  }
+}

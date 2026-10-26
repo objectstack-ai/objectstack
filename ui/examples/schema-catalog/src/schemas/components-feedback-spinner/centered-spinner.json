@@ -1,0 +1,14 @@
+{
+  "type": "flex",
+  "properties": {
+    "justify": "center",
+    "align": "center",
+    "children": [
+      {
+        "type": "spinner",
+        "size": "lg"
+      }
+    ]
+  },
+  "className": "h-32"
+}

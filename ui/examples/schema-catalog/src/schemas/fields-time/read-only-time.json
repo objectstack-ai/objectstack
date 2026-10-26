@@ -1,0 +1,16 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "defaultValues": {
+    "closing_time": "18:00"
+  },
+  "fields": [
+    {
+      "name": "closing_time",
+      "label": "Closing Time",
+      "type": "time",
+      "readonly": true
+    }
+  ]
+}

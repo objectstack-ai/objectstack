@@ -1,0 +1,20 @@
+---
+title: "Progress"
+description: "Progress bar to show completion status"
+---
+
+## Examples
+
+  <SchemaExample id="components-feedback-progress/progress-bar" />
+
+  <SchemaExample id="components-feedback-progress/different-values" />
+
+## Schema
+
+```ts
+interface ProgressSchema {
+  type: 'progress';
+  value: number;           // 0-100
+  className?: string;
+}
+```

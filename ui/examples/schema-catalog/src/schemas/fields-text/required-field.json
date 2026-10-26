@@ -1,0 +1,14 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "fields": [
+    {
+      "name": "name",
+      "label": "Full Name",
+      "type": "text",
+      "placeholder": "John Doe",
+      "required": true
+    }
+  ]
+}

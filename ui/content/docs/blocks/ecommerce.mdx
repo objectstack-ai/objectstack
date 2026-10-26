@@ -1,0 +1,85 @@
+---
+title: "E-commerce Blocks"
+description: "Product cards, checkout flows, and shopping components"
+---
+
+import { SchemaExample } from '@/app/components/ComponentDemo';
+
+# E-commerce Blocks
+
+Professional e-commerce components for online stores and marketplaces.
+
+## Product Card
+
+Product display with image, title, price, and actions.
+
+<SchemaExample id="ecommerce/product-card" />
+
+## Product Grid
+
+Multiple products in a responsive grid.
+
+<SchemaExample id="ecommerce/product-grid" />
+
+## Shopping Cart
+
+Cart summary with items and checkout.
+
+<SchemaExample id="ecommerce/shopping-cart" />
+
+## Order Summary
+
+Checkout order review.
+
+<SchemaExample id="ecommerce/order-summary" />
+
+## Usage
+
+Customize e-commerce blocks for your store:
+
+### Add Product Data
+
+A `card` fetches nothing. Records come from a data-bound block that names its
+object in the per-element `dataSource` binding (see the
+[Data Source guide](/docs/guide/data-source)):
+
+```json
+{
+  "type": "object-grid",
+  "dataSource": { "object": "product", "limit": 20 }
+}
+```
+
+### Add to Cart Action
+
+A control that runs something is its own node type, `action:button`, and its
+props go in the `properties` bag; `actionType: "api"` sends the request to
+`target`:
+
+```json
+{
+  "type": "action:button",
+  "properties": {
+    "label": "Add to Cart",
+    "actionType": "api",
+    "target": "/api/cart",
+    "method": "POST"
+  }
+}
+```
+
+### Customize Pricing Display
+
+```json
+{
+  "type": "text",
+  "content": "$299.99",
+  "className": "text-2xl font-bold text-primary"
+}
+```
+
+## Next Steps
+
+- Browse [Authentication Blocks](/docs/blocks/authentication)
+- Explore [Dashboard Blocks](/docs/blocks/dashboard)
+- Learn about [Actions](/docs/core/enhanced-actions)

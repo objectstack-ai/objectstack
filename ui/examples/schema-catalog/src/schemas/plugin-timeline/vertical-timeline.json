@@ -1,0 +1,35 @@
+{
+  "type": "timeline",
+  "variant": "vertical",
+  "dateFormat": "long",
+  "items": [
+    {
+      "time": "2024-01-15",
+      "title": "Project Started",
+      "description": "Kickoff meeting and initial planning",
+      "variant": "success",
+      "icon": "🚀"
+    },
+    {
+      "time": "2024-02-01",
+      "title": "First Milestone",
+      "description": "Completed initial design phase",
+      "variant": "info",
+      "icon": "🎨"
+    },
+    {
+      "time": "2024-03-15",
+      "title": "Beta Release",
+      "description": "Released beta version to testers",
+      "variant": "warning",
+      "icon": "⚡"
+    },
+    {
+      "time": "2024-04-01",
+      "title": "Launch",
+      "description": "Official product launch",
+      "variant": "success",
+      "icon": "🎉"
+    }
+  ]
+}

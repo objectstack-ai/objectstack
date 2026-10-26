@@ -1,0 +1,92 @@
+/*
+ * Tailwind entry for `@object-ui/plugin-kanban` — BUILD-TIME ONLY.
+ *
+ * Consumers never compile this file. They import the compiled artifact, and the
+ * order is part of the contract:
+ *
+ *   @import '@object-ui/components/style.css';
+ *   @import '@object-ui/plugin-kanban/style.css';   <- ./dist/index.css, built from this
+ *
+ * ## Why this file exists (objectui#4929)
+ *
+ * Until it did, a published-state consumer had NO source for this plugin's
+ * themed utilities. `@object-ui/components` and `@object-ui/fields` were the only
+ * packages shipping a stylesheet, and each scans its own `src` only, so a class
+ * used exclusively here could not appear in either by construction. `bg-muted/10`, `bg-card/60` and `text-muted-foreground/60`
+ * are ordinary appearance classes, not edge cases, and they rendered unstyled.
+ *
+ * Measured on this package at the commit that added this file: 28 plain and
+ * 19 themed utilities compile here and appear in neither published sheet. The
+ * plain ones a consumer could in principle regenerate by pointing `@source` at
+ * this package's `dist`. The themed ones they cannot: those resolve `@theme`
+ * tokens declared in `packages/components/src/index.css`, which that package does
+ * not publish (it ships `dist` only). A build inside this monorepo is their only
+ * possible producer — which is why the fix is a stylesheet we ship rather than a
+ * documentation note telling consumers to scan `node_modules` and hand-declare
+ * the theme, a direction objectui#4858 had just retired from the guides and the
+ * 2026-08-17 ruling rejected by name.
+ *
+ * ## Why the narrow "subtraction" shape (objectui#4059, `@object-ui/fields`)
+ *
+ * `@reference` gives this compilation `@object-ui/components`' theme tokens, its
+ * class-based `dark` variant and its `tailwindcss-animate` plugin WITHOUT emitting
+ * a single byte of them. So the sheet built from this entry carries utilities
+ * only — no preflight, no `@theme` `:root` block, no base layer;
+ * `scripts/build-css.mjs` then subtracts every rule components' published sheet
+ * already ships.
+ *
+ * The two halves defend different things, and the division is worth stating
+ * because it was measured rather than assumed. The SUBTRACTION is what removes
+ * the ~1350 shared utilities: without it this package would publish a 164 kB
+ * near-copy of the components sheet instead of an 11 kB supplement. The NARROW
+ * ENTRY is what makes preflight and the `@theme` `:root` block impossible to
+ * emit in the first place — swapping it for a plain `@import 'tailwindcss'` was
+ * tried on this card and produced a published artifact that is the same size
+ * (11.26 kB vs 11.41 kB) because the subtraction removes the duplicates too,
+ * which is precisely the point: that shape would leave a re-emitted theme block
+ * one Tailwind-emission change away from shipping, and a `:root` theme block
+ * loaded AFTER the base sheet overrides the consumer's own token overrides.
+ * Belt and braces, on purpose.
+ *
+ * The import ORDER above is not cosmetic either: this sheet is a supplement to
+ * the components sheet, never a replacement for it.
+ *
+ * ## What is subtracted — and what deliberately is not
+ *
+ * `scripts/build-css.mjs` subtracts `@object-ui/components`' sheet and nothing
+ * else. That is the one sheet every consumer of this plugin is guaranteed to have:
+ * components is a hard dependency of this package and its stylesheet is the
+ * quick-start's first import. This package also depends on `@object-ui/fields` and `@object-ui/plugin-detail`, which ships a
+ * sheet of its own — subtracting THAT one too would shave a few hundred bytes and
+ * buy a second ordering requirement, making this sheet silently wrong for anyone
+ * who imports it without that one. Not worth it, and not what the ruling scoped.
+ */
+@reference '../../components/src/index.css';
+
+/*
+ * `source(none)` is load-bearing, not tidiness. Tailwind's automatic source
+ * detection resolves against a base directory that defaults to the PROCESS CWD,
+ * and the `@reference` above pulls in components' entry, whose own
+ * `@import 'tailwindcss'` turns that detection on. Without `source(none)` the
+ * candidate set therefore depends on where the build was launched from — same
+ * commit, same command, two different published artifacts (measured for
+ * `@object-ui/fields`: 21 kB from its own directory, 287 kB from the repo root,
+ * objectui#4059; re-measured on components' entry for this card: 162 kB vs 432 kB).
+ *
+ * With it, the ONLY inputs are components' own `@source` line (reached through the
+ * `@reference`, and itself relative to that file) and the explicit lines below, so
+ * the output is byte-identical from any working directory. `scripts/__tests__/plugin-published-stylesheet.test.ts`
+ * asserts that byte-identity rather than trusting this comment.
+ */
+@import 'tailwindcss/utilities.css' layer(utilities) source(none);
+
+/*
+ * Only shipped source. A `*.test.tsx` never reaches a consumer, and neither does a
+ * helper that lives beside one, so a utility used solely by tests must not
+ * become a published byte. (Measured today the exclusions remove nothing — every
+ * class the tests use is also used by shipped source. They are here so that stays
+ * true by construction rather than by luck.)
+ */
+@source './**/*.{ts,tsx}';
+@source not './**/*.test.{ts,tsx}';
+@source not './**/__tests__/**';

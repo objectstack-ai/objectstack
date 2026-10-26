@@ -1,0 +1,29 @@
+{
+  "type": "context-menu",
+  "trigger": {
+    "type": "card",
+    "children": "Right-click here",
+    "className": "p-8 text-center border-dashed"
+  },
+  "items": [
+    {
+      "label": "Copy",
+      "icon": "copy"
+    },
+    {
+      "label": "Cut",
+      "icon": "scissors"
+    },
+    {
+      "label": "Paste",
+      "icon": "clipboard"
+    },
+    {
+      "separator": true
+    },
+    {
+      "label": "Delete",
+      "icon": "trash"
+    }
+  ]
+}

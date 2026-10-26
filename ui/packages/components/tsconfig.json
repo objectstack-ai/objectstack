@@ -1,0 +1,38 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    },
+    // Removed rootDir to prevent file not under rootDir errors when importing from ..
+    "noEmit": false,
+    "declaration": true,
+    // The incremental build RECORD, pinned OUTSIDE the published build output.
+    // Left unpinned, TypeScript derives it from `outDir`/`rootDir`: a package with
+    // no `rootDir` gets `dist/tsconfig.tsbuildinfo` -- inside what `files: ["dist",
+    // ...]` publishes -- and `pnpm check:published-dist` then reds on a byte-identical
+    // tree as soon as anything runs `tsc` (objectui#9189). Pinned in every composite
+    // package so the location is a decision, not a side effect of an unrelated option.
+    "tsBuildInfoFile": "./tsconfig.tsbuildinfo",
+    "composite": true,
+    "skipLibCheck": true
+  },
+  "include": ["src"],
+  // Tooling is excluded by DIRECTORY, not just by file NAME. A helper under
+  // `__tests__/` that is not itself called `*.test.ts` is otherwise a program
+  // input, and an EMITTING program writes it into the published `dist`
+  // (objectui#4006 / #4836 / #6943 -- the same defect three times, each found
+  // by hand). Enforced repo-wide by `pnpm check:published-tsconfig-exclude`
+  // (objectui#7212), which derives these directory names from `TOOLING_FILE`
+  // in scripts/check-phantom-dependencies.mjs.
+  "exclude": [
+    "**/__tests__/**",
+    "**/__mocks__/**",
+    "**/__benchmarks__/**",
+    "**/*.test.ts",
+    "**/*.test.tsx"
+  ]
+}

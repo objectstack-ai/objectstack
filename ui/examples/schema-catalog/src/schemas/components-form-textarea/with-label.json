@@ -1,0 +1,6 @@
+{
+  "type": "textarea",
+  "label": "Description",
+  "placeholder": "Describe your issue...",
+  "rows": 5
+}

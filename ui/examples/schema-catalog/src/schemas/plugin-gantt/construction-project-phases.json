@@ -1,0 +1,61 @@
+{
+  "type": "object-gantt",
+  "properties": {
+    "staticData": [
+      {
+        "id": 1,
+        "phase": "Site Preparation",
+        "starts_at": "2024-02-01",
+        "ends_at": "2024-02-14",
+        "percent_done": 100
+      },
+      {
+        "id": 2,
+        "phase": "Foundation",
+        "starts_at": "2024-02-15",
+        "ends_at": "2024-03-15",
+        "percent_done": 75,
+        "depends_on": [
+          1
+        ]
+      },
+      {
+        "id": 3,
+        "phase": "Framing",
+        "starts_at": "2024-03-16",
+        "ends_at": "2024-04-30",
+        "percent_done": 30,
+        "depends_on": [
+          2
+        ]
+      },
+      {
+        "id": 4,
+        "phase": "Electrical & Plumbing",
+        "starts_at": "2024-05-01",
+        "ends_at": "2024-05-31",
+        "percent_done": 0,
+        "depends_on": [
+          3
+        ]
+      },
+      {
+        "id": 5,
+        "phase": "Interior Finishing",
+        "starts_at": "2024-06-01",
+        "ends_at": "2024-07-15",
+        "percent_done": 0,
+        "depends_on": [
+          4
+        ]
+      }
+    ],
+    "gantt": {
+      "titleField": "phase",
+      "startDateField": "starts_at",
+      "endDateField": "ends_at",
+      "progressField": "percent_done",
+      "dependenciesField": "depends_on"
+    }
+  }
+}

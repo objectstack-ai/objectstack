@@ -1,0 +1,13 @@
+{
+  "pages": [
+    "guide",
+    "api",
+    "blocks",
+    "core",
+    "layout",
+    "fields",
+    "components",
+    "plugins",
+    "utilities"
+  ]
+}

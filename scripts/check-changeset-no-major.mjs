@@ -1348,10 +1348,10 @@ export function publishedSourceOwners(path, manifestOf) {
 // ── LEG 3: a repo file a package's build COPIES into what it packs (#15204) ─
 //
 // Legs 1 and 2 both read a path UNDER the package. `@objectstack/console` has
-// neither: its tracked files are a manifest, a README, a CHANGELOG and a
-// `.gitignore`, and everything it publishes is `dist/`, which
-// `scripts/build-console.sh` writes. One file in that `dist` comes from THIS
-// repository rather than from the objectui build — the repo-root
+// neither: its tracked files are a manifest, a README, a CHANGELOG, a
+// `.gitignore` and its build script, and everything it publishes is `dist/`,
+// which `packages/console/build-dist.sh` writes. One file in that `dist` comes
+// from outside the `ui/apps/console` build it copies — the repo-root
 // `sdui.manifest.json`, copied byte for byte to `dist/sdui.manifest.json`, and
 // read at runtime by `@objectstack/cli` (the JSX gate of `os validate` /
 // `compile` / `lint`, and the html-page save gate `serve` registers). So a PR
@@ -1372,24 +1372,20 @@ export function publishedSourceOwners(path, manifestOf) {
 // ⚠️ Residual, stated rather than implied: the reader understands the plain
 // shell the script is written in — `NAME="value"` assignments, `$NAME` /
 // `${NAME}` expansion, and `cp [flags] SRC DEST` — and nothing else. A copy
-// whose source does not resolve to one fixed repo path (the objectui build's
-// own `dist`, under a cache dir named by the pin) is not a tracked file and is
-// skipped. A script that is THERE but yields no copy at all is reported in
-// `unreadable` rather than read as "copies nothing", and the self-test drives
-// this repository's real `build-console.sh` so a respelling of the copy reds in
-// lint instead of silently retiring the leg.
-//
-// ⚠️ And what it does NOT add: `.objectui-sha`. The pin decides which objectui
-// tree the console `dist` is BUILT from, but the build does not copy it, and a
-// pin bump that moves an accept set moves the manifest too — which is the
-// reading this leg makes.
-export const PACKED_COPY_BUILD_SCRIPTS = Object.freeze(['scripts/build-console.sh']);
+// whose source is a build output rather than a tracked file (the Console
+// build's own `ui/apps/console/dist`) names no path a diff can carry, so it
+// matches nothing. A script that is THERE but yields no copy at all is reported
+// in `unreadable` rather than read as "copies nothing", and the self-test drives
+// this repository's real build script so a respelling of the copy reds in lint
+// instead of silently retiring the leg.
+export const PACKED_COPY_BUILD_SCRIPTS = Object.freeze(['packages/console/build-dist.sh']);
 
 // The value a build script assigns to the variable that names the repository
-// root: its own directory's parent, which is the repo root because every script
-// in `PACKED_COPY_BUILD_SCRIPTS` lives in `scripts/`. Read, not named, so the
-// variable's NAME is the script's business.
-const SCRIPT_PARENT_DIR_VALUE = /^\$\(cd "\$\(dirname "\$\{BASH_SOURCE\[0\]\}"\)\/\.\." && pwd\)$/;
+// root: its own directory climbed by as many `..` as the script's path is deep
+// below the root (`scripts/x.sh` one, `packages/console/x.sh` two). Read, not
+// named, so the variable's NAME is the script's business; a climb of any other
+// depth names some other directory and resolves nothing.
+const SCRIPT_ROOT_CLIMB_VALUE = /^\$\(cd "\$\(dirname "\$\{BASH_SOURCE\[0\]\}"\)((?:\/\.\.)+)" && pwd\)$/;
 const REPO_ROOT_MARK = 'repo-root::';
 
 /**
@@ -1403,9 +1399,15 @@ const REPO_ROOT_MARK = 'repo-root::';
  * the copy is skipped rather than guessed at.
  *
  * @param {string} text a shell script's content
+ * @param {number} [depth] how many directories below the repo root the script
+ *   lives (`scripts/x.sh` is 1), i.e. the `..` climb that names the root
  * @returns {{ source: string, destination: string }[]}
  */
-export function packedCopiesIn(text) {
+export function packedCopiesIn(text, depth = 1) {
+  const namesRoot = (value) => {
+    const climb = SCRIPT_ROOT_CLIMB_VALUE.exec(value);
+    return climb !== null && climb[1].length / 3 === depth;
+  };
   const vars = new Map();
   const unquote = (word) => (word.length >= 2 && word.startsWith('"') && word.endsWith('"') ? word.slice(1, -1) : word);
   const expand = (value) =>
@@ -1422,7 +1424,7 @@ export function packedCopiesIn(text) {
     const assignment = /^([A-Za-z_][A-Za-z0-9_]*)="(.*)"$/.exec(line);
     if (assignment) {
       const [, name, value] = assignment;
-      vars.set(name, SCRIPT_PARENT_DIR_VALUE.test(value) ? REPO_ROOT_MARK : expand(value));
+      vars.set(name, namesRoot(value) ? REPO_ROOT_MARK : expand(value));
       continue;
     }
     const copy = /^cp(?:\s+-[A-Za-z]+)*\s+("[^"]*"|[^\s"]+)\s+("[^"]*"|[^\s"]+)$/.exec(line);
@@ -1558,7 +1560,7 @@ export function packagesTouched({ cwd, from, head }) {
   for (const script of PACKED_COPY_BUILD_SCRIPTS) {
     const text = showOrNull(head, script, cwd);
     if (text === null) continue;
-    const copies = packedCopiesIn(text);
+    const copies = packedCopiesIn(text, script.split('/').length - 1);
     if (copies.length === 0) unreadable.add(script);
     for (const { source, destination } of copies) copiedTo.set(source, [...(copiedTo.get(source) ?? []), destination]);
   }
@@ -4810,7 +4812,7 @@ function selfTest() {
     //
     // `@objectstack/console` has no `src/**` and no `bin`; the one tracked file
     // its `dist` ships is the repo-root `sdui.manifest.json`, copied there by
-    // `scripts/build-console.sh`. PR #22812 moved only that file (and spec
+    // its build script. PR #22812 moved only that file (and spec
     // citations), graded the console `minor` under a true `Clause-②: yes
     // (widening)`, and was refused because no leg named the console.
     battery('THE COPY: a repo file a package build copies into what it packs (#15204)');
@@ -4820,6 +4822,8 @@ function selfTest() {
       const yesWidening = { value: 'yes', arm: 'widening', protocol: 'added', payload: true, readings: ['declaration line: `Clause-②: yes (widening)`', 'metadata-protocol line: `Metadata-protocol: added`'] };
       const declaredNo = { value: 'no', arm: null, protocol: 'none', payload: true, readings: ['declaration line: `Clause-②: no`', 'metadata-protocol line: `Metadata-protocol: none`'] };
       const ROOT_LINE = 'FRAMEWORK_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"';
+      const BUILD_SCRIPT = PACKED_COPY_BUILD_SCRIPTS[0];
+      const BUILD_ROOT_LINE = ROOT_LINE.replace('/..', '/..'.repeat(BUILD_SCRIPT.split('/').length - 1));
       const BUILD = [
         '#!/usr/bin/env bash',
         ROOT_LINE,
@@ -4847,6 +4851,11 @@ function selfTest() {
         'control: with no variable holding the script\'s own parent dir there is no repo root to resolve against, so nothing is claimed',
       );
       assert(
+        JSON.stringify(packedCopiesIn(BUILD.replace(ROOT_LINE, BUILD_ROOT_LINE), BUILD_SCRIPT.split('/').length - 1)) === MANIFEST_PAIR &&
+          JSON.stringify(packedCopiesIn(BUILD.replace(ROOT_LINE, BUILD_ROOT_LINE), 1)) === '[]',
+        `the climb names the root only at the script's own depth: ${BUILD_SCRIPT} climbs ${BUILD_SCRIPT.split('/').length - 1}, and the same climb read for a script one level deep names a subdirectory, so nothing is claimed`,
+      );
+      assert(
         pairs(`${ROOT_LINE}\nT="\${FRAMEWORK_ROOT}/packages/a/dist"\nS="\${FRAMEWORK_ROOT}/x.json"\nS="\${FRAMEWORK_ROOT}/y.json"\ncp "$S" "$T/x.json"\n`) ===
           '[{"source":"y.json","destination":"packages/a/dist/x.json"}]',
         'assignments are evaluated in ORDER — a reassigned variable is read at the value it has on the `cp` line',
@@ -4856,11 +4865,11 @@ function selfTest() {
         'control: a source that keeps an unexpanded `$` is not one fixed path and is skipped rather than guessed at',
       );
 
-      // ⭐ THE PIN on the real script. The leg reads `build-console.sh`, so the
+      // ⭐ THE PIN on the real script. The leg reads the console's build script, so the
       // day it stops copying the manifest (or respells the copy so the reader
       // cannot see it) this row reds in lint instead of the leg retiring quietly.
       const realBuild = readFileSync(resolve(REPO_ROOT, PACKED_COPY_BUILD_SCRIPTS[0]), 'utf8');
-      const realPairs = packedCopiesIn(realBuild);
+      const realPairs = packedCopiesIn(realBuild, PACKED_COPY_BUILD_SCRIPTS[0].split('/').length - 1);
       assert(
         realPairs.some((p) => p.source === 'sdui.manifest.json' && p.destination === 'packages/console/dist/sdui.manifest.json'),
         `this repository's ${PACKED_COPY_BUILD_SCRIPTS[0]} copies the repo-root sdui.manifest.json into packages/console/dist/ as read by this leg — got ${JSON.stringify(realPairs)}`,
@@ -4882,10 +4891,10 @@ function selfTest() {
       const consoleJson = JSON.stringify({ name: CONSOLE, version: '0.0.0', files: ['dist', 'README.md', 'CHANGELOG.md'] });
       const specJson = JSON.stringify({ name: SPEC, version: '0.0.0', files: ['dist'] });
       const changeset = (entries) => `---\n${entries.map(([p, b]) => `"${p}": ${b}`).join('\n')}\n---\n\nbody\n`;
-      const copyRepo = ({ head, build = BUILD }) =>
+      const copyRepo = ({ head, build = BUILD.replace(ROOT_LINE, BUILD_ROOT_LINE) }) =>
         makeRepo(
           {
-            'scripts/build-console.sh': build,
+            [BUILD_SCRIPT]: build,
             'packages/console/package.json': consoleJson,
             'packages/spec/package.json': specJson,
             'packages/spec/src/ui/x.ts': '/** cites objectui@aaaa */\nexport const x = 1;\n',
@@ -4917,7 +4926,7 @@ function selfTest() {
       // FIRING control: the same diff with the build script gone is the
       // pre-leg reading — refused. So the green above is this leg, not a lane
       // that moved.
-      const noLeg = levelOf(copyRepo({ head: { ...PR22812, 'scripts/build-console.sh': null } }), yesWidening);
+      const noLeg = levelOf(copyRepo({ head: { ...PR22812, [BUILD_SCRIPT]: null } }), yesWidening);
       assert(
         !noLeg.touched.packages.includes(CONSOLE) && noLeg.result.verdict === 'enforce' && noLeg.exitCode === 1,
         `FIRING control: without the copy to read, the console is unseen and the same PR is refused, exactly as CI job 114433350057 was — got ${JSON.stringify(noLeg.touched)} / ${noLeg.result.verdict}`,
@@ -4962,7 +4971,7 @@ function selfTest() {
       // "copies nothing"; and an unparseable destination manifest is unreadable.
       const blind = levelOf(copyRepo({ head: manifestOnly, build: '#!/usr/bin/env bash\ninstall -m 644 sdui.manifest.json packages/console/dist/\n' }), yesWidening);
       assert(
-        blind.touched.unreadable.includes('scripts/build-console.sh') && renderLevel(blind.result).stdout.join('\n').includes('scripts/build-console.sh'),
+        blind.touched.unreadable.includes(BUILD_SCRIPT) && renderLevel(blind.result).stdout.join('\n').includes(BUILD_SCRIPT),
         `a build script the reader yields no copy from is REPORTED and printed, never silent — got ${JSON.stringify(blind.touched)}`,
       );
       const broken = levelOf(copyRepo({ head: { ...manifestOnly, 'packages/console/package.json': '{ "name": \n' } }), yesWidening);

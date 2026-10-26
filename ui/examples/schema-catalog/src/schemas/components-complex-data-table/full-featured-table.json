@@ -1,0 +1,91 @@
+{
+  "type": "data-table",
+  "pagination": true,
+  "searchable": true,
+  "selectable": true,
+  "sortable": true,
+  "exportable": true,
+  "rowActions": true,
+  "pageSize": 5,
+  "columns": [
+    {
+      "header": "ID",
+      "accessorKey": "id",
+      "width": "60px"
+    },
+    {
+      "header": "Name",
+      "accessorKey": "name"
+    },
+    {
+      "header": "Role",
+      "accessorKey": "role"
+    },
+    {
+      "header": "Department",
+      "accessorKey": "department"
+    },
+    {
+      "header": "Status",
+      "accessorKey": "status"
+    }
+  ],
+  "data": [
+    {
+      "id": 1,
+      "name": "Alice Brown",
+      "role": "Manager",
+      "department": "Sales",
+      "status": "Active"
+    },
+    {
+      "id": 2,
+      "name": "Bob Wilson",
+      "role": "Developer",
+      "department": "Engineering",
+      "status": "Active"
+    },
+    {
+      "id": 3,
+      "name": "Carol Davis",
+      "role": "Designer",
+      "department": "Design",
+      "status": "Active"
+    },
+    {
+      "id": 4,
+      "name": "David Lee",
+      "role": "Developer",
+      "department": "Engineering",
+      "status": "Inactive"
+    },
+    {
+      "id": 5,
+      "name": "Eve Martinez",
+      "role": "Manager",
+      "department": "Marketing",
+      "status": "Active"
+    },
+    {
+      "id": 6,
+      "name": "Frank Taylor",
+      "role": "Analyst",
+      "department": "Finance",
+      "status": "Active"
+    },
+    {
+      "id": 7,
+      "name": "Grace Chen",
+      "role": "Designer",
+      "department": "Design",
+      "status": "Active"
+    },
+    {
+      "id": 8,
+      "name": "Henry Kim",
+      "role": "Developer",
+      "department": "Engineering",
+      "status": "Inactive"
+    }
+  ]
+}

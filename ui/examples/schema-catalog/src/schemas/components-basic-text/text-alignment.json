@@ -1,0 +1,21 @@
+{
+  "type": "stack",
+  "gap": 4,
+  "children": [
+    {
+      "type": "text",
+      "content": "Left aligned text",
+      "align": "left"
+    },
+    {
+      "type": "text",
+      "content": "Center aligned text",
+      "align": "center"
+    },
+    {
+      "type": "text",
+      "content": "Right aligned text",
+      "align": "right"
+    }
+  ]
+}

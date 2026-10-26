@@ -1,0 +1,125 @@
+// Type-checks the `.ts` files under `scripts/` — the repo-level helpers and,
+// above all, the gate PIN TESTS in `scripts/__tests__/`.
+//
+// objectui#3494: nothing compiled them. `scripts/` is not a workspace package,
+// so `turbo run type-check` never reaches it, and `scripts/__tests__` is matched
+// by no `include` in the repo (the root `tsconfig.json` includes only
+// `packages`/`examples`/`apps`). The ten pin tests that hold `ci.yml`,
+// `docs-links.yml`, `lint.yml`, the changeset guard, the control-byte scanner
+// and the shadcn local patches in place were therefore themselves ungated — the
+// objectui#3009 shape one directory over: a file that reads as enforcement while
+// no `tsc` invocation has ever looked at it.
+//
+// Two of the files here (`scripts/vite-crypto-stub.ts`,
+// `scripts/vite-maplibre-worker.ts`) ARE already compiled, by
+// `apps/console/tsconfig.node.json` — `vite.config.ts` imports them, and
+// objectui#3305 wired that project into `apps/console`'s `type-check`. They are
+// deliberately NOT excluded below: an exclusion list is a second thing to keep
+// honest, and the moment the console stops importing one of them it would drop
+// out of every program silently. Covering the whole directory means there is no
+// such question. The cost of the overlap is paid by matching that project's
+// option set (strict, ESNext, bundler resolution, `allowImportingTsExtensions`,
+// and notably NO `noImplicitReturns`), so a shared file cannot be green in one
+// project and red in the other. `scripts/__tests__/scripts-type-check.test.ts`
+// asserts this parity against `apps/console/tsconfig.node.json` directly
+// (objectui#4926) — it is what would have caught `allowImportingTsExtensions`
+// missing here.
+//
+// Deliberately NOT `"extends": "./tsconfig.tier-base.json"`: that file is an
+// EMITTING config, and its `exclude` lists the test globs. Inheriting it would
+// compile none of the test files this project exists for — passing vacuously,
+// which is the exact failure `scripts/check-type-check-coverage.mjs` section 5b
+// was written to catch one level up. Spelling the options out keeps that trap
+// from being reintroduced by an innocent-looking `extends`.
+//
+// Comments here are `//`, not `/* */`, on purpose: a glob containing `**` + `/`
+// closes a block comment early, and a tsconfig that silently fails to parse
+// falls back to including the entire repository. That is not hypothetical — it
+// happened while writing this file. `scripts/__tests__/scripts-type-check.test.ts`
+// pins that this config still parses without diagnostics.
+//
+// Run it with `pnpm type-check:scripts`; CI runs the same command in ci.yml's
+// `type-check` job. It is not reachable from `pnpm type-check` (that is
+// `turbo run type-check`, which is driven by package.json `scripts` and so
+// structurally cannot see a non-package directory) — hence the named root
+// script, so the gate is runnable locally instead of CI-only.
+{
+  "compilerOptions": {
+    // Node 22 (`engines.node: ">=22"`) is what actually runs these files.
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+
+    // Matches `apps/console/tsconfig.node.json`'s option set (see the file
+    // header above) — that project's `vite.config.ts` imports
+    // `../../scripts/vite-crypto-stub.ts` and
+    // `../../scripts/vite-maplibre-worker.ts` with explicit `.ts` extensions
+    // (objectui#3384), which needs `allowImportingTsExtensions`. This project
+    // doesn't itself need it today — the shared files' own imports carry no
+    // `.ts` extension — but without it here, a `.ts`-extension import added to
+    // either shared file, or a widening of `include` below to reach a `.ts`
+    // importer that spells extensions this way, would type-check in one
+    // project and not the other: exactly the gap this file's header says the
+    // matched option set prevents. Legal here because `noEmit` is `true`
+    // (`allowImportingTsExtensions` requires `noEmit` / `emitDeclarationOnly` /
+    // `rewriteRelativeImportExtensions`).
+    "allowImportingTsExtensions": true,
+
+    "strict": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+
+    // `allowJs` with `checkJs` off — measured, not assumed (objectui#3494).
+    // The pin tests import their subject from plain `.mjs`/`.js` helpers
+    // (`../check-control-bytes.mjs`, `../../eslint.config.js`, ...). Both ways
+    // to type those were run against this exact file set:
+    //
+    //   allowJs:false -> 8 errors. Three TS7016 ("no declaration file"), which
+    //     would have to be answered with hand-written `.d.mts` files sitting
+    //     next to the `.mjs` they describe — a second source of truth, free to
+    //     drift silently, which is the hazard
+    //     `scripts/check-spec-symbol-derivation.mjs` exists to police. Worse,
+    //     the resulting `any` module propagated: `it.each(patchedComponents())`
+    //     produced three TS2345s that are not real defects, only fallout from
+    //     the blanket `any`.
+    //
+    //   allowJs:true  -> 5 errors, every one of them a now-false
+    //     `@ts-expect-error — plain-JS CI helper, intentionally untyped`
+    //     comment. Deleting a stale comment is not a semantic change, and the
+    //     types the tests get are INFERRED FROM THE HELPER ITSELF, so they
+    //     cannot drift from it by construction. The three TS2345s vanish
+    //     because `patchedComponents()` is genuinely `string[]`.
+    //
+    // So `allowJs` both costs less and is the stronger gate: change a gate
+    // helper's exported signature and its pin test now goes red.
+    //
+    // `checkJs` stays FALSE on purpose — this project consumes the helpers'
+    // inferred types, it does not take ownership of type-cleanliness inside
+    // eight plain-JS CI scripts. That would be a different, much larger change.
+    //
+    // This says nothing about the ROOT `tsconfig.json`, which keeps
+    // `allowJs: false`; `vitest.config.mts`'s `@ts-expect-error` on the same
+    // kind of import is correct there and is left alone.
+    "allowJs": true,
+    "checkJs": false,
+
+    // No `references` and no `composite` here, so `noEmit` is legal — TS6310
+    // (a referenced project may not disable emit) is what forced
+    // `apps/console/tsconfig.node.json` into the emit-to-a-cache-dir dance.
+    // This project is standalone and can simply not emit.
+    "noEmit": true
+  },
+
+  // The whole directory, by glob. Not a file list: a list is a thing to forget,
+  // and the point of objectui#3494 is that a NEW `.ts` file under `scripts/`
+  // must not be able to land outside every program again.
+  // `scripts/__tests__/scripts-type-check.test.ts` pins that this glob really
+  // does reach every `.ts` file on disk under `scripts/`.
+  "include": ["scripts/**/*.ts"]
+}

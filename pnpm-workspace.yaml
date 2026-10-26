@@ -75,6 +75,9 @@ onlyBuiltDependencies:
 patchedDependencies:
   tsup@8.5.1: patches/tsup@8.5.1.patch
   tsx@4.23.15: patches/tsx@4.23.15.patch
+  # objectui's focus-scope patch (cutover, objectstack#25752);
+  # it was keyed unversioned in ui/package.json's ignored `pnpm` field.
+  '@radix-ui/react-focus-scope@1.1.16': patches/@radix-ui__react-focus-scope.patch
 
 # Transitive-dependency version pins. pnpm v10 reads `overrides` from THIS file
 # — the `pnpm.overrides` block in package.json is silently ignored — so all
@@ -231,8 +234,36 @@ patchedDependencies:
 #     Keep both in sync; removing the root devDependency reintroduces 5.55.3.
 #   - @tootallnate/once: GHSA-vpq2-c234-7xj6 (low) — pulled 1.1.2 through a
 #     legacy agent chain; force the patched 2.0.1 line.
+#   - body-parser: GHSA-27r3-jxmh-p828 (high), GHSA-v422-hmwv-36x6 (low) —
+#     objectui's tree pulled 1.20.5 through express 4 (@object-ui/cli), whose
+#     `~1.20.5` range admits the patched 1.20.9; scoped below 1.20.9 so the
+#     body-parser 2 line under express 5 is untouched (cutover,
+#     objectstack#25803, bill item 40).
+#   - markdown-it: GHSA-r7fv-28h4-cvq7, GHSA-gfr2-rv44-r23c (high),
+#     GHSA-253c-mchw-3w2r, GHSA-vfgh-jcmw-g37q — objectui's tree pulled 14.3.0
+#     through typedoc and @vscode/vsce (`^14.1.0`); force the patched 14.3.3
+#     line, bounded to the 14 major (bill item 40).
+#   - postcss-selector-parser@6.0.10: GHSA-rj75-hqrm-r3gf — @tailwindcss/typography
+#     0.5.20 pins 6.0.10 exactly, and the fix is only on the 7 line; the exact
+#     selector moves that one copy to 7.1.6 (bill item 40).
 overrides:
   esbuild: '>=0.28.1'
+  # objectui's security floors, from ui/package.json's ignored `pnpm` field
+  # (cutover, objectstack#25752; dompurify is already pinned).
+  'qs@<6.15.2': '^6.15.2'
+  'shell-quote@<1.8.4': '^1.8.4'
+  'tmp@<0.2.6': '^0.2.6'
+  'uuid@<11.1.1': '^11.1.1'
+  # objectui's merged-lock advisories (cutover, objectstack#25803, bill item 40).
+  'body-parser@<1.20.9': '~1.20.9'
+  'markdown-it@>=14.0.0 <14.3.3': '^14.3.3'
+  'postcss-selector-parser@6.0.10': '7.1.6'
+  # objectui's single react line (cutover, objectstack#25752):
+  # objectui pins 19.3.0 exactly; objectstack manifests still carry ^19.2.x ranges.
+  react: 19.3.0
+  react-dom: 19.3.0
+  '@types/react': 19.3.0
+  '@types/react-dom': 19.3.0
   'minimatch@<11.0.0': '^10.2.3'
   'tar@>=2.0.0 <8.0.0': '^7.5.11'
   'form-data@<5.0.0': '>=4.0.6'
@@ -364,7 +395,9 @@ overrides:
   # installs, so a consumer's own brace-expansion copy is theirs to lift.
   'brace-expansion@>=5.0.0 <6.0.0': '^5.0.12'
   'sharp@>=0.34.0 <0.36.0': '^0.35.5'
-  'react-router@<8.3.0': '^8.3.0'
+  # react-router GHSA-qwww-vcr4-c8h2: still floors the whole 8.x line below 8.3.0; the 7.x line
+  # (objectui's react-router-dom 7.18 pins its own react-router) has no fix to force onto.
+  'react-router@>=8.0.0 <8.3.0': '^8.3.0'
   '@sveltejs/kit@<2.69.1': '^2.69.1'
   '@hono/node-server@<3.0.0': '^2.0.10'
   # OSV batch 2026-08 (#5032) — all three name a fixed version, so they are
@@ -670,6 +703,15 @@ overrides:
   #     the 20.10.2 that resolved; with the peer rewritten to ^21.0.4 pnpm no
   #     longer installs it at all, so the lockfile carries no happy-dom. The
   #     entry stays as the floor a future declaration lands on.
+  #     The imported objectui tree (ui/, objectstack#25677) is that declaration:
+  #     ui/package.json and ui/apps/console declare ^20.11.2 and objectui's
+  #     vitest runs on the happy-dom environment, so this floor moves both onto
+  #     21.0.4, one major above what objectui locked. Kept on purpose: 20.x has
+  #     no fix, and no red class of the verification runs (objectstack#25718)
+  #     traces to happy-dom. It is the one override that still moves an
+  #     objectui dependency (scripts/ui-import/README.md step 6, measured on
+  #     objectui main 3b7b04007f); the react-router floor above is scoped to
+  #     8.x so objectui's 7.x line stays its own.
   #   NOT cleared: @azure/msal-node GHSA-xcx6-jx8p-x3h5 (high) — 5.4.1 from
   #     @azure/identity 4.13.1 (^5.1.0) under tedious 18.6.2, driver-sql's
   #     optional mssql peer. The fix is only in msal-node 7.1.0 and no

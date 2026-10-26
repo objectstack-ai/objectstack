@@ -1,0 +1,9 @@
+{
+  "type": "aspect-ratio",
+  "ratio": 1.7777777777777777,
+  "children": {
+    "type": "card",
+    "className": "bg-muted flex h-full items-center justify-center",
+    "children": "Video Player (16:9)"
+  }
+}

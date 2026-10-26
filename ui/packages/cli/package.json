@@ -1,0 +1,85 @@
+{
+  "name": "@object-ui/cli",
+  "version": "18.1.0",
+  "description": "Standalone CLI for Object UI — scaffold, develop, build and validate JSON/YAML schema-driven applications.",
+  "type": "module",
+  "homepage": "https://www.objectui.org/docs/utilities/cli",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
+    "directory": "ui/packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/objectstack-ai/objectui/issues"
+  },
+  "bin": {
+    "objectui": "./dist/cli.js"
+  },
+  "sideEffects": true,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "lint": "eslint src",
+    "test": "vitest run --root ../.. packages/cli/",
+    "type-check": "tsc --noEmit"
+  },
+  "keywords": [
+    "objectstack",
+    "object-ui",
+    "cli",
+    "schema-driven",
+    "ui-builder",
+    "json",
+    "objectui",
+    "sdui",
+    "schema-driven-ui",
+    "react",
+    "tailwind",
+    "shadcn",
+    "devtools"
+  ],
+  "author": "ObjectStack Team",
+  "license": "MIT",
+  "dependencies": {
+    "@object-ui/components": "workspace:*",
+    "@object-ui/react": "workspace:*",
+    "@object-ui/types": "workspace:*",
+    "@objectstack/spec": "workspace:^",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/glob": "^9.0.0",
+    "@vitejs/plugin-react": "^6.0.5",
+    "autoprefixer": "^10.5.4",
+    "chalk": "^6.0.0",
+    "commander": "^15.0.0",
+    "express": "^4.22.2",
+    "express-rate-limit": "^8.6.2",
+    "glob": "^13.0.6",
+    "js-yaml": "^5.4.1",
+    "jsonc-parser": "^3.3.1",
+    "vite": "^8.2.1"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.25",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^26.2.0",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

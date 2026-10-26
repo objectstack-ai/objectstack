@@ -1,0 +1,42 @@
+{
+  "note": [
+    "Exemptions for scripts/check-skills-paths.mjs: in-repo paths a guide states in a",
+    "backtick code span that deliberately do NOT exist on disk. Measured on",
+    "main@6422aa891: 86 stated paths across the 18 guide files, 85 resolve, and this",
+    "is the one that does not. Re-measured on main@0614b6df1 after objectui#7358",
+    "widened SCAN_ROOTS to cover .claude/skills: 88 stated paths across 20 files, 87",
+    "resolve, and it is still this same one -- stated now from the path objectui#7251",
+    "moved the guide to.",
+    "",
+    "A RATCHET, not an allowlist, red in BOTH directions (scan() in that script):",
+    "  - the path APPEARS on disk    -> red. The sentence built around 'there is no",
+    "    such directory' has become false; fix the prose, then delete the entry.",
+    "  - the scan never MEETS it     -> red. The prose was rewritten or the file",
+    "    moved, so the entry is dead weight; delete it.",
+    "Entries are keyed by guide file, then by the exact token as written in the",
+    "prose. Line numbers are deliberately NOT part of the key: guide prose is edited",
+    "constantly (PR #3856 moved this very file's paragraphs) and a line-keyed",
+    "exemption would go stale on every unrelated edit.",
+    "",
+    "The file key is a real coordinate, so a MOVE retires the entry the same way a",
+    "rewrite does -- that is the second direction working, not a bug. objectui#7251",
+    "moved this guide out of the scan root and the gate demanded the entry's deletion",
+    "in its own words ('1 baseline entry the scan never met ... Delete the entry');",
+    "it was deleted, and objectui#7358 re-added it under the new key once the widened",
+    "SCAN_ROOTS met the same sentence again.",
+    "",
+    "Not everything unresolvable needs an entry. A token containing whitespace, a",
+    "glob metacharacter or a placeholder segment is excluded by RULE, because it is",
+    "not a claim that a file exists -- see the script's docblock. Reach for this file",
+    "only when the prose really does assert the absence of a real coordinate."
+  ],
+
+  "allowedMissing": {
+    ".claude/skills/objectui-contributor/guides/console-development.md": {
+      "apps/console/src/context/": {
+        "reason": "Deliberate negative statement. The Key contexts section exists to correct the recurring wrong guess that the five contexts live in the console app: 'there is no apps/console/src/context/ directory at all'. If this directory is ever created, that sentence must be rewritten before the entry is removed. Granted against the gate's own prescription for this case: 'If the path is deliberately named as NOT existing -- a sentence whose whole point is \"there is no such directory\" -- add it to scripts/skills-path-baseline.json with a reason, and expect the gate to go red again the day that path appears on disk.'",
+        "issue": "objectui#3735 (re-keyed under the moved guide path by objectui#7358, 2026-09-02)"
+      }
+    }
+  }
+}

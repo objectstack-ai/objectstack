@@ -1,0 +1,18 @@
+{
+  "type": "toggle-group",
+  "selectionType": "multiple",
+  "items": [
+    {
+      "value": "bold",
+      "label": "Bold"
+    },
+    {
+      "value": "italic",
+      "label": "Italic"
+    },
+    {
+      "value": "underline",
+      "label": "Underline"
+    }
+  ]
+}

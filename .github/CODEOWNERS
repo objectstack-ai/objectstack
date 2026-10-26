@@ -46,6 +46,15 @@
 /docs/NORTH-STAR.md @os-zhuang @hotlong
 /.github/workflows/ @os-zhuang @hotlong
 
+# Tier H governed surfaces of the nested `ui/` workspace (#25712) — the same
+# register rows, under `ui/`; `ui/.claude/` is Tier H, unlike the root tree
+/ui/docs/adr/ @os-zhuang @hotlong
+/ui/.claude/ @os-zhuang @hotlong
+/ui/skills/ @os-zhuang @hotlong
+/ui/AGENTS.md @os-zhuang @hotlong
+/ui/CLAUDE.md @os-zhuang @hotlong
+/ui/.github/workflows/ @os-zhuang @hotlong
+
 # The enforcement chain
 /.github/CODEOWNERS @os-zhuang @hotlong
 /scripts/pm/check-governed-merges.mjs @os-zhuang @hotlong

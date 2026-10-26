@@ -1,0 +1,44 @@
+{
+  "type": "carousel",
+  "orientation": "horizontal",
+  "showArrows": true,
+  "className": "w-full max-w-xs",
+  "items": [
+    [
+      {
+        "type": "box",
+        "className": "p-8 border rounded bg-blue-50",
+        "children": [
+          {
+            "type": "text",
+            "content": "Slide 1"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "type": "box",
+        "className": "p-8 border rounded bg-green-50",
+        "children": [
+          {
+            "type": "text",
+            "content": "Slide 2"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "type": "box",
+        "className": "p-8 border rounded bg-purple-50",
+        "children": [
+          {
+            "type": "text",
+            "content": "Slide 3"
+          }
+        ]
+      }
+    ]
+  ]
+}

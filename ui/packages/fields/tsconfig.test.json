@@ -1,0 +1,82 @@
+{
+  // Type-checks this package's TESTS, which `tsconfig.json` now excludes.
+  // See `packages/plugin-dashboard/tsconfig.test.json` for the template and
+  // `packages/types/tsconfig.test.json` for why the exclusion would otherwise
+  // be a hole: a test nothing compiles can assert a contract the compiler never
+  // checked and then read as evidence that the contract holds (objectui#3009).
+  //
+  // The hole is NEW here, and that is the whole point of objectui#4006. Until
+  // this file existed these 85 tests were checked — but only as a SIDE EFFECT
+  // of the build config having no test exclude at all, which is also why 85
+  // `*.test.d.ts` were emitted into the published `dist/`. Removing the emit
+  // therefore had to move the coverage in the same commit, not after it:
+  // scripts/check-type-check-coverage.mjs fails 5c the moment the exclude
+  // lands alone (measured — it names all 85 files).
+  //
+  // Chained from this package's `type-check` script, which is what the CI
+  // `Type Check` job runs; the coverage gate enforces the chaining — a config
+  // nothing runs is the objectui#3009 failure itself.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    // A checking project, never an emitting one. The build config inherits the
+    // root's `noEmit: true` as well (this package emits `dist` from
+    // vite-plugin-dts, not from `tsc`), but stating it here is what the gate
+    // requires and what keeps this project from ever growing an output.
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "jsx": "react-jsx",
+    // Deliberately NOT raised to ES2022. Measured: no test file in this package
+    // reaches for `Array.prototype.at` or any other ES2021+ builtin, so the
+    // tests are held to the same lib the shipped SOURCE targets.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    //
+    // `types` is deliberately NOT named, unlike plugin-dashboard's. Naming it
+    // switches off automatic `@types/*` inclusion, and this package's build
+    // program does not name it either — so leaving it unset is what reproduces
+    // the exact program these tests were checked by until now, which is the
+    // property objectui#4006 had to preserve while moving the coverage.
+    // Re-measured here on this program's own resolved file list (objectui#8722
+    // round 2) — `tsc -p tsconfig.test.json --listFiles`, never a glob, because
+    // these tests sit at four different depths and any single glob reads a
+    // partial population. Of its 161 test files:
+    //
+    //   - None uses the Node `global` object, and one could not slip in
+    //     unnoticed: injecting `global.setTimeout` into a test file here is
+    //     TS2304, against an unmutated exit 0. That is what keeps `types` unset
+    //     safe on the Node axis, and it is the claim this paragraph rests on.
+    //   - Every one of the 92 files that call `@testing-library/jest-dom`
+    //     matchers now carries its own `import '@testing-library/jest-dom';`,
+    //     so no file's matchers are typed only by a DIFFERENT file's import.
+    //     119 files carry that import in all; the 27 beyond the 92 do not use
+    //     a matcher themselves.
+    //
+    // Those counts are a reading taken once, not a live fact. The instrument
+    // that re-derives them is `pnpm census:tsconfig-test-parity`, and the
+    // column that must stay 0 for this package is `leaning`.
+    //
+    // What the second point does NOT claim is that any single import is
+    // load-bearing. The augmentation is still PROGRAM-scoped, so removing any
+    // proper subset of those 119 imports leaves the program green (measured).
+    // What changed is that every matcher user is now also a supplier, so no
+    // file here can be reddened by an edit to a file it does not control.
+    //
+    // `paths` drops the root tsconfig's source-tree mappings so `@object-ui/*`
+    // and `@objectstack/spec/*` resolve through each workspace dependency's
+    // built `.d.ts` rather than pulling sibling package sources in as program
+    // inputs. `type-check` dependsOn `^build` (turbo.json), so those `.d.ts`
+    // exist by the time this runs. This is the one place the project is
+    // deliberately STRICTER than the program it replaces: the build config
+    // keeps the root `paths` (and the `rootDir: ".."` that lets sibling sources
+    // sit inside the root), so until now these tests were checked against
+    // sibling SOURCE. Checking them against the built declarations is what the
+    // published contract actually is, and it is what every other chained test
+    // project in this repo does. Measured: zero new errors either way.
+    "paths": {}
+  },
+  // Only the test files. Note there is no ambient `*.d.ts` under `src/` in this
+  // package today — if one is ever added it must be NAMED here, because being
+  // imported is not enough to make an ambient declaration a program input, and
+  // nothing imports one (plugin-map's lesson, objectui#4270).
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+}
