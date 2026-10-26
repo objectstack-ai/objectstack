@@ -12,7 +12,7 @@ import { Badge } from '../../ui';
 import { renderChildren } from '../../lib/utils';
 
 ComponentRegistry.register('badge', 
-  ({ schema, ...props }: { schema: BadgeSchema; [key: string]: any }) => {
+  ({ schema, ...props }: { schema: BadgeSchema; [key: string]: unknown }) => {
     // Extract designer-related props
     const { 
         'data-obj-id': dataObjId, 

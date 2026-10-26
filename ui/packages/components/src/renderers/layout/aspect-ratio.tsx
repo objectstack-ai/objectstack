@@ -12,7 +12,7 @@ import { AspectRatio } from '../../ui/aspect-ratio';
 import { renderChildren } from '../../lib/utils';
 
 ComponentRegistry.register('aspect-ratio', 
-  ({ schema, ...props }: { schema: AspectRatioSchema; [key: string]: any }) => {
+  ({ schema, ...props }: { schema: AspectRatioSchema; [key: string]: unknown }) => {
     const { 
         'data-obj-id': dataObjId, 
         'data-obj-type': dataObjType,

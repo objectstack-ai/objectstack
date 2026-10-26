@@ -50,7 +50,7 @@ import { cn } from '../../lib/utils';
  * destroys a legitimate computed value.
  */
 ComponentRegistry.register('spinner', 
-  ({ schema, className, ...props }: { schema: SpinnerSchema; className?: string; [key: string]: any }) => {
+  ({ schema, className, ...props }: { schema: SpinnerSchema; className?: string; [key: string]: unknown }) => {
     const { 
         'data-obj-id': dataObjId, 
         'data-obj-type': dataObjType,

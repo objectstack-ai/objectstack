@@ -13,7 +13,7 @@ import { Button } from '../../ui';
 import { toFormControlDomProps } from '../../lib/form-control-dom-props';
 
 ComponentRegistry.register('sonner', 
-  ({ schema, ...props }: { schema: SonnerSchema; [key: string]: any }) => {
+  ({ schema, ...props }: { schema: SonnerSchema; [key: string]: unknown }) => {
     // `style` forwarded by name; the rest through the form-control
     // declaration (objectui#5632).
     const { style, ...buttonProps } = props;

@@ -23,7 +23,7 @@ import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, Command
 import { resolveIcon } from '../action/resolve-icon';
 
 ComponentRegistry.register('command', 
-  ({ schema, ...props }: { schema: CommandSchema; [key: string]: any }) => {
+  ({ schema, ...props }: { schema: CommandSchema; [key: string]: unknown }) => {
     const { 
         'data-obj-id': dataObjId, 
         'data-obj-type': dataObjType,

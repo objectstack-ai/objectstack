@@ -29,7 +29,7 @@ const usePaginationTranslation = createSafeTranslation(
 );
 
 ComponentRegistry.register('pagination', 
-  ({ schema, ...props }: { schema: PaginationSchema; [key: string]: any }) => {
+  ({ schema, ...props }: { schema: PaginationSchema; [key: string]: unknown }) => {
     const { t } = usePaginationTranslation();
     const { 
         'data-obj-id': dataObjId, 

@@ -18,7 +18,7 @@ import {
 import { cn } from '../../lib/utils';
 import React from 'react';
 
-const TabsRenderer = ({ schema, className, onChange, value, ...props }: { schema: TabsSchema; className?: string; onChange?: (val: string) => void; value?: string; [key: string]: any }) => {
+const TabsRenderer = ({ schema, className, onChange, value, ...props }: { schema: TabsSchema; className?: string; onChange?: (val: string) => void; value?: string; [key: string]: unknown }) => {
   // Extract designer-related props
   const { 
       'data-obj-id': dataObjId, 

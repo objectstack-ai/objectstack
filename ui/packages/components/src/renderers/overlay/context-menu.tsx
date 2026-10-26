@@ -82,7 +82,7 @@ const renderContextMenuItems = (items: MenuItem[] | undefined) => {
 };
 
 ComponentRegistry.register('context-menu', 
-  ({ schema, className, ...props }: { schema: ContextMenuSchema; className?: string; [key: string]: any }) => {
+  ({ schema, className, ...props }: { schema: ContextMenuSchema; className?: string; [key: string]: unknown }) => {
     // Determine classes
     const triggerClass = schema.triggerClassName || className || (schema.className as string) || "h-[120px] w-full sm:h-[150px] sm:w-[300px] border border-dashed text-sm flex items-center justify-center";
     const contentClass = schema.contentClassName;

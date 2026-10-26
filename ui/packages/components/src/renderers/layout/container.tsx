@@ -16,7 +16,7 @@ import { forwardRef } from 'react';
 // argument — mechanism note on `action:bar` (objectui#4422), pinned by
 // `__tests__/forwardref-props-annotation.guard.test.ts`.
 const ContainerRenderer = forwardRef<HTMLDivElement, { schema: ContainerSchema; className?: string }>(
-  ({ schema, className, ...props }: { schema: ContainerSchema; className?: string; [key: string]: any }, ref) => {
+  ({ schema, className, ...props }: { schema: ContainerSchema; className?: string; [key: string]: unknown }, ref) => {
     // `??`, not `||`: `maxWidth` declares `false` for the "no maximum width"
     // case, and `||` folded that legal value into the default — so a container
     // asking for NO constraint rendered `max-w-xl` (36rem), the exact opposite

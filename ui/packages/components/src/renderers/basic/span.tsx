@@ -67,7 +67,7 @@ const SPAN_DEPRECATION_NOTICE =
 // argument — mechanism note on `action:bar` (objectui#4422), pinned by
 // `__tests__/forwardref-props-annotation.guard.test.ts`.
 const SpanRenderer = forwardRef<HTMLSpanElement, { schema: TextSpanSchema; className?: string }>(
-  ({ schema, className, ...props }: { schema: TextSpanSchema; className?: string; [key: string]: any }, ref) => {
+  ({ schema, className, ...props }: { schema: TextSpanSchema; className?: string; [key: string]: unknown }, ref) => {
     // Deprecation notice — JSON-authored nodes only (objectui#4000), once per
     // module load (objectui#3965, see warnDeprecatedOnce). Both rulings landed
     // for `div` first; objectui#4917 brings this renderer level with it.

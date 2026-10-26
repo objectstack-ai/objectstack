@@ -87,7 +87,7 @@ const GAPS: Record<number, string> = {
 };
 
 ComponentRegistry.register('grid', 
-  ({ schema, className, ...props }: { schema: GridSchema; className?: string; [key: string]: any }) => {
+  ({ schema, className, ...props }: { schema: GridSchema; className?: string; [key: string]: unknown }) => {
     // Determine columns configuration
     // Supports detailed object configuration from schema
     let baseCols = 2;

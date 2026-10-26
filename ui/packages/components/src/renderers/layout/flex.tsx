@@ -12,7 +12,7 @@ import { renderChildren } from '../../lib/utils';
 import { cn } from '../../lib/utils';
 
 ComponentRegistry.register('flex', 
-  ({ schema, className, ...props }: { schema: FlexSchema; className?: string; [key: string]: any }) => {
+  ({ schema, className, ...props }: { schema: FlexSchema; className?: string; [key: string]: unknown }) => {
     const direction = schema.direction || 'row';
     const justify = schema.justify || 'start';
     const align = schema.align || 'start';

@@ -108,7 +108,7 @@ import { describeIconLookup, resolveIcon } from '../action/resolve-icon';
 // argument — mechanism note on `action:bar` (objectui#4422), pinned by
 // `__tests__/forwardref-props-annotation.guard.test.ts`.
 const IconRenderer = forwardRef<SVGSVGElement, { schema: IconSchema; className?: string }>(
-  ({ schema, className, ...props }: { schema: IconSchema; className?: string; [key: string]: any }, ref) => {
+  ({ schema, className, ...props }: { schema: IconSchema; className?: string; [key: string]: unknown }, ref) => {
     // Extract designer-related props
     const { 
       'data-obj-id': dataObjId, 

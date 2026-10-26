@@ -13,7 +13,7 @@ import { Input, Label } from '../../ui';
 import { cn } from '../../lib/utils';
 import { toFormControlDomProps } from '../../lib/form-control-dom-props';
 
-const InputRenderer = ({ schema, className, onChange, value, disabled: hostDisabled, ...props }: { schema: InputSchema; className?: string; onChange?: (val: any) => void; value?: any; disabled?: boolean; [key: string]: any }) => {
+const InputRenderer = ({ schema, className, onChange, value, disabled: hostDisabled, ...props }: { schema: InputSchema; className?: string; onChange?: (val: any) => void; value?: any; disabled?: boolean; [key: string]: unknown }) => {
   // `disabled` is NOT read off `schema` here. `SchemaRenderer` evaluates the
   // node's `disabled` / `disabledOn` (either may be a predicate STRING), strips
   // the raw key from the props it spreads, and forwards the VERDICT as a real

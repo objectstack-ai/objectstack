@@ -26,7 +26,7 @@ const ButtonRenderer = forwardRef<HTMLButtonElement, { schema: ButtonSchema }>(
   // `schema.disabled` keeps one carrier for one question (AGENTS.md #0.1,
   // objectui#7238; precedent `plugin-chatbot`, objectui#6169) — and taking it
   // OFF `props` is the load-bearing half, see `isDisabled` below.
-  ({ schema, disabled: hostDisabled, ...props }: { schema: ButtonSchema; disabled?: boolean; [key: string]: any }, ref) => {
+  ({ schema, disabled: hostDisabled, ...props }: { schema: ButtonSchema; disabled?: boolean; [key: string]: unknown }, ref) => {
     // Extract designer-related props
     const { 
         'data-obj-id': dataObjId, 

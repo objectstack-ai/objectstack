@@ -75,7 +75,7 @@ function collapseTrail(items: BreadcrumbItemType[], maxItems: unknown): Slot[] {
 }
 
 ComponentRegistry.register('breadcrumb', 
-  ({ schema, ...props }: { schema: BreadcrumbSchema; [key: string]: any }) => {
+  ({ schema, ...props }: { schema: BreadcrumbSchema; [key: string]: unknown }) => {
     const { 
         'data-obj-id': dataObjId, 
         'data-obj-type': dataObjType,

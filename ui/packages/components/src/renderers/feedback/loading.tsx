@@ -12,7 +12,7 @@ import { Spinner } from '../../custom';
 import { cn } from '../../lib/utils';
 
 ComponentRegistry.register('loading', 
-  ({ schema, className, ...props }: { schema: LoadingSchema; className?: string; [key: string]: any }) => {
+  ({ schema, className, ...props }: { schema: LoadingSchema; className?: string; [key: string]: unknown }) => {
     const size = schema.size || 'md';
     const fullscreen = schema.fullscreen || false;
     

@@ -47,7 +47,7 @@ import { forwardRef } from 'react';
 // argument — mechanism note on `action:bar` (objectui#4422), pinned by
 // `__tests__/forwardref-props-annotation.guard.test.ts`.
 const BoxRenderer = forwardRef<HTMLDivElement, { schema: BoxSchema; className?: string }>(
-  ({ schema, className, ...props }: { schema: BoxSchema; className?: string; [key: string]: any }, ref) => {
+  ({ schema, className, ...props }: { schema: BoxSchema; className?: string; [key: string]: unknown }, ref) => {
     // DOM pass-through is a WHITELIST, never a list of keys to strip — the
     // objectui#3291 discipline, executed by {@link toDomProps} as on the
     // sibling `grid.tsx` / `flex.tsx` (objectui#4787 / #5574). `style` is

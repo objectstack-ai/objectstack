@@ -61,7 +61,7 @@ export interface ActionMenuSchema {
   visible?: boolean | string | { dialect: string; source?: string };
   /** Custom CSS class */
   className?: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 /**
@@ -207,7 +207,7 @@ ActionAutoTrigger.displayName = 'ActionAutoTrigger';
 // host-EVALUATED enablement verdict, declared rather than left to the index
 // signature, as `ActionButtonRendererProps` declares it (objectui#9131).
 const ActionMenuRenderer = forwardRef<HTMLButtonElement, { schema: ActionMenuSchema; className?: string }>(
-  ({ schema, className, ...props }: { schema: ActionMenuSchema; className?: string; disabled?: boolean; [key: string]: any }, ref) => {
+  ({ schema, className, ...props }: { schema: ActionMenuSchema; className?: string; disabled?: boolean; [key: string]: unknown }, ref) => {
     const {
       'data-obj-id': dataObjId,
       'data-obj-type': dataObjType,

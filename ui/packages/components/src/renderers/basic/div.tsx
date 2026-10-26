@@ -128,7 +128,7 @@ const DIV_DEPRECATION_NOTICE =
 // argument — mechanism note on `action:bar` (objectui#4422), pinned by
 // `__tests__/forwardref-props-annotation.guard.test.ts`.
 const DivRenderer = forwardRef<HTMLDivElement, { schema: DivSchema; className?: string }>(
-  ({ schema, className, ...props }: { schema: DivSchema; className?: string; [key: string]: any }, ref) => {
+  ({ schema, className, ...props }: { schema: DivSchema; className?: string; [key: string]: unknown }, ref) => {
     // Deprecation notice, once per module load (objectui#3965, see
     // warnDeprecatedOnce). There is no provenance exemption any more: the
     // declaration below names both authoring surfaces (objectui#10757), so a

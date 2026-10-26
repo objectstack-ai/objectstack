@@ -94,7 +94,7 @@ function useActionsLabel(): string {
 // exported and never appears in JSX, and `Registry.register` takes
 // `ComponentRenderer<T = any> = T`.
 const ActionBarRenderer = forwardRef<HTMLDivElement, { schema: ActionBarSchema; className?: string }>(
-  ({ schema, className, ...props }: { schema: ActionBarSchema; className?: string; [key: string]: any }, ref) => {
+  ({ schema, className, ...props }: { schema: ActionBarSchema; className?: string; [key: string]: unknown }, ref) => {
     const actionsAriaLabel = useActionsLabel();
     const {
       'data-obj-id': dataObjId,

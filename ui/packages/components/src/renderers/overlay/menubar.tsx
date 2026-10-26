@@ -65,7 +65,7 @@ const renderMenubarItems = (items: MenuItem[] | undefined) =>
   });
 
 ComponentRegistry.register('menubar', 
-  ({ schema, ...props }: { schema: MenubarSchema; [key: string]: any }) => {
+  ({ schema, ...props }: { schema: MenubarSchema; [key: string]: unknown }) => {
     const { 
         'data-obj-id': dataObjId, 
         'data-obj-type': dataObjType,

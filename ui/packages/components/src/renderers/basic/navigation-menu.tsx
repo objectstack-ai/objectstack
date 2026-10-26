@@ -12,7 +12,7 @@ import { NavigationMenu, NavigationMenuList, NavigationMenuItem, NavigationMenuT
 import { cn } from '../../lib/utils';
 
 ComponentRegistry.register('navigation-menu', 
-  ({ schema, ...props }: { schema: NavigationMenuSchema; [key: string]: any }) => {
+  ({ schema, ...props }: { schema: NavigationMenuSchema; [key: string]: unknown }) => {
     const { 
         'data-obj-id': dataObjId, 
         'data-obj-type': dataObjType,

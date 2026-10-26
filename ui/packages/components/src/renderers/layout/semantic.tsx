@@ -19,7 +19,7 @@ tags.forEach(tag => {
   // seven semantic tags with no schema type of their own, so `schema` stays
   // `any`; the annotation is written like its siblings' so the guard needs no
   // per-file carve-out.
-  const Component = forwardRef<HTMLElement, { schema: any; className?: string }>(({ schema, className, ...props }: { schema: any; className?: string; [key: string]: any }, ref) => {
+  const Component = forwardRef<HTMLElement, { schema: any; className?: string }>(({ schema, className, ...props }: { schema: any; className?: string; [key: string]: unknown }, ref) => {
       // Extract designer-related props
       const { 
           'data-obj-id': dataObjId, 

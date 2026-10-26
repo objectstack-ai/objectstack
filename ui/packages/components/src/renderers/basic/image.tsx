@@ -10,7 +10,7 @@ import { ComponentRegistry } from '@object-ui/core';
 import type { ImageSchema } from '@object-ui/types';
 
 ComponentRegistry.register('image',
-  ({ schema, className, ...props }: { schema: ImageSchema; className?: string; [key: string]: any }) => {
+  ({ schema, className, ...props }: { schema: ImageSchema; className?: string; [key: string]: unknown }) => {
     // Extract designer-related props
     const { 
         'data-obj-id': dataObjId, 

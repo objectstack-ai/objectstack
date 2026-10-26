@@ -17,7 +17,7 @@ import { forwardRef } from 'react';
 // argument — mechanism note on `action:bar` (objectui#4422), pinned by
 // `__tests__/forwardref-props-annotation.guard.test.ts`.
 const StackRenderer = forwardRef<HTMLDivElement, { schema: StackSchema; className?: string }>(
-  ({ schema, className, ...props }: { schema: StackSchema; className?: string; [key: string]: any }, ref) => {
+  ({ schema, className, ...props }: { schema: StackSchema; className?: string; [key: string]: unknown }, ref) => {
     // Default to column for Stack
     const direction = schema.direction || 'col';
     const justify = schema.justify || 'start';

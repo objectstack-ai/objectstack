@@ -11,7 +11,7 @@ import type { ToggleGroupSchema } from '@object-ui/types';
 import { ToggleGroup, ToggleGroupItem } from '../../ui/toggle-group';
 
 ComponentRegistry.register('toggle-group', 
-  ({ schema, ...props }: { schema: ToggleGroupSchema; [key: string]: any }) => {
+  ({ schema, ...props }: { schema: ToggleGroupSchema; [key: string]: unknown }) => {
     const { 
         'data-obj-id': dataObjId, 
         'data-obj-type': dataObjType,

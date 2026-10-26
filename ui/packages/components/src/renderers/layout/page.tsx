@@ -731,7 +731,7 @@ function nameHtmlTierReplacement(d: Diagnostic): Diagnostic {
 export const PageRenderer: React.FC<{
   schema: PageNodeSchema;
   className?: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }> = ({ schema, className, ...props }) => {
   const pageType = schema.pageType || 'record';
   // A `kind:'html'` page compiles its source against the registry, and a

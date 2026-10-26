@@ -62,7 +62,7 @@ import { toFormControlDomProps } from '../../lib/form-control-dom-props';
  * `element:text_input`: an unassociated `<p>` is decoration a screen reader
  * moving to the control never announces.
  */
-const ComboboxRenderer = ({ schema, disabled: hostDisabled, ...props }: { schema: ComboboxSchema; disabled?: boolean; [key: string]: any }) => {
+const ComboboxRenderer = ({ schema, disabled: hostDisabled, ...props }: { schema: ComboboxSchema; disabled?: boolean; [key: string]: unknown }) => {
   // `hostDisabled` is `SchemaRenderer`'s EVALUATED verdict on `disabled` /
   // `disabledOn`, not the raw authored key — which may be a predicate STRING,
   // truthy however it evaluates (objectui#7238, precedent objectui#6169).

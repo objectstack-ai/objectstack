@@ -11,7 +11,7 @@ import type { KbdSchema } from '@object-ui/types';
 import { cn } from '../../lib/utils';
 
 ComponentRegistry.register('kbd', 
-  ({ schema, ...props }: { schema: KbdSchema; [key: string]: any }) => {
+  ({ schema, ...props }: { schema: KbdSchema; [key: string]: unknown }) => {
     const { 
         'data-obj-id': dataObjId, 
         'data-obj-type': dataObjType,

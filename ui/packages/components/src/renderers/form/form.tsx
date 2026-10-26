@@ -1299,7 +1299,7 @@ function FullscreenTextarea({
    * nothing from that Slot, which is the whole of objectui#4824.
    */
   error?: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }) {
   // The inline control's own gate. `readOnly`/`disabled` are real attributes on
   // the `<Textarea>` below, but the attribute alone is not the write path —
@@ -1496,7 +1496,7 @@ function BuiltinTextarea({
    * the call site is where the two authored spellings are reconciled.
    */
   maxLength?: number;
-  [key: string]: any;
+  [key: string]: unknown;
 }) {
   /** One id per control; see `FullscreenTextarea` for why the dialog needs a second. */
   const descriptionId = `${React.useId()}-charcount`;
@@ -1553,7 +1553,7 @@ function BuiltinTextarea({
 
 // Form renderer component - Airtable-style feature-complete form
 ComponentRegistry.register('form',
-  ({ schema, className, onAction, disabled: hostDisabled, ...props }: { schema: FormSchema; className?: string; onAction?: (action: any) => void; disabled?: boolean; [key: string]: any }) => {
+  ({ schema, className, onAction, disabled: hostDisabled, ...props }: { schema: FormSchema; className?: string; onAction?: (action: any) => void; disabled?: boolean; [key: string]: unknown }) => {
     const { t } = useSafeFormTranslation();
     // Prefix for the label ids the GROUP-labelled fields need (objectui#3961).
     // Owned here, not derived from `<FormItem>`'s own `useId()`: that id lives in
@@ -4222,7 +4222,7 @@ interface RenderFieldProps {
    * before every registered widget (which reads it off `field`).
    */
   label?: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 // Native date/time inputs only open their picker when the user clicks the tiny

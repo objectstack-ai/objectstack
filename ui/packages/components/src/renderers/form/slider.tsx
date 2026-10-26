@@ -12,7 +12,7 @@ import { Slider } from '../../ui';
 import { toFormControlDomProps } from '../../lib/form-control-dom-props';
 
 ComponentRegistry.register('slider', 
-  ({ schema, className, ...props }: { schema: SliderSchema; className?: string; [key: string]: any }) => {
+  ({ schema, className, ...props }: { schema: SliderSchema; className?: string; [key: string]: unknown }) => {
     // Extract designer-related props
     const { 
         'data-obj-id': dataObjId, 

@@ -23,7 +23,7 @@ import { forwardRef } from 'react';
 // argument — mechanism note on `action:bar` (objectui#4422), pinned by
 // `__tests__/forwardref-props-annotation.guard.test.ts`.
 const CardRenderer = forwardRef<HTMLDivElement, { schema: CardSchema; className?: string }>(
-  ({ schema, className, ...props }: { schema: CardSchema; className?: string; [key: string]: any }, ref) => {
+  ({ schema, className, ...props }: { schema: CardSchema; className?: string; [key: string]: unknown }, ref) => {
     // Extract designer-related props
     const { 
         'data-obj-id': dataObjId, 

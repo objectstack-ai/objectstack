@@ -41,7 +41,7 @@ function toPickerDay(value: Date | string | undefined): Date | string | undefine
 }
 
 ComponentRegistry.register('date-picker',
-  ({ schema, className, value, onChange, ...props }: { schema: DatePickerSchema; className?: string; value?: Date | string; onChange?: (date: Date | undefined) => void; [key: string]: any }) => {
+  ({ schema, className, value, onChange, ...props }: { schema: DatePickerSchema; className?: string; value?: Date | string; onChange?: (date: Date | undefined) => void; [key: string]: unknown }) => {
     // `schema.format` is a date-fns pattern, and it is spelled in the display
     // locale: `PPP` and the textual tokens name months and weekdays in the
     // session's language (objectui#10722).

@@ -12,7 +12,7 @@ import { Button } from '../../ui';
 import { cn } from '../../lib/utils';
 
 ComponentRegistry.register('button-group', 
-  ({ schema, ...props }: { schema: ButtonGroupSchema; [key: string]: any }) => {
+  ({ schema, ...props }: { schema: ButtonGroupSchema; [key: string]: unknown }) => {
     const { 
         'data-obj-id': dataObjId, 
         'data-obj-type': dataObjType,

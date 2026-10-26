@@ -23,7 +23,7 @@ const useSafeFileUploadTranslation = createSafeTranslation(
 );
 
 ComponentRegistry.register('file-upload', 
-  ({ schema, className, value, onChange, ...props }: { schema: FileUploadSchema; className?: string; value?: File[]; onChange?: (files: File[]) => void; [key: string]: any }) => {
+  ({ schema, className, value, onChange, ...props }: { schema: FileUploadSchema; className?: string; value?: File[]; onChange?: (files: File[]) => void; [key: string]: unknown }) => {
     const { t } = useSafeFileUploadTranslation();
     const [files, setFiles] = useState<File[]>(value || []);
     const [isUploading, setIsUploading] = useState(false);

@@ -12,7 +12,7 @@ import { InputOTP, InputOTPGroup, InputOTPSeparator, InputOTPSlot } from '../../
 import { toFormControlDomProps } from '../../lib/form-control-dom-props';
 
 ComponentRegistry.register('input-otp', 
-  ({ schema, className, onChange, value, ...props }: { schema: InputOTPSchema; className?: string; [key: string]: any }) => {
+  ({ schema, className, onChange, value, ...props }: { schema: InputOTPSchema; className?: string; [key: string]: unknown }) => {
     // `style` forwarded by name; the rest through the form-control
     // declaration (objectui#5632).
     const { style, ...otpProps } = props;

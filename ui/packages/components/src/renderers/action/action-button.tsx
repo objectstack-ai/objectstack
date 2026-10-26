@@ -110,7 +110,7 @@ export interface ActionButtonRendererProps {
    * therefore never reaches the DOM spread — see the destructure.
    */
   disabled?: boolean;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 // `PropsWithoutRef` would collapse `ActionButtonRendererProps` to its bare index

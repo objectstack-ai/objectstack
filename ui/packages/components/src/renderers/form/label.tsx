@@ -11,7 +11,7 @@ import type { LabelSchema } from '@object-ui/types';
 import { Label } from '../../ui';
 
 ComponentRegistry.register('label', 
-  ({ schema, className, ...props }: { schema: LabelSchema; className?: string; [key: string]: any }) => {
+  ({ schema, className, ...props }: { schema: LabelSchema; className?: string; [key: string]: unknown }) => {
     // Extract designer-related props
     const { 
         'data-obj-id': dataObjId, 

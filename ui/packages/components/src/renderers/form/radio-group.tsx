@@ -36,7 +36,7 @@ const ORIENTATION_CLASS: Record<'horizontal' | 'vertical', string | undefined> =
 };
 
 ComponentRegistry.register('radio-group', 
-  ({ schema, className, ...props }: { schema: RadioGroupSchema; className?: string; [key: string]: any }) => {
+  ({ schema, className, ...props }: { schema: RadioGroupSchema; className?: string; [key: string]: unknown }) => {
     // Extract designer-related props
     const { 
         'data-obj-id': dataObjId, 

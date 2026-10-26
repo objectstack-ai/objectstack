@@ -12,7 +12,7 @@ import { Switch, Label } from '../../ui';
 import { toFormControlDomProps } from '../../lib/form-control-dom-props';
 
 ComponentRegistry.register('switch', 
-  ({ schema, className, ...props }: { schema: SwitchSchema; className?: string; [key: string]: any }) => {
+  ({ schema, className, ...props }: { schema: SwitchSchema; className?: string; [key: string]: unknown }) => {
     // Extract designer-related props
     const { 
         'data-obj-id': dataObjId, 

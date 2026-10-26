@@ -54,7 +54,7 @@ export interface ActionIconRendererProps {
    * signature, consumed by name below, never re-spread onto the DOM.
    */
   disabled?: boolean;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 // Index signature on the parameter annotation, not on the `forwardRef` type
