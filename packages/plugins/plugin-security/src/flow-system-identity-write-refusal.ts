@@ -54,10 +54,16 @@
  * body's `ctx.api` / `ctx.engine` (`buildActionExecutionContext`, runtime).
  * Each is derived with the app-automation elevation mark
  * (`appAutomationElevationOf`, `@objectstack/core`), and this predicate reads
- * it beside `flowRunId`: `isSystem` AND (`flowRunId` OR the mark). The mark is
- * set only at those two derivations, never on `sudo()`, so a platform writer's
- * system context — `sudo()`-derived or bare — carries neither and passes as
- * before. Under a hook's `runAs: 'user'` the context loses `isSystem`, and the
+ * it beside `flowRunId`: `isSystem` AND (`flowRunId` OR the mark).
+ *
+ * The same mark covers an app-authored hook's other elevations: a system
+ * context it inherits when it declares no `runAs`, and its in-process
+ * `ctx.api.sudo()` (`ScopedContext[APP_AUTHORED_HOOK_API]`, objectql), and an
+ * action reached through `ctx.api.object(x).execute(y)` (`'action'`). A hook is
+ * app-authored when it is bound through the hook binder (a metadata binding,
+ * the line `skipAutomations` draws); a hook registered in code (audit,
+ * security, any plugin's) is platform code. Platform code's `sudo()` and a
+ * platform writer's bare system context carry no mark and pass as before. Under a hook's `runAs: 'user'` the context loses `isSystem`, and the
  * D12 gate judges the user it acts for, as for a `runAs: 'user'` run.
  *
  * A context carrying both a run and a mark (a `runAs: 'system'` hook fired by a
@@ -99,7 +105,7 @@ type ElevationSource = 'flow' | AppAutomationElevation;
 /** How each source is named in the refusal. */
 const SUBJECT: Readonly<Record<ElevationSource, string>> = {
   flow: "a flow that runs as system (runAs: 'system')",
-  hook: "a hook that runs as system (runAs: 'system')",
+  hook: "a hook that runs as system (runAs: 'system', a system context it inherits, or ctx.api.sudo())",
   action: 'an action body (an action body runs as system)',
 };
 
@@ -115,7 +121,7 @@ const ASSIGNMENT_PRESCRIPTION: Readonly<Record<ElevationSource, string>> = {
     "Set the flow's runAs to 'user': the delegated-administration gate then judges the user the run acts for, "
     + 'and records that user as the grant\'s granted_by.',
   hook:
-    "Set the hook's runAs to 'user': the delegated-administration gate then judges the user the hook acts for, "
+    "Set the hook's runAs to 'user' and leave ctx.api.sudo() out: the delegated-administration gate then judges the user the hook acts for, "
     + 'and records that user as the grant\'s granted_by.',
   action:
     "Make the grant from a flow whose runAs is 'user', which an action of type 'flow' runs as the invoking user: "
@@ -140,8 +146,8 @@ function elevationSource(context: { isSystem?: unknown; flowRunId?: unknown } | 
 
 /**
  * Refuse a governed write to {@link FLOW_SYSTEM_IDENTITY_WRITE_OBJECTS} from a
- * system context a flow run opened, a hook's `runAs: 'system'` derived or an
- * action body runs under; return for every other operation.
+ * system context a flow run opened, an app-authored hook elevated, or an action
+ * body runs under; return for every other operation.
  *
  * Called by the data middleware immediately before its `isSystem` bypass, so
  * the refused write never reaches the engine's write path.

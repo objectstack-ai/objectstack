@@ -177,10 +177,10 @@ export function SourcePageEditor({
     }
   }, [source]);
 
-  // Monaco-unavailable fallback (headless / CSP / air-gapped) → plain textarea.
-  // Fast-fails the moment the CDN loader rejects instead of waiting the full
-  // grace period, and mounts the editor only once the loader has resolved
-  // (objectui#11800); see useMonacoFallback.
+  // Monaco-unavailable fallback (headless, a chunk that cannot be fetched) →
+  // plain textarea. Fast-fails the moment the editor chunk or the loader
+  // rejects instead of waiting the full grace period, and mounts the editor
+  // only once the loader has resolved (objectui#11800); see useMonacoFallback.
   const [monacoStatus, containerRef] = useMonacoFallback(fallbackDelayMs);
 
   const [theme, setTheme] = React.useState<'vs-dark' | 'light'>(() =>

@@ -8,6 +8,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { builtInLocales, registerBuiltInLocales } from '@object-ui/i18n/locales';
+import { ApiErrorSchema, FlowFailureDetailsSchema } from '@objectstack/spec/api';
+import type { AutomationResult } from '@objectstack/spec/contracts';
 import { flowSuccessCopy, interpretFlowResponse, judgeFlowLaunch } from '../flowResponse';
 
 const ok = { ok: true, status: 200 };
@@ -549,5 +552,87 @@ describe("flowSuccessCopy — the action's copy as a template envelope (objectui
         );
         expect(out.result).toEqual({ success: true, data, reload: true });
         expect(out.successToast).toBeUndefined();
+    });
+});
+
+// objectstack#24914 ruling B′ — a refusal a flow's write node met reads like
+// the same refusal on a record save: the authored `errorMessage`, then the
+// producer-marked `userMessage`, then the inner refusal (permission → the
+// form's localized line), then `message`.
+describe('interpretFlowResponse — a refusal met inside the run, by the record-save rule (objectstack#24914)', () => {
+    // Every pack resident, so the `zh` case reads the catalogue a Chinese
+    // console has loaded.
+    registerBuiltInLocales();
+
+    // The door's own constants (objectstack `packages/runtime/src/flow-failed-inner-refusal.test.ts`).
+    const INNER_MESSAGE =
+        "Duplicate record refused on 'crm_account': a unique constraint already holds these values. No record was written.";
+    const RAW_ERROR = `Node 'create_account' failed: create_record(crm_account) failed: ${INNER_MESSAGE}`;
+    const USER_TEXT = '该客户名称已被另一位销售代表占用，请联系主管。';
+    const UNIQUE = { code: 'UNIQUE_VIOLATION', message: INNER_MESSAGE } as const;
+    const DENIED = { code: 'PERMISSION_DENIED', message: 'insufficient privileges to create crm_account' } as const;
+    const RULE = { code: 'VALIDATION_FAILED', message: 'Account name must not contain a URL.' } as const;
+
+    /** The trigger/resume door's `400 FLOW_FAILED`, proven real by the spec's own schemas. */
+    function flowFailed(details: Record<string, unknown>, userMessage?: string) {
+        const error = {
+            code: 'FLOW_FAILED',
+            message: RAW_ERROR,
+            httpStatus: 400,
+            ...(userMessage ? { userMessage } : {}),
+            details,
+        };
+        expect(ApiErrorSchema.safeParse(error).error?.issues).toBeUndefined();
+        expect(FlowFailureDetailsSchema.safeParse(details).error?.issues).toBeUndefined();
+        return { success: false, error };
+    }
+    const failed400 = (json: unknown, copy?: Parameters<typeof interpretFlowResponse>[3]) =>
+        interpretFlowResponse({ ok: false, status: 400 }, json, 'Resume', copy);
+
+    it('a unique refusal shows the inner sentence, without the node and operation wrapper', () => {
+        expect(failed400(flowFailed({ innerRefusal: UNIQUE }))).toEqual({
+            kind: 'failed', error: INNER_MESSAGE, retryable: false,
+        });
+    });
+
+    it("a validation refusal shows the author's rule text", () => {
+        expect(failed400(flowFailed({ innerRefusal: RULE }))).toMatchObject({ error: RULE.message });
+    });
+
+    it("a permission refusal shows the record form's localized line, never the server prose", () => {
+        const en = failed400(flowFailed({ innerRefusal: DENIED }));
+        expect(en).toMatchObject({ error: builtInLocales.en.form.noPermissionToSave });
+
+        const zh = failed400(flowFailed({ innerRefusal: DENIED }), { flowName: 'convert', bundle: undefined, locale: 'zh-CN' });
+        expect(zh).toMatchObject({ error: builtInLocales.zh.form.noPermissionToSave });
+        expect((zh as { error: string }).error).not.toContain('crm_account');
+    });
+
+    it('a producer-marked userMessage wins over the inner refusal, verbatim', () => {
+        expect(failed400(flowFailed({ innerRefusal: UNIQUE }, USER_TEXT))).toMatchObject({ error: USER_TEXT });
+        expect(failed400(flowFailed({ innerRefusal: DENIED }, USER_TEXT))).toMatchObject({ error: USER_TEXT });
+    });
+
+    it("the flow's authored errorMessage still wins over both", () => {
+        const json = flowFailed({ errorMessage: 'Conversion failed.', innerRefusal: UNIQUE }, USER_TEXT);
+        expect(failed400(json)).toMatchObject({ error: 'Conversion failed.' });
+    });
+
+    it('an envelope without the members falls back to message, never to silence', () => {
+        expect(failed400(flowFailed({}))).toMatchObject({ error: RAW_ERROR });
+    });
+
+    it('the 200 failed arm reads the same members off the run, in the same order', () => {
+        const run = (extra: Partial<AutomationResult>): AutomationResult => ({
+            success: false, status: 'failed', error: RAW_ERROR, ...extra,
+        });
+        const on200 = (data: AutomationResult) => interpretFlowResponse(ok, { success: true, data }, 'Flow "convert"');
+
+        expect(on200(run({ innerRefusal: UNIQUE }))).toMatchObject({ kind: 'failed', error: INNER_MESSAGE, retryable: false });
+        expect(on200(run({ innerRefusal: DENIED }))).toMatchObject({ error: builtInLocales.en.form.noPermissionToSave });
+        expect(on200(run({ innerRefusal: UNIQUE, userMessage: USER_TEXT }))).toMatchObject({ error: USER_TEXT });
+        expect(on200(run({ innerRefusal: UNIQUE, userMessage: USER_TEXT, errorMessage: 'Conversion failed.' })))
+            .toMatchObject({ error: 'Conversion failed.' });
+        expect(on200(run({}))).toMatchObject({ error: RAW_ERROR });
     });
 });

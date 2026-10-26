@@ -6,7 +6,9 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import Editor from '@monaco-editor/react';
+import * as React from 'react';
+import Editor, { loader } from '@monaco-editor/react';
+import { configureBundledMonaco, isBundledMonacoLoaded } from './bundledMonaco';
 
 export interface MonacoImplProps {
   value?: string;
@@ -18,9 +20,17 @@ export interface MonacoImplProps {
   className?: string;
 }
 
+type MonacoStatus = 'loading' | 'ready' | 'unavailable';
+
 /**
  * MonacoImpl - The heavy implementation that imports Monaco Editor
  * This component is lazy-loaded to avoid including Monaco in the initial bundle
+ *
+ * The editor mounts only once the bundled Monaco has been handed to the loader
+ * (`bundledMonaco.ts`): mounted earlier, `<Editor>`'s own `loader.init()` would
+ * fetch Monaco from the loader's default CDN instead. When the editor chunk
+ * cannot be loaded, the same text is edited in a plain textarea rather than
+ * behind a "Loading..." that never ends.
  */
 export default function MonacoImpl({
   value = '',
@@ -31,6 +41,49 @@ export default function MonacoImpl({
   readOnly = false,
   className = '',
 }: MonacoImplProps) {
+  const [status, setStatus] = React.useState<MonacoStatus>(() =>
+    isBundledMonacoLoaded() ? 'ready' : 'loading',
+  );
+
+  React.useEffect(() => {
+    let cancelled = false;
+    configureBundledMonaco(loader).then(
+      () => {
+        if (!cancelled) setStatus('ready');
+      },
+      (reason: unknown) => {
+        if (cancelled) return;
+        console.warn(
+          `Monaco editor unavailable: ${reason instanceof Error ? reason.message : String(reason)}. The code editor falls back to a plain textarea.`,
+        );
+        setStatus('unavailable');
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (status === 'unavailable') {
+    return (
+      <div className={className}>
+        <textarea
+          value={value}
+          onChange={(e) => onChange?.(e.target.value)}
+          readOnly={readOnly}
+          spellCheck={false}
+          aria-label={`${language} source`}
+          style={{ height }}
+          className="block w-full resize-y bg-background p-3 font-mono text-sm leading-relaxed outline-none"
+        />
+      </div>
+    );
+  }
+
+  if (status === 'loading') {
+    return <div className={className} style={{ height }} aria-busy="true" />;
+  }
+
   return (
     <div className={className}>
       <Editor

@@ -15,6 +15,8 @@ import { enObjects } from './en.objects.generated.js';
  *   - `apps.setup.label` / `description`
  *   - `apps.setup.navigation.<id>.label` for every group AND leaf
  *   - `dashboards.system_overview.*`
+ *   - `datasets.<name>.{measures,dimensions}.<member>.label` for the System
+ *     Overview's datasets
  *
  * Object-level labels (Users, Roles, Audit Logs, …) are owned by the
  * sys_* object schemas themselves and translated separately.
@@ -250,6 +252,23 @@ export const en: TranslationData = {
       globalFilters: {
         created_at: { label: 'Date Range' },
       },
+    },
+  },
+
+  // The copy the System Overview draws from its DATASETS rather than from the
+  // board: the caption under each metric tile is the selected measure's label,
+  // and a table or chart over a dimension is headed by the dimension's label.
+  // Mirrors `dashboards/system.datasets.ts` verbatim; keyed
+  // `datasets.<name>.{measures,dimensions}.<member>.label`, and served on the
+  // analytics query, which localizes the saved definition before it runs.
+  datasets: {
+    sys_user_metrics: { measures: { user_count: { label: 'Users' } } },
+    sys_organization_metrics: { measures: { org_count: { label: 'Organizations' } } },
+    sys_session_metrics: { measures: { session_count: { label: 'Sessions' } } },
+    sys_package_installation_metrics: { measures: { package_count: { label: 'Installations' } } },
+    sys_audit_log_metrics: {
+      dimensions: { action: { label: 'Action' }, user_id: { label: 'User' } },
+      measures: { event_count: { label: 'Events' } },
     },
   },
 
