@@ -131,10 +131,12 @@ describe('exportOptions ↔ installed @objectstack/spec (objectui#4535)', () => 
     // Non-vacuity floor. Every assertion below reads through `specObjectBranch`,
     // and a spec refactor that moved the shape would otherwise turn each of them
     // into a comparison against `undefined` — which some would pass.
+    // Floors and named members, not the spec's arm and key counts (#26238):
+    // the parity cases below compare the full key sets, derived on both sides.
     expect(specExportOptions).toBeDefined();
-    expect(specUnion.options).toHaveLength(2);
+    expect(specUnion.options?.length).toBeGreaterThan(0);
     expect(specObjectBranch).toBeDefined();
-    expect(Object.keys(specObjectBranch?.shape ?? {}).length).toBe(5);
+    expect(Object.keys(specObjectBranch?.shape ?? {})).toContain('formats');
     expect(specFormatEnumValues().length).toBeGreaterThan(0);
   });
 

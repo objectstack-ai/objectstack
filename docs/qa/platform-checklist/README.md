@@ -3,7 +3,7 @@
 A durable, machine-readable checklist of platform capabilities that an **AI agent
 executes** against a running app (browser + API + CLI + build gates). It replaces the
 one-off shapes release verification used before — a hand-written table per release
-([docs/plans/release-15.1-test-plan.md](../../plans/release-15.1-test-plan.md)) and a
+([docs/plans/release-15.1-test-plan.md](https://github.com/objectstack-ai/objectstack/blob/df8aac41f2d9d14db04afdfe48511216419dafc0/docs/plans/release-15.1-test-plan.md)) and a
 checkbox issue per release (#3358) — with one ledger that **accumulates across
 releases**, supports append/change without losing history, and pins every tick to an
 acceptance oracle and captured evidence.
@@ -483,7 +483,7 @@ ledger** as revisions — that is the accumulation the one-off checklists never 
 | `packages/qa/dogfood` golden tests | Permanent pins for historical regressions — the `automated.ref` target for API-lane items. |
 | `examples/app-showcase/src/coverage.ts` | The ratchet that every spec variant is *demonstrable*. This ledger asserts the demonstrations *work when driven*. Fixture gaps found here should often be fixed there. |
 | objectui `e2e/live/*` + ADR-0054 | The browser-lane automation and the UI-testability contract (stable locators, machine-readable async state) that makes browser oracles trustworthy. |
-| `docs/plans/release-15.1-test-plan.md`, #3358 | The predecessors this generalizes. Their vocabulary (方式 lanes, 验证要点, 来源) maps to `surface`, `acceptance`, `source`. |
+| `docs/plans/release-15.1-test-plan.md` (deleted; read it at commit `df8aac41`), #3358 | The predecessors this generalizes. Their vocabulary (方式 lanes, 验证要点, 来源) maps to `surface`, `acceptance`, `source`. Item `source` rows that cite its sections (`§A13`, …) resolve at that commit. |
 
 **Deliberately not reused:** `packages/spec/src/qa/testing.zod.ts`
 (`TestScenarioSchema`). Its action vocabulary is headless-API-only
