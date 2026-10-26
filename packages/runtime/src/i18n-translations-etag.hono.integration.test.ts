@@ -116,7 +116,8 @@ describe('the translation bundle is revalidated with ETag and answered 304 over 
             const res = await get({ [SESSION_HEADER]: '1', 'if-none-match': issued });
             expect(res.status).toBe(200);
             expect(res.headers.get('etag')).not.toBe(issued);
-            expect((await res.json()).data.translations).toEqual({ objects: { lead: { label: 'Piste' } } });
+            const json = (await res.json()) as Record<string, any>;
+            expect(json.data.translations).toEqual({ objects: { lead: { label: 'Piste' } } });
         } finally {
             bundles.fr = previous;
         }
@@ -130,6 +131,7 @@ describe('the translation bundle is revalidated with ETag and answered 304 over 
         const res = await get({ 'if-none-match': etag });
         expect(res.status).toBe(401);
         expect(res.headers.get('etag')).toBeNull();
-        expect((await res.json()).error.code).toBe('UNAUTHENTICATED');
+        const json = (await res.json()) as Record<string, any>;
+        expect(json.error.code).toBe('UNAUTHENTICATED');
     });
 });
