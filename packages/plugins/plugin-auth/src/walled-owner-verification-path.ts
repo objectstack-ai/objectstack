@@ -145,6 +145,16 @@ export function devSeedAdminEmail(): string {
 }
 
 /**
+ * The password `AuthPlugin.maybeSeedDevAdmin` provisions the development admin
+ * with (`os dev --admin-password`, default `admin123`). The stack's
+ * `demoStaff` accounts sign in with the same one (`demo-staff.ts`), so a
+ * developer learns one password per local database, and the two cannot drift.
+ */
+export function devSeedAdminPassword(): string {
+  return env().OS_SEED_ADMIN_PASSWORD?.trim() || 'admin123';
+}
+
+/**
  * Whether the dev-admin seed is armed for this process — HARD-gated to
  * `NODE_ENV==='development'`, never armed on a migrate-and-exit boot
  * (`OS_MIGRATE_AND_EXIT=1`), opt-out via `OS_SEED_ADMIN=0|false|off|no`.

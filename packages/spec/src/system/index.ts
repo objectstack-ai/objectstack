@@ -33,6 +33,7 @@ export * from './object-storage.zod';
 export * from './search-engine.zod';
 export * from './http-server.zod';
 export * from './dev-login.zod';
+export * from './demo-staff.zod';
 export * from './stack-server.zod';
 
 // Observability & Operations

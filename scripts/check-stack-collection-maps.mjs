@@ -344,8 +344,17 @@ export function tupleFirstItems(body) {
  *   it is refused inside `packages[].manifest` exactly as `devPlugins` is. All
  *   eight sites are correct to omit it, so the same eight-contradictory-waivers
  *   outcome applies.
+ * - `demoStaff` (#25777) carries the DEMO ACCOUNTS a development boot creates
+ *   for the application's seed data to be dealt to. Its one reader is
+ *   `@objectstack/plugin-auth`, handed the list off the top level of the
+ *   authored definition by `os serve`; `os build` leaves it out of the
+ *   artifact. It names no metadata type and registers nothing: an entry becomes
+ *   an account through the auth sign-up pipeline, never a metadata item. No
+ *   singular name, no artifact subdirectory, no `registerInMemory` kind, no map
+ *   form, and an artifact ENVELOPE key besides — the same eight correct
+ *   omissions as `devLogins`.
  */
-const NON_COLLECTION_ARRAY_KEYS = new Set(['packages', 'devLogins']);
+const NON_COLLECTION_ARRAY_KEYS = new Set(['packages', 'devLogins', 'demoStaff']);
 
 /**
  * The stack-collection set: top-level `ObjectStackDefinitionSchema` keys whose

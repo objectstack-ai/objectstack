@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 240 |
-| Object name statically decidable | 163 |
+| Write call sites | 243 |
+| Object name statically decidable | 166 |
 | Object name chosen at run time | 77 |
-| Against a tenancy-enabled object | 162 |
+| Against a tenancy-enabled object | 165 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 181 |
+| Threading a tenant context | 184 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 51 |
 | …and decidably tenancy-enabled | 29 |
-| Threading a decidably elevated context | 137 |
+| Threading a decidably elevated context | 140 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 95 |
 
@@ -90,12 +90,12 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-25 at `ca3ca05b0`.
+Measured on 2026-10-25 at `85aabb332`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 768 |
-| engine-shaped types recognised | 87 |
+| tracked non-test sources scanned | 769 |
+| engine-shaped types recognised | 88 |
 | declared objects in the registry | 117 |
 | same-named calls subtracted as non-engine | 176 |
 
@@ -144,6 +144,9 @@ Measured on 2026-10-25 at `ca3ca05b0`.
 | `packages/plugins/plugin-auth/src/auth-plugin.ts` | `update` | `sys_user` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/auth-plugin.ts` | `update` | `SystemObjectName.USER` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/default-organization-invariant.ts` | `insert` | `sys_organization` | enabled | elevated | 1 |
+| `packages/plugins/plugin-auth/src/demo-staff.ts` | `update` | `sys_user` | enabled | elevated | 1 |
+| `packages/plugins/plugin-auth/src/demo-staff.ts` | `insert` | `sys_user_permission_set` | enabled | elevated | 1 |
+| `packages/plugins/plugin-auth/src/demo-staff.ts` | `insert` | `sys_user_position` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/ensure-default-organization.ts` | `insert` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/ensure-default-organization.ts` | `update` | `sys_member` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/forced-reset-revocation.ts` | `update` | `SystemObjectName.API_KEY` | undecidable | elevated | 1 |

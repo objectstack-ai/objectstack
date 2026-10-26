@@ -79,6 +79,7 @@ const ARTIFACT_ENVELOPE_KEYS = [
   'devPlugins',    // the `os dev` load list — the same class as `plugins` (#15219 ruling A)
   'devHint',       // one sentence the development BOOT BANNER prints — a property of the boot, not of a package (#17556)
   'devLogins',     // the first-run credentials that banner prints — read off the top level, never out of a body (#17556)
+  'demoStaff',     // the demo accounts the development boot creates — handed to auth off the authored config, never out of a body (#25777)
   'appName',       // the deployment's product name — read off the top level by the boot's mail/auth wiring
   'email',         // the deployment's mail configuration — read off the top level when the boot builds the email provider
   'sms',           // the deployment's SMS configuration — read off the top level when the boot builds the SMS provider

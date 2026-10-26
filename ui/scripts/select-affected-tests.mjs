@@ -68,7 +68,11 @@
  *         one);
  *       - an affected package that a BROAD root setup file imports by name:
  *         the light DOM setup installs the i18n catalogues into every `dom`
- *         test, an edge no test file states.
+ *         test, an edge no test file states;
+ *       - nested as `ui/` of the objectstack monorepo, a change OUTSIDE the
+ *         tree that its tests install or build from: a non-documentation
+ *         file at the workspace root, `patches/`, or a monorepo package the
+ *         tree depends on (`outsideTreeReasons` says which).
  *
  *  4. THE HEAVY SETUP. The setup of the `dom-heavy` project registers four
  *     packages' components into every test of that project and of each
@@ -110,7 +114,13 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
-import { parseWorkspaceGlobs, workspaceGlobs } from './workspace-root.mjs';
+import {
+  nestedPrefix,
+  parseWorkspaceGlobs,
+  workspaceGlobs,
+  workspaceManifestPath,
+  workspaceRoot,
+} from './workspace-root.mjs';
 
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -141,6 +151,9 @@ const DISK_SPECIFIERS = new Set([
   'tinyglobby',
 ]);
 
+const DEPENDENCY_FIELDS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'];
+const RUNTIME_DEPENDENCY_FIELDS = DEPENDENCY_FIELDS.filter((field) => field !== 'devDependencies');
+
 const RESOLVE_EXTENSIONS = ['', '.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs', '.json'];
 
 const toPosix = (p) => p.split(path.sep).join('/');
@@ -154,21 +167,19 @@ const toPosix = (p) => p.split(path.sep).join('/');
 export { parseWorkspaceGlobs };
 
 /**
- * Every workspace package: its name, its repository-relative directory and the
- * workspace packages it names in any dependency field.
+ * The named manifests under `globs` (`dir` or `dir/*`, already parsed),
+ * relative to `base`.
  *
- * @param {string} root
- * @returns {Array<{ name: string, dir: string, deps: string[] }>}
+ * @param {string} base
+ * @param {string[]} globs
+ * @returns {Array<{ name: string, dir: string, pkg: Record<string, any> }>}
  */
-export function listWorkspacePackages(root = REPO_ROOT) {
-  // Relative to `root` in both layouts: the objectui root's own file, or the
-  // monorepo root's `ui/...` globs with the prefix stripped (objectstack#25723).
-  const globs = workspaceGlobs(root);
+function readManifests(base, globs) {
   const dirs = [];
   for (const glob of globs) {
     if (glob.endsWith('/*')) {
       const parent = glob.slice(0, -2);
-      const abs = path.join(root, parent);
+      const abs = path.join(base, parent);
       if (!fs.existsSync(abs)) continue;
       for (const entry of fs.readdirSync(abs, { withFileTypes: true })) {
         if (entry.isDirectory()) dirs.push(`${parent}/${entry.name}`);
@@ -179,16 +190,30 @@ export function listWorkspacePackages(root = REPO_ROOT) {
   }
   const manifests = [];
   for (const dir of dirs.sort()) {
-    const file = path.join(root, dir, 'package.json');
+    const file = path.join(base, dir, 'package.json');
     if (!fs.existsSync(file)) continue;
     const pkg = JSON.parse(fs.readFileSync(file, 'utf8'));
     if (typeof pkg.name !== 'string') continue;
     manifests.push({ name: pkg.name, dir, pkg });
   }
+  return manifests;
+}
+
+/**
+ * Every workspace package: its name, its repository-relative directory and the
+ * workspace packages it names in any dependency field.
+ *
+ * @param {string} root
+ * @returns {Array<{ name: string, dir: string, deps: string[] }>}
+ */
+export function listWorkspacePackages(root = REPO_ROOT) {
+  // Relative to `root` in both layouts: the objectui root's own file, or the
+  // monorepo root's `ui/...` globs with the prefix stripped (objectstack#25723).
+  const manifests = readManifests(root, workspaceGlobs(root));
   const names = new Set(manifests.map((m) => m.name));
   return manifests.map(({ name, dir, pkg }) => {
     const deps = new Set();
-    for (const field of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
+    for (const field of DEPENDENCY_FIELDS) {
       for (const dep of Object.keys(pkg[field] ?? {})) if (names.has(dep) && dep !== name) deps.add(dep);
     }
     return { name, dir, deps: [...deps].sort() };
@@ -441,6 +466,100 @@ export function changedFiles(root, base, head = 'HEAD') {
     .filter(Boolean);
 }
 
+/**
+ * The changed files OUTSIDE this tree, relative to the workspace root -- the
+ * monorepo's own files when the tree is nested (`ui/` of objectstack), and
+ * nothing standalone, where the tree is the whole repository. `changedFiles`
+ * leaves them out by construction (`--relative`), so this is the second half
+ * of the same diff: git runs at the workspace root with `--relative` again,
+ * and the tree's own prefix is dropped from what it prints.
+ */
+export function changedOutsideTree(root, base, head = 'HEAD') {
+  const prefix = nestedPrefix(root);
+  if (!prefix) return [];
+  return changedFiles(workspaceRoot(root), base, head).filter((f) => !f.startsWith(prefix));
+}
+
+/**
+ * Why a change outside this tree reaches every test in it, one reason per
+ * file that does (an empty list means none does). The tree's tests install
+ * from the workspace root, so its install and toolchain inputs are this tree's
+ * too, and they import the monorepo's own packages the tree depends on from
+ * their built output (the CI job builds them first):
+ *
+ *   - a workspace-root file that is not documentation (the one lockfile, the
+ *     workspace file, the root manifest, `turbo.json`, a root `tsconfig`), or
+ *     anything under `patches/` -- the rule item 3 states for this tree's own
+ *     root, applied to the root it installs from;
+ *   - a file in a workspace package outside this tree that a package of this
+ *     tree depends on (any dependency field), or that such a package depends
+ *     on at run time (`dependencies`, `peerDependencies`,
+ *     `optionalDependencies`; an outer package's devDependencies are its own
+ *     test tooling, not its built output). On objectstack that is the seven
+ *     packages the `ui_consumers` filter of `ci.yml` names. Which of this
+ *     tree's tests read the changed export is not something the package graph
+ *     can say, so every test runs.
+ *
+ * Every other path -- another package of the monorepo, its docs, scripts and
+ * workflows -- reaches this tree's tests only through the always-on set, as a
+ * file outside every package does inside it.
+ *
+ * @param {{ root?: string, outside: string[] }} input  `outside` relative to the workspace root
+ * @returns {string[]}
+ */
+export function outsideTreeReasons({ root = REPO_ROOT, outside }) {
+  if (outside.length === 0) return [];
+  const prefix = nestedPrefix(root);
+  const wsRoot = workspaceRoot(root);
+  const own = new Set(listWorkspacePackages(root).map((p) => p.name));
+  const globs = parseWorkspaceGlobs(fs.readFileSync(workspaceManifestPath(root), 'utf8')).filter(
+    (g) => !g.startsWith(prefix) && `${g}/` !== prefix,
+  );
+  const outer = readManifests(wsRoot, globs).filter((m) => !own.has(m.name));
+  const outerNames = new Set(outer.map((m) => m.name));
+  const depsOf = (pkg, fields = DEPENDENCY_FIELDS) => fields.flatMap((field) => Object.keys(pkg[field] ?? {}));
+
+  // The outer packages this tree reaches, each with the tree package that
+  // reaches it first (named in the reason).
+  const reachedBy = new Map();
+  const queue = [];
+  for (const m of readManifests(root, workspaceGlobs(root))) {
+    for (const dep of depsOf(m.pkg)) {
+      if (outerNames.has(dep) && !reachedBy.has(dep)) {
+        reachedBy.set(dep, m.name);
+        queue.push(dep);
+      }
+    }
+  }
+  const byName = new Map(outer.map((m) => [m.name, m]));
+  while (queue.length) {
+    const name = queue.shift();
+    for (const dep of depsOf(byName.get(name).pkg, RUNTIME_DEPENDENCY_FIELDS)) {
+      if (outerNames.has(dep) && !reachedBy.has(dep)) {
+        reachedBy.set(dep, reachedBy.get(name));
+        queue.push(dep);
+      }
+    }
+  }
+
+  const reasons = [];
+  for (const rel of outside) {
+    if (!rel.includes('/') && !ROOT_DOC_FILE.test(rel)) {
+      reasons.push(`${rel}: a workspace-root file that is not documentation (install, toolchain or config input of this tree)`);
+      continue;
+    }
+    if (rel.startsWith('patches/')) {
+      reasons.push(`${rel}: a dependency patch changes what is installed for every test`);
+      continue;
+    }
+    const owner = owningPackage(rel, outer);
+    if (owner && reachedBy.has(owner.name)) {
+      reasons.push(`${rel}: ${owner.name} changed, and this tree's tests read its built output (through ${reachedBy.get(owner.name)})`);
+    }
+  }
+  return reasons;
+}
+
 /** The root vitest config and every `vitest.setup*` file beside it. */
 export function rootTestConfigFiles(tracked) {
   return tracked.filter((f) => ROOT_TEST_CONFIG.includes(f) || /^vitest\.setup[^/]*\.[cm]?[jt]sx?$/.test(f)).sort();
@@ -474,10 +593,12 @@ export function readHeavyProject(configText) {
 /**
  * The verdict for one change.
  *
- * @param {{ root?: string, changed: string[], tracked?: string[] }} input
+ * @param {{ root?: string, changed: string[], outside?: string[], tracked?: string[] }} input
+ *   `changed` relative to `root`; `outside` the changed files outside the tree,
+ *   relative to the workspace root (`changedOutsideTree`)
  * @returns {{ mode: 'full', reasons: string[] } | { mode: 'affected', changedPackages: string[], affectedPackages: string[], heavyEdge: string[], alwaysOn: Array<{ file: string, why: string }>, filters: string[], testFileCount: number, selectedTestFileCount: number }}
  */
-export function selectAffectedTests({ root = REPO_ROOT, changed, tracked = trackedFiles(root) }) {
+export function selectAffectedTests({ root = REPO_ROOT, changed, outside = [], tracked = trackedFiles(root) }) {
   const packages = listWorkspacePackages(root);
   const names = new Set(packages.map((p) => p.name));
   const { dependencyClosure, dependentClosure } = packageClosures(packages);
@@ -537,7 +658,7 @@ export function selectAffectedTests({ root = REPO_ROOT, changed, tracked = track
     })
     .map((f) => `${path.posix.dirname(f)}/`);
 
-  const reasons = [];
+  const reasons = outsideTreeReasons({ root, outside });
   const changedPackages = new Set();
   for (const rel of changed) {
     const base = rel.split('/').pop() ?? rel;
@@ -658,8 +779,10 @@ function main(argv) {
     return 2;
   }
   const changed = changedFiles(REPO_ROOT, base);
+  const outside = changedOutsideTree(REPO_ROOT, base);
   console.log(`changed files against the merge base of ${base}: ${changed.length}`);
-  const verdict = selectAffectedTests({ changed });
+  if (nestedPrefix(REPO_ROOT)) console.log(`changed files outside ${nestedPrefix(REPO_ROOT)}: ${outside.length}`);
+  const verdict = selectAffectedTests({ changed, outside });
   if (verdict.mode === 'full') {
     console.log('FULL RUN — this change reaches something every test runs through:');
     for (const r of verdict.reasons) console.log(`  - ${r}`);

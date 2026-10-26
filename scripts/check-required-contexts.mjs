@@ -461,6 +461,15 @@ export const REQUIRED_CONTEXTS = [
       'added to the `main` ruleset the same minute; this row is the repo half (#25853)',
     carries: 'the Console build from `ui/apps/console` and its Playwright e2e',
   },
+  {
+    workflow: 'ci.yml',
+    job: 'type-check-ui',
+    context: 'Type Check UI',
+    authorized:
+      '#25752 step 6, maintainer ruling 2026-10-26T02:56Z in the project thread, verbatim 「Type Check UI 加了」 — ' +
+      'after #25856 (fc2aaaec52) closed bill item 49 with the job green on the main push run 40253800516',
+    carries: 'the type-check + vitest-setup type-check family of the `ui/` workspace',
+  },
 ];
 
 /**
@@ -575,8 +584,9 @@ export const INSTRUCTION_SURFACES = [
     // with every gate green, which is what put the exclusivity rule below in
     // the judge. Then 7→5 by #22998 (two-speed CI: the dogfood and temporal
     // contexts moved to the full battery). Then 5→7 by #25853 (the `ui/`
-    // import's `Lint UI` and `Build & E2E UI`). The full set is pinned here so
-    // the corrected sentence cannot rot back — a rename in ANY of the seven
+    // import's `Lint UI` and `Build & E2E UI`) and 7→8 with `Type Check UI`
+    // once bill item 49 closed (#25856). The full set is pinned here so the
+    // corrected sentence cannot rot back — a rename in ANY of the eight
     // reddens this gate instead.
     file: 'AGENTS.md',
     statesTheSet: true,
@@ -588,6 +598,7 @@ export const INSTRUCTION_SURFACES = [
       'Governed Surface Queue Guard',
       'Lint UI',
       'Build & E2E UI',
+      'Type Check UI',
     ],
   },
   {
@@ -618,6 +629,7 @@ export const INSTRUCTION_SURFACES = [
       'Governed Surface Queue Guard',
       'Lint UI',
       'Build & E2E UI',
+      'Type Check UI',
     ],
   },
   {
@@ -640,7 +652,7 @@ export const INSTRUCTION_SURFACES = [
  * of the six surfaces have one; `AGENTS.md` does not, because a repo-root FILE
  * has no separator to be found by — so an AGENTS.md card derived this gate not
  * at all, while that surface is the one carrying `mustName` for every
- * required context (widened 2→6 by #9677, 6→7 by #17798, 7→5 by #22998, 5→7 by #25853). Editing the merge-queue
+ * required context (widened 2→6 by #9677, 6→7 by #17798, 7→5 by #22998, 5→7 by #25853, 7→8). Editing the merge-queue
  * paragraph there is precisely how this gate goes red, and it was reachable
  * only by judgment.
  *

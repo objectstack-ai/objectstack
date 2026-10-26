@@ -11,9 +11,11 @@
  * this module. It never reads a copy under `ui/.github/`: nothing runs one.
  *
  * What the port did not carry (the coverage lane, the docs job, the shard
- * aggregate, the affected-test and type-check-scope selectors, the timings
- * upload) has no job here, and the pins on those retired with a disposition
- * beside them rather than being pointed at a job that does something else.
+ * aggregate, the type-check-scope selector, the timings upload) has no job
+ * here, and the pins on those retired with a disposition beside them rather
+ * than being pointed at a job that does something else. The affected-test
+ * selector was wired into `test-ui` later (objectstack#25868), and its pins
+ * read that job.
  */
 import fs from 'node:fs';
 import path from 'node:path';
