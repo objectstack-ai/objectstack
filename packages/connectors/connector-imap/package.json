@@ -3,18 +3,30 @@
   "version": "18.1.0",
   "license": "Apache-2.0",
   "description": "IMAP connector for ObjectStack — a read-only IMAP4rev1 session (EXAMINE, UID FETCH with BODY.PEEK) and the per-user-shaped mail account and credential abstraction the mailbox sync connects through.",
+  "type": "commonjs",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "sideEffects": false,
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.js"
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
     },
     "./testing": {
-      "types": "./dist/testing.d.ts",
-      "import": "./dist/testing.mjs",
-      "require": "./dist/testing.js"
+      "import": {
+        "types": "./dist/testing.d.mts",
+        "default": "./dist/testing.mjs"
+      },
+      "require": {
+        "types": "./dist/testing.d.ts",
+        "default": "./dist/testing.js"
+      }
     }
   },
   "scripts": {
@@ -36,12 +48,18 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/objectstack-ai/objectstack.git",
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
     "directory": "packages/connectors/connector-imap"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "files": [
     "dist",
     "README.md",
     "CHANGELOG.md"
-  ]
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  }
 }

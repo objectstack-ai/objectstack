@@ -225,8 +225,14 @@ export function RegisterPage() {
         onSuccess={() => navigate('/')}
         onVerificationRequired={(email) => setPendingEmail(email)}
         loginUrl={loginUrl}
-        title={t('auth.register.title')}
-        description={t('auth.register.description')}
+        // #25886 — an invitee is told to register the invited address: the
+        // invitation is accepted only by the account that carries it.
+        title={invitationRedirect ? t('auth.register.invitationTitle') : t('auth.register.title')}
+        description={
+          invitationRedirect
+            ? t('auth.register.invitationDescription')
+            : t('auth.register.description')
+        }
         linkComponent={RouterLink}
         errorMessages={signUpRefusalMessages(t)}
         labels={{

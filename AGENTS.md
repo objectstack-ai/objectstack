@@ -135,7 +135,7 @@ layer at least as close to the code (ruling record 6120820653).
 
 | Scenario | Command | Notes |
 |:---|:---|:---|
-| **Frontend debug** (UI in `../objectui` calls backend) | `PORT=3000 pnpm dev` | `pnpm dev` = the **showcase** kitchen-sink app (default; best for exercising the platform). Port **must** be 3000 (UI hard-wired); persistent state; leave running. For the minimal CRM app instead: `PORT=3000 pnpm dev:crm`. |
+| **Frontend debug** (the Console in `ui/` calls backend) | `PORT=3000 pnpm dev` | `pnpm dev` = the **showcase** kitchen-sink app (default; best for exercising the platform). Port **must** be 3000 (UI hard-wired); persistent state; leave running. For the minimal CRM app instead: `PORT=3000 pnpm dev:crm`. |
 | **Backend-only debug** | `pnpm dev -- --fresh -p <random>` | Random high port; ephemeral tempdir; **you must kill it** when done |
 
 `--fresh`: ephemeral tempdir (auto-deleted on exit) + `--seed-admin` (POSTs sign-up, prints creds — default
@@ -153,14 +153,11 @@ pnpm dev:crm -- --fresh -p 38421   # start; debug via curl
 kill $(lsof -ti tcp:38421)         # tear down — tempdir auto-deletes
 ```
 
-### Frontend (Studio UI) — sibling repo `../objectui`
+### Frontend (Studio UI) — `ui/`
 
-This repo ships **backend only**. All Studio/Console UI work happens in `../objectui` (separate repo, checked out next
-to `framework/`). Workflow: edit + commit + push in `../objectui`, then in `framework/` run `pnpm objectui:refresh` to
-pull its build into `packages/console/`.
-
-Other scripts: `objectui:bump` (pull only), `objectui:build`, `objectui:clean`. ⛔ Never hand-edit
-`packages/console/dist/` or `.cache/objectui-*/` — regenerated.
+The Studio/Console UI lives in this workspace under `ui/` (`@object-ui/*`; the Console source is `ui/apps/console`),
+and `ui/AGENTS.md` adds that tree's own rules to this file's. `pnpm console:build` builds the Console and copies its
+dist into `packages/console/` (`packages/console/build-dist.sh`). ⛔ Never hand-edit `packages/console/dist/`.
 
 **Moving the pin has a second half: regenerate the committed manifest** — `pnpm objectui:build`, then
 `node scripts/gen-sdui-manifest-node.mjs`, which reads objectui's BUILT tree at the pin (never an npm install, whose
@@ -168,11 +165,11 @@ version string names an older commit) and takes no arguments; `scripts/check-sdu
 `objectui:bump` and `objectui:refresh` print the step, and the console build ships that same tracked file in
 `packages/console/dist/`. Full procedure: `docs/releases-maintenance.md`.
 
-**Fast iteration on `../objectui` src (no commit/refresh loop):** run objectui's own console dev server —
-`cd ../objectui && pnpm --filter @object-ui/console dev` (Vite on **:5180**, HMR). Its `/api` proxy targets
+**Fast iteration on `ui/` src (no rebuild loop):** run the Console dev server —
+`pnpm --filter @object-ui/console dev` (Vite on **:5180**, HMR). Its `/api` proxy targets
 `DEV_PROXY_TARGET || http://localhost:3000`, so **run the backend you're testing on :3000** (`PORT=3000 pnpm dev` for
-showcase) and browse `:5180`. Note `:3001/_console` (or whatever the backend serves) is the **published** console, not
-your `../objectui` src — only `:5180` reflects local UI edits. See `../objectui/AGENTS.md` for the app-id /
+showcase) and browse `:5180`. Note `:3001/_console` (or whatever the backend serves) is the **built** console, not
+your `ui/` src — only `:5180` reflects local UI edits. See `ui/AGENTS.md` for the app-id /
 localStorage / auth gotchas.
 
 ---
@@ -231,7 +228,7 @@ localStorage / auth gotchas.
     `.claude/hooks/guard-main-checkout.sh` blocks `Edit`/`Write`/`NotebookEdit`, and
     `.claude/hooks/guard-main-checkout-bash.sh` blocks the identical write arriving through **Bash** (`>`/`>>`
     redirection, `sed -i`, `perl -i`, `tee`, `cp`, `mv`, `rm`, `touch`) — and both check the **target file's own
-    repo**, so sibling repos (`objectui`/`cloud`) you touch are covered too (deliberate non-task override:
+    repo**, so sibling repos (`cloud`, `hotcrm`) you touch are covered too (deliberate non-task override:
     `OS_ALLOW_MAIN_EDITS=1`, one switch for both). The Bash guard is precision-first: it never blocks reads, and any
     shape it cannot resolve with confidence (`bash -c …`, `xargs`, `node -e`, a `$VAR`/glob target) is allowed through
     — the rule still outranks the hook. **A worktree isolates neither the stash nor the build cache** — the
@@ -302,7 +299,7 @@ localStorage / auth gotchas.
 15. **⛔ A version release is performed by the maintainer, by hand — no AI seat publishes, tags, cuts a Release, or
     triggers a release, and none merges the Version Packages PR.** A rule that binds every seat lives here,
     not only in a lane-specific skill file. **Release-adjacent work stays open to every seat**: the release board,
-    `.objectui-sha` pin bumps, version reconciliation, writing changesets, compiling release notes when asked, and
+    version reconciliation, writing changesets, compiling release notes when asked, and
     *verifying* release state (`npm view`, `git ls-remote --tags`) are ordinary tasks. What is reserved is the
     **release act itself**: ⛔ running `changeset publish` / `pnpm run release`, ⛔ pushing a version tag, ⛔
     cutting a GitHub Release, ⛔ pushing a runtime image, ⛔ `workflow_dispatch`-ing `release.yml` in any lane but
@@ -568,11 +565,10 @@ Even inside your own worktree, operate defensively:
    | `packages/spec/dist` | `check:api-surface` reports *other people's* exports as "N breaking (removed/narrowed)"; `check:i18n-coverage` rejects an example config for a value the spec allows | both read the built `.d.ts`, not `src/` |
    | `node_modules` | a package fails to resolve a dependency it plainly declares (`Cannot find package 'hono'`) | the merge moved `pnpm-lock.yaml` |
    | `packages/runtime/.objectstack/` | `datasource-autoconnect` sees each row 6× | gitignored fixture state accumulating across runs |
-   | `.cache/objectui-*` | `pnpm lint` reports dozens of errors in files you have never opened | a full objectui checkout left by `build-console.sh`, linted as if it were ours |
 
    So after any `git merge origin/main`:
-   `pnpm install --frozen-lockfile && pnpm build && rm -rf packages/runtime/.objectstack`
-   (add `rm -rf .cache` if you have run the console build). Note `OS_SKIP_DTS=1` keeps
+   `pnpm install --frozen-lockfile && pnpm build && rm -rf packages/runtime/.objectstack`.
+   Note `OS_SKIP_DTS=1` keeps
    a build fast but leaves no `.d.ts`, so `gen:api-surface` cannot run at all under it —
    that one needs a real build. None of this is CI-visible (CI checks out fresh). Only
    the first row has a gate: `check:dev-prereqs` refuses `pnpm dev` on a stale
@@ -659,6 +655,7 @@ packages/
   plugins/        # 🧱 Official plugins & drivers
   services/       # 🔧 Kernel-managed services
 apps/docs/        # 📖 Fumadocs site
+ui/               # 🎨 Studio/Console UI (`@object-ui/*`, `ui/apps/console`) — its own rules in `ui/AGENTS.md`
 examples/         # 📚 Reference implementations
 skills/           # 🤖 Domain skill definitions
 content/docs/     # 📝 Docs content
@@ -796,7 +793,7 @@ test regenerate; the wrapper reports all three each run rather than staying sile
 | `apps/docs/**` | Docs Engineer | Fumadocs + Next.js, MDX |
 | `examples/**` | Example Author | Minimal, runnable, uses `defineStack`. App or platform, on any tree: could this be written from the metadata alone, with no knowledge of this company? No ⇒ the app; yes ⇒ the platform, and a **gap** until it does — `.claude/skills/pm-dispatch/references/app-platform-boundary.md` |
 | `content/docs/**` | Technical Writer | Respect auto-gen boundaries |
-| `../objectui/**` (sibling repo) | Studio UI Engineer | React + Shadcn + Tailwind, dark mode default |
+| `ui/**` | Studio UI Engineer | React + Shadcn + Tailwind, dark mode default; `ui/AGENTS.md` applies on top |
 
 ---
 
@@ -1099,11 +1096,9 @@ Both non-handshake shapes, and how to classify and probe your own:
    disposition, in writing** — exactly one marker in the changeset body, which also carries both declaration lines
    (`pnpm check:adr-0087-registration` reads the arm and the kind there). ⛔ The categories are NOT copied here —
    the gate prints the full set when it fails.
-4. **A removal that breaks the pinned sibling checkout ships together with the sibling fix and the pin bump — or it
-   does not ship.** `Type Check UI` compiles the Console under `ui/` against the spec of the PR that makes such a
-   removal, so the removal reds its own PR; its ruling therefore authorizes the
-   objectui-side fix and the pin bump (manifest regeneration included — see the Frontend section) in the same
-   landing. Before merging, `git grep` what you remove or rename in `../objectui` at the pinned SHA.
+4. **A removal that breaks `ui/` ships together with the `ui/` fix — or it does not ship.** `Type Check UI` compiles
+   the Console under `ui/` against the spec of the PR that makes such a removal, so the removal reds its own PR; its
+   ruling authorizes the `ui/` fix in the same PR. Before pushing, `git grep` what you remove or rename under `ui/`.
 5. **Touched `packages/spec`? Regenerate and commit its artifacts before pushing** — § *Touched `packages/spec`*
    above is the authority; note `OS_SKIP_DTS=1` greens `check:api-surface` locally and reds it in CI.
 6. Update `ROADMAP.md` if user-facing or architectural.

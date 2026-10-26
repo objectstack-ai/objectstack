@@ -277,6 +277,8 @@ jobs:
               - 'package.json'
               - 'pnpm-lock.yaml'
               - 'tsconfig.json'
+              - 'tsconfig.base.json'
+              - 'tsconfig.test.base.json'
               - '.github/workflows/ci.yml'
               # BUILD INPUTS outside every package (#21202): turbo.json itself,
               # its `globalDependencies`, and each `$TURBO_ROOT$/…` input of a

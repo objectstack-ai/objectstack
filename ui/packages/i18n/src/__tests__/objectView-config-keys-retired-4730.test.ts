@@ -281,6 +281,10 @@ const RETIRED_OBJECT_VIEW_KEYS = [
   // objectui#12504 — the refused toolbar view-write's toast; the write and the
   // adapter gate that refused it retired together, and it had no other reader.
   'viewConfigPermissionDenied',
+  // objectstack#25921 — CONFIRMED by `check-i18n-dead-keys.mjs`: no call site
+  // and no textual occurrence of either dotted key outside the packs.
+  'ufTabs',
+  'viewTypeUnavailableShort',
 ] as const;
 
 /**
@@ -288,16 +292,17 @@ const RETIRED_OBJECT_VIEW_KEYS = [
  * 104 since objectui#13052 added `objectPackageDisabled`, the object route's
  * "this object's package is disabled" sentence (`ObjectNotFoundState`); 105
  * since objectui#13330 added `managedUsers`, Setup → Users' invite line and
- * 「未授权」 marker on a cloud-managed environment (`managedEnvironmentUsers`).
+ * 「未授权」 marker on a cloud-managed environment (`managedEnvironmentUsers`);
+ * 103 since objectstack#25921 retired `ufTabs` and `viewTypeUnavailableShort`.
  */
-const SURVIVING_KEY_COUNT = 105;
+const SURVIVING_KEY_COUNT = 103;
 
 describe('console.objectView config-panel keys are retired (objectui#4730)', () => {
   it('the retired list is the measured set', () => {
     // Guards the premise the rest of the file rests on. If this arithmetic ever
     // stops holding, the assertions below are checking a set nobody chose.
-    expect(RETIRED_OBJECT_VIEW_KEYS).toHaveLength(124);
-    expect(new Set(RETIRED_OBJECT_VIEW_KEYS).size).toBe(124);
+    expect(RETIRED_OBJECT_VIEW_KEYS).toHaveLength(126);
+    expect(new Set(RETIRED_OBJECT_VIEW_KEYS).size).toBe(126);
     // 209 at objectui#4730's landing; 210 since objectui#5232 added
     // `viewConfigPermissionDenied`; 211 since objectui#10636 added
     // `recordCountOne`, the record-count footer's singular; 217 since
@@ -309,8 +314,9 @@ describe('console.objectView config-panel keys are retired (objectui#4730)', () 
     // `viewConfigPermissionDenied`, which moved the split, not the total); 228
     // since objectui#13052 added `objectPackageDisabled`, the not-found view's
     // package-disabled sentence; 229 since objectui#13330 added
-    // `managedUsers`, the managed environment's Users-list strings. The
-    // RETIRED half is a ratchet that never
+    // `managedUsers`, the managed environment's Users-list strings
+    // (objectstack#25921 retired `ufTabs` and `viewTypeUnavailableShort`,
+    // which moved the split, not the total). The RETIRED half is a ratchet that never
     // runs BACKWARDS — it is pinned twice above, and objectui#8754 advanced it
     // 116 -> 118 — while the surviving half is a live namespace that grows on a
     // new key and shrinks by exactly what the retired half gains. Splitting
