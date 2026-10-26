@@ -1220,9 +1220,12 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // 680 since the dataset form's measures repeater offers `duration` (the
       // time between two datetime fields) — one row label, authored in all
       // three locales.
-      // 682 since ADR-0142: `queue` and `assignment_rule` joined the registry,
+      // 683 since #25760 (ADR-0055 §3 amendment): the object form's `sharing`
+      // composite — the block, its `controlledByParent` sub-block and the
+      // `ownerMayEdit` toggle — three row labels, authored in all three locales.
+      // 685 since ADR-0142: `queue` and `assignment_rule` joined the registry,
       // each with its type-level display pair, authored in all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(682);
+      expect(translated.length, `${locale} positive control`).toBe(685);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

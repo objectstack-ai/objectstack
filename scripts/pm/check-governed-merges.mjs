@@ -1709,6 +1709,8 @@ export function testVerdict(paths, { repo, size = null, fork = null, checks = nu
 
 /** The lift's citation, printed on every lifted reading so a queue log names what lifted it. */
 export const SIZE_LIFT_RULING = 'maintainer ruling 2026-09-27, objectstack#20153';
+/** The enqueue lift's citation: the maintainer's own enqueue from an authorized account (2026-10-26). */
+export const SIZE_ENQUEUE_LIFT_RULING = 'maintainer ruling 2026-10-26, the enqueue from an authorized account';
 
 /**
  * The lift an authorized-approval verdict grants the SIZE limb (maintainer
@@ -1718,14 +1720,33 @@ export const SIZE_LIFT_RULING = 'maintainer ruling 2026-09-27, objectstack#20153
  * (`{ login, commitId }` per counted approver), the field only the AUTHORIZED
  * reduction carries. The generic per-reviewer reduction, an `unapproved` or an
  * `unreadable` verdict, and no verdict at all answer null: no lift, fail closed.
+ *
+ * ⭐ The SECOND lift (maintainer ruling 2026-10-26): the queue guard hands the
+ * same verdict with its enqueue reading attached as `enqueue`, and an entry an
+ * account in `GOVERNED_APPROVERS` put in the queue is lifted the way an
+ * authorized approval lifts it — the size limb "lands the way a Tier H surface
+ * does", and the maintainer's own enqueue is now one of those landings. Still a
+ * READER: it asks for the guard's `authorized` state and a login, and decides
+ * nothing about who is authorized. The approval lift is read FIRST; an
+ * `unauthorized` or `undetermined` enqueue lifts nothing.
  */
 export function sizeLiftFrom(approval = null) {
-  if (approval?.state !== 'approved' || !Array.isArray(approval.approvals) || approval.approvals.length === 0) return null;
-  const approvals = approval.approvals
-    .filter((a) => typeof a?.login === 'string' && a.login !== '')
-    .map((a) => ({ login: a.login, commitId: typeof a.commitId === 'string' ? a.commitId : '' }));
-  if (approvals.length === 0) return null;
-  return { approvers: approvals.map((a) => a.login), approvals, ruling: SIZE_LIFT_RULING };
+  if (approval?.state === 'approved' && Array.isArray(approval.approvals) && approval.approvals.length > 0) {
+    const approvals = approval.approvals
+      .filter((a) => typeof a?.login === 'string' && a.login !== '')
+      .map((a) => ({ login: a.login, commitId: typeof a.commitId === 'string' ? a.commitId : '' }));
+    if (approvals.length > 0) return { approvers: approvals.map((a) => a.login), approvals, ruling: SIZE_LIFT_RULING };
+  }
+  const enqueue = approval?.enqueue;
+  if (enqueue?.state === 'authorized' && typeof enqueue.login === 'string' && enqueue.login !== '') {
+    return {
+      approvers: [],
+      approvals: [],
+      enqueuedBy: { login: enqueue.login, at: typeof enqueue.at === 'string' ? enqueue.at : null },
+      ruling: SIZE_ENQUEUE_LIFT_RULING,
+    };
+  }
+  return null;
 }
 
 /**
@@ -1921,8 +1942,9 @@ export function renderSizeLines(size) {
   );
 }
 
-/** The approver(s) and the commit each approval was given on, as one clause. Pure; `--self-test` pins it. */
+/** The approver(s) and the commit each approval was given on — or the authorized enqueuer and when — as one clause. Pure; `--self-test` pins it. */
 export function renderLiftApprovals(lifted) {
+  if (lifted?.enqueuedBy?.login) return `${lifted.enqueuedBy.login} (enqueued it${lifted.enqueuedBy.at ? ` at ${lifted.enqueuedBy.at}` : ''})`;
   return (lifted?.approvals ?? [])
     .map((a) => `${a.login} (on ${a.commitId ? a.commitId.slice(0, 12) : 'a commit the review did not name'})`)
     .join(', ');
@@ -6422,6 +6444,22 @@ async function selfTest() {
   assert('⛔ the-GENERIC-per-reviewer-reduction-carries-no-approvals-field-and-lifts-nothing-a-verdict-that-never-asked-WHO',
     sizeLimbFires(sizeVerdict(overSize, { state: 'approved', approvers: ['anyone'], changesRequestedBy: [], reviewsRead: 1 })) === true &&
       sizeLiftFrom({ state: 'approved', approvers: ['os-zhuang'], approvals: [] }) === null && sizeLiftFrom({ state: 'approved', approvals: [{ commitId: 'x' }] }) === null);
+  // ── the ENQUEUE lift (maintainer ruling 2026-10-26, objectstack#26066) ──
+  // The guard hands its approval verdict with the enqueue reading attached; an
+  // AUTHORIZED enqueue lifts, every other enqueue reading lifts nothing, and an
+  // authorized approval is still the lift that is read first.
+  const enqueued = (state, login = 'os-zhuang') => authorizedVerdict([], { enqueue: { state, login, at: '2026-10-26T15:00:00Z' } });
+  const liftedByEnqueue = sizeVerdict(overSize, enqueued('authorized'));
+  assert('⭐ an-AUTHORIZED-enqueue-LIFTS-the-size-limb-and-the-lift-names-the-enqueuer-and-the-ruling',
+    sizeLimbFires(liftedByEnqueue) === false && liftedByEnqueue.lifted?.enqueuedBy?.login === 'os-zhuang' && liftedByEnqueue.lifted.ruling === SIZE_ENQUEUE_LIFT_RULING &&
+      liftedByEnqueue.lifted.approvals.length === 0 && renderLiftApprovals(liftedByEnqueue.lifted) === 'os-zhuang (enqueued it at 2026-10-26T15:00:00Z)',
+    JSON.stringify(liftedByEnqueue.lifted));
+  assert('⛔ an-UNAUTHORIZED-or-UNDETERMINED-enqueue-lifts-nothing',
+    sizeLimbFires(sizeVerdict(overSize, enqueued('unauthorized', 'objectstack-fleet[bot]'))) === true &&
+      sizeLimbFires(sizeVerdict(overSize, enqueued('undetermined', null))) === true &&
+      sizeLiftFrom({ state: 'unapproved', approvals: [], enqueue: { state: 'authorized', login: '' } }) === null);
+  assert('an-authorized-APPROVAL-is-the-lift-read-first-even-with-an-authorized-enqueue-beside-it',
+    sizeLiftFrom(authorizedVerdict([{ login: 'hotlong', commitId: LIFT_SHA }], { enqueue: { state: 'authorized', login: 'os-zhuang' } })).ruling === SIZE_LIFT_RULING);
   assert('an-approval-under-the-line-lifts-nothing-because-there-is-nothing-to-lift',
     sizeVerdict({ additions: 10, deletions: 2 }, authorizedVerdict([{ login: 'hotlong', commitId: LIFT_SHA }])).lifted === null && sizeVerdict(null, authorizedVerdict([{ login: 'hotlong', commitId: LIFT_SHA }])).lifted === null);
   const liftedGoverned = testVerdict(['AGENTS.md'], { repo: REPO, size: overSize, approval: authorizedVerdict([{ login: 'hotlong', commitId: LIFT_SHA }]) });

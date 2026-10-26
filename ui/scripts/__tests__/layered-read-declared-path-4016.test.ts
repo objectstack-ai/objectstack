@@ -5,6 +5,8 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { skillsWalk } from '../skill-bundle-root.mjs';
+
 /**
  * objectui#4016 ratchet — nothing in this repo reaches the metadata LAYERED
  * projection by hanging a query flag on the ordinary item read.
@@ -95,7 +97,9 @@ describe('objectui#4016 ratchet · nothing reaches the layered projection by que
         }
       })
       .flatMap((src) => walkSources(src));
-    const guides = walkMarkdown(path.join(repoRoot, 'skills'));
+    // The published bundle is in the monorepo's `skills/` catalog since the
+    // cutover (decision C, `scripts/skill-bundle-root.mjs`).
+    const guides = walkMarkdown(skillsWalk(repoRoot).dir);
 
     // A scan that scanned nothing passes for the wrong reason. Both floors sit
     // far below the real counts (1327 sources / 18 guides when this was

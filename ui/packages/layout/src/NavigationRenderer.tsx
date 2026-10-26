@@ -736,6 +736,35 @@ export function hasVisibleNavigationItems(
   items: NavigationItem[],
   options: NavigationVisibilityOptions = {},
 ): boolean {
+  return !visibleNavigationEntries(items, options).next().done;
+}
+
+/**
+ * How many entries a navigation tree would actually render under the given
+ * guards — the count a collapsed group shows beside its label
+ * (objectstack#25876), so a closed group holding one entry no longer looks
+ * like one holding ten.
+ *
+ * The very walk {@link hasVisibleNavigationItems} stops at the first hit of:
+ * separators and groups are not entries, a group contributes its surviving
+ * descendants, and an `action` counts only with a dispatcher. Sharing the walk
+ * keeps the count equal to what opening the group reveals.
+ */
+function countVisibleNavigationItems(
+  items: NavigationItem[],
+  options: NavigationVisibilityOptions,
+): number {
+  const walk = visibleNavigationEntries(items, options);
+  let count = 0;
+  while (!walk.next().done) count += 1;
+  return count;
+}
+
+/** Every entry of `items` that would render, depth-first — the walk behind the two functions above. */
+function* visibleNavigationEntries(
+  items: NavigationItem[],
+  options: NavigationVisibilityOptions,
+): Generator<NavigationItem, void, undefined> {
   const { hasActionHandler = false } = options;
 
   for (const item of items) {
@@ -744,14 +773,13 @@ export function hasVisibleNavigationItems(
 
     if (item.type === 'separator') continue;
     if (item.type === 'group') {
-      if (hasVisibleNavigationItems(item.children ?? [], options)) return true;
+      yield* visibleNavigationEntries(item.children ?? [], options);
       continue;
     }
     if (item.type === 'action' && !hasActionHandler) continue;
 
-    return true;
+    yield item;
   }
-  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -1599,8 +1627,27 @@ function NavigationItemRenderer({
           <SidebarGroupLabel asChild className={cn(HIDDEN_ICON_LABEL_NO_POINTER, HIDDEN_ICON_LABEL_NOT_FOCUSABLE)}>
             <CollapsibleTrigger className={cn('flex w-full items-center justify-between', isMobile && 'min-h-[44px] text-[15px] rounded-xl')}>
               {groupLabel}
+              {/* objectstack#25876 — a collapsed group says how much it holds.
+                  Open, its entries are in view and the count is noise; a group
+                  holding the current route is forced open, so it never shows
+                  one. `aria-hidden`: the disclosure's name stays the label, and
+                  it already announces collapsed. In icon mode it hides under
+                  the very classes the label does. */}
+              {!isOpen && (
+                <Badge
+                  variant="secondary"
+                  aria-hidden="true"
+                  className={cn(
+                    'ml-auto px-1.5 py-0 text-[10px] font-medium tabular-nums',
+                    HIDDEN_ICON_LABEL_NO_POINTER,
+                    HIDDEN_ICON_LABEL_NOT_FOCUSABLE,
+                  )}
+                >
+                  {countVisibleNavigationItems(children, guardOptions)}
+                </Badge>
+              )}
               <ChevronRight
-                className={cn('ml-auto transition-transform', isMobile ? 'h-5 w-5' : 'h-4 w-4', isOpen && 'rotate-90')}
+                className={cn(isOpen ? 'ml-auto' : 'ml-1', 'transition-transform', isMobile ? 'h-5 w-5' : 'h-4 w-4', isOpen && 'rotate-90')}
               />
             </CollapsibleTrigger>
           </SidebarGroupLabel>

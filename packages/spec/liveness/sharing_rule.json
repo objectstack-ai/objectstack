@@ -12,8 +12,8 @@
     "label": {
       "status": "live",
       "verifiedAt": "2026-09-17",
-      "evidenceScope": "cross-repo",
-      "evidence": "packages/plugins/plugin-sharing/src/objects/sys-sharing-rule.object.ts#SysSharingRule — `titleFormat: '{label}'` makes the authored label the record title of every `sys_sharing_rule` row, and `label` is a column of all four declared listViews (`active`, `inactive`, `by_object`, `all_rules`); objectui @dda8f381 packages/components/src/renderers/layout/containers.tsx interpolates `objectSchema.titleFormat` for the rendered title, so the authored string is what an admin reads in Setup.",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/plugins/plugin-sharing/src/objects/sys-sharing-rule.object.ts#SysSharingRule — `titleFormat: '{label}'` makes the authored label the record title of every `sys_sharing_rule` row, and `label` is a column of all four declared listViews (`active`, `inactive`, `by_object`, `all_rules`); ui/packages/components/src/renderers/layout/containers.tsx interpolates `objectSchema.titleFormat` for the rendered title, so the authored string is what an admin reads in Setup.",
       "producer": "packages/plugins/plugin-sharing/src/declared-sharing-rules.ts#translateDeclaredSharingRule — `label: String(r.label ?? r.name)` threads the authored label into the served rule, which the sharing-rule service lists as the rule's `label`; without that thread the rule NAME would stand for every declared rule, which is exactly what an unauthored `label` still produces.",
       "note": "Display-shaped, so the #7131 split settles it: being shown to a human IS the whole of the claimed effect, and there is no second layer where a \"real\" consumer would live. The read point is the platform object's own record surface, NOT a metadata-admin preview — this type has none (enumerated in the file note above)."
     },

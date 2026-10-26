@@ -29,6 +29,11 @@ export interface FileRecord {
   ref_object?: string | null;
   ref_id?: string | null;
   ref_field?: string | null;
+  /** [#26046] The record whose field last owned this file, kept when it let
+   * the file go; the file is read by that record's rule until claimed again.
+   * NULL on every file no record has let go. */
+  released_ref_object?: string | null;
+  released_ref_id?: string | null;
   /**
    * The registry-injected tenant column (#12745).
    *
@@ -47,6 +52,22 @@ export interface FileRecord {
    * overwrites an explicit value).
    */
   organization_id?: string | null;
+}
+
+/**
+ * [#26046] The record that let this file go, when one did and none has
+ * claimed the file since, or `null`. Such a file is governed by that record's
+ * read rule: the download verdict judges it so, and its signed link gets the
+ * record-governed lifetime. Read by both, so they cannot disagree about which
+ * files a record still governs.
+ */
+export function releasingRecordOf(
+  file: Pick<FileRecord, 'released_ref_object' | 'released_ref_id'>,
+): { object: string; id: string } | null {
+  const object = file.released_ref_object;
+  const id = file.released_ref_id;
+  if (!object || id == null || id === '') return null;
+  return { object: String(object), id: String(id) };
 }
 
 /**

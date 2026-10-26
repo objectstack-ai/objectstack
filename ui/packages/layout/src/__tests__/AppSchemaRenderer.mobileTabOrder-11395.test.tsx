@@ -288,10 +288,12 @@ describe('objectui#11395 — the enumeration: inputs that are deliberately bar-s
       { id: 'grp_sales', type: 'group', label: 'Sales', expanded: false, children: [entry('Deals'), entry('Leads')] },
     ];
     const { tabs, sidebarRow, container, bar } = renderShell(navigation);
-    // The sidebar holds them behind its closed disclosure, one tap away.
+    // The sidebar holds them behind its closed disclosure, one tap away. A
+    // closed disclosure also draws its aria-hidden child count after the label
+    // (objectstack#25876), so the trigger is matched on its label text node.
     expect(sidebarRow('Deals')).toBeNull();
     const groupTrigger = Array.from(container.querySelectorAll('button')).find(
-      (el) => !bar()?.contains(el) && el.textContent === 'Sales',
+      (el) => !bar()?.contains(el) && el.getAttribute('aria-expanded') === 'false' && el.firstChild?.textContent === 'Sales',
     );
     expect(groupTrigger).toBeDefined();
     expect(tabs()).toEqual(['Deals', 'Leads']);

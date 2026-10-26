@@ -77,8 +77,10 @@
 // population decision with its own history — see EVIDENCE_SCANNED_STATUSES
 // below, where the `planned`/`experimental` widening and the `dead` exclusion
 // are argued from measurements. Cross-repo attribution
-// (`objectui: …`, `cloud: …`, `packages/services/service-ai/…`) is counted, not
-// resolved — those files are legitimately absent here. This was a ⚠ until #5623,
+// (`cloud: …`, `packages/services/service-ai/…`) is counted, not resolved —
+// those files are legitimately absent here; the renderer is not cross-repo since
+// it merged in as `ui/` (#25677), and an `objectui: …` attribution FAILS with the
+// in-repo spelling as its remedy (RETIRED_REALMS). This was a ⚠ until #5623,
 // for one historical reason: the pre-#3857 `evidence.split(':')[0]` parser
 // flagged 48 of 227 entries with a ~100% false-positive rate, so failing on it
 // would have failed every build. The parse fix is what turned a hit into signal.
@@ -201,7 +203,7 @@ import {
   type VerificationEntry,
   type VerificationReport,
 } from './verification.mts';
-import { checkCitationLines, checkEvidence, checkEvidenceAnchors, countLines, type EvidenceScan } from './evidence.mts';
+import { checkCitationLines, checkEvidence, checkEvidenceAnchors, countLines, scanEvidence, type EvidenceScan } from './evidence.mts';
 import {
   ELSEWHERE_EXPIRED_GUIDANCE,
   ELSEWHERE_GUIDANCE,
@@ -740,6 +742,7 @@ const report: any = {
   verification: null as VerificationReport | null, // `verifiedAt` ages — the re-verification worklist
   producers: null as ProducerReport | null, // `producer` / `evidenceScope` — the #4837 / #4895 worklists
   producerMissing: [] as string[], // a `producer` pointer into thin air — FAILS, like a rotted `evidence`
+  retiredRealm: [] as string[], // a path still attributed to a realm that merged into this repo (`objectui:`) — FAILS
   // The three evidence counters, and the distinction between the first two is
   // the whole point: `evidenceLocal` is how many repo-rooted paths the SCANNED
   // statuses DECLARE (EVIDENCE_SCANNED_STATUSES — see there for why `planned`
@@ -750,7 +753,7 @@ const report: any = {
   // "330 resolved" (#5623). Count and word now agree.
   evidenceLocal: 0, // repo-rooted evidence paths attributed to THIS repo — DECLARED, not yet proven
   evidenceMissing: 0, // ...of which this many do not exist here (=== staleEvidence.length) — FAILS the gate
-  evidenceForeign: 0, // evidence paths attributed to objectui / cloud — not resolvable here, never failed
+  evidenceForeign: 0, // evidence paths attributed to cloud / ee — not resolvable here, never failed
   // The LINE half of a citation. `evidenceMissing` above answers "does the cited
   // FILE exist"; nothing answered "does the cited LINE". A consumer that moves out
   // of a file which still exists therefore rotted its pointer in complete silence,
@@ -869,6 +872,11 @@ function collectAnchorFindings(scan: EvidenceScan, label: string): void {
   }
 }
 
+/** Record every path a scan attributed to a retired realm, with its in-repo spelling. */
+function collectRetired(scan: Pick<EvidenceScan, 'retired'>, label: string): void {
+  for (const r of scan.retired) report.retiredRealm.push(`${label} → ${r.realm}: ${r.path} (now ${r.inRepo})`);
+}
+
 function classify(type: string, path: string, status: string, led: any, cat: any) {
   cat.classified++;
   cat.byStatus[status] = (cat.byStatus[status] || 0) + 1;
@@ -897,12 +905,17 @@ function classify(type: string, path: string, status: string, led: any, cat: any
   if (typeof led?.producer === 'string') {
     const pv = checkEvidence(led.producer, (p) => existsSync(join(repoRoot, p)));
     for (const miss of pv.missing) report.producerMissing.push(`${type}/${path} → ${miss}`);
+    collectRetired(pv, `${type}/${path} [producer]`);
     collectOutOfRange(pv, `${type}/${path} [producer]`);
     collectAnchorFindings(pv, `${type}/${path} [producer]`);
   }
+  // A retired-realm pointer fails whatever the status: the realm no longer
+  // exists, so the attribution is wrong on a `dead` row too (#25712 — measured
+  // zero across every status once the objectui rows were re-rooted under ui/).
+  if (typeof led?.evidence === 'string') collectRetired(scanEvidence(led.evidence), `${type}/${path}`);
   if (EVIDENCE_SCANNED_STATUSES.has(status) && led?.evidence) {
     // Extract every repo-rooted path the evidence claims and resolve the ones
-    // attributed to THIS repo. Cross-repo pointers (objectui / cloud) are
+    // attributed to THIS repo. Cross-repo pointers (cloud / ee) are
     // counted, not resolved — see evidence.mts for why the old
     // `split(':')[0]` heuristic reported ~100% false positives.
     const ev = checkEvidence(led.evidence, (p) => existsSync(join(repoRoot, p)));
@@ -1511,6 +1524,10 @@ const failed =
   report.verification.errors.length > 0 ||
   report.producers.errors.length > 0 ||
   report.producerMissing.length > 0 ||
+  // A path still attributed to a realm that merged into this repo (#25712). Red
+  // from day one on the zero-census argument: the change that retired `objectui`
+  // re-rooted every such pointer under ui/, so only a NEW one can red it.
+  report.retiredRealm.length > 0 ||
   report.ungoverned.length > 0 ||
   report.stalePending.length > 0 ||
   report.undrilledNew.length > 0 ||
@@ -1548,7 +1565,7 @@ if (asJson) {
     `\nevidence paths: ${report.evidenceLocal} repo-local path(s) declared by ${EVIDENCE_SCANNED_LABEL} entries, ` +
     `${report.evidenceLocal - report.evidenceMissing} resolved against this checkout` +
     (report.evidenceMissing ? `, ${report.evidenceMissing} MISSING` : '') +
-    `; ${report.evidenceForeign} attributed to another repo (objectui / cloud — not resolvable here).`,
+    `; ${report.evidenceForeign} attributed to another repo (cloud / ee — not resolvable here).`,
   );
   // Same two-number discipline one level down, and for the same reason: printing
   // only "in range" would read as a pass on a run where the parser had degraded
@@ -1685,7 +1702,7 @@ if (asJson) {
       '     • the consumer (or the refuser) MOVED inside this repo → repoint the path, and\n' +
       '       stamp `verifiedAt` while you have the call graph open;\n' +
       '     • it moved to ANOTHER repo → say so with a realm marker\n' +
-      '       (`objectui: packages/app-shell/…`, `cloud: …`). Attributed paths are counted,\n' +
+      '       (`cloud: packages/…`). Attributed paths are counted,\n' +
       '       never resolved, and never fail here — that boundary is deliberate;\n' +
       '     • it is GONE → the verdict no longer holds. A `live` entry whose consumer left\n' +
       '       re-classifies under ADR-0049 enforce-or-remove; a `planned` / `experimental`\n' +
@@ -1951,6 +1968,23 @@ if (asJson) {
       + ` nothing can falsify is what this field exists to remove:`,
     );
     report.producerMissing.forEach((s: string) => console.log(`    ${s}`));
+  }
+  if (report.retiredRealm.length) {
+    console.log(
+      `\n✗ ${report.retiredRealm.length} pointer(s) attributed to a retired realm — that repo merged into this one:`,
+    );
+    report.retiredRealm.forEach((s: string) => console.log(`    ${s}`));
+    console.log(
+      '\n   objectui is no longer another repository: the renderer lives at `ui/` here (#25677),\n' +
+      '   so its files resolve like any other path. Cite the in-repo spelling printed above —\n' +
+      '   `ui/packages/app-shell/…#Symbol` — and drop the realm marker. The marker cannot\n' +
+      '   stay as foreign (counted, never resolved, it would never fail), and it cannot be\n' +
+      '   read as local either: both trees have a `packages/core/`, so the bare path could\n' +
+      '   resolve against a file that never was the reader. A line read at an old objectui\n' +
+      '   commit is NOT a current line: keep the path and anchor, and keep the reading as\n' +
+      '   prose (`(:961 at objectui @940ba24)`) unless the cited block is byte-identical at\n' +
+      '   one offset of today\'s file.',
+    );
   }
   const scopes = Object.entries(pr.byScope).map(([s, n]) => `${n} ${s}`).join(', ') || 'none';
   console.log(

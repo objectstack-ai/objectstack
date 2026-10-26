@@ -138,9 +138,10 @@ export const MATRIX: FieldCase[] = [
   { field: 'f_record', type: 'record', check: { kind: 'equal', write: { home: '+1', work: '+2' } } },
   // media — the STORED form is an opaque sys_file id (ADR-0104 D3 wave 2); the
   // inline `{url, …}` blob is the expanded READ form, derived by the resolver
-  // rather than written. These ids match no sys_file row here, which is the
-  // point: the round-trip must return the stored id verbatim when there is
-  // nothing to expand it into.
+  // rather than written. The `write` values are stand-ins in the stored shape
+  // (the value-shape test parses them): [#26043] a write naming an id that is
+  // no file of the organization is refused, so the HTTP suite uploads a real
+  // file for each and asserts the read form carries its id.
   { field: 'f_video', type: 'video', check: { kind: 'equal', write: 'file_zoo_video' } },
   { field: 'f_audio', type: 'audio', check: { kind: 'equal', write: 'file_zoo_audio' } },
   { field: 'f_composite', type: 'composite', check: { kind: 'equal', write: { label: 'x', n: 1 } } },

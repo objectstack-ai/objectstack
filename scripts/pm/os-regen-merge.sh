@@ -389,9 +389,8 @@
 #   baseline.json` and their neighbours are SHRINK-ONLY RATCHETS whose own
 #   entries say a merge must NEVER recompute them: a mid-merge regeneration
 #   records whatever the half-merged tree happens to compile to and enters it as
-#   merge noise instead of as red. `objectui-lockstep.json` cannot be
-#   regenerated here at all (it needs a sibling checkout), and the scaffold
-#   templates' generator refuses a file it did not already stamp. Every one of
+#   merge noise instead of as red, and the scaffold templates' generator
+#   refuses a file it did not already stamp. Every one of
 #   these is resolved BY HAND and regenerated later, or not at all.
 #
 # So class 3 prints one of two per-path readings, and the discriminator is ⛔ NOT

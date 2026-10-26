@@ -23,7 +23,7 @@
 //   - ⛔ STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`,
 //     `noUnusedParameters`, `noImplicitReturns`, `noFallthroughCasesInSwitch`,
 //     `rootDir`, `paths` and `types` are all INHERITED from `tsconfig.json`
-//     (and through it the root config), and none of them is re-declared here.
+//     (and through it the base config), and none of them is re-declared here.
 //     ⚠️ A child that declared its own `paths` would REPLACE the parent map
 //     rather than merge into it, silently sending a source-resolved specifier
 //     back to `dist/` — a BUILD ARTIFACT — so this file declares none.
@@ -64,13 +64,7 @@
 // does not REPAIR them — it makes the ratchet able to see them; paydown follows the
 // ratchet's own shrink-only discipline, on its own cards.
 {
-  "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "noEmit": true,
-    "module": "esnext",
-    "moduleResolution": "bundler",
-    "lib": ["ES2022"]
-  },
+  "extends": ["./tsconfig.json", "../../../tsconfig.test.base.json"],
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
 }

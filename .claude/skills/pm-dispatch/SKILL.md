@@ -68,7 +68,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 批 = 一个上下文里读完的 ≤5 张同族卡,是质量单位,⛔ 不是预算。
 - 班 = 一个会话的任期,只以交接或惰性回收结束。
 - 席位两形:Routine 席与项目席(会话是车队项目的线程);细则见 `references/seat-lifecycle.md`。
-- 项目席唤醒 = PR 订阅事件 + 每项目一个巡查 routine;⛔ 无自绑 cron、无 `send_later` 链。
+- 项目席唤醒 = PR 订阅 + 每项目一个自建自绑的巡查 routine,默认每小时;⛔ 无 `send_later` 链。
 - 探针先行:fire 的第一动作是一次最便宜的车道盘点查询,⛔ 在它之前不读任何长文本。
 - 队列空 + 无在飞 + 无待复核 + 决策箱无新答复 ⇒ 自退。
 - 分诊席跑直连会话、默认判断档;直连会话按召唤跑,⛔ 无自醒不常驻;裁决归总监席。
@@ -111,7 +111,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | `pm:blocking` | 有 open 下游依赖者(自 `Blocked-by:` 索引推导的缓存,⛔ 不手工挂);进选择全序 |
 | `pm:retriage` | 向分诊提问(改判、跨域 PR 指定车道、改路由、拆卡、裁 dev 报告留下的分叉),定车道与改路由限未派发卡,异议评论写明所求;与现行 `pm:*` 并存、⛔ 不摘原标;带本标签的 `pm:queue` 卡跳过派发 |
 | `finding` | 立卡三类内待首次定级,定级即离标;三类外关 not planned;不占队列不进收件箱 |
-| `tooling` | 修复落在门禁/脚本/workflow/技能/席位协议/PM 工具面而非产品包;分诊首触打,与 `domain:*` 同笔;四具名读者 = 候选查询排除、每轮派发 ≤10%、首触即关、普查半态行 |
+| `tooling` | 修复落在门禁/脚本/workflow/技能/席位协议/PM 工具面而非产品包;分诊首触打,与 `domain:*` 同笔;三具名读者 = 候选查询排除、首触即关、普查半态行 |
 | `target:<major>` | 发版阻塞:每个 backlog 恰好一个生产者 |
 | `pm:epic`(父单或 sub-issue) | 已由 epic PM 保留;其它 PM 永不取;⛔ 永不与 `pm:queue` 同挂 |
 | `pm:seat` | 座位登记贴:协议载体,不是待分诊的工作 |
@@ -137,8 +137,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 一个标签存在当且仅当有具名读者;`pm:blocking` 即其推导缓存,读者以词表脚本注为权威。
 - 跨仓解锁判据是消费方可安装,⛔ 不是上游已合并;探针:装上的包是否接受新键/新行为。
 - 以发布包消费上游的仓,解锁放回前先验修复已进可安装的发行版。
-- 未发版 ⇒ 转 `pm:on-hold` + `Restart-when:` 加消费方安装面判据,⛔ 不回 `pm:queue`。
-- 该 hold 评论预写唤醒后的派发形状;pin 消费的仓不适用:pin 移动即可安装,走 pin 滞后读数。
+- 未发版 ⇒ 转 `pm:on-hold`;`Restart-when:` 写安装面判据与唤醒后派发形状,⛔ 不回 `pm:queue`。
 - 状态变更不过夜:标签无评论、assignee 无认领评论、结论只在 chat,都是半状态。
 - 半状态在结束会话(含限流悬挂)前补齐成对或回滚半边;report-only 巡查见守卫索引。
 - 等待他座位也是状态,写在卡上才存在(等谁、自何时),⛔ 不留在会话记忆。
@@ -162,17 +161,18 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | `domain:devx` | `sdui-parser`、`packages/qa`、`content/docs`、`apps/docs`、`docs/qa`、`.githooks`、`docker/README.md`、`examples/**` 仅测试基建面;`packages/lint`、`scripts`(门禁类)、`.github/workflows`(接线)三者按锚定规则归 `domain:spec`,门禁按 SUBJECT:governed 面归 skills,代码/文档质量归本域 |
 | `domain:skills` | governed 面全量(含本文件;统一定义见「governed 面统一定义」行);非门禁的 `scripts/pm/**`(PM 循环工具);governed 面的治理执行文件:`.github/CODEOWNERS` + SUBJECT 是 governed 面本身的门禁/审计(现为 `scripts/pm/check-governed-merges.mjs`) |
 | `domain:spec` | `packages/spec` 整包:schema 形状、`contracts/**`、退役行为半边、strictness 台账;describe/JSDoc/墓碑散文/错误 guidance 与 alias 表;`packages/spec/scripts/**`、`packages/spec/docs/**` 及按锚定规则的例外归本域的工具链(域边界枚举与席内分派见 `references/lanes/spec.md`) |
+| `domain:ui` | `ui/**` 全部代码:`@object-ui/*` 库与 `ui/apps/*`、`ui/packages/types` 与 schema 语料、`ui/scripts` 与门禁工具、文档随所记录的面走;`packages/console`(dist 由 `pnpm console:build` 生成 ⛔ 不手改);协议恒归 `domain:spec`,受管面归 `domain:skills`;详见 `references/lanes/ui.md` |
 | `domain:cloud` | 云服务旅程,停放(加 `status:parked`,sweep 免扫)待 cloud PM 迁移,本仓不派 |
-| (无固定归属,按落点分诊) | `packages/apps/*`、`packages/console`(dist 由脚本生成 ⛔ 不手改;UI 缺陷走 `repo:objectui`)、`examples/*`(归它演练的子系统)、`docs/audits/**` |
+| (无固定归属,按落点分诊) | `packages/apps/*`、`examples/*`(归它演练的子系统)、`docs/audits/**` |
 
 - 表未覆盖的包首次分诊时归类并走 PR 更新本表;新增或退役 `domain:*` 必须同批改本表。
 - 退役 `domain:*` 只退流通,对象保留;`domain:engine`/`domain:services`/`domain:cli` 读作 `domain:server`。
-- `domain:*` 只由分诊席产出,例外一:在飞卡衍生 sub-issue 承父卡域;无标签的卡 ⛔ 不得认领。
-- 预贴标签只是建议,队列与级别只由分诊落笔(例外一同承);无分诊审计评论 ⛔ 不得认领。
+- `domain:*` 只由分诊产出,两例外:sub-issue 承父卡域、main-red 锚卡;无标签的卡 ⛔ 不得认领。
+- 预贴标签只是建议,队列与级别只由分诊落笔;无分诊审计评论 ⛔ 不得认领;两例外豁免。
 - 跨域例外路径:拆不动的跨域单 PR 由分诊席指定一个车道 PM 认领,认领评论申报文件面。
 - 派发前在飞检查:读 `pm:dispatched` 卡认领评论申报的文件面,本地求交、不另发查询。
 - 跨域例外路径的范围加上该单文件面触及各域的在飞单;相交 ⇒ 排该 PR 之后串行或让行。
-- 跨域相交只经三条越界通道:跨域例外路径、认领席跟到底的越界面、接手无主阻塞项。
+- 越界只四通道:跨域例外路径、认领席跟到底的越界面、接手无主阻塞项、main-red 锚卡。
 - 合并队列是共享串行资源:车道买到的是并行编写,不是并行落地。
 - 谁发现 flake 谁修或立单,⛔ 不绕行。
 

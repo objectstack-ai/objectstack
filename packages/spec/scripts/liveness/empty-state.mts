@@ -402,8 +402,10 @@ export function checkEmptyState({ sources, registry, exists }: CheckInput): Chec
     //
     // Evidence is parsed with the liveness ledger's own `checkEvidence`, so the
     // two surfaces agree: prose around the paths is fine and encouraged, several
-    // paths may be cited, and a path attributed to another repo (`objectui: …`)
-    // is recorded without being resolved here. Reusing it also keeps this honest
+    // paths may be cited, and a path attributed to another repo (`cloud: …`)
+    // is recorded without being resolved here; one attributed to the retired
+    // `objectui` realm counts as neither, so it reads as missing evidence until it
+    // is spelled `ui/…`. Reusing it also keeps this honest
     // — the README promises evidence resolves "like the ledger's", and a
     // single-raw-path `exists()` would have quietly not.
     if (entry.semantics === 'closed' || entry.semantics === 'open') {

@@ -32,8 +32,14 @@ import Database from 'better-sqlite3';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI_ROOT = resolve(HERE, '..', '..', '..');
+/**
+ * The source entry, spawned by this process's own `node`, as the family's other spawners
+ * (`data-commands.absent-database`, `object-scope`, `unmapped-columns`) spawn it. Not through
+ * the `tsx` binary: the entry, its `src/` and its pinned `NODE_ENV=development` are the same
+ * either way, and the wrapper only adds a second process and its own transform, ~3.4 s of
+ * every spawn (#23181 slice 12: `tsx bin/run-dev.js --version` 8.28-8.44 s, `node` 4.93-4.99 s).
+ */
 const RUN_DEV = resolve(CLI_ROOT, 'bin', 'run-dev.js');
-const TSX = resolve(CLI_ROOT, '..', '..', 'node_modules', '.bin', 'tsx');
 const CASE_TIMEOUT_MS = 300_000;
 
 const APP_OBJECT = 'os25134_deal';
@@ -93,14 +99,14 @@ function childEnv(f: Fixture, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv 
 
 /** `os serve`'s own provision-and-exit: a fresh store, the full composition schema-synced into it. */
 function serveBoot(f: Fixture): void {
-  const boot = spawnSync(TSX, [RUN_DEV, 'serve', '--no-server', '--no-ui', '--no-console', '--port', '0'], {
+  const boot = spawnSync(process.execPath, [RUN_DEV, 'serve', '--no-server', '--no-ui', '--no-console', '--port', '0'], {
     cwd: f.dir, env: childEnv(f, { OS_MIGRATE_AND_EXIT: '1' }), encoding: 'utf8', timeout: 240_000,
   });
   expect(boot.status, `the serving boot did not provision the database:\n${(boot.stderr ?? '').slice(-6000)}`).toBe(0);
 }
 
 function plan(f: Fixture, json: boolean): { exit: number | null; payload: any; text: string } {
-  const run = spawnSync(TSX, [RUN_DEV, 'migrate', 'plan', ...(json ? ['--json'] : [])], {
+  const run = spawnSync(process.execPath, [RUN_DEV, 'migrate', 'plan', ...(json ? ['--json'] : [])], {
     cwd: f.dir, env: childEnv(f), encoding: 'utf8', timeout: 240_000,
   });
   let payload: any;

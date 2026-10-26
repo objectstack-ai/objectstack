@@ -39,7 +39,7 @@ import {
   lookupTargetObject,
 } from './bulkParamToField';
 import { unresolvedFieldOf } from '../resolveBulkActions';
-import { bulkConfirmTextSource } from './bulkConfirmText';
+import { bulkConfirmText } from './bulkConfirmText';
 
 /**
  * The name the confirm step lists an affected record by (objectui#13107).
@@ -410,7 +410,7 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
           </DialogTitle>
           {step === 'confirm' && (
             <DialogDescription>
-              {bulkConfirmTextSource(def.confirmText) ?? t('grid.bulk.confirmDefault', { count: rows.length, defaultValue: `This will apply to ${rows.length} record(s).` })}
+              {bulkConfirmText(def.confirmText, { count: rows.length }) ?? t('grid.bulk.confirmDefault', { count: rows.length, defaultValue: `This will apply to ${rows.length} record(s).` })}
             </DialogDescription>
           )}
         </DialogHeader>

@@ -25,7 +25,7 @@
 //
 // STRICTNESS IS INHERITED and deliberately not relaxed: `strict`,
 // `esModuleInterop`, `forceConsistentCasingInFileNames` and the rest come from
-// the root config through `tsconfig.json`. The manifest type-checks clean
+// the base config through `tsconfig.json`. The manifest type-checks clean
 // under them -- it enters with ZERO recorded debt, and there is no ledger here
 // to record any in.
 {

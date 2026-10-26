@@ -353,6 +353,18 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Sharing Model",
         helpText: "Org-Wide Default record visibility for internal users. A custom object that omits it resolves to private at runtime (ADR-0090 D1)."
       },
+      sharing: {
+        label: "Sharing",
+        helpText: "Per-object sharing opt-ins that refine the org-wide default above; they never replace it. Unset: the default of each opt-in applies."
+      },
+      "sharing.controlledByParent": {
+        label: "Controlled by parent",
+        helpText: "Read only while sharingModel is 'controlled by parent'; refused on any other sharing model."
+      },
+      "sharing.controlledByParent.ownerMayEdit": {
+        label: "Owner may edit",
+        helpText: "On: the owner of a detail row (its owner_id) may update that row by id with read access to the master; everyone else, and every insert, delete, multi-row update and on-behalf-of write, still needs edit access to the master. Off (the default): every write of a detail needs edit access to its master."
+      },
       access: {
         label: "Access",
         helpText: "Wildcard-grant posture (ADR-0066 D2). Absent resolves to public. It decides whether a permission set's '*' object grant covers this object; record visibility between users is sharingModel."

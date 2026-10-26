@@ -353,6 +353,18 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "共享模型",
         helpText: "面向内部用户的组织级默认记录可见性（OWD）。自定义对象若不声明，运行时按 private 处理（ADR-0090 D1）。"
       },
+      sharing: {
+        label: "共享",
+        helpText: "按对象声明的共享可选项，用于细化上方的组织级默认值，但绝不取代它。未设置：各可选项按各自的默认值生效。"
+      },
+      "sharing.controlledByParent": {
+        label: "随父记录控制",
+        helpText: "仅在 sharingModel 为 'controlled by parent' 时读取；在其他共享模型下会被拒绝。"
+      },
+      "sharing.controlledByParent.ownerMayEdit": {
+        label: "所有者可编辑",
+        helpText: "开启：子记录的所有者（其 owner_id）只要对父记录有读权限，就可以按 id 更新该行；其他人，以及所有新增、删除、多行更新和代办写入，仍需要对父记录的编辑权限。关闭（默认）：子记录的每一次写入都需要对其父记录的编辑权限。"
+      },
       access: {
         label: "访问策略",
         helpText: "通配授权策略（ADR-0066 D2）。不声明时按 public 处理。它决定权限集的 '*' 对象授权是否覆盖本对象；用户之间的记录可见性由 sharingModel 决定。"

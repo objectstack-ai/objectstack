@@ -72,7 +72,7 @@ registry to fold it back onto — the override *is* its governance.
 
 | Status | Meaning |
 |---|---|
-| `live` | Has a runtime consumer. Cite it in `evidence`, preferably anchored to the consuming symbol — `file#symbol` — with `file:line` as an optional convenience; for another repo's path, prefix the realm — `objectui: packages/app-shell/…` (see below). |
+| `live` | Has a runtime consumer. Cite it in `evidence`, preferably anchored to the consuming symbol — `file#symbol` — with `file:line` as an optional convenience; the renderer is in this repo, cited `ui/packages/app-shell/…#Symbol`; for another repo's path, prefix the realm — `cloud: packages/…` (see below). |
 | `experimental` / `planned` | Declared, intentionally not enforced yet. Also read from a spec `.describe()` marker like `[EXPERIMENTAL — not enforced]`. |
 | `dead` | Parsed, no consumer **anywhere the census looked**. Tracked for **enforce-or-remove** (ADR-0049). A key that is dead here but enforced in a sibling repo is NOT `dead` — it is `live-elsewhere`, below. |
 | `live-elsewhere` | Dead here by measurement, **genuinely enforced in a sibling repo** (#13483). Not deletable. The template is `manifest.runtime`, "ENFORCED AT THE CLOUD PUBLISH GATE, NOT ENFORCED AT LOAD" — its load side belongs to this repo's loader. A key whose consumer is the closed cloud runtime is `live` with a `cloud`-attributed pointer instead (`agent.json`'s `_note`). Carries its own gate-executable criteria — see the section below. Ledger-entry-only (no `.describe()` marker). |
@@ -116,21 +116,37 @@ enforce-or-remove instead of repointing at a plausible survivor.
 
 **A path in another repo must say so**, or the gate will report it as rot —
 attributed paths are counted and never resolved, so they cannot fail this check
-(that boundary is deliberate: ~101 entries cite the renderer repo or the closed
-cloud runtime, whose files are legitimately absent here):
+(that boundary is deliberate: the closed cloud runtime's files are legitimately
+absent here):
 
 ```jsonc
-"evidence": "objectui: packages/app-shell/src/views/RecordDetailView.tsx:573"
-"evidence": "registered into ActionEngine (objectui packages/core/…/ActionEngine.ts:150) but no caller"
+"evidence": "cloud @cb8ee7ff: packages/service-ai/src/tools/action-tools.ts#buildParametersSchema"
+"evidence": "carried onto the tool definition (cloud packages/service-ai/…/action-tools.ts) but no runtime here"
 ```
 
-A realm marker (`objectui`, `cloud`, `ee`) attributes the paths that follow it,
-up to the next clause boundary (`;` or `)`), so a string can cite both repos —
+A realm marker (`cloud`, `ee`) attributes the paths that follow it, up to the
+next clause boundary (`;` or `)`), so a string can cite both repos —
 `framework` switches back explicitly. `packages/services/service-ai/…` is always
 treated as foreign: that is the closed cloud runtime, and `packages/services/`
 here ships every sibling service except it. A path that is not repo-rooted
 (`app-shell/MetadataProvider.tsx`, `action-button/-group`) reads as prose and is
 neither resolved nor reported.
+
+**The renderer is not another repo.** objectui merged into this one as `ui/`
+(#25677), so its files are cited like any other path — `ui/packages/app-shell/src/views/RecordDetailView.tsx#RecordDetailView`
+— and held to the same standard: the file exists, a cited line is inside it, an
+anchored symbol is in it, and the file names the key. `objectui` is a **retired**
+realm marker (`RETIRED_REALMS` in `scripts/liveness/evidence.mts`): a path still
+attributed to it FAILS, with its `ui/` spelling printed as the remedy. It cannot
+stay foreign (counted, never resolved, it would never fail) and it cannot be read
+as local either: both trees have a `packages/core/`, so `objectui: packages/core/…`
+could pass on a file that never was the reader. A path already spelled `ui/…` is
+local whatever prose precedes it, so a dated reading may keep naming the old repo —
+`ui/packages/layout/src/NavigationRenderer.tsx (:961 at objectui @940ba24)` — and
+that is exactly how #25712 re-rooted the 164 renderer rows: a `path:NNN` whose cited
+block is byte-identical at one offset of today's file was relocated there; any other
+line left the pointer and stayed behind as that dated prose, because a line read at
+an old objectui commit is not a line of this checkout.
 
 > This replaces the old advice to write objectui paths "as prose to avoid false
 > stale-flags." That was a workaround for a parser bug — the check took
@@ -171,9 +187,11 @@ Two rules, and the asymmetry between them is the point:
   loudly instead.
 
 Most entries predate the field and are simply undated; date them as you
-re-verify rather than back-filling guesses. **For objectui-side evidence, pin
-the commit** (`objectui @732b1bf`) — `action.undoable`'s reader line numbers had
+re-verify rather than back-filling guesses. **For cloud-side evidence, pin the
+commit** (`cloud @15f55df`) — `action.undoable`'s objectui reader line numbers had
 already drifted by 28 lines one day after the issue citing them was filed.
+Renderer evidence needs no pin since the merge (#25712): `ui/` is this checkout,
+and the gate bounds its lines and anchors on every run.
 
 ### `producer` — a consumer is only HALF the call graph (#4837)
 
@@ -259,7 +277,11 @@ barrel package adds a blind spot, and the renderer repo is all barrels.
 | Value | Means |
 |---|---|
 | `in-repo` | the call graph was closed inside this repo only |
-| `cross-repo` | a named foreign realm was walked too — say **which**, in the evidence, and **pin the commit** (`objectui @c2fd1223`): `action.undoable`'s reader line numbers drifted 28 lines in one day (#3714) |
+| `cross-repo` | a named foreign realm was walked too — say **which**, in the evidence, and **pin the commit** (`cloud @15f55df`): `action.undoable`'s reader line numbers drifted 28 lines in one day (#3714) |
+
+`in-repo` covers `ui/` — the renderer is this repo since #25712, which moved the
+scope of every re-rooted renderer row from `cross-repo` to `in-repo` (a row that
+also cites `cloud` kept `cross-repo`; an undeclared scope stayed undeclared).
 
 Absent = scope undeclared, a worklist row rather than a failure; the field is
 younger than nearly every entry. A value outside the vocabulary FAILS, the same
@@ -397,16 +419,15 @@ the maintainer settled it directly:
 
 **The mechanical rule, for the next sweep.** Before writing `"no runtime
 consumer"` — or any wording that means it — **enumerate the metadata-admin preview
-read points** for the type, in objectui, and say what you found. The population is
+read points** for the type, under `ui/`, and say what you found. The population is
 small, enumerable, and registered by type name, so this is a lookup and not a
 search:
 
 ```bash
 # 1. does this type have a preview at all?
-git -C ../objectui grep -n "registerMetadataPreview('<type>'" origin/main
+git grep -n "registerMetadataPreview('<type>'" -- ui/
 # 2. what does that preview read off the draft?
-git -C ../objectui show origin/main:packages/app-shell/src/views/metadata-admin/previews/<X>Preview.tsx \
-  | grep -n 'd\.<key>'
+grep -n 'd\.<key>' ui/packages/app-shell/src/views/metadata-admin/previews/<X>Preview.tsx
 ```
 
 An absent preview is a finding to record, not a step to skip — "the type has no
@@ -433,10 +454,10 @@ person.
 because a human sees it in the designer; the scheduler still stores name/schedule
 only, and the row says so. A re-grade is **not** an ADR-0033 change: these four
 rows are docs-shaped, deliberately KEPT, and still not `authorWarn`'d — nothing
-about enforce-or-remove moves. Cite the preview the way any cross-repo evidence is
-cited: realm marker, pinned objectui commit, and a `producer` naming the
-`registerMetadataPreview` call plus the surface that resolves it — a preview no
-registry hands a draft to is a read point that never runs.
+about enforce-or-remove moves. Cite the preview the way any in-repo evidence is
+cited — `ui/…#Symbol` — with a `producer` naming the `registerMetadataPreview`
+call plus the surface that resolves it: a preview no registry hands a draft to is
+a read point that never runs.
 
 ### How to verify a claim without fooling yourself
 
@@ -858,8 +879,8 @@ The governed set is `GOVERNED` at the top of `check-liveness.mts`. To add a type
 2. Seed `<type>.json` from that type's liveness audit (file:line evidence) + targeted
    greps. **Classify only with evidence** — `live` needs a cited consumer; `dead` needs a
    confirmed absence.
-3. **Confirmed absence means BOTH repos.** The renderer layer is a legitimate consumer
-   (`live` with objectui evidence as prose), so grep `../objectui` before writing `dead`.
+3. **Confirmed absence includes the renderer.** The renderer layer is a legitimate
+   consumer (`live` with `ui/…` evidence), so grep `ui/` before writing `dead`.
    Precedent: `enable.trackHistory` was misclassified dead for a month while
    RecordDetailView had been gating the History tab on it the whole time (#2707).
 4. Add the type to `GOVERNED`; confirm the gate is green.

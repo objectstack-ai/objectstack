@@ -40,13 +40,16 @@ export function UserField(props: FieldWidgetComponentProps<any>) {
     && ('reference' in raw.field || 'type' in raw.field);
   const meta = metaIsNested ? raw.field : raw;
 
-  // Ensure the picker always targets sys_user (even if the author omitted an
-  // explicit reference), presents user names by default, and defaults to the
-  // search-first PeoplePicker with sensible person display + candidate hygiene.
-  // `reference` is the only target spelling read (objectui#11070 round 4).
+  // The picker always targets sys_user, presents user names by default, and
+  // defaults to the search-first PeoplePicker with sensible person display +
+  // candidate hygiene. The target is a constant of the `user` type
+  // (objectstack#24952): the spec refuses a foreign `reference` on a `user`
+  // field and `referenceTargetOf` resolves every `user` field to `sys_user`, so
+  // an authored `reference` is not read — a stored body that still carries a
+  // foreign one picks users, as the runtime resolves it.
   const normalized = {
     ...(meta || {}),
-    reference: meta?.reference || 'sys_user',
+    reference: 'sys_user',
     displayField: meta?.displayField || meta?.reference_field || 'name',
     picker: meta?.picker ?? 'search',
     subtitle: meta?.subtitle ?? ['primary_business_unit_id.name', 'email'],

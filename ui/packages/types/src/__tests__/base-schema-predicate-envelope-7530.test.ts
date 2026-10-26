@@ -95,6 +95,7 @@
 
 import { describe, it, expect } from 'vitest';
 import type { z } from 'zod';
+import type { WithoutCatchall } from './zod-catchall-type';
 import type { BaseSchema } from '../base';
 import type { ExpressionWire } from '../expression';
 import { BaseSchema as Mirror } from '../zod/base.zod';
@@ -123,9 +124,13 @@ export type assertionWireShape = Expect<
   Equal< ExpressionWire, string | { dialect?: string; source: string } >
 >;
 
-/** The two faces of the wire type are one union. */
+/**
+ * The two faces of the wire type are one union — the zod face read without the
+ * `.passthrough()` catchall its envelope carries since objectstack#25923
+ * (`./zod-catchall-type`), which refuses nothing.
+ */
 export type assertionTwinParity = Expect<
-  Equal< ExpressionWire, z.input< typeof ExpressionWireSchema > >
+  Equal< ExpressionWire, WithoutCatchall< z.input< typeof ExpressionWireSchema > > >
 >;
 
 /** The helper can FAIL -- the old union is not the new one. */

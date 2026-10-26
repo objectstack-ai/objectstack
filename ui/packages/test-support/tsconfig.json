@@ -13,7 +13,6 @@
   // test files.
   "extends": "../../tsconfig.json",
   "compilerOptions": {
-    "jsx": "react-jsx",
     // `defaults-table-scan.ts` reads the workspace from disk (`node:fs`,
     // `node:path`, `node:module`), so this project needs Node's ambient types.
     // Naming them here REPLACES the auto-included set, which is why `vitest` is

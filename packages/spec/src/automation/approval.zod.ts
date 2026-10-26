@@ -712,6 +712,49 @@ export function normalizeDecisionOutputs(
   return out;
 }
 
+/**
+ * `escalateTo` literals no approver can ever act under, refused at
+ * registration — prefix → the remedy the refusal names.
+ *
+ * The approvals service resolves `escalateTo` as a position machine name
+ * first and falls back to the value as written. A person acts on a slot only
+ * under their user id, their email or `position:<p>` for a position they hold
+ * (`approver-address.ts` in `plugin-approvals` is the one source of that
+ * set), so a `team:` / `department:` / `org_membership_level:` literal, or
+ * the `role:` spelling ADR-0090 D3 retired, names nobody under any action:
+ * a `reassign` would move the request onto a slate no one can decide (the
+ * runtime keeps the slate and notifies instead), and a `notify` would reach
+ * no one. The shape alone settles it, so the contract refuses it at
+ * registration rather than leaving the SLA sweep to find it after the fact.
+ *
+ * Only the SHAPE is judged here. Whether a user id names an account, or a
+ * position has a holder, is directory state the runtime judges on timeout.
+ */
+const DEAD_ESCALATION_TARGET_PREFIXES: Readonly<Record<string, string>> = {
+  'team:':
+    'A team is not an escalation target: name a position its members hold, or a person.',
+  'department:':
+    'A department is not an escalation target: name a position its head or approvers hold, or a person.',
+  'org_membership_level:':
+    'An organization membership tier is not an escalation target: name a position, or a person.',
+  'role:':
+    "'role:' is the retired spelling of a position address: write 'position:<name>', or the bare position name.",
+};
+
+function checkEscalationTargetShape(value: string, ctx: z.RefinementCtx): void {
+  const target = value.trim();
+  const prefix = Object.keys(DEAD_ESCALATION_TARGET_PREFIXES).find((p) => target.startsWith(p));
+  if (prefix === undefined) return;
+  ctx.addIssue({
+    code: 'custom',
+    message:
+      `escalateTo '${target}' is a '${prefix}' address, and no approver acts under one, so an `
+      + 'escalation to it would hand the request to no one. '
+      + `${DEAD_ESCALATION_TARGET_PREFIXES[prefix]} `
+      + "escalateTo takes a user id, an email, a position machine name or 'position:<name>'.",
+  });
+}
+
 export const ApprovalEscalationSchema = lazySchema(() => strictObject(
   /**
    * Per-node SLA escalation — carried on the Approval node itself, so each
@@ -757,8 +800,12 @@ export const ApprovalEscalationSchema = lazySchema(() => strictObject(
   // position machine name to its holders via `sys_user_position` (ADR-0090
   // D3) and falls back to treating the value as a user id when nobody holds
   // it. NOT a better-auth membership tier — same contract as ApproverType.
-  escalateTo: z.string().optional().meta({
-    description: 'User id or position machine name to escalate to',
+  // A literal no approver acts under is refused by its shape
+  // (DEAD_ESCALATION_TARGET_PREFIXES); whether the rest resolve is runtime state.
+  escalateTo: z.string().superRefine(checkEscalationTargetShape).optional().meta({
+    description:
+      "User id, email, position machine name or 'position:<name>' to escalate to. A 'team:', "
+      + "'department:', 'org_membership_level:' or 'role:' address is refused: no approver acts under one",
     xRef: { kind: 'position' },
   }),
   notifySubmitter: z.boolean().default(true).describe('Notify the original submitter on escalation'),

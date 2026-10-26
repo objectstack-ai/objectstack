@@ -96,7 +96,8 @@
 #                          `eslint.config.mjs`, reads its baseline
 #                          (scripts/query-options-erasure-baseline.json,
 #                          at HEAD and at the merge base), and imports a few
-#                          top-level scripts/*.mjs helpers.
+#                          top-level scripts/*.mjs helpers and, through the
+#                          config, the rules in packages/eslint-plugin/.
 #   slot_lookup            `pnpm check:slot-lookup`. Same shape and the same
 #                          population, with scripts/slot-lookup-baseline.json.
 #   verify_lock            `bash scripts/pm/os-verify-lock.sh --self-test`.
@@ -569,6 +570,9 @@ family_reads() {
           # Both ratchets lint `packages/**` only; apps/ and examples/ are
           # outside their LINT_TARGET.
           case "$path" in
+            # The rules both ratchets measure live here (moved out of
+            # eslint.config.mjs), whatever the file's extension.
+            packages/eslint-plugin/*) return 0 ;;
             packages/*) is_ts_source "$path" && return 0; return 1 ;;
             *) return 1 ;;
           esac

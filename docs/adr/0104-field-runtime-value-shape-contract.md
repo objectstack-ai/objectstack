@@ -28,6 +28,12 @@
   kept as written and never claimed or copied, the answer #25682 gave across
   organizations. This qualifies the 2026-07-27 addendum's worst-case row for
   exclusive ownership. See the 2026-10-26 addendum.
+  · **Amended** (2026-10-26, #26043) — that kept id is replaced by a
+  refusal at the field: a write naming a file its caller may not read, or an
+  id the acting organization cannot see, fails with one `400
+  VALIDATION_FAILED` naming each such field with the ADR-0114 code
+  `invalid_value`, and nothing is written. See "The field refusal" in the
+  2026-10-26 addendum.
 - **Date**: 2026-07-22
 - **Issue**: design follow-up generalizing #3405 / #3406 (inline lookup param
   silently stripped); relates #3407 (silently dropped writes), #1878 / #1891
@@ -1459,20 +1465,25 @@ exists in the acting organization. One file had two access rules.
 - **One judgement, two callers.** The door's verdict is one function, and the
   claim path calls it under the write's caller context; neither restates it.
   It admits the uploader; a reader of the record that owns the file, through
-  its object's `fileAccessDelegate` where one is declared; a member of the
-  organization for a file no record owns; a reader of any parent for an
-  attachments-scope file; anyone for a `public_read` file.
-- **The quiet answer.** At the write door, a file the writer may not read is
-  answered as one the organization-scoped lookup cannot see: the id is kept
-  as written, nothing is claimed or copied, and constraint verdicts do not run
-  ahead of the read check. #25682 gave this answer across organizations; this
-  addendum states it within one. Unless the record already owned the file,
-  the kept id gives no reader anything through it: a reader refused
-  `sys_file` read gets the refused marker (`metadataRefused`), and the
-  download door judges the file by its own rule, never by this record. A slot
-  holding a file it does not own is a state that step 5's
-  `verify-references` classifies as blocking. #26043 tracks replacing this
-  answer with a field-level refusal.
+  its object's `fileAccessDelegate` where one is declared; for a file a record
+  let go, a reader of that record, until the file is claimed again or
+  collected (#26046); a member of the organization for a file no record has
+  owned; a reader of any parent for an attachments-scope file; anyone for a
+  `public_read` file.
+- **The field refusal.** *(Amended 2026-10-26, #26043. It replaces the quiet
+  answer this item first stated, which kept the id as written and so left a
+  slot holding a file it does not own, the state step 5's
+  `verify-references` classifies as blocking.)* At the write door, a write
+  naming a file its caller may not read is refused at the field, before the
+  driver runs: one `400 VALIDATION_FAILED` whose `fields[]` names each such
+  field with the ADR-0114 code `invalid_value`, the envelope the form door
+  gives an anonymous submission that carries a file (#25682). Nothing is
+  claimed, copied or written, and constraint verdicts do not run ahead of the
+  read check. An id the organization-scoped lookup cannot see gets the same
+  answer, and the answer names the field only, never the file or the record
+  that holds it, so the write door cannot tell "may not read" from "does not
+  exist in this organization". A write with no caller (below) keeps such an
+  id as written, as before.
 - **A write's own copy** is claimed by the same write without being asked
   again.
 - **Outage.** An authorization-store outage fails the write with its declared

@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — whole-package import: the in-process case imports the whole @objectstack/lint barrel cold and loads each lazy dep on its trigger, and the two built-dist probes each spawn node once to cold-load the dist and every lazy dep (typescript among them); slowest CI reading 13.91 s (run 40200279306, refresh PR #25960's window (hourly runs 40200279306 to 40272142430)) x 1.25, rounded up
 //
 // Boot-path contract: importing @objectstack/lint must NOT load its heavy,
 // gate-only dependencies. The package sits on the kernel boot path, while each

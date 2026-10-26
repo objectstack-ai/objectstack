@@ -57,8 +57,14 @@ import Database from 'better-sqlite3';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI_ROOT = resolve(HERE, '..', '..', '..');
+/**
+ * The source entry, spawned by this process's own `node`, as the family's other spawners
+ * (`data-commands.absent-database`, `object-scope`, `unmapped-columns`) spawn it. Not through
+ * the `tsx` binary: the entry, its `src/` and its pinned `NODE_ENV=development` are the same
+ * either way, and the wrapper only adds a second process and its own transform, ~3.4 s of
+ * every spawn (#23181 slice 12: `tsx bin/run-dev.js --version` 8.28-8.44 s, `node` 4.93-4.99 s).
+ */
 const RUN_DEV = resolve(CLI_ROOT, 'bin', 'run-dev.js');
-const TSX = resolve(CLI_ROOT, '..', '..', 'node_modules', '.bin', 'tsx');
 const CASE_TIMEOUT_MS = 300_000;
 const NOT_AN_OBJECT = ['sys_packages'];
 
@@ -98,10 +104,10 @@ interface Reading {
 function bootThenPlan(dir: string): Reading {
   const dbFile = join(dir, 'boot.db');
   const env = childEnv(dir, dbFile);
-  const boot = spawnSync(TSX, [RUN_DEV, 'serve', '--no-server', '--no-ui', '--no-console', '--port', '0'], {
+  const boot = spawnSync(process.execPath, [RUN_DEV, 'serve', '--no-server', '--no-ui', '--no-console', '--port', '0'], {
     cwd: dir, env: { ...env, OS_MIGRATE_AND_EXIT: '1' }, encoding: 'utf8', timeout: 240_000,
   });
-  const plan = spawnSync(TSX, [RUN_DEV, 'migrate', 'plan', '--json'], {
+  const plan = spawnSync(process.execPath, [RUN_DEV, 'migrate', 'plan', '--json'], {
     cwd: dir, env, encoding: 'utf8', timeout: 240_000,
   });
   let payload: any;

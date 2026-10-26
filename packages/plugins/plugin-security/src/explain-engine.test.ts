@@ -1093,6 +1093,8 @@ describe('buildContextForUser', () => {
       userId: 'u2',
       positions: ['hr_specialist', 'everyone'],
       permissions: ['payroll_reader'],
+      // [#25799] The resolver's channel split: `payroll_reader` is u2's own grant row.
+      directPermissions: ['payroll_reader'],
       // [#6352] The resolver's full envelope now reaches the panel. These four
       // were MISSING from the hand-written mirror, which is why an explanation
       // could disagree with enforcement — see the parity suite below.

@@ -754,6 +754,7 @@ export async function buildContextForUser(
     userId,
     positions: grants.positions,
     permissions: grants.permissions,
+    directPermissions: grants.directPermissions,
     systemPermissions: grants.systemPermissions,
     org_user_ids: grants.org_user_ids,
     accessible_org_ids: grants.accessible_org_ids,
@@ -1258,6 +1259,31 @@ function objectDefaultRowScopeSource(
     ` Source: the object default row scope ${named} declared on '${object}', not a permission set — ` +
     'no permission set held carries a row policy for this object and operation.'
   );
+}
+
+/**
+ * [ADR-0131 D3/D4; #24757] For each permission set a held position's
+ * DEFINITION names in `permissionSets`, the first such position in held order —
+ * the one channel a position grants through. `undefined` when the security
+ * catalog cannot be read: the attribution then says it cannot tell a
+ * position's set from a direct grant, rather than guessing either.
+ */
+async function positionBindingsOf(deps: ExplainEngineDeps, positions: readonly string[]): Promise<Map<string, string> | undefined> {
+  try {
+    const catalog = securityCatalogReaderOf(deps.ql);
+    if (!catalog) return undefined;
+    const boundBy = new Map<string, string>();
+    for (const position of positions) {
+      const entry = await catalog.resolve('position', position);
+      const listed = (entry?.definition as { permissionSets?: unknown } | undefined)?.permissionSets;
+      for (const name of Array.isArray(listed) ? listed : []) {
+        if (typeof name === 'string' && name !== '' && !boundBy.has(name)) boundBy.set(name, position);
+      }
+    }
+    return boundBy;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -2501,12 +2527,35 @@ async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, asker: 
   // and it is attributed by that name (`external-baseline.ts`).
   const baselineNames = humanBaselineFor(positions, deps.baselinePermissionSets);
   const externalBaseline = holdsExternalPosition(positions);
+  // [ADR-0131 D3/D4; #24757] A set reaches a principal through a position only
+  // when that position's DEFINITION names it — never by sharing the position's
+  // name, a channel the resolver no longer has. Both definition-bound and
+  // directly assigned sets arrive as `context.permissions`, so which one a set
+  // is gets read from the held positions' definitions.
+  //
+  // [#25799] A set can arrive through both channels: the user's own grant row
+  // AND a held position's definition. The resolver's own split of the two
+  // (`directPermissions`, `resolveUserAuthzGrants` §6) says which, so such a
+  // set names both, and revoking the position is not read as removing it. A
+  // context the resolver did not build carries no split, and a set a held
+  // definition names is then attributed to that position alone — unless the
+  // caller marked the split as one it tried and could not read
+  // (`directPermissionsUnread`), which is said rather than guessed.
+  const boundBy = await positionBindingsOf(deps, positions);
+  const direct: readonly string[] = Array.isArray(context?.directPermissions) ? context.directPermissions : [];
+  const directUnread = context?.directPermissionsUnread === true;
   const viaOf = (name: string): string => {
     if (baselineNames.includes(name)) {
       return externalBaseline ? 'external baseline (org_external)' : 'additive baseline (ADR-0090 D5)';
     }
-    if (positions.includes(name)) return `position:${name}`;
-    if ((context?.permissions ?? []).includes(name)) return 'direct grant';
+    const position = boundBy?.get(name);
+    if (position !== undefined) {
+      if (direct.includes(name)) return `direct grant + position:${position}`;
+      return directUnread ? `position:${position} (whether a direct grant also names it could not be read)` : `position:${position}`;
+    }
+    if ((context?.permissions ?? []).includes(name)) {
+      return boundBy ? 'direct grant' : 'direct grant or position definition (the position definitions could not be read)';
+    }
     return 'resolved';
   };
   // [ADR-0091 D2 / ADR-0049 / commit 42b05af89] Held-but-dropped grant rows (populated by

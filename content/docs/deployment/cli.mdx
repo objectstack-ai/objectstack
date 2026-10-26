@@ -192,7 +192,7 @@ os dev --database file:./data/test.db --auth-secret $(openssl rand -hex 32)
 | `--cert <path>` | — | Path to a TLS certificate (PEM). With `--key`, terminate TLS in the dev process and serve `https://localhost:<port>`. Bring your own certificate — none is generated |
 | `--key <path>` | — | Path to the private key (PEM) for `--cert`. Required with `--cert` |
 | `--ui` | — | Force Console UI on (already on by default in dev) |
-| `--compile` | — | Force compiling `objectstack.config.ts` → `dist/objectstack.json` before starting (auto when the artifact is missing; ignored with `--artifact`) |
+| `--compile` / `--no-compile` | — | Compile `objectstack.config.ts` → `dist/objectstack.json` before starting, under this boot's environment — default on, so a config value read from the environment (such as a self URL built from `OS_PORT`) is the same in the served metadata and in what runs. `--no-compile` boots the existing artifact as built (still compiled when it is missing). Ignored with `--artifact` |
 | `--fresh` | — | Ephemeral `OS_HOME` in the OS tempdir (clean DB, uploads root, and other `OS_HOME`-keyed state), auto-deleted on exit; implies `--seed-admin`. See the scope note below |
 | `--seed-admin` / `--no-seed-admin` | — | Seed a dev admin (`admin@objectos.ai` / `admin123`) on an empty DB — default on; override with `--admin-email` / `--admin-password` |
 | `-v, --verbose` | — | Verbose output |
