@@ -8,9 +8,10 @@
 
 import { ComponentRegistry } from '@object-ui/core';
 import type { ImageSchema } from '@object-ui/types';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 ComponentRegistry.register('image',
-  ({ schema, className, ...props }: { schema: ImageSchema; className?: string; [key: string]: unknown }) => {
+  ({ schema, className, ...props }: { schema: ImageSchema; className?: string; [key: string]: unknown } & RendererHostProps) => {
     // Extract designer-related props
     const { 
         'data-obj-id': dataObjId, 

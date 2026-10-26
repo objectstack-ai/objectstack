@@ -11,12 +11,13 @@ import type { ContainerSchema } from '@object-ui/types';
 import { renderChildren } from '../../lib/utils';
 import { cn } from '../../lib/utils';
 import { forwardRef } from 'react';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 // Index signature on the parameter annotation, not on the `forwardRef` type
 // argument — mechanism note on `action:bar` (objectui#4422), pinned by
 // `__tests__/forwardref-props-annotation.guard.test.ts`.
 const ContainerRenderer = forwardRef<HTMLDivElement, { schema: ContainerSchema; className?: string }>(
-  ({ schema, className, ...props }: { schema: ContainerSchema; className?: string; [key: string]: unknown }, ref) => {
+  ({ schema, className, ...props }: { schema: ContainerSchema; className?: string; [key: string]: unknown } & RendererHostProps, ref) => {
     // `??`, not `||`: `maxWidth` declares `false` for the "no maximum width"
     // case, and `||` folded that legal value into the default — so a container
     // asking for NO constraint rendered `max-w-xl` (36rem), the exact opposite

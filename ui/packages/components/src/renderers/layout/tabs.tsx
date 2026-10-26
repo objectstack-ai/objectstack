@@ -17,8 +17,9 @@ import {
 } from '../../ui';
 import { cn } from '../../lib/utils';
 import React from 'react';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
-const TabsRenderer = ({ schema, className, onChange, value, ...props }: { schema: TabsSchema; className?: string; onChange?: (val: string) => void; value?: string; [key: string]: unknown }) => {
+const TabsRenderer = ({ schema, className, onChange, value, ...props }: { schema: TabsSchema; className?: string; onChange?: (val: string) => void; value?: string; [key: string]: unknown } & RendererHostProps) => {
   // Extract designer-related props
   const { 
       'data-obj-id': dataObjId, 

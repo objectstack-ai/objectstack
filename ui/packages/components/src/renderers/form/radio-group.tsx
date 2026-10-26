@@ -12,6 +12,7 @@ import { RadioGroup, RadioGroupItem, Label } from '../../ui';
 import { cn } from '../../lib/utils';
 import { toControlValue } from './option-value';
 import { toFormControlDomProps } from '../../lib/form-control-dom-props';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 /**
  * The declared default (`packages/types/src/form.ts` — `@default 'vertical'`).
@@ -36,7 +37,7 @@ const ORIENTATION_CLASS: Record<'horizontal' | 'vertical', string | undefined> =
 };
 
 ComponentRegistry.register('radio-group', 
-  ({ schema, className, ...props }: { schema: RadioGroupSchema; className?: string; [key: string]: unknown }) => {
+  ({ schema, className, ...props }: { schema: RadioGroupSchema; className?: string; [key: string]: unknown } & RendererHostProps) => {
     // Extract designer-related props
     const { 
         'data-obj-id': dataObjId, 

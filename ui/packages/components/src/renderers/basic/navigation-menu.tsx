@@ -10,9 +10,10 @@ import { ComponentRegistry } from '@object-ui/core';
 import type { NavigationMenuSchema } from '@object-ui/types';
 import { NavigationMenu, NavigationMenuList, NavigationMenuItem, NavigationMenuTrigger, NavigationMenuContent, NavigationMenuLink } from '../../ui/navigation-menu';
 import { cn } from '../../lib/utils';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 ComponentRegistry.register('navigation-menu', 
-  ({ schema, ...props }: { schema: NavigationMenuSchema; [key: string]: unknown }) => {
+  ({ schema, ...props }: { schema: NavigationMenuSchema; [key: string]: unknown } & RendererHostProps) => {
     const { 
         'data-obj-id': dataObjId, 
         'data-obj-type': dataObjType,

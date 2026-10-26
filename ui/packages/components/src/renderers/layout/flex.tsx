@@ -10,9 +10,10 @@ import { ComponentRegistry, toDomProps } from '@object-ui/core';
 import type { FlexSchema } from '@object-ui/types';
 import { renderChildren } from '../../lib/utils';
 import { cn } from '../../lib/utils';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 ComponentRegistry.register('flex', 
-  ({ schema, className, ...props }: { schema: FlexSchema; className?: string; [key: string]: unknown }) => {
+  ({ schema, className, ...props }: { schema: FlexSchema; className?: string; [key: string]: unknown } & RendererHostProps) => {
     const direction = schema.direction || 'row';
     const justify = schema.justify || 'start';
     const align = schema.align || 'start';

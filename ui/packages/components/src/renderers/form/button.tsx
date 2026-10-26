@@ -14,6 +14,7 @@ import { forwardRef } from 'react';
 import { Loader2 } from 'lucide-react';
 import { toFormControlDomProps } from '../../lib/form-control-dom-props';
 import { resolveIcon } from '../action/resolve-icon';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 // Index signature on the parameter annotation, not on the `forwardRef` type
 // argument — mechanism note on `action:bar` (objectui#4422), pinned by
@@ -26,7 +27,7 @@ const ButtonRenderer = forwardRef<HTMLButtonElement, { schema: ButtonSchema }>(
   // `schema.disabled` keeps one carrier for one question (AGENTS.md #0.1,
   // objectui#7238; precedent `plugin-chatbot`, objectui#6169) — and taking it
   // OFF `props` is the load-bearing half, see `isDisabled` below.
-  ({ schema, disabled: hostDisabled, ...props }: { schema: ButtonSchema; disabled?: boolean; [key: string]: unknown }, ref) => {
+  ({ schema, disabled: hostDisabled, ...props }: { schema: ButtonSchema; disabled?: boolean; loading?: boolean; [key: string]: unknown } & RendererHostProps, ref) => {
     // Extract designer-related props
     const { 
         'data-obj-id': dataObjId, 

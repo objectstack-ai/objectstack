@@ -12,8 +12,9 @@ import { Checkbox, Label } from '../../ui';
 import { cn } from '../../lib/utils';
 import { toFormControlDomProps } from '../../lib/form-control-dom-props';
 import React from 'react';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
-const CheckboxRenderer = ({ schema, className, onChange, value, disabled: hostDisabled, ...props }: { schema: CheckboxSchema; className?: string; onChange?: (val: any) => void; value?: any; disabled?: boolean; [key: string]: unknown }) => {
+const CheckboxRenderer = ({ schema, className, onChange, value, disabled: hostDisabled, ...props }: { schema: CheckboxSchema; className?: string; onChange?: (val: any) => void; value?: any; disabled?: boolean; [key: string]: unknown } & RendererHostProps) => {
   // `hostDisabled` is `SchemaRenderer`'s EVALUATED verdict on `disabled` /
   // `disabledOn`, not the raw authored key — which may be a predicate STRING,
   // truthy however it evaluates (objectui#7238, precedent objectui#6169).

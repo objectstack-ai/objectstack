@@ -20,6 +20,7 @@ import { Menubar, MenubarMenu, MenubarTrigger, MenubarContent, MenubarItem, Menu
 // deliberately NOT used: it degrades an unknown name to the `Database` glyph,
 // trading a no-icon failure for a WRONG-icon one (objectui#5622, #5633).
 import { resolveIcon } from '../action/resolve-icon';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 // Draws one level of `MenuItem`s and recurses into `children`: the type is
 // recursive (`children?: MenuItem[]`) and the docs call it "drawn as a nested
@@ -65,7 +66,7 @@ const renderMenubarItems = (items: MenuItem[] | undefined) =>
   });
 
 ComponentRegistry.register('menubar', 
-  ({ schema, ...props }: { schema: MenubarSchema; [key: string]: unknown }) => {
+  ({ schema, ...props }: { schema: MenubarSchema; [key: string]: unknown } & RendererHostProps) => {
     const { 
         'data-obj-id': dataObjId, 
         'data-obj-type': dataObjType,

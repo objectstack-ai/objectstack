@@ -11,13 +11,14 @@ import type { StackSchema } from '@object-ui/types';
 import { renderChildren } from '../../lib/utils';
 import { cn } from '../../lib/utils';
 import { forwardRef } from 'react';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 // Stack is essentially a Flex container that defaults to column direction
 // Index signature on the parameter annotation, not on the `forwardRef` type
 // argument — mechanism note on `action:bar` (objectui#4422), pinned by
 // `__tests__/forwardref-props-annotation.guard.test.ts`.
 const StackRenderer = forwardRef<HTMLDivElement, { schema: StackSchema; className?: string }>(
-  ({ schema, className, ...props }: { schema: StackSchema; className?: string; [key: string]: unknown }, ref) => {
+  ({ schema, className, ...props }: { schema: StackSchema; className?: string; [key: string]: unknown } & RendererHostProps, ref) => {
     // Default to column for Stack
     const direction = schema.direction || 'col';
     const justify = schema.justify || 'start';

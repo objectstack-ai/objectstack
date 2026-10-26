@@ -14,6 +14,7 @@ import { format } from 'date-fns';
 import { cn } from '../../lib/utils';
 import { useDisplayDateLocale } from '../../lib/date-fns-locale';
 import { toFormControlDomProps } from '../../lib/form-control-dom-props';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 /**
  * The day the trigger labels and the calendar selects (objectui#10844).
@@ -41,7 +42,7 @@ function toPickerDay(value: Date | string | undefined): Date | string | undefine
 }
 
 ComponentRegistry.register('date-picker',
-  ({ schema, className, value, onChange, ...props }: { schema: DatePickerSchema; className?: string; value?: Date | string; onChange?: (date: Date | undefined) => void; [key: string]: unknown }) => {
+  ({ schema, className, value, onChange, ...props }: { schema: DatePickerSchema; className?: string; value?: Date | string; onChange?: (date: Date | undefined) => void; [key: string]: unknown } & RendererHostProps) => {
     // `schema.format` is a date-fns pattern, and it is spelled in the display
     // locale: `PPP` and the textual tokens name months and weekdays in the
     // session's language (objectui#10722).

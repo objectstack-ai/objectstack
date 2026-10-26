@@ -10,9 +10,10 @@ import { ComponentRegistry } from '@object-ui/core';
 import type { SliderSchema } from '@object-ui/types';
 import { Slider } from '../../ui';
 import { toFormControlDomProps } from '../../lib/form-control-dom-props';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 ComponentRegistry.register('slider', 
-  ({ schema, className, ...props }: { schema: SliderSchema; className?: string; [key: string]: unknown }) => {
+  ({ schema, className, ...props }: { schema: SliderSchema; className?: string; [key: string]: unknown } & RendererHostProps) => {
     // Extract designer-related props
     const { 
         'data-obj-id': dataObjId, 

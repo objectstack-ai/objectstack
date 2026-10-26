@@ -15,9 +15,10 @@ import { useDisplayLocale } from '@object-ui/i18n';
 // the spec's INLINE locale map — see `BaseSchema.label` (objectui#4580).
 import { resolveI18nLabel as resolveInlineI18nLabel } from '@objectstack/spec/ui';
 import { FilterBuilder } from '../../custom/filter-builder';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 ComponentRegistry.register('filter-builder',
-  ({ schema, className, onChange, ...props }: { schema: FilterBuilderSchema; className?: string; onChange?: (event: any) => void; [key: string]: unknown }) => {
+  ({ schema, className, onChange, ...props }: { schema: FilterBuilderSchema; className?: string; onChange?: (event: any) => void; [key: string]: unknown } & RendererHostProps) => {
     // Read-time resolution against the display locale (objectui#4580 revised
     // Q1-A). `BaseSchema.label` accepts `string | I18nLabel`; rendering the map
     // straight into a text node THREW "Objects are not valid as a React child".
@@ -42,7 +43,12 @@ ComponentRegistry.register('filter-builder',
         )}
         <FilterBuilder
           fields={(schema.fields || []) as any}
-          value={schema.value || props.value}
+          // `schema.value` is the AUTHORED `FilterGroup`; the builder edits its
+          // own `FilterBuilderRowGroup`, and the two rows are assignable in
+          // neither direction (see `FilterBuilderRow`). The `any` index
+          // signature this renderer's props carried hid that gap; with it gone
+          // the read is cast here, once and visibly, instead (#25918).
+          value={(schema.value || props.value) as any}
           onChange={handleChange}
           className={className}
           {...props}

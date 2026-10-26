@@ -10,6 +10,7 @@ import { ComponentRegistry, toDomProps } from '@object-ui/core';
 import type { SpinnerSchema } from '@object-ui/types';
 import { Loader2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 /**
  * `ui:spinner`'s host is an SVG (lucide's `Loader2`), so its DOM pass-through is
@@ -50,7 +51,7 @@ import { cn } from '../../lib/utils';
  * destroys a legitimate computed value.
  */
 ComponentRegistry.register('spinner', 
-  ({ schema, className, ...props }: { schema: SpinnerSchema; className?: string; [key: string]: unknown }) => {
+  ({ schema, className, ...props }: { schema: SpinnerSchema; className?: string; [key: string]: unknown } & RendererHostProps) => {
     const { 
         'data-obj-id': dataObjId, 
         'data-obj-type': dataObjType,

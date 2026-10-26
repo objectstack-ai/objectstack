@@ -10,9 +10,10 @@ import { ComponentRegistry } from '@object-ui/core';
 import type { BadgeSchema } from '@object-ui/types';
 import { Badge } from '../../ui';
 import { renderChildren } from '../../lib/utils';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 ComponentRegistry.register('badge', 
-  ({ schema, ...props }: { schema: BadgeSchema; [key: string]: unknown }) => {
+  ({ schema, ...props }: { schema: BadgeSchema; [key: string]: unknown } & RendererHostProps) => {
     // Extract designer-related props
     const { 
         'data-obj-id': dataObjId, 

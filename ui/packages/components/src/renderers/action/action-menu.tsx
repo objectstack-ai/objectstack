@@ -35,6 +35,7 @@ import { hasDeclaredVisibilityGate } from './visibility-gate';
 import { useAutoTriggerOnce } from './auto-trigger';
 import { readActionEntryParamValues } from './static-params';
 import { DisabledReasonMenuLabel, menuItemReasonAria, useDisabledReason } from './disabled-reason';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 function useMoreActionsLabel(): string {
   // useObjectTranslation is provider-safe (never throws); no try/catch, which
@@ -61,7 +62,7 @@ export interface ActionMenuSchema {
   visible?: boolean | string | { dialect: string; source?: string };
   /** Custom CSS class */
   className?: string;
-  [key: string]: unknown;
+  [key: string]: any;
 }
 
 /**
@@ -207,7 +208,7 @@ ActionAutoTrigger.displayName = 'ActionAutoTrigger';
 // host-EVALUATED enablement verdict, declared rather than left to the index
 // signature, as `ActionButtonRendererProps` declares it (objectui#9131).
 const ActionMenuRenderer = forwardRef<HTMLButtonElement, { schema: ActionMenuSchema; className?: string }>(
-  ({ schema, className, ...props }: { schema: ActionMenuSchema; className?: string; disabled?: boolean; [key: string]: unknown }, ref) => {
+  ({ schema, className, ...props }: { schema: ActionMenuSchema; className?: string; disabled?: boolean; [key: string]: unknown } & RendererHostProps, ref) => {
     const {
       'data-obj-id': dataObjId,
       'data-obj-type': dataObjType,

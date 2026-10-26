@@ -9,6 +9,7 @@
 import { ComponentRegistry } from '@object-ui/core';
 import { renderChildren } from '../../lib/utils';
 import { forwardRef } from 'react';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 const tags = ['aside', 'main', 'header', 'nav', 'footer', 'section', 'article'] as const;
 
@@ -19,7 +20,7 @@ tags.forEach(tag => {
   // seven semantic tags with no schema type of their own, so `schema` stays
   // `any`; the annotation is written like its siblings' so the guard needs no
   // per-file carve-out.
-  const Component = forwardRef<HTMLElement, { schema: any; className?: string }>(({ schema, className, ...props }: { schema: any; className?: string; [key: string]: unknown }, ref) => {
+  const Component = forwardRef<HTMLElement, { schema: any; className?: string }>(({ schema, className, ...props }: { schema: any; className?: string; [key: string]: unknown } & RendererHostProps, ref) => {
       // Extract designer-related props
       const { 
           'data-obj-id': dataObjId, 

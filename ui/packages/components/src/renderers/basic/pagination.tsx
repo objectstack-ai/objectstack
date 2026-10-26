@@ -11,6 +11,7 @@ import type { PaginationSchema } from '@object-ui/types';
 import { Pagination, PaginationContent, PaginationEllipsis, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from '../../ui/pagination';
 import { createSafeTranslation } from '@object-ui/i18n';
 import React from 'react';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 /**
  * objectui#12145 — the previous / next links' accessible names. The Shadcn
@@ -29,7 +30,7 @@ const usePaginationTranslation = createSafeTranslation(
 );
 
 ComponentRegistry.register('pagination', 
-  ({ schema, ...props }: { schema: PaginationSchema; [key: string]: unknown }) => {
+  ({ schema, ...props }: { schema: PaginationSchema; onPageChange?: (page: number) => void; [key: string]: unknown } & RendererHostProps) => {
     const { t } = usePaginationTranslation();
     const { 
         'data-obj-id': dataObjId, 

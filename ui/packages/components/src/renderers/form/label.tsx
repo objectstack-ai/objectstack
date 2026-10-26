@@ -9,9 +9,10 @@
 import { ComponentRegistry } from '@object-ui/core';
 import type { LabelSchema } from '@object-ui/types';
 import { Label } from '../../ui';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 ComponentRegistry.register('label', 
-  ({ schema, className, ...props }: { schema: LabelSchema; className?: string; [key: string]: unknown }) => {
+  ({ schema, className, ...props }: { schema: LabelSchema; className?: string; [key: string]: unknown } & RendererHostProps) => {
     // Extract designer-related props
     const { 
         'data-obj-id': dataObjId, 

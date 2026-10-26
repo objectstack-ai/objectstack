@@ -10,9 +10,10 @@ import { ComponentRegistry } from '@object-ui/core';
 import type { ScrollAreaSchema } from '@object-ui/types';
 import { ScrollArea, ScrollBar } from '../../ui';
 import { renderChildren } from '../../lib/utils';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 ComponentRegistry.register('scroll-area', 
-  ({ schema, className, ...props }: { schema: ScrollAreaSchema; className?: string; [key: string]: unknown }) => {
+  ({ schema, className, ...props }: { schema: ScrollAreaSchema; className?: string; [key: string]: unknown } & RendererHostProps) => {
     // Extract designer-related props
     const { 
         'data-obj-id': dataObjId, 

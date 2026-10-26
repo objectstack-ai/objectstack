@@ -32,6 +32,7 @@ import { hasDeclaredVisibilityGate } from './visibility-gate';
 import { useAutoTriggerOnce } from './auto-trigger';
 import { readStaticParamValues } from './static-params';
 import { DisabledReasonTrigger, describedByWithReason, useDisabledReason } from './disabled-reason';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 /** A record value: a plain object, never `null` or an array. */
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -97,7 +98,7 @@ function withUndoBaseline(
 // `ActionButtonProps` as the block's AUTHORED property bag (`actionType`, `label`, `variant`, …).
 // This is the React envelope that carries a node (`schema`, `context`, `disabled`, an open
 // tail) — a different layer, named as objectui#7265 named `RecordAlertRendererProps`.
-export interface ActionButtonRendererProps {
+export interface ActionButtonRendererProps extends RendererHostProps {
   schema: UIActionSchema & { type: string; className?: string; actionType?: string };
   className?: string;
   /** Override context for this specific action */

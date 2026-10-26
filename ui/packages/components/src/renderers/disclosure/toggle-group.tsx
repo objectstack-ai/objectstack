@@ -9,9 +9,10 @@
 import { ComponentRegistry } from '@object-ui/core';
 import type { ToggleGroupSchema } from '@object-ui/types';
 import { ToggleGroup, ToggleGroupItem } from '../../ui/toggle-group';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 ComponentRegistry.register('toggle-group', 
-  ({ schema, ...props }: { schema: ToggleGroupSchema; [key: string]: unknown }) => {
+  ({ schema, ...props }: { schema: ToggleGroupSchema; [key: string]: unknown } & RendererHostProps) => {
     const { 
         'data-obj-id': dataObjId, 
         'data-obj-type': dataObjType,

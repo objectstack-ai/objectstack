@@ -8,7 +8,7 @@
 
 import { ComponentRegistry, resolveFieldRuleState, evalFieldPredicate, resolveCascadingOptions, resolveDependsOnFields, CASCADE_OPTION_WIDGET_TYPES, EXPANDABLE_FIELD_TYPES, isValueStillOffered, isMissingForRequired, isServerOwnedValue } from '@object-ui/core';
 import type { FormSchema, FormField as FormFieldConfig, FormFieldTab, FormFieldPane, FieldCondition, SelectOption } from '@object-ui/types';
-import { useForm } from 'react-hook-form';
+import { useForm, type RefCallBack } from 'react-hook-form';
 import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage, FormDescription } from '../../ui/form';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
@@ -44,6 +44,7 @@ import { cn } from '../../lib/utils';
 import React from 'react';
 import { SchemaRendererContext, usePredicateScope, isPermissionError, extractWriteErrorMessage, extractFieldErrors, declaredUserMessage } from '@object-ui/react';
 import { createSafeTranslation } from '@object-ui/i18n';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 /**
  * Whether a `section-divider` row draws anything: a heading, a blurb, or both.
@@ -1553,7 +1554,7 @@ function BuiltinTextarea({
 
 // Form renderer component - Airtable-style feature-complete form
 ComponentRegistry.register('form',
-  ({ schema, className, onAction, disabled: hostDisabled, ...props }: { schema: FormSchema; className?: string; onAction?: (action: any) => void; disabled?: boolean; [key: string]: unknown }) => {
+  ({ schema, className, onAction, disabled: hostDisabled, ...props }: { schema: FormSchema; className?: string; onAction?: (action: any) => void; disabled?: boolean; [key: string]: unknown } & RendererHostProps) => {
     const { t } = useSafeFormTranslation();
     // Prefix for the label ids the GROUP-labelled fields need (objectui#3961).
     // Owned here, not derived from `<FormItem>`'s own `useId()`: that id lives in
@@ -4222,6 +4223,12 @@ interface RenderFieldProps {
    * before every registered widget (which reads it off `field`).
    */
   label?: string;
+  /** react-hook-form's ref binding, handed to the built-in control by name. */
+  ref?: RefCallBack;
+  /** The field's raw metadata object (`field.field`, else the field config). */
+  field?: Record<string, unknown>;
+  /** A dependent select's gate hint while its controlling field is unset (#2284). */
+  emptyHint?: string;
   [key: string]: unknown;
 }
 

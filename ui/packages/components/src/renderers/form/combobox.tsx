@@ -11,6 +11,7 @@ import { ComponentRegistry } from '@object-ui/core';
 import type { ComboboxSchema } from '@object-ui/types';
 import { Combobox } from '../../custom';
 import { toFormControlDomProps } from '../../lib/form-control-dom-props';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 /**
  * The `combobox` NODE renderer (objectui#8140).
@@ -62,7 +63,7 @@ import { toFormControlDomProps } from '../../lib/form-control-dom-props';
  * `element:text_input`: an unassociated `<p>` is decoration a screen reader
  * moving to the control never announces.
  */
-const ComboboxRenderer = ({ schema, disabled: hostDisabled, ...props }: { schema: ComboboxSchema; disabled?: boolean; [key: string]: unknown }) => {
+const ComboboxRenderer = ({ schema, disabled: hostDisabled, ...props }: { schema: ComboboxSchema; disabled?: boolean; [key: string]: unknown } & RendererHostProps) => {
   // `hostDisabled` is `SchemaRenderer`'s EVALUATED verdict on `disabled` /
   // `disabledOn`, not the raw authored key — which may be a predicate STRING,
   // truthy however it evaluates (objectui#7238, precedent objectui#6169).

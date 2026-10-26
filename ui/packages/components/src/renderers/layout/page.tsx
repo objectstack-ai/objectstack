@@ -34,6 +34,7 @@ import { cn } from '../../lib/utils';
 import { PageBlockGrid } from './page-block-grid';
 import { PageDescriptionContext } from './page-description-context';
 import { PageRegionPostureProvider, PageWidthProvider, usePageWidthStore } from './page-region-posture';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -732,7 +733,7 @@ export const PageRenderer: React.FC<{
   schema: PageNodeSchema;
   className?: string;
   [key: string]: unknown;
-}> = ({ schema, className, ...props }) => {
+} & RendererHostProps> = ({ schema, className, ...props }) => {
   const pageType = schema.pageType || 'record';
   // A `kind:'html'` page compiles its source against the registry, and a
   // compile error fails the whole page. Without this the failure is permanent
