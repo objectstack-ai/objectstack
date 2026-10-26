@@ -27,5 +27,3 @@ plugin.d.ts
 *.sln
 *.sw?
 
-# MSW
-public/mockServiceWorker.js

@@ -27,7 +27,6 @@ import { stripUnauthorableProperties } from './unauthorable-nodes.js';
 // admits anything. See the module header for the predicate and its controls.
 import { markErasedAuthoringInput } from './erased-authoring-mark.js';
 import {
-    CLOSURE_CONTEXT_KEY_BY_TYPE,
     SDUI_MANIFEST_SERVICE,
     isUsableSduiManifest,
     stampHtmlPageRequires,
@@ -398,6 +397,8 @@ import { applyPublishBackfill, planPublishBackfill } from './protocol-publish-ba
 import { discardDraftInItsScope, listDrafts } from './protocol-drafts.js';
 // [#25467 cut 13] The package door's save refusal and the origin-gated removal verdict.
 import { originGatedRemovalRefusal, refusePackagedBaseOverride } from './protocol-packaged-base-refusal.js';
+// [#25467 cut 14] The publish batch's seed apply and its own pending declarations.
+import { applySeedBodies, collectBatchPendingDeclarations } from './protocol-publish-batch.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -2731,7 +2732,7 @@ function commitPlanKey(item: { type: string; name: string; member?: string }): s
  * member was named, so a call addressing the canonical member — and every call
  * for a type with no members — passes exactly the options it always did.
  */
-function memberOption(member: string | undefined): { member?: string } {
+export function memberOption(member: string | undefined): { member?: string } {
     return member !== undefined ? { member } : {};
 }
 
@@ -3633,7 +3634,7 @@ function carryCatalogedErrorCode(target: Error, source: unknown): void {
  * error on `cause`, which `handleRouteError` / `logWithheldServerFault` print
  * whole — the same posture {@link metadataStoreUnavailableError} already takes.
  */
-function declaresClientRefusal(err: unknown): boolean {
+export function declaresClientRefusal(err: unknown): boolean {
     const status = (err as { status?: unknown } | null | undefined)?.status;
     return typeof status === 'number' && status >= 400 && status < 500;
 }
@@ -23333,83 +23334,13 @@ export class ObjectStackProtocolImplementation implements
         success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[];
         issues?: Array<{ path: string; message: string; code?: string | undefined }>;
     }> {
-        try {
-            const seeds = bodies.filter(
-                (b: any) => b && typeof b.object === 'string' && Array.isArray(b.records),
-            );
-            if (seeds.length === 0) {
-                return { success: false, inserted: 0, updated: 0, error: 'seed apply: no readable seed bodies' };
-            }
-            const { SeedLoaderService } = await import('./seed-loader.js');
-            const { SeedLoaderRequestSchema } = await import('@objectstack/spec/data');
-            // The loader only needs `getObject` from IMetadataService (dependency
-            // graph + field introspection); satisfy it from the protocol's own
-            // metadata reads so no kernel service lookup is required.
-            const metadataAdapter = {
-                getObject: async (name: string) => {
-                    const wrapper: any = await (this as any).getMetaItem({ type: 'object', name });
-                    return wrapper?.item ?? wrapper ?? null;
-                },
-            };
-            const loader = new SeedLoaderService(
-                this.engine as any,
-                metadataAdapter as any,
-                console as any,
-            );
-            // [#8333 · P9] `safeParse`, not `parse` — see {@link
-            // seedRequestValidationError}. A malformed seed body used to reach
-            // the catch below as a raw `ZodError`, which declares no `status`
-            // and would therefore have been withheld along with the driver text
-            // this card is about. Declaring the refusal at its own producer is
-            // what keeps the author's feedback AND the positive list intact.
-            const parsedRequest = SeedLoaderRequestSchema.safeParse({
-                seeds,
-                config: {
-                    defaultMode: 'upsert',
-                    multiPass: true,
-                    // [ADR-0131 D6, §12] No caller organization: a seed dataset
-                    // names the organization it populates itself, and the
-                    // loader derives the owner only under `single` (D9).
-                },
-            });
-            if (!parsedRequest.success) throw seedRequestValidationError(parsedRequest.error.issues);
-            const r = await loader.load(parsedRequest.data);
-            return {
-                success: r.success,
-                inserted: r.summary.totalInserted,
-                updated: r.summary.totalUpdated,
-                ...(r.errors?.length ? { errors: r.errors } : {}),
-            };
-        } catch (e: any) {
-            // [#8333 · P9] `seedApplied.error` rides on a **200** publish
-            // response, so this is a data-path disclosure no HTTP boundary can
-            // reach. Measured on `origin/main`: a driver failure under the
-            // loader's dependency-graph read (`getMetaItem` → `sys_metadata`)
-            // escaped the loader and arrived here, putting `SQLITE_ERROR: no
-            // such table: sys_metadata` on the field.
-            //
-            // The other population this catch receives — the seed bodies' own
-            // schema rejection — now DECLARES itself 422 at the parse above, so
-            // it is quoted in full and the author still learns which seed and
-            // which key. That declaration is the whole reason this site could
-            // be converted rather than escalated.
-            console.warn(`[protocol.applySeedBodies] seed apply failed: ${e?.message ?? e}`);
-            return {
-                success: false, inserted: 0, updated: 0,
-                error: clientFacingFailureText(e, 'seed apply failed'),
-                // [#10524] A DECLARED refusal's structured findings ride the
-                // receipt beside the headline `error` — the message is a
-                // one-sentence headline now, so this is where the per-key
-                // prose reaches the author. Guarded by the same declaration
-                // test as the text above: only the declared 422
-                // (`seedRequestValidationError`) attaches `issues`; no driver
-                // error carries them (the #8441 measurement), so nothing
-                // undeclared is routed around the withhold.
-                ...(declaresClientRefusal(e) && Array.isArray(e?.issues)
-                    ? { issues: e.issues }
-                    : {}),
-            };
-        }
+        // [#25467 cut 14] The body moved to `protocol-publish-batch.ts` (see `PublishBatchHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof applySeedBodies> = {
+            get engine() { return readEngine(); },
+            getMetaItem: (...a) => this.getMetaItem(...a),
+        };
+        return applySeedBodies.call(host, bodies);
     }
 
     /**
@@ -23526,75 +23457,12 @@ export class ObjectStackProtocolImplementation implements
     private async collectBatchPendingDeclarations(
         drafts: ReadonlyArray<{ type: string; name: string; member?: string }>,
     ): Promise<RuntimePendingDeclarations | undefined> {
-        // [#13216] Typed as a mapped type over `RuntimePendingDeclarations`
-        // with `-?`, not as a hand-listed literal. The literal it replaces was
-        // the third place the collection set is written down, and the only one
-        // that could fall behind SILENTLY: a key added to `RuntimeStackContext`
-        // and routed by `CLOSURE_CONTEXT_KEY_BY_TYPE` would simply never be
-        // accumulated here, so a package publishing a dataset beside the
-        // dashboard that binds it would keep being refused for the sibling in
-        // its own batch — the `shyx_customer_ds` shape #10377 was filed for.
-        // `-?` makes every key REQUIRED, so the next widening is a compile error
-        // at this line instead — and [#17063]'s NARROWING was one too, which is
-        // how `pages` left this literal in the same edit it left
-        // `RuntimeStackContext`.
-        const pending: { [K in keyof RuntimePendingDeclarations]-?: unknown[] } = {
-            objects: [], permissions: [], books: [], datasets: [],
+        // [#25467 cut 14] The body moved to `protocol-publish-batch.ts` (see `PublishBatchHost`).
+        const host: ThisParameterType<typeof collectBatchPendingDeclarations> = {
+            getOverlayRepo: (...a) => this.getOverlayRepo(...a),
+            warnClosureReadUnavailable: (...a) => this.warnClosureReadUnavailable(...a),
         };
-        let any = false;
-        for (const d of drafts) {
-            // The canonical fold, same boundary the promote applies: a stored
-            // manifest-plural spelling must route to the same collection its
-            // singular does, or one row's shape would decide whether the
-            // package is judged against itself.
-            const singular = canonicalMetaType(d.type);
-            const key = (CLOSURE_CONTEXT_KEY_BY_TYPE as Record<string, keyof RuntimePendingDeclarations>)[singular];
-            if (!key) continue;
-            const repo = this.getOverlayRepo();
-            // ── The repository-shape guard, and why it degrades ALL-OR-NOTHING
-            //
-            // This method introduced the batch door's first dependency on
-            // `repo.get`. `SysMetadataRepository` has always had it, but the
-            // seam is overridable (`getOverlayRepo` is the injection point every
-            // publish double replaces), and the door's only previous body read —
-            // the `seed` capture — fires solely when a seed draft is in the
-            // batch, so a repository shape without `get` had never been asked
-            // for one. Measured: nine `publishPackageDrafts` cases in
-            // `@objectstack/objectql` drive a double declaring `listDrafts`
-            // alone, and this call turned every one of them into
-            // `TypeError: repo.get is not a function` — thrown BEFORE any
-            // promotion, so the batch door died on a shape it used to accept.
-            //
-            // The answer is a declared capability check, not a wider `try`: a
-            // missing member is a fact about the repository, knowable up front,
-            // and it must not read like a failed read. Degrading returns the
-            // closure to its pre-#10377 state (the live universe alone), which
-            // is the safe direction — the gate keeps judging and can only be
-            // MORE strict, never fail open.
-            //
-            // ⛔ All-or-nothing on purpose. Bailing out of the whole collection
-            // rather than skipping this one draft is what keeps the verdict from
-            // depending on WHICH org a draft happens to live in: a partial
-            // closure would resolve some of a package's own names and not
-            // others, which is a third behaviour nobody declared and nobody
-            // could reproduce.
-            if (typeof repo.get !== 'function') {
-                this.warnClosureReadUnavailable(singular, d.name);
-                return undefined;
-            }
-            const ref = {
-                type: singular, name: d.name, org: 'env',
-            } as unknown as Parameters<typeof repo.get>[0];
-            // [#22877] The draft's own bundle member, as listed.
-            const draft = await repo.get(ref, { state: 'draft', ...memberOption(d.member) });
-            if (draft?.body === undefined || draft.body === null) continue;
-            pending[key].push(draft.body);
-            any = true;
-        }
-        // Absent, not empty: `undefined` is what keeps a batch with no
-        // closure-relevant drafts byte-identical to the pre-#10377 gate call,
-        // rather than routing it through a merge that would be a no-op.
-        return any ? pending : undefined;
+        return collectBatchPendingDeclarations.call(host, drafts);
     }
 
     /**

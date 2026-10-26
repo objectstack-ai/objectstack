@@ -855,19 +855,19 @@ export const ADJUDICATED = new Map([
   [
     'scripts/__tests__/check-doc-links.test.ts',
     {
-      reads: ['./*', 'apps/**', 'content/docs/**', 'docs/ARCHITECTURE.md', 'docs/CONSOLE-STREAMLINING-SUMMARY.md', 'docs/adr/**', 'docs/audits/**', 'examples/**', 'packages/**'],
+      reads: ['./*', 'apps/**', 'content/docs/**', 'docs/app-shell-extraction-guide.md', 'docs/adr/**', 'docs/audits/**', 'examples/**', 'packages/**'],
     },
   ],
   [
     'scripts/__tests__/check-doc-snippet-emitted-census.test.ts',
     {
-      reads: ['README.md', 'apps/console/docs/UI_IMPROVEMENT_PROPOSAL.md', 'apps/console/docs/deployment.md', 'apps/console/docs/error-tracking.md', 'content/docs/**', 'docs/ARCHITECTURE.md', 'docs/CONSOLE-STREAMLINING-SUMMARY.md', 'docs/adr/**', 'docs/audits/**', 'packages/**'],
+      reads: ['README.md', 'apps/console/docs/UI_IMPROVEMENT_PROPOSAL.md', 'apps/console/docs/deployment.md', 'apps/console/docs/error-tracking.md', 'content/docs/**', 'docs/app-shell-extraction-guide.md', 'docs/adr/**', 'docs/audits/**', 'packages/**'],
     },
   ],
   [
     'scripts/__tests__/check-doc-snippet-types.test.ts',
     {
-      reads: ['README.md', 'apps/console/docs/UI_IMPROVEMENT_PROPOSAL.md', 'apps/console/docs/deployment.md', 'apps/console/docs/error-tracking.md', 'content/docs/**', 'docs/ARCHITECTURE.md', 'docs/CONSOLE-STREAMLINING-SUMMARY.md', 'docs/adr/**', 'docs/audits/**', 'packages/**'],
+      reads: ['README.md', 'apps/console/docs/UI_IMPROVEMENT_PROPOSAL.md', 'apps/console/docs/deployment.md', 'apps/console/docs/error-tracking.md', 'content/docs/**', 'docs/app-shell-extraction-guide.md', 'docs/adr/**', 'docs/audits/**', 'packages/**'],
       walker: 'markdown-tree',
     },
   ],
@@ -986,15 +986,6 @@ export const ADJUDICATED = new Map([
       walker: 'markdown-tree',
     },
   ],
-  // Reads no markdown: its `README.md` literal is sample input to a pure path-matcher
-  // assertion -- the suite is a census OF corpus walkers and keeps its own inputs literal.
-  [
-    'scripts/__tests__/coverage-red-cause-census.test.ts',
-    {
-      reads: [],
-      notRead: ['README.md'],
-    },
-  ],
   // Reads no markdown: every document literal is fixture text handed to pure functions.
   [
     'scripts/__tests__/cross-file-line-citation-census.test.ts',
@@ -1017,14 +1008,7 @@ export const ADJUDICATED = new Map([
   [
     'scripts/__tests__/dollar-dialect-alias-census.test.ts',
     {
-      reads: ['./*', '.changeset/**', '.claude/skills/**', 'apps/**', 'content/docs/**', 'docs/ARCHITECTURE.md', 'docs/CONSOLE-STREAMLINING-SUMMARY.md', 'docs/adr/**', 'docs/audits/**', 'examples/**', 'packages/**', 'patches/README.md', 'skills/objectui/**'],
-    },
-  ],
-  [
-    'scripts/__tests__/extract-mdx-demos.test.ts',
-    {
-      reads: ['content/docs/**'],
-      walker: 'markdown-tree',
+      reads: ['./*', '.changeset/**', '.claude/skills/**', 'apps/**', 'content/docs/**', 'docs/app-shell-extraction-guide.md', 'docs/adr/**', 'docs/audits/**', 'examples/**', 'packages/**', 'patches/README.md', 'skills/objectui/**'],
     },
   ],
   [

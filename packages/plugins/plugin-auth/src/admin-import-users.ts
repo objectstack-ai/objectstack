@@ -111,7 +111,16 @@ import type {
 } from '@objectstack/rest';
 import { prepareImportRequest, runImport } from '@objectstack/rest';
 import { generatePlaceholderEmail, isPlaceholderEmail } from './placeholder-email.js';
-import { generateTemporaryPassword, normalizePhoneNumber, isLikelyEmail, type AdminActor, type EndpointResult } from './admin-user-endpoints.js';
+import {
+  generateTemporaryPassword,
+  normalizePhoneNumber,
+  isLikelyEmail,
+  mapAuthApiError,
+  type AdminActor,
+  type AuthContextLike,
+  type EndpointResult,
+} from './admin-user-endpoints.js';
+import { temporaryPasswordLength } from './temporary-password-length.js';
 import { SYS_USER_IMPORT_UPDATE_FIELDS } from './sys-user-writable-fields.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import {
@@ -168,6 +177,12 @@ export interface IdentityImportEngine {
 export interface IdentityImportDeps {
   /** better-auth server api (createUser + requestPasswordReset). */
   getAuthApi(): Promise<any>;
+  /**
+   * [#25932] better-auth's `$context`, the same reader create-user holds: its
+   * `password.config` is the deployment's length range, which sizes every
+   * generated temporary password (`temporaryPasswordLength`).
+   */
+  getAuthContext(): Promise<{ password: Pick<AuthContextLike['password'], 'config'> }>;
   getDataEngine(): IdentityImportEngine | undefined;
   /**
    * Optional object-declaration reader. It feeds field coercion (best-effort:
@@ -610,6 +625,14 @@ export async function runAdminImportUsers(
   if (typeof authApi.createUser !== 'function') {
     return fail(501, 'NOT_IMPLEMENTED', 'The better-auth admin plugin is not enabled (auth.plugins.admin)');
   }
+  // [#25932] The deployment's length range sizes every temporary password this
+  // batch mints, read before any row is written, as create-user reads it.
+  let temporaryLength: number;
+  try {
+    temporaryLength = temporaryPasswordLength((await deps.getAuthContext()).password.config);
+  } catch (error) {
+    return mapAuthApiError(error, 'import-users failed');
+  }
 
   const protocol: ImportProtocolLike = {
     // [#22800] The declaration reader the parser was handed above. With it,
@@ -687,7 +710,7 @@ export async function runAdminImportUsers(
       // credential-less accounts (better-auth: omitted password → no
       // credential record); the credential is minted later by the user via
       // set-initial-password / the reset flow, which creates it on demand.
-      const password = plan.kind === 'temporary' ? generateTemporaryPassword() : undefined;
+      const password = plan.kind === 'temporary' ? generateTemporaryPassword(temporaryLength) : undefined;
 
       const created = await authApi.createUser({
         body: {

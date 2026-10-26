@@ -671,7 +671,7 @@ describe('objectui#7856 — the root docs/*.md pages are in the scan set, and on
     const documents = listDocuments(repoRoot);
     for (const doc of rootDocsPages(repoRoot)) expect(documents).toContain(doc);
     // Non-vacuous: the leg reaches a real page, not an empty directory.
-    expect(rootDocsPages(repoRoot)).toContain('docs/ARCHITECTURE.md');
+    expect(rootDocsPages(repoRoot)).toContain('docs/app-shell-extraction-guide.md');
   });
 
   it('the widening judges something — the leg contributes blocks to the compiled tier', () => {

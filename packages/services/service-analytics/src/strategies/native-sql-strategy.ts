@@ -47,6 +47,7 @@ import { textMatchPredicateSql, sqlDialectFor, type AnalyticsSqlDialect } from '
 import { whereContainsMembershipSql } from '../contains-membership-sql.js';
 // [#25778] The per-row operand of a dataset duration measure, per dialect.
 import { durationMeasureIn, durationMeasureKey, durationOperandSql, hasDurationSql } from '../duration-measure-sql.js';
+import { scopedMeasureFilter } from '../scoped-measure-key.js';
 import { isJsonStoredShape } from '../contains-membership-sql.js';
 import { expandEmptyOperator } from '@objectstack/spec/data';
 import { resolveAnalyticsDateRangeString } from '@objectstack/core';
@@ -979,7 +980,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       : undefined;
     if (carries(datasetScope?.filter, memberTarget)) return true;
     for (const measure of query.measures ?? []) {
-      if (carries(datasetScope?.measureFilters?.[measure], memberTarget)) return true;
+      if (carries(scopedMeasureFilter(datasetScope, measure, cube.name), memberTarget)) return true;
     }
     if (typeof ctx.getReadScope !== 'function') return false;
     const scoped = (ctx as DatasetScopedStrategyContext).readScopedObjects;
@@ -1124,7 +1125,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     const inScope = findNestedRelationCondition(datasetScope?.filter, 'filter');
     if (inScope) return { source: 'the dataset\'s own `filter`', ...inScope };
     for (const measure of query.measures ?? []) {
-      const inMeasure = findNestedRelationCondition(datasetScope?.measureFilters?.[measure], 'filter');
+      const inMeasure = findNestedRelationCondition(scopedMeasureFilter(datasetScope, measure, query.cube), 'filter');
       if (inMeasure) return { source: `the \`filter\` of measure "${measure}"`, ...inMeasure };
     }
     return null;
@@ -1345,10 +1346,10 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
         // loop, so its bound values are pushed onto `params` in the order the
         // placeholders appear in the statement — the SELECT list precedes the
         // WHERE clause, and `$n` is positional.
-        // [#25778] A duration measure named `<cube>.<name>` reads the filter
-        // its dataset scoped under `<name>`.
+        // [#25778, #25906] A measure named `<cube>.<name>` reads the filter its
+        // dataset scoped under `<name>`, a duration measure or any other.
         const durationKey = durationMeasureKey(datasetScope?.measureDurations, measure, cube.name);
-        const measureFilter = datasetScope?.measureFilters?.[durationKey ?? measure];
+        const measureFilter = scopedMeasureFilter(datasetScope, measure, cube.name);
         const predicate = measureFilter
           ? this.compileFilterNode(
               normalizeAnalyticsFilterTree(judgedComparands({ where: measureFilter }, comparandTypeOf), lowering),

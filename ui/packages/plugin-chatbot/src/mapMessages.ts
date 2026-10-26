@@ -998,6 +998,43 @@ export function detectBuiltAppPackage(result: unknown): string | undefined {
 export function detectDraftResult(result: unknown): DraftReview | undefined {
   const obj = parseResultEnvelope(result);
   if (!obj || obj.status !== 'drafted') return undefined;
+  return draftReviewOf(obj);
+}
+
+/**
+ * objectstack#25887 — the review of a whole-app build an auto-publish
+ * environment already published. Its envelope answers `status: 'published'`
+ * and keeps `drafted[]`, `packageId` and `nextSteps` (see
+ * {@link detectBuiltAppPackage}), but {@link detectDraftResult} lifts `drafted`
+ * envelopes only, so a reloaded build, and a replayed one even live (a replay
+ * emits no `data-build-progress` frames), drew no result card. Never an
+ * invocation's `draftReview`: nothing about a published build is left to
+ * publish or review, so it feeds the result card alone.
+ */
+export function detectPublishedBuildReview(result: unknown): DraftReview | undefined {
+  const obj = parseResultEnvelope(result);
+  if (!obj || obj.status !== 'published' || !detectBuiltAppPackage(obj)) return undefined;
+  return draftReviewOf(obj);
+}
+
+/**
+ * objectstack#25887 — the one confirm-replay that keeps its draft review: a
+ * WHOLE-APP build (approving the proposed plan replays its `apply_blueprint`)
+ * that drafted. It has no confirm card to carry its verdict, so suppressing
+ * the review (objectui#5695) drew it nowhere; it gets the draft review, and
+ * with it the result card, that a model-driven build of the same envelope
+ * gets. A failed publish keeps the suppression (no live Publish over a
+ * rollback), and so does an incremental edit (`kind: 'edit'`).
+ */
+function replayedBuildReview(
+  outcome: ReplayOutcome,
+  result: unknown,
+): DraftReview | undefined {
+  if (outcome.kind !== 'drafted' || !detectBuiltAppPackage(result)) return undefined;
+  return detectDraftResult(result);
+}
+
+function draftReviewOf(obj: Record<string, unknown>): DraftReview | undefined {
   const items = draftedItemsOf(obj);
   if (items.length === 0) return undefined;
   // The owning package (when the staging tool reported it) lets the chat offer
@@ -1172,9 +1209,13 @@ function extractToolInvocations(
       // publish must NOT surface as an ordinary draft card with a live Publish
       // button (that is exactly the "narrated success over a rollback" the
       // card exists to prevent, #5695). So a matched replay suppresses the
-      // draft-review lift for this invocation.
+      // draft-review lift for this invocation — except a drafted whole-app
+      // build, which has no confirm card and is drawn as a build
+      // (objectstack#25887, `replayedBuildReview`).
       const replayOutcome = detectReplayOutcome(toolCallId, result);
-      const draftReview = replayOutcome ? undefined : detectDraftResult(result);
+      const draftReview = replayOutcome
+        ? replayedBuildReview(replayOutcome, result)
+        : detectDraftResult(result);
       const proposedPlan = detectProposedPlan(result);
       const proposedChanges = detectProposedChanges(result);
       const builderHandoff = detectBuilderHandoff(result);
@@ -1436,11 +1477,15 @@ export function uiMessageToChatMessage(
   // synthesized from the apply_blueprint draft envelope — which IS persisted on
   // the tool result — so the panel + its open/preview affordances survive a
   // refresh. Re-derived on every map (incl. useObjectChat's round-trip), so it
-  // cannot be lost the way a one-shot hydration value would.
+  // cannot be lost the way a one-shot hydration value would. An auto-publish
+  // environment's `published` envelope is read too (objectstack#25887): a
+  // replayed build has no live frames, so it is the only tree it gets.
   const tree =
     extractBuildProgress(parts) ??
     resolvedTools
-      .map((tool) => buildProgressFromDraftReview(tool.draftReview))
+      .map((tool) =>
+        buildProgressFromDraftReview(tool.draftReview ?? detectPublishedBuildReview(tool.result)),
+      )
       .find((bp): bp is ChatBuildProgress => Boolean(bp));
   // The verification line rides on the tree it verifies (objectui#11988).
   const verify = extractBuildVerify(parts);
