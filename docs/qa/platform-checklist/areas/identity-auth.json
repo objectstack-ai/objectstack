@@ -2461,7 +2461,7 @@
       "title": "ADR-0131 single posture: the Default Organization exists from boot BEFORE any sign-up — the first sign-up becomes its owner, later sign-ups its members, every session carries it as active org, and seeded org-columned rows carry it instead of NULL",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -2471,20 +2471,21 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)"
+          "a fresh boot of the showcase at info log level: `pnpm dev -- --fresh -p PORT --seed-admin --log-level info` (the seeded admin is printed). acceptance[1] reads the [default-org] lines, which are info-level, so a boot at `os dev`'s default warn level prints nothing for it to read",
+          "a DB file the runner can read: --fresh puts the SQLite file at FRESH_HOME/data/objectstack.db, where FRESH_HOME is the path the boot prints on its 'Fresh OS_HOME' line. Read it with a SQLite client while the server runs (it is deleted on exit): acceptance[1]'s created_at ordering of the slug-default sys_organization row against the first sys_user row is read there"
         ]
       },
       "steps": [
         "on a fresh DB, confirm the slug `default` sys_organization row exists before the first user: read the boot log ordering (the Default Organization is ensured before --seed-admin signs the admin up) — at --log-level info only: the [default-org] lines a healthy boot prints are info-level (packages/plugins/plugin-auth/src/ensure-default-organization.ts), and `os dev`'s default warn level prints no Default-Organization line at all — or compare the created_at of the slug-default sys_organization row with the first sys_user row's, or boot WITHOUT --seed-admin and read the scratch DB",
         "let --seed-admin create the first user, then create a second with POST /api/v1/auth/admin/create-user (self-registration is closed on the stock showcase); GET /api/v1/auth/get-session for each",
-        "as admin GET /api/v1/data/sys_member?filter organization = default",
+        "as admin GET /api/v1/data/sys_member?organization_id=DEFAULT_ORG_ID, where DEFAULT_ORG_ID is the id of the slug-default sys_organization row read in step 1 — the column is organization_id and holds the organization's id, not its slug",
         "as admin GET /api/v1/data/sys_business_unit and read organization_id on the seeded rows"
       ],
       "acceptance": [
         {
           "clause": "ensureDefaultOrganization runs at boot and the identity objects stamp the org — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=1 FILE`, one package at a time and never through a bare `--`; RUNNER.md's memory fact: the container holds the Tier 1 vitest pins under its memory cap only at --maxWorkers=1, and an exit 137 is that cap, not a failing test); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -2535,6 +2536,12 @@
           "date": "2026-10-19",
           "change": "steps[0] and acceptance[1].verify corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24538, identity-auth.default-organization-boot-invariant; wave anchor #24579 §3): at os dev's default log level the boot prints no Default-Organization line, so 'read the boot log ordering' had nothing to read — ensure-default-organization.ts logs its success lines at info. The step now names --log-level info and the created_at ordering the run used instead. No clause changed",
           "ref": "#24632"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-26",
+          "change": "checklist-accuracy findings of the 18.2.0 sweep (QA run #25812, identity-auth.default-organization-boot-invariant; wave anchor #25807; card #25843). steps[2] filtered `organization = default`, but sys_member's column is organization_id and it holds the organization's id, so the step now filters organization_id by the slug-default row's id. fixtures.requires booted with --fresh alone, but acceptance[1] needs the info-level [default-org] lines and a DB it can read: the boot now carries --log-level info, and a second requires entry names the --fresh SQLite file. acceptance[0].verify prescribed --maxWorkers=2, against RUNNER.md's memory fact (--maxWorkers=1); it now says 1. No clause changed",
+          "ref": "#25843"
         }
       ]
     },
