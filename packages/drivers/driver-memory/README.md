@@ -89,7 +89,7 @@ const driver = new InMemoryDriver({
 ## Related Packages
 
 - [`@objectstack/objectql`](../../objectql) — query engine.
-- [`@objectstack/driver-sql`](../driver-sql) — production driver (ObjectStack Cloud ships an additional `@objectstack/driver-turso` for edge/multi-tenant deployments).
+- [`@objectstack/driver-sql`](../driver-sql) — production driver (ObjectOS Cloud ships an additional `@objectstack/driver-turso` for edge/multi-tenant deployments).
 
 ## Links
 
