@@ -30,6 +30,7 @@ import {
   useSettledSchema,
   useFilterScope,
   useResolvedFilter,
+  useObjectTranslation,
 } from '@object-ui/react';
 import { NavigationOverlay, cn, useIsMobile } from '@object-ui/components';
 import { usePermissions } from '@object-ui/permissions';
@@ -61,8 +62,8 @@ import {
 /**
  * Public MapLibre demo style — free, unauthenticated, but not intended for
  * production traffic (rate-limited, no uptime guarantee). Used only when no
- * `style` is configured; a load failure surfaces the banner below rather
- * than failing silently.
+ * `style` is configured; a load failure swaps the map for the record list
+ * below rather than leaving a grey canvas.
  */
 const DEFAULT_MAP_STYLE = 'https://demotiles.maplibre.org/style.json';
 
@@ -679,17 +680,25 @@ export const ObjectMap: React.FC<ObjectMapProps> = ({
   const [userLocation, setUserLocation] = useState<{ lng: number; lat: number } | null>(null);
   const [geoError, setGeoError] = useState<string | null>(null);
   const [geoBusy, setGeoBusy] = useState(false);
-  // Style/tile load failures (bad network, unreachable style server) don't
-  // throw from react-map-gl — they emit an `error` event. Without this, a
-  // failed load renders a blank map with no indication anything went wrong.
+  const { t } = useObjectTranslation();
+  // Style/tile load failures (bad network, unreachable style server, a tile
+  // host the deployment's network blocks) don't throw from react-map-gl — they
+  // emit an `error` event. The map left behind is a grey canvas: the markers
+  // float over nothing, so the view swaps it for the same record list a
+  // browser without WebGL2 gets (objectstack#25889). Holds MapLibre's own
+  // reason, `''` when it gave none; `null` while the map is healthy. Kept
+  // across refetches — the same style would fail again — until the user asks
+  // for the map back.
   const [mapStyleError, setMapStyleError] = useState<string | null>(null);
   const handleMapError = useCallback((e: { error?: Error & { status?: number } }) => {
-    setMapStyleError(e?.error?.message || 'Failed to load the map style/tiles.');
+    setMapStyleError(e?.error?.message ?? '');
   }, []);
+  const retryMap = useCallback(() => setMapStyleError(null), []);
   // Asked once per mount, before `MapGL` is ever mounted: a browser without
-  // WebGL2 gets the record list instead of a map (see `canStartMap`). Not a
-  // style/tile failure — that one keeps the map and its markers, above.
+  // WebGL2 gets the record list instead of a map (see `canStartMap`). There is
+  // no retry for that one — the browser will not grow WebGL2 by asking again.
   const [mapCanStart] = useState(canStartMap);
+  const showRecordList = !mapCanStart || mapStyleError !== null;
   const requestUserLocation = useCallback(() => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
       setGeoError('Geolocation is not available in this browser.');
@@ -1329,10 +1338,10 @@ export const ObjectMap: React.FC<ObjectMapProps> = ({
    * `map.` because the declared block is the authoring surface — the flat
    * top-level spelling this component also reads is the internal transport form
    * ObjectView / ListView produce (see `FlatMapConfigKeys`), which no author
-   * writes. ⛔ Not translated: `@object-ui/plugin-map` carries no i18n
-   * dependency and every user-facing string in this file is a literal, the same
-   * shape as the "Calendar/Gantt configuration required" refusals in the
-   * sibling plugins.
+   * writes. ⛔ Not translated: it is an authoring diagnostic whose words are
+   * metadata keys, the same shape as the "Calendar/Gantt configuration
+   * required" refusals in the sibling plugins. The notices a VIEWER reads —
+   * the excluded-records count, the map-failed alerts — go through the bundle.
    */
   if (!hasCoordinateBinding(mapConfig)) {
     return (
@@ -1372,11 +1381,38 @@ export const ObjectMap: React.FC<ObjectMapProps> = ({
     );
   }
 
+  // Why the record list stands where the map should be. No deployment-wide map
+  // style setting exists, so neither style remedy promises one: a configured
+  // style is this view's own to check, and the public default is for an
+  // administrator to replace with a style set on this view.
+  const styleFailureReason =
+    mapStyleError ||
+    t('element.map.styleFailedUnknownReason', { defaultValue: 'the map style or tiles could not be loaded' });
+  const recordListNotice = !mapCanStart
+    ? t('element.map.webgl2Unavailable', {
+        defaultValue:
+          'Map failed to load (this browser does not provide WebGL2, which the map needs). The records are listed below; turn on hardware acceleration or use a browser with WebGL2 to see the map.',
+      })
+    : mapConfig.style
+      ? t('element.map.styleFailedConfigured', {
+          reason: styleFailureReason,
+          defaultValue:
+            'Map failed to load ({{reason}}). The records are listed below; check the map style URL set on this view.',
+        })
+      : t('element.map.styleFailedDefault', {
+          reason: styleFailureReason,
+          defaultValue:
+            'Map failed to load ({{reason}}). The records are listed below; the public default map tiles could not be loaded here, so ask your administrator to set a map style for this view.',
+        });
+
   return (
     <div className={cn("min-w-0 overflow-hidden", className)}>
       {invalidCount > 0 && (
         <div className="mb-2 p-2 text-sm text-yellow-800 bg-yellow-50 border border-yellow-200 rounded">
-          {`${invalidCount} record${invalidCount !== 1 ? 's' : ''} with missing or invalid coordinates excluded from the map.`}
+          {t('element.map.invalidCoordinatesExcluded', {
+            excluded: invalidCount,
+            defaultValue: 'Records excluded from the map for missing or invalid coordinates: {{excluded}}',
+          })}
         </div>
       )}
       {markers.length > 0 && (
@@ -1391,22 +1427,41 @@ export const ObjectMap: React.FC<ObjectMapProps> = ({
         </div>
       )}
       <div className="relative border rounded-lg overflow-hidden bg-muted h-[300px] sm:h-[400px] md:h-[500px] lg:h-[600px] w-full">
-         {!mapCanStart ? (
-           // No WebGL2: `MapGL` is never mounted (see `canStartMap`), so the
-           // records the markers would draw are listed here instead — the same
+         {showRecordList ? (
+           // No map to draw on — no WebGL2 (`MapGL` is never mounted, see
+           // `canStartMap`), or a style/tile load failed (`MapGL` is unmounted,
+           // which runs its `map.remove()` on a map that did start). The
+           // records the markers would draw are listed here instead: the same
            // `filteredMarkers` the search box above narrows, each row taking
            // the marker's own click path.
-           <div className="flex h-full flex-col" data-testid="map-webgl2-fallback">
+           <div
+             className="flex h-full flex-col"
+             data-testid={mapCanStart ? 'map-style-fallback' : 'map-webgl2-fallback'}
+           >
              <div
                role="alert"
                className="p-2 text-sm text-center text-amber-900 bg-amber-50 border-b border-amber-200"
              >
-               Map failed to load (this browser does not provide WebGL2, which the map needs). The records are
-               listed below; turn on hardware acceleration or use a browser with WebGL2 to see the map.
+               {recordListNotice}
+               {mapCanStart && (
+                 <button
+                   type="button"
+                   onClick={retryMap}
+                   className="ml-2 font-medium underline hover:no-underline"
+                   data-testid="map-style-retry"
+                 >
+                   {t('element.map.retry', { defaultValue: 'Try the map again' })}
+                 </button>
+               )}
              </div>
-             <ul className="min-h-0 flex-1 overflow-y-auto divide-y bg-background" aria-label="Locations">
+             <ul
+               className="min-h-0 flex-1 overflow-y-auto divide-y bg-background"
+               aria-label={t('element.map.listLabel', { defaultValue: 'Locations' })}
+             >
                {filteredMarkers.length === 0 && (
-                 <li className="px-3 py-2 text-sm text-muted-foreground">No locations to list.</li>
+                 <li className="px-3 py-2 text-sm text-muted-foreground">
+                   {t('element.map.listEmpty', { defaultValue: 'No locations to list.' })}
+                 </li>
                )}
                {filteredMarkers.map((marker) => (
                  <li key={marker.id}>
@@ -1440,15 +1495,6 @@ export const ObjectMap: React.FC<ObjectMapProps> = ({
             onZoom={(e) => setCurrentZoom(Math.round(e.viewState.zoom))}
             onError={handleMapError}
          >
-            {mapStyleError && (
-              <div
-                role="alert"
-                className="absolute inset-x-0 top-0 z-20 p-2 text-sm text-center text-amber-900 bg-amber-50 border-b border-amber-200"
-              >
-                Map failed to load ({mapStyleError}). Markers below are still listed in the search box;{' '}
-                {mapConfig.style ? 'check the configured map style URL.' : 'configure a custom map style for production use.'}
-              </div>
-            )}
             <NavigationControl position="top-right" showCompass={true} showZoom={true} />
 
             {/* Geolocation button — explicit user-initiated location request */}

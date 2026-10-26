@@ -448,9 +448,11 @@ export const TabbedForm: React.FC<TabbedFormProps> = ({
         objectName: schema.objectName,
         mode: schema.mode,
         objectSchema,
+        // The persisted record a `state_machine` select narrows by (#25933).
+        previousValues: schema.mode === 'edit' && schema.recordId ? formData : undefined,
       }) ?? fields) as FormField[];
     },
-    [objectSchema, schema.readOnly, schema.mode, schema.recordId, schema.objectName, schema.customFields, fieldLabel, perms],
+    [objectSchema, schema.readOnly, schema.mode, schema.recordId, schema.objectName, schema.customFields, fieldLabel, perms, formData],
   );
 
   // Handle form submission

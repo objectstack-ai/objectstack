@@ -77,7 +77,7 @@ which only *mention* the call in comments), filtered to a literal `name: '...'` 
 matching — a first pass without that step undercounted by 2
 (`sys_oauth_client_resource`, `sys_oauth_resource`), both because a doc comment shaped like
 `(255, 768]` desyncs a naive bracket scan; see the script's own header comment for detail).
-Script: `scripts/audits/14096-tenancy-ledger-namespace-regexp-census.mjs`.
+Script: `scripts/audits/14096-tenancy-ledger-namespace-regexp-census.mjs` (removed from the tree after this reading; held at commit `7111e14ac9`).
 
 **Result: 84 registered platform-namespace objects** — all `sys_`-prefixed; zero `cloud_`
 or `ai_` object schemas exist in this repository (the ledger's own comment explains why:
@@ -282,6 +282,8 @@ under `scripts/audits/` — no exported symbol, no published payload key, nothin
 # Build the dependency closure the script imports from (dist, not src):
 pnpm --filter '@objectstack/objectql^...' build && pnpm --filter @objectstack/objectql build
 
+# The script was removed from the tree; run these from a checkout of commit 7111e14ac9,
+# which holds it: git worktree add --detach ../objectstack-7111e14ac9 7111e14ac9
 # The whole census, in one command — prints the full JSON report to stdout
 # and a human-readable summary to stderr; exits 0 (measurement, not a gate):
 node scripts/audits/14096-tenancy-ledger-namespace-regexp-census.mjs

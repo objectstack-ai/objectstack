@@ -502,6 +502,14 @@ expect_reason self_test_workflow_commands 'no changed path is in its read-set'
 expect_reason entry_guard 'no changed path is in its read-set'
 expect_line 'Gate families: 3 run, 6 skipped'
 
+S=$(scenario A:packages/eslint-plugin/src/rule.mjs)
+run_case 'merge_group: a rule file in packages/eslint-plugin runs both ratchets though it is not TS source' "$REPO" merge_group '' "$C0"
+expect_rc 0
+expect_warnings '' ''
+expect_verdicts query_options_erasure slot_lookup comment_mask_corpus
+expect_reason query_options_erasure '(A, workspace)'
+expect_reason slot_lookup '(A, workspace)'
+
 S=$(scenario M:apps/site/src/page.tsx)
 run_case 'merge_group: an apps TSX edit is outside the ratchets (packages/** only) and inside the corpus alone' "$REPO" merge_group '' "$C0"
 expect_rc 0
