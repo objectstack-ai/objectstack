@@ -68,8 +68,8 @@ function principalUnder(perms: MePermissionsResponse | null): ReturnType<typeof 
   return captured;
 }
 
-const WRITE_ACTIONS = ['create', 'update', 'edit', 'delete', 'import'] as const;
-const READ_ACTIONS = ['read', 'view', 'export'] as const;
+const WRITE_ACTIONS = ['create', 'update', 'delete', 'import'] as const;
+const READ_ACTIONS = ['read', 'export'] as const;
 
 describe.each([
   { shape: "read-only '*'", perms: READ_ONLY_WILDCARD },
@@ -102,14 +102,14 @@ describe("a served row is read through the spec's fold", () => {
   it('a row granting only Create grants Create and nothing else', () => {
     const p = principalUnder(envelope({ account: { allowRead: true, allowCreate: true } }));
     expect(p.can('account', 'create')).toBe(true);
-    expect(p.can('account', 'edit')).toBe(false);
+    expect(p.can('account', 'update')).toBe(false);
     expect(p.can('account', 'delete')).toBe(false);
   });
 
   it('Modify All widens edit and delete, never create', () => {
     const p = principalUnder(envelope({ '*': { modifyAllRecords: true } }));
     expect(p.can('account', 'read')).toBe(true);
-    expect(p.can('account', 'edit')).toBe(true);
+    expect(p.can('account', 'update')).toBe(true);
     expect(p.can('account', 'delete')).toBe(true);
     expect(p.can('account', 'create')).toBe(false);
     expect(p.checkField('account', 'name', 'write')).toBe(true);
@@ -119,7 +119,7 @@ describe("a served row is read through the spec's fold", () => {
   it('an object key is matched case-insensitively, as checkField already matches it', () => {
     const p = principalUnder(envelope({ '*': { allowRead: true }, account: { allowRead: true, allowCreate: true } }));
     expect(p.can('Account', 'create')).toBe(true);
-    expect(p.can('Account', 'edit')).toBe(false);
+    expect(p.can('Account', 'update')).toBe(false);
   });
 });
 
