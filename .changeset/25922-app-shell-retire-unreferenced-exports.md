@@ -4,7 +4,7 @@
 
 refactor(app-shell)!: retire the 54 root-entry exports that nothing outside the package names
 
-`@object-ui/app-shell`'s root entry published 261 names. 57 of them appear in no file of this repository outside `ui/packages/app-shell/` (the measure covers `ui/`, `packages/` and `apps/`); three of those are taken by the package's own README examples and stay (`SignUpOffer`, `RuntimeBranding`, `studioOrgScopePath`). The other 54 leave the entry. Every module that defines them stays, and code inside the package keeps importing them from there; only the package entry stops publishing them. The entry now publishes 208 names (207, plus `InvitationSignUpPrompt`, which main added meanwhile).
+`@object-ui/app-shell`'s root entry published 261 names. 57 of them appear in no file of this repository outside `ui/packages/app-shell/` (the measure covers `ui/`, `packages/` and `apps/`); three of those are taken by the package's own README examples and stay (`SignUpOffer`, `RuntimeBranding`, `studioOrgScopePath`). The other 54 leave the entry. Every module that defines them stays, and code inside the package keeps importing them from there; only the package entry stops publishing them. The entry now publishes 209 names (207, plus `InvitationSignUpPrompt` and `isDefaultProductName`, which main added meanwhile).
 
 Clause-②: yes (narrowing)
 Metadata-protocol: none
