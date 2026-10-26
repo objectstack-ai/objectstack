@@ -190,7 +190,24 @@ interface Binding {
   from: string;
 }
 
-const source = (rel: string): string => readFileSync(resolve(SRC, rel), 'utf8');
+/**
+ * One answer per module, computed on its first ask and shared by every later
+ * one. The readers below run once per binding and once per row, and `serve.ts`
+ * is over 7,000 lines: masking it afresh on each ask cost the SERVE_ONLY case
+ * about 4.7 s against vitest's 5 s default ([#26147]).
+ */
+function perModule<T>(read: (rel: string) => T): (rel: string) => T {
+  const memo = new Map<string, T>();
+  return (rel) => {
+    if (!memo.has(rel)) memo.set(rel, read(rel));
+    return memo.get(rel) as T;
+  };
+}
+
+const source = perModule((rel) => readFileSync(resolve(SRC, rel), 'utf8'));
+
+/** `rel` with its comments masked: what `bindings()` and `declares()` read. */
+const commentMasked = perModule((rel) => maskComments(source(rel)));
 
 /** Resolve an import specifier written in `rel` to what the test loads. */
 function resolveSpecifier(rel: string, spec: string): string {
@@ -202,8 +219,8 @@ function resolveSpecifier(rel: string, spec: string): string {
 const relToSrc = (from: string): string => (from.startsWith(SRC) ? from.slice(SRC.length + 1) : from);
 
 /** Every value binding `rel` imports — `import { … } from` and `const { … } = await import(…)`. */
-function bindings(rel: string): Binding[] {
-  const code = maskComments(source(rel));
+const bindings = perModule((rel): readonly Binding[] => {
+  const code = commentMasked(rel);
   const out: Binding[] = [];
   const add = (clause: string, spec: string): void => {
     for (const raw of clause.split(',')) {
@@ -216,10 +233,13 @@ function bindings(rel: string): Binding[] {
   for (const m of code.matchAll(/\bimport\s+(?!type\b)\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]/g)) add(m[1], m[2]);
   for (const m of code.matchAll(/\bconst\s*\{([^}]*)\}\s*=\s*await\s+import\(\s*['"]([^'"]+)['"]\s*\)/g)) add(m[1], m[2]);
   return out;
-}
+});
 
 /** The import statements `bindings()` reads — what binds a name, never a use of it. */
 const IMPORT_STATEMENT = /\bimport\s+(?!type\b)\{[^}]*\}\s*from\s*['"][^'"]*['"]|\bconst\s*\{[^}]*\}\s*=\s*await\s+import\(\s*['"][^'"]*['"]\s*\)/g;
+
+/** `rel`'s code alone: comments and literals masked, the import statements dropped. */
+const codeOnly = perModule((rel) => maskCommentsAndLiterals(source(rel)).replace(IMPORT_STATEMENT, ''));
 
 /**
  * Does `rel` USE the binding `name` in code — call it, or hand it on (a
@@ -228,15 +248,13 @@ const IMPORT_STATEMENT = /\bimport\s+(?!type\b)\{[^}]*\}\s*from\s*['"][^'"]*['"]
  * and neither does the import that binds it or the declaration that defines it.
  */
 function uses(rel: string, name: string): boolean {
-  const code = maskCommentsAndLiterals(source(rel))
-    .replace(IMPORT_STATEMENT, '')
-    .replace(new RegExp(`\\bfunction\\s+${name}\\b`, 'g'), '');
+  const code = codeOnly(rel).replace(new RegExp(`\\bfunction\\s+${name}\\b`, 'g'), '');
   return new RegExp(`(?<![\\w$.])${name}(?![\\w$])`).test(code);
 }
 
 /** Does `rel` declare and export `name` itself? */
 const declares = (rel: string, name: string): boolean =>
-  new RegExp(`\\bexport\\s+(?:async\\s+)?function\\s+${name}\\b`).test(maskComments(source(rel)));
+  new RegExp(`\\bexport\\s+(?:async\\s+)?function\\s+${name}\\b`).test(commentMasked(rel));
 
 async function load(from: string): Promise<Record<string, unknown>> {
   return (await import(from)) as Record<string, unknown>;

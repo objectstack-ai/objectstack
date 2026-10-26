@@ -71,6 +71,7 @@ import {
   copyOfCallerPredicate,
   PREDICATE_WRITE_READABLE_ID_CAP,
   predicateWriteReadableCapError,
+  readUnlessRefused,
   requiredCapsForOperation,
 } from './security-plugin.js';
 import { withoutOperationPrivateKeys } from '@objectstack/core';
@@ -102,6 +103,15 @@ import { isPlatformOwnershipFloorPolicy } from './platform-ownership-policies.js
  * so nothing new can reach a response body or a log line.
  */
 const MASTER_EDIT_DENIAL_LEG = new WeakMap<PermissionDeniedError, ControlledByParentWriteDenialLeg>();
+
+/**
+ * [ADR-0055 §3 amendment] The stored column the owner leg of
+ * {@link assertControlledByParentWrite} compares the caller against: the
+ * platform's injected per-record owner, the same `owner_id` the relation
+ * resolver confirmed the schema carries before it set
+ * {@link CbpRelation.ownerMayEdit} (`security-plugin-cbp-relation.ts`).
+ */
+const OWNER_COLUMN = 'owner_id';
 
 /**
  * [ADR-0055] The master-detail write check's own outcome, read off what
@@ -311,6 +321,8 @@ export async function assertControlledByParentWrite(
   // target row (read as system — we only need its FK value).
   let masterId: unknown;
   let detailRecordId: unknown;
+  /** The stored detail row a by-id write addresses, for the owner leg below; `null` on every other shape. */
+  let detailRow: Record<string, unknown> | null = null;
   if (operation === 'insert') {
     const data = opCtx.data;
     if (Array.isArray(data)) {
@@ -366,6 +378,7 @@ export async function assertControlledByParentWrite(
     const row = await this.readRowById(object, targetId, { isSystem: true });
     if (!row) throw new DetailRecordNotFoundError(object, operation, targetId);
     masterId = row[rel.fk];
+    detailRow = row;
   }
   if (masterId == null) {
     // [#8688] CONDITIONAL stand-down — maintainer ruling of 2026-08-15.
@@ -461,6 +474,68 @@ export async function assertControlledByParentWrite(
     // same rule, in `askBodyNamedMaster` above.
     if (operation === 'insert' && rel.omissionRefusedByValidation) return;
     throw new MasterReferenceMissingError(object, operation, rel.fk, detailRecordId);
+  }
+
+  // [ADR-0055 §3 amendment · ruling 6398566164] The OWNER of a detail row
+  // updates it with READ access to the master, when the detail opts in
+  // (`sharing.controlledByParent.ownerMayEdit: true`, carried on the
+  // relation as {@link CbpRelation.ownerMayEdit}). Salesforce's "the owner of
+  // an activity always has full access to it" under Activities OWD =
+  // Controlled by Parent, narrowed to the ruling's verb: every other caller,
+  // and every other shape of write, keeps the §3 rule below.
+  //
+  // Four conditions, each a boundary of the ruling and each fail-closed:
+  //
+  //  • a by-id UPDATE — the stored row was read above (`detailRow`). An
+  //    insert has no row to own; a delete is not the ruled verb (deleting a
+  //    child is still answered by the master); a predicate (`multi: true`)
+  //    update judges every master of the rows it selects and has no single
+  //    row whose owner could be asked, so it returned above, unchanged;
+  //  • NOT delegated — read off `opCtx.context`, the one envelope both passes
+  //    of a delegated write share (ADR-0090 D10, as the master-row leg reads
+  //    it): an on-behalf-of write keeps the master-edit rule on the agent's
+  //    pass AND the delegator's, exactly as it keeps both floors;
+  //  • the CALLER is the row's owner — the stored row's `owner_id` (the
+  //    platform's injected per-record owner, the column the relation resolver
+  //    confirmed the schema carries) is the caller's own `userId`. A row with
+  //    no owner, or another's, admits nobody here;
+  //  • the caller can READ the master row — asked of the read door itself
+  //    under the caller's own context, the same probe the by-id pre-image
+  //    gate uses, so the answer is the one a direct read of the master gives:
+  //    the master's object grant, its row-level and sharing scope, and, for a
+  //    master that is itself `controlled_by_parent`, the chain the engine
+  //    composes for its read (ADR-0139 D6). A hidden row and a refused read
+  //    (a declared 4xx) are one answer, "not readable" (#7505,
+  //    {@link readUnlessRefused}); a store fault propagates as raised, never
+  //    as a verdict.
+  //
+  // What the leg does NOT change: the detail's own object-level `update`
+  // grant (gate ①, judged before this middleware step) and its own row-level
+  // policies (step 2.7, judged before this step, where an authored
+  // `owner_id == current_user.id` update policy decides as authored) still
+  // run; the sharing service's verdict on the detail is unchanged; and a body
+  // that re-points the master reference still asks EDIT on the master it
+  // names (`askBodyNamedMaster`): the owner may change their row, not move it
+  // under a master they cannot edit. A body naming the stored master names no
+  // new master and is not asked again.
+  //
+  // When any condition fails the write takes the §3 walk below and, refused,
+  // carries the walk's own sentence — the owner leg adds no envelope of its
+  // own, so nothing new reaches a response body.
+  if (
+    operation === 'update' &&
+    detailRow !== null &&
+    rel.ownerMayEdit &&
+    !opCtx?.context?.onBehalfOf?.userId &&
+    context?.userId != null &&
+    detailRow[OWNER_COLUMN] != null &&
+    String(detailRow[OWNER_COLUMN]) === String(context.userId)
+  ) {
+    const masterRead = await readUnlessRefused(() => this.readRowById(rel.master, masterId, context));
+    if (!masterRead.refused && masterRead.value != null) {
+      await askBodyNamedMaster([masterId]);
+      return;
+    }
   }
 
   await this.assertControlledByParentChainEditable(

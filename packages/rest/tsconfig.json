@@ -1,5 +1,5 @@
 {
-  "extends": "../../tsconfig.json",
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "./dist",
     // [#9960] Widened from `./src` as a CONSEQUENCE of the `paths` rule below,
@@ -44,7 +44,7 @@
     // repo's other `paths` block, for the measured version of that trap.
     //
     // No `lib` / `types` mirroring was needed, unlike that block: both packages
-    // extend the same root config and both already declare `types: ["node"]`,
+    // extend the same base config and both already declare `types: ["node"]`,
     // so the producer's source compiles under this package's environment with
     // zero errors (measured: `tsc --noEmit` exit 0 over the merged program).
     "paths": {

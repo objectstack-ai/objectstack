@@ -1,0 +1,29 @@
+// The compiler options every package, app and example in this workspace
+// shares. Packages extend THIS file, never the root `tsconfig.json`: the root
+// is the type-check program for `scripts/` and the top-level configs, and its
+// environment (`types: ["node"]`, the `exclude` list) belongs to that program
+// alone.
+//
+// ⛔ Strictness lives here and is never loosened by an extending config. A
+// package may re-set module semantics (`module` / `moduleResolution`) only with
+// a one-line comment beside them saying why.
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "NodeNext",
+    "lib": ["ES2020"],
+    "ignoreDeprecations": "6.0",
+    "declaration": true,
+    "declarationMap": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "moduleResolution": "NodeNext",
+    "resolveJsonModule": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true
+  }
+}

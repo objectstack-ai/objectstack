@@ -49,6 +49,8 @@ import { RegisterPage } from '../RegisterPage';
 
 const AUTH_URL = 'http://localhost/api/v1/auth';
 const SIGN_UP_LINK = { name: 'Sign up' } as const;
+/** #25886 — an invitee's sign-up is the register-first prompt, not the small link. */
+const INVITE_SIGN_UP = { name: builtInLocales.en.auth.login.invitationSignUpButton } as const;
 const INVITATION = '/accept-invitation/inv_1';
 const INVITE_QUERY = `?redirect=${encodeURIComponent(INVITATION)}`;
 const SELF_REGISTRATION_CLOSED_TEXT = builtInLocales.en.auth.register.errors.selfRegistrationClosed;
@@ -162,11 +164,20 @@ describe('LoginPage — the "Sign up" link follows the audience posture (objectu
     expect(screen.queryByRole('link', SIGN_UP_LINK)).toBeNull();
   });
 
-  it('under invite_only, still offers "Sign up" to an invitation redirect, carrying the redirect', async () => {
+  it('under invite_only, still offers sign-up to an invitation redirect, carrying the redirect', async () => {
     renderAt(`/login${INVITE_QUERY}`, configFor('invite_only'));
     await loginConfigApplied();
 
-    expect(screen.getByRole('link', SIGN_UP_LINK).getAttribute('href')).toBe(`/register${INVITE_QUERY}`);
+    // #25886 — greeted for the invitation, not as a returning user, with the
+    // register-first prompt in place of the small link, never both.
+    expect(
+      screen.getByRole('heading', { name: builtInLocales.en.auth.login.invitationTitle }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('heading', { name: builtInLocales.en.auth.login.welcomeTitle }),
+    ).toBeNull();
+    expect(screen.getByRole('link', INVITE_SIGN_UP).getAttribute('href')).toBe(`/register${INVITE_QUERY}`);
+    expect(screen.queryByRole('link', SIGN_UP_LINK)).toBeNull();
     expect(wire.bootstrapProbes).toBe(0);
   });
 
@@ -202,6 +213,11 @@ describe('LoginPage — the "Sign up" link follows the audience posture (objectu
     await loginConfigApplied();
 
     expect(screen.queryByRole('link', SIGN_UP_LINK)).toBeNull();
+    // #25886 — still greeted for the invitation, but offered no registration.
+    expect(
+      screen.getByRole('heading', { name: builtInLocales.en.auth.login.invitationTitle }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('link', INVITE_SIGN_UP)).toBeNull();
   });
 });
 
@@ -220,9 +236,13 @@ describe('RegisterPage — explains invitation-only registration before the form
   it('an invitation redirect reaches a working registration under invite_only, from /login on', async () => {
     renderAt(`/login${INVITE_QUERY}`, configFor('invite_only'));
     await loginConfigApplied();
-    await userEvent.click(screen.getByRole('link', SIGN_UP_LINK));
+    await userEvent.click(screen.getByRole('link', INVITE_SIGN_UP));
 
     await userEvent.type(await screen.findByLabelText('Name'), 'Ada');
+    // #25886 — the form asks for the invited address.
+    expect(
+      screen.getByRole('heading', { name: builtInLocales.en.auth.register.invitationTitle }),
+    ).toBeInTheDocument();
     await userEvent.type(screen.getByLabelText('Email'), 'ada@example.com');
     await userEvent.type(screen.getByLabelText('Password'), 'hunter2hunter2');
     await userEvent.type(screen.getByLabelText('Confirm Password'), 'hunter2hunter2');

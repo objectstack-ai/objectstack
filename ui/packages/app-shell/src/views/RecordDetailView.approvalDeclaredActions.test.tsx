@@ -471,9 +471,15 @@ describe('record page decision actions — gating is the SERVER\'s (objectui#305
     stubApprovalsApi(pendingRequest({ can_act: false, is_submitter: false, can_override: true }));
     renderRecordPage();
 
-    await waitFor(() => expect(decisionButton('approval_approve')).toBeTruthy());
-    expect(decisionButton('approval_reject')).toBeTruthy();
-    expect(decisionButton('approval_reassign')).toBeTruthy();
+    // objectstack#25877 — for an admin who holds no slot the record page folds
+    // the rescue levers into one marked menu, so they are read from there.
+    const trigger = await screen.findByTestId('declared-actions-override-menu');
+    expect(decisionButton('approval_approve'), 'folded, not a button').toBeNull();
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    await screen.findByRole('menu');
+    expect(decisionButton('approval_approve')?.getAttribute('role')).toBe('menuitem');
+    expect(decisionButton('approval_reject')?.getAttribute('role')).toBe('menuitem');
+    expect(decisionButton('approval_reassign')?.getAttribute('role')).toBe('menuitem');
     expect(decisionButton('approval_send_back')).toBeNull();
     expect(decisionButton('approval_request_info')).toBeNull();
   });
