@@ -42,6 +42,7 @@ import { z } from 'zod';
 import type { BaseSchema } from '../base';
 import { BaseSchema as Mirror } from '../zod/base.zod';
 import { AnyComponentSchema, StrictAnyComponentSchema } from '../zod/index.zod.js';
+import { ObjectViewSchema } from '../zod/objectql.zod.js';
 
 type Eq<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
 
@@ -148,5 +149,29 @@ describe('objectstack#25926 — the document faces refuse the retired spellings 
     const canonical = { ...node, visibleWhen: 'data.a', hidden: 'data.b', disabled: 'data.c' };
     expect(AnyComponentSchema.safeParse(canonical).success).toBe(true);
     expect(StrictAnyComponentSchema.safeParse(canonical).success).toBe(true);
+  });
+});
+
+/* ── (c) the object-view `table` slot's refusal of the same spellings names the surviving node key ── */
+
+describe('objectstack#25926 — the `object-view` table slot refuses the retired spellings with a remedy that names the surviving node key', () => {
+  const VIEW = { type: 'object-view', objectName: 'task' };
+
+  it.each(RETIRED)('`table.%s` is refused at its own path, and the remedy says to write `%s` on the object-view node', (alias, canonical) => {
+    const r = ObjectViewSchema.safeParse({ ...VIEW, table: { [alias]: 'data.ok' } });
+    expect(r.success).toBe(false);
+    const issues = r.success ? [] : r.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message }));
+    expect(issues.map((i) => i.path)).toEqual([`table.${alias}`]);
+    expect(issues[0]!.message).toContain('NOT A TABLE KEY');
+    expect(issues[0]!.message).toContain(`\`${alias}\` is also a retired spelling`);
+    expect(issues[0]!.message).toContain(`write \`${canonical}\` on the object-view node itself; the value is unchanged.`);
+  });
+
+  it('CONTROL — `table.visibleWhen` keeps the generic node-level reason, which sends the key to the object-view node', () => {
+    const r = ObjectViewSchema.safeParse({ ...VIEW, table: { visibleWhen: 'data.ok' } });
+    expect(r.success).toBe(false);
+    const message = r.success ? '' : r.error.issues[0]!.message;
+    expect(message).toContain('A node-level key belongs on the object-view node itself.');
+    expect(message).not.toContain('retired spelling');
   });
 });
