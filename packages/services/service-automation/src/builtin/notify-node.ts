@@ -452,7 +452,8 @@ async function refuseUndeliverableAddresses(
             undeliverable.push(`${nameOf(entry)} (\`user:\` takes a user id, not an email address)`);
             continue;
         }
-        const lead = `notify: node \`${nodeId}\` ${where}, and its recipient ${nameOf(entry)} is an email address. `
+        const which = entry.computed ? nameOf(entry) : `its recipient ${nameOf(entry)} is an email address`;
+        const lead = `notify: node \`${nodeId}\` ${where}, and ${which}. `
             + 'Only the email channel sends to an address; the others deliver to a user';
         if (!data) {
             return `${lead}, and there is no data engine to look up whether a user holds it, so nothing was sent. `

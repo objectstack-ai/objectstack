@@ -85,6 +85,34 @@ afterEach(async () => {
   }
 });
 
+/** The user who holds the owner address the records below carry. */
+const GRACE = { id: 'usr_grace', email: 'grace@example.com', name: 'Grace' };
+
+/**
+ * [#25758] The directory the notify node looks an owner address up in. The
+ * records' `owner` holds an email address, and an inbox-only `notify` node
+ * delivers an address only to the user who holds it: with no `sys_user`
+ * there is no one to deliver to, and the node fails. Seeded through the
+ * driver, like the Default Organization: data at rest, not a write under test.
+ */
+async function installOwnerUser(engine: any): Promise<void> {
+  if (!engine.getSchema('sys_user')) {
+    engine.registry.registerObject(
+      {
+        name: 'sys_user',
+        label: 'User',
+        managedBy: 'better-auth',
+        fields: { email: { type: 'email', label: 'Email' }, name: { type: 'text', label: 'Name' } },
+      },
+      '@objectstack/example-showcase',
+    );
+  }
+  await engine.syncSchemas();
+  const driver = engine.getDriverForObject('sys_user')!;
+  if (await driver.findOne('sys_user', { where: { id: GRACE.id } })) return;
+  await driver.create('sys_user', GRACE);
+}
+
 interface Booted {
   automation: AutomationEngine & Record<string, any>;
   approvals: any;
@@ -132,6 +160,7 @@ async function bootShowcaseApprovals(
   // A real `single` install's Default Organization: the system writes below
   // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
   await installDefaultOrganization(objectql);
+  await installOwnerUser(objectql);
 
   for (const flow of flows) automation.registerFlow(flow.name, flow);
 
@@ -458,7 +487,7 @@ describe('#7381 — approving Invoice Dual Sign-off delivers the cleared notice'
     // The recipient is the INVOICE's owner — the field that actually holds a
     // person. This is the assertion the shipped `{record.account.owner}` could
     // never satisfy, because `showcase_account` has no such field.
-    expect(notice.user_id).toBe('grace@example.com');
+    expect(notice.user_id).toBe(GRACE.id);
     // The start node's `expand: ['account']` is what makes this readable — an
     // un-hydrated relation renders the raw FK, or nothing at all.
     expect(notice.body_md).toContain(account.name);
@@ -638,7 +667,7 @@ describe('#7381 — approving Invoice Dual Sign-off delivers the cleared notice'
     // annotation is free to name the only other way it can fail (#10106).
     const delivered = await deliveredInbox(booted, 'Project update', 1);
     expect(delivered, 'the subflow notified more than one recipient').toHaveLength(1);
-    expect(delivered[0].user_id, 'the recipient is not the project owner the hop names').toBe('grace@example.com');
+    expect(delivered[0].user_id, 'the recipient is not the project owner the hop names').toBe(GRACE.id);
   }, 30_000);
 });
 
