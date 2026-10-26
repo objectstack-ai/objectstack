@@ -15,6 +15,7 @@ import { findHierarchyScopeGrants } from '@objectstack/spec/security';
 import {
     evaluateRuntimeAuthoringGate,
     HIERARCHY_SCOPE_CAPABILITY_REQUIRED,
+    type RuntimeAuthoringIssue,
 } from './runtime-authoring-gate.js';
 
 const managerSet = (grant: Record<string, unknown> = { allowRead: true, readScope: 'unit_and_below' }) => ({
@@ -33,7 +34,7 @@ const judge = (over: Partial<Parameters<typeof evaluateRuntimeAuthoringGate>[0]>
         ...over,
     });
 
-const hierarchyIssues = (issues: ReadonlyArray<{ rule: string }>) =>
+const hierarchyIssues = (issues: ReadonlyArray<RuntimeAuthoringIssue>) =>
     issues.filter((i) => i.rule === HIERARCHY_SCOPE_CAPABILITY_REQUIRED);
 
 describe('#26188 — hierarchy scope without a resolver (pure gate)', () => {
