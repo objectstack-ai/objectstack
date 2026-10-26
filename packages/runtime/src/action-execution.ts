@@ -37,6 +37,9 @@ import { checkApiExposure, type ApiExposureDecision, type ObjectApiDef } from '.
 // door's and the MCP stdio bridge's, imported rather than re-walked so this door
 // cannot disagree with them about which conditions a filter holds.
 import { relationConditionSites } from '@objectstack/core';
+// [#25653] The app-automation elevation mark an action body's context carries
+// — see `buildActionExecutionContext`.
+import { markAppAutomationElevation } from '@objectstack/core';
 // [#9446] The ONE #9378 status table. Imported rather than re-read here: this
 // door's blanket `FLOW_FAILED` was the second of three readings of one engine
 // result, and a second definition of the rule is what let the doors diverge.
@@ -1964,10 +1967,19 @@ export function buildActionSession(_deps: ActionExecutionDeps, ec: any): ActionS
  * `updated_by`, `tenantId` stamps the org column and drives driver-level
  * tenant isolation, `transaction` joins an open transaction — instead of the
  * unattributable, org-less rows a bare `{ isSystem: true }` would write.
+ *
+ * [#25653] The elevation also carries the app-automation elevation mark
+ * (`'action'`, `@objectstack/core`): an action body is app-authored
+ * automation, and the identity-assignment refusal (plugin-security) judges its
+ * writes to the four identity objects as it judges a system flow's — through
+ * `ctx.api` (the mark is carried across `createContext`'s parse) and
+ * `ctx.engine` alike. This builder serves every handler an action door
+ * dispatches, a host code handler included; a census of the handlers on
+ * `main` found none that writes those objects.
  */
 export function buildActionExecutionContext(ec: any): Record<string, unknown> {
     const base = ec && typeof ec === 'object' ? { ...(ec as Record<string, unknown>) } : {};
-    return { ...base, isSystem: true };
+    return markAppAutomationElevation({ ...base, isSystem: true }, 'action');
 }
 
 /**
@@ -1996,9 +2008,10 @@ export function buildActionApi(_deps: ActionExecutionDeps, ql: any, ec: any): an
         return serveStoredMetadataReadsThrough(ql.createContext(buildActionExecutionContext(ec)), ql);
     } catch {
         // A malformed caller envelope must not sink the action — fall back to
-        // the bare elevated context (the same shape hooks default to).
+        // the bare elevated context (the same shape hooks default to), marked
+        // as the body's elevation like every other (#25653).
         try {
-            return serveStoredMetadataReadsThrough(ql.createContext({ isSystem: true }), ql);
+            return serveStoredMetadataReadsThrough(ql.createContext(buildActionExecutionContext(undefined)), ql);
         } catch {
             return undefined;
         }
