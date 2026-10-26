@@ -737,6 +737,22 @@ the whole section renders nothing — no header, no empty grid, no "New"
 button that would be rejected server-side. With no `PermissionProvider`
 mounted (Studio designer, standalone embeds) the gate stays open.
 
+A page author withdraws **New** from one related list by authoring
+`actions: []` on its `record:related_list` node — the author's choice of no
+actions on that list, the generic create form included. Use it where the
+children must be created through a process (a renewal through its flow, a
+version through upload). It holds per list, whatever the child object's
+`userActions.create` says; every list that does not author `[]` keeps the
+host's verdict. A non-empty `actions` list leaves New as it was, and the row
+affordances (View, Edit, Delete) are not governed by this key.
+
+```ts
+{
+  type: 'record:related_list',
+  properties: { objectName: 'contract', relationshipField: 'renewed_from', actions: [] },
+}
+```
+
 ### InlineEditSaveBar & InlineFieldInput
 
 The record-level inline-edit session (#2407): double-clicking a field (or its
