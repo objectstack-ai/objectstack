@@ -249,6 +249,16 @@ on the object the last hop reaches — the join the cube declares for that hop,
 else the lookup's `reference`. A measure of an expression type (`number`,
 `string`, `boolean`) and the row wildcard `'*'` are not judged by this check.
 
+A **duration measure** (`duration: { from, to, unit }`, the time between two
+fields of each record) is judged by the same check under a third id. Each of
+`from` and `to` must name a field declared `datetime`; one declared anything
+else (a `date`, a `time`, a number, text) is refused
+(`measure-duration-field-type-refused`) at
+`datasets[N].measures[M].duration.from` or `.to`, because it holds no instant
+to measure from. The analytics service refuses the same column with
+`400 DATASET_INVALID` when a query is built. A name the object does not declare
+is reported as `dataset-field-unknown` instead.
+
 ### 7. Navigation exposing objects nobody can read
 
 Navigation and permissions are separate metadata, each valid on its own — so an

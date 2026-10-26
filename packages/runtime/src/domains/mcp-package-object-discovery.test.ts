@@ -594,7 +594,8 @@ function actionPackageOf(prefix: string) {
             const base: any = pkg.artifact();
             base.objects[0].actions = [
                 update('mark_done', true),
-                { name: 'ping', label: 'Ping', type: 'script', target: 'qa_ping', ai: { exposed: true, description: 'Ping' } },
+                // [#25744] An object's own action is stored as its `ActionSchema` parse too.
+                { name: 'ping', label: 'Ping', type: 'script', target: 'qa_ping', ai: { exposed: true, description: 'Ping: answers pong, for the MCP discovery test' } },
                 update('hidden_done', false),
             ];
             base.objects[1].actions = [update('gated_done', true)];
