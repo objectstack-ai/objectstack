@@ -22,6 +22,12 @@
   naming every offending param, with no `fields[]`, at both doors, which
   corrects item 1's "`400 VALIDATION_FAILED` per-field envelope". See the
   note under D2 item 1.
+  · **Amended** (2026-10-26, #25692, PR #25951, merge commit `3761710927`) —
+  wave 2's claim and copy-on-claim run only for a file the writing caller may
+  read, by the download door's own verdict. A file the writer may not read is
+  kept as written and never claimed or copied, the answer #25682 gave across
+  organizations. This qualifies the 2026-07-27 addendum's worst-case row for
+  exclusive ownership. See the 2026-10-26 addendum.
 - **Date**: 2026-07-22
 - **Issue**: design follow-up generalizing #3405 / #3406 (inline lookup param
   silently stripped); relates #3407 (silently dropped writes), #1878 / #1891
@@ -599,6 +605,12 @@ of special case that produces mistakes. So the real question is what happens
 |---|---|---|
 | Shared + reference-counted | file's readable-by set becomes the **union of every referrer's** — copying a private record's id into a world-readable record silently widens access; and a single miscount authorises an **irreversible byte delete** | no |
 | Exclusive + copy-on-claim | duplicated bytes | yes — it costs money, not data |
+
+> **Amended 2026-10-26 (#25692, PR #25951, merge commit `3761710927`).** The
+> exclusive row's worst case holds only when claim and copy-on-claim run for a
+> file the writer may read. The claim path did not ask that question until
+> #25692; it now asks the download door's own verdict. See the 2026-10-26
+> addendum.
 
 Read authorisation for attachment files already derives from the parent record.
 Under sharing, "the parent record" is ambiguous, and the safe reading of an
@@ -1428,3 +1440,51 @@ here so that a grep for `JSON_COLUMN_TYPES`, `VARCHAR(2048)` or "bare id"
 lands on the decision (Prime Directive #13), and so that the driver card
 implements a ruling rather than a changeset that quietly does the opposite of
 D1's clause.
+
+## Addendum (2026-10-26) — a write references only a file its writer may read
+
+#25692, implemented by PR #25951 (merge commit `3761710927`). Wave 2's
+ownership bookkeeping (step 1 of the 2026-07-27 resequencing) and its governed
+download (step 2) each answered a different question about the same file.
+The download door asked whether the caller may read it. The claim path, which
+claims or copies a file a record write names, asked only whether the file
+exists in the acting organization. One file had two access rules.
+
+### The rule
+
+> A record write claims or copies only a file its caller may read, by the
+> download door's own verdict. Claim and copy-on-claim never run for a file
+> the writer may not read.
+
+- **One judgement, two callers.** The door's verdict is one function, and the
+  claim path calls it under the write's caller context; neither restates it.
+  It admits the uploader; a reader of the record that owns the file, through
+  its object's `fileAccessDelegate` where one is declared; a member of the
+  organization for a file no record owns; a reader of any parent for an
+  attachments-scope file; anyone for a `public_read` file.
+- **The quiet answer.** A file the writer may not read is answered as one the
+  organization-scoped lookup cannot see: the id is kept as written, nothing
+  is claimed or copied, and constraint verdicts do not run ahead of the read
+  check. #25682 gave this answer across organizations; this addendum states
+  it within one.
+- **A write's own copy** is claimed by the same write without being asked
+  again.
+- **Outage.** An authorization-store outage fails the write with its declared
+  envelope. Any other fault in the judgement is a refusal.
+- **No caller, no question.** System writes and context-less programmatic
+  writes reference files as before. A deliberate server-side copy between
+  records runs as a system write.
+
+### What it qualifies
+
+The 2026-07-27 worst-case table rates exclusive + copy-on-claim at
+"duplicated bytes — recoverable". That rating assumes the copy is taken by a
+writer who could read the original. Under this rule it holds, and the table
+carries a note saying so.
+
+### Why this stays inside ADR-0104
+
+It revisits neither exclusivity nor copy-on-claim. It states the
+precondition both always needed for the exclusive row's worst case to be
+true, and records it here so that a grep for copy-on-claim lands on the rule
+(Prime Directive #13).
