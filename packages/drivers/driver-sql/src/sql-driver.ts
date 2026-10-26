@@ -16,7 +16,7 @@ import type {
   IntrospectedSchema as SpecIntrospectedSchema,
   IntrospectedTable as SpecIntrospectedTable,
 } from '@objectstack/spec/contracts';
-import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, type AutonumberToken } from '@objectstack/spec/data';
+import { parseAutonumberFormat, resolveAutonumberFormat, isTenancyDisabled, type AutonumberToken } from '@objectstack/spec/data';
 // The DECLARED aggregate vocabulary (#5907). Read from the spec so this driver's
 // "the protocol has no such function" refusal cannot drift from what
 // `AggregationNodeSchema.function` actually admits.
@@ -99,9 +99,7 @@ import { ExternalSchemaModeViolationError } from '@objectstack/spec/shared';
 import { UnsupportedDialectEmissionError } from './dialect-emission-refusal.js';
 import { OrganizationlessCounterRefusal } from './organizationless-counter-refusal.js';
 import {
-  isUniqueViolationError,
   isUnbackedConflictTargetError,
-  uniqueViolationColumn,
   resolveTenancyPosture,
   declareTargetedTable,
   isMissingTableError,
@@ -184,6 +182,11 @@ import {
 // [#25521 cut 10] And the drift pipeline that drives them (`detectTableDrift`, `detectTableIndexDrift`,
 // `detectManagedDrift`, `planMediaColumnMove`, `reconcileAndWarnDrift`, `applyMigrationEntries`).
 import { applyDriftOpInPlace, applyIndexDriftOp, applyMigrationEntries, applyNullSafeUniquePreflight, createNullSafeUniqueIndex, detectManagedDrift, detectTableDrift, detectTableIndexDrift, planMediaColumnMove, rebuildSqliteTablePatched, reconcileAndWarnDrift, restoreBareIndexAfterFailedTighten, syncDeclaredIndexes } from './sql-driver-schema-sync.js';
+// [#25521 cut 11] The autonumber sequence path (`getNextSequenceValue`, `fillAutoNumberFields`,
+// `issueAutonumbers`, `maxAutonumberCounter`, and the #5495 collision re-seed `collidingAutoNumberReservations`
+// and `resyncSequenceToDataMax`); the methods of the same names below hand each body the members it reads
+// (`AutonumberHost`).
+import { collidingAutoNumberReservations, fillAutoNumberFields, getNextSequenceValue, issueAutonumbers, maxAutonumberCounter, resyncSequenceToDataMax } from './sql-driver-autonumber.js';
 import { makeDatabaseDirectory, probeAbsentSqliteDatabaseFile, SqliteDatabaseFileError } from './sqlite-database-file.js';
 import { jsonMembershipPredicate } from '@objectstack/core';
 import knex, { Knex } from 'knex';
@@ -303,7 +306,7 @@ export function lastIdentifierSegment(raw: string): string {
  * counters so sequences are monotonic, tenant-isolated, and resilient to
  * concurrent writers. Lazily created on first autonumber-bearing insert.
  */
-const SEQUENCES_TABLE = '_objectstack_sequences';
+export const SEQUENCES_TABLE = '_objectstack_sequences';
 
 /**
  * How many times `create()` will re-seed a stale autonumber counter and retry
@@ -8349,27 +8352,8 @@ export class SqlDriver implements IDataDriver {
    * transport reads them by this one rule rather than by a copy of it.
    */
   protected maxAutonumberCounter(values: Iterable<unknown>, prefix: string, suffix: string): number {
-    let maxN = 0;
-    const anchored = prefix !== '' || suffix !== '';
-    for (const v of values) {
-      if (typeof v !== 'string') continue;
-      let n: number;
-      if (anchored) {
-        // Spec's inverse of `renderAutonumber` (#6560). It also re-checks the
-        // prefix in JS: a driver-side `LIKE` can match looser than `startsWith`
-        // (collation, case-insensitive columns), and a row from another scope
-        // must not inflate this counter — it reads as `undefined`, same as a
-        // row carrying no counter at all.
-        const read = readAutonumberCounter(v, prefix, suffix);
-        if (read === undefined) continue;
-        n = read;
-      } else {
-        // Unanchored: `prefix` is '' here, so this is the whole value.
-        n = parseInt(v.replace(/[^0-9]/g, ''), 10);
-      }
-      if (Number.isFinite(n) && n > maxN) maxN = n;
-    }
-    return maxN;
+    // [#25521 cut 11] The body moved to `sql-driver-autonumber.ts`; it reads no member of the driver.
+    return maxAutonumberCounter(values, prefix, suffix);
   }
 
   /**
@@ -8473,7 +8457,7 @@ export class SqlDriver implements IDataDriver {
    * contract is unchanged: it still hands out one value per call and never
    * takes one back.
    */
-  protected async getNextSequenceValue(
+  protected getNextSequenceValue(
     object: string,
     tableName: string,
     field: string,
@@ -8487,85 +8471,19 @@ export class SqlDriver implements IDataDriver {
     // (#6468). Purely positional plumbing; no sequencing logic reads it.
     suffix = '',
   ): Promise<number> {
-    // Pass the caller's transaction so a cold-cache first write inside a batch
-    // transaction ensures the table on the right connection instead of dead-
-    // locking on a second one (SQLite pool max=1). `initObjects` normally warms
-    // this up front, making the call a no-op — this only bites the lazy path.
-    // The bucket first: an organization-less row on a tenant table is refused
-    // here (ADR-0131 D9), before the lazy DDL below or any counter read.
-    const resolvedTenantId = this.resolveSequenceTenantId(tenantField, tenantId, tableName, field);
-    await this.ensureSequencesTable(parentTrx);
-    if (scope !== '' && !this.sequencesHasKeyHash) {
-      // The legacy sequences table could not be migrated to the key_hash shape,
-      // so it cannot represent per-scope counters. Fail with a clear, actionable
-      // message instead of corrupting the single legacy counter.
-      throw new Error(
-        `Cannot generate a per-scope autonumber for "${object}.${field}": the ` +
-          `${SEQUENCES_TABLE} table is still the legacy shape. ` +
-          `Migrate it to the key_hash shape before using date/{field}/per-parent formats.`,
-      );
-    }
-    // `scope` (rendered date/field prefix, boundary-delimited) gives each
-    // period/group its own counter; '' keeps the single global counter for
-    // fixed-prefix formats. `prefix` is the full rendered prefix used to
-    // bootstrap from existing data. The row is keyed by a hash of the composite;
-    // on an un-migrated legacy table only fixed-prefix (scope '') reaches here,
-    // so fall back to the original `(object, tenant_id, field)` key for it.
-    const key = this.sequencesHasKeyHash
-      ? { key_hash: this.sequenceKeyHash(tableName, resolvedTenantId, field, scope) }
-      : { object: tableName, tenant_id: resolvedTenantId, field };
-    const insertRow = this.sequencesHasKeyHash
-      ? { ...key, object: tableName, tenant_id: resolvedTenantId, field, scope }
-      : { ...key };
-
-    const runner: Knex | Knex.Transaction = parentTrx ?? this.knex;
-
-    return runner.transaction(async (trx) => {
-      // Lock the row (no-op on SQLite, real lock on Postgres/MySQL).
-      //
-      // Speculative, so it runs under a savepoint: `.forUpdate()` on a MISSING
-      // row does NOT throw on Postgres (measured: returns zero rows), so the
-      // fallback below is unreachable for the reason the old comment gave. It
-      // IS reachable for lock-level failures — deadlock (40P01), lock/statement
-      // timeout (55P03/57014) — and without the savepoint each of those turned
-      // into a `25P02` from the fallback SELECT, masking the real error.
-      let existing: any;
-      const locked = await this.attemptWithoutPoisoning(trx, (scoped) =>
-        scoped(SEQUENCES_TABLE).where(key).forUpdate().first(),
-      );
-      if (locked.ok) {
-        existing = locked.value;
-      } else {
-        // Fall back to a plain SELECT then rely on transaction isolation.
-        existing = await trx(SEQUENCES_TABLE).where(key).first();
-      }
-
-      if (!existing) {
-        const seedMax = await this.scanMaxNumericTail(
-          trx,
-          tableName,
-          field,
-          prefix,
-          tenantField,
-          resolvedTenantId === GLOBAL_TENANT ? null : resolvedTenantId,
-          suffix,
-        );
-        const initial = seedMax + 1;
-        const inserted = await this.attemptWithoutPoisoning(trx, (scoped) =>
-          scoped(SEQUENCES_TABLE).insert({ ...insertRow, last_value: initial }),
-        );
-        if (inserted.ok) return initial;
-        // Another writer raced us to the first INSERT. Fall through to
-        // the UPDATE path with the now-present row. This `SELECT … FOR UPDATE`
-        // blocks until the winner commits, so it sees the committed counter.
-        existing = await trx(SEQUENCES_TABLE).where(key).forUpdate().first();
-        if (!existing) throw inserted.error;
-      }
-
-      const next = Number(existing.last_value) + 1;
-      await trx(SEQUENCES_TABLE).where(key).update({ last_value: next, updated_at: this.knex.fn.now() });
-      return next;
-    });
+    // [#25521 cut 11] The body moved to `sql-driver-autonumber.ts` (see `AutonumberHost`).
+    const readKnex = () => this.knex;
+    const readSequencesHasKeyHash = () => this.sequencesHasKeyHash;
+    const host: ThisParameterType<typeof getNextSequenceValue> = {
+      attemptWithoutPoisoning: (...a) => this.attemptWithoutPoisoning(...a),
+      ensureSequencesTable: (...a) => this.ensureSequencesTable(...a),
+      get knex() { return readKnex(); },
+      resolveSequenceTenantId: (...a) => this.resolveSequenceTenantId(...a),
+      scanMaxNumericTail: (...a) => this.scanMaxNumericTail(...a),
+      sequenceKeyHash: (...a) => this.sequenceKeyHash(...a),
+      get sequencesHasKeyHash() { return readSequencesHasKeyHash(); },
+    };
+    return getNextSequenceValue.call(host, object, tableName, field, prefix, tenantField, tenantId, parentTrx, scope, suffix);
   }
 
   /**
@@ -8583,72 +8501,20 @@ export class SqlDriver implements IDataDriver {
    * filled is not reported, because a duplicate on it is the caller's 409 to
    * receive, not a sequence to re-seed.
    */
-  protected async fillAutoNumberFields(
+  protected fillAutoNumberFields(
     object: string,
     row: Record<string, any>,
     options?: DriverOptions,
   ): Promise<AutoNumberReservation[]> {
-    // Scan/seed the physical (remote) table for an external object; managed
-    // objects fall through to the storage-mapped name. Config lookup stays
-    // keyed by object name (matching initObjects/registerExternalObject).
-    const tableName = this.physicalTableByObject[object] ?? StorageNameMapping.resolveTableName({ name: object } as any);
-    const cfgs = this.autoNumberFields[object] || this.autoNumberFields[tableName];
-    if (!cfgs || cfgs.length === 0) return [];
-    const reservations: AutoNumberReservation[] = [];
-    const parentTrx = options?.transaction as Knex.Transaction | undefined;
-    const timezone = options?.timezone;
-    const now = new Date();
-    for (const cfg of cfgs) {
-      if (row[cfg.name] !== undefined && row[cfg.name] !== null && row[cfg.name] !== '') continue;
-      // A `{field}` token with no value would render to an empty prefix and
-      // silently merge this record into the wrong counter scope, so refuse to
-      // generate rather than emit a wrong record number (the referenced field
-      // must be populated before the autonumber — see field.zod docs).
-      const missing = missingFieldValues(cfg.tokens, row);
-      if (missing.length > 0) {
-        throw new Error(
-          `Cannot generate autonumber "${object}.${cfg.name}" (format "${cfg.format}"): ` +
-            `referenced field(s) [${missing.join(', ')}] are empty on the record. ` +
-            `Fields interpolated into an autonumber format must be set before the record is created.`,
-        );
-      }
-      // Resolve tenant for this row: explicit field on the record wins,
-      // then driver options, else null → global sequence.
-      const rowTenant = cfg.tenantField ? row[cfg.tenantField] : undefined;
-      const optTenant = options?.tenantId;
-      const tenantId = rowTenant != null && rowTenant !== ''
-        ? String(rowTenant)
-        : optTenant != null && optTenant !== ''
-          ? String(optTenant)
-          : null;
-      // Resolve the scope/prefix for this row (counter-value-independent),
-      // reserve the next value under that scope, then render the final string.
-      const probe = renderAutonumber({ tokens: cfg.tokens, seq: 0, record: row, now, timezone });
-      const next = await this.getNextSequenceValue(
-        object,
-        tableName,
-        cfg.name,
-        probe.prefix,
-        cfg.tenantField,
-        tenantId,
-        parentTrx,
-        probe.scope,
-        probe.suffix,
-      );
-      const value = renderAutonumber({ tokens: cfg.tokens, seq: next, record: row, now, timezone }).value;
-      row[cfg.name] = value;
-      reservations.push({
-        field: cfg.name,
-        tableName,
-        prefix: probe.prefix,
-        scope: probe.scope,
-        suffix: probe.suffix,
-        tenantField: cfg.tenantField ?? null,
-        tenantId,
-        value,
-      });
-    }
-    return reservations;
+    // [#25521 cut 11] The body moved to `sql-driver-autonumber.ts` (see `AutonumberHost`).
+    const readAutoNumberFields = () => this.autoNumberFields;
+    const readPhysicalTableByObject = () => this.physicalTableByObject;
+    const host: ThisParameterType<typeof fillAutoNumberFields> = {
+      get autoNumberFields() { return readAutoNumberFields(); },
+      getNextSequenceValue: (...a) => this.getNextSequenceValue(...a),
+      get physicalTableByObject() { return readPhysicalTableByObject(); },
+    };
+    return fillAutoNumberFields.call(host, object, row, options);
   }
 
   /**
@@ -8684,63 +8550,23 @@ export class SqlDriver implements IDataDriver {
    * `autoNumberValueExists` / `resyncSequenceToDataMax`, the overrides its
    * `create()` already calls.
    */
-  async issueAutonumbers(
+  issueAutonumbers(
     object: string,
     rows: Record<string, unknown>[],
     options?: DriverOptions,
     afterCollision?: unknown,
   ): Promise<string[][]> {
-    if (afterCollision === undefined) {
-      const filled: string[][] = [];
-      for (const row of rows) {
-        if (!row || typeof row !== 'object') {
-          filled.push([]);
-          continue;
-        }
-        // Filled as `create()` fills it: the caller's organization stamped
-        // first (numbers are issued per organization), on a view, so only
-        // the numbers land on the caller's row.
-        const view: Record<string, any> = { ...row };
-        this.injectTenantOnInsert(object, view, options);
-        const reserved = await this.fillAutoNumberFields(object, view, options);
-        for (const r of reserved) row[r.field] = view[r.field];
-        // A value kept from an earlier issue on this row is still this
-        // driver's, so it stays described beside the fresh ones (#6943).
-        const fresh = new Set(reserved.map((r) => r.field));
-        const kept = (this.issuedAutoNumbers.get(row) ?? []).filter((r) => !fresh.has(r.field));
-        this.issuedAutoNumbers.set(row, [...kept, ...reserved]);
-        filled.push(reserved.map((r) => r.field));
-      }
-      return filled;
-    }
-
-    const none = rows.map((): string[] => []);
-    if (options?.transaction !== undefined) return none;
-    const issued = rows.map((row) => (row && typeof row === 'object' ? this.issuedAutoNumbers.get(row) ?? [] : []));
-    const colliding = await this.collidingAutoNumberReservations(afterCollision, issued.flat(), options);
-    if (colliding.length === 0) return none;
-
-    const stale = new Set<string>();
-    for (const reservation of colliding) {
-      const key = this.autoNumberCounterKey(reservation);
-      if (stale.has(key)) continue;
-      stale.add(key);
-      await this.resyncSequenceToDataMax(reservation);
-    }
-    return rows.map((row, i) => {
-      const emptied: string[] = [];
-      const kept: AutoNumberReservation[] = [];
-      for (const reservation of issued[i]) {
-        if (stale.has(this.autoNumberCounterKey(reservation))) {
-          delete row[reservation.field];
-          emptied.push(reservation.field);
-        } else {
-          kept.push(reservation);
-        }
-      }
-      if (emptied.length > 0) this.issuedAutoNumbers.set(row, kept);
-      return emptied;
-    });
+    // [#25521 cut 11] The body moved to `sql-driver-autonumber.ts` (see `AutonumberHost`).
+    const readIssuedAutoNumbers = () => this.issuedAutoNumbers;
+    const host: ThisParameterType<typeof issueAutonumbers> = {
+      autoNumberCounterKey: (...a) => this.autoNumberCounterKey(...a),
+      collidingAutoNumberReservations: (...a) => this.collidingAutoNumberReservations(...a),
+      fillAutoNumberFields: (...a) => this.fillAutoNumberFields(...a),
+      injectTenantOnInsert: (...a) => this.injectTenantOnInsert(...a),
+      get issuedAutoNumbers() { return readIssuedAutoNumbers(); },
+      resyncSequenceToDataMax: (...a) => this.resyncSequenceToDataMax(...a),
+    };
+    return issueAutonumbers.call(host, object, rows, options, afterCollision);
   }
 
   /**
@@ -8806,22 +8632,18 @@ export class SqlDriver implements IDataDriver {
    *     the data instead of the message. On this repo's tenanted autonumber
    *     index, state 3 is the ONLY state that ever occurs.
    */
-  protected async collidingAutoNumberReservations(
+  protected collidingAutoNumberReservations(
     error: unknown,
     reservations: AutoNumberReservation[],
     options?: DriverOptions,
   ): Promise<AutoNumberReservation[]> {
-    if (reservations.length === 0 || !isUniqueViolationError(error)) return [];
-
-    const column = uniqueViolationColumn(error);
-    if (column !== undefined) return reservations.filter((r) => r.field === column);
-
-    const runner: Knex | Knex.Transaction = (options?.transaction as Knex.Transaction | undefined) ?? this.knex;
-    const colliding: AutoNumberReservation[] = [];
-    for (const reservation of reservations) {
-      if (await this.autoNumberValueExists(runner, reservation)) colliding.push(reservation);
-    }
-    return colliding;
+    // [#25521 cut 11] The body moved to `sql-driver-autonumber.ts` (see `AutonumberHost`).
+    const readKnex = () => this.knex;
+    const host: ThisParameterType<typeof collidingAutoNumberReservations> = {
+      autoNumberValueExists: (...a) => this.autoNumberValueExists(...a),
+      get knex() { return readKnex(); },
+    };
+    return collidingAutoNumberReservations.call(host, error, reservations, options);
   }
 
   /**
@@ -8844,32 +8666,19 @@ export class SqlDriver implements IDataDriver {
    * *because* an INSERT into this very table was refused by a constraint, so
    * the table demonstrably exists.
    */
-  protected async resyncSequenceToDataMax(reservation: AutoNumberReservation): Promise<void> {
-    await this.ensureSequencesTable();
-    const resolvedTenantId = this.resolveSequenceTenantId(
-      reservation.tenantField,
-      reservation.tenantId,
-      reservation.tableName,
-      reservation.field,
-    );
-    const key = this.sequencesHasKeyHash
-      ? { key_hash: this.sequenceKeyHash(reservation.tableName, resolvedTenantId, reservation.field, reservation.scope) }
-      : { object: reservation.tableName, tenant_id: resolvedTenantId, field: reservation.field };
-
-    await this.knex.transaction(async (trx) => {
-      const observedMax = await this.scanMaxNumericTail(
-        trx,
-        reservation.tableName,
-        reservation.field,
-        reservation.prefix,
-        reservation.tenantField,
-        resolvedTenantId === GLOBAL_TENANT ? null : resolvedTenantId,
-        reservation.suffix,
-      );
-      const existing = await trx(SEQUENCES_TABLE).where(key).first();
-      if (!existing || Number(existing.last_value) >= observedMax) return;
-      await trx(SEQUENCES_TABLE).where(key).update({ last_value: observedMax, updated_at: this.knex.fn.now() });
-    });
+  protected resyncSequenceToDataMax(reservation: AutoNumberReservation): Promise<void> {
+    // [#25521 cut 11] The body moved to `sql-driver-autonumber.ts` (see `AutonumberHost`).
+    const readKnex = () => this.knex;
+    const readSequencesHasKeyHash = () => this.sequencesHasKeyHash;
+    const host: ThisParameterType<typeof resyncSequenceToDataMax> = {
+      ensureSequencesTable: (...a) => this.ensureSequencesTable(...a),
+      get knex() { return readKnex(); },
+      resolveSequenceTenantId: (...a) => this.resolveSequenceTenantId(...a),
+      scanMaxNumericTail: (...a) => this.scanMaxNumericTail(...a),
+      sequenceKeyHash: (...a) => this.sequenceKeyHash(...a),
+      get sequencesHasKeyHash() { return readSequencesHasKeyHash(); },
+    };
+    return resyncSequenceToDataMax.call(host, reservation);
   }
 
   /**
