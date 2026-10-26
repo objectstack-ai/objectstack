@@ -1787,8 +1787,16 @@ export const DetailView: React.FC<DetailViewProps> = ({
                   `undefined` means the host resolves no approval identity, and
                   then this renders exactly as it did before the signal existed
                   — hiding on absent information would take the submitter's own
-                  unlock lever away (see InlineEditContextValue). */}
-              {dataSource?.cancelPendingApproval && inline?.approvalIsSubmitter !== false && (
+                  unlock lever away (see InlineEditContextValue).
+
+                  And it is drawn ONCE per page (objectstack#25877). A host that
+                  already draws the request's declared recall lever — the record
+                  page's approval bar — says so with `approvalRecallDrawnByHost`,
+                  and the band then keeps its status badge only. Absent, the band
+                  stays the recall lever exactly as above. */}
+              {dataSource?.cancelPendingApproval
+                && !inline?.approvalRecallDrawnByHost
+                && inline?.approvalIsSubmitter !== false && (
                 <Button
                   variant="outline"
                   size="sm"

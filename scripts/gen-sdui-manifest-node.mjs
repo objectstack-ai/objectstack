@@ -24,9 +24,9 @@
  * wire it). The enumeration mirrors objectui's own generator page
  * (`apps/console/dev/manifest-dump.tsx`) exactly: eager-import the 16 registry
  * modules IN ITS ORDER, read `ComponentRegistry.getPublicConfigs()`, and
- * serialize through `manifestFromConfigs` from `@objectstack/sdui-parser` —
- * the hoisted, lockstep-pinned copy of objectui's adapter
- * (`pnpm check:sdui-lockstep` holds the two copies byte-equal).
+ * serialize through `manifestFromConfigs` from `@objectstack/sdui-parser`,
+ * the one parser the save gate runs (#25712 item 3 retires the renderer's
+ * second copy under `ui/packages/sdui-parser`).
  *
  * `apps/console/node_modules/@object-ui/` in the built tree carries every
  * registry package as a workspace symlink whose `exports["."].import` is

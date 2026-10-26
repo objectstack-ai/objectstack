@@ -257,10 +257,23 @@ export function RegisterPage() {
     <AuthLayout formWidth="md">
       <Card className="border-border/60 px-4 py-8 shadow-sm shadow-primary/5 backdrop-blur supports-[backdrop-filter]:bg-card/95">
       <RegisterForm
-        title={t('auth.register.title', { defaultValue: 'Create an account' })}
-        description={t('auth.register.description', {
-          defaultValue: 'Create your account to start building.',
-        })}
+        // #25886 — an invitee is told to register the invited address: the
+        // invitation is accepted only by the account that carries it.
+        title={
+          invitationRedirect
+            ? t('auth.register.invitationTitle', { defaultValue: 'Create an account to join' })
+            : t('auth.register.title', { defaultValue: 'Create an account' })
+        }
+        description={
+          invitationRedirect
+            ? t('auth.register.invitationDescription', {
+                defaultValue:
+                  'Register with the email address the invitation was sent to. The invitation can only be accepted with that address.',
+              })
+            : t('auth.register.description', {
+                defaultValue: 'Create your account to start building.',
+              })
+        }
         loginUrl={loginUrl}
         verificationCallbackURL={verificationCallbackURL}
         linkComponent={RouterLink}

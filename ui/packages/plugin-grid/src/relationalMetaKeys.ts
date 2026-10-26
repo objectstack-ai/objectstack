@@ -330,7 +330,7 @@ export interface RelationalMetaEntry {
  */
 export const RELATIONAL_META_READ_SET: Readonly<Record<string, RelationalMetaEntry>> = {
   // ── The relational target ────────────────────────────────────────────────
-  reference: { verdict: 'spec', readers: ALL_THREE, note: "FieldSchema.reference — the served spelling for a lookup's target object, and since objectui#11070 round 4 the only one any consumer reads." },
+  reference: { verdict: 'spec', readers: CELL_AND_LOOKUP_EDITOR, note: "FieldSchema.reference — the served spelling for a lookup's target object, and since objectui#11070 round 4 the only one any consumer reads." },
   // ⭐ objectui#11070 round 4 removed the `reference_to` row. It is not a
   // verdict change: the key left this table because the three consumers
   // stopped reading it and the choke point stopped stamping it, and a row here

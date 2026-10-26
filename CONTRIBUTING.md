@@ -63,6 +63,13 @@ The README's [Hack on the framework](./README.md#hack-on-the-framework) section
 has the commands for building the Console and running an example app with `pnpm dev`;
 the next section says what each one costs.
 
+`pnpm dev` listens on port 3000 and automatically shifts to the next free port
+when 3000 is busy; pin an explicit port with `OS_PORT=3000 pnpm dev` (`PORT` is
+the legacy alias). The Console's own dev server (`ui/apps/console`, Vite on
+:5180) proxies `/api` to `DEV_PROXY_TARGET`, default `http://localhost:3000`, so
+when the backend has moved off 3000, point `DEV_PROXY_TARGET` at the port it
+printed.
+
 ## Build and Test Cost
 
 `pnpm console:build` builds the Console from its source in this workspace
@@ -312,6 +319,12 @@ verified it.
 - **[GitHub Issues](https://github.com/objectstack-ai/objectstack/issues)** — bug reports
   and feature requests
 - **[Documentation](https://objectstack.ai/docs)** — the published docs site
+
+This repository is the one public issue tracker for every ObjectOS edition: Community
+(the code in this repository), Cloud and Enterprise. Say which edition you run when you
+open an issue; the Bug report and Feature request forms ask for it. Cloud and Enterprise
+reports are triaged by the ObjectOS Cloud team and may be moved to the repository where
+that code lives.
 
 ## License
 
