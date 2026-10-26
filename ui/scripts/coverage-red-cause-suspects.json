@@ -1,0 +1,16 @@
+[
+  {
+    "name": "doc-links corpus walk (objectui#8419)",
+    "path": "scripts/__tests__/check-doc-links.test.ts",
+    "liveFrom": "2026-09-04T15:38:06Z",
+    "liveUntil": "2026-09-07T21:59:50Z",
+    "why": "liveFrom is the push run of f7cf7e8a9f 'check-doc-links resolves the #fragment, not just the file (objectui#7644) (#7657)', the change that grew the walk; liveUntil is the push run of 0203a29e9b, the hoist. Both bounds are push-run created_at, not commit time, because the census is indexed by push run."
+  },
+  {
+    "name": "whole-repository scan (objectui#8479 / objectui#8380)",
+    "path": "scripts/__tests__/check-unused-dependencies.test.ts",
+    "liveFrom": "2026-09-07T09:52:35Z",
+    "liveUntil": "2026-09-08T09:25:57Z",
+    "why": "liveFrom is the first push run in the window whose failing shard set contains the shard this file computes into; ⛔ it is an OBSERVED onset, not a landing commit — no commit in the window edits this file before the fix, which is objectui#8545's own point that a file can cross the bound with nobody editing it. liveUntil is the push run of 83d4fda160, the hoist."
+  }
+]

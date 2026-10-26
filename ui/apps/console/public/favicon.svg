@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
+  <!-- Brand surface: flat indigo-600 rounded square (matches login BrandMark) -->
+  <rect width="256" height="256" rx="56" fill="#4F46E5" />
+
+  <!-- Layered "stack" glyph, scaled from the 24x24 lucide layers icon -->
+  <g transform="translate(64 64) scale(5.333)" stroke="white" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 2 2 7l10 5 10-5-10-5Z" />
+    <path d="m2 17 10 5 10-5" />
+    <path d="m2 12 10 5 10-5" />
+  </g>
+</svg>

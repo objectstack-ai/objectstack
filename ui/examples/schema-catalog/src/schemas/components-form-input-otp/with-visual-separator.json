@@ -1,0 +1,5 @@
+{
+  "type": "input-otp",
+  "length": 6,
+  "separator": true
+}

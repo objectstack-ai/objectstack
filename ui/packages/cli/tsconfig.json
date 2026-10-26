@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "module": "ESNext",
+    "target": "ES2020",
+    "lib": ["ES2020"],
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    // Drop the repo-root `paths` (which point `@object-ui/*` at sibling
+    // `src/`): with `rootDir: ./src` those sources are outside this project
+    // and every one of them reports TS6059. Workspace deps resolve through
+    // node_modules to their built types, which `type-check` depends on.
+    "paths": {}
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

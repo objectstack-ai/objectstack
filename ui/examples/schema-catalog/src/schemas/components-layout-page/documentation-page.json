@@ -1,0 +1,40 @@
+{
+  "type": "page",
+  "pageType": "app",
+  "title": "Getting Started",
+  "description": "Learn how to use the platform",
+  "children": [
+    {
+      "type": "container",
+      "maxWidth": false,
+      "centered": false,
+      "padding": 0,
+      "className": "prose prose-slate",
+      "children": [
+        {
+          "type": "text",
+          "content": "Welcome!",
+          "className": "text-2xl font-bold mb-4"
+        },
+        {
+          "type": "text",
+          "content": "This guide will help you get started with the platform.",
+          "className": "mb-4"
+        },
+        {
+          "type": "separator",
+          "className": "my-6"
+        },
+        {
+          "type": "text",
+          "content": "Step 1: Setup",
+          "className": "text-xl font-semibold mb-2"
+        },
+        {
+          "type": "text",
+          "content": "Follow these instructions to set up your account..."
+        }
+      ]
+    }
+  ]
+}

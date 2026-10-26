@@ -1,0 +1,43 @@
+{
+  "type": "dashboard",
+  "columns": 4,
+  "gap": 4,
+  "widgets": [
+    {
+      "type": "metric-card",
+      "title": "Total Sales",
+      "value": "$123,456",
+      "icon": "shopping-cart",
+      "trend": "up",
+      "trendValue": "+15%",
+      "description": "vs last quarter"
+    },
+    {
+      "type": "metric-card",
+      "title": "New Customers",
+      "value": "856",
+      "icon": "user-plus",
+      "trend": "up",
+      "trendValue": "+22%",
+      "description": "vs last quarter"
+    },
+    {
+      "type": "metric-card",
+      "title": "Conversion Rate",
+      "value": "3.2%",
+      "icon": "trending-up",
+      "trend": "up",
+      "trendValue": "+0.8%",
+      "description": "vs last quarter"
+    },
+    {
+      "type": "metric-card",
+      "title": "Avg. Order Value",
+      "value": "$144.20",
+      "icon": "dollar-sign",
+      "trend": "up",
+      "trendValue": "+8%",
+      "description": "vs last quarter"
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+---
+title: "List"
+description: "Display a list of items"
+---
+
+## Examples
+
+  <SchemaExample id="components-data-display-list/basic-list" />
+
+## Schema
+
+```ts
+import type { SchemaNode } from '@object-ui/types';
+
+interface ListSchema {
+  type: 'list';
+  title?: string;           // heading drawn above the list
+  bind?: string;            // path to an array in the host scope, read first
+  items?: SchemaNode[];     // drawn when `bind` resolves no array
+  ordered?: boolean;
+  className?: string;
+  wrapperClass?: string;
+}
+```
+
+A `list` needs at least one of `bind` and `items`. The renderer reads `bind` through
+`useDataScope` first and falls back to `items` when the bound value is not an array, so
+a node may carry both. A bind-only list draws one entry per element of the bound array:
+
+```json
+{
+  "type": "list",
+  "bind": "customerNames"
+}
+```
+
+A `list` with neither key is refused at the node by `safeValidateSchema` and the strict
+face, with `params.code` set to `LIST_ENTRIES_REQUIRED`. Until objectui#11405 `items` was
+required, so the bind-only list above was refused at `items`. The TypeScript face declares
+`items` optional and cannot express the at-least-one rule; the validator enforces it.
+
+<Callout type="warn">
+  `wrapperClass` is now typed. The renderer has read it all along — it lands on the
+  wrapper element around the list — but it went undeclared until objectui#7722,
+  surviving on what was then `BaseSchema`'s index signature (objectui#8347 removed it) and the zod mirror's `.passthrough()`.
+  Declared as `string` on both faces, a **non-string** `wrapperClass` that used to
+  parse green is now refused by name — on `ListSchema` and through
+  `safeValidateSchema` alike. Pass the Tailwind class string; a number or an object
+  gets a parse error where it used to get silence.
+</Callout>

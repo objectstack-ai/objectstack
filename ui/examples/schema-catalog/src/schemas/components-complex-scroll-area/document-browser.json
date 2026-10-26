@@ -1,0 +1,613 @@
+{
+  "type": "scroll-area",
+  "height": "250px",
+  "className": "rounded-md border",
+  "children": [
+    {
+      "type": "box",
+      "className": "divide-y",
+      "children": [
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 3,
+            "children": [
+              {
+                "type": "text",
+                "content": "📄",
+                "className": "text-2xl"
+              },
+              {
+                "type": "box",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "document_1.pdf",
+                    "className": "block font-medium"
+                  },
+                  {
+                    "type": "text",
+                    "content": "396KB",
+                    "className": "text-xs text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 hover:bg-slate-50 cursor-pointer"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 3,
+            "children": [
+              {
+                "type": "text",
+                "content": "📄",
+                "className": "text-2xl"
+              },
+              {
+                "type": "box",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "document_2.pdf",
+                    "className": "block font-medium"
+                  },
+                  {
+                    "type": "text",
+                    "content": "328KB",
+                    "className": "text-xs text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 hover:bg-slate-50 cursor-pointer"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 3,
+            "children": [
+              {
+                "type": "text",
+                "content": "📄",
+                "className": "text-2xl"
+              },
+              {
+                "type": "box",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "document_3.pdf",
+                    "className": "block font-medium"
+                  },
+                  {
+                    "type": "text",
+                    "content": "405KB",
+                    "className": "text-xs text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 hover:bg-slate-50 cursor-pointer"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 3,
+            "children": [
+              {
+                "type": "text",
+                "content": "📄",
+                "className": "text-2xl"
+              },
+              {
+                "type": "box",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "document_4.pdf",
+                    "className": "block font-medium"
+                  },
+                  {
+                    "type": "text",
+                    "content": "369KB",
+                    "className": "text-xs text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 hover:bg-slate-50 cursor-pointer"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 3,
+            "children": [
+              {
+                "type": "text",
+                "content": "📄",
+                "className": "text-2xl"
+              },
+              {
+                "type": "box",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "document_5.pdf",
+                    "className": "block font-medium"
+                  },
+                  {
+                    "type": "text",
+                    "content": "379KB",
+                    "className": "text-xs text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 hover:bg-slate-50 cursor-pointer"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 3,
+            "children": [
+              {
+                "type": "text",
+                "content": "📄",
+                "className": "text-2xl"
+              },
+              {
+                "type": "box",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "document_6.pdf",
+                    "className": "block font-medium"
+                  },
+                  {
+                    "type": "text",
+                    "content": "378KB",
+                    "className": "text-xs text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 hover:bg-slate-50 cursor-pointer"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 3,
+            "children": [
+              {
+                "type": "text",
+                "content": "📄",
+                "className": "text-2xl"
+              },
+              {
+                "type": "box",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "document_7.pdf",
+                    "className": "block font-medium"
+                  },
+                  {
+                    "type": "text",
+                    "content": "458KB",
+                    "className": "text-xs text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 hover:bg-slate-50 cursor-pointer"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 3,
+            "children": [
+              {
+                "type": "text",
+                "content": "📄",
+                "className": "text-2xl"
+              },
+              {
+                "type": "box",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "document_8.pdf",
+                    "className": "block font-medium"
+                  },
+                  {
+                    "type": "text",
+                    "content": "438KB",
+                    "className": "text-xs text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 hover:bg-slate-50 cursor-pointer"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 3,
+            "children": [
+              {
+                "type": "text",
+                "content": "📄",
+                "className": "text-2xl"
+              },
+              {
+                "type": "box",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "document_9.pdf",
+                    "className": "block font-medium"
+                  },
+                  {
+                    "type": "text",
+                    "content": "132KB",
+                    "className": "text-xs text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 hover:bg-slate-50 cursor-pointer"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 3,
+            "children": [
+              {
+                "type": "text",
+                "content": "📄",
+                "className": "text-2xl"
+              },
+              {
+                "type": "box",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "document_10.pdf",
+                    "className": "block font-medium"
+                  },
+                  {
+                    "type": "text",
+                    "content": "403KB",
+                    "className": "text-xs text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 hover:bg-slate-50 cursor-pointer"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 3,
+            "children": [
+              {
+                "type": "text",
+                "content": "📄",
+                "className": "text-2xl"
+              },
+              {
+                "type": "box",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "document_11.pdf",
+                    "className": "block font-medium"
+                  },
+                  {
+                    "type": "text",
+                    "content": "37KB",
+                    "className": "text-xs text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 hover:bg-slate-50 cursor-pointer"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 3,
+            "children": [
+              {
+                "type": "text",
+                "content": "📄",
+                "className": "text-2xl"
+              },
+              {
+                "type": "box",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "document_12.pdf",
+                    "className": "block font-medium"
+                  },
+                  {
+                    "type": "text",
+                    "content": "435KB",
+                    "className": "text-xs text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 hover:bg-slate-50 cursor-pointer"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 3,
+            "children": [
+              {
+                "type": "text",
+                "content": "📄",
+                "className": "text-2xl"
+              },
+              {
+                "type": "box",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "document_13.pdf",
+                    "className": "block font-medium"
+                  },
+                  {
+                    "type": "text",
+                    "content": "254KB",
+                    "className": "text-xs text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 hover:bg-slate-50 cursor-pointer"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 3,
+            "children": [
+              {
+                "type": "text",
+                "content": "📄",
+                "className": "text-2xl"
+              },
+              {
+                "type": "box",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "document_14.pdf",
+                    "className": "block font-medium"
+                  },
+                  {
+                    "type": "text",
+                    "content": "419KB",
+                    "className": "text-xs text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 hover:bg-slate-50 cursor-pointer"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 3,
+            "children": [
+              {
+                "type": "text",
+                "content": "📄",
+                "className": "text-2xl"
+              },
+              {
+                "type": "box",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "document_15.pdf",
+                    "className": "block font-medium"
+                  },
+                  {
+                    "type": "text",
+                    "content": "259KB",
+                    "className": "text-xs text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 hover:bg-slate-50 cursor-pointer"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 3,
+            "children": [
+              {
+                "type": "text",
+                "content": "📄",
+                "className": "text-2xl"
+              },
+              {
+                "type": "box",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "document_16.pdf",
+                    "className": "block font-medium"
+                  },
+                  {
+                    "type": "text",
+                    "content": "149KB",
+                    "className": "text-xs text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 hover:bg-slate-50 cursor-pointer"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 3,
+            "children": [
+              {
+                "type": "text",
+                "content": "📄",
+                "className": "text-2xl"
+              },
+              {
+                "type": "box",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "document_17.pdf",
+                    "className": "block font-medium"
+                  },
+                  {
+                    "type": "text",
+                    "content": "120KB",
+                    "className": "text-xs text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 hover:bg-slate-50 cursor-pointer"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 3,
+            "children": [
+              {
+                "type": "text",
+                "content": "📄",
+                "className": "text-2xl"
+              },
+              {
+                "type": "box",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "document_18.pdf",
+                    "className": "block font-medium"
+                  },
+                  {
+                    "type": "text",
+                    "content": "185KB",
+                    "className": "text-xs text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 hover:bg-slate-50 cursor-pointer"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 3,
+            "children": [
+              {
+                "type": "text",
+                "content": "📄",
+                "className": "text-2xl"
+              },
+              {
+                "type": "box",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "document_19.pdf",
+                    "className": "block font-medium"
+                  },
+                  {
+                    "type": "text",
+                    "content": "211KB",
+                    "className": "text-xs text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 hover:bg-slate-50 cursor-pointer"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 3,
+            "children": [
+              {
+                "type": "text",
+                "content": "📄",
+                "className": "text-2xl"
+              },
+              {
+                "type": "box",
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "document_20.pdf",
+                    "className": "block font-medium"
+                  },
+                  {
+                    "type": "text",
+                    "content": "137KB",
+                    "className": "text-xs text-muted-foreground block"
+                  }
+                ]
+              }
+            ]
+          },
+          "className": "p-3 hover:bg-slate-50 cursor-pointer"
+        }
+      ]
+    }
+  ]
+}

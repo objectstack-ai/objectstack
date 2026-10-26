@@ -1,0 +1,50 @@
+{
+  // Type-checks this package's TESTS, which `tsconfig.json` excludes.
+  // See `packages/types/tsconfig.test.json` for why that exclusion was a hole:
+  // the build correctly keeps tests out of `dist`, but nothing else compiled
+  // them, so a test could assert a contract the compiler never checked — and
+  // this package had a large backlog of exactly that, including an
+  // `actionProviderProps` restatement that omitted a prop the implementation
+  // has always returned (objectui#4040).
+  //
+  // This project is now the ONLY one that compiles the five files whose whole
+  // value is compile-time assertions — `src/__tests__/spec-symbol-parity.test.ts`,
+  // `src/utils/resolveActionParams.test.ts`, the two flow-edge `.types.test.ts`
+  // pins and `InspectorComboField.naming.types.test.tsx`. Their assertions are
+  // erased at runtime, so vitest proves nothing about them and `tsc` is the only
+  // thing that can (objectui#3181). A narrow `tsconfig.typetests.json` next door
+  // used to name those five while the rest of the tree was in TEST_DEBT; the
+  // package graduated in objectui#4040 and the narrow project was retired with
+  // it, after `--listFiles` showed this project reads all five (of 3624 files)
+  // and a provably-false `Assert` appended to the parity test turned this
+  // project red.
+  //
+  // Chained from this package's `type-check` script, which is what the CI
+  // `Type Check` job runs; scripts/check-type-check-coverage.mjs enforces the
+  // chaining — a config nothing runs is the objectui#3009 failure itself.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    // A checking project, never an emitting one.
+    "noEmit": true,
+    // The package build emits `dist`; this project emits nothing, so it must
+    // not inherit `composite` / `declaration` from the build config.
+    "composite": false,
+    "declaration": false,
+    "jsx": "react-jsx",
+    // One notch above the package build's ES2020: these suites read the last
+    // emitted call with `calls.at(-1)` and use `Object.hasOwn` / `Array.at`,
+    // all ES2022. Raised HERE and not in `tsconfig.json`, so the package
+    // SOURCE keeps compiling against the ES2020 baseline it ships to.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // Naming `types` at all switches off automatic `@types/*` inclusion.
+    // `node` and `vite/client` mirror the build config (the suites touch
+    // `import.meta.env` and node globals); `@testing-library/jest-dom` is
+    // listed for the matchers the DOM suites use.
+    "types": ["node", "vite/client", "@testing-library/jest-dom"],
+    // Drop the root tsconfig's source-tree `paths` so `@object-ui/*` and
+    // `@objectstack/spec` resolve through the workspace dependency's built
+    // `.d.ts` instead of pulling sibling sources in as program inputs (TS6059).
+    "paths": {}
+  },
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+}

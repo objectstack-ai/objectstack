@@ -1,0 +1,6 @@
+{
+  "type": "toast",
+  "variant": "info",
+  "title": "Update Available",
+  "description": "A new version is available."
+}

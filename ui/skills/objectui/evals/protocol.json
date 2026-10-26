@@ -1,0 +1,55 @@
+{
+  "skill_name": "objectui",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "My ObjectUI card renders as an empty box. The schema is { \"type\": \"card\", \"props\": { \"title\": \"Customer Summary\", \"description\": \"Last 30 days\" } }. Nothing is logged. What is wrong?",
+      "expected_output": "Identifies that SchemaRenderer spreads schema.props as React props instead of merging it into the node, so a ui:*/page:* renderer that reads schema.title never sees it — the component paints an empty frame and the envelope lands in the DOM as props=\"[object Object]\". Rewrites the node with title and description on the node itself. Does not suggest a different renderer, a missing import, or a stylesheet problem.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "node",
+          "title",
+          "description",
+          "card"
+        ],
+        "must_not_contain": [
+          "style.css",
+          "ComponentRegistry.register"
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "prompt": "In an ObjectUI schema, what is the difference between props and properties? Can I use either one to carry an expression like ${data.total} into a statistic's value?",
+      "expected_output": "States that they are two different envelopes with opposite outcomes: props is evaluated and then spread as React props, so a ui:*/page:* renderer never reads it; properties is evaluated and then hoisted onto the node, so every namespace reads it. Notes that element:* components are where props IS read by design. For the statistic case, says the supported route is the key on the node — statistic declares value — and that properties' status as an authoring channel for ui:*/page:* is an open contract question, recorded rather than recommended.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "properties",
+          "hoisted",
+          "element:",
+          "statistic"
+        ],
+        "must_not_contain": []
+      }
+    },
+    {
+      "id": 3,
+      "prompt": "I have a grid in an ObjectUI page that should show 1 column on phones, 2 on tablets and 6 on wide desktops. I wrote { \"type\": \"grid\", \"props\": { \"cols\": { \"xs\": 1, \"md\": 2, \"2xl\": 6 } } } and it renders as a flat two-column grid at every width.",
+      "expected_output": "Names the two faults that cause the flat grid: the keys are under props and so are never read; the key is columns, not cols, which no schema or renderer declares. Rewrites it as columns on the node with xs, md and 2xl. Notes that 2xl is the sixth breakpoint key and is read by the current grid renderer; on an @object-ui/components release from before the six-key widening the 2xl step is accepted and silently dropped, so there stop at xl or carry the widest step in className.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "columns",
+          "node",
+          "xl",
+          "className"
+        ],
+        "must_not_contain": [
+          "\"cols\":"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,94 @@
+---
+title: "Currency Field"
+description: "Formatted currency input with locale support"
+---
+
+The Currency Field component provides a formatted currency input with proper locale formatting and currency symbol display.
+
+## Basic Usage
+
+<SchemaExample id="fields-currency/usd-currency" />
+
+## Different Currencies
+
+<SchemaExample id="fields-currency/euro-currency" />
+
+## Field Schema
+
+A currency field is authored as `CurrencyFieldMetadata` (`@object-ui/types`), which is
+the source of truth for the key set: it extends `BaseFieldMetadata` with the currency
+declaration, the total-digit `precision` and the two numeric bounds.
+
+```ts
+import type { CurrencyFieldMetadata } from '@object-ui/types';
+
+const amount: CurrencyFieldMetadata = {
+  type: 'currency',
+  name: 'amount',
+  label: 'Amount',
+  placeholder: '0.00',
+  required: true,
+  currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' },
+  min: 0,
+  max: 1000000,
+};
+```
+
+**The currency is `currencyConfig`**, `@objectstack/spec`'s own declaration. A field that
+always shows one currency declares `{ currencyMode: 'fixed', defaultCurrency }`; a field
+with no `currencyConfig`, or with `currencyMode: 'dynamic'`, shows the tenant's default
+currency. A field-level `currency` key is refused by the spec by name, and
+`CurrencyFieldMetadata` refuses it at compile time.
+
+**Decimal places come from the currency, not from a field key.** An amount shows its
+currency's own ISO 4217 minor unit — two decimals for USD or CNY, none for JPY, three
+for KWD — in the read-only display, in the input's `step` and in the rounding applied
+when the input loses focus. `precision` is the total digit count of the stored decimal
+(a DECIMAL(18,2) amount declares `precision: 18`), so it never sets how many decimals are
+shown. With no currency resolved at all, the amount shows two decimals.
+
+The value being edited, and the `className` / `disabled` a host supplies, are **not**
+metadata keys — they are runtime widget props. See [Field Widget Props](/docs/fields/widget-props).
+
+## What the browser rewrites before this field sees it
+
+This widget renders a native `type="number"` input, so the browser decides what
+the box accepts. Two things can happen and **only one of them is announced**:
+
+- **Announced.** Text the browser cannot read at all — `1e`, a lone `-`, a lone
+  `.` — leaves the box visibly showing what was typed while its value reads
+  empty. The field is marked `aria-invalid` and draws
+  *"Not saved: the text in this box is not a number."*
+- ⚠️ **Not announced.** Entries the browser silently **truncates**: pasting
+  ``1.2.3`` stores ``1.23``, and `0x10` stores ``10``. No warning is
+  possible here — the browser discards the extra characters as they arrive, so
+  nothing reaches ObjectUI to check.
+
+⛔ **"No warning" therefore does not mean "the value is right."** Full
+explanation and the reasoning: [What a number field silently
+rewrites](/docs/guide/fields#what-a-number-field-silently-rewrites).
+
+## Supported Currencies
+
+- **USD**: US Dollar ($)
+- **EUR**: Euro (€)
+- **GBP**: British Pound (£)
+- **JPY**: Japanese Yen (¥)
+- And all other ISO 4217 currency codes
+
+## Cell Renderer
+
+In tables/grids, currency values are formatted with the appropriate symbol:
+
+```ts
+import { CurrencyCellRenderer } from '@object-ui/fields';
+
+// Renders: $1,234.56 or €1.234,56 based on locale
+```
+
+## Use Cases
+
+- **Pricing**: Product prices, service costs
+- **Financial Data**: Revenue, expenses, budgets
+- **Transactions**: Payment amounts, invoice totals
+- **Salaries**: Compensation amounts

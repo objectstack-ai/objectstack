@@ -1,0 +1,57 @@
+---
+title: "Filter UI"
+description: "Build flexible filter panels for list and view toolbars"
+---
+
+The Filter UI component renders configurable filters with text, select, date, and boolean inputs.
+
+## JSON Configuration
+
+```plaintext
+{
+  type: 'filter-ui',
+  layout: 'popover',
+  showApply: true,
+  showClear: true,
+  filters: [
+    { field: 'name', label: 'Name', type: 'text', placeholder: 'Search name' },
+    { field: 'status', label: 'Status', type: 'select', options: [
+      { label: 'Open', value: 'open' },
+      { label: 'Closed', value: 'closed' }
+    ] },
+    { field: 'created_at', label: 'Created', type: 'date-range' }
+  ]
+}
+```
+
+## Basic Usage
+
+<SchemaExample id="components-complex-filter-ui/filter-ui" />
+
+## Schema
+
+```ts
+interface FilterUISchema {
+  type: 'filter-ui';
+  filters: Array<{
+    field: string;
+    label?: string;
+    type: 'text' | 'number' | 'select' | 'multi-select' | 'date' | 'date-range' | 'boolean';
+    options?: Array<{ label: string; value: any }>;
+    placeholder?: string;
+  }>;
+  values?: Record<string, any>;
+  onChange?: string;
+  showClear?: boolean;
+  showApply?: boolean;
+  layout?: 'inline' | 'popover' | 'drawer';
+}
+```
+
+### Retired: `filters[].operator`
+
+A filter entry no longer takes an `operator` (objectui#10611). The component never
+read one: it picks each control from `type` and reports changes as `{ values }`, a
+field-to-value record with no operator in it, and it does no matching of its own. How
+each value is matched is up to the host that consumes the change. An authored
+`operator` is now refused by name when the schema is validated.

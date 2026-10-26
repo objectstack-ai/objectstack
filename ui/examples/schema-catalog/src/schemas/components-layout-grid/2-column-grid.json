@@ -1,0 +1,27 @@
+{
+  "type": "grid",
+  "columns": 2,
+  "gap": 4,
+  "children": [
+    {
+      "type": "card",
+      "title": "Card 1",
+      "children": [
+        {
+          "type": "text",
+          "content": "Content 1"
+        }
+      ]
+    },
+    {
+      "type": "card",
+      "title": "Card 2",
+      "children": [
+        {
+          "type": "text",
+          "content": "Content 2"
+        }
+      ]
+    }
+  ]
+}

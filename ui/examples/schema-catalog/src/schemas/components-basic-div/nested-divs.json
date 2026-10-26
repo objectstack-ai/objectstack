@@ -1,0 +1,23 @@
+{
+  "type": "div",
+  "className": "p-6 border-2 border-dashed border-blue-300 rounded-lg",
+  "children": [
+    {
+      "type": "div",
+      "className": "p-4 border-2 border-dashed border-green-300 rounded",
+      "children": [
+        {
+          "type": "div",
+          "className": "p-3 border-2 border-dashed border-purple-300 rounded text-center",
+          "children": [
+            {
+              "type": "text",
+              "content": "Nested Content",
+              "className": "font-mono text-sm"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

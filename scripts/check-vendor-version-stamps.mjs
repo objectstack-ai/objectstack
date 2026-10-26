@@ -62,10 +62,11 @@
 //     written, true now, true after 1.9.0. Forcing them to the pin would
 //     fabricate that many measurements. (Those figures are a dated reading, not
 //     a live one: run `--census` for today's.)
-//   - Some sites are not attestations at all. It is SELF-TEST FIXTURE DATA
-//     inside `check-prerelease-pin-watch.mjs` — a synthetic npm registry payload
-//     whose `1.7.1` is an arbitrary input proving the watcher notices a stable
-//     release. A pin-equality sweep would corrupt a gate's own test input.
+//   - Some sites are not attestations at all. One was SELF-TEST FIXTURE DATA
+//     inside `check-prerelease-pin-watch.mjs` (since retired) — a synthetic
+//     npm registry payload whose `1.7.1` was an arbitrary input proving the
+//     watcher noticed a stable release. A pin-equality sweep would corrupt a
+//     gate's own test input.
 //
 // So the rule is about PHRASING, not about version equality:
 //
@@ -376,8 +377,8 @@ export const ANCHOR_PATTERN = /\b20\d\d-\d\d-\d\d\b|#\d{3,6}\b/;
  * Gate self-tests build fake registry payloads and fake prose to drive their own
  * assertions; those numbers are arbitrary test data, and holding them to the
  * resolved pin would corrupt another gate's fixture. #13940 measured one such
- * site inside `check-prerelease-pin-watch.mjs` — its `1.7.1` proves the watcher
- * notices a stable release and means nothing about this tree.
+ * site inside `check-prerelease-pin-watch.mjs` (since retired) — its `1.7.1`
+ * proved the watcher noticed a stable release and meant nothing about this tree.
  *
  * It is an INLINE declaration rather than a central exemption list on purpose: a
  * central list rots away from the thing it describes, while this sits on the

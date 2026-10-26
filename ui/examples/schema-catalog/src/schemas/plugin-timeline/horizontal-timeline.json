@@ -1,0 +1,31 @@
+{
+  "type": "timeline",
+  "variant": "horizontal",
+  "dateFormat": "short",
+  "items": [
+    {
+      "time": "2024-01-01",
+      "title": "Q1",
+      "description": "First quarter",
+      "variant": "default"
+    },
+    {
+      "time": "2024-04-01",
+      "title": "Q2",
+      "description": "Second quarter",
+      "variant": "info"
+    },
+    {
+      "time": "2024-07-01",
+      "title": "Q3",
+      "description": "Third quarter",
+      "variant": "warning"
+    },
+    {
+      "time": "2024-10-01",
+      "title": "Q4",
+      "description": "Fourth quarter",
+      "variant": "success"
+    }
+  ]
+}

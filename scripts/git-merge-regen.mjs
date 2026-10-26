@@ -155,6 +155,8 @@ const DECLARED_WATCH_HINTS = [
   'packages/**/package.json',
   'apps/**/package.json',
   'examples/**/package.json',
+  // The objectui tree under `ui/` (objectstack#25677), as check-workspace-manifest-cycles spells it.
+  'ui/**/package.json',
 ];
 
 /**

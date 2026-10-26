@@ -1,0 +1,13 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "fields": [
+    {
+      "name": "start_time",
+      "label": "Start Time",
+      "type": "time",
+      "placeholder": "HH:MM"
+    }
+  ]
+}

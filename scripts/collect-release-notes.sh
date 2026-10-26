@@ -9,7 +9,8 @@
 #   2. The changesets consumed by the release (full text — the best prose for
 #      items that have one).
 #   3. The objectui (Console UI) commit range, derived from the .objectui-sha
-#      pin at each ref.
+#      pin at each ref. After objectstack#25711 no ref carries a pin (the
+#      Console is built from ui/), and the section says so instead.
 #   4. The cloud (control plane) commits inside the release's time window.
 #      Cloud is not pinned by the framework (it tracks it via link: deps and
 #      versions independently), so the window between the two refs' commit
@@ -428,14 +429,23 @@ fi
 echo "## 3. Console UI (objectui) — pin range"
 echo
 
+# The pin is gone from every ref after objectstack#25711: the Console is built
+# from this tree's ui/, so its commits are already in section 1. A range across
+# that boundary starts at the last pin and ends at the subtree import, and only
+# the objectui repository holds the commits between the two.
 prev_sha=$(git show "${PREV_REF}:.objectui-sha" 2>/dev/null || true)
-new_sha=$(git show "${NEW_REF}:.objectui-sha" 2>/dev/null || cat .objectui-sha)
+new_sha=$(git show "${NEW_REF}:.objectui-sha" 2>/dev/null || true)
 
 echo "- previous pin: \`${prev_sha:-<none>}\`"
-echo "- this release: \`${new_sha}\`"
+echo "- this release: \`${new_sha:-<none>}\`"
 echo
 
-if [[ -z "$prev_sha" ]]; then
+if [[ -z "$new_sha" ]]; then
+  echo "_No objectui pin at ${NEW_REF}: the Console is built from ui/ in this tree (objectstack#25711), so its commits are in section 1._"
+  if [[ -n "$prev_sha" ]]; then
+    echo "_The last pin was \`${prev_sha}\`: the objectui commits from it up to the ui/ subtree import are not in section 1; read them in objectstack-ai/objectui._"
+  fi
+elif [[ -z "$prev_sha" ]]; then
   echo "_No .objectui-sha at ${PREV_REF}; cannot compute the range._"
 elif [[ "$prev_sha" == "$new_sha" ]]; then
   echo "_Console pin unchanged — no objectui delta in this release._"

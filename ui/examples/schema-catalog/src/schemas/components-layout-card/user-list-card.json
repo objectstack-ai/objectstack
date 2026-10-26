@@ -1,0 +1,183 @@
+{
+  "type": "card",
+  "children": [
+    {
+      "type": "flex",
+      "properties": {
+        "align": "center",
+        "justify": "between",
+        "children": [
+          {
+            "type": "text",
+            "content": "Users",
+            "className": "text-lg font-semibold"
+          },
+          {
+            "type": "button",
+            "label": "Add User",
+            "variant": "default",
+            "size": "sm",
+            "icon": "plus"
+          }
+        ]
+      },
+      "className": "mb-4"
+    },
+    {
+      "type": "stack",
+      "gap": 0,
+      "children": [
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 4,
+            "children": [
+              {
+                "type": "text",
+                "content": "Name",
+                "className": "w-36"
+              },
+              {
+                "type": "text",
+                "content": "Email",
+                "className": "w-48"
+              },
+              {
+                "type": "text",
+                "content": "Role",
+                "className": "w-24"
+              },
+              {
+                "type": "text",
+                "content": "Status",
+                "className": "w-20"
+              }
+            ]
+          },
+          "className": "px-4 py-2 bg-muted text-xs font-medium text-muted-foreground border-b"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 4,
+            "children": [
+              {
+                "type": "text",
+                "content": "Alice Johnson",
+                "className": "w-36 font-medium"
+              },
+              {
+                "type": "text",
+                "content": "alice@example.com",
+                "className": "w-48 text-muted-foreground"
+              },
+              {
+                "type": "text",
+                "content": "Admin",
+                "className": "w-24"
+              },
+              {
+                "type": "badge",
+                "label": "Active",
+                "variant": "default"
+              }
+            ]
+          },
+          "className": "px-4 py-3 border-b text-sm"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 4,
+            "children": [
+              {
+                "type": "text",
+                "content": "Bob Smith",
+                "className": "w-36 font-medium"
+              },
+              {
+                "type": "text",
+                "content": "bob@example.com",
+                "className": "w-48 text-muted-foreground"
+              },
+              {
+                "type": "text",
+                "content": "Editor",
+                "className": "w-24"
+              },
+              {
+                "type": "badge",
+                "label": "Active",
+                "variant": "default"
+              }
+            ]
+          },
+          "className": "px-4 py-3 border-b text-sm"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 4,
+            "children": [
+              {
+                "type": "text",
+                "content": "Carol White",
+                "className": "w-36 font-medium"
+              },
+              {
+                "type": "text",
+                "content": "carol@example.com",
+                "className": "w-48 text-muted-foreground"
+              },
+              {
+                "type": "text",
+                "content": "Viewer",
+                "className": "w-24"
+              },
+              {
+                "type": "badge",
+                "label": "Inactive",
+                "variant": "secondary"
+              }
+            ]
+          },
+          "className": "px-4 py-3 border-b text-sm"
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "gap": 4,
+            "children": [
+              {
+                "type": "text",
+                "content": "David Lee",
+                "className": "w-36 font-medium"
+              },
+              {
+                "type": "text",
+                "content": "david@example.com",
+                "className": "w-48 text-muted-foreground"
+              },
+              {
+                "type": "text",
+                "content": "Editor",
+                "className": "w-24"
+              },
+              {
+                "type": "badge",
+                "label": "Active",
+                "variant": "default"
+              }
+            ]
+          },
+          "className": "px-4 py-3 text-sm"
+        }
+      ]
+    }
+  ]
+}

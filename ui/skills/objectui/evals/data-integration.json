@@ -1,0 +1,54 @@
+{
+  "skill_name": "objectui",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I have a plain REST API at /api/products with standard CRUD endpoints. How do I wire it to my ObjectUI grid and form components?",
+      "expected_output": "Provides a custom DataSource adapter implementation for REST, SchemaRendererProvider wiring, and schema examples with bind for grid and form.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "DataSource",
+          "SchemaRendererProvider",
+          "fetch",
+          "bind"
+        ],
+        "must_not_contain": [
+          "axios.get(`/api/",
+          "useEffect(() => { fetch"
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "prompt": "Set up MSW mock data for my ObjectUI app so I can develop the frontend without a running backend. I have a Todo object with title, completed, and dueDate fields.",
+      "expected_output": "Provides MSW browser setup using ObjectKernel + InMemoryDriver + MSWPlugin, objectstack.config with the Todo schema, and main.tsx bootstrap pattern.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "ObjectKernel",
+          "InMemoryDriver",
+          "MSWPlugin",
+          "objectstack.config"
+        ],
+        "must_not_contain": [
+          "msw rest.get('/api/todos'"
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "prompt": "My ObjectUI table shows 'undefined' for all rows. The dataSource.find() call returns data correctly in the console. What's wrong?",
+      "expected_output": "Diagnoses likely bind path mismatch or missing SchemaRendererProvider. Shows correct data flow: provider → bind → useDataScope resolution.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "bind",
+          "useDataScope",
+          "SchemaRendererProvider"
+        ],
+        "must_not_contain": []
+      }
+    }
+  ]
+}

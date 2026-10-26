@@ -1,0 +1,457 @@
+{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "style": "default",
+  "rsc": false,
+  "tsx": true,
+  "tailwind": {
+    "config": "tailwind.config.js",
+    "css": "src/index.css",
+    "baseColor": "slate",
+    "cssVariables": true
+  },
+  "aliases": {
+    "components": "@/ui",
+    "utils": "@/lib/utils"
+  },
+  "registry": "https://ui.shadcn.com",
+  "components": {
+    "accordion": {
+      "source": "https://ui.shadcn.com/r/styles/default/accordion.json",
+      "dependencies": [
+        "radix-ui"
+      ],
+      "registryDependencies": []
+    },
+    "alert": {
+      "source": "https://ui.shadcn.com/r/styles/default/alert.json",
+      "dependencies": [],
+      "registryDependencies": []
+    },
+    "alert-dialog": {
+      "source": "https://ui.shadcn.com/r/styles/default/alert-dialog.json",
+      "dependencies": [
+        "radix-ui"
+      ],
+      "registryDependencies": [
+        "button"
+      ]
+    },
+    "aspect-ratio": {
+      "source": "https://ui.shadcn.com/r/styles/default/aspect-ratio.json",
+      "dependencies": [
+        "radix-ui"
+      ],
+      "registryDependencies": []
+    },
+    "avatar": {
+      "source": "https://ui.shadcn.com/r/styles/default/avatar.json",
+      "dependencies": [
+        "radix-ui"
+      ],
+      "registryDependencies": []
+    },
+    "badge": {
+      "source": "https://ui.shadcn.com/r/styles/default/badge.json",
+      "dependencies": [],
+      "registryDependencies": [],
+      "localEdits": "Adds `whitespace-nowrap`: a badge is a single-line pill by definition, and without it CJK labels (e.g. 待审批) break per-character inside a cramped table cell and stack vertically (objectui#2762 P0-1). The reasoning is also comment-documented in the file."
+    },
+    "breadcrumb": {
+      "source": "https://ui.shadcn.com/r/styles/default/breadcrumb.json",
+      "dependencies": [],
+      "registryDependencies": []
+    },
+    "button": {
+      "source": "https://ui.shadcn.com/r/styles/default/button.json",
+      "dependencies": [
+        "radix-ui"
+      ],
+      "registryDependencies": []
+    },
+    "calendar": {
+      "source": "https://ui.shadcn.com/r/styles/default/calendar.json",
+      "dependencies": [
+        "react-day-picker",
+        "date-fns"
+      ],
+      "registryDependencies": [
+        "button"
+      ],
+      "localEdits": "Tailwind v4 syntax: upstream still ships v3’s `[--var]` arbitrary values, which on Tailwind 4.x compile to a bare custom-property name instead of `var(--var)` — invalid CSS that browsers drop. Applied repo-wide in 925051db6. Here it covers `h-`, `w-`, `px-`, `size-` and `max-w-` on `--cell-size`. Also carries the objectui#10722 display-locale patch: `DayPicker` gets the date-fns `Locale` for the session's display locale (`useDisplayDateLocale()`, `packages/components/src/lib/date-fns-locale.ts`) ahead of the `{...props}` spread, so its caption, weekday heads and week start follow the session and a caller's `locale` still wins. It also carries the objectui#10747 `localeTag` input: a BCP-47 tag a caller formats its own dates with (`CalendarView`'s header popover passes its grids' locale), resolved by that same hook in place of the display locale; its type lives beside the resolver. Those edits are DECLARED in `scripts/shadcn-local-patches.mjs` and re-applied on every `--update`; the Tailwind v4 edit is not."
+    },
+    "card": {
+      "source": "https://ui.shadcn.com/r/styles/default/card.json",
+      "dependencies": [],
+      "registryDependencies": []
+    },
+    "carousel": {
+      "source": "https://ui.shadcn.com/r/styles/default/carousel.json",
+      "dependencies": [
+        "embla-carousel-react"
+      ],
+      "registryDependencies": [
+        "button"
+      ]
+    },
+    "checkbox": {
+      "source": "https://ui.shadcn.com/r/styles/default/checkbox.json",
+      "dependencies": [
+        "radix-ui"
+      ],
+      "registryDependencies": []
+    },
+    "collapsible": {
+      "source": "https://ui.shadcn.com/r/styles/default/collapsible.json",
+      "dependencies": [
+        "radix-ui"
+      ],
+      "registryDependencies": []
+    },
+    "command": {
+      "source": "https://ui.shadcn.com/r/styles/default/command.json",
+      "dependencies": [
+        "cmdk"
+      ],
+      "registryDependencies": [
+        "dialog"
+      ],
+      "localEdits": "Two local additions to CommandDialog. (1) `contentProps`, so callers can attach a stable locator/ARIA name to the underlying dialog element — a `data-testid` spread onto CommandDialog lands on the Radix Dialog root, which renders no DOM (ADR-0054 C4). (2) `sr-only` DialogTitle/DialogDescription, which Radix requires for an accessible name. Upstream has neither, and drops each addition together with its usages — so syncing deletes ~38 lines and still type-checks clean. Verified: `--update command --force` compiles."
+    },
+    "context-menu": {
+      "source": "https://ui.shadcn.com/r/styles/default/context-menu.json",
+      "dependencies": [
+        "radix-ui"
+      ],
+      "registryDependencies": [],
+      "localEdits": "Tailwind v4 syntax. Local uses `origin-(--radix-context-menu-content-transform-origin)`; upstream still ships v3's `origin-[--radix-…]`, which on Tailwind 4.x compiles to the bare `transform-origin: --radix-…` rather than `var(--radix-…)` — invalid CSS that browsers drop, so the open/close animation would scale from the default origin instead of the one Radix computes. Verified against tailwindcss 4.3.3: the paren form emits `var()`, the bracket form does not. Same for `max-h-(--radix-context-menu-content-available-height)`. Applied repo-wide in 925051db6; do not revert piecemeal."
+    },
+    "dialog": {
+      "source": "https://ui.shadcn.com/r/styles/default/dialog.json",
+      "dependencies": [
+        "radix-ui"
+      ],
+      "registryDependencies": [],
+      "localEdits": "objectstack#5505 i18n close patch: `DialogContent` auto-renders an icon-only close button whose `sr-only` span IS its accessible name, and upstream hardcodes the English literal — so under zh/ja/es every modal in the console announced \"Close\" in English. The span is replaced by `<CloseSrLabel />` (`packages/components/src/lib/close-label.tsx`), which resolves `common.close` for the session locale and falls back to English with no I18nProvider mounted. The edit is DECLARED as data in `scripts/shadcn-local-patches.mjs` and re-applied on every `--update`, and `pnpm shadcn:check` exits non-zero if it is ever missing from the file or can no longer be re-applied to upstream."
+    },
+    "drawer": {
+      "source": "https://ui.shadcn.com/r/styles/default/drawer.json",
+      "dependencies": [
+        "vaul"
+      ],
+      "registryDependencies": []
+    },
+    "dropdown-menu": {
+      "source": "https://ui.shadcn.com/r/styles/default/dropdown-menu.json",
+      "dependencies": [
+        "radix-ui"
+      ],
+      "registryDependencies": [],
+      "localEdits": "Tailwind v4 syntax. Local uses `origin-(--radix-dropdown-menu-content-transform-origin)`; upstream still ships v3's `origin-[--radix-…]`, which on Tailwind 4.x compiles to the bare `transform-origin: --radix-…` rather than `var(--radix-…)` — invalid CSS that browsers drop, so the open/close animation would scale from the default origin instead of the one Radix computes. Verified against tailwindcss 4.3.3: the paren form emits `var()`, the bracket form does not. Applied repo-wide in 925051db6; do not revert piecemeal."
+    },
+    "form": {
+      "source": "https://ui.shadcn.com/r/styles/default/form.json",
+      "dependencies": [
+        "radix-ui",
+        "react-hook-form",
+        "@hookform/resolvers"
+      ],
+      "registryDependencies": [
+        "button",
+        "label"
+      ],
+      "localEdits": "FormItem accepts `Record<`data-${string}`, string | undefined>` on top of upstream's `React.HTMLAttributes<HTMLDivElement>`, so callers can attach a stable `data-testid` to the field wrapper (ADR-0054 testability contract). Upstream has no equivalent; syncing removes it and the locators go with it."
+    },
+    "hover-card": {
+      "source": "https://ui.shadcn.com/r/styles/default/hover-card.json",
+      "dependencies": [
+        "radix-ui"
+      ],
+      "registryDependencies": [],
+      "localEdits": "Tailwind v4 syntax. Local uses `origin-(--radix-hover-card-content-transform-origin)`; upstream still ships v3's `origin-[--radix-…]`, which on Tailwind 4.x compiles to the bare `transform-origin: --radix-…` rather than `var(--radix-…)` — invalid CSS that browsers drop, so the open/close animation would scale from the default origin instead of the one Radix computes. Verified against tailwindcss 4.3.3: the paren form emits `var()`, the bracket form does not. Applied repo-wide in 925051db6; do not revert piecemeal."
+    },
+    "input": {
+      "source": "https://ui.shadcn.com/r/styles/default/input.json",
+      "dependencies": [],
+      "registryDependencies": []
+    },
+    "input-otp": {
+      "source": "https://ui.shadcn.com/r/styles/default/input-otp.json",
+      "dependencies": [
+        "input-otp"
+      ],
+      "registryDependencies": []
+    },
+    "label": {
+      "source": "https://ui.shadcn.com/r/styles/default/label.json",
+      "dependencies": [
+        "radix-ui"
+      ],
+      "registryDependencies": []
+    },
+    "menubar": {
+      "source": "https://ui.shadcn.com/r/styles/default/menubar.json",
+      "dependencies": [
+        "radix-ui"
+      ],
+      "registryDependencies": [],
+      "localEdits": "Tailwind v4 syntax. Local uses `origin-(--radix-menubar-content-transform-origin)`; upstream still ships v3's `origin-[--radix-…]`, which on Tailwind 4.x compiles to the bare `transform-origin: --radix-…` rather than `var(--radix-…)` — invalid CSS that browsers drop, so the open/close animation would scale from the default origin instead of the one Radix computes. Verified against tailwindcss 4.3.3: the paren form emits `var()`, the bracket form does not. Applied repo-wide in 925051db6; do not revert piecemeal."
+    },
+    "navigation-menu": {
+      "source": "https://ui.shadcn.com/r/styles/default/navigation-menu.json",
+      "dependencies": [
+        "radix-ui"
+      ],
+      "registryDependencies": []
+    },
+    "pagination": {
+      "source": "https://ui.shadcn.com/r/styles/default/pagination.json",
+      "dependencies": [],
+      "registryDependencies": [
+        "button"
+      ]
+    },
+    "popover": {
+      "source": "https://ui.shadcn.com/r/styles/default/popover.json",
+      "dependencies": [
+        "radix-ui"
+      ],
+      "registryDependencies": [],
+      "localEdits": "Tailwind v4 syntax. Local uses `origin-(--radix-popover-content-transform-origin)`; upstream still ships v3's `origin-[--radix-…]`, which on Tailwind 4.x compiles to the bare `transform-origin: --radix-…` rather than `var(--radix-…)` — invalid CSS that browsers drop, so the open/close animation would scale from the default origin instead of the one Radix computes. Verified against tailwindcss 4.3.3: the paren form emits `var()`, the bracket form does not. Applied repo-wide in 925051db6; do not revert piecemeal."
+    },
+    "progress": {
+      "source": "https://ui.shadcn.com/r/styles/default/progress.json",
+      "dependencies": [
+        "radix-ui"
+      ],
+      "registryDependencies": []
+    },
+    "radio-group": {
+      "source": "https://ui.shadcn.com/r/styles/default/radio-group.json",
+      "dependencies": [
+        "radix-ui"
+      ],
+      "registryDependencies": []
+    },
+    "scroll-area": {
+      "source": "https://ui.shadcn.com/r/styles/default/scroll-area.json",
+      "dependencies": [
+        "radix-ui"
+      ],
+      "registryDependencies": []
+    },
+    "select": {
+      "source": "https://ui.shadcn.com/r/styles/default/select.json",
+      "dependencies": [
+        "radix-ui"
+      ],
+      "registryDependencies": [],
+      "localEdits": "Wraps SelectPrimitive.Root to swallow `onValueChange(\"\")`. Radix mirrors the value into a hidden native `<select>`; SelectContent registers its options a commit AFTER the trigger mounts, so a value arriving mid-hydration (an edit form whose record lands after first paint) finds no matching `<option>`, and Radix echoes back an empty string that silently wipes the field — latching the form when a `visibleWhen` predicate reads it (#2968). SelectItem rejects `value=\"\"`, so `\"\"` is never a real user choice. Also tailwind v4 syntax: upstream still ships v3’s `[--var]` arbitrary values, which on Tailwind 4.x compile to a bare custom-property name instead of `var(--var)` — invalid CSS that browsers drop. Applied repo-wide in 925051db6."
+    },
+    "separator": {
+      "source": "https://ui.shadcn.com/r/styles/default/separator.json",
+      "dependencies": [
+        "radix-ui"
+      ],
+      "registryDependencies": []
+    },
+    "sheet": {
+      "source": "https://ui.shadcn.com/r/styles/default/sheet.json",
+      "dependencies": [
+        "radix-ui"
+      ],
+      "registryDependencies": [],
+      "localEdits": "Adds a `hideOverlay` prop that suppresses `<SheetOverlay />`, for sheets that must not dim the page behind them. Upstream renders the overlay unconditionally. Also carries the objectstack#5505 i18n close patch (see `dialog` for the full rationale): `SheetContent`'s auto-rendered close button renders `<CloseSrLabel />` instead of a hardcoded English `sr-only` span. BOTH edits are declared in `scripts/shadcn-local-patches.mjs` and RE-APPLIED automatically by every sync; neither depends on anyone remembering it. `hideOverlay` was the exception until objectui#6090 — it was documented here and declared nowhere, and because it is an OPTIONAL prop with no in-repo call site, a `--force` sync that dropped it would have type-checked clean. Declaring it also made `sheet` the second family to regenerate byte-for-byte from registry bytes (`roundTrip: true` in `scripts/__tests__/shadcn-local-patches.test.ts`), which is what now proves nothing else in this file diverges undeclared."
+    },
+    "sidebar": {
+      "source": "https://ui.shadcn.com/r/styles/default/sidebar.json",
+      "dependencies": [
+        "radix-ui"
+      ],
+      "registryDependencies": [
+        "button",
+        "separator",
+        "sheet",
+        "skeleton",
+        "tooltip"
+      ],
+      "localEdits": "Three systematic edits, not 24 independent ones. (1) Tailwind v4 syntax: upstream still ships v3’s `[--var]` arbitrary values, which on Tailwind 4.x compile to a bare custom-property name instead of `var(--var)` — invalid CSS that browsers drop. Applied repo-wide in 925051db6. (2) `theme(spacing.4)` → `1rem`: cosmetic only — verified that Tailwind 4.3.3 still resolves the v3 `theme()` dot-notation, and both spellings compile to the identical `calc(var(--sidebar-width-icon) + 1rem)`. Unlike (1) this one is NOT load-bearing; it is just avoiding a deprecated idiom. (3) `data-collapsible` is set unconditionally, where upstream blanks the attribute when expanded, so the attribute stays in the DOM for styling and test locators. That keeps upstream's result only because every rule keyed on the attribute is also qualified by the collapsed state: the `icon` rules by hand (`group-data-[state=collapsed]:` in this file, and `[data-state]` selectors in `src/sidebar-fixes.css` for the menu button's bespoke classes), and the `offcanvas` rules (the gap, the panel's left and right offsets, the rail) by the DECLARED `sidebarOffcanvasStateQualifierPatches` family in `scripts/shadcn-local-patches.mjs` (objectui#11464), re-applied on every `--update`. Until that family, the offcanvas rules were unqualified and matched the expanded state too, so an expanded offcanvas sidebar was drawn off-screen. Also carries an `eslint-disable react-hooks/purity` the skeleton’s random width needs under this repo’s lint config; syncing removes it and Lint fails."
+    },
+    "skeleton": {
+      "source": "https://ui.shadcn.com/r/styles/default/skeleton.json",
+      "dependencies": [],
+      "registryDependencies": []
+    },
+    "slider": {
+      "source": "https://ui.shadcn.com/r/styles/default/slider.json",
+      "dependencies": [
+        "radix-ui"
+      ],
+      "registryDependencies": [],
+      "localEdits": "Forwards `aria-label` to `SliderPrimitive.Thumb`. Upstream renders the Thumb with only a className, so the accessible name never reaches the element screen readers focus."
+    },
+    "sonner": {
+      "source": "https://ui.shadcn.com/r/styles/default/sonner.json",
+      "dependencies": [
+        "sonner",
+        "next-themes"
+      ],
+      "registryDependencies": [],
+      "localEdits": "Re-exports `toast` from the module (`import { Toaster as Sonner, toast }` / `export { Toaster, toast }`) so consumers get it from @object-ui/components rather than depending on `sonner` directly — plugin-form, plugin-kanban and others import it that way. Upstream exports only `Toaster`; syncing breaks those imports."
+    },
+    "switch": {
+      "source": "https://ui.shadcn.com/r/styles/default/switch.json",
+      "dependencies": [
+        "radix-ui"
+      ],
+      "registryDependencies": []
+    },
+    "table": {
+      "source": "https://ui.shadcn.com/r/styles/default/table.json",
+      "dependencies": [],
+      "registryDependencies": [],
+      "localEdits": "Adds `containerClassName` to override the scroll-wrapper `<div>`. The wrapper is its own `overflow-auto` container by default; inside an already-bounded scroll region (DataTable’s `flex-1 min-h-0 overflow-auto`) that creates a SECOND, height-unbounded scroll container whose horizontal scrollbar sits below every row, reachable only after scrolling to the last one. `containerClassName=\"overflow-visible\"` hands both axes to the outer container. Rationale is spelled out in the file’s JSDoc."
+    },
+    "tabs": {
+      "source": "https://ui.shadcn.com/r/styles/default/tabs.json",
+      "dependencies": [
+        "radix-ui"
+      ],
+      "registryDependencies": []
+    },
+    "textarea": {
+      "source": "https://ui.shadcn.com/r/styles/default/textarea.json",
+      "dependencies": [],
+      "registryDependencies": []
+    },
+    "toast": {
+      "source": "https://ui.shadcn.com/r/styles/default/toast.json",
+      "dependencies": [
+        "radix-ui"
+      ],
+      "registryDependencies": []
+    },
+    "toggle": {
+      "source": "https://ui.shadcn.com/r/styles/default/toggle.json",
+      "dependencies": [
+        "radix-ui"
+      ],
+      "registryDependencies": []
+    },
+    "toggle-group": {
+      "source": "https://ui.shadcn.com/r/styles/default/toggle-group.json",
+      "dependencies": [
+        "radix-ui"
+      ],
+      "registryDependencies": []
+    },
+    "tooltip": {
+      "source": "https://ui.shadcn.com/r/styles/default/tooltip.json",
+      "dependencies": [
+        "radix-ui"
+      ],
+      "registryDependencies": [],
+      "localEdits": "Tailwind v4 syntax. Local uses `origin-(--radix-tooltip-content-transform-origin)`; upstream still ships v3's `origin-[--radix-…]`, which on Tailwind 4.x compiles to the bare `transform-origin: --radix-…` rather than `var(--radix-…)` — invalid CSS that browsers drop, so the open/close animation would scale from the default origin instead of the one Radix computes. Verified against tailwindcss 4.3.3: the paren form emits `var()`, the bracket form does not. Applied repo-wide in 925051db6; do not revert piecemeal."
+    }
+  },
+  "customComponents": {
+    "button-group": {
+      "description": "Custom ObjectUI component - Button group wrapper",
+      "dependencies": [
+        "button"
+      ]
+    },
+    "calendar-view": {
+      "description": "Custom ObjectUI component - Full calendar view (moved to @object-ui/plugin-calendar-view)",
+      "dependencies": [
+        "calendar"
+      ],
+      "movedToPlugin": "@object-ui/plugin-calendar-view"
+    },
+    "chart": {
+      "description": "Excluded from the sync - the chart primitives (ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent, ChartStyle) were removed from @object-ui/components and live in @object-ui/plugin-charts (ChartContainerImpl.tsx), which is the single implementation. It began as a Shadcn component and is listed here, never under `components`, so `pnpm shadcn:update-all` cannot resurrect src/ui/chart.tsx - a second copy is how the objectui#7248 legend bug would come back (objectui#7397).",
+      "dependencies": [
+        "recharts",
+        "lucide-react"
+      ],
+      "movedToPlugin": "@object-ui/plugin-charts"
+    },
+    "chatbot": {
+      "description": "Custom ObjectUI component - Chatbot interface (moved to @object-ui/plugin-chatbot)",
+      "dependencies": [
+        "card",
+        "input",
+        "button"
+      ],
+      "movedToPlugin": "@object-ui/plugin-chatbot"
+    },
+    "combobox": {
+      "description": "Custom ObjectUI component - Combo box (select + input)",
+      "dependencies": [
+        "popover",
+        "command"
+      ]
+    },
+    "date-picker": {
+      "description": "Custom ObjectUI component - Date picker wrapper",
+      "dependencies": [
+        "calendar",
+        "popover",
+        "button"
+      ]
+    },
+    "empty": {
+      "description": "Custom ObjectUI component - Empty state",
+      "dependencies": []
+    },
+    "field": {
+      "description": "Custom ObjectUI component - Form field wrapper",
+      "dependencies": [
+        "label"
+      ]
+    },
+    "filter-builder": {
+      "description": "Custom ObjectUI component - Query filter builder",
+      "dependencies": [
+        "select",
+        "input",
+        "button"
+      ]
+    },
+    "input-group": {
+      "description": "Custom ObjectUI component - Input group with addons",
+      "dependencies": [
+        "input"
+      ]
+    },
+    "item": {
+      "description": "Custom ObjectUI component - Generic item component",
+      "dependencies": []
+    },
+    "kbd": {
+      "description": "Custom ObjectUI component - Keyboard key display",
+      "dependencies": []
+    },
+    "resizable": {
+      "description": "Diverged from Shadcn - hand-migrated to react-resizable-panels v4. Upstream still ships v3 (imports PanelGroup/PanelResizeHandle, which v4 does not export), so re-syncing would break the build. Restore to `components` only once upstream regenerates for v4.",
+      "dependencies": [
+        "react-resizable-panels"
+      ],
+      "divergedFrom": "https://ui.shadcn.com/r/styles/default/resizable.json"
+    },
+    "spinner": {
+      "description": "Custom ObjectUI component - Loading spinner",
+      "dependencies": []
+    },
+    "timeline": {
+      "description": "Custom ObjectUI component - Timeline component (moved to @object-ui/plugin-timeline)",
+      "dependencies": [],
+      "movedToPlugin": "@object-ui/plugin-timeline"
+    },
+    "toaster": {
+      "description": "Custom ObjectUI component - Toast container",
+      "dependencies": [
+        "toast"
+      ]
+    }
+  }
+}

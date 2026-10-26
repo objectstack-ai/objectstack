@@ -1,0 +1,267 @@
+name: Merge Queue Head Patrol
+
+# The standing caller for `scripts/check-merge-queue-head.mjs`.
+#
+# ## What it watches for (objectui#7010)
+#
+# A merge-queue entry can sit at the HEAD of the queue for which GitHub never
+# dispatches `merge_group` at all. Nothing is red, nothing is ejected, and
+# everything queued behind it builds green and never merges — a merge queue is
+# strictly ordered, so a head that cannot merge blocks every lane in the
+# repository. Four occurrences are on record (2026-08-17, two on 08-31, one on
+# 09-02); the worst ran four hours and the cheapest self-healed in ~63 minutes
+# on the ruleset's status-check timeout. Nothing was watching for any of them.
+#
+# The detection is two API reads and was verified in BOTH directions before it
+# was automated (#7010, 2026-08-31T13:23Z): the wedged head answered
+# `total_count: 0` for 58 minutes, the healthy head that replaced it answered
+# the full set within the second. The script's header carries the mechanism, the
+# confounder that makes the reading safe only on the head entry, and the
+# threshold's two boundary measurements.
+#
+# ## Why a SCHEDULE, when everything else here is event-driven
+#
+# The failure is an ABSENCE — the `merge_group` event is never dispatched — and
+# an absence cannot trigger a workflow. Every event-driven alternative was
+# considered and each is blind to exactly this shape:
+#
+#   `merge_group`  the wedged entry produces no event; that IS the defect.
+#   `push` to main a wedge means `main` never moves, so nothing ever fires.
+#   `pull_request` fires on the PR, minutes before it is ever enqueued.
+#
+# So: a clock. ⚠️ Runner cost, measured rather than assumed — this repository is
+# PUBLIC, so scheduled Actions minutes are not billed at all; the real budget is
+# scheduler latency and log volume. The job is a checkout plus one `node` call
+# (no `pnpm install`, see below) and makes 3 API reads on a healthy queue.
+#
+# Cadence arithmetic, so it can be retuned against the same numbers: the wedge
+# self-heals in ~60 minutes, and the script's threshold is 5. At `*/15` a wedge
+# is reported between 5 and 20 minutes after it starts, i.e. with two thirds of
+# the wasted hour still recoverable, for 96 runs a day. `*/5` buys ~10 minutes
+# at three times the runs; hourly would routinely report a wedge that had
+# already healed.
+#
+# ## ⛔ Why there is no `pull_request` leg (a deliberate divergence)
+#
+# `half-state-patrol.yml`, the sibling this file is shaped after, carries one so
+# its transport is proven before it merges. This one must not: every job of a
+# `pull_request`-triggered workflow produces a check run, and
+# `scripts/dependabot-merge-gate.mjs` requires every produced name to be
+# classified in one of its three buckets (`merge-queue-reporting.test.ts` and
+# `dependabot-merge-gate.test.ts` partition them exactly). Adding a leg here
+# would mean editing that gate's declaration from a card that does not hold it.
+#
+# What replaces it: `node scripts/check-merge-queue-head.mjs --self-test` runs
+# offline in `scripts/__tests__/check-merge-queue-head.test.ts` on every pull
+# request, and the live transport is proven by `workflow_dispatch`, which needs
+# no merge. If a `pull_request` leg is ever wanted, it also needs a row in
+# `NOT_A_GATE` — it is a patrol, it can never gate a pull request.
+#
+# ## Where a finding lands
+#
+# Three places, in this order — the run summary always, the anchor issue when
+# one is configured, and a RED job on a wedge.
+#
+# ⛔ It never opens an issue, on any code path. A patrol that files a card per
+# firing produces one card per fifteen minutes for an hour, on an incident that
+# is one incident (objectui#7010's own history is the precedent: a later seat
+# posted a live recurrence as a COMMENT there "per the one-anchor rule rather
+# than as a new card"). `permissions:` grants `issues: write` for exactly one
+# PATCH of one pinned body and nothing else — no labels, no comments, no state.
+#
+# ⚠️ The red job is the divergence from `half-state-patrol.yml`, which is
+# report-only and fails only when the sweep could not run. Here a FINDING fails
+# the job too, for a reason specific to this defect: the remedy is a human
+# dequeue inside a 60-minute window, and an issue body edit notifies nobody
+# while a failed run does. It stays proportionate because the finding is rare —
+# four occurrences in three weeks — and because it is impossible for it to be
+# red on the healthy case: an empty queue, a settling head and an unreadable
+# reading all exit 0.
+#
+# ## The anchor is OPTIONAL here, and that is also a divergence
+#
+# `half-state-patrol.yml` fails when its anchor variable is unset, because its
+# findings have nowhere else to go. This patrol's findings do have somewhere
+# else to go (the red job above), so an unset variable is silent rather than
+# red: a patrol that failed 96 times a day over a missing setting would train
+# everyone to ignore the one failure that matters. ⛔ That is the whole reason,
+# and it is the repo's own doctrine — a permanently red check trains everyone to
+# ignore red (objectui#6596).
+#
+# TO ADD AN ANCHOR: open an issue, put its number in the repository variable
+# `MERGE_QUEUE_ANCHOR_ISSUE` (Settings -> Secrets and variables -> Actions ->
+# Variables), and this workflow will own its body from the next run on. Nothing
+# else changes.
+
+on:
+  schedule:
+    # Every 15 minutes, offset off the hour. The minute is not :00 on purpose:
+    # scheduled workflows across GitHub bunch at the top of the hour and are
+    # delayed under that load, and a patrol whose whole value is timeliness
+    # should not queue behind everyone else's nightly.
+    - cron: '7,22,37,52 * * * *'
+  workflow_dispatch: {}
+
+# Least privilege. `actions: read` is what `GET /actions/runs` needs — the count
+# of `merge_group` runs on the head entry IS the measurement. `issues: write` is
+# the narrowest scope GitHub offers for editing one issue body.
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+# One patrol at a time, and never cancelled: a scheduled run overlapping a
+# manual dispatch would have two runs racing to rewrite the same body, and a
+# cancelled run mid-confirmation-wait would discard a completed reading.
+concurrency:
+  group: merge-queue-head-patrol
+  cancel-in-progress: false
+
+env:
+  # The pinned anchor issue whose body this workflow owns, or empty. The literal
+  # fallback is guarded by the repository name for the reason
+  # `half-state-patrol.yml` states: an issue number is only ever meaningful in
+  # the repo it was minted in, and an unguarded default would let a copy of this
+  # file rewrite some unrelated card in a sibling repository.
+  ANCHOR_ISSUE: >-
+    ${{ vars.MERGE_QUEUE_ANCHOR_ISSUE || '' }}
+
+jobs:
+  patrol:
+    name: Merge queue head patrol
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # No `pnpm install`: the patrol imports `scripts/invoked-as.mjs` and
+      # nothing else, and reaches the API through global `fetch`. Installing the
+      # workspace would buy nothing and would give a scheduled patrol a lockfile
+      # it could fail on. `check:pre-install-import-graph` derives this step's
+      # script into its population and holds that property.
+      - name: Read the head of the merge queue
+        id: patrol
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          QUEUE_BASE_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set +e
+          node scripts/check-merge-queue-head.mjs \
+            > "$RUNNER_TEMP/patrol.md" 2> "$RUNNER_TEMP/patrol.err"
+          code=$?
+          set -e
+          # Captured with NO pipe in between: `node … | tail` would report the
+          # PIPE's status, and `tail` essentially never fails, so a wedge (3), a
+          # clean reading (0) and an unreadable one (2) would all read as 0 —
+          # which is the exact class of silent pass this patrol exists to catch.
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          # Re-emit stderr so the one-line verdict and any `::error::` annotation
+          # reach the run log; they were redirected out of it a moment ago.
+          cat "$RUNNER_TEMP/patrol.err" >&2 || true
+
+      - name: Refresh the pinned anchor issue
+        # Skipped, not failed, when no anchor is configured — see the header.
+        if: env.ANCHOR_ISSUE != ''
+        uses: actions/github-script@v9
+        env:
+          PATROL_EXIT: ${{ steps.patrol.outputs.exit_code }}
+        with:
+          # Delivery is retried, never assumed: this PATCH is the whole board
+          # product of the run, and a transient answer would discard a completed
+          # reading.
+          retries: 3
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const anchor = Number(process.env.ANCHOR_ISSUE);
+            if (!Number.isInteger(anchor) || anchor <= 0) {
+              core.setFailed(`MERGE_QUEUE_ANCHOR_ISSUE is ${JSON.stringify(process.env.ANCHOR_ISSUE)}, which is not an issue number.`);
+              return;
+            }
+            const exitCode = Number(process.env.PATROL_EXIT);
+            const runUrl = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+            const read = (name) => {
+              try { return fs.readFileSync(path.join(process.env.RUNNER_TEMP, name), 'utf8'); }
+              catch { return ''; }
+            };
+
+            // The composition split, deliberately: a reading that was TAKEN
+            // renders its own body in the script, where `--self-test` pins every
+            // property of it. Only the did-not-run body is composed here —
+            // saying "my callee could not run" is the caller's job.
+            const report = read('patrol.md');
+            let body;
+            if ((exitCode === 0 || exitCode === 3) && report.trim()) {
+              body = report;
+            } else {
+              body = [
+                'os-merge-queue-head-patrol — machine-findable marker for this generated view.',
+                '',
+                `# ⛔ THE PATROL DID NOT READ THE QUEUE (exit ${exitCode})`,
+                '',
+                `_Attempted ${new Date().toISOString()} · [run log](${runUrl})._`,
+                '',
+                'Nothing below is a finding. **The merge queue was not judged**, so this body says nothing about',
+                'whether the queue is moving — it is not a healthy queue and it is not a wedged one, it is no',
+                'reading at all. A patrol that could not run must never read as a healthy queue.',
+                '',
+                'The patrol\'s own classified output:',
+                '',
+                '```',
+                (read('patrol.err') || '(no output captured)').trim(),
+                '```',
+              ].join('\n');
+            }
+
+            body += `\n\n_Read ${new Date().toISOString()} · [run log](${runUrl}) · patrol exit ${exitCode}._\n`;
+
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: anchor,
+              body,
+            });
+            core.info(`anchor #${anchor} refreshed (${body.length} chars, patrol exit ${exitCode})`);
+
+      - name: Publish the reading to the run summary
+        # Always: on a run with no anchor configured this IS the delivery, and on
+        # every other run it makes the log self-contained when someone opens it
+        # after an alert.
+        if: always()
+        run: |
+          {
+            echo "### Merge queue head patrol — exit ${{ steps.patrol.outputs.exit_code }}"
+            echo
+            cat "$RUNNER_TEMP/patrol.md" 2>/dev/null || echo '_(no reading produced)_'
+            echo
+            echo '<details><summary>stderr</summary>'
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/patrol.err" 2>/dev/null || true
+            echo '```'
+            echo
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail the run on a wedge, or when the queue could not be read
+        # LAST, on purpose: the anchor and the summary carry the reading BEFORE
+        # the job goes red. Land the truth, then raise the alarm.
+        #
+        # Exit 0 covers every reading that is not a finding — a healthy head, an
+        # empty queue, a head too young to judge, and a head that could not be
+        # identified. Only 3 (wedged) and 2 (could not read) reach here.
+        if: steps.patrol.outputs.exit_code != '0'
+        run: |
+          if [ "${{ steps.patrol.outputs.exit_code }}" = "3" ]; then
+            echo "::error::The merge queue is WEDGED — its head entry has no merge_group build and every queued pull request is blocked behind it. Remove that entry from the merge queue; the reading is in this run's summary."
+          else
+            echo "::error::check-merge-queue-head exited ${{ steps.patrol.outputs.exit_code }} — the queue was NOT read. This is not a healthy-queue reading."
+          fi
+          exit 1

@@ -1,0 +1,68 @@
+---
+title: "Toaster"
+description: "Container for displaying toast notifications"
+---
+
+The Toaster component provides a container for toast notifications. It should be placed once at the root level of your application to enable toast functionality.
+
+## Basic Usage
+
+The Toaster component is typically added to your app's layout and doesn't require configuration:
+
+<SchemaExample id="components-feedback-toaster/default-toaster" />
+
+## Schema
+
+```ts
+interface ToasterSchema {
+  type: 'toaster';
+  
+  // Configuration
+  position?: 'top-left' | 'top-center' | 'top-right' | 
+             'bottom-left' | 'bottom-center' | 'bottom-right';  // Toast position
+  limit?: number;                        // Maximum number of toasts (default: 5)
+  
+  // Styling
+  className?: string;                    // Tailwind CSS classes
+  
+  // Base properties
+  id?: string;
+  visible?: boolean | string | { dialect?: string; source: string };
+  testId?: string;
+}
+```
+
+## Examples
+
+### In App Layout
+
+```plaintext
+{
+  type: 'div',
+  className: 'min-h-screen',
+  children: [
+    // Your app content
+    { type: 'page', pageType: 'app', title: 'Dashboard', children: [...] },
+    
+    // Toaster at root level
+    { type: 'toaster' }
+  ]
+}
+```
+
+### Usage with Toast Actions
+
+The Toaster component works in conjunction with Toast components to display notifications. Once the Toaster is mounted, you can trigger toasts programmatically or via Toast components:
+
+<SchemaExample id="components-feedback-toaster/with-toast-trigger" />
+
+### Configuration
+
+<SchemaExample id="components-feedback-toaster/custom-position-limit" />
+
+## Notes
+
+- Place the Toaster component once in your app's root layout
+- ObjectUI ships a single toaster implementation, backed by Sonner
+- Toast notifications are triggered separately using toast functions or Toast components
+- The Toaster manages the positioning and lifecycle of all toasts

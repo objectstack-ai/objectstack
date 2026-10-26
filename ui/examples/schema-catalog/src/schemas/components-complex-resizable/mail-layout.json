@@ -1,0 +1,82 @@
+{
+  "type": "resizable",
+  "direction": "horizontal",
+  "minHeight": "350px",
+  "className": "rounded-lg border",
+  "panels": [
+    {
+      "defaultSize": 20,
+      "minSize": 15,
+      "content": [
+        {
+          "type": "box",
+          "className": "p-4 h-full border-r",
+          "children": [
+            {
+              "type": "text",
+              "content": "Folders",
+              "className": "font-semibold mb-3 block"
+            },
+            {
+              "type": "text",
+              "content": "📧 Inbox",
+              "className": "block py-2 cursor-pointer hover:bg-slate-50 px-2 rounded"
+            },
+            {
+              "type": "text",
+              "content": "📤 Sent",
+              "className": "block py-2 cursor-pointer hover:bg-slate-50 px-2 rounded"
+            },
+            {
+              "type": "text",
+              "content": "🗑️ Trash",
+              "className": "block py-2 cursor-pointer hover:bg-slate-50 px-2 rounded"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "defaultSize": 40,
+      "content": [
+        {
+          "type": "box",
+          "className": "p-4 h-full border-r",
+          "children": [
+            {
+              "type": "text",
+              "content": "Messages",
+              "className": "font-semibold mb-3 block"
+            },
+            {
+              "type": "text",
+              "content": "Message list...",
+              "className": "text-sm text-muted-foreground"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "defaultSize": 40,
+      "content": [
+        {
+          "type": "box",
+          "className": "p-4 h-full",
+          "children": [
+            {
+              "type": "text",
+              "content": "Message Content",
+              "className": "font-semibold mb-3 block"
+            },
+            {
+              "type": "text",
+              "content": "Email body appears here...",
+              "className": "text-sm text-muted-foreground"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

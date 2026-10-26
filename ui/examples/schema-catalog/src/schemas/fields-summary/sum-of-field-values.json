@@ -1,0 +1,21 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "defaultValues": {
+    "total_revenue": 15750.5
+  },
+  "fields": [
+    {
+      "name": "total_revenue",
+      "label": "Total Revenue",
+      "type": "summary",
+      "summaryOperations": {
+        "object": "orders",
+        "field": "amount",
+        "function": "sum"
+      },
+      "readonly": true
+    }
+  ]
+}

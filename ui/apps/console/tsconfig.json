@@ -1,0 +1,38 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "allowJs": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+
+    /* Linting */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+
+    /* Testing */
+    // `node` is here for the DEV-ONLY preview fixtures under `src/`, which
+    // import workspace package SOURCES by relative path rather than through a
+    // package barrel (see the note in `src/inbox-arrival-preview.tsx` for why a
+    // `@object-ui/<pkg>/<subpath>` specifier is not available to them). Those
+    // sources are written against their own package's tsconfig, which declares
+    // `types: ["node", "vite/client"]`, and they guard on `typeof process` for
+    // the non-browser case — without `node` here that guard is TS2591 and the
+    // console build fails on another package's legitimate code. Additive only:
+    // it declares globals, it suppresses no check.
+    "types": ["vitest/globals", "@testing-library/jest-dom", "node"]
+  },
+  "include": ["src", "dev", "scripts"],
+  "references": [{ "path": "./tsconfig.node.json" }]
+}

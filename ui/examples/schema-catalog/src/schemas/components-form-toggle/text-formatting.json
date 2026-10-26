@@ -1,0 +1,30 @@
+{
+  "type": "flex",
+  "properties": {
+    "gap": 1,
+    "children": [
+      {
+        "type": "toggle",
+        "label": "B",
+        "size": "sm",
+        "variant": "outline",
+        "ariaLabel": "Bold"
+      },
+      {
+        "type": "toggle",
+        "label": "I",
+        "size": "sm",
+        "variant": "outline",
+        "ariaLabel": "Italic"
+      },
+      {
+        "type": "toggle",
+        "label": "U",
+        "size": "sm",
+        "variant": "outline",
+        "ariaLabel": "Underline"
+      }
+    ]
+  },
+  "className": "p-2 bg-muted rounded-lg"
+}

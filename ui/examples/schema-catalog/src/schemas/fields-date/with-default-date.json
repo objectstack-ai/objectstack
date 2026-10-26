@@ -1,0 +1,15 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "defaultValues": {
+    "event_date": "2026-05-28T06:36:57.154Z"
+  },
+  "fields": [
+    {
+      "name": "event_date",
+      "label": "Event Date",
+      "type": "date"
+    }
+  ]
+}

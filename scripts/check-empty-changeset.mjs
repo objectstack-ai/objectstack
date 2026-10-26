@@ -694,7 +694,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'The second consumer: where THIS SELF-TEST runs (#6509)': 12,
   'Parser unit rows': 8,
   'THE FIX (#7004): comments and quoted bump values': 12,
-  'The family reads one block one way (#7004)': 25,
+  'The family reads one block one way (#7004)': 20, // the objectui digest's five cases left with it (objectstack#25711)
   'Missing input is a failure, never a pass (#4690)': 1,
 });
 
@@ -2085,12 +2085,11 @@ function selfTest() {
         'scripts/check-changeset-no-major.mjs',
         'scripts/check-empty-changeset.mjs',
         'scripts/check-adr-0087-registration.mjs',
-        'scripts/objectui-changeset-digest.mjs',
       ];
       const literals = new Map();
       for (const rel of FAMILY) {
         const path = join(REPO_ROOT, rel);
-        assert(existsSync(path), `family: ${rel} must exist — it is one of the four readers of a changeset frontmatter block`);
+        assert(existsSync(path), `family: ${rel} must exist — it is one of the family's readers of a changeset frontmatter block`);
         const src = existsSync(path) ? readFileSync(path, 'utf8') : '';
         const found = src.match(/\/\^\\s\*\["'\]\?.*?\/\.exec\(/g) ?? [];
         // Anti-vacuous-green (#6983): an extraction that stops matching yields
@@ -2102,13 +2101,13 @@ function selfTest() {
       const distinct = new Set(literals.values());
       assert(
         distinct.size === 1,
-        `family: all four changeset frontmatter parsers must use a byte-identical entry regex — found ${distinct.size} distinct spellings: ${JSON.stringify([...literals])}`,
+        `family: every changeset frontmatter parser in the family must use a byte-identical entry regex — found ${distinct.size} distinct spellings: ${JSON.stringify([...literals])}`,
       );
       // And the shared spelling must actually be the comment-aware one, so this
       // block cannot go green on four identically-STALE copies.
       assert(
         [...distinct][0]?.includes('(?:\\s+#.*)?'),
-        'family: the shared entry regex must carry the `(?:\\s+#.*)?` trailing-comment arm — four identical copies of the OLD anchor would satisfy the agreement check above while re-opening #7004',
+        'family: the shared entry regex must carry the `(?:\\s+#.*)?` trailing-comment arm — identical copies of the OLD anchor would satisfy the agreement check above while re-opening #7004',
       );
       for (const rel of FAMILY) {
         const src = existsSync(join(REPO_ROOT, rel)) ? readFileSync(join(REPO_ROOT, rel), 'utf8') : '';

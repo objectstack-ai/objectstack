@@ -1,0 +1,26 @@
+---
+title: "Card"
+description: "Container with header, content, and footer sections"
+---
+
+## Examples
+
+  <SchemaExample id="components-layout-card/basic-card" />
+
+  <SchemaExample id="components-layout-card/with-footer" />
+
+## Schema
+
+```ts
+import type { SchemaNode } from '@object-ui/types';
+
+interface CardSchema {
+  type: 'card';
+  title?: string;
+  description?: string;
+  children?: SchemaNode[];
+  header?: SchemaNode[];
+  footer?: SchemaNode[];
+  className?: string;
+}
+```

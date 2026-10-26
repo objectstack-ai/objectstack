@@ -1,0 +1,58 @@
+{
+  "skill_name": "objectui",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I want to start a new project using ObjectUI with Vite and React. What do I need to install and configure? Give me the full setup.",
+      "expected_output": "Provides complete setup: package.json dependencies, vite.config.ts, an index.css that imports tailwindcss and then '@object-ui/components/style.css' before '@object-ui/fields/style.css', tsconfig.json, and a minimal App.tsx with SchemaRenderer. No tailwind.config.js step and no theme block of the consumer's own — the components sheet already ships those tokens.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "package.json",
+          "vite.config",
+          "@object-ui/components/style.css",
+          "@object-ui/fields/style.css",
+          "SchemaRenderer"
+        ],
+        "must_not_contain": [
+          "create-react-app",
+          "node_modules/@object-ui"
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "prompt": "My ObjectUI components render but they have no styling at all — just plain text and bare inputs. What's wrong?",
+      "expected_output": "Diagnoses the missing stylesheet imports and gives the complete index.css: '@import \"tailwindcss\"', then '@object-ui/components/style.css', then '@object-ui/fields/style.css'. Explains that the order is load-bearing — the components sheet carries the utilities, the theme tokens they are built on and the :root/.dark defaults, while the fields sheet is a supplement with every rule the first sheet already ships subtracted from it, so imported first or alone its rules resolve against tokens that are not there yet.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "@import",
+          "@object-ui/components/style.css",
+          "@object-ui/fields/style.css",
+          "order"
+        ],
+        "must_not_contain": [
+          "node_modules/@object-ui"
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "prompt": "How do I add the grid and kanban plugins to my existing ObjectUI project and make sure they're available in my schemas?",
+      "expected_output": "Shows installing @object-ui/plugin-grid and @object-ui/plugin-kanban, the side-effect import at the app entry that registers each plugin's renderers in ComponentRegistry (without it SchemaRenderer resolves the node to 'Unknown component type'), and the schema type to use afterwards. On styling: the plugin packages publish no stylesheet of their own — only @object-ui/components and @object-ui/fields export a ./style.css — so there is no third sheet to import and nothing to point Tailwind at inside node_modules. Inside the ObjectUI workspace the app owns the Tailwind entry and adds one @source line per plugin package's src, the way apps/console/src/index.css does.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "@object-ui/plugin-grid",
+          "@object-ui/plugin-kanban",
+          "import"
+        ],
+        "must_not_contain": [
+          "node_modules/@object-ui",
+          "@object-ui/plugin-grid/style.css"
+        ]
+      }
+    }
+  ]
+}

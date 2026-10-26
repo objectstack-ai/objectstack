@@ -2654,7 +2654,7 @@ export async function selfTest() {
   assert('an-unapproved-workflow-PR-is-REFUSED-at-the-queue-on-the-Tier-H-terminal', wfRefused.exitCode === EXIT_REFUSED_UNAPPROVED && renderGuardVerdict(wfRefused).includes(WF) && /landing tier: H/.test(renderGuardVerdict(wfRefused)), renderGuardVerdict(wfRefused));
   assert('and-an-authorized-approval-on-the-head-clears-it', run('merge_group', [row(23043, [WF])], new Map([[23043, authorizedPass()]])).exitCode === EXIT_CLEAR);
   const wfClearText = renderGuardVerdict(run('merge_group', [row(3, ['.github/ISSUE_TEMPLATE/bug.md'])]));
-  assert('the-clear-words-count-the-rows-that-govern-THIS-repository-and-name-it', /7 surfaces govern objectstack/.test(wfClearText), wfClearText);
+  assert('the-clear-words-count-the-rows-that-govern-THIS-repository-and-name-it', /13 surfaces govern objectstack/.test(wfClearText), wfClearText);
   const threw = (fn) => { try { fn(); return null; } catch (error) { return error; } };
   assert('⛔ decomposeGovernedWork-without-a-repository-is-an-ERROR-never-a-clear', threw(() => decomposeGovernedWork([row(1, [WF])])) instanceof TypeError && /decomposeGovernedWork wants the repository/.test(threw(() => decomposeGovernedWork([row(1, [WF])])).message));
   const liftRejects = await liftGeneratedExceptions('/w', 'base', [], []).then(() => null, (error) => error);
@@ -4640,7 +4640,7 @@ export async function selfTest() {
     const live = codeownersMirrorVerdict({ text: onDisk });
     assert('⭐ the-file-on-disk-mirrors-the-register-and-the-approver-list', live.ok, live.problems.join(' | '));
     assert('every-Tier-H-row-that-governs-this-repository-is-a-pattern-the-file-carries', live.tierHPatterns.length === governedSurfacesFor(REPO).filter((s) => s.tier === GOVERNED_TIER_H).length && live.tierHPatterns.every((p) => live.rows.some((r) => r.pattern === p)), JSON.stringify(live.tierHPatterns));
-    assert('the-patterns-are-the-register-rows-root-anchored-prefix-or-exact', live.tierHPatterns.join() === '/docs/adr/,/skills/,/AGENTS.md,/CLAUDE.md,/docs/NORTH-STAR.md,/.github/workflows/', live.tierHPatterns.join());
+    assert('the-patterns-are-the-register-rows-root-anchored-prefix-or-exact', live.tierHPatterns.join() === '/docs/adr/,/skills/,/AGENTS.md,/CLAUDE.md,/docs/NORTH-STAR.md,/.github/workflows/,/ui/docs/adr/,/ui/.claude/,/ui/skills/,/ui/AGENTS.md,/ui/CLAUDE.md,/ui/.github/workflows/', live.tierHPatterns.join());
     assert('every-line-on-disk-names-every-approver-spelled-as-a-login', live.rows.every((r) => GOVERNED_APPROVERS.every((a) => r.owners.includes(`@${a}`))) && live.rows.length >= live.tierHPatterns.length, JSON.stringify(live.rows));
     assert('the-parser-strips-comments-and-blank-lines-and-splits-owners', JSON.stringify(codeownersRows('# c\n\n/docs/adr/ @a @b # trailing\n  /x.md   @c\n')) === JSON.stringify([{ pattern: '/docs/adr/', owners: ['@a', '@b'], line: 3 }, { pattern: '/x.md', owners: ['@c'], line: 4 }]));
     const owners = GOVERNED_APPROVERS.map((a) => `@${a}`).join(' ');
@@ -4658,19 +4658,16 @@ export async function selfTest() {
     assert('⛔ a-file-that-never-names-the-constant-is-a-problem', !silent.ok && silent.problems.length === 1 && silent.problems[0].includes('GOVERNED_APPROVERS'), silent.problems.join(' | '));
     const other = codeownersMirrorVerdict({ text: onDisk, approvers: ['someone-else'] });
     assert('⭐ the-approver-list-is-READ-not-restated-another-list-reds-the-file-on-disk', !other.ok && other.problems.length >= live.tierHPatterns.length, String(other.problems.length));
-    // The nested `ui/` workspace rows (#25712), handed in through the register's seam: each lands
-    // Tier H, so each needs its root-anchored `/ui/…` line, and the file on disk carries none yet.
-    const uiRows = GOVERNED_SURFACES.filter((s) => s.id !== 'north-star').map((s) => Object.freeze({
-      ...s, id: `ui-${s.id}`, ...(s.prefix ? { prefix: `ui/${s.prefix}` } : { exact: `ui/${s.exact}` }), glob: `ui/${s.glob}`,
-      tier: GOVERNED_TIER_H, tierRepos: undefined, repos: Object.freeze(['objectstack']),
-    }));
-    const withUi = [...GOVERNED_SURFACES, ...uiRows];
-    const uiLive = codeownersMirrorVerdict({ text: onDisk, register: withUi });
-    assert('⛔ with-the-ui-rows-handed-in-the-file-on-disk-is-short-one-line-per-ui-row', !uiLive.ok && uiLive.problems.length === uiRows.length && uiRows.every((r) => uiLive.problems.some((p) => p.includes(`\`${r.id}\``) && p.includes(`\`/${r.prefix ?? r.exact}\``))), uiLive.problems.join(' | '));
-    assert('the-ui-patterns-are-root-anchored-under-ui-the-ui-claude-tree-included', uiLive.tierHPatterns.slice(live.tierHPatterns.length).join() === '/ui/docs/adr/,/ui/.claude/,/ui/skills/,/ui/AGENTS.md,/ui/CLAUDE.md,/ui/.github/workflows/', uiLive.tierHPatterns.join());
-    const uiFull = `# mirrors GOVERNED_APPROVERS\n${uiLive.tierHPatterns.map((p) => `${p} ${owners}`).join('\n')}\n`;
-    assert('a-fixture-carrying-the-ui-lines-too-passes-against-the-ui-register', codeownersMirrorVerdict({ text: uiFull, register: withUi }).ok);
-    assert('the-ui-rows-govern-objectstack-alone-so-a-sibling-copy-needs-no-ui-line', codeownersMirrorVerdict({ text: full(), repo: 'objectui', register: withUi }).tierHPatterns.every((p) => !p.startsWith('/ui/')));
+    // The nested `ui/` workspace rows (#25712) are live register rows: each lands Tier H, so each has its
+    // root-anchored `/ui/…` line on disk, and a file without those lines is short exactly one per row.
+    const uiRows = governedSurfacesFor(REPO).filter((s) => s.id.startsWith('ui-'));
+    const withoutUi = GOVERNED_SURFACES.filter((s) => !s.id.startsWith('ui-'));
+    assert('the-ui-patterns-are-root-anchored-under-ui-the-ui-claude-tree-included', uiRows.length === 6 && live.tierHPatterns.filter((p) => p.startsWith('/ui/')).join() === '/ui/docs/adr/,/ui/.claude/,/ui/skills/,/ui/AGENTS.md,/ui/CLAUDE.md,/ui/.github/workflows/', live.tierHPatterns.join());
+    const noUiLines = codeownersMirrorVerdict({ text: onDisk.split('\n').filter((l) => !l.startsWith('/ui/')).join('\n') });
+    assert('⛔ without-its-ui-lines-the-file-on-disk-is-short-one-line-per-ui-row', !noUiLines.ok && noUiLines.problems.length === uiRows.length && uiRows.every((r) => noUiLines.problems.some((p) => p.includes(`\`${r.id}\``) && p.includes(`\`/${r.prefix ?? r.exact}\``))), noUiLines.problems.join(' | '));
+    const priorRegister = codeownersMirrorVerdict({ text: onDisk.split('\n').filter((l) => !l.startsWith('/ui/')).join('\n'), register: withoutUi });
+    assert('the-register-seam-still-reads-a-register-handed-in-the-one-without-the-ui-rows-passes-the-file-without-their-lines', priorRegister.ok && priorRegister.tierHPatterns.every((p) => !p.startsWith('/ui/')), priorRegister.problems.join(' | '));
+    assert('the-ui-rows-govern-objectstack-alone-so-a-sibling-copy-needs-no-ui-line', codeownersMirrorVerdict({ text: full(), repo: 'objectui' }).tierHPatterns.every((p) => !p.startsWith('/ui/')));
   }
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────

@@ -1,0 +1,13 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "fields": [
+    {
+      "name": "team_members",
+      "label": "Team Members",
+      "type": "user",
+      "multiple": true
+    }
+  ]
+}

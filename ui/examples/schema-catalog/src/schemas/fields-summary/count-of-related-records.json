@@ -1,0 +1,21 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "defaultValues": {
+    "order_count": 42
+  },
+  "fields": [
+    {
+      "name": "order_count",
+      "label": "Total Orders",
+      "type": "summary",
+      "summaryOperations": {
+        "object": "orders",
+        "field": "id",
+        "function": "count"
+      },
+      "readonly": true
+    }
+  ]
+}

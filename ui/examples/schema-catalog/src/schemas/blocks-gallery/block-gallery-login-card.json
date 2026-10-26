@@ -1,0 +1,67 @@
+{
+  "type": "card",
+  "className": "max-w-sm mx-auto",
+  "header": [
+    {
+      "type": "stack",
+      "gap": 1,
+      "className": "text-center",
+      "children": [
+        {
+          "type": "text",
+          "content": "Sign In",
+          "className": "text-xl font-bold"
+        },
+        {
+          "type": "text",
+          "content": "Enter your credentials",
+          "className": "text-sm text-muted-foreground"
+        }
+      ]
+    }
+  ],
+  "children": [
+    {
+      "type": "stack",
+      "gap": 3,
+      "children": [
+        {
+          "type": "stack",
+          "gap": 2,
+          "children": [
+            {
+              "type": "label",
+              "label": "Email"
+            },
+            {
+              "type": "input",
+              "inputType": "email",
+              "placeholder": "you@example.com"
+            }
+          ]
+        },
+        {
+          "type": "stack",
+          "gap": 2,
+          "children": [
+            {
+              "type": "label",
+              "label": "Password"
+            },
+            {
+              "type": "input",
+              "inputType": "password",
+              "placeholder": "••••••••"
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Sign In",
+          "variant": "default",
+          "className": "w-full"
+        }
+      ]
+    }
+  ]
+}

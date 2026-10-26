@@ -1,0 +1,29 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "fields": [
+    {
+      "name": "team_members",
+      "label": "Team Members",
+      "type": "lookup",
+      "placeholder": "Select team members...",
+      "reference": "users",
+      "multiple": true,
+      "options": [
+        {
+          "label": "Alice Brown",
+          "value": "user_4"
+        },
+        {
+          "label": "Charlie Davis",
+          "value": "user_5"
+        },
+        {
+          "label": "Diana Wilson",
+          "value": "user_6"
+        }
+      ]
+    }
+  ]
+}

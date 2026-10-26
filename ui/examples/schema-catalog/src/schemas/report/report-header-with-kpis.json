@@ -1,0 +1,151 @@
+{
+  "type": "stack",
+  "gap": 4,
+  "children": [
+    {
+      "type": "flex",
+      "properties": {
+        "align": "center",
+        "justify": "between",
+        "children": [
+          {
+            "type": "stack",
+            "gap": 1,
+            "children": [
+              {
+                "type": "text",
+                "content": "Quarterly Sales Report",
+                "className": "text-xl font-bold"
+              },
+              {
+                "type": "text",
+                "content": "Q1 2024 · January - March",
+                "className": "text-sm text-muted-foreground"
+              }
+            ]
+          },
+          {
+            "type": "flex",
+            "properties": {
+              "gap": 2,
+              "children": [
+                {
+                  "type": "button",
+                  "label": "PDF",
+                  "variant": "outline",
+                  "size": "sm",
+                  "icon": "file-text"
+                },
+                {
+                  "type": "button",
+                  "label": "Excel",
+                  "variant": "outline",
+                  "size": "sm",
+                  "icon": "table"
+                },
+                {
+                  "type": "button",
+                  "label": "Print",
+                  "variant": "outline",
+                  "size": "sm",
+                  "icon": "printer"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "grid",
+      "columns": 4,
+      "gap": 4,
+      "children": [
+        {
+          "type": "card",
+          "className": "p-4",
+          "children": [
+            {
+              "type": "text",
+              "content": "Total Revenue",
+              "className": "text-xs text-muted-foreground font-medium uppercase tracking-wider"
+            },
+            {
+              "type": "text",
+              "content": "$284,500",
+              "className": "text-2xl font-bold mt-1"
+            },
+            {
+              "type": "text",
+              "content": "+12.5% vs Q4",
+              "className": "text-xs text-green-600 mt-1"
+            }
+          ]
+        },
+        {
+          "type": "card",
+          "className": "p-4",
+          "children": [
+            {
+              "type": "text",
+              "content": "Orders",
+              "className": "text-xs text-muted-foreground font-medium uppercase tracking-wider"
+            },
+            {
+              "type": "text",
+              "content": "1,842",
+              "className": "text-2xl font-bold mt-1"
+            },
+            {
+              "type": "text",
+              "content": "+8.3% vs Q4",
+              "className": "text-xs text-green-600 mt-1"
+            }
+          ]
+        },
+        {
+          "type": "card",
+          "className": "p-4",
+          "children": [
+            {
+              "type": "text",
+              "content": "Avg. Order",
+              "className": "text-xs text-muted-foreground font-medium uppercase tracking-wider"
+            },
+            {
+              "type": "text",
+              "content": "$154.45",
+              "className": "text-2xl font-bold mt-1"
+            },
+            {
+              "type": "text",
+              "content": "+3.8% vs Q4",
+              "className": "text-xs text-green-600 mt-1"
+            }
+          ]
+        },
+        {
+          "type": "card",
+          "className": "p-4",
+          "children": [
+            {
+              "type": "text",
+              "content": "Return Rate",
+              "className": "text-xs text-muted-foreground font-medium uppercase tracking-wider"
+            },
+            {
+              "type": "text",
+              "content": "2.4%",
+              "className": "text-2xl font-bold mt-1"
+            },
+            {
+              "type": "text",
+              "content": "-0.6% vs Q4",
+              "className": "text-xs text-green-600 mt-1"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -521,10 +521,13 @@ export type {
 // refused the same way; `wholeCollection` is the statement.
 // Its FIFTH: a list view still carrying a key the spec retired, reported by
 // name with the tombstone's prescription (`os lint` never parses).
+// [#25786] Its SIXTH: a grouping level's `orderBy` naming a field the group
+// header query cannot order by (`min` / `max` refused for its type).
 export {
   validateListViewFieldRefs,
   LIST_VIEW_FIELD_UNKNOWN,
   LIST_VIEW_FIELD_DOTTED,
+  LIST_VIEW_GROUP_ORDER_UNORDERABLE,
   LIST_VIEW_OBJECT_OUTSIDE_CLOSURE,
   LIST_VIEW_OBJECT_UNKNOWN,
   LIST_VIEW_KEY_RETIRED,

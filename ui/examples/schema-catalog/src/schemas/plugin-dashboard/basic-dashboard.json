@@ -1,0 +1,34 @@
+{
+  "type": "dashboard",
+  "columns": 3,
+  "gap": 4,
+  "widgets": [
+    {
+      "type": "metric-card",
+      "title": "Total Users",
+      "value": "1,234",
+      "icon": "users",
+      "trend": "up",
+      "trendValue": "+12%",
+      "description": "vs last month"
+    },
+    {
+      "type": "metric-card",
+      "title": "Revenue",
+      "value": "$56,789",
+      "icon": "dollar-sign",
+      "trend": "up",
+      "trendValue": "+8.2%",
+      "description": "vs last month"
+    },
+    {
+      "type": "metric-card",
+      "title": "Active Sessions",
+      "value": "432",
+      "icon": "activity",
+      "trend": "down",
+      "trendValue": "-3%",
+      "description": "vs last month"
+    }
+  ]
+}

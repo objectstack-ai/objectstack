@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "skills": {
+    "objectui": {
+      "source": "local",
+      "sourceType": "local",
+      "path": "./skills/objectui"
+    },
+    "shadcn": {
+      "source": "shadcn/ui",
+      "sourceType": "github",
+      "computedHash": "873c67922d80775a9fdf596db7964b579f0408c30ec6e3d11989f6055bbec89f"
+    }
+  }
+}

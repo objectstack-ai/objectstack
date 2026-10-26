@@ -1,0 +1,18 @@
+{
+  "type": "stack",
+  "gap": 3,
+  "children": [
+    {
+      "type": "switch",
+      "label": "Email notifications"
+    },
+    {
+      "type": "switch",
+      "label": "Push notifications"
+    },
+    {
+      "type": "switch",
+      "label": "SMS notifications"
+    }
+  ]
+}

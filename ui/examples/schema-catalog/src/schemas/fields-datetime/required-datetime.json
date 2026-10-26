@@ -1,0 +1,13 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "fields": [
+    {
+      "name": "appointment",
+      "label": "Appointment",
+      "type": "datetime",
+      "required": true
+    }
+  ]
+}

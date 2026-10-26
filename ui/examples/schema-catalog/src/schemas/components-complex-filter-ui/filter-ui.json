@@ -1,0 +1,43 @@
+{
+  "type": "filter-ui",
+  "layout": "popover",
+  "showApply": true,
+  "showClear": true,
+  "filters": [
+    {
+      "field": "name",
+      "label": "Name",
+      "type": "text",
+      "placeholder": "Search name"
+    },
+    {
+      "field": "status",
+      "label": "Status",
+      "type": "select",
+      "options": [
+        {
+          "label": "Open",
+          "value": "open"
+        },
+        {
+          "label": "Closed",
+          "value": "closed"
+        },
+        {
+          "label": "In Progress",
+          "value": "in_progress"
+        }
+      ]
+    },
+    {
+      "field": "priority",
+      "label": "Priority",
+      "type": "number"
+    },
+    {
+      "field": "created_at",
+      "label": "Created",
+      "type": "date-range"
+    }
+  ]
+}

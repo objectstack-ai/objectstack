@@ -1,0 +1,64 @@
+{
+  "type": "tree-view",
+  "title": "Project Structure",
+  "nodes": [
+    {
+      "id": "src",
+      "label": "src",
+      "icon": "folder",
+      "children": [
+        {
+          "id": "components",
+          "label": "components",
+          "icon": "folder",
+          "children": [
+            {
+              "id": "button",
+              "label": "Button.tsx",
+              "icon": "file"
+            },
+            {
+              "id": "input",
+              "label": "Input.tsx",
+              "icon": "file"
+            }
+          ]
+        },
+        {
+          "id": "utils",
+          "label": "utils",
+          "icon": "folder",
+          "children": [
+            {
+              "id": "helpers",
+              "label": "helpers.ts",
+              "icon": "file"
+            }
+          ]
+        },
+        {
+          "id": "index",
+          "label": "index.ts",
+          "icon": "file"
+        }
+      ]
+    },
+    {
+      "id": "public",
+      "label": "public",
+      "icon": "folder",
+      "children": [
+        {
+          "id": "logo",
+          "label": "logo.svg",
+          "icon": "file"
+        }
+      ]
+    },
+    {
+      "id": "package",
+      "label": "package.json",
+      "icon": "file"
+    }
+  ]
+}

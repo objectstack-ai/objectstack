@@ -1,0 +1,13 @@
+{
+  "type": "collapsible",
+  "trigger": {
+    "type": "button",
+    "label": "Toggle"
+  },
+  "content": [
+    {
+      "type": "text",
+      "content": "Hidden content"
+    }
+  ]
+}

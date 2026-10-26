@@ -1,0 +1,55 @@
+{
+  "name": "@object-ui/example-schema-catalog",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Canonical JSON schema catalog for ObjectUI. Single source of truth for example schemas consumed by the docs site, smoke tests, and AI few-shot retrieval.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./schemas/*": "./src/schemas/*"
+  },
+  "files": [
+    "dist",
+    "src/schemas"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "regenerate": "python3 ../../scripts/regenerate-catalog-index.py",
+    "regenerate:check": "python3 ../../scripts/regenerate-catalog-index.py --check",
+    "test": "vitest run --root ../.. examples/schema-catalog/",
+    "type-check": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@object-ui/types": "workspace:*"
+  },
+  "devDependencies": {
+    "@object-ui/components": "workspace:*",
+    "@object-ui/core": "workspace:*",
+    "@object-ui/fields": "workspace:*",
+    "@object-ui/layout": "workspace:*",
+    "@object-ui/plugin-calendar": "workspace:*",
+    "@object-ui/plugin-charts": "workspace:*",
+    "@object-ui/plugin-chatbot": "workspace:*",
+    "@object-ui/plugin-dashboard": "workspace:*",
+    "@object-ui/plugin-editor": "workspace:*",
+    "@object-ui/plugin-form": "workspace:*",
+    "@object-ui/plugin-gantt": "workspace:*",
+    "@object-ui/plugin-grid": "workspace:*",
+    "@object-ui/plugin-kanban": "workspace:*",
+    "@object-ui/plugin-map": "workspace:*",
+    "@object-ui/plugin-markdown": "workspace:*",
+    "@object-ui/plugin-timeline": "workspace:*",
+    "@object-ui/plugin-view": "workspace:*",
+    "@object-ui/react": "workspace:*",
+    "@object-ui/sdui-parser": "workspace:*",
+    "@object-ui/test-support": "workspace:*",
+    "typescript": "^6.0.3"
+  }
+}

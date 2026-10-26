@@ -387,9 +387,9 @@
 - 本车道强制多是过宽的回忆:`dispatch-gates.mjs --tier PATH` 逐路径现推,路径线是下限非放行。
 - 该脚本只答自己那棵树:姊妹仓路径回 absent from this tree,姊妹仓的档位与条款②只能手推。
 - `os-verify-lock.sh` 只住 objectstack:objectui 无它,跑本仓副本读的是容器级锁,非该仓深度。
-- required checks 的名单是每仓事实,objectstack 五个:
-  `TypeScript Type Check` · `Lint & Repo Gates` · `Test Core` ·
-  `Build Core` · `Governed Surface Queue Guard`。
+- required checks 的名单是每仓事实,objectstack 七个:
+  `TypeScript Type Check` · `Lint & Repo Gates` · `Test Core` · `Build Core` ·
+  `Governed Surface Queue Guard` · `Lint UI` · `Build & E2E UI`。
 - ⭐ 本表的 `mustName` 声明 `statesTheSet` ⇒ 必须逐字等于注册表,加注册行不跟改本表即红。
 - ⇒ 门绿即名单逐字齐全的读数;⛔ 但数量词未钉:实测 七→六 照绿,只能手跟改。
 - ⛔ 聚合命令同样不作判定:`check:type-check-debt` 可在包级 typecheck 绿时红。

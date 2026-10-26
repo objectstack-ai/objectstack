@@ -1,0 +1,16 @@
+{
+  "type": "aside",
+  "className": "p-4 border rounded bg-slate-50",
+  "children": [
+    {
+      "type": "text",
+      "content": "Sidebar Content",
+      "className": "font-semibold mb-2"
+    },
+    {
+      "type": "text",
+      "content": "Complementary information",
+      "className": "text-sm"
+    }
+  ]
+}

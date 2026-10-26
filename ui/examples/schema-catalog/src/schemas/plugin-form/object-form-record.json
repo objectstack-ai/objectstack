@@ -1,0 +1,11 @@
+{
+  "type": "object-form",
+  "properties": {
+    "objectName": "users",
+    "mode": "edit",
+    "recordId": "1",
+    "columns": 2,
+    "fields": ["name", "email", "role", "department", "status"],
+    "submitText": "Save changes"
+  }
+}

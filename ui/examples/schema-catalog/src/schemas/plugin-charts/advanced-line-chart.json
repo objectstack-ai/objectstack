@@ -1,0 +1,55 @@
+{
+  "type": "chart",
+  "chartType": "line",
+  "data": [
+    {
+      "month": "Jan",
+      "revenue": 4000,
+      "expenses": 2400
+    },
+    {
+      "month": "Feb",
+      "revenue": 3000,
+      "expenses": 1398
+    },
+    {
+      "month": "Mar",
+      "revenue": 6000,
+      "expenses": 3800
+    },
+    {
+      "month": "Apr",
+      "revenue": 8000,
+      "expenses": 3908
+    },
+    {
+      "month": "May",
+      "revenue": 5000,
+      "expenses": 4800
+    },
+    {
+      "month": "Jun",
+      "revenue": 7000,
+      "expenses": 3800
+    }
+  ],
+  "xAxisKey": "month",
+  "series": [
+    {
+      "dataKey": "revenue"
+    },
+    {
+      "dataKey": "expenses"
+    }
+  ],
+  "config": {
+    "revenue": {
+      "label": "Revenue",
+      "color": "#8884d8"
+    },
+    "expenses": {
+      "label": "Expenses",
+      "color": "#82ca9d"
+    }
+  }
+}

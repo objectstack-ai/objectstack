@@ -1,0 +1,24 @@
+{
+  "type": "flex",
+  "properties": {
+    "gap": 2,
+    "align": "center",
+    "children": [
+      {
+        "type": "toggle",
+        "label": "Small",
+        "size": "sm"
+      },
+      {
+        "type": "toggle",
+        "label": "Default",
+        "size": "default"
+      },
+      {
+        "type": "toggle",
+        "label": "Large",
+        "size": "lg"
+      }
+    ]
+  }
+}

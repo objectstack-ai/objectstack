@@ -1,0 +1,14 @@
+{
+  "type": "stack",
+  "gap": 4,
+  "children": [
+    {
+      "type": "button",
+      "label": "Show Toast",
+      "onClick": "toast(\"Hello from ObjectUI!\")"
+    },
+    {
+      "type": "toaster"
+    }
+  ]
+}

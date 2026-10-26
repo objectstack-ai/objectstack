@@ -1,0 +1,59 @@
+---
+title: "Flex"
+description: "Flexible box layout container"
+---
+
+## Examples
+
+  <SchemaExample id="components-layout-flex/horizontal-layout" />
+
+## Schema
+
+A `flex` node takes its props — the child list included — in its `properties` bag, the
+spelling `@objectstack/spec`'s page component declares. `objectui validate` refuses a `flex`
+prop written on the node itself, by name, and points at its bag member
+(`properties.direction`, `properties.children`, …). `className` and the other base props stay
+on the node.
+
+```json
+{
+  "type": "flex",
+  "className": "p-4",
+  "properties": {
+    "direction": "col",
+    "gap": 4,
+    "children": [
+      { "type": "text", "content": "First" },
+      { "type": "text", "content": "Second" }
+    ]
+  }
+}
+```
+
+The bag's members are `FlexLayoutProps` from `@object-ui/types`:
+
+```ts
+import type { SchemaNode } from '@object-ui/types';
+
+interface FlexNode {
+  type: 'flex';
+  className?: string;
+  properties?: {
+    direction?: 'row' | 'col' | 'row-reverse' | 'col-reverse';
+    gap?: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;  // default: 2
+    align?: 'start' | 'end' | 'center' | 'baseline' | 'stretch';
+    justify?: 'start' | 'end' | 'center' | 'between' | 'around' | 'evenly';
+    wrap?: boolean;
+    children?: SchemaNode[];
+  };
+}
+```
+
+Nothing changes at render time: `SchemaRenderer` hoists every `properties` key onto the node
+before the `flex` renderer reads it, so a stored node that still writes these props flat keeps
+rendering.
+
+`gap` is a step on the flex spacing scale, 0 to 8, and `0` means none. Those are the steps the
+renderer maps to a gap class, so they are the only values validation accepts:
+`"properties": { "gap": 9 }` is refused with the set named (objectui#11474). Such a number
+used to pass validation and then render with no gap at all, not even the default.

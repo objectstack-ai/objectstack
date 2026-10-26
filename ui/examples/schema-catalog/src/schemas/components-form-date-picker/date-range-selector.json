@@ -1,0 +1,21 @@
+{
+  "type": "flex",
+  "properties": {
+    "gap": 2,
+    "align": "center",
+    "children": [
+      {
+        "type": "date-picker",
+        "placeholder": "Start date"
+      },
+      {
+        "type": "text",
+        "content": "to"
+      },
+      {
+        "type": "date-picker",
+        "placeholder": "End date"
+      }
+    ]
+  }
+}

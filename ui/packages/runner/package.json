@@ -1,0 +1,73 @@
+{
+  "name": "@object-ui/runner",
+  "private": true,
+  "version": "18.1.0",
+  "description": "Universal Object UI Application Runner",
+  "type": "module",
+  "homepage": "https://www.objectui.org/docs/utilities/runner",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
+    "directory": "ui/packages/runner"
+  },
+  "bugs": {
+    "url": "https://github.com/objectstack-ai/objectui/issues"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "type-check": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "test": "vitest run --root ../.. packages/runner/"
+  },
+  "dependencies": {
+    "@object-ui/components": "workspace:*",
+    "@object-ui/core": "workspace:*",
+    "@object-ui/plugin-charts": "workspace:*",
+    "@object-ui/plugin-kanban": "workspace:*",
+    "@object-ui/react": "workspace:*",
+    "@object-ui/types": "workspace:*",
+    "lucide-react": "^1.43.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "tailwindcss-animate": "^1.0.7"
+  },
+  "devDependencies": {
+    "@objectstack/spec": "workspace:^",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "^6.0.5",
+    "autoprefixer": "^10.5.4",
+    "postcss": "^8.5.26",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^6.0.3",
+    "vite": "^8.2.1"
+  },
+  "keywords": [
+    "objectui",
+    "sdui",
+    "schema-driven-ui",
+    "react",
+    "tailwind",
+    "shadcn",
+    "objectstack",
+    "runner",
+    "application",
+    "console",
+    "bootstrap"
+  ],
+  "license": "MIT",
+  "author": "ObjectStack Team <team@objectstack.ai>",
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": true,
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ]
+}

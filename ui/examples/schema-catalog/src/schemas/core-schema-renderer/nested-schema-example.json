@@ -1,0 +1,39 @@
+{
+  "type": "stack",
+  "gap": 4,
+  "children": [
+    {
+      "type": "card",
+      "title": "Parent Component",
+      "children": [
+        {
+          "type": "flex",
+          "properties": {
+            "gap": 2,
+            "children": [
+              {
+                "type": "badge",
+                "label": "Nested"
+              },
+              {
+                "type": "badge",
+                "label": "Components",
+                "variant": "outline"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "type": "card",
+      "title": "Sibling Component",
+      "children": [
+        {
+          "type": "text",
+          "content": "All rendered from a single schema tree"
+        }
+      ]
+    }
+  ]
+}

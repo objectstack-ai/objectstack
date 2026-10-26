@@ -1,0 +1,77 @@
+---
+title: "Scroll Area"
+description: "Customizable scrollable container with styled scrollbars"
+---
+
+import { DemoGrid } from '@/app/components/ComponentDemo';
+
+The Scroll Area component provides a scrollable container with styled scrollbars that match your design system.
+
+## Basic Usage
+
+<SchemaExample id="components-complex-scroll-area/vertical-scroll" />
+
+## Horizontal Scroll
+
+<SchemaExample id="components-complex-scroll-area/horizontal-scroll" />
+
+## Custom Heights
+
+<DemoGrid>
+  <SchemaExample id="components-complex-scroll-area/short-150px" />
+  <SchemaExample id="components-complex-scroll-area/tall-300px" />
+</DemoGrid>
+
+## Schema
+
+```ts
+import type { SchemaNode } from '@object-ui/types';
+
+interface ScrollAreaSchema {
+  type: 'scroll-area';
+  
+  // Dimensions
+  height?: string | number;             // Container height ('200px', '50vh', or 200 = px)
+  width?: string | number;              // Container width ('100%', '50vw', or 300 = px)
+  
+  // Configuration
+  orientation?: 'vertical' | 'horizontal' | 'both';  // Scroll direction (default: 'vertical')
+  
+  // Content
+  children?: SchemaNode | SchemaNode[]; // Scrollable content (the only content channel)
+  
+  // Styling
+  className?: string;                   // Tailwind CSS classes
+  
+  // Base properties
+  id?: string;
+  visible?: boolean | string | { dialect?: string; source: string };
+  testId?: string;
+}
+```
+
+The scrollable body is authored under `children`, and only under `children`:
+the renderer reads `renderChildren(schema.children)` and nothing else, and the
+registration's `defaultProps` ships `children` too. A scroll area that puts its
+body under `content` is not refused anywhere — `content` is not a member of
+`ScrollAreaSchema`, but the zod twin extends a `.passthrough()` base, so it
+validates, survives parsing, and reaches the DOM as a stray attribute on an
+otherwise empty scroll box.
+
+`height` and `width` take a number as well as a CSS length; a bare number is
+applied as pixels (`height: 200` renders `height: 200px`). Neither has a
+render-time default — omitting one leaves the container unsized in that axis.
+
+## Examples
+
+### Message List
+
+<SchemaExample id="components-complex-scroll-area/chat-messages" />
+
+### File List
+
+<SchemaExample id="components-complex-scroll-area/document-browser" />
+
+### Code Block
+
+<SchemaExample id="components-complex-scroll-area/code-preview" />
