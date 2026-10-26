@@ -2238,7 +2238,7 @@
       "title": "A session held by the ADR-0069 credential policy (password expired, forced reset, MFA not enrolled) is refused with the gate's own 403 code on EVERY raw-host route family, and an API key whose owner holds an account-scope posture is refused too",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2261,27 +2261,27 @@
       ],
       "acceptance": [
         {
-          "clause": "the auth gate runs before route logic on every raw-host family, outage answers 503, and the API-key account posture is enforced at REST, the dispatcher and install-local — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "clause": "the auth gate runs before route logic on every raw-host family, outage answers 503, and the API-key account posture is enforced at REST, the dispatcher and install-local — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand). The pins prove this at mixed layers, and this clause scores only that: the storage, settings, share-link and cloud-connection pins call the registered handlers with a fake IHttpRequest / IHttpResponse; the vendor-admin-doors pin arms PASSWORD_RESET_REQUIRED by a system write of must_change_password plus auth.noteMustChangePasswordIssued(), simulating the forced-reset route rather than driving it; the two API-key posture pins drive RestServer.enforceAuth with a hand-built req/res and a fake auth, and HttpDispatcher with fakes, so neither answers an HTTP x-api-key call. A pass here does not score acceptance[1], acceptance[2] or acceptance[3], which are driven live",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=1 FILE`, one package at a time and never through a bare `--`; RUNNER.md's memory fact: the container holds the Tier 1 vitest pins under its memory cap only at --maxWorkers=1, and an exit 137 is that cap, not a failing test); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
           "clause": "every raw-host family answers the held session 403 with the gate's OWN code (PASSWORD_EXPIRED / PASSWORD_RESET_REQUIRED / MFA_REQUIRED) — never 200, never a route-specific 404/400 that ran logic first",
           "oracle": "api",
-          "verify": "status + error.code per family from the held session; an unheld session gets the normal answer on the same call",
+          "verify": "status + error.code per family from the held session over HTTP against the booted server; an unheld session gets the normal answer on the same call. The pins call some families' handlers with fake requests (acceptance[0]), so every family is scored here from a real request",
           "evidence": "one status+code line per family for both sessions"
         },
         {
           "clause": "an admin-forced change answers PASSWORD_RESET_REQUIRED (not PASSWORD_EXPIRED)",
           "oracle": "api",
-          "verify": "error.code on the first held call after the admin forced the reset",
+          "verify": "drive the admin's forced-reset door itself: as admin POST /api/v1/auth/admin/set-user-password with the member's userId and a new password (mustChangePassword defaults to true). It revokes the member's sessions and API keys by default, so sign the member in again with the new password and read error.code on that session's first held call (pass revokeSessionsAndKeys: false to keep steps[3]'s key alive). The vendor-admin-doors pin arms this code by a system write, not through this door, so the door is scored only here",
           "evidence": "the refusal body"
         },
         {
           "clause": "an API key whose owner holds MFA_REQUIRED is refused 403 MFA_REQUIRED; a credential-scope posture (PASSWORD_EXPIRED) does NOT hold the key",
           "oracle": "api",
-          "verify": "the two x-api-key calls",
+          "verify": "the two x-api-key calls, made over HTTP against the booted server: the two posture pins drive RestServer.enforceAuth and HttpDispatcher with hand-built requests and fakes, so no pin answers an HTTP x-api-key call",
           "evidence": "both status lines"
         }
       ],
@@ -2316,6 +2316,12 @@
           "date": "2026-10-19",
           "change": "fixtures.requires[1] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24538, identity-auth.auth-gate-held-session-raw-host-families; wave anchor #24579 §3): the MFA hold appeared ~70 s after require_mfa was switched on, because plugin-auth reads organization MFA through a 60 s-TTL cache refreshed in the background (auth-manager.ts refreshOrgMfaCacheIfStale). A runner probing at once sees 200 and could score a false FAIL; the fixture now says to poll. No clause changed",
           "ref": "#24632"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-26",
+          "change": "checklist-accuracy findings of the 18.2.0 sweep (QA run #25815, identity-auth.auth-gate-held-session-raw-host-families a1, a2 and a3; wave anchor #25807; card #25843). The raw-host families are proven at mixed layers (the storage, settings, share-link and cloud-connection pins call handlers with fake IHttpRequest / IHttpResponse); held-session-vendor-admin-doors arms PASSWORD_RESET_REQUIRED by a system write of must_change_password plus noteMustChangePasswordIssued(), not by driving the forced-reset door; and the two API-key posture pins drive RestServer.enforceAuth and HttpDispatcher with fakes, so neither answers an HTTP x-api-key call. acceptance[0] now says what each pin layer proves and that it does not score acceptance[1]–[3]; acceptance[1].verify and acceptance[3].verify say to drive them over HTTP; acceptance[2].verify names the forced-reset door, POST /api/v1/auth/admin/set-user-password, and its default session and key revocation (admin-user-endpoints.ts runAdminSetUserPassword). acceptance[0].verify's --maxWorkers=2 now reads 1, RUNNER.md's memory fact (the same correction as identity-auth.default-organization-boot-invariant, QA run #25812). No clause's assertion changed",
+          "ref": "#25843"
         }
       ]
     },
@@ -2324,7 +2330,7 @@
       "title": "API-key lifecycle policy: a mint with no expiry gets the default (90 days) echoed back, an expiry past the ceiling is refused 400 API_KEY_EXPIRY_TOO_LONG, and an expired / inactive / revoked key is refused with its own 403 code",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2345,9 +2351,9 @@
       ],
       "acceptance": [
         {
-          "clause": "default expiry, ceiling refusal and the three distinct 403 codes — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "clause": "default expiry, ceiling refusal and the three distinct 403 codes — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand). The pins are layered, and this clause scores only what they assert: the dogfood file drives the 90-day default and the ceiling refusal's status + code through a booted server; 'nothing is stored' on a refused mint and the revoked / expired / inactive 403 codes are pinned at unit layer only (the runtime pin over a fake objectql and a fake kernel, the rest pin over an HTTP stub and a fake ql), so a pass here does not score acceptance[2]'s no-key half or acceptance[3]",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=1 FILE`, one package at a time and never through a bare `--`; RUNNER.md's memory fact: the container holds the Tier 1 vitest pins under its memory cap only at --maxWorkers=1, and an exit 137 is that cap, not a failing test); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -2359,13 +2365,13 @@
         {
           "clause": "an expires_at beyond the ceiling (365 days by default) is refused 400 API_KEY_EXPIRY_TOO_LONG and no key is minted",
           "oracle": "api",
-          "verify": "status + error.code; GET /api/v1/keys count unchanged",
+          "verify": "status + error.code; GET /api/v1/keys before and after the refused mint, and the count is unchanged. Drive the count live: the dogfood case asserts only the 400 and its code, and the no-key half is pinned only over a fake objectql (packages/runtime/src/api-key-lifecycle.pin.test.ts)",
           "evidence": "refusal body + the two key counts"
         },
         {
           "clause": "a revoked key answers 403 API_KEY_REVOKED and an expired one 403 API_KEY_EXPIRED — distinct codes, not one generic 401",
           "oracle": "api",
-          "verify": "status + error.code per key",
+          "verify": "status + error.code per key, driven live with a key revoked through the admin key action and a key past its expires_at: the dogfood file drives no revoked or expired key, and the three 403 codes are pinned at unit layer only (packages/rest/src/rest-api-key-lifecycle.pin.test.ts, packages/runtime/src/api-key-lifecycle.pin.test.ts)",
           "evidence": "both refusal bodies"
         }
       ],
@@ -2387,6 +2393,12 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it; identity-auth.api-key-ui-lifecycle covers mint/revoke/restore only, not expiry, ceiling or inactivity",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-26",
+          "change": "checklist-accuracy findings of the 18.2.0 sweep (QA run #25815, identity-auth.api-key-expiry-lifecycle a2 and a3; wave anchor #25807; card #25843). The dogfood case asserts 400 API_KEY_EXPIRY_TOO_LONG but never that the key count is unchanged, and it drives no revoked or expired key; 'nothing is stored' and the three 403 codes are pinned only at unit layer over fakes. acceptance[0] now says which layer pins what and that it does not score those halves, and acceptance[2].verify / acceptance[3].verify say to drive them live. acceptance[0].verify's --maxWorkers=2 now reads 1, RUNNER.md's memory fact (the same correction as identity-auth.default-organization-boot-invariant, QA run #25812). No clause's assertion changed",
+          "ref": "#25843"
         }
       ]
     },
@@ -2395,7 +2407,7 @@
       "title": "A cookie session past its updateAge is renewed ONLY by GET /auth/get-session: in-process reads (data, meta, me/permissions, SSO admin) leave sys_session.expires_at unchanged and set no cookie, while bearer-only calls still renew",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -2415,15 +2427,15 @@
       ],
       "acceptance": [
         {
-          "clause": "in-process session reads never renew a cookie session; get-session does — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "clause": "in-process session reads never renew a cookie session; get-session does — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand). The runtime pin's doors are GET /data/:object, GET /auth/me/permissions and GET /i18n/locales; none is a meta read, so a pass here does not score acceptance[1]'s meta leg",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=1 FILE`, one package at a time and never through a bare `--`; RUNNER.md's memory fact: the container holds the Tier 1 vitest pins under its memory cap only at --maxWorkers=1, and an exit 137 is that cap, not a failing test); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
           "clause": "cookie-carrying data/meta reads leave expires_at unchanged and return no Set-Cookie",
           "oracle": "api",
-          "verify": "expires_at before/after + the response headers",
+          "verify": "expires_at before/after + the response headers, for the data read AND the meta read (GET /api/v1/meta/object/showcase_task) of steps[1] separately: the meta leg has no door in the runtime pin, so this live read is its only score",
           "evidence": "the two expires_at values and the header dump"
         },
         {
@@ -2453,6 +2465,12 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-26",
+          "change": "checklist-accuracy finding of the 18.2.0 sweep (QA run #25815, identity-auth.cookie-session-renewal-in-process a1; wave anchor #25807; card #25843). The runtime pin's DOORS are GET /data/:object, /auth/me/permissions and /i18n/locales, so acceptance[1]'s 'meta reads' leg has no door in it. acceptance[0] now names the doors and says it does not score the meta leg, and acceptance[1].verify scores the meta read on its own. acceptance[0].verify's --maxWorkers=2 now reads 1, RUNNER.md's memory fact (the same correction as identity-auth.default-organization-boot-invariant, QA run #25812). No clause's assertion changed",
+          "ref": "#25843"
         }
       ]
     },
@@ -2550,7 +2568,7 @@
       "title": "Identity import sends the dedicated account-invitation mail whose link opens the console set-password page, and the SSO domain-verification doors answer 404 for an unknown provider when enabled and 400 DOMAIN_VERIFICATION_DISABLED when off",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -2572,9 +2590,9 @@
       ],
       "acceptance": [
         {
-          "clause": "import sends auth.account_invitation with a working link; the SSO domain doors answer by flag — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "clause": "import sends auth.account_invitation with a working link, while a self-requested reset still sends auth.password_reset; the SSO domain doors answer by flag — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand). admin-import-users-invite-link.test.ts asserts the invitation template on the import only; the password_reset half is admin-import-users-account-invitation.test.ts cases ① and ②. sso-domain-verification-unknown-provider.pin.test.ts mounts the real AuthPlugin on Hono but over createMemoryEngine, a hand-rolled engine fake, so it scores the domain doors at unit layer only and a pass here does not score acceptance[3]",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=1 FILE`, one package at a time and never through a bare `--`; RUNNER.md's memory fact: the container holds the Tier 1 vitest pins under its memory cap only at --maxWorkers=1, and an exit 137 is that cap, not a failing test); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -2592,13 +2610,13 @@
         {
           "clause": "unknown providerId: 404 RESOURCE_NOT_FOUND with the flag on, 400 DOMAIN_VERIFICATION_DISABLED with it off",
           "oracle": "api",
-          "verify": "status + error.code per boot",
+          "verify": "status + error.code per boot, over HTTP against each booted server: the pin drives these doors over a fake engine (acceptance[0]), so the live answer is this clause's only score",
           "evidence": "both refusal bodies"
         }
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/plugins/plugin-auth/src/sso-domain-verification-unknown-provider.pin.test.ts + packages/plugins/plugin-auth/src/admin-import-users-invite-link.test.ts + packages/plugins/plugin-email/src/auth-account-invitation-template.test.ts"
+        "ref": "packages/plugins/plugin-auth/src/sso-domain-verification-unknown-provider.pin.test.ts + packages/plugins/plugin-auth/src/admin-import-users-invite-link.test.ts + packages/plugins/plugin-auth/src/admin-import-users-account-invitation.test.ts + packages/plugins/plugin-email/src/auth-account-invitation-template.test.ts"
       },
       "source": [
         "packages/plugins/plugin-email/src/templates/auth-templates.ts#AUTH_ACCOUNT_INVITATION_TEMPLATE",
@@ -2612,6 +2630,12 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-26",
+          "change": "checklist-accuracy findings of the 18.2.0 sweep (QA run #25815, identity-auth.import-invitation-and-sso-domain-answers a1 and a3; wave anchor #25807; card #25843). admin-import-users-invite-link.test.ts asserts the auth.account_invitation template on the import but never that a self-requested reset still uses password_reset; admin-import-users-account-invitation.test.ts (cases ① and ②) asserts both and was not in automated.ref, so it joins the ref and acceptance[0] names both halves. sso-domain-verification-unknown-provider.pin.test.ts mounts the real AuthPlugin on Hono over createMemoryEngine, a hand-rolled engine fake, so acceptance[0] now says it scores the doors at unit layer only and acceptance[3].verify drives them live. acceptance[0].verify's --maxWorkers=2 now reads 1, RUNNER.md's memory fact (the same correction as identity-auth.default-organization-boot-invariant, QA run #25812). No clause's assertion changed",
+          "ref": "#25843"
         }
       ]
     }
