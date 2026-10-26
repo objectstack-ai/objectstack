@@ -859,7 +859,36 @@ export type AdminScope = z.input<typeof AdminScopeSchema>;
 export type AdminScopeParsed = z.infer<typeof AdminScopeSchema>;
 
 /**
+ * [Ruling of record 6408558941, letter A] The two sentences a field
+ * permission's row condition is refused with. Module-private for the reason
+ * {@link ADMIN_SCOPE_BUSINESS_UNIT_BLANK} gives.
+ */
+const FIELD_PERMISSION_WHEN_BLANK =
+  'A blank `when` is not a row condition: write the rows this entry votes on as a predicate in the '
+  + 'language `rowLevelSecurity[].using` is written in (e.g. when: \'status in ["approved", "active"]\'), '
+  + 'or remove the key so the entry votes on every row.';
+
+const FIELD_PERMISSION_WHEN_ON_READABLE =
+  'A `when` reaches the EDIT vote only: reads are judged row-blind, so `readable: false` beside a `when` '
+  + 'would declare a per-row read lock the runtime does not deliver (the field would be hidden on every '
+  + 'row, or on none). Keep `readable: true` (the default) on a row-conditioned entry; to hide the field '
+  + 'on every row, declare `readable: false` on an entry without `when`.';
+
+/**
  * Field Level Security (FLS)
+ *
+ * [Ruling of record 6408558941, letter A — ADR-0066 ⑧ note of 2026-10-26] An
+ * entry may carry a row condition, `when`, in the language the RLS `using`
+ * predicate is written in. It narrows WHERE the entry votes: on a row the
+ * condition matches, the entry votes as declared; on any other row the entry
+ * is absent, so the most-permissive merge and the "declaring sets vote" rule
+ * (`PermissionEvaluator.getFieldPermissions`) are unchanged. The write gate
+ * judges it on the stored row before an update and on the incoming row of an
+ * insert. It reaches the EDIT vote only: reads are row-blind (per-row masking
+ * waits for a measured need), so `readable: false` beside a `when` is refused
+ * at parse time — a per-row read lock the runtime would not deliver. The
+ * cross-key rule is a refinement, declared as a dropped-refinement site; the
+ * published JSON Schema states it in `when`'s description.
  */
 export const FieldPermissionSchema = lazySchema(() => strictObject(
   {
@@ -870,6 +899,9 @@ export const FieldPermissionSchema = lazySchema(() => strictObject(
       write: 'editable',
       edit: 'editable',
       update: 'editable',
+      condition: 'when',
+      where: 'when',
+      filter: 'when',
     },
     guidance: {
       hidden:
@@ -885,7 +917,44 @@ export const FieldPermissionSchema = lazySchema(() => strictObject(
   readable: z.boolean().default(true).describe('Field read access'),
   /** Can edit this field */
   editable: z.boolean().default(false).describe('Field edit access'),
-}));
+  /**
+   * The rows this entry votes on. Absent, the entry votes on every row.
+   * Present, the entry votes only on rows the predicate matches and is absent
+   * on the rest — for the EDIT vote; the read vote is row-blind.
+   */
+  when: z.string()
+    .refine(NON_BLANK_STRING, { message: FIELD_PERMISSION_WHEN_BLANK })
+    .optional()
+    .describe(
+      'Row condition narrowing where this entry votes, authored in canonical CEL like `rowLevelSecurity[].using` '
+      + '(a field of this object compared with a literal or a `current_user.*` value using `==`, `!=`, `<`, `<=`, `>`, '
+      + '`>=` or `in`, combined with `&&` / `||`; e.g. status in ["approved", "signing", "active"]). Absent, the entry '
+      + 'votes on every row. Present, the entry votes as declared on the rows the condition matches and is ABSENT on '
+      + 'every other row, so the most-permissive merge across the caller\'s sets and the rule that only declaring '
+      + 'sets vote are unchanged: a set that locks a field only from a stage onward does not lock the rows before it, '
+      + 'and a co-held set that says nothing about the field still lifts nothing. The write gate judges the condition '
+      + 'on the stored row BEFORE an update (so a lock on `status in [...]` holds on an approved row even when the '
+      + 'write changes `status`) and on the incoming row of an insert, as the caller sent it. It reaches the EDIT vote '
+      + 'only — reads are judged row-blind — so `readable: false` beside a `when` is refused at parse time: keep '
+      + '`readable: true` (the default) on a row-conditioned entry. Where no row can be judged (a predicate update '
+      + 'with no row address, a stored row the caller cannot read, a condition that does not resolve for the '
+      + 'request) the entry is judged as its lock: it contributes no edit grant on that write. Validated like an RLS '
+      + 'predicate at authoring and publish time: the fields it names must exist on the entry\'s object and it may '
+      + 'not reach across a relation; a condition that cannot be lowered is refused there, never dropped at runtime. '
+      + 'Readers that hold no row (`/auth/me/permissions`, the field projections, the write preview on an update) '
+      + 'report a row-conditioned entry as its lock, so a client never advertises an edit the gate refuses.',
+    ),
+}).refine(
+  // The cross-key rule: a condition reaches the edit vote only, so an entry
+  // that conditions a read lock is refused rather than enforced row-blind
+  // (hidden on every row) or dropped (hidden on none) — either would be a
+  // declaration the runtime does not deliver (ADR-0049). A refinement because
+  // no projectable arm states "when `when` is present, `readable` is `true`";
+  // the JSON Schema says it in `when`'s description and the site is on the
+  // dropped-refinements ledger.
+  (p) => p.when === undefined || p.readable !== false,
+  { message: FIELD_PERMISSION_WHEN_ON_READABLE, path: ['when'] },
+));
 
 /**
  * Permission Set Schema

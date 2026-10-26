@@ -82,6 +82,10 @@ vi.mock('@monaco-editor/react', () => {
   const Editor = () => null;
   return { Editor, default: Editor, loader: { init: () => Promise.reject(new Error('offline')) } };
 });
+
+// The bundled Monaco loads: the page's probe awaits plugin-editor's
+// `configureBundledMonaco` before `loader.init()` (its own suite drives it).
+vi.mock('@object-ui/plugin-editor', () => ({ configureBundledMonaco: () => Promise.resolve() }));
 // The page's own side reads (the AI agents roster and the like) go through the
 // global `fetch`; one double answers "absent" for the whole file, so no read
 // can reach a socket after a test body returns.
