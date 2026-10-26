@@ -61,10 +61,18 @@ type Expect< T extends true > = T;
 /* ── 1. The declared member, in the spec's shape ─────────────────────────── */
 
 export type _DependsOnIsDeclaredInSpecShape = Expect< Equal< NonNullable< BaseFieldMetadata['dependsOn'] >, FieldDependsOn > >;
-// The derived shape is exactly what the installed spec declares at field level
-// (`z.array(z.union([z.string(), z.strictObject({ field, param? })]))`) — if a
-// spec release widens or narrows it, this line moves with it and says so.
-export type _SpecShapeIsArrayOfNameOrEntry = Expect< Equal< FieldDependsOn, Array< string | { field: string; param?: string | undefined } > > >;
+// The derived shape is what the installed spec declares at field level
+// (`z.array(z.union([z.string(), z.strictObject({ field, param? })]))`): an
+// array of a bare name or an entry with `field` and an optional `param`. Pinned
+// on those members, so a narrowing is red here and a key the spec adds to the
+// entry is not.
+type DependsOnItem = FieldDependsOn extends Array< infer I > ? I : never;
+export type _SpecShapeIsArray = Expect< Equal< FieldDependsOn, Array< DependsOnItem > > >;
+export type _SpecShapeAdmitsAName = Expect< Equal< Extract< DependsOnItem, string >, string > >;
+export type _SpecShapeIsArrayOfNameOrEntry = Expect< Equal<
+  Pick< Exclude< DependsOnItem, string >, 'field' | 'param' >,
+  { field: string; param?: string | undefined }
+> >;
 // Inherited, not restated: the select and lookup faces carry the SAME member.
 export type _SelectInherits = Expect< Equal< SelectFieldMetadata['dependsOn'], BaseFieldMetadata['dependsOn'] > >;
 export type _LookupInherits = Expect< Equal< LookupFieldMetadata['dependsOn'], BaseFieldMetadata['dependsOn'] > >;
