@@ -85,7 +85,7 @@ describe('collectSeedFiles / placeSeedFiles', () => {
   it('refuses a path that names no file, saying where the reference sits', () => {
     const result = collectSeedFiles(
       packageRoot({}),
-      { data: [{ object: 'x', records: [{ code: 'a' }, { file: seedFile('fixtures/missing.pdf') }] }] },
+      { data: [{ object: 'x', records: [{ name: 'a' }, { file: seedFile('fixtures/missing.pdf') }] }] },
     );
     expect(result.issues).toHaveLength(1);
     expect(result.issues[0].location).toBe('data[0].records[1].file');
