@@ -74,7 +74,7 @@ export async function readCloudConfig(): Promise<CloudConfig> {
     return JSON.parse(content) as CloudConfig;
   } catch (error: any) {
     if (error.code === 'ENOENT') {
-      throw new Error('Not logged in to ObjectStack Cloud. Run `os cloud login` first.');
+      throw new Error('Not logged in to ObjectOS Cloud. Run `os cloud login` first.');
     }
     throw new Error(`Failed to read cloud credentials: ${error.message}`);
   }

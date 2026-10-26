@@ -89,18 +89,38 @@ async function bootFallbackWorld(withResolver = true): Promise<World> {
       return [...ids];
     },
   };
-  if (withResolver) (stack.kernel as any).registerService('hierarchy-scope-resolver', refResolver);
-
   // Save the app-declared profile through the metadata door — the security
   // catalog the named fallback resolves through (the SecurityPlugin's catalog
   // loader, ADR-0131 D3/D4; a `sys_permission_set` row is not read).
   // `readScope` rides inside `objects`.
-  const saved = await stack.apiAs(adminToken, 'PUT', `/meta/permission/${PROFILE_NAME}`, {
+  const saveProfile = () => stack.apiAs(adminToken, 'PUT', `/meta/permission/${PROFILE_NAME}`, {
     name: PROFILE_NAME,
     label: DEFAULT_PROFILE_METADATA.label,
     objects: DEFAULT_PROFILE_METADATA.objects,
   });
+
+  if (!withResolver) {
+    // #26188 — the open edition's first wall: with no resolver mounted the
+    // metadata door refuses to publish a hierarchy-scope grant at all.
+    const refused = await saveProfile();
+    const body: any = await refused.clone().json().catch(() => ({}));
+    expect(refused.status, JSON.stringify(body)).toBe(422);
+    expect(body.code).toBe('INVALID_METADATA');
+    expect((body.issues ?? []).map((i: any) => i.rule)).toContain('hierarchy-scope-capability-required');
+  }
+
+  // The resolver is mounted for the save in both worlds. In the open-edition
+  // world it is taken away again right after: the profile then stands for one
+  // stored while an enterprise resolver served this database (or before the
+  // door refused it), which the open edition must still serve fail-closed.
+  (stack.kernel as any).registerService('hierarchy-scope-resolver', refResolver);
+  const saved = await saveProfile();
   expect(saved.status, await saved.clone().text().catch(() => '')).toBe(200);
+  if (!withResolver) {
+    (stack.kernel as any).services.delete('hierarchy-scope-resolver');
+    (stack.kernel as any).pluginLoader.serviceInstances.delete('hierarchy-scope-resolver');
+    expect(() => (stack.kernel as any).context.getService('hierarchy-scope-resolver')).toThrow(/not found/);
+  }
 
   const uid = async (who: Who) =>
     (await ql.findOne('sys_user', { where: { email: `fb-${who}@verify.test` }, context: { isSystem: true } }))?.id;

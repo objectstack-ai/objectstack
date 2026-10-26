@@ -3189,6 +3189,7 @@ const en = {
     },
     shell: {
       tenantHostHint: 'You are signing in to this system',
+      poweredBy: 'Powered by ObjectStack',
     },
     // These were previously supplied only as inline `defaultValue:` args at the
     // SetPasswordPage call sites, so `zh` was the only pack that could carry a
@@ -4558,7 +4559,7 @@ const en = {
       cancel: 'Cancel',
     },
     bound: {
-      title: 'Connected to ObjectStack Cloud',
+      title: 'Connected to ObjectOS Cloud',
       runtime: 'Runtime',
       organization: 'Organization',
       approvedBy: 'Approved by',
@@ -4661,13 +4662,13 @@ const en = {
       install: {
         dialogTitle: 'Install {{name}}',
         dialogDescCurrent: 'Install into this environment ({{host}}).',
-        dialogDescPicker: 'Choose an environment to install this app into. You need to be signed into ObjectStack Cloud.',
+        dialogDescPicker: 'Choose an environment to install this app into. You need to be signed into ObjectOS Cloud.',
         environment: 'Environment',
         environmentPlaceholder: 'Pick an environment',
         includeSampleData: 'Include sample data',
         noEnvs: 'No environments found in your active organization.',
         noPermission: 'You do not have permission to install apps in any environment. Only organization owners and admins can install — ask your organization admin.',
-        signInFirst: 'You need to sign into ObjectStack Cloud first. Click "Open on cloud" below.',
+        signInFirst: 'You need to sign into ObjectOS Cloud first. Click "Open on cloud" below.',
         success: 'Installed successfully. Open the environment to see the new app.',
         localSuccess: 'Installed v{{version}} to this runtime. "{{name}}" should now appear in the app switcher.',
         // objectui#12098 — the install answered `hotLoaded: false`: installed, and
@@ -4714,7 +4715,7 @@ const en = {
       update: {
         dialogTitle: 'Update {{name}}',
         dialogDescCurrent: 'Update the copy installed in this environment ({{host}}).',
-        dialogDescPicker: 'Choose the environment whose installed copy to update. You need to be signed into ObjectStack Cloud.',
+        dialogDescPicker: 'Choose the environment whose installed copy to update. You need to be signed into ObjectOS Cloud.',
         majorNotice: 'This is a major version update (v{{fromMajor}} → v{{toMajor}}), which may include breaking changes.',
         releaseNotes: 'Read the v{{version}} release notes',
         success: 'Updated to v{{version}}.',

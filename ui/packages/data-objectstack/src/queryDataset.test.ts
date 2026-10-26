@@ -449,11 +449,17 @@ describe('queryDataset(selection) is @objectstack/spec DatasetSelection itself',
     // month at all. A restatement does not only drift on the fields it has — it
     // also stops at whatever the contract looked like the day it was written.
     type _HasDateGranularity = Assert<HasKey<SelectionParam, 'dateGranularity'>>;
+    // The same lesson holds for this pin, so it names the five buckets rather
+    // than restating the whole enum: a bucket the spec adds is not a red here,
+    // and a widening to `string` still is.
     type _DateGranularityEnum = Assert<
       Equal<
-        SelectionParam['dateGranularity'],
-        'day' | 'week' | 'month' | 'quarter' | 'year' | undefined
+        Exclude<'day' | 'week' | 'month' | 'quarter' | 'year', SelectionParam['dateGranularity']>,
+        never
       >
+    >;
+    type _DateGranularityIsClosed = Assert<
+      Equal<string extends SelectionParam['dateGranularity'] ? true : false, false>
     >;
 
     expect(true).toBe(true);

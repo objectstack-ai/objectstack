@@ -157,9 +157,11 @@ describe('AppContent records a visit on the package-id route as a recent item (o
     expect(objectEntries()[0].href).toBe('/apps/com.example.showcase/showcase_task');
   });
 
-  it('CONTROL: a visit through the name alias is recorded on the alias it used', async () => {
+  it('CONTROL: a visit through the name alias is recorded once, on the package-id address it moves to', async () => {
+    // objectstack-ai/objectstack#26183 — the alias route is rewritten onto the
+    // package id, so the visit is never recorded on a second address.
     await visit('/apps/showcase_app/showcase_task');
     await waitFor(() => expect(objectEntries()).toHaveLength(1));
-    expect(objectEntries()[0].href).toBe('/apps/showcase_app/showcase_task');
+    expect(objectEntries()[0].href).toBe('/apps/com.example.showcase/showcase_task');
   });
 });
