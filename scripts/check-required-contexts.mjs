@@ -466,8 +466,8 @@ export const REQUIRED_CONTEXTS = [
     job: 'type-check-ui',
     context: 'Type Check UI',
     authorized:
-      'PENDING the maintainer ruling — asked 2026-10-26T01:42Z to add it to the `main` ruleset, after #25856 (fc2aaaec52) ' +
-      'closed bill item 49 with the job green on the main push run 40253800516; #25752 step 6',
+      '#25752 step 6, maintainer ruling 2026-10-26T02:56Z in the project thread, verbatim 「Type Check UI 加了」 — ' +
+      'after #25856 (fc2aaaec52) closed bill item 49 with the job green on the main push run 40253800516',
     carries: 'the type-check + vitest-setup type-check family of the `ui/` workspace',
   },
 ];
