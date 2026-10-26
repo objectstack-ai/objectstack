@@ -4,14 +4,23 @@
  * objectui#6605 — the bulk buttons (R / CRUD / All / None) and the keys the
  * matrix does not author.
  *
- * `bulkSetObject` used to REPLACE the object's permission row. Three
- * spec-declared keys are modelled by neither the local `ObjectPerm` interface
- * nor the `OBJECT_ACTIONS` column list — `allowExport`, and the ADR-0057
- * access-depth axis `readScope` / `writeScope` — so one bulk click dropped
- * whatever those held. The sharpest shape is the button labelled **All**: an
- * admin clicking what reads as "grant everything" could WIDEN effective read
- * access by deleting a `readScope: 'own'` narrowing, with no diff shown and no
- * error.
+ * `bulkSetObject` used to REPLACE the object's permission row. Keys outside
+ * the `OBJECT_ACTIONS` column list — `allowExport`, and the ADR-0057
+ * access-depth axis `readScope` / `writeScope` (authored by the row's own
+ * pickers since objectstack#26187, never by a bulk button) — were dropped by
+ * one bulk click. The sharpest shape was "CRUD" or "R": an admin narrowing the
+ * grant could WIDEN effective read access by deleting a `readScope: 'own'`
+ * narrowing, with no diff shown and no error.
+ *
+ * ## "All" drops the scopes — objectstack#26187, seat ruling under 6416233738 Q1
+ *
+ * "All" grants View All and Modify All, and the BASE schema refuses
+ * `readScope` beside either and `writeScope` beside Modify All (#16870): the
+ * resolvers answer `org` on those bits before they read a scope, so the
+ * scope changes nothing and the stored pair is refused. "All" therefore drops
+ * both scopes, as the per-checkbox cascade does — effective access is the same
+ * `org` either way. It still merges: `allowExport` and every other key the
+ * matrix does not author rides through.
  *
  * Every pin here asserts the SAVED payload, never editor state. That is the
  * card's own argument for why the defect persisted: both save doors carry the
@@ -145,7 +154,7 @@ async function autosaved(server: FakeServer) {
 }
 
 describe('PermissionMatrixEditor · bulk buttons vs unmodelled keys (objectui#6605)', () => {
-  it('"All" — the widening shape — grants every column AND the saved row keeps readScope / writeScope / allowExport', async () => {
+  it('"All" grants every column, keeps allowExport, and drops readScope / writeScope — the pair the BASE schema refuses (objectstack#26187)', async () => {
     const server = await renderMatrix({
       a_account: { allowRead: true, allowExport: true, readScope: 'own', writeScope: 'own' },
     });
@@ -155,14 +164,13 @@ describe('PermissionMatrixEditor · bulk buttons vs unmodelled keys (objectui#66
 
     const row = payload.objects.a_account;
     for (const key of MATRIX_KEYS) expect(row[key], key).toBe(true);
-    // The narrowings survive the click that used to delete them. `readScope`
-    // is the load-bearing one: dropping `own` silently widened read access.
-    expect(row.readScope).toBe('own');
-    expect(row.writeScope).toBe('own');
+    // View All + Modify All already answer `org`; a scope beside them is the
+    // #16870 pair the server refuses, so "All" drops both. `allowExport` is a
+    // key the matrix does not author and still rides through.
+    expect('readScope' in row).toBe(false);
+    expect('writeScope' in row).toBe(false);
     expect(row.allowExport).toBe(true);
-    expect(Object.keys(row).sort()).toEqual(
-      [...MATRIX_KEYS, 'allowExport', 'readScope', 'writeScope'].sort(),
-    );
+    expect(Object.keys(row).sort()).toEqual([...MATRIX_KEYS, 'allowExport'].sort());
   });
 
   it('"CRUD" merges the unmodelled keys through but still RESETS the matrix columns outside its grant', async () => {
@@ -234,7 +242,7 @@ describe('PermissionMatrixEditor · bulk buttons vs unmodelled keys (objectui#66
     expect(payload.objects.a_contact).toEqual({ allowRead: true, readScope: 'own' });
   });
 
-  it('package door: the merged slice keeps the unmodelled keys after "All", and other packages\' rows survive byte-for-byte', async () => {
+  it('package door: the merged slice keeps allowExport and drops the scopes after "All", and other packages\' rows survive byte-for-byte', async () => {
     // In-scope: a_account (this package's row, carrying the narrowings).
     // Out-of-scope: b_order — another package's contribution, not listed by
     // this package, which `mergePermissionSlice` must copy verbatim from base.
@@ -251,8 +259,9 @@ describe('PermissionMatrixEditor · bulk buttons vs unmodelled keys (objectui#66
 
     const row = payload.objects.a_account;
     for (const key of MATRIX_KEYS) expect(row[key], key).toBe(true);
-    expect(row.readScope).toBe('own');
-    expect(row.writeScope).toBe('own');
+    // objectstack#26187 — the scopes go with "All" at this door too.
+    expect('readScope' in row).toBe(false);
+    expect('writeScope' in row).toBe(false);
     expect(row.allowExport).toBe(true);
     // The other package's row is untouched — and the save went through the
     // package door (a draft write), not a live record write.
