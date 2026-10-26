@@ -27,10 +27,12 @@
 
 import { Link } from 'react-router-dom';
 import { Lock } from 'lucide-react';
-// The three primitives `RouteNotFound` and the app-verdict screens in
-// `AppContent.tsx` already compose, so this screen looks like its siblings and
-// adds nothing to the eager `ui-components` chunk.
-import { Button, Empty, EmptyDescription, EmptyTitle } from '@object-ui/components';
+// The shared empty state (objectstack#25915): it draws the muted icon square
+// this screen used to hand-copy, and it is `role="status"`, so "nothing here
+// for you" is announced instead of being an unlabelled block. `AppContent.tsx`
+// already reaches it through `PreviewDraftEmptyState`, so the eager graph
+// gains no new module.
+import { Button, DataEmptyState } from '@object-ui/components';
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { resolveKeyedI18nLabel } from '../utils/index.js';
 
@@ -56,44 +58,44 @@ export function AppNoAccessEmptyState({ app, setupPath, reason = 'no-navigation'
   // The same label the header's app switcher shows for this app.
   const label = appLabel({ name: app.name, label: resolveKeyedI18nLabel(app.label, t) });
 
+  const description =
+    reason === 'no-readable-object'
+      ? setupPath
+        ? t('empty.appNoReadableObjectGrantDescription', {
+            defaultValue: 'Your account cannot read any of the records in this app yet. You can grant access in Setup.',
+          })
+        : t('empty.appNoReadableObjectDescription', {
+            defaultValue:
+              'Your account cannot read any of the records in this app yet. Ask an administrator to assign you a permission set.',
+          })
+      : setupPath
+        ? t('empty.appNothingAvailableGrantDescription', {
+            defaultValue: 'This app has no pages your account can open. You can grant access in Setup.',
+          })
+        : t('empty.appNothingAvailableDescription', {
+            defaultValue: 'This app has no pages your account can open. Ask an administrator to grant you access.',
+          });
+
   return (
     <div className="flex h-full w-full items-center justify-center p-8" data-testid="app-no-access-empty-state">
-      <Empty>
-        <div className="flex size-10 items-center justify-center rounded-lg bg-muted text-muted-foreground" aria-hidden="true">
-          <Lock className="size-5" />
-        </div>
-        <EmptyTitle>
-          {t('empty.appNothingAvailable', {
-            app: label,
-            defaultValue: 'Nothing in {{app}} is available to you yet',
-          })}
-        </EmptyTitle>
-        <EmptyDescription data-reason={reason}>
-          {reason === 'no-readable-object'
-            ? setupPath
-              ? t('empty.appNoReadableObjectGrantDescription', {
-                  defaultValue: 'Your account cannot read any of the records in this app yet. You can grant access in Setup.',
-                })
-              : t('empty.appNoReadableObjectDescription', {
-                  defaultValue:
-                    'Your account cannot read any of the records in this app yet. Ask an administrator to assign you a permission set.',
-                })
-            : setupPath
-              ? t('empty.appNothingAvailableGrantDescription', {
-                  defaultValue: 'This app has no pages your account can open. You can grant access in Setup.',
-                })
-              : t('empty.appNothingAvailableDescription', {
-                  defaultValue: 'This app has no pages your account can open. Ask an administrator to grant you access.',
-                })}
-        </EmptyDescription>
-        {setupPath && (
-          <Button asChild variant="outline">
-            <Link to={setupPath} data-testid="app-no-access-open-setup">
-              {t('empty.openSetup', { defaultValue: 'Open Setup' })}
-            </Link>
-          </Button>
-        )}
-      </Empty>
+      <DataEmptyState
+        data-reason={reason}
+        icon={<Lock className="size-5 text-muted-foreground" aria-hidden="true" />}
+        title={t('empty.appNothingAvailable', {
+          app: label,
+          defaultValue: 'Nothing in {{app}} is available to you yet',
+        })}
+        description={description}
+        action={
+          setupPath ? (
+            <Button asChild variant="outline">
+              <Link to={setupPath} data-testid="app-no-access-open-setup">
+                {t('empty.openSetup', { defaultValue: 'Open Setup' })}
+              </Link>
+            </Button>
+          ) : undefined
+        }
+      />
     </div>
   );
 }

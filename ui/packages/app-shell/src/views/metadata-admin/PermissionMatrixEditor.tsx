@@ -100,6 +100,8 @@ import {
   useMetadataLocale,
 } from './i18n.js';
 import { PermissionAdvancedFacets } from './PermissionAdvancedFacets.js';
+import { CelPredicateField } from './CelPredicateField.js';
+import type { CelLintIssue } from './celAuthoring.js';
 import { useRegisterUnsavedEdits } from '../../chrome/unsavedEdits.js';
 import { AssignedUsersSection } from './AssignedUsersSection.js';
 import { isEnvironmentScope, useWalledCatalogReadOnly } from './catalog-scope.js';
@@ -263,6 +265,17 @@ function owdLabel(t: (k: string) => string, value: string): string {
 interface FieldSummary {
   name: string;
   label?: string;
+}
+
+/**
+ * objectstack#25866 — a bulk shortcut rewrites the two booleans and keeps an
+ * authored row condition, so it never silently widens a conditioned entry into
+ * an unconditioned one. Clearing a condition is its own act, in the row.
+ */
+function withFieldBits(cur: FieldPerm | undefined, readable: boolean, editable: boolean): FieldPerm {
+  const next: FieldPerm = { readable, editable };
+  if (cur?.when !== undefined) next.when = cur.when;
+  return next;
 }
 
 function getObjectActions(
@@ -859,6 +872,17 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   // (objectui#2413): a malformed predicate silently mis-scopes rows, so we
   // don't let it persist.
   const [celErrorCount, setCelErrorCount] = React.useState(0);
+  // objectstack#25866 — blocking lint findings on the field rows' `when`
+  // conditions, keyed `${object}.${field}`. Held like the RLS clauses: a
+  // condition the publish gate would refuse (a parse fault, a predicate the
+  // RLS rule refuses) does not persist. A key whose condition the draft no
+  // longer carries is ignored, so clearing the text releases the hold.
+  const [fieldWhenErrors, setFieldWhenErrors] = React.useState<Record<string, number>>({});
+  const fieldWhenErrorCount = Object.entries(fieldWhenErrors).reduce(
+    (n, [key, count]) => (count > 0 && (draft.fields?.[key]?.when ?? '').trim() !== '' ? n + count : n),
+    0,
+  );
+  const celErrorTotal = celErrorCount + fieldWhenErrorCount;
   // objectui#13113 — RLS rows with no name yet ("Add policy" inserts one
   // blank). Incomplete, not wrong: like a CEL error, they hold the save, and
   // each row says beside itself what it needs (`policyNamed` in
@@ -872,7 +896,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
       return !(typeof n === 'string' && n.trim() !== '');
     },
   ).length;
-  const saveHeld = celErrorCount > 0 || rlsUnnamedCount > 0;
+  const saveHeld = celErrorTotal > 0 || rlsUnnamedCount > 0;
 
   // Dirty detection — cheap JSON snapshot comparison against the last
   // loaded/saved baseline (same approach as ResourceEditPage). Every mutation
@@ -1002,12 +1026,49 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
       const fields = { ...(prev.fields ?? {}) };
       const cur = fields[key] ?? { readable: true, editable: false };
       const next: FieldPerm = { ...cur, [action]: value };
-      // Cascade: !readable implies !editable.
-      if (action === 'readable' && !value) next.editable = false;
+      // Cascade: !readable implies !editable — and no row condition: the spec
+      // refuses `when` beside `readable: false` (objectstack#25866), so Read
+      // off clears the condition instead of authoring the refused shape.
+      if (action === 'readable' && !value) {
+        next.editable = false;
+        delete next.when;
+      }
       // Cascade: editable implies readable.
       if (action === 'editable' && value) next.readable = true;
       fields[key] = next;
       return { ...prev, fields };
+    });
+  }
+
+  // objectstack#25866 — the row condition on a field's EDIT vote. Blank clears
+  // the key (the spec refuses a blank `when`); a condition on an entry whose
+  // Read is off switches Read back on, so the draft never carries the shape
+  // the spec refuses (`when` beside `readable: false`).
+  function updateFieldWhen(objectName: string, fieldName: string, when: string) {
+    const key = `${objectName}.${fieldName}`;
+    setDraft((prev) => {
+      const fields = { ...(prev.fields ?? {}) };
+      const cur = fields[key] ?? { readable: true, editable: false };
+      const next: FieldPerm = { ...cur };
+      if (when.trim() === '') delete next.when;
+      else {
+        next.when = when;
+        if (next.readable === false) next.readable = true;
+      }
+      fields[key] = next;
+      return { ...prev, fields };
+    });
+  }
+
+  function reportFieldWhenLint(objectName: string, fieldName: string, issues: CelLintIssue[]) {
+    const key = `${objectName}.${fieldName}`;
+    const count = issues.filter((i) => i.severity === 'error').length;
+    setFieldWhenErrors((prev) => {
+      if ((prev[key] ?? 0) === count) return prev;
+      const next = { ...prev };
+      if (count === 0) delete next[key];
+      else next[key] = count;
+      return next;
     });
   }
 
@@ -1022,8 +1083,8 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
       for (const fieldName of fieldNames) {
         const key = `${objectName}.${fieldName}`;
         if (action === 'clear') delete fields[key];
-        else if (action === 'readable') fields[key] = { readable: true, editable: false };
-        else fields[key] = { readable: true, editable: true };
+        else if (action === 'readable') fields[key] = withFieldBits(fields[key], true, false);
+        else fields[key] = withFieldBits(fields[key], true, true);
       }
       return { ...prev, fields };
     });
@@ -1308,7 +1369,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
           onClick={() => doSave(false)}
           disabled={saving || saveHeld}
           title={
-            celErrorCount > 0
+            celErrorTotal > 0
               ? t('perm.cel.saveBlocked')
               : rlsUnnamedCount > 0
                 ? t('perm.rls.nameNeeded')
@@ -1340,7 +1401,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
             <Loader2 className="h-3 w-3 animate-spin" />
             {t('engine.studio.autoSaving')}
           </span>
-        ) : celErrorCount > 0 && isDirty ? (
+        ) : celErrorTotal > 0 && isDirty ? (
           <span className="text-[11px] text-destructive" data-testid="perm-autosave-held">
             {t('perm.cel.saveBlocked')}
           </span>
@@ -1834,6 +1895,8 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
                   onFieldPerm={updateFieldPerm}
                   onBulkSet={bulkSetObject}
                   onFieldBulk={bulkSetFields}
+                  onFieldWhen={updateFieldWhen}
+                  onFieldWhenLint={reportFieldWhenLint}
                   onOpenOwd={onOpenOwd}
                 />
               </div>
@@ -2010,6 +2073,8 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
             onFieldPerm={updateFieldPerm}
             onBulkSet={bulkSetObject}
             onFieldBulk={bulkSetFields}
+            onFieldWhen={updateFieldWhen}
+            onFieldWhenLint={reportFieldWhenLint}
             onOpenOwd={onOpenOwd}
           />
           {/* Advanced facets (ADR-0056 P3) — RLS / tab visibility / delegated
@@ -2059,6 +2124,10 @@ interface PermissionTableProps {
   onBulkSet: (objectName: string, action: 'all' | 'none' | 'crud' | 'read') => void;
   /** objectui#2600 B4 — field-level bulk over the filtered field set. */
   onFieldBulk: (objectName: string, action: 'readable' | 'writable' | 'clear', fieldNames: string[]) => void;
+  /** objectstack#25866 — the row condition on a field's edit vote; blank clears it. */
+  onFieldWhen: (objectName: string, fieldName: string, when: string) => void;
+  /** objectstack#25866 — blocking lint findings on a field's `when`, so Save can hold. */
+  onFieldWhenLint: (objectName: string, fieldName: string, issues: CelLintIssue[]) => void;
   /** objectui#2505 — when set, the OWD badge links to the package OWD overview. */
   onOpenOwd?: (objectName: string) => void;
 }
@@ -2076,6 +2145,8 @@ function PermissionTable({
   onFieldPerm,
   onBulkSet,
   onFieldBulk,
+  onFieldWhen,
+  onFieldWhenLint,
   onOpenOwd,
 }: PermissionTableProps) {
   return (
@@ -2226,6 +2297,8 @@ function PermissionTable({
                       t={t}
                       onFieldPerm={onFieldPerm}
                       onFieldBulk={onFieldBulk}
+                      onFieldWhen={onFieldWhen}
+                      onFieldWhenLint={onFieldWhenLint}
                     />
                   </td>
                 </tr>
@@ -2335,6 +2408,8 @@ function StudioObjectMatrix({
   onFieldPerm,
   onBulkSet,
   onFieldBulk,
+  onFieldWhen,
+  onFieldWhenLint,
   onOpenOwd,
 }: PermissionTableProps) {
   const sharingStart = objectActions.findIndex((a) => a.key === STUDIO_SHARING_GROUP_START);
@@ -2380,6 +2455,8 @@ function StudioObjectMatrix({
             onFieldPerm={onFieldPerm}
             onBulkSet={onBulkSet}
             onFieldBulk={onFieldBulk}
+            onFieldWhen={onFieldWhen}
+            onFieldWhenLint={onFieldWhenLint}
             onOpenOwd={onOpenOwd}
           />
         ))}
@@ -2403,6 +2480,8 @@ function StudioObjectRow({
   onFieldPerm,
   onBulkSet,
   onFieldBulk,
+  onFieldWhen,
+  onFieldWhenLint,
   onOpenOwd,
 }: {
   object: ObjectSummary;
@@ -2419,6 +2498,8 @@ function StudioObjectRow({
   onFieldPerm: (objectName: string, fieldName: string, action: keyof FieldPerm, value: boolean) => void;
   onBulkSet: (objectName: string, action: 'all' | 'none' | 'crud' | 'read') => void;
   onFieldBulk: (objectName: string, action: 'readable' | 'writable' | 'clear', fieldNames: string[]) => void;
+  onFieldWhen: (objectName: string, fieldName: string, when: string) => void;
+  onFieldWhenLint: (objectName: string, fieldName: string, issues: CelLintIssue[]) => void;
   onOpenOwd?: (objectName: string) => void;
 }) {
   // The bulk strip draws on the row under the pointer, and on the row that
@@ -2539,6 +2620,8 @@ function StudioObjectRow({
               t={t}
               onFieldPerm={onFieldPerm}
               onFieldBulk={onFieldBulk}
+              onFieldWhen={onFieldWhen}
+              onFieldWhenLint={onFieldWhenLint}
             />
           </td>
         </tr>
@@ -2555,6 +2638,8 @@ function FieldsSubTable({
   t,
   onFieldPerm,
   onFieldBulk,
+  onFieldWhen,
+  onFieldWhenLint,
 }: {
   objectName: string;
   fields: FieldSummary[] | undefined;
@@ -2563,10 +2648,24 @@ function FieldsSubTable({
   t: (key: string) => string;
   onFieldPerm: (objectName: string, fieldName: string, action: keyof FieldPerm, value: boolean) => void;
   onFieldBulk: (objectName: string, action: 'readable' | 'writable' | 'clear', fieldNames: string[]) => void;
+  onFieldWhen: (objectName: string, fieldName: string, when: string) => void;
+  onFieldWhenLint: (objectName: string, fieldName: string, issues: CelLintIssue[]) => void;
 }) {
   // objectui#2600 B4 — filter fields and bulk-apply over the visible set, so
   // wide objects (dozens of fields) aren't two-checkboxes-at-a-time tedious.
   const [fieldFilter, setFieldFilter] = React.useState('');
+  // objectstack#25866 — which rows have their row-condition editor open. A row
+  // whose entry carries a `when` shows it as a chip either way; the editor
+  // (the same CEL field as the RLS clauses, linted the same way) opens on
+  // demand, so a wide object does not mount one per field.
+  const [openWhen, setOpenWhen] = React.useState<Set<string>>(() => new Set());
+  const toggleWhen = (key: string) =>
+    setOpenWhen((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   if (!fields) {
     return (
       <div className="text-xs text-muted-foreground flex items-center gap-2">
@@ -2640,37 +2739,87 @@ function FieldsSubTable({
               <th className="text-left py-1 font-medium">{t('perm.field.col.name')}</th>
               <th className="px-2 py-1 font-medium w-16 text-center" title={t('perm.field.read')}>{t('perm.field.read')}</th>
               <th className="px-2 py-1 font-medium w-16 text-center" title={t('perm.field.edit')}>{t('perm.field.edit')}</th>
+              <th className="px-2 py-1 font-medium text-left" title={t('perm.field.when.tip')}>{t('perm.field.when')}</th>
             </tr>
           </thead>
           <tbody>
             {visible.map((f) => {
               const key = `${objectName}.${f.name}`;
               const cur = fieldsState[key] ?? { readable: true, editable: false };
+              const whenText = cur.when ?? '';
+              const whenOpen = openWhen.has(key) && cur.readable !== false;
               return (
-                <tr key={f.name} className="border-t border-muted">
-                  <td className="py-1">
-                    {f.label ?? f.name}
-                    {f.label && (
-                      <span className="ml-1 text-muted-foreground">({f.name})</span>
-                    )}
-                  </td>
-                  <td className="px-2 py-1 text-center">
-                    <Checkbox
-                      checked={!!cur.readable}
-                      disabled={!writable}
-                      onCheckedChange={(v) => onFieldPerm(objectName, f.name, 'readable', !!v)}
-                      aria-label={`${objectName}.${f.name} readable`}
-                    />
-                  </td>
-                  <td className="px-2 py-1 text-center">
-                    <Checkbox
-                      checked={!!cur.editable}
-                      disabled={!writable}
-                      onCheckedChange={(v) => onFieldPerm(objectName, f.name, 'editable', !!v)}
-                      aria-label={`${objectName}.${f.name} editable`}
-                    />
-                  </td>
-                </tr>
+                <React.Fragment key={f.name}>
+                  <tr className="border-t border-muted">
+                    <td className="py-1">
+                      {f.label ?? f.name}
+                      {f.label && (
+                        <span className="ml-1 text-muted-foreground">({f.name})</span>
+                      )}
+                    </td>
+                    <td className="px-2 py-1 text-center">
+                      <Checkbox
+                        checked={!!cur.readable}
+                        disabled={!writable}
+                        onCheckedChange={(v) => onFieldPerm(objectName, f.name, 'readable', !!v)}
+                        aria-label={`${objectName}.${f.name} readable`}
+                      />
+                    </td>
+                    <td className="px-2 py-1 text-center">
+                      <Checkbox
+                        checked={!!cur.editable}
+                        disabled={!writable}
+                        onCheckedChange={(v) => onFieldPerm(objectName, f.name, 'editable', !!v)}
+                        aria-label={`${objectName}.${f.name} editable`}
+                      />
+                    </td>
+                    {/* objectstack#25866 — the row condition on the edit vote.
+                        Read off shows no affordance: the spec refuses `when`
+                        beside `readable: false`, and the cascade has cleared it. */}
+                    <td className="px-2 py-1 text-left">
+                      {cur.readable === false ? (
+                        <span className="text-muted-foreground" title={t('perm.field.when.readOff')}>
+                          —
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={!writable && whenText === ''}
+                          aria-label={`${objectName}.${f.name} when`}
+                          aria-expanded={whenOpen}
+                          title={whenText === '' ? t('perm.field.when.add') : t('perm.field.when.edit')}
+                          onClick={() => toggleWhen(key)}
+                          className={cn(
+                            'inline-flex max-w-full items-center rounded px-1.5 py-0.5 text-left hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50',
+                            whenText === '' ? 'text-muted-foreground' : 'font-mono text-foreground',
+                          )}
+                        >
+                          <span className="truncate">{whenText === '' ? t('perm.field.when.add') : whenText}</span>
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                  {whenOpen && (
+                    <tr className="border-t border-muted bg-muted/10">
+                      <td colSpan={4} className="px-2 py-2">
+                        <CelPredicateField
+                          id={`perm-when-${objectName}-${f.name}`}
+                          label={t('perm.field.when.label')}
+                          value={whenText}
+                          disabled={!writable}
+                          placeholder="status == 'draft'"
+                          objectName={objectName}
+                          fieldNames={fields.map((x) => x.name)}
+                          clause="check"
+                          onLintChange={(issues) => onFieldWhenLint(objectName, f.name, issues)}
+                          onChange={(v) => onFieldWhen(objectName, f.name, v)}
+                          t={t}
+                        />
+                        <p className="mt-1 text-[11px] text-muted-foreground">{t('perm.field.when.tip')}</p>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
               );
             })}
           </tbody>

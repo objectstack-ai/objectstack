@@ -25,6 +25,10 @@ D11 are unchanged.
 maintainer 「23267 我们的系统 和 salesforce 类似，暂时没有 没有公开站点或门户的产品计划」) — D3 item 5: the
 guest's bind door is built implementation-first, when a named deployment needs to grant the guest on
 a public surface; until then no door binds a set to `guest`, and the record carries the door's shape.
+· **Amended** (2026-10-26, ruling Q1 A on [#26020](https://github.com/objectstack-ai/objectstack/issues/26020),
+[`6413975861`](https://github.com/objectstack-ai/objectstack/issues/26020#issuecomment-6413975861),
+maintainer 「26020 Q1 A Q2 B 26001 A」) — D2: the signed-out invitation preview is admitted as a
+class-2-shaped door ([the dated note under D2's table](#d2--the-closed-list-of-doors)).
 **Decided by**: the maintainer's ruling on [#22146](https://github.com/objectstack-ai/objectstack/issues/22146)
 (comment [`6054113537`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6054113537),
 decision batch #290 item 1, 2026-10-08, 「22146 同意」): **A on all eight questions, and G2 on the
@@ -275,6 +279,26 @@ domain's first statement, never surface by surface:
 envelope does not carry, so the envelope the runtime face assembles for every sessionless request
 (D9) is refused in every domain except at the two endpoint classes above. A new surface is therefore
 401 until this list names it, and naming a new door class is an amendment of this record.
+
+**Amended 2026-10-26 — the signed-out invitation preview, a class-2-shaped door.** Ruling Q1 A on
+[#26020](https://github.com/objectstack-ai/objectstack/issues/26020)
+([`6413975861`](https://github.com/objectstack-ai/objectstack/issues/26020#issuecomment-6413975861),
+maintainer 「26020 Q1 A Q2 B 26001 A」) admits one more door of class 2's shape, not a seventh class:
+`GET /api/v1/auth/organization/invitation-preview?id=…`, so the invitation landing page can name the
+inviting organization and the inviter to a person who is not signed in. What admits the request: the
+invitation id the invitation link carries, the capability token. What it runs as: after validation,
+a read of that one invitation, projected — it answers only for a `pending` invitation that has not
+expired, returns exactly `{ organizationName, inviterName, email }` with the invited address masked,
+and gives one uniform not-found for an unknown, expired, accepted, rejected or cancelled id. No
+principal is evaluated and the session is never read, so a signed-in caller gets the same
+projection. It carries a per-address rate limit, as ADR-0121 D6 requires of a door that admits an
+anonymous caller. Enforced by
+`packages/plugins/plugin-auth/src/invitation-preview.ts#runInvitationPreview`, ledgered in
+`packages/plugins/plugin-auth/src/auth-route-ledger.ts`. The route sits in the `/auth` namespace,
+which the control-plane allowlist exempts as a whole; the sweep's classification therefore lists it
+under class 2, ahead of the allowlist, so it is judged as this door and not as control-plane
+infrastructure. The same ruling's Q2 B leaves the verification posture as it was: an
+invitation-link sign-up still owes the verification mail.
 
 **Outside the guest model by construction**, and not on the list:
 

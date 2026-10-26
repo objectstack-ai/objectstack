@@ -530,6 +530,8 @@ export class AuthPlugin implements Plugin {
    * Memoized `bindAuthSettings()` run — see {@link ensureAuthSettingsBound}.
    */
   private authSettingsBinding: Promise<void> | null = null;
+  /** [#26020] The per-address window of the signed-out invitation preview counts here; set in `init()`. */
+  private invitationPreviewCounters: (() => Promise<CounterStore>) | null = null;
 
   constructor(options: AuthPluginOptions = {}) {
     this.options = {
@@ -700,6 +702,18 @@ export class AuthPlugin implements Plugin {
           'The budget is still enforced, but PER NODE: every node grants the same phone number its own ' +
           'cooldown and hourly cap, so an N-node deployment can send up to N× the configured number of ' +
           'PAID SMS to one number',
+      });
+      // [#26020] The signed-out invitation preview's per-address window
+      // (ADR-0121 D6: a door that admits an anonymous caller carries a rate
+      // limit), on the same lazy resolution. Its own subject, so an operator
+      // reading the degraded warning knows WHICH budget stopped being global.
+      this.invitationPreviewCounters = createLazyCounterStore({
+        resolveCache,
+        logger: ctx.logger,
+        subject: 'signed-out invitation preview rate limit',
+        degradedImpact:
+          'The limit is still enforced, but PER NODE: an N-node deployment admits up to N× the configured ' +
+          'previews per address per window',
       });
     }
 
@@ -3824,6 +3838,41 @@ export class AuthPlugin implements Plugin {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] organization/add-member failed', err);
         return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
+    // [#26020] The signed-out invitation preview (ruling 6413975861, Q1 A):
+    // `{ organizationName, inviterName, email }` with the address masked, for
+    // a pending, unexpired invitation only, one uniform not-found for every
+    // other id, rate-limited per address. An anonymous door: ADR-0138 D2's
+    // dated note admits it as a class-2-shaped door (the invitation id is the
+    // capability token), and the reasons for each of those properties live in
+    // invitation-preview.ts. It never reads the session, so a signed-in caller
+    // gets the same projection. Ledgered `public` in auth-route-ledger.ts.
+    rawApp.get(`${basePath}/organization/invitation-preview`, async (c: any) => {
+      try {
+        const counters = this.invitationPreviewCounters;
+        const mgr = this.authManager!;
+        if (!counters) {
+          ctx.logger.error('[AuthPlugin] organization/invitation-preview: the rate-limit store was never wired; refusing');
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'The invitation preview is unavailable.' } }, 500);
+        }
+        const { runInvitationPreview } = await import('./invitation-preview.js');
+        const headers = (c.req.header() ?? {}) as Record<string, string>;
+        const answer = await runInvitationPreview(
+          {
+            queries: (c.req.queries() ?? {}) as Record<string, string[]>,
+            clientAddress: mgr.resolveClientAddress({ headers, ...transportOf(c) }),
+          },
+          { getDataEngine: () => mgr.getDataEngine() as any, counterStore: counters },
+        );
+        return c.json(answer.body, answer.status as any, answer.headers);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] organization/invitation-preview failed', err);
+        // A signed-out caller is told the read failed, never why.
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'The invitation preview is unavailable.' } }, 500);
       }
     });
 
