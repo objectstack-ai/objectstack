@@ -24,7 +24,6 @@
     // not inherit `composite` / `declaration` from the build config.
     "composite": false,
     "declaration": false,
-    "jsx": "react-jsx",
     // One notch above the root's ES2020: these suites read the last emitted
     // call with `calls.at(-1)`, and `Array.prototype.at` is ES2022. The
     // compiler named the remedy itself. Raised HERE and not in `tsconfig.json`,
