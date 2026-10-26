@@ -384,7 +384,7 @@ export class AuditPlugin implements Plugin {
         } catch {
           settings = undefined;
         }
-        const { locale } = await resolveLocalizationContext({ ql: engine, settings, tenantId, userId });
+        const { locale } = await resolveLocalizationContext({ ql: engine, settings, organizationId: tenantId, userId });
         return locale;
       };
       // [ADR-0131 D9] The organization an activity row about an org-less record

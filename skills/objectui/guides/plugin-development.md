@@ -276,7 +276,7 @@ export function ColorField({
     <Input
       type="color"
       className={className}
-      value={value || '#000000'}
+      value={value ?? ''}
       onChange={(e) => onChange(e.target.value)}
       disabled={readonly || disabled}
       // `error` drives the a11y state ONLY. The form renderer already prints

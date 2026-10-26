@@ -172,6 +172,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
+import { skillsWalk } from './skill-bundle-root.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -291,19 +292,23 @@ function walk(dir, predicate, out = []) {
 export function listBundles(root) {
   const bundles = [];
   for (const scanRoot of SCAN_ROOTS) {
-    const base = join(root, scanRoot);
-    if (!existsSync(base) || !statSync(base).isDirectory()) continue;
+    // `skills` is the published bundle, in the monorepo's catalog since the
+    // cutover (`skill-bundle-root.mjs`); its labels stay `skills/objectui/...`.
+    const { dir: top, base: labelBase } = scanRoot === 'skills' ? skillsWalk(root) : { dir: join(root, scanRoot), base: root };
+    if (!existsSync(top) || !statSync(top).isDirectory()) continue;
     const seen = new Set();
-    for (const evalFile of walk(base, (name) => name.endsWith('.json'))) {
+    for (const evalFile of walk(top, (name) => name.endsWith('.json'))) {
       const evalsDir = dirname(evalFile);
       if (evalsDir.split(sep).pop() !== 'evals') continue;
       const bundleDir = dirname(evalsDir);
       if (seen.has(bundleDir)) continue;
       seen.add(bundleDir);
-      bundles.push(bundleDir);
+      bundles.push({ dir: bundleDir, base: labelBase });
     }
   }
-  return bundles.sort().map((dir) => ({ dir, rel: relative(root, dir).split(sep).join('/') }));
+  return bundles
+    .sort((a, b) => (a.dir < b.dir ? -1 : a.dir > b.dir ? 1 : 0))
+    .map(({ dir, base }) => ({ dir, base, rel: relative(base, dir).split(sep).join('/') }));
 }
 
 /** The row key. One file, one eval, one token — the unit a per-row fix removes. */
@@ -332,7 +337,7 @@ export function analyze({ root, baseline = KNOWN_UNTAUGHT_EVAL_TOKENS }) {
   for (const bundle of listBundles(root)) {
     const guideFiles = walk(bundle.dir, (name) => name.endsWith('.md'));
     const guides = guideFiles.map((full) => ({
-      rel: relative(root, full).split(sep).join('/'),
+      rel: relative(bundle.base, full).split(sep).join('/'),
       text: readFileSync(full, 'utf8'),
     }));
     if (guides.length === 0) {
@@ -348,7 +353,7 @@ export function analyze({ root, baseline = KNOWN_UNTAUGHT_EVAL_TOKENS }) {
     const record = { rel: bundle.rel, guides: guides.map((g) => g.rel), evalFiles: [], evalCount: 0, emptyMustContain: 0 };
 
     for (const full of evalFiles) {
-      const evalPath = relative(root, full).split(sep).join('/');
+      const evalPath = relative(bundle.base, full).split(sep).join('/');
       record.evalFiles.push(evalPath);
       let doc;
       try {

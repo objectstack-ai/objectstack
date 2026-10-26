@@ -141,9 +141,11 @@ describe('FormFieldSchema still accepts every legitimate widget id', () => {
     expect(namespaceIssues({ name: 'pw', widget: 'password', type: 'ui:password' })).toEqual([]);
   });
 
-  it('leaves strip-mode parsing and the declared key set intact', () => {
+  it('leaves passthrough parsing and the declared key set intact', () => {
+    // Passthrough since objectstack#25923 (strip mode before): an undeclared key
+    // is kept, not dropped and not refused.
     const parsed = FormFieldSchema.parse({ name: 'pw', type: 'password', bogus: 1 });
-    expect(parsed).toEqual({ name: 'pw', type: 'password' });
+    expect(parsed).toEqual({ name: 'pw', type: 'password', bogus: 1 });
     expect(FormFieldSchema.shape.type).toBeDefined();
   });
 });

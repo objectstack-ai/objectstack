@@ -2,11 +2,10 @@
 name: objectui
 description: Universal Server-Driven UI (SDUI) engine for building JSON-driven React interfaces with Shadcn design quality. Use for schema-driven page building, plugin development, expression bindings, data integration, testing, auth/permissions, i18n, mobile responsiveness and project setup with the `@object-ui/*` packages. Triggers on ObjectUI, SchemaRenderer, JSON UI schemas, SDUI, metadata-driven UIs, `@object-ui/*`. Do NOT use for server-side ObjectStack concerns (data modelling, API endpoints, automation, formulas, agents) — those belong to the `objectstack-*` skills.
 license: Apache-2.0
-compatibility: Tracks the @objectstack/spec range each @object-ui/* package declares in its own manifest; read it there. This file states no version literal, per the doc-version-claims ratchet.
+compatibility: Requires @objectstack/spec 18.x; each @object-ui/* package declares its exact @objectstack/spec range in its own manifest.
 metadata:
-  internal: true
   author: objectstack-ai
-  version: "2.0"
+  version: "18.1.0"
   domain: ui
   tags: sdui, schema-renderer, json-ui, react, shadcn, tailwind, plugin, expression
 user-invocable: false
@@ -31,7 +30,7 @@ kanbans, CRUDs, forms, grids.
 | Start a new project — CLI, Vite, Tailwind, config files | [`guides/project-setup.md`](./guides/project-setup.md) |
 | Write unit / DOM / E2E tests for components, schemas and plugins | [`guides/testing.md`](./guides/testing.md) |
 | Responsive behaviour, breakpoints, touch gestures | [`guides/mobile.md`](./guides/mobile.md) |
-| Auth, roles, tenants, client-side permission guards | [`guides/auth-permissions.md`](./guides/auth-permissions.md) |
+| Auth, positions, tenants, client-side permission guards | [`guides/auth-permissions.md`](./guides/auth-permissions.md) |
 | Multi-language text and formatters | [`guides/i18n.md`](./guides/i18n.md) |
 
 **Rules — read before writing schemas.** These are the non-negotiables, and they

@@ -10,7 +10,7 @@ Before writing implementation code, define:
 
 - Page purpose (dashboard, list, detail, form, wizard, board).
 - Required data inputs and output actions.
-- User roles and visibility rules.
+- User positions and visibility rules.
 - Interaction model (navigation, submit, bulk actions, modals).
 
 Then produce a first schema draft.
