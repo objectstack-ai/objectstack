@@ -51,7 +51,7 @@
   "author": "ObjectStack",
   "repository": {
     "type": "git",
-    "url": "https://github.com/objectstack-ai/objectstack.git",
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
     "directory": "packages/cloud-connection"
   },
   "homepage": "https://objectstack.ai/docs",

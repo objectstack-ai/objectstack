@@ -27,5 +27,8 @@
   "scripts": {
     "build:dist": "bash build-dist.sh",
     "prepublishOnly": "node -e \"const fs=require('fs');const p='dist/index.html';if(!fs.existsSync(p)){console.error('\\n✗ @objectstack/console: '+p+' is missing — run pnpm console:build at the repo root before publishing.\\n');process.exit(1)}\""
+  },
+  "engines": {
+    "node": ">=22.0.0"
   }
 }

@@ -3,14 +3,20 @@
   "version": "18.1.0",
   "license": "Apache-2.0",
   "description": "Model Context Protocol (MCP) connector for ObjectStack — a generic adapter that turns any MCP server's tools into a connector's actions on the automation engine's connector registry (ADR-0024).",
+  "type": "commonjs",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "sideEffects": false,
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.js"
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
     }
   },
   "scripts": {
@@ -42,7 +48,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/objectstack-ai/objectstack.git",
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
     "directory": "packages/connectors/connector-mcp"
   },
   "publishConfig": {
@@ -52,5 +58,8 @@
     "dist",
     "README.md",
     "CHANGELOG.md"
-  ]
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  }
 }
