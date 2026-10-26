@@ -384,7 +384,10 @@ describe('#7968 — the paused-run screen is gated to its trigger identity, or t
 
         it('treats a getRun THROW as unresolved identity, not as a match', async () => {
             const h = makeDispatcher('refusing');
-            h.getRun.mockRejectedValueOnce(new Error('run store unreachable'));
+            // Every read throws, not just the first: since #25820 the door's
+            // scope check reads the run once ahead of this gate, and a store
+            // that is unreachable is unreachable for both.
+            h.getRun.mockRejectedValue(new Error('run store unreachable'));
             const { response } = await h.dispatcher.handleAutomation(
                 SCREEN_PATH, 'GET', undefined, TRIGGERING_USER(), undefined,
             );

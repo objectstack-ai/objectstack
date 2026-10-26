@@ -328,7 +328,10 @@ describe('#19987 — the resume door admits the run\'s starter, or the run-state
 
             expect(statusOf(response)).toBe(200);
             expect(h.resume).toHaveBeenCalledTimes(1);
-            expect(h.getRun).not.toHaveBeenCalled();
+            // The gate reads nothing for a system context. The one `getRun` is
+            // the #25820 scope check (does the path's flow own the run?), which
+            // holds for every caller and runs after this gate.
+            expect(h.getRun).toHaveBeenCalledTimes(1);
             expect(h.explainCalls).toHaveLength(0);
         });
     });
