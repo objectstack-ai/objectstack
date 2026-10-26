@@ -13433,6 +13433,37 @@ export class ObjectStackProtocolImplementation implements
         // rows returned ungrouped, looking exactly like a served query.
         this.assertGroupByFieldsExist(request.object, options.groupBy);
         this.assertAggregationFieldsExist(request.object, options.aggregations);
+        // [#25819] An aggregate axis sent as an EMPTY list, with no non-empty
+        // axis beside it, asks for an aggregate of nothing. The routing below
+        // reads it as no aggregate and handed the key to `engine.find`, which
+        // refuses an option it does not execute with an uncoded error whose
+        // words carry the quoted object name — read at the REST door as the
+        // unknown-object heuristic: `404 OBJECT_NOT_FOUND`, "Object '…' is not
+        // registered", for a registered object. No shipped caller sends `[]`
+        // meaning the plain rows, so it is refused for what it is. An empty
+        // list beside a non-empty one is served as before (`groupBy` with
+        // `aggregations: []` lists the groups).
+        {
+            const emptyAxes = (['groupBy', 'aggregations'] as const)
+                .filter((k) => Array.isArray(options[k]) && options[k].length === 0);
+            const servedAxis = (['groupBy', 'aggregations'] as const)
+                .some((k) => Array.isArray(options[k]) && options[k].length > 0);
+            if (emptyAxes.length > 0 && !servedAxis) {
+                const named = emptyAxes.map((k) => `'query.${k}'`).join(' and ');
+                const err: any = new Error(
+                    `${named} ${emptyAxes.length > 1 ? 'are empty lists' : 'is an empty list'} on object `
+                    + `'${request.object}': an aggregate query names at least one aggregation, or a non-empty `
+                    + `'groupBy' to list its groups. The query was NOT run. Send e.g. { "aggregations": `
+                    + `[{ "function": "count", "alias": "n" }] }, or omit ${emptyAxes.map((k) => `'${k}'`).join(' and ')} `
+                    + 'for the plain rows.',
+                );
+                err.status = 400;
+                err.code = 'INVALID_QUERY';
+                err.param = emptyAxes[emptyAxes.length - 1];
+                err.object = request.object;
+                throw err;
+            }
+        }
         // [#21086] A stored metadata body is served only as its type's read
         // projection (see `redactStoredMetadataRows` below), and a GROUP KEY
         // cannot be projected — so grouping by the body column of a

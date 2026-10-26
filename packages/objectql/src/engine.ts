@@ -276,6 +276,7 @@ import {
 } from './secret-fields.js';
 import { assertGroupByNamesNoJsonStoredField } from './group-by-structured-json-door.js';
 import { assertAggregationFieldTypesAccepted } from './aggregate-field-type-door.js';
+import { assertAggregatedColumnsAreDistinct, assertDateBucketTargetsAreTemporal } from './aggregate-query-shape-door.js';
 import { applyProtection, pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec/shared';
 import { SchemaRegistry, computeFQN, type ArtifactInstallScope } from './registry.js';
 import { expandSearchToFilter, normalizeSearch, SEARCHABLE_ENUM_TYPES, SEARCHABLE_TEXTUAL_TYPES } from './search-filter.js';
@@ -21954,6 +21955,13 @@ export class ObjectQL implements IObjectQLEngine {
       // string on SQLite and a 500 on PostgreSQL; `sum` over one answered `0`,
       // `0` and a 500. Every row of the table is asked (see the door's header).
       assertAggregationFieldTypesAccepted(object, this._registry.getObject(object), query.aggregations);
+      // [#25818] …and the two shapes that answered a plausible wrong table: a
+      // `dateGranularity` over a field declared neither a date nor a datetime
+      // (every row in one null bucket), and two columns of the aggregated row
+      // under one name (the last value written won). After the two doors
+      // above, so a JSON field under a date bucket keeps their words.
+      assertDateBucketTargetsAreTemporal(object, this._registry.getObject(object), query.groupBy);
+      assertAggregatedColumnsAreDistinct(object, query.groupBy, query.aggregations);
       // [#10576] The per-aggregation `filter` (`AggregationNodeSchema.filter`,
       // the contract half of #10413) is a second filter position on this verb,
       // so it walks through the same refusal doors `where` does at this seam:
