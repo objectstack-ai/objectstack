@@ -194,17 +194,35 @@ interface PackageActionSchemaError extends Error {
  * Refused rather than stored unparsed: an action that fails the parse would be
  * served with whatever gates it declares never taking effect, and `defineStack`
  * and `os validate` refuse the same declaration at authoring time.
+ *
+ * [#25744] The one parse for both places a code package declares an action:
+ * a standalone `action` item ({@link SchemaRegistry.registerItem}) and an
+ * object's own `actions` ({@link parsePackageObjectActions}, called by
+ * {@link SchemaRegistry.registerObject}). `owner` names the object an own
+ * action is declared on, so the refusal says which object and `issues[]`
+ * locates each failure inside its body.
  */
-function parsePackageAction(item: unknown, name: string, packageId: string): unknown {
+function parsePackageAction(
+  item: unknown,
+  name: string,
+  packageId: string,
+  owner?: { object: string; index: number },
+): unknown {
   const parsed = ActionSchema.safeParse(item);
   if (parsed.success) return parsed.data;
+  // [#25744] An object's own action is located inside the object body it was
+  // declared in (`actions.<index>.<key>`), the path `ObjectSchema` reports.
+  const prefix = owner ? ['actions', String(owner.index)] : [];
   const issues = parsed.error.issues.map((issue) => ({
-    path: issue.path.map(String).join('.'),
+    path: [...prefix, ...issue.path.map(String)].join('.'),
     message: issue.message,
     code: issue.code,
   }));
+  const subject = owner
+    ? `Action '${name}' of object '${owner.object}' in package '${packageId}'`
+    : `Action '${name}' of package '${packageId}'`;
   const err = new Error(
-    `Action '${name}' of package '${packageId}' does not satisfy the action contract (ActionSchema): `
+    `${subject} does not satisfy the action contract (ActionSchema): `
     + issues.map((issue) => (issue.path ? `${issue.path}: ${issue.message}` : issue.message)).join('; ')
     + '. Every action a package ships is stored as its schema parse — the parse that lowers '
     + '`requiresFeature` and `requiresMembershipReach` into `visible` — so an action that does not parse '
@@ -216,6 +234,35 @@ function parsePackageAction(item: unknown, name: string, packageId: string): unk
   err.httpStatus = 422;
   err.issues = issues;
   throw err;
+}
+
+/**
+ * [#25744] A code package's object, its own `actions` stored as their
+ * `ActionSchema` parse ({@link parsePackageAction}) — or the loud refusal of
+ * the first one that does not parse.
+ *
+ * The object-path twin of {@link SchemaRegistry.registerItem}'s action parse.
+ * `ObjectSchema`'s `actions` is `ActionSchema[]`, so a platform object
+ * (`ObjectSchema.create`) and a strict `defineStack` already hand this method
+ * parsed actions, and the parse being idempotent over its own output stores
+ * them deep-equal to what arrived. A raw manifest, a `strict: false` stack or a
+ * programmatic `registerApp` reached the store with its objects' actions as
+ * written, so a declared `requiresFeature` / `requiresMembershipReach` was
+ * served raw, never lowered into `visible`.
+ *
+ * Returns `schema` by reference when it declares no `actions` array, and a
+ * shallow copy carrying the parsed array otherwise: the caller's body is
+ * never mutated.
+ */
+function parsePackageObjectActions(schema: ServiceObject, packageId: string): ServiceObject {
+  const actions = (schema as { actions?: unknown }).actions;
+  if (!Array.isArray(actions) || actions.length === 0) return schema;
+  const parsed = actions.map((action, index) => {
+    const declared = (action as { name?: unknown } | null | undefined)?.name;
+    const name = typeof declared === 'string' && declared !== '' ? declared : `#${index}`;
+    return parsePackageAction(action, name, packageId, { object: schema.name, index });
+  });
+  return { ...schema, actions: parsed } as ServiceObject;
 }
 
 /**
@@ -3440,6 +3487,25 @@ export class SchemaRegistry {
     // reason, so a refused contribution leaves nothing behind.
     if (ownership === 'extend' && (schema as { membershipKeys?: unknown }).membershipKeys !== undefined) {
       throw new ExtensionMembershipKeysRefusedError(schema.name, packageId);
+    }
+
+    // [#25744] A code package's object keeps its own actions as their
+    // `ActionSchema` parse — `requiresFeature` / `requiresMembershipReach`
+    // lowered into `visible` — or is refused here, beside the doors above and
+    // for their reason: before any materialization and before the contributor
+    // list is opened, so a refused object leaves nothing behind and a refused
+    // re-registration leaves the registered one in place
+    // ({@link parsePackageObjectActions}). The test is `registerItem`'s action
+    // parse's, asked of the body as `applyProtection` below will stamp it (a
+    // package id it does not already carry, `'package'` provenance): ⛔ a
+    // registration with no `packageId`, the `sys_metadata` sentinel, or a
+    // tenant-authored body (`_provenance: 'org'` — the save door's write-through
+    // and the boot rehydration) is never judged here.
+    if (packageId && isCodeArtifactBody({
+      _packageId: (schema as { _packageId?: unknown })._packageId ?? packageId,
+      _provenance: (schema as { _provenance?: unknown })._provenance ?? 'package',
+    })) {
+      schema = parsePackageObjectActions(schema, packageId);
     }
 
     // [#23065] A `tree` field that names no `reference` references the object
