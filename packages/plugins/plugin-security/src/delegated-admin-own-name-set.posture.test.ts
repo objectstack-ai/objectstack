@@ -190,7 +190,8 @@ describe('[ADR-0090 D12, amended 2026-10-17; #24757] a delegate is judged on exa
         // nothing at all.
         const h = await boot(posture);
         const r = await assign(h, NARROW, 'field_auditor');
-        expect([r.status, r.code], r.message).toEqual([403, 'PERMISSION_DENIED']);
+        // [#26189] A set off the caller's allowlist is a scope violation: its own code.
+        expect([r.status, r.code], r.message).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
         expect(r.message).toMatch(/position 'field_auditor' distributes permission set 'field_audit'.*not in the scope's allowlist/);
         expect(await storedPositions(h)).toEqual([]);
       });

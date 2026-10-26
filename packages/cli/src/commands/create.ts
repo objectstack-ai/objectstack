@@ -73,9 +73,10 @@
  *                            `private`, and the project lands in the
  *                            developer's own directory.
  *   `in-repo`     (--in-repo) the platform-work shape: `workspace:*` deps, a
- *                            `tsconfig.json` that extends this repo's root
- *                            config, a publishable `@objectstack/plugin-<name>`
- *                            landing under `packages/plugins/`. Explicit and
+ *                            `tsconfig.json` that extends this repo's shared
+ *                            `tsconfig.base.json`, a publishable
+ *                            `@objectstack/plugin-<name>` landing under
+ *                            `packages/plugins/`. Explicit and
  *                            documented, never the default — its output
  *                            installs nowhere else.
  *
@@ -168,15 +169,21 @@ export function objectstackDependencySpec(placement: ScaffoldPlacement): string 
 }
 
 /**
- * The `extends` an in-repo scaffold needs to reach this repo's root
- * `tsconfig.json`, DERIVED from where the template lands rather than written
- * down. Writing it down is how the `plugin` template came to declare
- * `'../../tsconfig.json'` from a directory two levels below `packages/`, which
- * resolves to a file that does not exist.
+ * The `extends` an in-repo scaffold needs to reach this repo's shared
+ * `tsconfig.base.json` — the file every package here extends — DERIVED from
+ * where the template lands rather than written down. Writing it down is how the
+ * `plugin` template came to declare `'../../tsconfig.json'` from a directory two
+ * levels below `packages/`, which resolves to a file that does not exist.
+ *
+ * ⛔ Never the root `tsconfig.json`: that is the type-check program for
+ * `scripts/` and the top-level configs, and its `exclude` (`packages`, `apps`,
+ * `examples`, `ui`) resolves against the root, so a scaffold that inherited it
+ * matched none of its own `src/` — `tsc` stopped with TS18003, "No inputs were
+ * found".
  */
-export function rootTsconfigExtends(inRepoDir: string, projectDirName: string): string {
+export function baseTsconfigExtends(inRepoDir: string, projectDirName: string): string {
   const depth = path.posix.join(inRepoDir, projectDirName).split('/').filter(Boolean).length;
-  return `${'../'.repeat(depth)}tsconfig.json`;
+  return `${'../'.repeat(depth)}tsconfig.base.json`;
 }
 
 /** A rendered file: JSON objects are stringified on write, strings land as-is. */
@@ -387,7 +394,7 @@ export const templates: Record<string, CreateTemplate> = {
           // `tsc` emits ES modules under the compiler options below, so the
           // manifest has to declare the project as ESM or Node refuses the
           // emitted `dist/index.js`. The in-repo placement inherits its module
-          // semantics from the root config it extends, so it does not.
+          // semantics from the shared base config it extends, so it does not.
           ...(standalone ? { type: 'module' } : {}),
           main: 'dist/index.js',
           types: 'dist/index.d.ts',
@@ -432,12 +439,18 @@ export const templates: Record<string, CreateTemplate> = {
                 include: SCAFFOLD_TSCONFIG_INCLUDE_SRC_ONLY,
               })
             : {
-                extends: rootTsconfigExtends(PLUGIN_IN_REPO_DIR, pluginDirName(name)),
+                // The shape a sibling under `packages/plugins/` declares
+                // (`plugin-email` is one): the shared base, Node's types, and
+                // an `exclude` of its own, so nothing it inherits resolves
+                // against another directory.
+                extends: baseTsconfigExtends(PLUGIN_IN_REPO_DIR, pluginDirName(name)),
                 compilerOptions: {
                   outDir: 'dist',
                   rootDir: 'src',
+                  types: ['node'],
                 },
                 include: ['src/**/*'],
+                exclude: ['dist', 'node_modules'],
               },
         // The config `build` and `dev` compile with (#25175). `tsconfig.json`
         // includes all of `src/`, the starter test with it, so `typecheck`

@@ -260,6 +260,12 @@ describe('DroppedFieldsEvent IS the spec type, not a mirror of it', () => {
     // and `main` agree again and this is the exact five-member union, with no
     // `Exclude`: any new arm is a remainder `Equal` refuses, and
     // `_ReasonIsNotString` below still refuses a widening to `string`.
+    //
+    // This pin stays exact on purpose: ui renders the union exhaustively.
+    // `STRIPPED_LINE` in `@object-ui/app-shell`'s `writeWarningToast.ts` is a
+    // `Record` over `DroppedFieldsEvent['reason']`, so a new arm also fails the
+    // app-shell build there. That map is where the new arm needs its wording
+    // (and both locale tables their row); this list follows it.
     type _ReasonIsTheEnum = Assert<
       Equal<
         DroppedFieldsEvent['reason'],
@@ -281,7 +287,11 @@ describe('MetadataCacheStats is not the spec ICacheService stats', () => {
     // spec's is a server KV store sized in keys and bytes; this one is a bounded
     // browser LRU that evicts, coalesces in-flight fetches and reports a rate.
     type _Shared = Assert<Equal<Extract<keyof MetadataCacheStats, keyof SpecCacheStats>, 'hits' | 'misses'>>;
-    type _SpecOnly = Assert<Equal<Exclude<keyof SpecCacheStats, keyof MetadataCacheStats>, 'keyCount' | 'memoryUsage'>>;
+    // The spec side is named by the two keys that make it a KV store, not
+    // closed: a key the spec adds to its own stats is not a red here.
+    type _SpecOnly = Assert<
+      Equal<Exclude<'keyCount' | 'memoryUsage', Exclude<keyof SpecCacheStats, keyof MetadataCacheStats>>, never>
+    >;
     type _LocalOnly = Assert<
       Equal<
         Exclude<keyof MetadataCacheStats, keyof SpecCacheStats>,
@@ -319,7 +329,9 @@ describe('DataApiValidationError is an Error, the spec ValidationError is a reco
 
     // The spec's is one entry in a validation report. `@object-ui/types`
     // re-exports it under that name, so the two were importable side by side.
-    type _SpecShape = Assert<Equal<Exclude<keyof SpecValidationError, 'field' | 'message' | 'code'>, never>>;
+    // Named by the three members a report entry carries; a key the spec adds
+    // to it is not a red here.
+    type _SpecShape = Assert<Equal<Exclude<'field' | 'message' | 'code', keyof SpecValidationError>, never>>;
 
     // This one is a thrown runtime object: it has a `stack`, which no data
     // record does, and it carries the whole list the spec type is one item of.
