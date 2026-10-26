@@ -71,11 +71,6 @@ import {
 } from './item-lock.js';
 import {
     bumpWriteEpoch,
-    metaOverlayCacheTtlMs,
-    readMetaOverlayCache,
-    readOverlayCacheGeneration,
-    writeMetaOverlayCache,
-    type MetaOverlayCacheKey,
 } from './meta-overlay-cache.js';
 import {
     ConflictError,
@@ -400,6 +395,8 @@ import { originGatedRemovalRefusal, refusePackagedBaseOverride } from './protoco
 import { applySeedBodies, collectBatchPendingDeclarations } from './protocol-publish-batch.js';
 // [#25467 cut 15] The artifact registry's lookups: an item's artifact, the packages that ship a type, and the lock's artifact layer.
 import { artifactLockLayerAt, lookupArtifactItem, shippedArtifactsOf, shippingPackagesOf } from './protocol-artifact-lookup.js';
+// [#25467 cut 16] The stored-overlay row reads: a type's active rows, their parsed entries, the names with a row of their own, and one item's rows.
+import { namesWithOwnStoredRow, readActiveOverlayRows, readItemActiveRows, storedOverlayEntries } from './protocol-stored-overlay-reads.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -2831,7 +2828,7 @@ function rowMatchesOverlayWhere(row: object, where: Readonly<Record<string, unkn
  * package (`packageId`) and then the package-less rows (`null`); with none,
  * `undefined`, which matches a row of any package.
  */
-function addressPackages(packageId: string | undefined): ReadonlyArray<string | null | undefined> {
+export function addressPackages(packageId: string | undefined): ReadonlyArray<string | null | undefined> {
     return [...new Set(servedOverlayRowCandidates({ packageId })
         .map((candidate) => candidate.packageId))];
 }
@@ -6230,7 +6227,7 @@ function isNonCanonicalStoredType(type: string): boolean {
  * row). [#21804] `type` is the spelling the row is stored under (its own
  * `type` column), which the served-row resolution reads.
  */
-interface StoredOverlayEntry {
+export interface StoredOverlayEntry {
     name: string;
     data: any;
     packageId: string | undefined;
@@ -10262,81 +10259,13 @@ export class ObjectStackProtocolImplementation implements
     private async readActiveOverlayRows(
         request: { type: string; packageId?: string },
     ): Promise<any[]> {
-        const { packageId } = request;
-        const queryActive = async (): Promise<any[]> => {
-            const whereClause: Record<string, unknown> = {
-                type: request.type,
-                state: 'active',
-            };
-            if (packageId) whereClause.package_id = packageId;
-            // [#21911] The explicit system opt-in — see findServedOverlayRow.
-            // [ADR-0131 D6/D7] The environment's rows only, on every find —
-            // see {@link findEnvironmentRows}.
-            let rs = await this.findEnvironmentRows('sys_metadata', { where: whereClause, context: { isSystem: true } });
-            if ((!rs || rs.length === 0)) {
-                const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
-                if (alt) {
-                    const altWhere: Record<string, unknown> = { type: alt, state: 'active' };
-                    if (packageId) altWhere.package_id = packageId;
-                    rs = await this.findEnvironmentRows('sys_metadata', { where: altWhere, context: { isSystem: true } });
-                }
-            }
-            return rs ?? [];
+        // [#25467 cut 16] The body moved to `protocol-stored-overlay-reads.ts` (see `StoredOverlayReadHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof readActiveOverlayRows> = {
+            get engine() { return readEngine(); },
+            findEnvironmentRows: (...a) => this.findEnvironmentRows(...a),
         };
-        // ── Leg D of #11633 (#11967): the cross-request overlay cache ──
-        //
-        // ⭐ The cache sits HERE, and its position IS the resolution of the
-        // SchemaRegistry-hydration trap #11633 §4 names. What is cached is
-        // the ROW SET — the value the `queryActive` call produces —
-        // never the merged answer below it. Everything downstream of this
-        // point still runs on every call, hit or miss: the overlay parse,
-        // the package-aware merge, `hydrateOverlayIntoRegistry`, the
-        // MetadataService merge, the disabled-package filter, the nav
-        // contributions, the decorations. A hit changes where the rows came
-        // from and nothing about what is done with them, so the read-side
-        // registry hydration cannot be skipped by one.
-        //
-        // ⛔ Do NOT move this below the merge. That is precisely the naive
-        // shape the trap describes, and it would additionally serve three
-        // mutable sources — the SchemaRegistry, the MetadataService and the
-        // artifact table — whose changes nothing in this key can observe.
-        // See `meta-overlay-cache.ts` for the measured four-source table.
-        //
-        // ⭐ The epoch reading is taken BEFORE the read, and it is this
-        // pre-read value that is stored with the rows. A write landing
-        // WHILE this read is in flight therefore moves the epoch past what
-        // the entry records, so the entry is already dead when it is
-        // written — the safe direction. Reading it afterwards would stamp
-        // pre-write rows with a post-write epoch and make that staleness
-        // permanent: the clear-then-repopulate-from-a-stale-read failure
-        // #11633 §7 pin 2 names.
-        const overlayCacheKey: MetaOverlayCacheKey = {
-            type: request.type,
-            packageId,
-        };
-        const overlayCacheTtlMs = metaOverlayCacheTtlMs();
-        const overlayCacheEpoch = overlayCacheTtlMs > 0 ? readOverlayCacheGeneration(this.engine) : undefined;
-        const overlayCacheNow = Date.now();
-        const cachedRecords = readMetaOverlayCache(
-            this.engine, overlayCacheKey, overlayCacheEpoch, overlayCacheTtlMs, overlayCacheNow,
-        );
-
-        let records: any[];
-        if (cachedRecords !== undefined) {
-            records = cachedRecords as any[];
-        } else {
-            records = await queryActive();
-            // ⭐ An EMPTY row set is cached too, and that is the main point
-            // rather than an edge case: the empty result is what triggers the
-            // alt-type retry above, so "no overlay rows for this type" is the
-            // answer whose caching removes BOTH reads. #11633 §1 measured that
-            // an app whose objects are all code-authored pays the doubled read
-            // on every request; this is the line that stops it.
-            writeMetaOverlayCache(
-                this.engine, overlayCacheKey, overlayCacheEpoch, records, overlayCacheTtlMs, overlayCacheNow,
-            );
-        }
-        return records;
+        return readActiveOverlayRows.call(host, request);
     }
 
     /**
@@ -10350,33 +10279,11 @@ export class ObjectStackProtocolImplementation implements
         request: { type: string },
         records: any[],
     ): StoredOverlayEntry[] {
-        // Parse each overlay body once — replaying the stored-row
-        // conversion chain (#3903) so every consumer of this list sees
-        // the canonical protocol shape — and surface its persisted
-        // software-package binding so the sidebar package filter and
-        // provenance classification see overlay rows the way they see
-        // registry items.
-        return records.map((record) => {
-            const data = this.convertStoredItem(
-                String(record.type ?? request.type),
-                typeof record.metadata === 'string'
-                    ? JSON.parse(record.metadata)
-                    : record.metadata,
-            ) as any;
-            const recPkg = (record as { package_id?: string | null }).package_id ?? undefined;
-            if (recPkg && data && typeof data === 'object' && (data as any)._packageId === undefined) {
-                (data as any)._packageId = recPkg;
-            }
-            // [ADR-0131 D6/D7] Every row is the environment's: the family
-            // declares no organization column, and the reads that feed this
-            // ({@link readActiveOverlayRows}) leave a legacy organization's
-            // rows out off the physical column. (The form doors' legacy layer
-            // that once needed the row's own scope here is deleted.)
-            return {
-                name: String(record.name), data, packageId: recPkg, organizationId: null,
-                type: String(record.type ?? request.type),
-            };
-        });
+        // [#25467 cut 16] The body moved to `protocol-stored-overlay-reads.ts` (see `StoredOverlayReadHost`).
+        const host: ThisParameterType<typeof storedOverlayEntries> = {
+            convertStoredItem: (...a) => this.convertStoredItem(...a),
+        };
+        return storedOverlayEntries.call(host, request, records);
     }
 
     /**
@@ -10429,13 +10336,8 @@ export class ObjectStackProtocolImplementation implements
      * other package served the expansion.
      */
     private namesWithOwnStoredRow(records: readonly any[], packageId?: string): ReadonlySet<string> {
-        const packages = addressPackages(packageId);
-        const names = new Set<string>();
-        for (const record of records) {
-            if (typeof record?.name !== 'string') continue;
-            if (packages.some((pkg) => pkg === undefined || (record?.package_id ?? null) === pkg)) names.add(record.name);
-        }
-        return names;
+        // [#25467 cut 16] The body moved to `protocol-stored-overlay-reads.ts`.
+        return namesWithOwnStoredRow(records, packageId);
     }
 
     /**
@@ -10660,28 +10562,13 @@ export class ObjectStackProtocolImplementation implements
      * read is per call and never kept, exactly as before.
      */
     private async readItemActiveRows(type: string, name: string, cached = false): Promise<StoredOverlayRow[]> {
-        const other = PLURAL_TO_SINGULAR[type] ?? SINGULAR_TO_PLURAL[type];
-        const read = async (): Promise<StoredOverlayRow[]> => {
-            // [#21911] The explicit system opt-in — see findServedOverlayRow.
-            const rows: StoredOverlayRow[] | null | undefined = await this.findEnvironmentRows('sys_metadata', {
-                where: { type: other === undefined ? type : { $in: [type, other] }, name, state: 'active' },
-                context: { isSystem: true },
-            });
-            return rows ?? [];
+        // [#25467 cut 16] The body moved to `protocol-stored-overlay-reads.ts` (see `StoredOverlayReadHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof readItemActiveRows> = {
+            get engine() { return readEngine(); },
+            findEnvironmentRows: (...a) => this.findEnvironmentRows(...a),
         };
-        if (!cached) return read();
-        // ⭐ The epoch is read BEFORE the read and stored with its rows, as the
-        // list read's is (see `readActiveOverlayRows`): a write landing while
-        // this read is in flight leaves the entry dead on arrival.
-        const key: MetaOverlayCacheKey = { type, name };
-        const ttlMs = metaOverlayCacheTtlMs();
-        const epoch = ttlMs > 0 ? readOverlayCacheGeneration(this.engine) : undefined;
-        const now = Date.now();
-        const hit = readMetaOverlayCache(this.engine, key, epoch, ttlMs, now);
-        if (hit !== undefined) return hit as StoredOverlayRow[];
-        const rows = await read();
-        writeMetaOverlayCache(this.engine, key, epoch, rows, ttlMs, now);
-        return rows;
+        return readItemActiveRows.call(host, type, name, cached);
     }
 
     /**
