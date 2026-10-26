@@ -61,6 +61,7 @@ const driver = new InMemoryDriver({
 
 | Export | Kind | Description |
 |:---|:---|:---|
+| `default` | legacy plugin object | Legacy `onEnable` shape — not a kernel `Plugin`; register through `DriverPlugin`. |
 | `InMemoryDriver` | class | Driver instance for direct use. |
 | `InMemoryStrategy` | class | Query execution strategy used by ObjectQL. |
 | `FileSystemPersistenceAdapter` | class | Node-only persistence. |
