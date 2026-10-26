@@ -848,10 +848,12 @@ describe('check-doc-expression-carriage: the real tree, and the posture', () => 
 });
 
 describe('check-doc-expression-carriage: the wiring', () => {
-  it('is actually run by ci.yml — a gate nobody runs cannot be told from one that passes', () => {
-    const ci = fs.readFileSync(path.join(ROOT, '.github/workflows/ci.yml'), 'utf8');
-    expect(ci).toContain(`node ${GATE}`);
-  });
+  // `is actually run by ci.yml` retired with objectstack#25712. The census ran,
+  // report-only, in objectui ci.yml's `docs` job (`Build Docs`), and that file
+  // runs nowhere under the monorepo. The job is row 7 `Build Docs
+  // (@object-ui/site)` of the objectstack#25697 workflow roster, "kept,
+  // follow-up port": no root job runs the census until that port lands, and
+  // the port brings this pin back against its job (`helpers/root-ci.ts`).
 
   it('is named on the page that documents what CI runs', () => {
     const page = fs.readFileSync(path.join(ROOT, 'content/docs/guide/ci-cd-pipeline.md'), 'utf8');

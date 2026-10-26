@@ -316,36 +316,14 @@ describe('select-affected-tests — the live tree', () => {
   });
 });
 
-describe('ci.yml wires the selector fail-open (objectui#12214)', () => {
-  const ci = fs.readFileSync(path.join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
-  const code = ci
-    .split('\n')
-    .filter((l) => !/^\s*#/.test(l))
-    .join('\n');
-
-  it('runs the full battery hourly on main, beside push', () => {
-    expect(code).toMatch(/^ {2}schedule:\n {4}- cron: '[^']+'$/m);
-    expect(code).toMatch(/^ {4}if: github\.event_name == 'push' \|\| github\.event_name == 'schedule'$/m);
-  });
-
-  it('selects only on pull_request and merge_group, and treats every other event as full', () => {
-    const step = code.slice(code.indexOf('- name: Select the tests this change affects'));
-    expect(step).toMatch(/pull_request\) base="\$PR_BASE"/);
-    expect(step).toMatch(/merge_group\) base="\$QUEUE_BASE"/);
-    expect(step).toMatch(/\*\)\n\s+echo 'mode=full' >> "\$GITHUB_OUTPUT"/);
-  });
-
-  it('turns a selector that cannot decide into a full run, not a skip', () => {
-    const step = code.slice(code.indexOf('- name: Select the tests this change affects'));
-    expect(step).toContain('|| status=$?');
-    expect(step).toMatch(/verdict='mode=full'/);
-    // objectui#6221: the status must not be swallowed by a command substitution.
-    expect(step).not.toMatch(/\$\(node scripts\/select-affected-tests\.mjs/);
-  });
-
-  it('keeps the matrix width and the full-suite command for the full battery', () => {
-    const run = code.slice(code.indexOf('- name: Run tests (shard ${{ matrix.shard }}/16)'));
-    expect(run).toContain('pnpm test --shard=${{ matrix.shard }}/16');
-    expect(run).toContain('pnpm exec vitest run --shard=${{ matrix.shard }}/16 "${filters[@]}"');
-  });
-});
+// `ci.yml wires the selector fail-open (objectui#12214)` retired with
+// objectstack#25712. It held objectui ci.yml's `test` job to this selector:
+// the hourly full battery, the `Select the tests this change affects` step's
+// two selecting events and its fail-open verdict, and the full-suite command
+// beside the filtered one. That file runs nowhere under the monorepo. The
+// root `test-ui` job that replaced it runs the whole suite on every event and
+// does not wire the selector (its comment says why: `git diff --name-only`
+// prints `ui/...` paths against a graph spelled relative to the objectui
+// root), as row 7 `Test (shard n/16)` of the objectstack#25697 workflow roster
+// records. Wiring it there brings these pins back against `test-ui`
+// (`helpers/root-ci.ts`).

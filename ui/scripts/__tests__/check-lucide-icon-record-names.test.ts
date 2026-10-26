@@ -20,6 +20,7 @@ import {
   selfTest,
   toRecordKey,
 } from '../check-lucide-icon-record-names.mjs';
+import { rootCi, uiRun } from './helpers/root-ci';
 
 // ⭐ objectui#5935 — THE resolver itself, imported so this file can EXECUTE it
 // rather than only read its text. TypeScript straight out of `packages/` in a
@@ -1014,8 +1015,11 @@ describe('the gate is wired and the local pins it subsumes are gone', () => {
     const entry = Object.entries(scripts).find(([, command]) => command.includes(GATE));
     expect(entry, `no root script runs ${GATE}`).toBeDefined();
 
-    const ci = fs.readFileSync(path.join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
-    expect(ci, `${GATE} is not run by ci.yml — an unrun gate is not a gate`).toContain(`pnpm ${entry![0]}`);
+    // objectstack's root ci.yml is the workflow that runs objectui's gates
+    // (objectstack#25697); the ci.yml under `ui/.github/` runs nowhere (#25712).
+    expect(rootCi(), `${GATE} is not run by ci.yml — an unrun gate is not a gate`).toContain(
+      `run: ${uiRun(entry![0])}`,
+    );
   });
 
   it('the two fully-subsumed local pins are deleted', () => {

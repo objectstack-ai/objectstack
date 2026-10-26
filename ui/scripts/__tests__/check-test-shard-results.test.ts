@@ -28,7 +28,6 @@ import {
   shardContexts,
   unconcludedShards,
 } from '../check-test-shard-results.mjs';
-import { checkNames, readWorkflows } from './workflow-checks.js';
 
 /**
  * objectui#9499 — the aggregator that replaced four required shard contexts.
@@ -56,7 +55,6 @@ import { checkNames, readWorkflows } from './workflow-checks.js';
  */
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const ciYaml = fs.readFileSync(path.join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
 
 /** A jobs-API answer: every shard green, plus the aggregator's own in-flight job. */
 function greenRun(shards = 8) {
@@ -71,22 +69,13 @@ function greenRun(shards = 8) {
 const read = (jobs: unknown[], shards = 8) => evaluate({ jobs, shards, selfJobName: 'Test' });
 
 describe('check-test-shard-results — the shard names it expects', () => {
-  it('spells them the way ci.yml names the matrix job', () => {
-    // Both sides derived, neither retyped: `checkNames` is the same parser
-    // `dependabot-merge-gate.test.ts` partitions the produced check set with,
-    // so this compares the gate's expectation against the workflow itself.
-    const workflow = readWorkflows().find((w) => w.file === 'ci.yml');
-    expect(workflow, 'ci.yml must still be a workflow').toBeTruthy();
-
-    const produced = checkNames(workflow!);
-    const shards = produced.filter((name) => /^Test \(shard \d+\/\d+\)$/.test(name));
-    expect(shards.length, 'ci.yml no longer produces a `Test (shard N/M)` matrix').toBeGreaterThan(1);
-
-    expect(
-      shardContexts(shards.length),
-      "the gate's shard-name spelling has drifted from ci.yml's `name:` template",
-    ).toEqual(shards);
-  });
+  // `spells them the way ci.yml names the matrix job` retired with
+  // objectstack#25712. It held this gate's `Test (shard N/M)` spelling to
+  // objectui ci.yml's `test` matrix, a file nothing runs under the monorepo;
+  // the matrix that runs is the root's `test-ui`, named `Test UI (N/16)`, and
+  // no root job runs this gate. Both wait on row 7 `Test (the shard
+  // aggregate)` of the objectstack#25697 workflow roster ("dropped until
+  // cutover"); its port re-derives the spelling from the root job.
 
   it('refuses a width that is not a positive integer', () => {
     for (const bad of [0, -1, 1.5, Number.NaN]) expect(() => shardContexts(bad)).toThrow(/positive integer/);
@@ -1087,80 +1076,16 @@ describe('check-test-shard-results — the check-run reader is walked on every r
   });
 });
 
-describe('ci.yml wires the gate to its own matrix (#9499)', () => {
-  /** The `test-aggregate` job block, comments stripped. */
-  const aggregate = (() => {
-    const body = ciYaml.slice(ciYaml.search(/^jobs:[ \t]*$/m));
-    const at = body.search(/^ {2}test-aggregate:[ \t]*$/m);
-    expect(at, 'ci.yml must still define a `test-aggregate:` job').toBeGreaterThan(-1);
-    const rest = body.slice(at + 1);
-    const next = rest.search(/^ {2}\S/m);
-    return (next === -1 ? rest : rest.slice(0, next))
-      .split('\n')
-      .filter((line) => !/^\s*#/.test(line))
-      .join('\n');
-  })();
-
-  it('passes the gate the width ci.yml actually runs', () => {
-    // The one number this script does not derive. Pinning it here is what keeps
-    // the matrix and the `--shards` argument from drifting apart silently —
-    // locally and loudly, which is the difference from the repository-settings
-    // surface the shard count used to be welded to.
-    const declared = ciYaml.match(/^ {8}shard: \[([^\]]+)\]/m);
-    expect(declared, 'ci.yml must still declare a `shard:` matrix').toBeTruthy();
-    const width = declared![1].split(',').filter((s) => s.trim()).length;
-
-    const passed = aggregate.match(/check-test-shard-results\.mjs --shards (\d+)/);
-    expect(passed, '`test-aggregate` must still run the shard-results gate').toBeTruthy();
-    expect(Number(passed![1]), 'the --shards argument and ci.yml\'s matrix have drifted apart').toBe(width);
-  });
-
-  it('tells the gate the name of the job it is running in', () => {
-    // The gate refuses any verdict over a job list not containing this name, so
-    // a wrong value here fails closed (exit 2, red) rather than vacuously green.
-    const name = aggregate.match(/^ {4}name: (.+)$/m);
-    expect(name, '`test-aggregate` must declare a `name:`').toBeTruthy();
-    expect(aggregate).toContain(`--job-name '${name![1].trim()}'`);
-  });
-
-  it('needs every job whose result it speaks for, and reports whatever they did', () => {
-    expect(aggregate).toMatch(/^ {4}needs: \[test, test-dist-pins\]$/m);
-    // `always()` — without it a red or skipped shard SKIPS this job, and a
-    // skipped required context counts as SUCCESS in branch protection. No
-    // event guard since objectui#12214: on `push` and `schedule` this is the
-    // full battery's test verdict, read the same way.
-    expect(aggregate).toMatch(/^ {4}if: always\(\)$/m);
-    // `actions: read` is what the API read needs; a `permissions:` block sets
-    // every unlisted scope to `none`, so its absence is a 403 and exit 2.
-    expect(aggregate).toMatch(/^ {6}actions: read$/m);
-  });
-
-  it('keeps the re-read bound inside the job\'s own budget (objectui#10931)', () => {
-    // The worst case is every re-read spent on a shard that never answers. It
-    // must leave at least half of `timeout-minutes` for the checkout, the
-    // reads themselves and the dist-pin step: a job killed by its timeout
-    // reports `cancelled`, which the merge queue reads as a failure.
-    const timeout = aggregate.match(/^ {4}timeout-minutes: (\d+)$/m);
-    expect(timeout, '`test-aggregate` must declare its own `timeout-minutes`').toBeTruthy();
-    expect(REREAD_LIMIT).toBeGreaterThan(0);
-    expect(REREAD_LIMIT * REREAD_WAIT_MS).toBeLessThanOrEqual((Number(timeout![1]) * 60_000) / 2);
-  });
-
-  it('keeps the whole gate inside the job, with room for the steps around it (objectui#13064)', () => {
-    // `GATE_BUDGET_MS` bounds every retry and re-read, and each request is cut
-    // to what is left of it, so it is the gate step's worst case. After it,
-    // the report-only headroom step makes one `fetchRunJobs()` read with no
-    // retry, bounded by `REQUEST_TIMEOUT_MS`. The two minutes are for set-up,
-    // checkout and post steps (the three runs the card records spent about
-    // ten seconds on them, read by hand once and not re-derived here). Past
-    // `timeout-minutes` the job reports `cancelled`, which the merge queue
-    // reads exactly as it reads a red.
-    const timeout = aggregate.match(/^ {4}timeout-minutes: (\d+)$/m);
-    expect(timeout, '`test-aggregate` must declare its own `timeout-minutes`').toBeTruthy();
-    const job = Number(timeout![1]) * 60_000;
-    expect(GATE_BUDGET_MS + REQUEST_TIMEOUT_MS + 2 * 60_000).toBeLessThanOrEqual(job);
-  });
-
+describe('check-test-shard-results — the gate budget it sizes itself against', () => {
+  // The rest of `ci.yml wires the gate to its own matrix (#9499)` retired with
+  // objectstack#25712: the width, job name, `needs:`, `if:`, permissions,
+  // rollup env and `timeout-minutes` it pinned were objectui ci.yml's
+  // `test-aggregate` job, and that file runs nowhere under the monorepo. The
+  // job is row 7 `Test (the shard aggregate)` of the objectstack#25697 workflow
+  // roster, "dropped until cutover", to be ported with objectstack's
+  // shard-attestation pattern. No root job runs this gate until then; the port
+  // brings those pins back against its job (`helpers/root-ci.ts`). The case
+  // below reads only the module's own constants, so it stays.
   it('sizes the two re-read stretches against the recorded staleness and the gate budget (objectui#13064)', () => {
     const sleeps = REREAD_LIMIT * REREAD_WAIT_MS + STALE_REREAD_LIMIT * STALE_REREAD_WAIT_MS;
     // Long enough for the 6 min 22 s run 39286083342 recorded, even starting
@@ -1171,16 +1096,5 @@ describe('ci.yml wires the gate to its own matrix (#9499)', () => {
     expect(STALE_REREAD_WAIT_MS).toBeGreaterThanOrEqual(REREAD_WAIT_MS);
     // A transient retry's whole stretch fits too, with its requests.
     expect(TRANSIENT_RETRY_LIMIT * TRANSIENT_RETRY_WAIT_MS + (TRANSIENT_RETRY_LIMIT + 1) * REQUEST_TIMEOUT_MS).toBeLessThan(GATE_BUDGET_MS);
-  });
-
-  it('hands the gate the matrix rollup under the name it reads (objectui#13064)', () => {
-    // The gate reads it only to decide whether to wait longer. Pinned so that
-    // renaming it in ci.yml cannot silently switch the extension off.
-    expect(aggregate).toMatch(/^ {10}TEST_MATRIX_ROLLUP: \$\{\{ needs\.test\.result \}\}$/m);
-  });
-
-  it('asserts the dist-pin job too, so nothing in the lane is left ungated', () => {
-    expect(aggregate).toContain('needs.test-dist-pins.result');
-    expect(aggregate).toMatch(/!= 'success'/);
   });
 });

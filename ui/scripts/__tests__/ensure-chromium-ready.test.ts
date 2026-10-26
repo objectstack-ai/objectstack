@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { jobBlock, rootCi, UI_JOBS } from './helpers/root-ci';
+
 /**
  * objectui#5304 — `Build & E2E` hung inside `apt-get update` and was cancelled
  * at the 30-minute job ceiling, three times, with a byte-identical last line:
@@ -238,11 +240,19 @@ describe('ensure-chromium-ready.sh — the bound holds where GNU `timeout` is ab
 });
 
 describe('the workflows actually use it', () => {
-  const workflows = ['.github/workflows/ci.yml', '.github/workflows/live-e2e.yml'];
+  /**
+   * The job that provisions Chromium: `build-e2e-ui` in objectstack's root
+   * ci.yml, objectui's `Build & E2E` (objectstack#25697). The ci.yml under
+   * `ui/.github/` runs nowhere (objectstack#25712). objectui's second caller,
+   * `live-e2e.yml`, left this list with it: it is row 17 of the
+   * objectstack#25697 workflow roster, "kept, follow-up port", and comes back
+   * here with that port.
+   */
+  const workflows = [{ file: 'ci.yml `build-e2e-ui`', read: () => jobBlock(rootCi(), UI_JOBS.buildE2e) }];
 
   /**
-   * Whole-line comments removed. Required, not cosmetic: both workflows now
-   * explain the incident in prose and name the very spellings asserted against
+   * Whole-line comments removed. Required, not cosmetic: objectui's workflows
+   * explained the incident in prose and named the very spellings asserted against
    * below, so a scan that counted the prose would report an unbounded apt call
    * that no step makes.
    */
@@ -252,8 +262,8 @@ describe('the workflows actually use it', () => {
       .filter((line) => !/^\s*#/.test(line))
       .join('\n');
 
-  it.each(workflows)('%s calls the script instead of shelling straight to apt', (file) => {
-    const yaml = withoutComments(fs.readFileSync(path.join(repoRoot, file), 'utf8'));
+  it.each(workflows)('$file calls the script instead of shelling straight to apt', ({ file, read }) => {
+    const yaml = withoutComments(read());
 
     expect(
       yaml,

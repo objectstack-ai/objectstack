@@ -2,8 +2,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { parse as parseYaml } from 'yaml';
 
 // Plain-JS CI helpers; their types are INFERRED from the .mjs source by
 // `tsconfig.scripts.json` (`allowJs`), so no `@ts-expect-error` here.
@@ -26,11 +24,10 @@ import { TIMINGS_SCHEMA, datasetWeights, pathKey } from '../test-shard-partition
 /**
  * The per-file timing pipeline (objectui#12208): the reporter that measures on
  * the full battery, the selector that picks which runs feed the dataset, and
- * the generator that writes `scripts/test-shard-timings.json`. Plus the pins
- * that hold `ci.yml` to the names and flags this file spells.
+ * the generator that writes `scripts/test-shard-timings.json`. The pins that
+ * held objectui's `ci.yml` to the names and flags this file spells retired
+ * with it (see the end of this file).
  */
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const ciYaml = fs.readFileSync(path.join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
 
 /** A TestModule-shaped object, as vitest 4 hands one to `onTestRunEnd`. */
 function testModule(file: string, d: Record<string, number>, project = 'unit') {
@@ -184,48 +181,14 @@ describe('the selector', () => {
   });
 });
 
-describe("ci.yml spells what this file spells (objectui#12208)", () => {
-  interface Step { name?: string; run?: unknown; uses?: string; with?: Record<string, unknown>; env?: Record<string, unknown>; if?: string }
-  const workflow = parseYaml(ciYaml) as { jobs: Record<string, { name?: string; steps?: Step[]; strategy?: { matrix?: { shard?: unknown[] } } }> };
-  const test = workflow.jobs.test;
-  const width = (test.strategy?.matrix?.shard ?? []).length;
-
-  it('names the test shards the way the selector looks for them', () => {
-    expect(test.name).toBe(shardJobName(Number.NaN, width).replace('NaN', '${{ matrix.shard }}'));
-  });
-
-  it('runs the full battery with the timing reporter AND the two reporters it would otherwise displace', () => {
-    const run = test.steps?.find((s) => typeof s.run === 'string' && s.run.includes('pnpm test --shard='));
-    expect(run, "the `test` job no longer runs `pnpm test --shard=`").toBeDefined();
-    const full = (run!.run as string).split('\n').find((l) => l.includes('pnpm test --shard=')) ?? '';
-    // A CLI `--reporter` REPLACES vitest's default set, so naming only the
-    // timing reporter would silently drop the log and the per-test
-    // annotations a red leg is read by (the objectui#9177 shape).
-    for (const flag of ['--reporter=default', '--reporter=github-actions', '--reporter=./scripts/test-file-timings.mjs']) {
-      expect(full, `the full-battery invocation lacks ${flag}`).toContain(flag);
-    }
-    expect(run!.env?.[OUT_ENV], `the run step must name ${OUT_ENV}`).toMatch(/test-file-timings\/shard-\$\{\{ matrix\.shard \}\}\.json$/);
-  });
-
-  it('has the weekly refresh select runs at the width the `test` matrix runs (objectui#12384)', () => {
-    // The selector judges a run by the leg NAMES of one width, so a refresh
-    // left on an old width after the matrix moves takes no run, ever -- and
-    // that ends in its NOT MEASURED warning, a green job, and a dataset that
-    // silently stops being refreshed. Held here, locally and loudly, the way
-    // `test-aggregate`'s `--shards` is held in `check-test-shard-results.test.ts`.
-    const refresh = fs.readFileSync(path.join(repoRoot, '.github/workflows/test-shard-timings-refresh.yml'), 'utf8');
-    const selects = [...refresh.matchAll(/test-file-timings\.mjs select --shards (\d+)\b/g)].map((m) => Number(m[1]));
-    expect(selects, 'the refresh must run the selector exactly once').toHaveLength(1);
-    expect(width, 'ci.yml must still declare a `shard:` matrix on `test`').toBeGreaterThan(0);
-    expect(selects[0], "the refresh's --shards and ci.yml's `test` matrix have drifted apart").toBe(width);
-  });
-
-  it('uploads each shard under the artifact name the selector requires, on the full battery only', () => {
-    const upload = test.steps?.find((s) => s.uses?.startsWith('actions/upload-artifact@') && String(s.with?.name).startsWith('test-file-timings-'));
-    expect(upload, "the `test` job no longer uploads its per-file timings").toBeDefined();
-    expect(upload!.with?.name).toBe(artifactName(Number.NaN).replace('NaN', '${{ matrix.shard }}'));
-    expect(upload!.if).toContain("github.event_name == 'push'");
-    expect(upload!.if).toContain("github.event_name == 'schedule'");
-    expect(upload!.with?.['if-no-files-found'], 'a missing reading must not turn a green leg red').toBe('warn');
-  });
-});
+// `ci.yml spells what this file spells (objectui#12208)` retired with
+// objectstack#25712. It held objectui ci.yml's `test` job to this file's names
+// and flags: the `Test (shard N/M)` job name, the timing reporter beside the
+// two it would displace, the per-shard `test-file-timings-N` upload, and the
+// weekly refresh's `--shards`. That ci.yml runs nowhere under the monorepo, and
+// the root `test-ui` job that replaced it carries none of the four on purpose:
+// its comment defers the reporter and the upload to the refresh workflow, row
+// 28 `test-shard-timings-refresh.yml` of the objectstack#25697 workflow roster
+// (→ sub-issue 4, "when ported, restore Test UI's timings reporter and
+// upload"), and row 7 `Test (shard n/16)` records the same wait. The port
+// brings these pins back against `test-ui` (`helpers/root-ci.ts`).
