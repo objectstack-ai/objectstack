@@ -28,6 +28,12 @@
  *  - platform code's `sudo()` and a platform writer's own system context: the writes land,
  *    because neither carries the mark (`sudo()` never sets it).
  *
+ * The second slice closes the inherited path: a hook bound through the hook
+ * binder (app-authored) that declares no `runAs` and runs under a system
+ * context, its in-process `ctx.api.sudo()`, and an action it reaches through
+ * `ctx.api.object(x).execute(y)` are refused the same way. A hook registered in
+ * code, with no metadata binding (platform), keeps writing the four.
+ *
  * The system flow's own refusal is pinned, unchanged, beside the predicate
  * (`flow-system-identity-write-refusal.test.ts`, plugin-security).
  *
@@ -36,7 +42,7 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { ObjectQL, bindHooksToEngine } from '@objectstack/objectql';
+import { ObjectQL, bindHooksToEngine, wrapDeclarativeHook } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { SecurityPlugin } from '@objectstack/plugin-security';
@@ -349,6 +355,155 @@ describe('CONTROL: platform system writes carry no mark and still land', () => {
 
       await engine.insert(object, ROWS[object]('by_system'), { context: { ...PLATFORM } } as never);
       expect(await stored(engine, object, 'by_system')).toMatchObject({ id: 'by_system' });
+    }, 30000);
+  }
+});
+
+/** A host handler writing `verb` on `object` through the api it is handed. */
+function handlerWrite(object: string, verb: (typeof VERBS)[number]) {
+  return async (api: any): Promise<void> => {
+    const repo = api.object(object);
+    if (verb === 'insert') await repo.insert(ROWS[object]('born'));
+    else if (verb === 'update') await repo.update(EDITS[object], { where: { id: 'seeded' } });
+    else await repo.delete({ where: { id: 'seeded' } });
+  };
+}
+
+/** The id of the `qa_note` row a hook fired for, on either face of its input. */
+const noteId = (hctx: any): unknown => hctx.result?.id ?? hctx.input?.data?.id ?? hctx.input?.id;
+
+/** Bind an app-authored hook with no `runAs`, fire it by `trigger`'s write, return the refusal. */
+async function fireInheritingHook(engine: ObjectQL, hook: Record<string, unknown>, trigger: Record<string, unknown>): Promise<any> {
+  bindHooksToEngine(engine, [{ name: 'qa_inherit_hook', object: 'qa_note', events: ['afterInsert'], ...hook } as any], { packageId: 'qa' });
+  return refusal(() => engine.insert('qa_note', { id: 'note_1', title: 'Note' }, { context: { ...trigger } } as never));
+}
+
+describe('an app-authored hook with no runAs, under a platform system write: governed writes to the four objects are refused', () => {
+  for (const surface of ['body', 'handler'] as const) {
+    for (const object of OBJECTS) {
+      for (const verb of VERBS) {
+        it(`${surface}: ${verb} on ${object} is refused and the store does not move`, async () => {
+          const engine = await boot();
+          const before = await seed(engine, object);
+          const write = handlerWrite(object, verb);
+          const hook = surface === 'body'
+            ? { body: { language: 'js', source: bodySource(object, verb), capabilities: ['api.read', 'api.write'] } }
+            : { handler: async (hctx: any) => write(hctx.api) };
+
+          expectRefused(await fireInheritingHook(engine, hook, PLATFORM), object, verb, 'hook');
+
+          expect(await stored(engine, object, 'seeded')).toEqual(before);
+          expect(await stored(engine, object, 'born')).toBe(null);
+          expect(await stored(engine, 'qa_note', 'note_1')).toBe(null);
+        }, 30000);
+      }
+    }
+  }
+
+  it('the same hook still writes every other object', async () => {
+    const engine = await boot();
+    const err = await fireInheritingHook(engine, {
+      body: {
+        language: 'js',
+        source: `await ctx.api.object('qa_note').update({ title: 'stamped' }, { where: { id: 'note_1' } });`,
+        capabilities: ['api.read', 'api.write'],
+      },
+    }, PLATFORM);
+    expect(err).toBe(null);
+    expect(await stored(engine, 'qa_note', 'note_1')).toMatchObject({ title: 'stamped' });
+  }, 30000);
+});
+
+describe("an app-authored hook's in-process ctx.api.sudo(): governed writes to the four objects are refused", () => {
+  for (const object of OBJECTS) {
+    for (const verb of VERBS) {
+      it(`${verb} on ${object} is refused and the store does not move`, async () => {
+        const engine = await boot();
+        const before = await seed(engine, object);
+        const write = handlerWrite(object, verb);
+
+        expectRefused(
+          await fireInheritingHook(engine, { handler: async (hctx: any) => write(hctx.api.sudo()) }, PLAIN),
+          object, verb, 'hook',
+        );
+
+        expect(await stored(engine, object, 'seeded')).toEqual(before);
+        expect(await stored(engine, object, 'born')).toBe(null);
+      }, 30000);
+    }
+  }
+
+  it("inside ctx.api.transaction, and under runAs: 'user', the same", async () => {
+    const engine = await boot();
+    const write = handlerWrite('sys_member', 'insert');
+    expectRefused(
+      await fireInheritingHook(engine, {
+        handler: async (hctx: any) => hctx.api.transaction(async (trx: any) => write(trx.sudo())),
+      }, PLAIN),
+      'sys_member', 'insert', 'hook',
+    );
+    expectRefused(
+      await fireInheritingHook(engine, { runAs: 'user', handler: async (hctx: any) => write(hctx.api.sudo()) }, PLAIN),
+      'sys_member', 'insert', 'hook',
+    );
+    expect(await stored(engine, 'sys_member', 'born')).toBe(null);
+  }, 30000);
+});
+
+describe("an action reached through ctx.api.object(x).execute(y): governed writes to the four objects are refused", () => {
+  for (const object of OBJECTS) {
+    it(`insert on ${object} is refused`, async () => {
+      const engine = await boot();
+      const write = handlerWrite(object, 'insert');
+      engine.registerAction('qa_note', 'qa_reached_action', async (actx: any) => write(actx.api));
+
+      expectRefused(
+        await fireInheritingHook(engine, { handler: async (hctx: any) => hctx.api.object('qa_note').execute('qa_reached_action') }, PLAIN),
+        object, 'insert', 'action',
+      );
+
+      expect(await stored(engine, object, 'born')).toBe(null);
+    }, 30000);
+  }
+});
+
+describe("CONTROL: an app-authored hook with no runAs, under an ordinary user's write, takes the ordinary gates", () => {
+  for (const object of OBJECTS) {
+    it(`${object}: the plain member's insert is refused by the ordinary gates, not by the elevation refusal`, async () => {
+      const engine = await boot();
+      const write = handlerWrite(object, 'insert');
+      const err = await fireInheritingHook(engine, { handler: async (hctx: any) => write(hctx.api) }, PLAIN);
+      expect(err, `the plain member's ${object} insert landed`).not.toBe(null);
+      expect(rootRefusal(err).code).toBe('PERMISSION_DENIED');
+      expect(String(err.message)).not.toMatch(/governed identity writes/);
+      expect(await stored(engine, object, 'born')).toBe(null);
+    }, 30000);
+  }
+});
+
+describe('CONTROL: a hook registered in code, with no metadata binding, still writes the four objects', () => {
+  for (const object of OBJECTS) {
+    it(`${object}: inherited system context, its sudo(), and the declarative wrapper with no binding all land`, async () => {
+      const engine = await boot();
+      const insert = (id: string) => async (api: any) => api.object(object).insert(ROWS[object](id));
+      const byInherit = insert('by_inherit');
+      const bySudo = insert('by_sudo');
+      const byWrapped = insert('by_wrapped');
+      engine.registerHook('afterInsert', async (hctx: any) => {
+        if (noteId(hctx) === 'note_sys') await byInherit(hctx.api);
+        if (noteId(hctx) === 'note_user') await bySudo(hctx.api.sudo());
+      }, { object: 'qa_note', packageId: 'sys:qa' });
+      const meta = { name: 'qa_platform_wrapped', object: 'qa_note', events: ['afterInsert'] } as any;
+      engine.registerHook('afterInsert', wrapDeclarativeHook(meta, async (hctx: any) => {
+        if (noteId(hctx) === 'note_sys') await byWrapped(hctx.api);
+      }), { object: 'qa_note', packageId: 'sys:qa' });
+
+      await engine.insert('qa_note', { id: 'note_sys', title: 'Note' }, { context: { ...PLATFORM } } as never);
+      await engine.insert('qa_note', { id: 'note_user', title: 'Note' }, { context: { ...PLAIN } } as never);
+
+      for (const id of ['by_inherit', 'by_sudo', 'by_wrapped']) {
+        expect(await stored(engine, object, id), `${id} on ${object} did not land`).toMatchObject({ id });
+      }
     }, 30000);
   }
 });

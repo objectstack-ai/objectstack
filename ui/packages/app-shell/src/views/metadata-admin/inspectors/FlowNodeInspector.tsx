@@ -481,7 +481,7 @@ export function FlowNodeInspector({ selection, draft, onPatch, onClearSelection,
   // Screen nodes (and the `user_task` alias) get a live end-user preview.
   const isScreen = node.type === 'screen' || node.type === 'user_task';
 
-  const setField = (field: FlowConfigField, value: unknown) => {
+  const setField = (field: FlowConfigField, value: unknown, alongside?: Readonly<Record<string, unknown>>) => {
     if (!loc) return;
     const path = field.path;
     let stored = value;
@@ -543,6 +543,13 @@ export function FlowNodeInspector({ selection, draft, onPatch, onClearSelection,
       : setAtPath(node, path, stored);
     if (switched && isBareSwitchedOffBlock(nextNode, switched)) {
       nextNode = setAtPath(nextNode, [...switched.block], undefined);
+    }
+    // objectstack#25900 — sibling keys the field writes in the SAME patch (the
+    // recipients editor's `channels` beside an email-field recipient). Two
+    // commits would each start from the node this render closed over, and the
+    // second would drop the first.
+    for (const [key, sibling] of Object.entries(alongside ?? {})) {
+      nextNode = setAtPath(nextNode, [...path.slice(0, -1), key], sibling);
     }
     // Migrate-on-edit: writing the canonical path drops any looser fallback
     // location, so the node never carries a stale duplicate (engine + designer agree).
@@ -805,7 +812,7 @@ export function FlowNodeInspector({ selection, draft, onPatch, onClearSelection,
             <FlowNodeConfigField
               field={effField}
               value={value}
-              onCommit={(v) => setField(field, v)}
+              onCommit={(v, alongside) => setField(field, v, alongside)}
               disabled={readOnly || !!cadence}
               locale={locale}
               context={{ draft, node }}
