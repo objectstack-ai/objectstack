@@ -56,6 +56,22 @@ import {
   Play, Loader2, CheckCircle2, XCircle, Clock, AlertCircle, RefreshCw, Workflow,
 } from 'lucide-react';
 
+/**
+ * A panel's error: the message a call threw, or the client method the panel
+ * needs and this client lacks. The method is kept by name and worded at render,
+ * so the diagnostic reads in the viewer's locale (#25916).
+ */
+type PanelError = { message: string } | { unavailable: string };
+
+function panelErrorText(t: ReturnType<typeof useObjectTranslation>['t'], error: PanelError): string {
+  return 'unavailable' in error
+    ? t('console.developer.flowRuns.clientMethodUnavailable', {
+        defaultValue: '{{method}} is not available on this client',
+        method: error.unavailable,
+      })
+    : error.message;
+}
+
 interface FlowVariable {
   name: string;
   type: string;
@@ -197,13 +213,13 @@ export function FlowRunsPage() {
 
   const [flows, setFlows] = useState<FlowItem[]>([]);
   const [flowsLoading, setFlowsLoading] = useState(true);
-  const [flowsError, setFlowsError] = useState<string | null>(null);
+  const [flowsError, setFlowsError] = useState<PanelError | null>(null);
   const [selectedFlowName, setSelectedFlowName] = useState<string>('');
   const [refreshRuns, setRefreshRuns] = useState(0);
 
   const loadFlows = useCallback(async () => {
     if (!client?.meta?.getItems) {
-      setFlowsError('meta.getItems is not available on this client');
+      setFlowsError({ unavailable: 'meta.getItems' });
       setFlowsLoading(false);
       return;
     }
@@ -233,7 +249,7 @@ export function FlowRunsPage() {
         setSelectedFlowName(normalized[0].name);
       }
     } catch (e: any) {
-      setFlowsError(e?.message ?? String(e));
+      setFlowsError({ message: e?.message ?? String(e) });
     } finally {
       setFlowsLoading(false);
     }
@@ -276,7 +292,7 @@ export function FlowRunsPage() {
         <CardContent>
           {flowsLoading && <Skeleton className="h-9 w-72" />}
           {flowsError && (
-            <p className="text-sm text-red-500 font-mono break-all">{flowsError}</p>
+            <p className="text-sm text-red-500 font-mono break-all">{panelErrorText(t, flowsError)}</p>
           )}
           {!flowsLoading && !flowsError && flows.length === 0 && (
             <p className="text-sm text-muted-foreground">{t('console.developer.flowRuns.noFlows', { defaultValue: 'No flow definitions found.' })}</p>
@@ -335,7 +351,7 @@ function FlowTestRunner({
   const [values, setValues] = useState<Record<string, string>>({});
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<any>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<PanelError | null>(null);
   // The paused screen a test run stopped at — driven to completion by
   // <FlowRunner>, exactly as a `type: 'flow'` action would.
   const [screenFlow, setScreenFlow] = useState<ScreenFlowState | null>(null);
@@ -351,7 +367,7 @@ function FlowTestRunner({
 
   const handleRun = async () => {
     if (!client?.automation?.execute) {
-      setError('automation.execute is not available on this client');
+      setError({ unavailable: 'automation.execute' });
       return;
     }
     setRunning(true);
@@ -376,7 +392,7 @@ function FlowTestRunner({
       }
       onExecuted?.();
     } catch (e: any) {
-      setError(e?.message ?? String(e));
+      setError({ message: e?.message ?? String(e) });
     } finally {
       setRunning(false);
     }
@@ -455,7 +471,7 @@ function FlowTestRunner({
                 </Badge>
               )}
             </div>
-            {error && <p className="text-sm text-red-500 font-mono break-all">{error}</p>}
+            {error && <p className="text-sm text-red-500 font-mono break-all">{panelErrorText(t, error)}</p>}
             {/* A run left paused (the runner was dismissed) can be reopened —
                 the suspension is durable, so the screen is still waiting. */}
             {result?.status === 'paused' && result?.screen && result?.runId && !screenFlow && (
@@ -518,7 +534,7 @@ function FlowRunsPanel({
   const displayLocale = useDisplayLocale();
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<PanelError | null>(null);
 
   const [openRunId, setOpenRunId] = useState<string | null>(null);
   const [runDetail, setRunDetail] = useState<any>(null);
@@ -527,7 +543,7 @@ function FlowRunsPanel({
 
   const loadRuns = useCallback(async () => {
     if (!client?.automation?.listRuns) {
-      setError('automation.listRuns is not available on this client');
+      setError({ unavailable: 'automation.listRuns' });
       setLoading(false);
       return;
     }
@@ -538,7 +554,7 @@ function FlowRunsPanel({
       const items: RunSummary[] = Array.isArray(res) ? res : (res?.items ?? res?.runs ?? []);
       setRuns(items);
     } catch (e: any) {
-      setError(e?.message ?? String(e));
+      setError({ message: e?.message ?? String(e) });
     } finally {
       setLoading(false);
     }
@@ -585,7 +601,7 @@ function FlowRunsPanel({
             </div>
           )}
           {!loading && error && (
-            <p className="text-sm text-red-500 font-mono break-all">{error}</p>
+            <p className="text-sm text-red-500 font-mono break-all">{panelErrorText(t, error)}</p>
           )}
           {!loading && !error && runs.length === 0 && (
             <p className="text-sm text-muted-foreground py-6 text-center">

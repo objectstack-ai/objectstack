@@ -44,6 +44,7 @@
 import * as React from 'react';
 import { ComponentRegistry, isCapabilityEnabled, CAP_REACT_PAGES } from '@object-ui/core';
 import { SchemaRenderer, SchemaRendererProvider, useAdapter, useDataInvalidation } from '@object-ui/react';
+import { useObjectTranslation } from '@object-ui/i18n';
 
 type RuntimeModule = typeof import('@object-ui/react-runtime');
 
@@ -198,15 +199,51 @@ function sameContent(a: unknown, b: unknown, seen: Map<object, object> = new Map
   return true;
 }
 
+/**
+ * #25916 — this renderer's notices read `reactPage.*`, so a non-English page
+ * draws its own language. Each inline `defaultValue` is the `en` pack's value.
+ *
+ * Two sentences carry a `<code>` chip (the page kind, an env flag, a call). The
+ * chip cannot be interpolated as text, and splitting the sentence around it
+ * would fix the word order to English's. So each chip's slot is interpolated
+ * with a private-use mark ({@link CHIP}), and {@link withChips} splits the
+ * translated sentence on those marks: the language decides where the chip
+ * sits. The same technique as `element:metadata_viewer`'s chips.
+ */
+const CHIP = ['\uE000', '\uE001', '\uE002'] as const;
+
+/** The translated `text` with `chips[i]` drawn where `CHIP[i]` was interpolated. */
+function withChips(text: string, chips: React.ReactNode[]): React.ReactNode {
+  return text.split(/([\uE000-\uE002])/u).map((part, i) => {
+    const at = (CHIP as readonly string[]).indexOf(part);
+    return at === -1 ? part : <React.Fragment key={i}>{chips[at]}</React.Fragment>;
+  });
+}
+
+const KIND_CHIP = <code key="kind">kind:&apos;react&apos;</code>;
+
 function CapabilityDisabledNotice(): React.ReactElement {
+  const { t } = useObjectTranslation();
   return (
     <div className="m-4 rounded-md border border-amber-400/40 bg-amber-50 p-4 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-      <div className="font-semibold">React pages are disabled on this deployment</div>
+      <div className="font-semibold">
+        {t('reactPage.disabledTitle', { defaultValue: 'React pages are disabled on this deployment' })}
+      </div>
       <p className="mt-1 leading-relaxed">
-        <code>kind:&apos;react&apos;</code> pages execute author JavaScript directly in the
-        application, so they are off unless the deployment turns them on. An operator whose
-        page authors are trusted sets <code>OS_PAGE_REACT_ENABLED=true</code> on the server
-        (a host embedding the renderer calls <code>enableCapability(&apos;react-pages&apos;)</code>).
+        {withChips(
+          t('reactPage.disabledBody', {
+            defaultValue:
+              '{{kind}} pages execute author JavaScript directly in the application, so they are off unless the deployment turns them on. An operator whose page authors are trusted sets {{flag}} on the server (a host embedding the renderer calls {{call}}).',
+            kind: CHIP[0],
+            flag: CHIP[1],
+            call: CHIP[2],
+          }),
+          [
+            KIND_CHIP,
+            <code key="flag">OS_PAGE_REACT_ENABLED=true</code>,
+            <code key="call">enableCapability(&apos;react-pages&apos;)</code>,
+          ],
+        )}
       </p>
     </div>
   );
@@ -217,6 +254,7 @@ export const ReactKindPage: React.FC<{ schema: any }> = ({ schema }) => {
   // The live data source for the injected data blocks (and the page's own
   // `useAdapter()` calls). Same object the rest of the app renders against.
   const adapter = useAdapter();
+  const { t } = useObjectTranslation();
   // Gate: default-closed, on only where the host enabled it. Read here so the hooks
   // below stay unconditional; the disabled notice is returned after them, and
   // the effect never loads the gated runtime when disabled.
@@ -279,7 +317,9 @@ export const ReactKindPage: React.FC<{ schema: any }> = ({ schema }) => {
   if (loadError) {
     return (
       <div className="m-4 rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
-        <div className="font-semibold">Failed to load the react runtime</div>
+        <div className="font-semibold">
+          {t('reactPage.loadFailed', { defaultValue: 'Failed to load the react runtime' })}
+        </div>
         <pre className="mt-1 whitespace-pre-wrap">{String(loadError)}</pre>
       </div>
     );
@@ -287,12 +327,23 @@ export const ReactKindPage: React.FC<{ schema: any }> = ({ schema }) => {
   if (!source.trim()) {
     return (
       <div className="m-4 rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
-        A <code>kind:&apos;react&apos;</code> page requires a non-empty <code>source</code>.
+        {withChips(
+          t('reactPage.sourceRequired', {
+            defaultValue: 'A {{kind}} page requires a non-empty {{source}}.',
+            kind: CHIP[0],
+            source: CHIP[1],
+          }),
+          [KIND_CHIP, <code key="source">source</code>],
+        )}
       </div>
     );
   }
   if (!runtime) {
-    return <div className="m-4 text-sm text-muted-foreground">Loading react runtime…</div>;
+    return (
+      <div className="m-4 text-sm text-muted-foreground">
+        {t('reactPage.loading', { defaultValue: 'Loading react runtime…' })}
+      </div>
+    );
   }
 
   const { ReactRunner } = runtime;
@@ -303,7 +354,7 @@ export const ReactKindPage: React.FC<{ schema: any }> = ({ schema }) => {
         scope={scope}
         fallback={(error) => (
           <div className="m-4 rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
-            <div className="font-semibold">React page error</div>
+            <div className="font-semibold">{t('reactPage.error', { defaultValue: 'React page error' })}</div>
             <pre className="mt-1 whitespace-pre-wrap">{String(error)}</pre>
           </div>
         )}

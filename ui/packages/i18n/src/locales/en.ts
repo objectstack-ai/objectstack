@@ -673,6 +673,10 @@ const en = {
     selected_other: '{{count}} selected',
     edit: 'Edit',
     delete: 'Delete',
+    // The inline-edit row buttons and the hover open affordance (#25916).
+    openRecord: 'Open record',
+    cancelChanges: 'Cancel changes',
+    saveRow: 'Save row',
   },
   grid: {
     actions: 'Actions',
@@ -2932,6 +2936,8 @@ const en = {
         stepInput: 'Input',
         stepOutput: 'Output',
         stepError: 'Error',
+        // A client that lacks the method a panel calls (#25916).
+        clientMethodUnavailable: '{{method}} is not available on this client',
       },
       // objectui#13460 — the Integrations page's "Connect an AI agent" card (`AgentConnectSection`).
       agentConnect: {
@@ -5532,6 +5538,16 @@ const en = {
       unknownType: 'Unknown metadata view type. Expected {{a}}, {{b}} or {{c}}.',
       unknownTypeNamed: 'Unknown metadata view type “{{type}}”. Expected {{a}}, {{b}} or {{c}}.',
     },
+  },
+  // `kind:'react'` page renderer's notices (`react-page.tsx`, #25916). A
+  // `{{slot}}` is a `<code>` chip the renderer draws where the language put it.
+  reactPage: {
+    disabledTitle: 'React pages are disabled on this deployment',
+    disabledBody: '{{kind}} pages execute author JavaScript directly in the application, so they are off unless the deployment turns them on. An operator whose page authors are trusted sets {{flag}} on the server (a host embedding the renderer calls {{call}}).',
+    loadFailed: 'Failed to load the react runtime',
+    sourceRequired: 'A {{kind}} page requires a non-empty {{source}}.',
+    loading: 'Loading react runtime…',
+    error: 'React page error',
   },
 } as const;
 

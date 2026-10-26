@@ -2167,15 +2167,11 @@ those cards and in git history.
   `scripts/ci/spec-shape-retirements.json`, beside the objectui card that removes the downstream
   use. The gate reads a diagnostic matching a registered retirement as known rather than new;
   that file's own header states the entry grammar and when an entry is deleted.
-- **What stays here.** `turbo.json` still names
-  `node_modules/@objectstack/spec/.spec-main-shape-gate.json` in `globalDependencies`. objectstack's
-  injection writes that marker — the name is kept on purpose — into every copy of the spec it
-  replaces, so a tree holding an injected spec never shares a turbo hash with an installed one. That
-  matters when somebody reproduces the gate locally in a linked worktree, whose `.turbo/cache` is
-  shared with its siblings: a forced run skips cache reads but still writes, and without the marker
-  an ordinary `pnpm type-check` in a sibling could replay a verdict taken against the injected spec
-  ([#12114](https://github.com/objectstack-ai/objectui/issues/12114)). An installed tree carries no
-  marker, and an absent global dependency hashes as nothing.
+- **What stays here.** Nothing. `turbo.json` used to name
+  `node_modules/@objectstack/spec/.spec-main-shape-gate.json` in `globalDependencies`, a marker the
+  objectstack injection wrote into every copy of the spec it replaced. Since this tree became the
+  `ui/` workspace of objectstack the spec is a workspace package, nothing writes the marker, and
+  [objectstack#25920](https://github.com/objectstack-ai/objectstack/issues/25920) removed the entry.
 
 
 ## Release Workflows

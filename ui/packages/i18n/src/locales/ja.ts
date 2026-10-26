@@ -444,6 +444,10 @@ const ja = {
     selected_other: "{{count}} 件選択中",
     edit: "編集",
     delete: "削除",
+    // The inline-edit row buttons and the hover open affordance (#25916).
+    openRecord: "レコードを開く",
+    cancelChanges: "変更を取り消す",
+    saveRow: "行を保存",
   },
   grid: {
     bulkSelected: "{{count}} 件を選択中",
@@ -2411,6 +2415,8 @@ const ja = {
         stepInput: '入力',
         stepOutput: '出力',
         stepError: 'エラー',
+        // A client that lacks the method a panel calls (#25916).
+        clientMethodUnavailable: "このクライアントでは {{method}} を利用できません",
       },
       // objectui#13460 — the Integrations page's "Connect an AI agent" card (`AgentConnectSection`).
       agentConnect: {
@@ -4730,6 +4736,14 @@ const ja = {
       unknownType: "不明なメタデータビューの種類です。{{a}}、{{b}}、{{c}} のいずれかを指定してください。",
       unknownTypeNamed: "不明なメタデータビューの種類「{{type}}」です。{{a}}、{{b}}、{{c}} のいずれかを指定してください。",
     },
+  },
+  reactPage: {
+    disabledTitle: "このデプロイでは React ページが無効です",
+    disabledBody: "{{kind}} ページは作成者の JavaScript をアプリケーション内で直接実行するため、デプロイで有効にしない限りオフになっています。ページ作成者を信頼できるオペレーターは、サーバーで {{flag}} を設定します（レンダラーを埋め込むホストは {{call}} を呼び出します）。",
+    loadFailed: "React ランタイムを読み込めませんでした",
+    sourceRequired: "{{kind}} ページには空でない {{source}} が必要です。",
+    loading: "React ランタイムを読み込んでいます…",
+    error: "React ページのエラー",
   },
 };
 

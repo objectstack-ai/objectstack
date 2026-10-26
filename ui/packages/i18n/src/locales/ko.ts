@@ -444,6 +444,10 @@ const ko = {
     selected_other: "{{count}}개 선택됨",
     edit: "편집",
     delete: "삭제",
+    // The inline-edit row buttons and the hover open affordance (#25916).
+    openRecord: "레코드 열기",
+    cancelChanges: "변경 취소",
+    saveRow: "행 저장",
   },
   grid: {
     bulkSelected: "{{count}}건 선택됨",
@@ -2409,6 +2413,8 @@ const ko = {
         stepInput: '입력',
         stepOutput: '출력',
         stepError: '오류',
+        // A client that lacks the method a panel calls (#25916).
+        clientMethodUnavailable: "이 클라이언트에서는 {{method}} 기능을 사용할 수 없습니다",
       },
       // objectui#13460 — the Integrations page's "Connect an AI agent" card (`AgentConnectSection`).
       agentConnect: {
@@ -4727,6 +4733,14 @@ const ko = {
       unknownType: "알 수 없는 메타데이터 보기 유형입니다. {{a}}, {{b}} 또는 {{c}}이어야 합니다.",
       unknownTypeNamed: "알 수 없는 메타데이터 보기 유형 “{{type}}”입니다. {{a}}, {{b}} 또는 {{c}}이어야 합니다.",
     },
+  },
+  reactPage: {
+    disabledTitle: "이 배포에서는 React 페이지가 비활성화되어 있습니다",
+    disabledBody: "{{kind}} 페이지는 작성자의 JavaScript를 애플리케이션에서 직접 실행하므로 배포에서 켜지 않는 한 꺼져 있습니다. 페이지 작성자를 신뢰하는 운영자는 서버에 {{flag}} 설정을 적용합니다(렌더러를 임베드하는 호스트는 {{call}} 호출).",
+    loadFailed: "React 런타임을 불러오지 못했습니다",
+    sourceRequired: "{{kind}} 페이지에는 비어 있지 않은 {{source}} 값이 필요합니다.",
+    loading: "React 런타임을 불러오는 중…",
+    error: "React 페이지 오류",
   },
 };
 

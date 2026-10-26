@@ -474,6 +474,10 @@ const ar = {
     selected_other: "تم تحديد {{count}}",
     edit: "تعديل",
     delete: "حذف",
+    // The inline-edit row buttons and the hover open affordance (#25916).
+    openRecord: "فتح السجل",
+    cancelChanges: "إلغاء التغييرات",
+    saveRow: "حفظ الصف",
   },
   grid: {
     bulkSelected: "تم تحديد {{count}}",
@@ -2611,6 +2615,8 @@ const ar = {
         stepInput: 'الإدخال',
         stepOutput: 'الإخراج',
         stepError: 'خطأ',
+        // A client that lacks the method a panel calls (#25916).
+        clientMethodUnavailable: "{{method}} غير متاح في هذا العميل",
       },
       // objectui#13460 — the Integrations page's "Connect an AI agent" card (`AgentConnectSection`).
       agentConnect: {
@@ -5183,6 +5189,14 @@ const ar = {
       unknownType: "نوع عرض بيانات وصفية غير معروف. المتوقع {{a}} أو {{b}} أو {{c}}.",
       unknownTypeNamed: "نوع عرض بيانات وصفية غير معروف «{{type}}». المتوقع {{a}} أو {{b}} أو {{c}}.",
     },
+  },
+  reactPage: {
+    disabledTitle: "صفحات React معطلة في هذا النشر",
+    disabledBody: "تنفذ صفحات {{kind}} شيفرة JavaScript الخاصة بالمؤلف مباشرة داخل التطبيق، لذا تكون معطلة ما لم يفعّلها النشر. يضبط المشغّل الذي يثق بمؤلفي صفحاته {{flag}} على الخادم (ويستدعي المضيف الذي يضمّن العارض {{call}}).",
+    loadFailed: "تعذّر تحميل بيئة تشغيل React",
+    sourceRequired: "تتطلب صفحة {{kind}} قيمة {{source}} غير فارغة.",
+    loading: "جارٍ تحميل بيئة تشغيل React…",
+    error: "خطأ في صفحة React",
   },
 };
 
