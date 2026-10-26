@@ -165,11 +165,32 @@ function runVitestList(...flags: string[]): ChildRun {
   }
 }
 
+/** How much of a child's output a failed status assertion carries. */
+const REPORTED_OUTPUT_CHARS = 2_000;
+
+/**
+ * The message every status assertion here carries: the child's exit status and
+ * the head of what it printed (#26047).
+ *
+ * Each case asserts a child's exit code, so any death of the child reads as
+ * `expected 1 to be +0` and nothing else. Three merge-queue builds failed the
+ * no-override control with exactly that line and no way to tell a refusal, a
+ * config-load crash and a timeout apart. The head is kept because a config-load
+ * failure prints its cause first (`failed to load config from …` and the
+ * thrown error), and the length is bounded so a listing of the whole package
+ * cannot flood the report.
+ */
+function describeRun(run: ChildRun): string {
+  const head = run.output.slice(0, REPORTED_OUTPUT_CHARS);
+  const cut = run.output.length > head.length ? `\n… (${run.output.length - head.length} more chars)` : '';
+  return `vitest list exited ${run.status}; its output began:\n${head}${cut}`;
+}
+
 describe('#18788 a CLI timeout override that cannot reach a project is refused, not passed', () => {
   it('refuses `--hookTimeout`, naming the package and a spelling that does bite', () => {
     const run = runVitestList('--hookTimeout=1');
 
-    expect(run.status).not.toBe(0);
+    expect(run.status, describeRun(run)).not.toBe(0);
     expect(run.output).toContain(REFUSAL);
     expect(run.output).toContain('--hookTimeout');
     // The #17978 finding against the sibling preflight, held here too: a shared
@@ -185,7 +206,7 @@ describe('#18788 a CLI timeout override that cannot reach a project is refused, 
   it('refuses `--teardownTimeout` — the other knob the same allowlist drops', () => {
     const run = runVitestList('--teardownTimeout=1');
 
-    expect(run.status).not.toBe(0);
+    expect(run.status, describeRun(run)).not.toBe(0);
     expect(run.output).toContain(REFUSAL);
     expect(run.output).toContain('--teardownTimeout');
   }, VITEST_LIST_BUDGET_MS);
@@ -195,7 +216,7 @@ describe('#18788 a CLI timeout override that cannot reach a project is refused, 
     // everything, which would be a worse defect than the one being fixed.
     const run = runVitestList();
 
-    expect(run.status).toBe(0);
+    expect(run.status, describeRun(run)).toBe(0);
     expect(run.output).not.toContain(REFUSAL);
     // It really listed something, so the zero is a reading and not an empty run.
     expect(run.output).toMatch(/\.test\.ts/);
@@ -209,7 +230,7 @@ describe('#18788 a CLI timeout override that cannot reach a project is refused, 
     // question.
     const run = runVitestList('--testTimeout=1');
 
-    expect(run.status).toBe(0);
+    expect(run.status, describeRun(run)).toBe(0);
     expect(run.output).not.toContain(REFUSAL);
   }, VITEST_LIST_BUDGET_MS);
 });
