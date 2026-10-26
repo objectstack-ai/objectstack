@@ -6223,7 +6223,7 @@ export function createUnknownHostnameGuardPlugin(
     <div class="host">${safeHost}</div>
     <p class="muted" style="margin-top:24px">
       If you own this domain, bind it to an environment in the
-      <a href="https://cloud.objectos.ai/">ObjectStack Cloud console</a>.
+      <a href="https://cloud.objectos.ai/">ObjectOS Cloud console</a>.
     </p>
   </main>
 </body>
