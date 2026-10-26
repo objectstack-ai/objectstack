@@ -5233,7 +5233,7 @@
       "title": "A script action whose server-side hook refuses the write with a user-facing sentence answers a 4xx, the console shows exactly one error toast carrying that sentence, and the record is left unchanged",
       "since": "v17.5",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -5249,7 +5249,7 @@
           "a browser driver that can read the network log and the DOM of one page (Playwright with launchOptions.executablePath=/opt/pw-browsers/chromium on these containers — RUNNER environment facts)"
         ],
         "knownGaps": [
-          "the console half is pinned in the objectui repo, not here — objectui packages/app-shell/src/utils/__tests__/consoleServerAction.errorToast.test.ts characterizes the console failure chain (a 500 or a 400 carrying the sentence yields exactly one error toast with that sentence) with fetch and the toast sink as doubles. It is not runnable from this checkout and it stubs the transport, so it is not this item's evidence; this item exists to observe the whole chain live, on a stock app.",
+          "the console half has a unit pin in this checkout — ui/packages/app-shell/src/utils/__tests__/consoleServerAction.errorToast.test.ts characterizes the console failure chain (a 500 or a 400 carrying the sentence yields exactly one error toast with that sentence) with fetch and the toast sink as doubles. It runs from ui/ with that package's vitest (cwd ui/: pnpm exec vitest run packages/app-shell/src/utils/__tests__/consoleServerAction.errorToast.test.ts), but it stubs the transport and the toast sink, so it is not this item's evidence; this item exists to observe the whole chain live, on a stock app.",
           "the toaster auto-dismisses every toast after 4s (objectui ConsoleToaster toastOptions.duration 4000) and closes it with an exit animation that marks the node data-removed=\"true\" first — count inside that window, and exclude removed nodes, or a correct single toast reads as zero."
         ]
       },
@@ -5334,6 +5334,12 @@
           "revision": 4,
           "date": "2026-10-26",
           "change": "fixtures.requires[3] and steps[0] named the retired pin flow (a console built at .objectui-sha by pnpm objectui:build); the console now builds from this checkout's ui/ tree with pnpm console:build (root package.json; RUNNER.md as of PR #26052). Carried for #26035, which left this file's retired pin wording to this card. No clause changed",
+          "ref": "#25846"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-26",
+          "change": "fixtures.knownGaps[0] said the console-half pin lives in the objectui repo and is not runnable from this checkout; it is at ui/packages/app-shell/src/utils/__tests__/consoleServerAction.errorToast.test.ts and runs from ui/ with that package's vitest, so the note says where it is and how it runs, and still says it stubs fetch and the toast sink and is not this item's evidence (devx seat 2 REVISE on #26125). Re-read on main cc378e93. No clause changed",
           "ref": "#25846"
         }
       ]
