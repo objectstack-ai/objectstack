@@ -5,6 +5,7 @@
   "description": "SQL Driver for ObjectStack - Supports PostgreSQL, MySQL, SQLite via Knex",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

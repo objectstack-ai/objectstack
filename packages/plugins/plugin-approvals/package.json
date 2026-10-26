@@ -5,6 +5,7 @@
   "description": "Multi-step approval engine for ObjectStack — sys_approval_process + sys_approval_request + sys_approval_action + IApprovalService.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

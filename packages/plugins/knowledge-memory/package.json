@@ -5,6 +5,7 @@
   "description": "In-memory knowledge adapter for ObjectStack (dev / test reference implementation).",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

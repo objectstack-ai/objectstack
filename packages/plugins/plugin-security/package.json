@@ -5,6 +5,7 @@
   "description": "Security Plugin for ObjectStack — RBAC, RLS, and Field-Level Security Runtime",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

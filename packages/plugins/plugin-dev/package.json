@@ -5,6 +5,7 @@
   "description": "Development Assembly Plugin for ObjectStack — wires the real platform stack for zero-config local development",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

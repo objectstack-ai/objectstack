@@ -5,6 +5,7 @@
   "description": "ObjectStack Account — the end-user account/self-service console app, packaged as its own ObjectStack app package (ADR-0048: one app per package).",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

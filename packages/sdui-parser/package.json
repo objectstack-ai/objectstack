@@ -5,6 +5,7 @@
   "description": "ObjectStack constrained JSX-source → SDUI SchemaNode tree compiler (parse, never execute). Isomorphic, zero React. ADR-0080.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

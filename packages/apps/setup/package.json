@@ -5,6 +5,7 @@
   "description": "ObjectStack Setup — the platform administration app, packaged as its own ObjectStack app package (ADR-0048: one app per package).",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

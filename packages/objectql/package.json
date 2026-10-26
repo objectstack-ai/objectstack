@@ -5,6 +5,7 @@
   "description": "Isomorphic ObjectQL Engine for ObjectStack",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

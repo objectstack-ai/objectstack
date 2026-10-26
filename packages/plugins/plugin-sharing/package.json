@@ -5,6 +5,7 @@
   "description": "Record-level sharing for ObjectStack — sys_record_share + middleware that enforces sharingModel + ISharingService.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

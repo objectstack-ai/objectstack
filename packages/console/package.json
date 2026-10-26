@@ -20,6 +20,7 @@
     "README.md",
     "CHANGELOG.md"
   ],
+  "sideEffects": false,
   "exports": {
     "./package.json": "./package.json"
   },

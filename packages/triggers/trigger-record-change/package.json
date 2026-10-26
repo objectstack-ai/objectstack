@@ -5,6 +5,7 @@
   "description": "Record-change flow trigger for ObjectStack — auto-launches flows on object insert/update/delete via ObjectQL lifecycle hooks (ADR-0018)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

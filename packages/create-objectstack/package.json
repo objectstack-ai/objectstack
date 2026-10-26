@@ -5,6 +5,9 @@
   "bin": {
     "create-objectstack": "./bin/create-objectstack.js"
   },
+  "sideEffects": [
+    "./dist/index.js"
+  ],
   "exports": {
     "./created-summary": {
       "types": "./dist/created-summary.d.ts",

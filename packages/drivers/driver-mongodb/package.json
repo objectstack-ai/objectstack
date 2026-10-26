@@ -5,6 +5,7 @@
   "description": "MongoDB Driver for ObjectStack - Native document database driver via official mongodb client",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

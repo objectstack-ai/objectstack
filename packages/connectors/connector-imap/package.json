@@ -5,6 +5,7 @@
   "description": "IMAP connector for ObjectStack — a read-only IMAP4rev1 session (EXAMINE, UID FETCH with BODY.PEEK) and the per-user-shaped mail account and credential abstraction the mailbox sync connects through.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

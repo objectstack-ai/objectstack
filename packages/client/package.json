@@ -5,6 +5,7 @@
   "description": "Official Client SDK for ObjectStack Protocol",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
