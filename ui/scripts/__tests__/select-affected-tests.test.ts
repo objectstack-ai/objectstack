@@ -6,16 +6,20 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import {
+  changedFiles,
+  changedOutsideTree,
   closureSummaries,
   dedupeFilters,
   listWorkspacePackages,
   moduleSpecifiers,
+  outsideTreeReasons,
   packageClosures,
   parseWorkspaceGlobs,
   readHeavyProject,
   selectAffectedTests,
   trackedFiles,
 } from '../select-affected-tests.mjs';
+import { workspaceRoot } from '../workspace-root.mjs';
 
 /**
  * objectui#12214 — the affected-test selector behind the two-speed `Test` lane.
@@ -222,6 +226,102 @@ describe('select-affected-tests — the heavy DOM setup', () => {
   });
 });
 
+/**
+ * objectstack#25868 — the tree nested as `ui/` of a monorepo, the layout the
+ * root `ci.yml` runs it in. The tree's own files are the fixture above; the
+ * parent holds the one workspace file, the lockfile and its own packages:
+ * `@os/base` <- `@os/mid` (runtime) <- the tree's `@fx/a` (dev), `@os/mid`
+ * dev-depends on `@os/tooling`, and `@os/other` is unrelated.
+ */
+function nestedWorkspace() {
+  const tree = workspace();
+  const files: Record<string, string> = {
+    'pnpm-workspace.yaml': "packages:\n  - 'packages/*'\n  - ui\n  - 'ui/packages/*'\n",
+    'package.json': manifest('monorepo'),
+    'pnpm-lock.yaml': 'lockfileVersion: 9.0\n',
+    'README.md': '# monorepo\n',
+    'packages/base/package.json': manifest('@os/base'),
+    'packages/base/src/index.ts': 'export const base = 1;\n',
+    'packages/mid/package.json': JSON.stringify({
+      name: '@os/mid',
+      version: '0.0.0',
+      dependencies: { '@os/base': 'workspace:*' },
+      devDependencies: { '@os/tooling': 'workspace:*' },
+    }),
+    'packages/tooling/package.json': manifest('@os/tooling'),
+    'packages/tooling/src/index.ts': 'export const t = 1;\n',
+    'packages/other/package.json': manifest('@os/other'),
+    'packages/other/src/index.ts': 'export const o = 1;\n',
+  };
+  for (const rel of tree.tracked) {
+    if (rel === 'pnpm-workspace.yaml') continue; // a nested workspace root is ignored; the parent's governs
+    const text = fs.readFileSync(path.join(tree.root, rel), 'utf8');
+    files[`ui/${rel}`] =
+      rel === 'packages/a/package.json'
+        ? JSON.stringify({ name: '@fx/a', version: '0.0.0', devDependencies: { '@os/mid': 'workspace:*' } })
+        : text;
+  }
+  const { root } = fixture(files);
+  const ui = path.join(root, 'ui');
+  return { monorepo: root, root: ui, tracked: tree.tracked.filter((f) => f !== 'pnpm-workspace.yaml') };
+}
+
+describe('select-affected-tests — nested as ui/ of a monorepo (objectstack#25868)', () => {
+  it('a change outside the tree that every test installs or builds from is a full run', () => {
+    const { root } = nestedWorkspace();
+    const reasons = (outside: string[]) => outsideTreeReasons({ root, outside });
+    expect(reasons(['pnpm-lock.yaml'])[0]).toMatch(/^pnpm-lock\.yaml: a workspace-root file that is not documentation/);
+    expect(reasons(['package.json'])).toHaveLength(1);
+    expect(reasons(['patches/x@1.0.0.patch'])[0]).toMatch(/a dependency patch/);
+    // A package the tree depends on, and what that package depends on at run time.
+    expect(reasons(['packages/mid/src/index.ts'])[0]).toMatch(/@os\/mid changed, .* \(through @fx\/a\)$/);
+    expect(reasons(['packages/base/src/index.ts'])[0]).toMatch(/@os\/base changed/);
+  });
+
+  it('a change outside the tree that no test runs through is not', () => {
+    const { root } = nestedWorkspace();
+    // An outer package's devDependency is its own test tooling, not its built output.
+    for (const rel of [
+      'packages/tooling/src/index.ts',
+      'packages/other/src/index.ts',
+      'README.md',
+      'docs/guide.md',
+      '.github/workflows/ci.yml',
+      'scripts/gate.mjs',
+    ]) {
+      expect(outsideTreeReasons({ root, outside: [rel] }), rel).toEqual([]);
+    }
+  });
+
+  it('reads the tree as before when nothing outside it changed, and turns full when the lockfile did', () => {
+    const { root, tracked } = nestedWorkspace();
+    expect(listWorkspacePackages(root).map((p) => p.dir)).toContain('packages/a');
+    const v = affected(root, tracked, ['packages/c/src/index.ts']);
+    expect(v.affectedPackages).toEqual(['@fx/c']);
+    const outside = ['docs/guide.md', 'packages/other/src/index.ts'];
+    expect(selectAffectedTests({ root, tracked, changed: ['packages/c/src/index.ts'], outside }).mode).toBe('affected');
+    const verdict = selectAffectedTests({ root, tracked, changed: ['packages/c/src/index.ts'], outside: ['pnpm-lock.yaml'] });
+    expect(verdict.mode).toBe('full');
+  });
+
+  it('git hands the tree its own changes and the monorepo its own, both through --relative', () => {
+    const { monorepo, root } = nestedWorkspace();
+    const git = (...args: string[]) =>
+      execFileSync('git', ['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', ...args], {
+        cwd: monorepo,
+        encoding: 'utf8',
+      });
+    git('init', '-q');
+    git('add', '-A');
+    git('commit', '-q', '-m', 'base');
+    fs.appendFileSync(path.join(root, 'packages/c/src/index.ts'), 'export const d = 2;\n');
+    fs.appendFileSync(path.join(monorepo, 'pnpm-lock.yaml'), '# moved\n');
+    git('commit', '-q', '-am', 'change');
+    expect(changedFiles(root, 'HEAD~1')).toEqual(['packages/c/src/index.ts']);
+    expect(changedOutsideTree(root, 'HEAD~1')).toEqual(['pnpm-lock.yaml']);
+  });
+});
+
 describe('select-affected-tests — readers', () => {
   it('drops a filter another one already matches, as the vitest invocation guard requires (objectui#7814)', () => {
     expect(dedupeFilters(['packages/c/src/plain.test.tsx', 'packages/c/src/plain.test.ts', 'packages/c/'])).toEqual([
@@ -316,36 +416,44 @@ describe('select-affected-tests — the live tree', () => {
   });
 });
 
-describe('ci.yml wires the selector fail-open (objectui#12214)', () => {
-  const ci = fs.readFileSync(path.join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
+describe("the root ci.yml's Test UI job wires the selector fail-open (objectui#12214, objectstack#25868)", () => {
+  // The workflow that runs this tree's suite is the monorepo root's; the
+  // objectui copy under `ui/.github/` runs nowhere.
+  const ci = fs.readFileSync(path.join(workspaceRoot(repoRoot), '.github/workflows/ci.yml'), 'utf8');
   const code = ci
     .split('\n')
     .filter((l) => !/^\s*#/.test(l))
     .join('\n');
+  const job = code.slice(code.indexOf('\n  test-ui:\n'), code.indexOf('\n  lint-ui:\n'));
 
   it('runs the full battery hourly on main, beside push', () => {
     expect(code).toMatch(/^ {2}schedule:\n {4}- cron: '[^']+'$/m);
-    expect(code).toMatch(/^ {4}if: github\.event_name == 'push' \|\| github\.event_name == 'schedule'$/m);
+    expect(job).not.toBe('');
   });
 
   it('selects only on pull_request and merge_group, and treats every other event as full', () => {
-    const step = code.slice(code.indexOf('- name: Select the tests this change affects'));
-    expect(step).toMatch(/pull_request\) base="\$PR_BASE"/);
+    const step = job.slice(job.indexOf('- name: Select the tests this change affects'));
+    expect(step).toMatch(/pull_request\)\n\s+if \[ -n "\$PR_BASE_REF" \]; then\n\s+base=\$\(git merge-base "refs\/remotes\/origin\/\$PR_BASE_REF" HEAD\) \|\| base=''/);
     expect(step).toMatch(/merge_group\) base="\$QUEUE_BASE"/);
     expect(step).toMatch(/\*\)\n\s+echo 'mode=full' >> "\$GITHUB_OUTPUT"/);
   });
 
   it('turns a selector that cannot decide into a full run, not a skip', () => {
-    const step = code.slice(code.indexOf('- name: Select the tests this change affects'));
+    const step = job.slice(job.indexOf('- name: Select the tests this change affects'));
     expect(step).toContain('|| status=$?');
     expect(step).toMatch(/verdict='mode=full'/);
     // objectui#6221: the status must not be swallowed by a command substitution.
-    expect(step).not.toMatch(/\$\(node scripts\/select-affected-tests\.mjs/);
+    expect(step).not.toMatch(/\$\(node ui\/scripts\/select-affected-tests\.mjs/);
+  });
+
+  it('checks out the history the diff base needs', () => {
+    expect(job).toMatch(/uses: actions\/checkout@\S+\n\s+with:\n\s+fetch-depth: 0\n/);
   });
 
   it('keeps the matrix width and the full-suite command for the full battery', () => {
-    const run = code.slice(code.indexOf('- name: Run tests (shard ${{ matrix.shard }}/16)'));
-    expect(run).toContain('pnpm test --shard=${{ matrix.shard }}/16');
-    expect(run).toContain('pnpm exec vitest run --shard=${{ matrix.shard }}/16 "${filters[@]}"');
+    const run = job.slice(job.indexOf('- name: Run the ui tests (shard ${{ matrix.shard }}/16)'));
+    expect(job).toContain('shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]');
+    expect(run).toContain('pnpm --dir ui run test --shard=${{ matrix.shard }}/16');
+    expect(run).toContain('pnpm --dir ui exec vitest run --shard=${{ matrix.shard }}/16 --reporter=default --reporter=github-actions "${filters[@]}"');
   });
 });
