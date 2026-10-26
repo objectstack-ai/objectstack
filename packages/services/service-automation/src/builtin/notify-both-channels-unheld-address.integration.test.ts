@@ -131,23 +131,25 @@ describe('#25990 — a written-out address no user holds, on a node naming inbox
         ['as user:ADDRESS of an address a user holds', 'user:exec@company.example'],
     ])('is mailed as written and writes no inbox row (%s)', async (_label, recipient) => {
         const stack = boot();
-        const { run, step } = await runOnce(stack, { recipients: [recipient], channels: BOTH });
+        const { run } = await runOnce(stack, { recipients: [recipient], channels: BOTH });
         expect(run.success).toBe(true);
         expect(stack.mailed).toEqual([recipient.replace(/^user:/, '')]);
         expect(rowsOf(stack, INBOX_OBJECT)).toEqual([]);
-        expect((step?.output as { delivered?: number } | undefined)?.delivered).toBe(1);
+        // The one recipient, and the one delivery a channel accepted: its mail.
+        expect(run.summary).toMatchObject({ selected: 1, acted: 1 });
     });
 
     it('beside a user, the user still gets the inbox row and the mail; the address only the mail', async () => {
         const stack = boot();
-        const { run, step } = await runOnce(stack, { recipients: ['usr_exec', 'stranger@example.com'], channels: BOTH });
+        const { run } = await runOnce(stack, { recipients: ['usr_exec', 'stranger@example.com'], channels: BOTH });
         expect(run.success).toBe(true);
         expect(rowsOf(stack, INBOX_OBJECT).map((r) => r.user_id)).toEqual(['usr_exec']);
         expect([...stack.mailed].sort()).toEqual(['exec@company.example', 'stranger@example.com']);
-        // Every delivery a channel accepted is counted: the user's inbox and mail, and the address's mail.
-        expect((step?.output as { delivered?: number } | undefined)?.delivered).toBe(3);
-        expect(rowsOf(stack, INBOX_OBJECT).every((r) => r.user_id === 'usr_exec')).toBe(true);
-        expect(rowsOf(stack, NOTIFICATION_EVENT_OBJECT).length).toBeGreaterThan(0);
+        // Both recipients are counted, and every delivery a channel accepted:
+        // the user's inbox row and mail, and the address's mail.
+        expect(run.summary).toMatchObject({ selected: 2, acted: 3 });
+        // The address's mail is its own notification, on the email channel alone.
+        expect(rowsOf(stack, NOTIFICATION_EVENT_OBJECT)).toHaveLength(2);
     });
 
     it('a written-out address a user holds keeps reaching that user\'s inbox and is mailed, as before', async () => {
