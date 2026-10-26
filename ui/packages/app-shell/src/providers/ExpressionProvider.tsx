@@ -429,6 +429,22 @@ export function useExpressionContext(): ExpressionContextValue {
 }
 
 /**
+ * Is an `ExpressionProvider` mounted above this component? (objectstack#25892)
+ *
+ * {@link useExpressionContext} answers either way, with an empty `current_user`
+ * and no permissions bound when nothing is mounted, so its value cannot tell a
+ * frame that built the signed-in user's scope from one that built none. A
+ * navigation gate needs that distinction: evaluated against the empty default,
+ * every predicate that names `current_user` faults, which reads as an
+ * authoring error the author did not make.
+ *
+ * Internal to the package: not re-exported by the package entry.
+ */
+export function useHasExpressionScope(): boolean {
+  return useContext(ExprCtx) !== null;
+}
+
+/**
  * The `type` slot of the shared visibility-fault reporter, for THIS surface
  * (objectui#6443).
  *
@@ -612,6 +628,19 @@ export function evaluateVisibility(
  * evaluator's own fail-closed seam (`throwOnError`), and only a throw there
  * withholds. A predicate that evaluates never pays that second call.
  *
+ * ## A frame with no predicate scope (objectstack#25892)
+ *
+ * `scopeBound: false` is the frame that mounts no `ExpressionProvider` (the
+ * Studio, the organizations pages, the full-page assistant), where the bell's
+ * activity roster still walks every app's navigation. There `current_user` is
+ * the empty default and no permissions are bound, so a predicate naming either
+ * faults whatever the author wrote: the fault says nothing about the
+ * predicate. The verdict is the same (the entry is withheld), but the fault is
+ * not reported per predicate; one quiet note says once that this frame cannot
+ * answer such gates. The app's own shell, which does bind the scope, still
+ * reports a real fault. A blank gate is reported on either frame, since it is
+ * blank whatever the scope.
+ *
  * ⛔ This is UI gating, not a security boundary: the server enforces what a
  * member may read whatever the shell draws.
  *
@@ -620,10 +649,17 @@ export function evaluateVisibility(
 export function evaluateNavigationVisibility(
   expression: string | boolean | { dialect?: string; source?: string } | undefined,
   evaluator: ExpressionEvaluator,
+  scopeBound: boolean = true,
 ): boolean {
   if (expression === undefined || expression === null) return true;
   if (expression === true || expression === 'true') return true;
   if (expression === false || expression === 'false') return false;
+
+  const withhold = (r: unknown): false => {
+    if (scopeBound) reportAppShellVisibleFault('visible', expression, r, 'withholding');
+    else noteUnboundNavigationScope();
+    return false;
+  };
 
   let reason: unknown;
   let faulted = false;
@@ -637,8 +673,7 @@ export function evaluateNavigationVisibility(
     if (!faulted) return verdict;
   } catch (err) {
     // The evaluator itself threw: no answer at all, so the entry is withheld.
-    reportAppShellVisibleFault('visible', expression, err, 'withholding');
-    return false;
+    return withhold(err);
   }
 
   try {
@@ -648,9 +683,32 @@ export function evaluateNavigationVisibility(
     reportAppShellVisibleFault('visible', expression, reason, 'visibility');
     return verdict;
   } catch {
-    reportAppShellVisibleFault('visible', expression, reason, 'withholding');
-    return false;
+    return withhold(reason);
   }
+}
+
+/**
+ * The one note a frame with no predicate scope prints (objectstack#25892), in
+ * place of a warning per navigation predicate it cannot answer. Once per page
+ * load: it describes the frame, not any one predicate.
+ */
+const UNBOUND_NAVIGATION_SCOPE_NOTE =
+  '[ObjectUI] Navigation `visible` predicates are not answered on this screen: it mounts no ' +
+  'expression scope, so `current_user` and its permissions are not bound here. Entries gated ' +
+  'by such a predicate are left out without a warning each; the app itself still evaluates ' +
+  'and reports them.';
+
+let unboundNavigationScopeNoted = false;
+
+function noteUnboundNavigationScope(): void {
+  if (unboundNavigationScopeNoted) return;
+  unboundNavigationScopeNoted = true;
+  console.info(UNBOUND_NAVIGATION_SCOPE_NOTE);
+}
+
+/** Test-only reset for the once-per-load note above. */
+export function __resetUnboundNavigationScopeNote(): void {
+  unboundNavigationScopeNoted = false;
 }
 
 /**
