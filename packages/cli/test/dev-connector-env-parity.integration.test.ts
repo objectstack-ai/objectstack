@@ -81,6 +81,14 @@ const EMAIL = 'admin@objectos.ai';
 const PASSWORD = 'admin123';
 
 const MANIFEST = { id: 'com.example.fxp', namespace: 'fxp', version: '1.0.0', type: 'app', name: 'Fxp' };
+/** One object: a host config with none boots no query engine (`shouldAutoRegisterObjectQL`). */
+const OBJECTS = [{
+  name: 'fxp_note',
+  label: 'Note',
+  pluralLabel: 'Notes',
+  sharingModel: 'public_read_write',
+  fields: { title: { type: 'text', label: 'Title' } },
+}];
 
 /** The connector as the config declares it, given the base URL its environment yields. */
 const connector = (baseUrl: string) => ({
@@ -107,6 +115,7 @@ const selfUrl = \`http://127.0.0.1:\${process.env.OS_PORT?.trim() || '3000'}\`;
 
 export default defineStack({
   manifest: ${JSON.stringify(MANIFEST)},
+  objects: ${JSON.stringify(OBJECTS)},
   requires: ['automation'],
   connectors: [${JSON.stringify(connector('__SELF_URL__')).replace('"__SELF_URL__"', 'selfUrl')}],
   plugins: [{
@@ -248,7 +257,7 @@ beforeAll(async () => {
   mkdirSync(join(dir, 'dist'), { recursive: true });
   writeFileSync(
     join(dir, 'dist', 'objectstack.json'),
-    JSON.stringify({ manifest: MANIFEST, requires: ['automation'], connectors: [connector(BUILD_URL)] }, null, 2),
+    JSON.stringify({ manifest: MANIFEST, objects: OBJECTS, requires: ['automation'], connectors: [connector(BUILD_URL)] }, null, 2),
     'utf8',
   );
 
