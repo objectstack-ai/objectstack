@@ -62,6 +62,7 @@ export function isSeedFilePath(path: unknown): path is string {
 export const SeedFilePathSchema = lazySchema(() => z.string()
   .regex(SEED_FILE_PATH_PATTERN, SEED_FILE_PATH_RULE)
   .describe('Path of a file the package ships, relative to the package root (e.g. `fixtures/nda-v1.pdf`)'));
+export type SeedFilePath = z.infer<typeof SeedFilePathSchema>;
 
 /** A MIME type: `type/subtype`, the shape a `sys_file.mime_type` carries. */
 const MIME_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/i;
