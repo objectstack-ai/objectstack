@@ -2087,25 +2087,27 @@ async function applyRecordAttribution(
                     ? depthRecord('admitted',
                         `Caller owns the record — inside every read depth, including '${depthScope}'; the baseline ` +
                         'already admits it (see owd_baseline).')
-                    // [#26188] Ahead of the depth verdict: with no hierarchy
-                    // resolver the sharing service evaluates a hierarchy depth
-                    // as 'own', so the owner is outside it for that reason,
-                    // not because they are outside the caller's unit. Below
-                    // 'org' and above 'own' every depth is a hierarchy one.
-                    : depthScope !== 'org' && deps.hierarchyResolverMounted?.() === false
-                      ? depthRecord(sharingMatches === false ? 'excluded' : 'not_evaluated',
-                          "Hierarchy resolver absent — requires enterprise; depth evaluated as 'own'. The caller's " +
-                          `'${depthScope}' read depth reaches no owner beyond the caller on this deployment` +
-                          (sharingMatches === false
-                            ? `, and the record's owner (${ownerLabel}) is not the caller; a share may still widen ` +
-                              'access (see the sharing layer).'
-                            : '; a share admits this record (see the sharing layer).'))
                     : depthAdmitsRow
                       ? depthRecord('admitted', depthScope === 'org'
                           ? "Effective read depth 'org' admits this record without a share: at org depth the sharing " +
                             'service imposes no owner-match (ADR-0057 D1).'
                           : `The record's owner (${ownerLabel}) is inside the caller's '${depthScope}' read depth — ` +
                             "the sharing service's owner-match admits it without a share (ADR-0057 D1).")
+                      // [#26188] Ahead of the depth verdict below: with no
+                      // hierarchy resolver the sharing service evaluates a
+                      // hierarchy depth as 'own', so the owner is outside it for
+                      // that reason, not because they are outside the caller's
+                      // unit. Below 'org' and above 'own' every depth is a
+                      // hierarchy one. A row the depth did admit is reported
+                      // above as admitted, never as this.
+                      : depthScope !== 'org' && deps.hierarchyResolverMounted?.() === false
+                        ? depthRecord(sharingMatches === false ? 'excluded' : 'not_evaluated',
+                            "Hierarchy resolver absent — requires enterprise; depth evaluated as 'own'. The caller's " +
+                            `'${depthScope}' read depth reaches no owner beyond the caller on this deployment` +
+                            (sharingMatches === false
+                              ? `, and the record's owner (${ownerLabel}) is not the caller; a share may still widen ` +
+                                'access (see the sharing layer).'
+                              : '; a share admits this record (see the sharing layer).'))
                       : sharingMatches === false
                         ? depthRecord('excluded',
                             `The record's owner (${ownerLabel}) is outside the caller's '${depthScope}' read depth; ` +
