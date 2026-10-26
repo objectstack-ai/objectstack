@@ -762,7 +762,6 @@ export const ADJUDICATED = new Map([
     {
       reads: [],
       notRead: ['.changeset/README.md', 'CHANGELOG.md', 'README.md', 'apps/console/README.md'],
-      walker: 'not-markdown: `.github/workflows/*.yml`',
     },
   ],
   [
@@ -872,14 +871,6 @@ export const ADJUDICATED = new Map([
     'scripts/__tests__/check-handler-key-read-sites.test.ts',
     {
       reads: ['content/docs/guide/ci-cd-pipeline.md'],
-    },
-  ],
-  [
-    'scripts/__tests__/check-links-workflow.test.ts',
-    {
-      reads: ['content/docs/**', 'docs/**'],
-      notRead: ['README.md'],
-      walker: 'markdown-tree',
     },
   ],
   [

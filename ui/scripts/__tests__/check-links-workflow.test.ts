@@ -45,44 +45,14 @@ import { fileURLToPath } from 'node:url';
  * right), and `push` / `pull_request` must NOT — an external link checker walks
  * the network, and gating PRs on third-party uptime makes other people's work
  * fail for reasons they cannot fix.
+ *
+ * ⚠️ Half 1, the workflow surface of half 3 and the trigger set retired with
+ * objectstack#25712; the note above the first describe names the cases. Half 2
+ * and this header's own count pin stand.
  */
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const workflowPath = path.join(repoRoot, '.github/workflows/check-links.yml');
 const lycheeConfigPath = path.join(repoRoot, 'lychee.toml');
-const siteConfigPath = path.join(repoRoot, 'apps/site/source.config.ts');
-
-/**
- * The workflow YAML with whole-line comments removed.
- *
- * Required, not cosmetic: the header explains at length why `push` and
- * `pull_request` stay disabled and names both of them, and the commented-out
- * trigger block is itself part of the record. A scan that counted either would
- * report triggers this workflow does not have.
- */
-function withoutComments(yaml: string): string {
-  return yaml
-    .split('\n')
-    .filter((line) => !/^\s*#/.test(line))
-    .join('\n');
-}
-
-/**
- * The workflow's comment prose, with the leading `#` markers stripped.
- *
- * Stripped, not kept: a sentence that wraps across two comment lines has a `#`
- * sitting in the middle of it, and a scan that reads the raw lines cannot see a
- * numeral and the noun it qualifies as adjacent when the line break falls
- * between them. Removing the marker is what makes the count pin below read the
- * header the way a person does.
- */
-function commentProse(yaml: string): string {
-  return yaml
-    .split('\n')
-    .filter((line) => /^\s*#/.test(line))
-    .map((line) => line.replace(/^\s*#\s?/, ''))
-    .join('\n');
-}
 
 /**
  * This file's own leading block comment — the second surface the count pin reads.
@@ -136,103 +106,21 @@ function documentCounts(text: string): string[] {
   return [...text.matchAll(new RegExp(POPULATION_COUNT.source, 'gi'))].map((m) => m[0].replace(/\s+/g, ' ').trim());
 }
 
-/** The quoted input patterns from the workflow's `args:` block. */
-function scannedPatterns(yaml: string): string[] {
-  return [...withoutComments(yaml).matchAll(/^\s*'([^']+)'\s*$/gm)].map((m) => m[1]);
-}
-
-/** Every `.md` / `.mdx` file below `dir`, as repo-relative paths. */
-function markdownFilesUnder(dir: string): string[] {
-  const absolute = path.join(repoRoot, dir);
-  if (!fs.existsSync(absolute)) return [];
-  const found: string[] = [];
-  const walk = (current: string) => {
-    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
-      const full = path.join(current, entry.name);
-      if (entry.isDirectory()) walk(full);
-      else if (/\.mdx?$/.test(entry.name)) found.push(path.relative(repoRoot, full));
-    }
-  };
-  walk(absolute);
-  return found;
-}
-
 /**
- * Files matched by one input pattern.
- *
- * Only the two shapes the workflow uses are supported — `<dir>/ ** / *.<ext>`
- * and a literal path. Anything else is reported rather than silently counted as
- * zero, because "matches nothing" is the very defect this file exists to catch.
+ * Retired with objectstack#25712: `scans every markdown file the site is built
+ * from`, `still sweeps the repo-root internal docs and README`, `states its
+ * inputs in a shape this test can actually evaluate`, `runs on a schedule as
+ * well as on demand`, `does not gate pull requests`, and the workflow surface
+ * of the count pin below. Each read objectui's `check-links.yml` (its `args:`
+ * block against the docs tree `apps/site/source.config.ts` declares, its
+ * triggers, its header prose), which runs nowhere under the monorepo: GitHub
+ * runs the root `.github/workflows/` alone. The root `check-links.yml` sweeps
+ * the root's own trees, not `ui/`. objectui's is row 6 of the objectstack#25697
+ * workflow roster (→ sub-issue 4, which widens the root sweep to `ui/` or keeps
+ * objectui's); either way the port brings these pins back against the root
+ * workflow, by path.
  */
-function filesMatching(pattern: string): string[] {
-  const glob = /^(.+)\/\*\*\/\*\.([a-z]+)$/.exec(pattern);
-  if (glob) {
-    const [, base, extension] = glob;
-    return markdownFilesUnder(base).filter((file) => file.endsWith(`.${extension}`));
-  }
-  if (/[*?[\]]/.test(pattern)) {
-    throw new Error(`unsupported glob shape in check-links.yml args: ${pattern}`);
-  }
-  return fs.existsSync(path.join(repoRoot, pattern)) ? [pattern] : [];
-}
-
-/** The docs directory the site itself declares, as a repo-relative path. */
-function declaredDocsDir(): string {
-  const source = fs.readFileSync(siteConfigPath, 'utf8');
-  const match = /\bdir:\s*'([^']+)'/.exec(source);
-  expect(match, `${siteConfigPath} no longer declares a docs \`dir\``).not.toBeNull();
-  const resolved = path.resolve(path.dirname(siteConfigPath), match![1]);
-  return path.relative(repoRoot, resolved);
-}
-
-const workflowYaml = () => fs.readFileSync(workflowPath, 'utf8');
-
-describe('check-links.yml — the external link sweep looks at the published docs', () => {
-  it('scans every markdown file the site is built from', () => {
-    // The #3449 assertion. Derived from the site config on purpose: see the
-    // header. `content/docs` is never spelled out here.
-    const docsDir = declaredDocsDir();
-    const published = markdownFilesUnder(docsDir);
-    expect(published.length, `no markdown found under the declared docs dir '${docsDir}'`).toBeGreaterThan(100);
-
-    const scanned = new Set(scannedPatterns(workflowYaml()).flatMap(filesMatching));
-    const missed = published.filter((file) => !scanned.has(file));
-    expect(missed.slice(0, 5), `${missed.length} published doc(s) are not covered by check-links.yml args`).toEqual([]);
-  });
-
-  it('still sweeps the repo-root internal docs and README', () => {
-    // Ruling on #3449: `docs/**` (ADRs, audits) and README keep their coverage.
-    // Widening to the published tree was never meant to narrow anything.
-    const scanned = new Set(scannedPatterns(workflowYaml()).flatMap(filesMatching));
-    const internal = markdownFilesUnder('docs');
-    expect(internal.length, "the repo-root internal docs tree is gone — re-read this workflow's scope").toBeGreaterThan(
-      0,
-    );
-
-    const missed = internal.filter((file) => !scanned.has(file));
-    expect(missed.slice(0, 5), `${missed.length} internal doc(s) are not covered by check-links.yml args`).toEqual([]);
-    expect(scanned.has('README.md')).toBe(true);
-  });
-
-  it('states its inputs in a shape this test can actually evaluate', () => {
-    // Coverage above is asserted per FILE, not per pattern, and that is
-    // deliberate: `docs/**/*.mdx` currently matches nothing (the internal tree
-    // is all `.md`) and should stay anyway, so that an internal `.mdx` landing
-    // tomorrow is swept rather than becoming a fresh blind spot. What must not
-    // happen is an args block this test cannot read — it would assert coverage
-    // over an empty pattern list and pass while checking nothing.
-    const patterns = scannedPatterns(workflowYaml());
-    expect(patterns.length, 'no input patterns found in the args block').toBeGreaterThan(2);
-    for (const pattern of patterns) expect(() => filesMatching(pattern)).not.toThrow();
-  });
-
-  it('runs on a schedule as well as on demand', () => {
-    const yaml = withoutComments(workflowYaml());
-    expect(yaml, 'the periodic sweep #3213 ruling B intended').toMatch(/^\s*schedule:/m);
-    expect(yaml).toMatch(/^\s*-\s*cron:\s*'[^']+'/m);
-    expect(yaml).toMatch(/^\s*workflow_dispatch:/m);
-  });
-
+describe('check-links — the header count pin', () => {
   /**
    * objectui#7825 — the third copy of objectui#7448's pin, in the home the card
    * named. This header stated two document counts as literals: the repo-root
@@ -259,10 +147,7 @@ describe('check-links.yml — the external link sweep looks at the published doc
    * before their emptiness means anything.
    */
   it('its header states the population and never counts it — no count can rot here', () => {
-    const surfaces = [
-      ['check-links.yml', commentProse(workflowYaml())],
-      ["this test file's own header", ownHeaderComment()],
-    ] as const;
+    const surfaces = [["this test file's own header", ownHeaderComment()]] as const;
 
     for (const [label, prose] of surfaces) {
       expect(
@@ -321,15 +206,6 @@ describe('check-links.yml — the external link sweep looks at the published doc
     for (const line of legitimate) {
       expect(documentCounts(line), `the pin must NOT fire on: ${line}`).toEqual([]);
     }
-  });
-
-  it('does not gate pull requests', () => {
-    // #3213 ruling B. Lychee goes over the network; a third-party 502 must not
-    // be able to redden somebody's unrelated PR. The commented-out block in the
-    // workflow stays commented — `withoutComments` is what makes this real.
-    const yaml = withoutComments(workflowYaml());
-    expect(yaml, 'external link checking must not become a PR gate — see #3213').not.toMatch(/^\s*pull_request:/m);
-    expect(yaml).not.toMatch(/^\s*push:/m);
   });
 });
 
