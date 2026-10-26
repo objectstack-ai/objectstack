@@ -27,8 +27,8 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, within } from '@testing-library/react';
 import type { FeedItem } from '@object-ui/types';
 import { RecordContextProvider } from '@object-ui/react';
-import { RecordActivityTimeline, foldFeedItems, FOLD_WINDOW_MS } from '../RecordActivityTimeline';
-import { activityRowToFeedItem, type SysActivityRow } from '../renderers/recordActivityFeed';
+import { RecordActivityTimeline } from '../RecordActivityTimeline';
+import { activityRowToFeedItem, foldFeedItems, FOLD_WINDOW_MS, type SysActivityRow } from '../renderers/recordActivityFeed';
 import { DETAIL_DEFAULT_TRANSLATIONS } from '../useDetailTranslation';
 
 const EXPAND = DETAIL_DEFAULT_TRANSLATIONS['detail.expandFolded'];

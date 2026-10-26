@@ -39,6 +39,7 @@ import { CommentBody } from './CommentAuthorControls';
 import { useDisplayLocale } from '@object-ui/i18n';
 import { useRecordContext, useSafeFieldLabel } from '@object-ui/react';
 import { useDetailTranslation } from './useDetailTranslation';
+import { foldFeedItems, type TimelineEntry } from './renderers/recordActivityFeed';
 
 /**
  * Which slice of the record feed the timeline shows.
@@ -240,91 +241,6 @@ function filterItems(items: FeedItem[], mode: FeedFilterMode): FeedItem[] {
     default:
       return items;
   }
-}
-
-/**
- * The longest gap between two adjacent updates that still folds them into one
- * row (objectstack#25959). Measured between NEIGHBOURS, not from the first
- * entry, so a flow that writes the record every few minutes for an hour is one
- * run, and a gap longer than this starts a new one.
- */
-export const FOLD_WINDOW_MS = 10 * 60 * 1000;
-
-/** One row of the rendered timeline: a feed item, or a run of folded updates. */
-export type TimelineEntry =
-  | { kind: 'item'; item: FeedItem }
-  | { kind: 'fold'; id: string; items: FeedItem[] };
-
-/**
- * Whether a feed item is a plain update that may fold (objectstack#25959).
- *
- * Only an `updated` row read from `sys_activity`: `activityType` is set by
- * `activityRowToFeedItem`, so a host item without it never folds. A row with a
- * domain kind (`activityKind`, a fired milestone) is an event in its own
- * right and never folds, and neither does a create, a delete, a comment or a
- * completed task, whose `activityType` is not `updated`. A row whose summary
- * is empty still folds and still counts.
- */
-function isFoldableUpdate(item: FeedItem): boolean {
-  return (
-    item.activityType === 'updated'
-    && item.type === 'field_change'
-    && item.activityKind === undefined
-    && !item.parentId
-  );
-}
-
-function foldTime(item: FeedItem): number {
-  return item.createdAt ? Date.parse(item.createdAt) : Number.NaN;
-}
-
-/**
- * Whether `next` continues the run `prev` ends: the same actor (`actorId`,
- * `null` for the system, and the same display name, so two unnamed writers are
- * never merged into one), and no more than {@link FOLD_WINDOW_MS} apart.
- */
-function continuesRun(prev: FeedItem, next: FeedItem): boolean {
-  if ((prev.actorId ?? null) !== (next.actorId ?? null)) return false;
-  if (prev.actor !== next.actor) return false;
-  const a = foldTime(prev);
-  const b = foldTime(next);
-  if (Number.isNaN(a) || Number.isNaN(b)) return false;
-  return Math.abs(b - a) <= FOLD_WINDOW_MS;
-}
-
-/**
- * Fold runs of consecutive updates by one actor into single timeline rows
- * (objectstack#25959).
- *
- * Rendering only. Every item stays in the feed and in its run, in order, so
- * expanding a fold shows each entry as it was written; nothing is dropped or
- * merged in the data. A run is adjacent items of the list as the reader sees
- * it (after the filter), each a foldable update ({@link isFoldableUpdate}) that
- * continues the one before it ({@link continuesRun}). Any other row between two
- * updates ends the run. A run of one is an ordinary row.
- */
-export function foldFeedItems(items: readonly FeedItem[]): TimelineEntry[] {
-  const entries: TimelineEntry[] = [];
-  let run: FeedItem[] = [];
-  const flush = () => {
-    if (run.length > 1) {
-      entries.push({ kind: 'fold', id: `fold:${String(run[0].id)}`, items: run });
-    } else if (run.length === 1) {
-      entries.push({ kind: 'item', item: run[0] });
-    }
-    run = [];
-  };
-  for (const item of items) {
-    if (!isFoldableUpdate(item)) {
-      flush();
-      entries.push({ kind: 'item', item });
-      continue;
-    }
-    if (run.length > 0 && !continuesRun(run[run.length - 1], item)) flush();
-    run.push(item);
-  }
-  flush();
-  return entries;
 }
 
 /** The distinct changed fields of a run, in first-seen order. */
