@@ -28,7 +28,6 @@
     // not inherit `composite` / `declaration` from the build config.
     "composite": false,
     "declaration": false,
-    "jsx": "react-jsx",
     // The root baseline, plus `DOM.Iterable` (which the root already sets and
     // the retired narrow project did not) — strictly wider than what compiled
     // the parity test before.

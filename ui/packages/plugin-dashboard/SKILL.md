@@ -162,10 +162,14 @@ running over a window nobody asked for.
 
 ### When NOT to use `compareTo`
 
-- Filters with no bounded date range — there is no window to shift, and the
-  widget reports that instead of rendering a comparison. Date the widget (a
+- Filters whose date condition is not a closed `$gte`/`$lte` window — a
+  one-bound YTD `{ $gte: '{current_year_start}' }`, an exclusive `$lt` bound,
+  a single day. There is no window to shift, and the widget reports that
+  instead of rendering a comparison. Date the widget with a closed pair (a
   date-macro `$gte`/`$lte` pair, or a dashboard date-range filter bound to it)
-  or omit `compareTo` entirely.
+  or omit `compareTo` entirely. A filter that dates **nothing** on the compared
+  field — the reader picked All time on the dashboard date filter — is not an
+  error: the widget asks for no comparison and shows its number with no badge.
 - Pie / donut / funnel charts — comparison overlays are not visually
   meaningful and are silently ignored.
 - Scatter charts, and the `bubble` widget type that renders as one — a scatter

@@ -38,7 +38,8 @@ import type { ObjectFormSection } from '@object-ui/types';
 import { deriveFieldGroupSections } from './fieldGroups';
 
 /**
- * The keys `@objectstack/spec` REFUSES beside `group`, measured against
+ * The keys `@objectstack/spec` REFUSES beside `group` (two of them only as
+ * `true`, see {@link TRUE_ONLY_GROUP_OWNED_SECTION_KEYS}), measured against
  * `FormSectionSchema` in `@objectstack/spec` 17.3.0 and pinned in
  * `__tests__/formSectionGroupReference-7051.test.tsx`.
  *
@@ -57,6 +58,27 @@ export const GROUP_OWNED_SECTION_KEYS = [
   'collapsed',
   'visibleWhen',
 ] as const;
+
+/**
+ * The subset of {@link GROUP_OWNED_SECTION_KEYS} the spec refuses only when set
+ * to `true` — its `trueOnlyDerivedKeys` on `FormSectionSchema`, which the spec
+ * passes inline and exports under no name, so the agreement is measured by
+ * parse in `__tests__/sectionGroupTrueOnlyKeys-25955.test.ts`, key by key.
+ *
+ * Both carry `.default(false)`, so EVERY parsed section carries them as `false`
+ * whether or not its author wrote them, and `false` declares exactly what a
+ * group with `collapse: 'none'` delivers. Reading "declares" as "is not
+ * `undefined`" reported a restated key on every `{ group }` section of every
+ * parsed form, prescribing a move for a key nobody wrote. Only `true` is
+ * presentation the group owns, so only `true` is reported.
+ */
+const TRUE_ONLY_GROUP_OWNED_SECTION_KEYS: ReadonlySet<string> = new Set(['collapsible', 'collapsed']);
+
+/** Does this section restate `key` in the sense the spec refuses beside `group`? */
+function restatesGroupOwnedKey(section: ObjectFormSection, key: string): boolean {
+  const value = (section as any)[key];
+  return TRUE_ONLY_GROUP_OWNED_SECTION_KEYS.has(key) ? value === true : value !== undefined;
+}
 
 /**
  * The keys the spec PERMITS beside `group`. They describe how THIS form lays
@@ -231,7 +253,7 @@ function pickLayout(section: ObjectFormSection): Partial<ObjectFormSection> {
 
 /** Report — once — an off-spec key restated beside `group`. */
 function reportGroupOwnedKeys(section: ObjectFormSection, group: string, objectName: string): void {
-  const restated = GROUP_OWNED_SECTION_KEYS.filter((k) => (section as any)[k] !== undefined);
+  const restated = GROUP_OWNED_SECTION_KEYS.filter((k) => restatesGroupOwnedKey(section, k));
   if (restated.length === 0) return;
   reportOnce(`owned:${objectName}.${group}:${restated.join(',')}`, () =>
     console.warn(

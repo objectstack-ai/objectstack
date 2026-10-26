@@ -47,6 +47,12 @@ import {
 } from './hook-run-as.js';
 import { assertEngineDeleteDispatch } from './engine-delete-dispatch.js';
 import { assertEngineUpdateDispatch } from './engine-update-dispatch.js';
+// [#26049] The published face, loaded with the file rather than inside the
+// case that reads it: the entry pulls the rest of the package's module graph,
+// which cost ~2.5 s inside that case on a quiet box and crossed its 5 s budget
+// under merge-queue load. Same module, same assertions; only where the load
+// is paid moved.
+import * as entry from './index.js';
 import type { Hook, HookContext } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 
@@ -386,8 +392,7 @@ describe('#14010 Hook.runAs — the identity a hook\'s ctx.api presents', () => 
       expect(userless.seen).toEqual([]);
     });
 
-    it('the seed is no nameable member of the published face: keyed on a symbol the package entry does not export', async () => {
-      const entry = await import('./index.js');
+    it('the seed is no nameable member of the published face: keyed on a symbol the package entry does not export', () => {
       expect('SEED_USER_GRANTS' in entry).toBe(false);
       expect(Object.getOwnPropertyNames(ScopedContext.prototype)).not.toContain('withUserGrantsSeeded');
       // [#25653] The app-authored hook api's derivation is the other symbol-keyed member, unexported too.
