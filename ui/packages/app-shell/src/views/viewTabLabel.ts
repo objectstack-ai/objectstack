@@ -7,6 +7,7 @@
  */
 
 import { isServedView, type useServedViewItems } from '../hooks/useServedViewItems.js';
+import { metadataText } from '../hooks/useNavTargetLabel.js';
 
 /** `useObjectLabel().viewLabel` — the client bundle's view-label lookup. */
 export type ViewLabelLookup = (objectName: string, viewName: string, fallback: string) => string;
@@ -34,14 +35,23 @@ export type ViewLabelLookup = (objectName: string, viewName: string, fallback: s
  * qualified name, which is what a label-less view's tab drew before
  * (objectui#12774), nor a string humanized from it, which is what the header
  * drew before (objectui#12805).
+ *
+ * The `label` is an `I18nLabel` — a string or an inline locale map — and is
+ * resolved in the viewer's `language` before either branch reads it (#25901).
+ * The server overlays only catalog text, so a map with no catalog entry is
+ * served as authored; handed on raw, it reached every caller as an object, and
+ * the app header — mounted outside the route's error boundary — threw on it and
+ * took the whole console down. A map that resolves to no text counts as no
+ * `label`, so `unlabelled` is drawn only when nothing resolves.
  */
 export function viewTabLabel(
-  view: { id?: string; name?: string; label?: string },
+  view: { id?: string; name?: string; label?: unknown },
   objectName: string,
   servedViews: ReturnType<typeof useServedViewItems>,
   viewLabel: ViewLabelLookup,
   unlabelled: string,
+  language: string | undefined,
 ): string {
-  const text = view.label || unlabelled;
+  const text = metadataText(view.label, language) ?? unlabelled;
   return isServedView(servedViews, objectName, view.id) ? text : viewLabel(objectName, view.name || view.id || '', text);
 }

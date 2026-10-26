@@ -17,7 +17,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ACTION_CONFIRM_PARAMS_ROOT,
-  ACTION_COPY_DOLLAR_TRANSITION_ROOTS,
   ACTION_COPY_RECORD_ROOT,
   ACTION_ERROR_TEMPLATE_ROOTS,
   ACTION_SUCCESS_RESULT_ROOT,
@@ -51,7 +50,7 @@ describe('the page action rows\' copy keys are template slots', () => {
         expect(ok('Delete {{ record.name }}?')).toEqual({ dialect: 'template', source: 'Delete {{ record.name }}?' });
         expect(ok({ dialect: 'template', source: 'Done' })).toEqual({ dialect: 'template', source: 'Done' });
         // A `${…}` sentence parsed while the key was a string, and still does:
-        // the doors judge it (a warning only while the runner still fills it).
+        // the doors refuse it, the parse keeps it so a stored one loads.
         expect(ok('Delete ${record.name}?')).toEqual({ dialect: 'template', source: 'Delete ${record.name}?' });
         expect(ok('')).toBe('');
         expect(ok('  ')).toBe('  ');
@@ -113,11 +112,5 @@ describe('the roots are what the runner binds', () => {
     expect(ACTION_SUCCESS_RESULT_ROOT).toBe('result');
     expect([...ACTION_SUCCESS_TEMPLATE_ROOTS]).toEqual(['result', 'record']);
     expect([...ACTION_ERROR_TEMPLATE_ROOTS]).toEqual([]);
-  });
-
-  it('the `${…}` tokens the runner still fills: `${record.*}` in a confirmText, `${result.*}` in a successMessage', () => {
-    expect([...ACTION_COPY_DOLLAR_TRANSITION_ROOTS.confirmText]).toEqual(['record']);
-    expect([...ACTION_COPY_DOLLAR_TRANSITION_ROOTS.successMessage]).toEqual(['result']);
-    expect([...ACTION_COPY_DOLLAR_TRANSITION_ROOTS.errorMessage]).toEqual([]);
   });
 });

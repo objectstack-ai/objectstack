@@ -240,6 +240,13 @@ are retired and read by nothing: the `o.{object}` shape below, and the flat
 `<namespace>.<prop>` shape recorded under
 [ObjectQL Integration](#objectql-integration).
 
+Every locale code (a bundle key, an item's `locale`, `i18n.defaultLocale`,
+`supportedLocales` and `fallbackLocale`) is a BCP-47 language tag with `-`
+between subtags (`en`, `zh-CN`, `zh-Hans-CN`). `LocaleSchema` refuses anything
+else at parse — `zh_CN`, a padded value, a language name — and the 18.x
+conversion `translation-locale-tag-canonicalized` rewrites the `_` and padded
+spellings in stored rows and older builds. Case is not judged: the resolvers fold it.
+
 ```typescript
 // One locale of a TranslationBundle (e.g. zh-CN)
 const zh: TranslationData = {

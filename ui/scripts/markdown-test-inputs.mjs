@@ -762,7 +762,16 @@ export const ADJUDICATED = new Map([
     {
       reads: [],
       notRead: ['.changeset/README.md', 'CHANGELOG.md', 'README.md', 'apps/console/README.md'],
-      walker: 'not-markdown: `.github/workflows/*.yml`',
+    },
+  ],
+  // Reads no markdown: its three markdown literals are probes of the root `ci.yml`
+  // `ui` filter's globs, asserting a markdown-only change still starts Lint UI
+  // (objectstack#25712). The gate's own corpus is reached through the script.
+  [
+    'scripts/__tests__/check-control-bytes.test.ts',
+    {
+      reads: [],
+      notRead: ['README.md', 'content/docs/guide/ci-cd-pipeline.md', 'packages/core/README.md'],
     },
   ],
   [
@@ -812,9 +821,11 @@ export const ADJUDICATED = new Map([
   [
     'scripts/__tests__/check-doc-fence-languages.test.ts',
     {
+      // `packages/core/README.md` is a probe of the root `ci.yml` `ui` filter's
+      // globs, not a read (objectstack#25712). The test's only directory walk was
+      // of objectui's own `.github/workflows`, which it no longer reads.
       reads: ['apps/console/docs/**', 'content/docs/**', 'docs/**'],
-      notRead: ['README.md'],
-      walker: 'markdown-tree',
+      notRead: ['README.md', 'packages/core/README.md'],
     },
   ],
   [
@@ -860,6 +871,16 @@ export const ADJUDICATED = new Map([
       walker: 'markdown-tree',
     },
   ],
+  // Reads no markdown: its one markdown literal is a probe of the root `ci.yml`
+  // `ui` filter's globs, asserting a docs-only change still starts Lint UI
+  // (objectstack#25712).
+  [
+    'scripts/__tests__/check-docs-route-eager-closure.test.ts',
+    {
+      reads: [],
+      notRead: ['content/docs/guide/ci-cd-pipeline.md'],
+    },
+  ],
   // Reads no markdown: the root-document literals are fixture INPUTS to a pure path classifier.
   [
     'scripts/__tests__/check-governed-queue-guard.test.ts',
@@ -872,14 +893,6 @@ export const ADJUDICATED = new Map([
     'scripts/__tests__/check-handler-key-read-sites.test.ts',
     {
       reads: ['content/docs/guide/ci-cd-pipeline.md'],
-    },
-  ],
-  [
-    'scripts/__tests__/check-links-workflow.test.ts',
-    {
-      reads: ['content/docs/**', 'docs/**'],
-      notRead: ['README.md'],
-      walker: 'markdown-tree',
     },
   ],
   [

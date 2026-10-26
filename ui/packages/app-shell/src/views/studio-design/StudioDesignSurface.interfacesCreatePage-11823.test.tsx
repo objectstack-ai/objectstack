@@ -93,6 +93,10 @@ vi.mock('@monaco-editor/react', () => {
   return { Editor, default: Editor, loader: { init: () => Promise.reject(new Error('offline')) } };
 });
 
+// The bundled Monaco loads: the page's probe awaits plugin-editor's
+// `configureBundledMonaco` before `loader.init()` (its own suite drives it).
+vi.mock('@object-ui/plugin-editor', () => ({ configureBundledMonaco: () => Promise.resolve() }));
+
 import { InterfacesPillar } from './StudioDesignSurface';
 // The `page` resource config whose `fromDraft` the pillar's page save goes
 // through, registered at load exactly as the package entry registers it.
