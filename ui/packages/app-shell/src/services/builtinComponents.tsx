@@ -217,6 +217,14 @@ registerMetadataResource({
   type: 'position',
   domain: 'security',
   listInclude: 'grants',
+  // objectstack#26192 — Setup → Positions → New creates the position LIVE
+  // outside a package binding, as the permission set does (objectui#7611).
+  // Setup carries no `?package=`, so the generic editor's draft save wrote a
+  // draft with no package: the list (published items) never showed it and a
+  // read of the name answered not found until a hand Publish. The server
+  // admits a live position create (`allowRuntimeCreate`); under `?package=`
+  // the create stays a package draft (ADR-0086).
+  createLive: true,
   listColumns: [
     { key: 'name', label: 'Name', width: '20%' },
     { key: 'label', label: 'Label', width: '20%' },
