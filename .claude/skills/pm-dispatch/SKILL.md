@@ -137,8 +137,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 一个标签存在当且仅当有具名读者;`pm:blocking` 即其推导缓存,读者以词表脚本注为权威。
 - 跨仓解锁判据是消费方可安装,⛔ 不是上游已合并;探针:装上的包是否接受新键/新行为。
 - 以发布包消费上游的仓,解锁放回前先验修复已进可安装的发行版。
-- 未发版 ⇒ 转 `pm:on-hold` + `Restart-when:` 加消费方安装面判据,⛔ 不回 `pm:queue`。
-- 该 hold 评论预写唤醒后的派发形状;pin 消费的仓不适用:pin 移动即可安装,走 pin 滞后读数。
+- 未发版 ⇒ 转 `pm:on-hold`;`Restart-when:` 写安装面判据与唤醒后派发形状,⛔ 不回 `pm:queue`。
 - 状态变更不过夜:标签无评论、assignee 无认领评论、结论只在 chat,都是半状态。
 - 半状态在结束会话(含限流悬挂)前补齐成对或回滚半边;report-only 巡查见守卫索引。
 - 等待他座位也是状态,写在卡上才存在(等谁、自何时),⛔ 不留在会话记忆。
@@ -162,8 +161,9 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | `domain:devx` | `sdui-parser`、`packages/qa`、`content/docs`、`apps/docs`、`docs/qa`、`.githooks`、`docker/README.md`、`examples/**` 仅测试基建面;`packages/lint`、`scripts`(门禁类)、`.github/workflows`(接线)三者按锚定规则归 `domain:spec`,门禁按 SUBJECT:governed 面归 skills,代码/文档质量归本域 |
 | `domain:skills` | governed 面全量(含本文件;统一定义见「governed 面统一定义」行);非门禁的 `scripts/pm/**`(PM 循环工具);governed 面的治理执行文件:`.github/CODEOWNERS` + SUBJECT 是 governed 面本身的门禁/审计(现为 `scripts/pm/check-governed-merges.mjs`) |
 | `domain:spec` | `packages/spec` 整包:schema 形状、`contracts/**`、退役行为半边、strictness 台账;describe/JSDoc/墓碑散文/错误 guidance 与 alias 表;`packages/spec/scripts/**`、`packages/spec/docs/**` 及按锚定规则的例外归本域的工具链(域边界枚举与席内分派见 `references/lanes/spec.md`) |
+| `domain:ui` | `ui/**` 全部代码:`@object-ui/*` 库与 `ui/apps/*`、`ui/packages/types` 与 schema 语料、`ui/scripts` 与门禁工具、文档随所记录的面走;`packages/console`(dist 由 `pnpm console:build` 生成 ⛔ 不手改);协议恒归 `domain:spec`,受管面归 `domain:skills`;详见 `references/lanes/ui.md` |
 | `domain:cloud` | 云服务旅程,停放(加 `status:parked`,sweep 免扫)待 cloud PM 迁移,本仓不派 |
-| (无固定归属,按落点分诊) | `packages/apps/*`、`packages/console`(dist 由脚本生成 ⛔ 不手改;UI 缺陷走 `repo:objectui`)、`examples/*`(归它演练的子系统)、`docs/audits/**` |
+| (无固定归属,按落点分诊) | `packages/apps/*`、`examples/*`(归它演练的子系统)、`docs/audits/**` |
 
 - 表未覆盖的包首次分诊时归类并走 PR 更新本表;新增或退役 `domain:*` 必须同批改本表。
 - 退役 `domain:*` 只退流通,对象保留;`domain:engine`/`domain:services`/`domain:cli` 读作 `domain:server`。
