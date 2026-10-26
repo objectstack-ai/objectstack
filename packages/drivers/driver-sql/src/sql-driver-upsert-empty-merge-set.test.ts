@@ -19,6 +19,9 @@
  *    the payload omits (the column has a non-null default) is refused and
  *    rewrites nothing; a collision on the primary key with only insert-only
  *    columns in the payload is refused and rewrites nothing;
+ *  - a conflict target that no PRIMARY KEY or UNIQUE index backs is still
+ *    refused (`VALIDATION_ERROR` / 400) on that path, and nothing is written —
+ *    the same answer every dialect gives when there IS something to merge;
  *  - controls: a payload that collides with nothing still inserts and answers
  *    the row, and a payload that carries its conflict target still upserts
  *    onto the stored row.
@@ -99,6 +102,12 @@ const STAMPED = {
   fields: { email: { type: 'string' }, title: { type: 'string' } },
 } as any;
 
+/** No index on `email` at all: a conflict target nothing backs. */
+const UNBACKED = {
+  name: 'os8740_unbacked',
+  fields: { email: { type: 'string' }, title: { type: 'string' } },
+} as any;
+
 const KEPT_ID = 'os8740_kept_row';
 const KEPT_CREATED = '2020-01-01 00:00:00';
 
@@ -155,6 +164,7 @@ function declareEmptyMergeSetPins(cell: DialectCell): void {
       knexInstance = (driver as any).knex;
       await knexInstance.schema.dropTableIfExists(DEFAULTED.name);
       await knexInstance.schema.dropTableIfExists(STAMPED.name);
+      await knexInstance.schema.dropTableIfExists(UNBACKED.name);
       await knexInstance.schema.createTable(DEFAULTED.name, (t: any) => {
         t.string('id', 64).primary();
         t.string('email', 191).notNullable().defaultTo('unset').unique();
@@ -167,18 +177,26 @@ function declareEmptyMergeSetPins(cell: DialectCell): void {
         t.string('title', 191).nullable();
       });
       driver.registerExternalObject({ ...DEFAULTED, external: { remoteName: DEFAULTED.name } });
+      await knexInstance.schema.createTable(UNBACKED.name, (t: any) => {
+        t.string('id', 64).primary();
+        t.string('email', 191).nullable();
+        t.string('title', 191).nullable();
+      });
       driver.registerExternalObject({ ...STAMPED, external: { remoteName: STAMPED.name } });
+      driver.registerExternalObject({ ...UNBACKED, external: { remoteName: UNBACKED.name } });
     });
 
     afterAll(async () => {
       await knexInstance?.schema.dropTableIfExists(DEFAULTED.name).catch(() => {});
       await knexInstance?.schema.dropTableIfExists(STAMPED.name).catch(() => {});
+      await knexInstance?.schema.dropTableIfExists(UNBACKED.name).catch(() => {});
       await driver?.disconnect?.();
     });
 
     beforeEach(async () => {
       await knexInstance(DEFAULTED.name).delete();
       await knexInstance(STAMPED.name).delete();
+      await knexInstance(UNBACKED.name).delete();
       await knexInstance(DEFAULTED.name).insert({ id: KEPT_ID, email: 'unset', title: 'kept' });
       await knexInstance(STAMPED.name).insert({
         id: KEPT_ID,
@@ -208,6 +226,18 @@ function declareEmptyMergeSetPins(cell: DialectCell): void {
       expectUniqueViolation(err);
       expect(await rows(STAMPED.name)).toEqual(before);
       expect(await createdAtOf(KEPT_ID), 'an insert-only column was rewritten').toBe(createdBefore);
+    });
+
+    it('refuses a conflict target that no unique index backs, and writes nothing', async () => {
+      const err = (await captureError(() => driver.upsert(UNBACKED.name, { id: 'os8740_unbacked_row' }, ['email']))) as {
+        code?: string;
+        status?: number;
+      } | null;
+
+      expect(err, 'the unbacked conflict target was accepted').not.toBeNull();
+      expect(err!.code).toBe('VALIDATION_ERROR');
+      expect(err!.status).toBe(400);
+      expect(await rows(UNBACKED.name), 'a row was written').toEqual([]);
     });
 
     it('still inserts, and answers the row, when the payload collides with nothing', async () => {
