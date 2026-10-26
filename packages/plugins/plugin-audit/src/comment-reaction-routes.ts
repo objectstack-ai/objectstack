@@ -4,21 +4,18 @@ import {
   ANONYMOUS_DENY_CODE,
   ANONYMOUS_DENY_MESSAGE,
   ANONYMOUS_DENY_STATUS,
-  apiKeyLifecyclePolicySourceOf,
-  assembleExecutionContext,
   evaluateAuthGate,
   isApiKeyLifecycleRefusalError,
   isAuthzStoreUnavailableError,
   recordNotFoundError,
-  resolveAuthzContext,
+  resolveRequestExecutionContext,
   shouldDenyAnonymous,
-  userAuthGateSourceOf,
+  type TenancyServiceResolver,
 } from '@objectstack/core';
 import type { ErrorCode } from '@objectstack/spec/api';
 import type { IAuthService, IHttpRequest, IHttpResponse, IHttpServer } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import type { TenancyPosture } from '@objectstack/spec/security';
-import { inProcessSessionReadInput, resolveThrownHttpError, sendError, sendOk, sendServerFault } from '@objectstack/types';
+import { resolveThrownHttpError, sendError, sendOk, sendServerFault } from '@objectstack/types';
 
 import { COMMENT_REACTION_OBJECT } from './comment-access-hooks.js';
 
@@ -121,51 +118,47 @@ export interface PlatformCallerSources {
   /** The auth service the caller's session is read through; `undefined` when none is registered. */
   getAuth(): IAuthService | undefined;
   /**
-   * The tenancy posture in force, for the resolver's posture-conditional API-key
-   * refusals; `undefined` on a kernel that enforces no organization wall. A
-   * posture that cannot be read rejects, and the door answers that outage.
+   * How this door reaches the `tenancy` service, for the resolver's
+   * posture-conditional API-key refusals; `undefined` on a host with no async
+   * registry (no posture is read). A service that cannot answer rejects, and
+   * the door answers that outage.
    */
-  resolveTenancyPosture(): Promise<TenancyPosture | undefined>;
+  tenancy: TenancyServiceResolver | undefined;
 }
 
 /**
- * The platform's caller resolution for this door: the one resolver
- * (`resolveAuthzContext`) over the auth service's in-process session read,
- * assembled the way the REST face assembles a context. A request that names
- * nobody resolves to a context with no `userId`, which step 2 refuses.
+ * The platform's caller resolution for this door: the one composition
+ * (`resolveRequestExecutionContext`), with the choices the settings door
+ * makes. A request that names nobody resolves to `undefined`, which step 2
+ * refuses.
  */
 export function platformCallerResolver(sources: PlatformCallerSources): CommentReactionRoutesDeps['resolveCaller'] {
-  return async (req) => {
+  return (req) => {
     const headers = new Headers();
     for (const [name, value] of Object.entries(req.headers ?? {})) {
       if (value == null) continue;
       headers.set(name, Array.isArray(value) ? value.join(',') : String(value));
     }
-    const auth = sources.getAuth();
-    const getSession = auth
-      ? async (h: Headers) => {
-          const api = auth.api ?? (await auth.getApi?.());
-          return api?.getSession?.(inProcessSessionReadInput(h));
-        }
-      : undefined;
-    const authz = await resolveAuthzContext({
-      ql: sources.getEngine(),
+    // - `anonymous: 'fail-closed'`: the door serves signed-in members only.
+    // - `authGate: 'resolved'`: the posture rides the envelope, and step 3 enforces it.
+    // - `sessionApi: 'optional'`: with no session read, an API key still admits its owner.
+    // - `localization`, `requestLocale`, `accessToken`, `oauth`: withheld. The door
+    //   answers no translated text, carries no bearer, and speaks no OAuth scope.
+    return resolveRequestExecutionContext({
       headers,
-      getSession,
-      tenancyPosture: await sources.resolveTenancyPosture(),
-      userAuthGates: userAuthGateSourceOf(auth),
-      apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(auth),
-    });
-    return assembleExecutionContext({
-      authz,
-      // No OAuth access token is accepted here: those are honoured at the MCP door alone.
-      oauth: undefined,
-      // The door answers no translated text; its context carries no language.
-      localization: undefined,
+      ql: sources.getEngine(),
+      authService: sources.getAuth(),
+      tenancy: sources.tenancy,
+      anonymous: 'fail-closed',
+      authGate: 'resolved',
+      credentials: 'api-key-and-session',
+      sessionApi: 'optional',
+      session: 'request',
+      localization: 'withhold',
       requestLocale: undefined,
-      // The REST face's choice: the session bearer is not carried onto the envelope.
-      accessToken: undefined,
-      authGate: authz.authGate,
+      accessToken: 'withhold',
+      oauth: undefined,
+      onAdmission: undefined,
     });
   };
 }

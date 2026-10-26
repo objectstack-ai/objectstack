@@ -2,10 +2,10 @@
 
 import type { Plugin, PluginContext } from '@objectstack/core';
 import {
-  classifyAdmissionTenancyPosture,
   effectiveTenancyPosture,
   resolveLocalizationContext,
   type TenancyPostureSource,
+  type TenancyServiceResolver,
 } from '@objectstack/core';
 import type {
   IAuthService,
@@ -15,7 +15,6 @@ import type {
   ISecurityService,
   ISharingService,
 } from '@objectstack/spec/contracts';
-import type { TenancyPosture } from '@objectstack/spec/security';
 import { SysAuditLog, SysActivity, SysComment, SysCommentReaction } from './objects/index.js';
 // `sys_notification` was parked here "until that [ADR-0030] migration lands".
 // It has landed, so the contribution moved to @objectstack/service-messaging —
@@ -811,7 +810,7 @@ export class AuditPlugin implements Plugin {
       resolveCaller: platformCallerResolver({
         getEngine,
         getAuth: () => optional<IAuthService>('auth'),
-        resolveTenancyPosture: () => resolveAdmissionTenancyPosture(ctx),
+        tenancy: tenancyServiceResolver(ctx),
       }),
     });
     ctx.logger.info(`AuditPlugin: unreact door mounted at DELETE ${COMMENT_REACTION_REMOVE_ROUTE}`);
@@ -835,18 +834,17 @@ export class AuditPlugin implements Plugin {
 }
 
 /**
- * The tenancy posture in force, for the unreact door's admission (the
- * resolver's two posture-conditional API-key refusals). Read through the
- * kernel's async accessor, per request, and classified by the platform's one
- * rule (`classifyAdmissionTenancyPosture`): a `tenancy` service never
- * registered is a kernel with no organization wall, answered `undefined`; one
- * that is registered and cannot answer rejects, and the door answers that
- * outage. A host with no async accessor registers no `tenancy` service either.
+ * How the unreact door reaches the `tenancy` service: the kernel's async
+ * accessor, read per request and classified by the composition
+ * (`classifyAdmissionTenancyPosture`). A `tenancy` service never registered is
+ * a kernel with no organization wall; one that is registered and cannot answer
+ * is the outage the door answers. A host with no async accessor registers no
+ * `tenancy` service either, and no posture is read.
  */
-async function resolveAdmissionTenancyPosture(ctx: PluginContext): Promise<TenancyPosture | undefined> {
+function tenancyServiceResolver(ctx: PluginContext): TenancyServiceResolver | undefined {
   const kernel = ctx.getKernel?.() as
     | { getServiceAsync?: <T>(name: string, scopeId?: string) => Promise<T> }
     | undefined;
   if (!kernel || typeof kernel.getServiceAsync !== 'function') return undefined;
-  return classifyAdmissionTenancyPosture(() => kernel.getServiceAsync!<TenancyPostureSource>('tenancy'));
+  return () => kernel.getServiceAsync!<TenancyPostureSource>('tenancy');
 }
