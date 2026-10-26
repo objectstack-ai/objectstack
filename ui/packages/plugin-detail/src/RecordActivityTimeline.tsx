@@ -255,14 +255,6 @@ function changedFieldsOf(items: readonly FeedItem[]): string[] {
 /** How many field labels a folded row names before it says "+N". */
 const FOLD_FIELDS_SHOWN = 3;
 
-function formatList(values: string[], locale: string): string {
-  try {
-    return new Intl.ListFormat(locale, { style: 'long', type: 'conjunction' }).format(values);
-  } catch {
-    return values.join(', ');
-  }
-}
-
 /**
  * RecordActivityTimeline — Unified timeline renderer for Airtable-style activity feeds.
  *
@@ -615,8 +607,11 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
     const named = rest > 0 ? [...shown, t('detail.foldedMoreFields', { count: rest })] : shown;
     // No field named on any entry (an unstamped row, or a reader served none
     // of the fields) still reads as updates, and still counts.
+    // Joined with the pack's list punctuation, the key the form's field lists
+    // use: `Intl.ListFormat` was measured and rejected there, because its
+    // `unit` styles join zh and ru with no separator at all.
     const summary = named.length > 0
-      ? t('detail.foldedUpdates', { fields: formatList(named, displayLocale) })
+      ? t('detail.foldedUpdates', { fields: named.join(t('validation.formInvalidJoiner')) })
       : t('detail.activityUpdated');
     const expanded = expandedFolds.has(entry.id);
     const Icon = FEED_TYPE_ICONS.field_change;

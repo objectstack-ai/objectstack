@@ -209,7 +209,7 @@ describe('RecordActivityTimeline renders a folded run as one row (objectstack#25
     const fold = folds[0];
     expect(fold.getAttribute('data-fold-count')).toBe('13');
     expect(within(fold).getByTestId('activity-fold-count').textContent).toBe('13 updates');
-    expect(within(fold).getByText('Updated Number Sent, Leads, and Responses')).toBeTruthy();
+    expect(within(fold).getByText('Updated Number Sent, Leads, Responses')).toBeTruthy();
     // The individual summaries are not on screen until the row is expanded,
     // and the person's comment is no longer buried.
     expect(screen.queryByText(/Updated Campaign "CPG-0001"/)).toBeNull();
@@ -232,7 +232,7 @@ describe('RecordActivityTimeline renders a folded run as one row (objectstack#25
 
   it('outside a record page the field list falls back to machine names', () => {
     render(<RecordActivityTimeline items={mapAll([row({ minute: 0 }), row({ minute: 1, changed_fields: ['responses'] })])} />);
-    expect(screen.getByText('Updated num_sent and responses')).toBeTruthy();
+    expect(screen.getByText('Updated num_sent, responses')).toBeTruthy();
   });
 
   it('a long field list names three and counts the rest', () => {
@@ -241,7 +241,7 @@ describe('RecordActivityTimeline renders a folded run as one row (objectstack#25
         items={mapAll([row({ minute: 0, changed_fields: ['a', 'b', 'c'] }), row({ minute: 1, changed_fields: ['d', 'e'] })])}
       />,
     );
-    expect(screen.getByText('Updated a, b, c, and 2 more')).toBeTruthy();
+    expect(screen.getByText('Updated a, b, c, 2 more')).toBeTruthy();
   });
 
   it('a run whose entries name no fields still reads as updates and still counts', () => {
