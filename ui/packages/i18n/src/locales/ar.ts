@@ -4226,6 +4226,15 @@ const ar = {
       localSuccess: "تم تثبيت v{{version}} في هذا الوقت التشغيل. يجب أن يظهر \"{{name}}\" الآن في مبدّل التطبيقات.",
       localLoadsAtRestart: "تم تثبيت v{{version}} في وقت التشغيل هذا. سيُحمَّل \"{{name}}\" عند إعادة التشغيل التالية لوقت التشغيل، ولن يظهر في مبدّل التطبيقات قبل ذلك.",
       localManifestConflict: "{{message}}\nملاحظة: تطبيق محلي يمتلك بالفعل هذا المعرف. أزله أولاً من objectstack.config.ts.",
+      // ADR-0141 D2 — the install refusal DEPENDENCY_MISSING, one line per unmet entry.
+      dependencyMissing: {
+        heading: "تم رفض التثبيت: تبعية تعلنها هذه الحزمة غير مستوفاة في هذه البيئة، لذا لم يُثبَّت أي شيء.",
+        absent: "ثبّت {{dependency}} {{range}} أولاً.",
+        outOfRange: "ثبّت {{dependency}} {{range}} أولاً. الإصدار المثبّت هو {{installedVersion}}.",
+        unreadableRange: "تعلن {{packageId}} عن {{dependency}} بنطاق الإصدارات {{range}}، ولا يمكن قراءته. صحّح النطاق ثم أعد نشر الحزمة.",
+        unreadableVersion: "ثبّت إصدارًا نهائيًا من {{dependency}} ضمن {{range}}. الإصدار المثبّت {{installedVersion}} ليس بصيغة MAJOR.MINOR.PATCH.",
+        unreadableDeclaration: "تعلن {{packageId}} عن تبعياتها بصيغة لا يستطيع التثبيت قراءتها. اكتبها كخريطة من معرّف الحزمة إلى نطاق الإصدارات ثم أعد نشر الحزمة.",
+      },
       localUnauthorized: "سجل الدخول إلى هذا الوقت التشغيل أولاً.",
       localMarketplaceUnavailable: "هذا الوقت التشغيل لا يحتوي على OS_CLOUD_URL مُهيأ.",
       updateTo: "تحديث → v{{version}}",

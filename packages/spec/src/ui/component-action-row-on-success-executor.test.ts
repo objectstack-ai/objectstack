@@ -18,10 +18,10 @@
  *   rename onto `'url'` — whose `target` the url scheme set judges. Every other
  *   executor name, a host-registered handler included, stays open.
  * - **`onSuccess` beside the effective executor** (section 3): `ActionSchema`'s
- *   "`onSuccess` only beside `api` / `script`", carried to the rows on the
- *   vocabulary the action's closed `ActionType` can see. Refused beside every
- *   runner built-in other than those two (`url`, `navigation`, `modal`,
- *   `flow`, `form`) and beside a row with no effective executor; a host
+ *   "`onSuccess` only beside `api` / `script` / `flow`", carried to the rows on
+ *   the vocabulary the action's closed `ActionType` can see. Refused beside
+ *   every runner built-in other than those three (`url`, `navigation`,
+ *   `modal`, `form`) and beside a row with no effective executor; a host
  *   handler name stays open; the refusal text is the action's own.
  *
  * Each row gets one refusal (its Zod issue path and its first sentence) and one
@@ -235,8 +235,8 @@ const TARGETS: Readonly<Record<string, string>> = {
 
 const HOP = { navigate: '/apps/crm/tasks/${result.id}' };
 
-describe("a page action row's `onSuccess` is refused beside a runner built-in other than `api` / `script`", () => {
-  const REFUSED = ['url', 'modal', 'flow', 'form'] as const;
+describe("a page action row's `onSuccess` is refused beside a runner built-in other than `api` / `script` / `flow`", () => {
+  const REFUSED = ['url', 'modal', 'form'] as const;
 
   it.each(ROWS.flatMap((row) => REFUSED.map((executor) => [row.name, executor, row] as const)))(
     'REFUSAL: %s with `%s` and `onSuccess` is refused at `onSuccess`, naming the row and its executor',
@@ -308,8 +308,8 @@ describe("a page action row's `onSuccess` is refused beside no effective executo
   });
 });
 
-describe("a page action row's `onSuccess` stays open beside `api`, `script` and a host-registered handler", () => {
-  it.each(ROWS.flatMap((row) => (['api', 'script', 'run'] as const).map((executor) => [row.name, executor, row] as const)))(
+describe("a page action row's `onSuccess` stays open beside `api`, `script`, `flow` and a host-registered handler", () => {
+  it.each(ROWS.flatMap((row) => (['api', 'script', 'flow', 'run'] as const).map((executor) => [row.name, executor, row] as const)))(
     'ACCEPTED: %s with `%s` and `onSuccess` parses, the block resolved as on the action',
     (_name, executor, row) => {
       const r = row.parse({ [row.executorKey]: executor, target: TARGETS[executor], onSuccess: HOP });
@@ -319,7 +319,7 @@ describe("a page action row's `onSuccess` stays open beside `api`, `script` and 
   );
 
   it.each(ROWS)('ACCEPTED: $name on the name leg — no executor key and `name: \'api\'` or a host handler name — parses', (row) => {
-    for (const name of ['api', 'script', 'clone_task']) {
+    for (const name of ['api', 'script', 'flow', 'clone_task']) {
       const r = row.parse({ name, onSuccess: HOP });
       expect(r.success, `${name}: ${JSON.stringify(issuesOf(r))}`).toBe(true);
     }

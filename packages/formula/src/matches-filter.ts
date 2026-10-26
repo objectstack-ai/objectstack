@@ -296,6 +296,16 @@ function isFieldReference(raw: unknown): raw is Record<string, unknown> {
   return raw !== null && typeof raw === 'object' && !Array.isArray(raw) && '$field' in (raw as Record<string, unknown>);
 }
 
+/**
+ * [#25808] A `{ $now, addDays }` now-anchored comparand — the same shape test
+ * {@link resolveValue} applies: an object carrying a `$now` key. `$now` is
+ * `true` as authored, or the ISO instant the engine's token resolver pinned it
+ * to; both read as an instant here ({@link nowAnchorInstant}).
+ */
+function isNowAnchor(raw: unknown): raw is Record<string, unknown> {
+  return raw !== null && typeof raw === 'object' && !Array.isArray(raw) && '$now' in (raw as Record<string, unknown>);
+}
+
 /** A plain object — an operator map rather than a comparand (`Date` is a comparand). */
 function isOperatorMap(spec: unknown): spec is Record<string, unknown> {
   if (spec === null || typeof spec !== 'object' || Array.isArray(spec) || spec instanceof Date) return false;
@@ -674,10 +684,11 @@ function evalOp(
   if ((ORDERING_OPERATORS as readonly string[]).includes(op) && isNonScalarValue(actual)) {
     throw arrayComparandError();
   }
-  const v = resolveValue(raw, record);
+  const v = resolveValue(raw, record, actual);
   // [#14104] An offset reference whose base is NULL is FALSE for every
   // operator — see {@link NO_OFFSET_BASE}. Before the switch, so `$ne`'s
-  // complement arm and `$eq`'s null arm never see it.
+  // complement arm and `$eq`'s null arm never see it. [#25808] A malformed
+  // now-anchor resolves to the same sentinel, for the same reason.
   if (v === NO_OFFSET_BASE) return false;
   switch (op) {
     case '$eq': return v === null ? actual == null : looseEq(actual, v);
@@ -953,14 +964,61 @@ const NO_OFFSET_BASE: unique symbol = Symbol('matches-filter:no-offset-base');
  * raw`, any extra key ignored) so the three faces keep agreeing on what a
  * reference IS; only what is done with one grew.
  */
-function resolveValue(raw: unknown, record: Record<string, unknown>): unknown {
+function resolveValue(raw: unknown, record: Record<string, unknown>, actual?: unknown): unknown {
   if (raw && typeof raw === 'object' && !Array.isArray(raw) && '$field' in (raw as Record<string, unknown>)) {
     const ref = raw as Record<string, unknown>;
     const base = getPath(record, String(ref.$field));
     if (!('addDays' in ref) || ref.addDays === undefined) return base;
     return addWholeDays(base, resolveDayOffset(ref.addDays, record));
   }
+  if (isNowAnchor(raw)) return resolveNowAnchor(raw, record, actual);
   return raw;
+}
+
+/**
+ * [#25808] The resolved comparand of a `{ $now, addDays }` anchor: the current
+ * instant shifted by `addDays` whole days — an integer literal or a nested
+ * `{ $field }` reference to a numeric column, read exactly as a `{ $field,
+ * addDays }` pair's offset is ({@link resolveDayOffset}: a NULL offset column
+ * is zero days, a fractional value truncates toward zero, a non-number fails
+ * closed).
+ *
+ * The shift is made IN THE FORM OF THE VALUE IT IS COMPARED AGAINST, which is
+ * what makes the answer the SQL twin's: `driver-sql` binds the instant in the
+ * target column's storage form and shifts it there (`applyNowAnchorComparison`),
+ * so a `date` column meets the instant's UTC calendar day plus the offset — a
+ * calendar day, compared day for day — and a `datetime` column meets the ISO
+ * instant plus the offset, time of day intact. This evaluator has no column
+ * declaration, so it reads the form off the stored value: a bare `YYYY-MM-DD`
+ * actual puts the anchor in calendar-day form; anything else (an ISO instant,
+ * a `Date`, an epoch number, a NULL) meets the ISO instant.
+ *
+ * `addDays` is REQUIRED on an anchor (the schema and the engine's resolver
+ * both refuse its absence; `{now}` is the spelling for the unshifted instant);
+ * one that reaches this evaluator without it fails closed, as a malformed
+ * offset does.
+ */
+function resolveNowAnchor(anchor: Record<string, unknown>, record: Record<string, unknown>, actual: unknown): unknown {
+  const at = nowAnchorInstant(anchor.$now);
+  if (at === null || !('addDays' in anchor) || anchor.addDays === undefined) return NO_OFFSET_BASE;
+  const days = resolveDayOffset(anchor.addDays, record);
+  const base = typeof actual === 'string' && CALENDAR_DAY_RE.test(actual)
+    ? at.toISOString().slice(0, 10)
+    : at.toISOString();
+  return addWholeDays(base, days);
+}
+
+/**
+ * [#25808] The instant a `$now` names: `true` is the evaluator's own clock (a
+ * caller that passed no resolver seam — the RLS check, a direct call); an ISO
+ * string is the instant the engine's `resolveFilterTokens` pinned the whole
+ * tree to. Anything else names no instant.
+ */
+function nowAnchorInstant(raw: unknown): Date | null {
+  if (raw === true) return new Date();
+  if (typeof raw !== 'string') return null;
+  const ms = Date.parse(raw);
+  return Number.isFinite(ms) ? new Date(ms) : null;
 }
 
 /**

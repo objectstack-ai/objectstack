@@ -81,7 +81,6 @@ interface Probe {
 describe('walled posture: withdrawing a public form from anonymous intake', () => {
   let stack: VerifyStack;
   let admin: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let ql: any;
   let published: Record<string, any>;
   let orgId: string;

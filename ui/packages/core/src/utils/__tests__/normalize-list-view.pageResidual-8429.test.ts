@@ -140,20 +140,17 @@ describe('the `page` residual (objectui#8429), closed by the protocol at @object
   });
 
   describe('the populations, sized before they are used', () => {
-    it('reads a non-empty, exactly-sized vocabulary from each face', () => {
-      // The spec's list-view types, as published in @objectstack/spec 17.5.0:
-      // the nine visualizations, `page` retired.
-      expect(SPEC_LIST_VIEW_TYPES.length).toBe(9);
-      expect([...SPEC_LIST_VIEW_TYPES].sort()).toEqual([
-        'calendar', 'chart', 'gallery', 'gantt', 'grid', 'kanban', 'map', 'timeline', 'tree',
-      ]);
+    it('reads a non-empty vocabulary from each face, `page` on neither', () => {
+      // The spec's list-view types, as published since @objectstack/spec 17.5.0:
+      // the nine visualizations ListView draws, `page` retired. Asserted by
+      // name; the spec's whole list is not this file's to pin (#26238).
+      const drawn = ['calendar', 'chart', 'gallery', 'gantt', 'grid', 'kanban', 'map', 'timeline', 'tree'];
+      for (const kind of drawn) expect(SPEC_LIST_VIEW_TYPES).toContain(kind);
+      expect(SPEC_LIST_VIEW_TYPES).not.toContain('page');
 
-      // objectui's derived face: the spec's nine, plus the two local categories.
-      expect(OBJECTUI_VIEW_TYPES.length).toBe(11);
-      expect([...OBJECTUI_VIEW_TYPES].sort()).toEqual([
-        'calendar', 'chart', 'detail', 'gallery', 'gantt', 'grid',
-        'kanban', 'list', 'map', 'timeline', 'tree',
-      ]);
+      // objectui's derived face: the spec's kinds, plus the two local categories.
+      for (const kind of ['detail', 'list']) expect(OBJECTUI_VIEW_TYPES).toContain(kind);
+      expect(OBJECTUI_VIEW_TYPES.length).toBe(SPEC_LIST_VIEW_TYPES.length + 2);
 
       // The derivation itself: objectui declares a superset, never a subset.
       for (const kind of SPEC_LIST_VIEW_TYPES) {
@@ -161,11 +158,11 @@ describe('the `page` residual (objectui#8429), closed by the protocol at @object
       }
     });
 
-    it('partitions objectui`s vocabulary into 9 drawable kinds and the 2 local categories', () => {
+    it('partitions objectui`s vocabulary into the drawable kinds and the 2 local categories', () => {
       const drawable = OBJECTUI_VIEW_TYPES.filter((k) => isListViewVisualization(k));
       const undrawable = OBJECTUI_VIEW_TYPES.filter((k) => !isListViewVisualization(k));
 
-      expect(drawable.length).toBe(9);
+      expect(drawable.length).toBeGreaterThan(0);
       expect(undrawable.length).toBe(2);
       expect(drawable.length + undrawable.length).toBe(OBJECTUI_VIEW_TYPES.length);
       expect([...undrawable].sort()).toEqual(['detail', 'list']);
@@ -176,8 +173,9 @@ describe('the `page` residual (objectui#8429), closed by the protocol at @object
     it('leaves no spec-authorable list-view type ListView cannot draw', () => {
       const residual = SPEC_LIST_VIEW_TYPES.filter((k) => !isListViewVisualization(k));
       expect(residual).toEqual([]);
-      // Control: the subtraction is a real one — every one of the spec's nine IS drawable.
-      expect(SPEC_LIST_VIEW_TYPES.filter((k) => isListViewVisualization(k)).length).toBe(9);
+      // Control: the subtraction is a real one — every one of the spec's kinds IS drawable.
+      expect(SPEC_LIST_VIEW_TYPES.filter((k) => isListViewVisualization(k)).length).toBe(SPEC_LIST_VIEW_TYPES.length);
+      expect(SPEC_LIST_VIEW_TYPES.length).toBeGreaterThan(0);
     });
 
     it('refuses `page` on BOTH published `@object-ui/types` faces, as the spec does', () => {
@@ -214,15 +212,17 @@ describe('the `page` residual (objectui#8429), closed by the protocol at @object
   });
 
   describe('the whole vocabulary, as a census', () => {
-    it('maps every one of the 11 declared kinds to what the renderer actually gets', () => {
+    it('maps every declared kind to what the renderer actually gets', () => {
       const census = new Map<string, unknown>(
         OBJECTUI_VIEW_TYPES.map((kind) => [
           kind,
           readViewType(normalizeListViewSchema({ type: 'list-view', objectName: 'account', specType: kind })),
         ]),
       );
-      expect(census.size).toBe(11);
-      expect(Object.fromEntries(census)).toEqual({
+      expect(census.size).toBe(OBJECTUI_VIEW_TYPES.length);
+      // The kinds named here by their mapping; a kind the spec adds later is
+      // held by the closing line instead (it must resolve to itself, #26238).
+      expect(Object.fromEntries(census)).toMatchObject({
         grid: 'grid',
         kanban: 'kanban',
         gallery: 'gallery',

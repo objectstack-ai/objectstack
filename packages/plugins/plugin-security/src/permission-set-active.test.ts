@@ -6,15 +6,13 @@
  *
  * The dominant enforcement point is `resolveUserAuthzGrants` in
  * `@objectstack/core`, which drops a deactivated set before
- * `context.permissions` is built. The plugin's resolution is the SECOND
- * reader, and it is not defence in depth that nothing reaches — the
- * reachability case below is the reason it exists:
- *
- *   `resolvePermissionSetsForContext` requests `context.positions` as
- *   permission-set NAMES too (a position name is commonly reused as a set
- *   name). So an ACTIVE position whose name matches a DEACTIVATED set arrives
- *   with that name still standing: core judged the position, not a set of
- *   the same name.
+ * `context.permissions` is built. The plugin's resolution used to be a SECOND
+ * reader, for one case: it requested `context.positions` as permission-set
+ * NAMES too, so an ACTIVE position whose name matched a DEACTIVATED set
+ * arrived with that name still standing. #24757 retired that position-name
+ * fold, and with it the second read: every name the plugin requests arrives
+ * already judged, and a held position's name reaches no set at all, active or
+ * switched off.
  *
  * [ADR-0131 D3, ADR-0126 §4] The switch is the activation ledger's
  * (`sys_metadata_activation`, type `permission`), read through core's own
@@ -111,40 +109,19 @@ const namesFor = async (fixture: Fixture, context: Record<string, unknown>): Pro
 
 const switchedOff = (active: unknown) => ({ metadata_type: 'permission', name: 'sales_manager', active });
 
-describe('[#8613] a position name reaching a set the activation ledger switched off', () => {
-  it('THE REACHABILITY CASE: the folded name resolves nothing; the baseline still applies', async () => {
-    const names = await namesFor({ ledger: [switchedOff(false)] }, { positions: ['sales_manager'], permissions: [] });
+describe('[#8613, #24757] a position name reaches no set, so there is nothing for the ledger to switch off', () => {
+  it('an ACTIVE same-named set is not granted through the position name; the baseline still applies', async () => {
+    const names = await namesFor({}, { positions: ['sales_manager'], permissions: [] });
     expect(names).not.toContain('sales_manager');
     expect(names).toContain('member_default');
   });
 
-  it('…and the same request with no ledger row does resolve, whole — the case is real, not vacuous', async () => {
+  it('…while the same set, named by the context, resolves whole — the set is real, so the absence above is not vacuous', async () => {
     const { svc } = await locate();
-    const sets = await svc.resolvePermissionSetsForContext?.({ userId: 'u1', positions: ['sales_manager'], permissions: [] } as any);
+    const sets = await svc.resolvePermissionSetsForContext?.({ userId: 'u1', positions: [], permissions: ['sales_manager'] } as any);
     const found: any = (sets ?? []).find((s) => s.name === 'sales_manager');
     expect(found?.objects).toEqual({ deal: { allowRead: true, allowEdit: true } });
     expect(found?.systemPermissions).toEqual(['setup.access']);
-  });
-
-  it('the 0/1 storage shape of the ledger is judged too, not only a literal `false`', async () => {
-    expect(await namesFor({ ledger: [switchedOff(0)] }, { positions: ['sales_manager'] })).not.toContain('sales_manager');
-    expect(await namesFor({ ledger: [switchedOff(1)] }, { positions: ['sales_manager'] })).toContain('sales_manager');
-  });
-
-  it("a ledger row of ANOTHER type under the same name switches nothing off (a position's row is not the set's)", async () => {
-    const names = await namesFor(
-      { ledger: [{ metadata_type: 'position', name: 'sales_manager', active: false }] },
-      { positions: ['sales_manager'] },
-    );
-    expect(names).toContain('sales_manager');
-  });
-
-  it("a catalog ROW's `active: false` is not read — only the ledger switches a set off", async () => {
-    const names = await namesFor(
-      { rows: [{ name: 'sales_manager', active: false }] },
-      { positions: ['sales_manager'] },
-    );
-    expect(names).toContain('sales_manager');
   });
 });
 
@@ -158,9 +135,9 @@ describe('[ADR-0049] names that arrive already judged are not judged again', () 
     expect(ledgerReads()).toBe(0);
   });
 
-  it('a request with no folded collision issues no ledger read', async () => {
-    const { svc, ledgerReads } = await locate();
-    await svc.resolvePermissionSetsForContext?.({ userId: 'u1', positions: ['everyone', 'org_member'], permissions: [] } as any);
+  it('a held position — one whose name a set shares included — issues no ledger read', async () => {
+    const { svc, ledgerReads } = await locate({ ledger: [switchedOff(false)] });
+    await svc.resolvePermissionSetsForContext?.({ userId: 'u1', positions: ['everyone', 'org_member', 'sales_manager'], permissions: [] } as any);
     expect(ledgerReads()).toBe(0);
   });
 });

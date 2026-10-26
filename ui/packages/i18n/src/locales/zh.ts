@@ -4093,6 +4093,15 @@ const zh = {
         localSuccess: '已将 v{{version}} 安装到本运行时。"{{name}}" 应该已经出现在应用切换器中。',
         localLoadsAtRestart: '已将 v{{version}} 安装到本运行时。"{{name}}" 将在运行时下次重启时加载，在此之前不会出现在应用切换器中。',
         localManifestConflict: '{{message}}\n提示：本地已有应用占用此 manifest_id，请先从 objectstack.config.ts 中移除。',
+        // ADR-0141 D2 — the install refusal DEPENDENCY_MISSING, one line per unmet entry.
+        dependencyMissing: {
+          heading: '安装被拒绝：此软件包声明的依赖在当前环境中未满足，未安装任何内容。',
+          absent: '请先安装 {{dependency}} {{range}}。',
+          outOfRange: '请先安装 {{dependency}} {{range}}（当前安装的是 {{installedVersion}}）。',
+          unreadableRange: '{{packageId}} 为 {{dependency}} 声明的版本范围 {{range}} 无法识别，请修改版本范围后重新发布软件包。',
+          unreadableVersion: '请安装 {{dependency}} 在 {{range}} 范围内的正式版本（当前安装的 {{installedVersion}} 不是“主版本.次版本.修订号”格式）。',
+          unreadableDeclaration: '{{packageId}} 的依赖声明格式无法识别，请写成“软件包 ID → 版本范围”的映射后重新发布软件包。',
+        },
         localUnauthorized: '请先登录本运行时再试。',
         localMarketplaceUnavailable: '本运行时未配置 OS_CLOUD_URL，无法访问应用市场目录。',
         updateTo: '更新 → v{{version}}',

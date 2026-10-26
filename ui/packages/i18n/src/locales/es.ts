@@ -4001,6 +4001,15 @@ const es = {
       localSuccess: "v{{version}} instalado en este runtime. \"{{name}}\" debería aparecer en el selector de aplicaciones ahora.",
       localLoadsAtRestart: "v{{version}} instalado en este runtime. \"{{name}}\" se cargará en el próximo reinicio del runtime y no aparecerá en el selector de aplicaciones hasta entonces.",
       localManifestConflict: "{{message}}\nNota: Una aplicación local ya tiene este manifest_id. Primero elimínela de objectstack.config.ts.",
+      // ADR-0141 D2 — the install refusal DEPENDENCY_MISSING, one line per unmet entry.
+      dependencyMissing: {
+        heading: "Instalación rechazada: una dependencia que declara este paquete no se cumple en este entorno, por lo que no se instaló nada.",
+        absent: "Instale primero {{dependency}} {{range}}.",
+        outOfRange: "Instale primero {{dependency}} {{range}}. La versión instalada es {{installedVersion}}.",
+        unreadableRange: "{{packageId}} declara {{dependency}} con el rango de versiones {{range}}, que no se puede leer. Corrija el rango y vuelva a publicar el paquete.",
+        unreadableVersion: "Instale una versión publicada de {{dependency}} dentro de {{range}}. La versión instalada {{installedVersion}} no tiene el formato MAJOR.MINOR.PATCH.",
+        unreadableDeclaration: "{{packageId}} declara sus dependencias en una forma que la instalación no puede leer. Escríbalas como un mapa de ID de paquete a rango de versiones y vuelva a publicar el paquete.",
+      },
       localUnauthorized: "Primero inicie sesión en este runtime.",
       localMarketplaceUnavailable: "Este runtime no tiene configurado OS_CLOUD_URL.",
       updateTo: "Actualizar → v{{version}}",

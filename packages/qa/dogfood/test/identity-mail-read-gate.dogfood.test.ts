@@ -66,9 +66,7 @@ const SYS = { context: { isSystem: true } } as const;
 const BODY_FIELDS = ['body_text', 'body_html'] as const;
 
 type Row = Record<string, any>;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const rowsOf = (body: any): Row[] => (Array.isArray(body) ? body : (body?.records ?? body?.data ?? body?.value ?? []));
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const recordOf = (body: any): Row => body?.record ?? body?.data ?? body;
 const filterOf = (where: Record<string, unknown>) => encodeURIComponent(JSON.stringify(where));
 const hasBodyKey = (row: Row) => BODY_FIELDS.some((f) => f in row);
@@ -91,7 +89,6 @@ function credentialSpanOf(row: Row): string {
 describe('[#24625] identity-mail bodies over a ceremonied 18.0 database: principal × door', () => {
   const dir = mkdtempSync(join(tmpdir(), 'dogfood-identity-mail-gate-'));
   let stack: VerifyStack;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let ql: any;
   const tok: Record<'platform' | 'orgAdmin' | 'member', string> = { platform: '', orgAdmin: '', member: '' };
   /**

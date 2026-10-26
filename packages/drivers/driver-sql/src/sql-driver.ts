@@ -2889,6 +2889,92 @@ function fieldReferenceOffsetOf(value: unknown): CrossFieldOffset | null {
 }
 
 /**
+ * [#25808] A `{ $now, addDays }` now-anchored comparand — the current instant
+ * shifted by whole days, compared against a temporal column of the row
+ * (`NowAnchorSchema`, `data/filter.zod.ts`; maintainer ruling 2026-10-26,
+ * letter A). Recognised by SHAPE — an object carrying a `$now` key — the way
+ * {@link fieldReferenceOf} recognises a reference, and for the same reason: the
+ * evaluator (`@objectstack/formula`'s `resolveValue`) reads the same shape, so
+ * the two paths agree on what an anchor IS and a malformed one is refused here
+ * rather than bound as a literal object.
+ *
+ * `$now` arrives in two spellings. `true` is the AUTHORED form; the engine's
+ * token resolver (`resolveFilterTokens`, `@objectstack/core`) pins it to the
+ * tree's instant — the ISO string of the same `now` every `{N_days_ago}`
+ * token in the tree resolved from — before any driver runs. A caller that
+ * reaches this driver without that seam (a direct `find`, a permission filter
+ * assembled in code) still carries `true`, and the driver reads its own clock
+ * for it, as the evaluator does. Anything else is `invalid`.
+ */
+type NowAnchor = { kind: 'instant'; at: Date } | { kind: 'invalid'; reason: string };
+
+function nowAnchorOf(value: unknown): NowAnchor | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value instanceof Date) return null;
+  if (!('$now' in value)) return null;
+  const raw = (value as Record<string, unknown>).$now;
+  if (raw === true) return { kind: 'instant', at: new Date() };
+  if (typeof raw === 'string') {
+    const ms = Date.parse(raw);
+    if (Number.isFinite(ms)) return { kind: 'instant', at: new Date(ms) };
+    return { kind: 'invalid', reason: `$now ${JSON.stringify(raw)} is not an instant the resolver could have pinned` };
+  }
+  return {
+    kind: 'invalid',
+    reason: `$now must be the literal true (the resolver pins it to the current instant), not ${JSON.stringify(raw)}`,
+  };
+}
+
+/**
+ * [#25808] A `{ $now }` anchor reached a position this driver does not compile:
+ * a list member, a text pattern, the bare `{ field: { $now: true } }` spelling
+ * (which reaches the operator loop as an operator named `$now`). The same
+ * boundary as {@link crossFieldComparisonError}, for the same reason, with the
+ * same withholding (#7929): the anchor compiles only as the WHOLE comparand of
+ * one of the six scalar comparisons, where {@link SqlDriver.applyNowAnchorComparison}
+ * answers it.
+ */
+function nowAnchorPositionError(field: string, op: string, subtree?: unknown, index?: number): Error {
+  const position = index === undefined ? '' : ` at index ${index} of its value list`;
+  const diagnostic =
+    `Operator "${op}" on field "${field}" compares against a now-anchored comparand ` +
+    `({ "$now": true, "addDays": … })${position}, a position SQL push-down does not compile.`;
+  return withheldFilterError(
+    `A now-anchored comparand ({ "$now": true, "addDays": … }) in this filter sits in a position SQL ` +
+      `push-down does not compile. It compiles only as the whole comparand of a scalar comparison ` +
+      `operator ($eq/$ne/$gt/$gte/$lt/$lte) on a date or datetime column. Compare against a literal ` +
+      `value here, or write the test as one of those comparisons. The field and the operator this ` +
+      `filter used are withheld from the message; the full diagnostic is in the server log.`,
+    diagnostic,
+    subtree,
+    `${diagnostic} It compiles only as the whole comparand of a scalar comparison operator ` +
+      `($eq/$ne/$gt/$gte/$lt/$lte) on a date or datetime column.`,
+  );
+}
+
+/**
+ * [#25808] A `{ $now }` anchor in a scalar-comparison position this driver
+ * cannot compile for the stated reason — the target column is not temporal, the
+ * offset column breaks one of the #5222 rulings, the anchor is malformed. The
+ * caller-visible message states the capability boundary and names nothing
+ * (#7929); the diagnostic goes to the server log through the same withhold
+ * {@link uncompilableFieldReferenceError} uses.
+ */
+function uncompilableNowAnchorError(field: string, op: string, reason: string, subtree?: unknown): Error {
+  const diagnostic =
+    `Operator "${op}" on field "${field}" compares against a now-anchored comparand ` +
+    `({ "$now": true, "addDays": … }), which cannot be compiled here: ${reason}`;
+  return withheldFilterError(
+    `A now-anchored comparison ({ "$now": true, "addDays": … }) in this filter cannot be compiled ` +
+      `here. On SQL push-down the anchor compares against a date or datetime column the object ` +
+      `declares, and its addDays offset is an integer or a same-table numeric column the object ` +
+      `declares, excluding the tenant-isolation column. The field, the operator this filter used ` +
+      `and the specific reason are withheld from the message; the full diagnostic is in the server log.`,
+    diagnostic,
+    subtree,
+  );
+}
+
+/**
  * [#5041→#5222] `{ $field }` reached a position this driver does NOT compile to
  * a column-to-column comparison.
  *
@@ -3326,6 +3412,8 @@ function assertCompilableComparand(
 ): void {
   const ref = fieldReferenceOf(value);
   if (ref !== null) throw crossFieldComparisonError(field, op, ref, value);
+  // [#25808] …and a now-anchored comparand, outside the six comparisons.
+  if (nowAnchorOf(value) !== null) throw nowAnchorPositionError(field, op, value);
 
   // [#5234] The pattern family answers first: an array IS an object here, so
   // the member scan below would otherwise report `{$contains: ['a', {}]}` as a
@@ -3340,6 +3428,7 @@ function assertCompilableComparand(
     for (const [index, member] of value.entries()) {
       const memberRef = fieldReferenceOf(member);
       if (memberRef !== null) throw crossFieldComparisonError(field, op, memberRef, member, index);
+      if (nowAnchorOf(member) !== null) throw nowAnchorPositionError(field, op, member, index);
       // [#5234] Every member of a list operator's array is a comparand in its
       // own right and gets the same bind test the whole comparand gets. Scoped
       // to the operators for which an array is legitimate, so a scalar operator
@@ -4878,6 +4967,8 @@ function classifyFilterKey(
       if (CROSS_FIELD_COMPARISON_OPERATORS.has(op)) continue;
       const ref = fieldReferenceOf(comparand);
       if (ref !== null) throw crossFieldComparisonError(key, op, ref, comparand);
+      // [#25808] A now-anchored comparand under any other operator, likewise.
+      if (nowAnchorOf(comparand) !== null) throw nowAnchorPositionError(key, op, comparand);
     }
   }
 
@@ -17165,6 +17256,18 @@ export class SqlDriver implements IDataDriver {
             this.applyCrossFieldComparison(builder, method, table, key, localField, field, rawOp, crossFieldRef, opValue);
             continue;
           }
+          // [#25808] The bare `{ field: { $now: true, addDays } }` spelling reaches
+          // this loop as an operator named `$now`, as the bare `$field` does.
+          if (rawOp === '$now') throw nowAnchorPositionError(field, rawOp, value);
+          // [#25808] A `{ $now, addDays }` anchor that is the WHOLE comparand of a
+          // scalar comparison compiles to `column <op> <instant + days>` (or
+          // refuses inside the emitter, with the boundary named). Same slot as
+          // the `{ $field }` arm above, for the same reasons.
+          const nowAnchor = nowAnchorOf(opValue);
+          if (nowAnchor !== null && CROSS_FIELD_COMPARISON_OPERATORS.has(rawOp)) {
+            this.applyNowAnchorComparison(builder, method, table, key, localField, field, rawOp, nowAnchor, opValue);
+            continue;
+          }
           // #5041 — reject a comparand that cannot become a bind parameter
           // BEFORE any rewrite or coercion touches it, so the message names the
           // shape the caller actually sent.
@@ -17694,6 +17797,182 @@ export class SqlDriver implements IDataDriver {
         // Unreachable: the call site gates on CROSS_FIELD_COMPARISON_OPERATORS.
         throw crossFieldComparisonError(targetColumn, op, ref, refNode);
     }
+  }
+
+  /**
+   * [#25808] `column <op> (now + days)` — a now-anchored comparand on a
+   * temporal column, maintainer ruling 2026-10-26 (letter A): the current
+   * instant, shifted by a whole-day offset read from an integer literal or a
+   * NUMERIC column of the SAME record, compared against a `date` or `datetime`
+   * column. The analytics shape it was ruled for: "opened more than
+   * `review_sla_days` ago", where the SLA is a column of the row and the row's
+   * own clock is `now`.
+   *
+   * The arithmetic is {@link SqlDriver.crossFieldOffsetExpr}'s — the `addDays`
+   * arm of {@link SqlDriver.applyCrossFieldComparison}, with the anchor's
+   * instant bound where the referenced column would be read. The offset column
+   * is held to every rule that arm holds it to (same-table, declared, numeric,
+   * never the tenant-isolation column; a NULL offset is zero days through the
+   * same `coalesce`), so an offset that compiles there compiles here and no
+   * other does. What differs is the base: it is a VALUE, never NULL, so the
+   * `<base> is not null` conjunct the reference arm writes is dropped and the
+   * predicate reads as the plain literal comparison would — an ordering and
+   * `$eq` need the target to have a value, `$ne` holds when it has none or
+   * differs (`@objectstack/formula`'s `evalOp` over the resolved anchor,
+   * made total so `$not` re-admits exactly the complement).
+   *
+   * The instant is bound in the TARGET column's storage form, so the shifted
+   * value compares against the column exactly as a stored value would — the
+   * rule every literal comparand on a temporal column follows
+   * (`coerceFilterValue`): a `datetime` column keeps the time of day (the
+   * canonical UTC ISO text, through `mysqlDatetimeLiteral` on MySQL); a `date`
+   * column takes the instant's UTC calendar day (`temporalStorageForm`, the
+   * reading `{now}` and `{today}` take on a `date` column). PostgreSQL and
+   * MySQL cast the bound text (`timestamptz` / `datetime(3)`, `date`) because
+   * the dialect's day arithmetic needs a typed operand where a bare `?` beside
+   * a column would have been inferred; SQLite's `date()` / `strftime()` read
+   * the canonical text directly, as they read a stored value.
+   */
+  protected applyNowAnchorComparison(
+    builder: Knex.QueryBuilder,
+    method: 'where' | 'orWhere',
+    table: string | null,
+    targetKey: string,
+    targetLocalField: string,
+    targetColumn: string,
+    op: string,
+    anchor: NowAnchor,
+    // The `{ $now, addDays }` node itself, for the provenance resolver (#8220).
+    node?: unknown,
+  ): void {
+    if (anchor.kind === 'invalid') {
+      throw uncompilableNowAnchorError(targetColumn, op, `${anchor.reason}.`, node);
+    }
+    const offset = fieldReferenceOffsetOf(node);
+    if (offset === null) {
+      throw uncompilableNowAnchorError(targetColumn, op,
+        `a { "$now": true } comparand must carry an addDays offset — an integer literal of any sign ` +
+        `or a { "$field" } reference to a numeric column; for the unshifted instant write the "{now}" ` +
+        `placeholder.`, node);
+    }
+    if (offset.kind === 'invalid') {
+      throw uncompilableNowAnchorError(targetColumn, op,
+        `${offset.reason}; addDays is an integer literal of any sign or a { "$field" } reference ` +
+        `to a numeric column.`, node);
+    }
+    if (!table) {
+      throw uncompilableNowAnchorError(targetColumn, op,
+        `the target table of this query could not be resolved, so the target column's type ` +
+        `cannot be read.`, node);
+    }
+    const declared = this.declaredFieldsFor(table);
+    if (!declared) {
+      throw uncompilableNowAnchorError(targetColumn, op,
+        `object "${table}" has no declared column set on this driver (an external/federated ` +
+        `or unregistered table), so the target column's type cannot be read.`, node);
+    }
+    const hasOwn = (name: string) => Object.prototype.hasOwnProperty.call(declared, name);
+    const tenantField = this.resolveTenantField(table);
+    if (tenantField !== null && (targetKey === tenantField || targetLocalField === tenantField)) {
+      throw uncompilableNowAnchorError(targetColumn, op,
+        `"${tenantField}" is the tenant-isolation column of "${table}", which must not be the ` +
+        `target of a now-anchored comparison.`, node);
+    }
+    const targetDeclaredName = hasOwn(targetKey) ? targetKey : targetLocalField;
+    if (!hasOwn(targetDeclaredName)) {
+      throw uncompilableNowAnchorError(targetColumn, op,
+        `the target field "${targetKey}" is not a declared field of "${table}", so its type ` +
+        `cannot be checked as temporal.`, node);
+    }
+    const targetClass = crossFieldComparisonClass(declared[targetDeclaredName] ?? {});
+    if (targetClass !== 'date' && targetClass !== 'datetime') {
+      throw uncompilableNowAnchorError(targetColumn, op,
+        `a now-anchored comparand is an instant shifted by whole days, and the target field ` +
+        `"${targetKey}" (type "${String(declared[targetDeclaredName]?.type ?? 'string')}"` +
+        `${declared[targetDeclaredName]?.multiple ? ', multiple' : ''}) is stored as ` +
+        `${targetClass ?? 'no scalar column'} — only a date or datetime column can be compared ` +
+        `against it.`, node);
+    }
+
+    let offsetOperand: { sql: string; bindings: any[] };
+    if (offset.kind === 'literal') {
+      offsetOperand = { sql: '?', bindings: [offset.days] };
+    } else {
+      const offsetRef = offset.ref;
+      if (offsetRef.includes('.')) {
+        throw uncompilableNowAnchorError(targetColumn, op,
+          `the addDays offset "${offsetRef}" is a dotted path, and SQL push-down compiles ` +
+          `same-table column references only (no relation traversal, no alias-qualified columns).`,
+          node);
+      }
+      if (tenantField !== null && offsetRef === tenantField) {
+        throw uncompilableNowAnchorError(targetColumn, op,
+          `"${tenantField}" is the tenant-isolation column of "${table}", which must not appear ` +
+          `in a cross-field comparison — not as the addDays offset either.`, node);
+      }
+      const offsetDeclaredName = hasOwn(offsetRef) ? offsetRef : this.mapSortField(offsetRef);
+      if (!hasOwn(offsetDeclaredName)) {
+        throw uncompilableNowAnchorError(targetColumn, op,
+          `the addDays offset "${offsetRef}" is not a declared field of "${table}" — only ` +
+          `declared fields can be referenced.`, node);
+      }
+      const offsetClass = crossFieldComparisonClass(declared[offsetDeclaredName] ?? {});
+      if (offsetClass !== 'numeric') {
+        throw uncompilableNowAnchorError(targetColumn, op,
+          `the addDays offset "${offsetRef}" (type ` +
+          `"${String(declared[offsetDeclaredName]?.type ?? 'string')}"` +
+          `${declared[offsetDeclaredName]?.multiple ? ', multiple' : ''}) is not a numeric ` +
+          `column, and a day offset must be a number of days.`, node);
+      }
+      const offsetLocal = this.mapSortField(offsetRef);
+      offsetOperand = { sql: '??', bindings: [this.remoteColumn(table, offsetRef, offsetLocal)] };
+    }
+
+    const lhs = this.filterColumnExpr(table, targetLocalField, targetColumn)
+      ?? { sql: '??', bindings: [targetColumn] };
+    const base = this.nowAnchorBaseExpr(anchor.at, targetClass);
+    const shifted = this.crossFieldOffsetExpr(base, offsetOperand, targetClass);
+    const raw = method === 'orWhere' ? 'orWhereRaw' : 'whereRaw';
+    const A = lhs.sql;
+    const Bx = shifted.sql;
+    switch (op) {
+      case '$eq':
+        (builder as any)[raw](`(${A} is not null and ${A} = ${Bx})`, [...lhs.bindings, ...lhs.bindings, ...shifted.bindings]);
+        return;
+      case '$ne':
+        (builder as any)[raw](`(${A} is null or ${A} <> ${Bx})`, [...lhs.bindings, ...lhs.bindings, ...shifted.bindings]);
+        return;
+      case '$gt':
+      case '$gte':
+      case '$lt':
+      case '$lte': {
+        const sqlOp = op === '$gt' ? '>' : op === '$gte' ? '>=' : op === '$lt' ? '<' : '<=';
+        (builder as any)[raw](
+          `(${A} is not null and ${A} ${sqlOp} ${Bx})`,
+          [...lhs.bindings, ...lhs.bindings, ...shifted.bindings],
+        );
+        return;
+      }
+      default:
+        // Unreachable: the call site gates on CROSS_FIELD_COMPARISON_OPERATORS.
+        throw nowAnchorPositionError(targetColumn, op, node);
+    }
+  }
+
+  /**
+   * [#25808] The anchor's instant as a typed operand in `cls`'s storage form,
+   * per dialect — see {@link SqlDriver.applyNowAnchorComparison}.
+   */
+  protected nowAnchorBaseExpr(at: Date, cls: 'date' | 'datetime'): { sql: string; bindings: any[] } {
+    if (cls === 'date') {
+      const day = temporalStorageForm(at, 'date');
+      if (this.isSqlite) return { sql: '?', bindings: [day] };
+      return { sql: 'cast(? as date)', bindings: [day] };
+    }
+    const instant = at.toISOString();
+    if (this.isSqlite) return { sql: '?', bindings: [instant] };
+    if (this.isMysql) return { sql: 'cast(? as datetime(3))', bindings: [mysqlDatetimeLiteral(instant)] };
+    return { sql: 'cast(? as timestamptz)', bindings: [instant] };
   }
 
   /**

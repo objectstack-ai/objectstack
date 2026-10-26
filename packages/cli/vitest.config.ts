@@ -649,6 +649,7 @@ import {
   runProjectCliOverridePreflight,
 } from '../qa/vitest-filter-preflight/src/index.js';
 import { integrationTestFiles, unitTestFiles } from './vitest-tiers.js';
+import { readTierMode } from '../../scripts/nightly-tiers.mjs';
 
 // The two tiers, DERIVED from what the files DO — never written down — over
 // the population `OS_TEST_TIERS` selects. `vitest-tiers.ts` holds the
@@ -738,6 +739,25 @@ runProjectCliOverridePreflight({
 // reading the variable — it looks for the read in code position, so the read
 // lives at its use site in the `test` block below, not in a helper binding
 // that could outlive the spread.
+
+// #23181 slice 14 — THE OCLIF MANIFEST SETUP. One `globalSetup` module writes
+// `oclif.manifest.json` from source when the `integration` project runs (the
+// tier every CLI-spawning file is derived into) and removes it at teardown, so
+// a `tsx bin/run-dev.js` spawn reads its command table instead of importing all
+// 72 command modules: 8.2-8.5 s -> 2.0-2.3 s per spawn, same bytes out, same
+// exit code. The `unit` project carries the same module and generates nothing;
+// it only clears a manifest a killed run left behind. The module's header is
+// the authority on what is written, why it is transparent, and who removes it.
+//
+// ⛔ The QUEUE population only. Under `OS_TEST_TIERS=nightly` both projects run
+// without it, because the e2e tier holds the suites that pin what a manifest
+// would change: oclif importing every command module inside `Config.load()`
+// (`run-dev-unbuilt-workspace.e2e`, the `*-stderr-nonblocking.e2e` pair). The
+// product ships no manifest, so that is the shape those pins must keep seeing.
+// Set per project rather than at the root, where `extends: true` would hand it
+// to both projects AND to the root project, running it three times.
+const OCLIF_MANIFEST_SETUP =
+  readTierMode() === 'queue' ? [path.resolve(__dirname, 'test/helpers/oclif-manifest.global-setup.ts')] : [];
 
 export default defineConfig({
   resolve: {
@@ -873,6 +893,7 @@ export default defineConfig({
         test: {
           name: 'unit',
           disableConsoleIntercept: true,
+          globalSetup: OCLIF_MANIFEST_SETUP,
           // #13517: quiet the registry's per-item registration chatter — the
           // engine's own `OS_REGISTRY_LOG` seam, not a change to its shipped
           // default. Enforced by scripts/check-registry-log-declared.mjs.
@@ -885,6 +906,7 @@ export default defineConfig({
         test: {
           name: 'integration',
           disableConsoleIntercept: true,
+          globalSetup: OCLIF_MANIFEST_SETUP,
           // #13517: quiet the registry's per-item registration chatter — the
           // engine's own `OS_REGISTRY_LOG` seam, not a change to its shipped
           // default. Enforced by scripts/check-registry-log-declared.mjs.

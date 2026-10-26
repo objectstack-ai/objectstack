@@ -89,15 +89,16 @@ const _notASpecScope: MetadataLayered['overlayScope'] = 'organization';
 // `LAYER_SCOPE_ZH`'s `org` entry left with it (objectui#12030).
 
 describe('MetadataLayered.overlayScope tracks the spec enum (objectui#4982)', () => {
-  it('the producer vocabulary is exactly env, plus null, on the installed spec', () => {
+  it('the producer vocabulary holds env, plus null, on the installed spec', () => {
     // Read through `@object-ui/test-support` rather than `.unwrap().options`
     // (objectui#5872 class (4)). The bare spelling was a SEVENTH way to ask this
     // question and the only one with neither a cast nor a guard: it answered
     // correctly only while `overlayScope` stayed wrapped exactly once and Zod
     // kept `.options` where it is. `enumOptions` walks the wrappers and answers
     // `[]` when it cannot read — and `[]` fails this assertion, which is the
-    // non-vacuity duty that reader's docblock leaves with every caller.
-    expect(enumOptions(specOverlayScope)).toEqual(['env']);
+    // non-vacuity duty that reader's docblock leaves with every caller. Asserted
+    // as membership (#26238); the retired spellings are refused by name below.
+    expect(enumOptions(specOverlayScope)).toContain('env');
     expect(specOverlayScope.safeParse(null).success).toBe(true);
   });
 
