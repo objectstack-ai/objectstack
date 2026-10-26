@@ -1136,7 +1136,7 @@ function ledgerUnregistered(ql: any): boolean {
  * and the read is not issued. An engine with no registry to ask is read.
  *
  * Exported so every other reader of "is this switched off" — the permission
- * explainer's dropped-grant report, the security plugin's position-name fold —
+ * explainer's dropped-grant report among them —
  * asks this one read instead of a second copy, and explain and enforce cannot
  * disagree about deactivation.
  */
@@ -1319,9 +1319,9 @@ function setsInForceByPosition(
  *    nothing, {@link catalogSetBody}), in declared order;
  *  - `disabledPositions` — the positions switched off, which grant nothing.
  *
- * Only the definition's half. The position-name fold — a set that shares a held
- * position's NAME, requested one layer down in `plugin-security` — is that
- * layer's to report, from its own request. A read that fails throws
+ * The definition is the whole answer (ADR-0131 D3/D4): a set that merely
+ * shares a held position's NAME is granted by nothing, since the security
+ * plugin's position-name fold retired (#24757). A read that fails throws
  * (`AuthzStoreUnavailableError`), exactly as the resolver's does.
  */
 export async function readPositionGrantsInForce(
@@ -1555,9 +1555,9 @@ interface GuestAnchorGrants {
  * ⛔ Nothing else reaches the guest (D3 item 3). The `everyone` anchor and the
  * platform-admin derivations live in {@link resolveUserAuthzGrants}, which a
  * request with no user never reaches; the authenticated baseline is applied by
- * the security plugin's set resolution to a caller with a user id only; and
- * the position-name fold is closed for the guest there too
- * (`SecurityPlugin.resolvePermissionSetsForContextUnmemoized`).
+ * the security plugin's set resolution to a caller with a user id only; and a
+ * held position's name requests no set for anyone, the guest included, since
+ * the position-name fold retired (#24757).
  */
 async function resolveGuestAnchorGrants(
   ql: any,
@@ -1885,9 +1885,9 @@ export async function resolveUserAuthzGrants(
   //     directly and filtering there would over-revoke.
   //
   //     The name is dropped from `positions` too, not merely from the junction
-  //     read: `resolvePermissionSetsForContext` requests `positions` as
-  //     permission-set NAMES (position names are commonly reused as set names),
-  //     so a name left standing would resolve the same grant one layer down.
+  //     read, so no reader downstream sees a switched-off position as held. (A
+  //     held name no longer requests a same-named set one layer down: the
+  //     security plugin's position-name fold retired, #24757.)
   //     Only a name the activation ledger switched off is dropped
   //     ({@link readDisabledCatalogNames}); a name with no ledger row is in
   //     effect, a membership-derived role (`org_owner`) included.
