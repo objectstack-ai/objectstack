@@ -65,13 +65,7 @@
 // next run. Both are the pin working, and both land on the change that caused
 // them — but only if the next reader knows the coupling is there.
 {
-  "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "noEmit": true,
-    "module": "esnext",
-    "moduleResolution": "bundler",
-    "lib": ["ES2022"]
-  },
+  "extends": ["./tsconfig.json", "../../tsconfig.test.base.json"],
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
 }

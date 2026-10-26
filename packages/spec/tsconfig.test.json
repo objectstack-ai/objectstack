@@ -33,12 +33,9 @@
 // still rejects; and it carries no ledger entries at all, so plain `tsc` is a
 // stricter gate for it than this file's shrink-only debt list.
 {
-  "extends": "./tsconfig.json",
+  "extends": ["./tsconfig.json", "../../tsconfig.test.base.json"],
   "compilerOptions": {
-    "noEmit": true,
     "rootDir": ".",
-    "module": "esnext",
-    "moduleResolution": "bundler",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["node"]
   },

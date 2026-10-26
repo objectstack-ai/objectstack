@@ -63,13 +63,7 @@
 // does not REPAIR them — it makes the ratchet able to see them; paydown follows the
 // ratchet's own shrink-only discipline, on its own cards.
 {
-  "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "noEmit": true,
-    "module": "esnext",
-    "moduleResolution": "bundler",
-    "lib": ["ES2022"]
-  },
+  "extends": ["./tsconfig.json", "../../../tsconfig.test.base.json"],
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
 }

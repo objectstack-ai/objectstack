@@ -71,13 +71,7 @@
 // PR body for the full per-file breakdown. No `test-typecheck-debt.json`:
 // residue is 0, so none is owed (#5286 route, maintainer-only to open one).
 {
-  "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "noEmit": true,
-    "module": "esnext",
-    "moduleResolution": "bundler",
-    "lib": ["ES2022"]
-  },
+  "extends": ["./tsconfig.json", "../../../tsconfig.test.base.json"],
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
 }

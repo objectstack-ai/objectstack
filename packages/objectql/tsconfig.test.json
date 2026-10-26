@@ -89,13 +89,9 @@
 // not the fix; the repair is tracked separately (see the PR that added this
 // file) and ⛔ must not be smuggled in by loosening anything here.
 {
-  "extends": "./tsconfig.json",
+  "extends": ["./tsconfig.json", "../../tsconfig.test.base.json"],
   "compilerOptions": {
-    "noEmit": true,
     "rootDir": ".",
-    "module": "esnext",
-    "moduleResolution": "bundler",
-    "lib": ["ES2022"],
     "types": ["node"]
   },
   "include": ["src/**/*"],

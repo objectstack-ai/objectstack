@@ -91,13 +91,7 @@
 // — the same grep hits `packages/spec/src`), so no pin here was silently dead;
 // what the gap cost was the other half.
 {
-  "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "noEmit": true,
-    "module": "esnext",
-    "moduleResolution": "bundler",
-    "lib": ["ES2022"]
-  },
+  "extends": ["./tsconfig.json", "../../../tsconfig.test.base.json"],
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
 }

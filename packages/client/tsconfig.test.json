@@ -50,12 +50,9 @@
 // `client.test.ts`, the pin file, first among them — must have no errors at
 // all.
 {
-  "extends": "./tsconfig.json",
+  "extends": ["./tsconfig.json", "../../tsconfig.test.base.json"],
   "compilerOptions": {
-    "noEmit": true,
     "rootDir": "../..",
-    "module": "esnext",
-    "moduleResolution": "bundler",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["node"]
   },
