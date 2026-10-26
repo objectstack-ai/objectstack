@@ -1475,7 +1475,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     const [searchParams, setSearchParams] = useSearchParams();
     const location = useLocation();
     const { showDebug } = useMetadataInspector();
-    const { t } = useObjectTranslation();
+    const { t, language } = useObjectTranslation();
     const { objectLabel, objectPluralLabel, objectDescription: objectDesc, viewLabel, viewEmptyState, actionParamText, fieldLabel, fieldOptionLabel } = useObjectLabel();
     // The views a server read served — `/meta/view`, and the object document's
     // own `listViews` — already translated: their labels are drawn as given,
@@ -2477,11 +2477,11 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
             const Icon = VIEW_TYPE_ICONS[view.type as keyof typeof VIEW_TYPE_ICONS];
             return {
                 id: view.id,
-                label: viewTabLabel(view, objectDef.name, servedViews, viewLabel, unlabelledViewText),
+                label: viewTabLabel(view, objectDef.name, servedViews, viewLabel, unlabelledViewText, language),
                 icon: Icon ? <Icon className="h-4 w-4" /> : undefined,
             };
         });
-    }, [views, objectDef.name, viewLabel, unlabelledViewText, servedViews]);
+    }, [views, objectDef.name, viewLabel, unlabelledViewText, servedViews, language]);
     useMobileViewSwitcherRegistration({
         views: mobileViewSwitcherItems,
         activeViewId: activeViewId ?? '',
@@ -2878,7 +2878,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
             const originState = {
               from: {
                 pathname: location.pathname + (location.search || ''),
-                label: viewTabLabel({ id: activeView?.id, name: activeView?.name, label: activeView?.label }, objectDef.name, servedViews, viewLabel, unlabelledViewText),
+                label: viewTabLabel({ id: activeView?.id, name: activeView?.name, label: activeView?.label }, objectDef.name, servedViews, viewLabel, unlabelledViewText, language),
               },
             };
             if (viewId) {
@@ -2887,7 +2887,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                 navigate(`record/${encodeURIComponent(String(recordId))}`, { state: originState });
             }
         },
-        [navigate, viewId, location.pathname, location.search, objectDef, activeView?.id, activeView?.name, activeView?.label, viewLabel, unlabelledViewText, servedViews]
+        [navigate, viewId, location.pathname, location.search, objectDef, activeView?.id, activeView?.name, activeView?.label, viewLabel, unlabelledViewText, servedViews, language]
     );
     /**
      * The list surface's half of the record-link mechanism (objectui#4490):
@@ -3015,7 +3015,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         const isSystem = !saved;
         return {
             id: view.id,
-            label: viewTabLabel(view, objectDef.name, servedViews, viewLabel, unlabelledViewText),
+            label: viewTabLabel(view, objectDef.name, servedViews, viewLabel, unlabelledViewText, language),
             type: view.type,
             hasActiveFilters: Array.isArray(view.filter) && view.filter.length > 0,
             hasActiveSort: Array.isArray(view.sort) && view.sort.length > 0,
@@ -3176,7 +3176,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                 const dims: string[] = Array.isArray(chartConfig.dimensions) ? chartConfig.dimensions : [];
                 const vals: string[] = Array.isArray(chartConfig.values) ? chartConfig.values : [];
                 return withViewTabs(
-                    <Suspense key={identityKey} fallback={<div className="p-4 text-sm text-muted-foreground">Loading chart…</div>}>
+                    <Suspense key={identityKey} fallback={<div className="p-4 text-sm text-muted-foreground">{t('chart.loading')}</div>}>
                         <ObjectChart
                             dataSource={ds}
                             schema={{
@@ -3208,7 +3208,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
             // `chart-missing-category-axis`) instead of aggregating on a name
             // nobody wrote. ⛔ Do not restore a floor here.
             return withViewTabs(
-                <Suspense key={identityKey} fallback={<div className="p-4 text-sm text-muted-foreground">Loading chart…</div>}>
+                <Suspense key={identityKey} fallback={<div className="p-4 text-sm text-muted-foreground">{t('chart.loading')}</div>}>
                     <ObjectChart
                         dataSource={ds}
                         schema={{
@@ -3881,7 +3881,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                 const originState = {
                   from: {
                     pathname: location.pathname + (location.search || ''),
-                    label: viewTabLabel({ id: activeView?.id, name: activeView?.name, label: activeView?.label }, objectDef.name, servedViews, viewLabel, unlabelledViewText),
+                    label: viewTabLabel({ id: activeView?.id, name: activeView?.name, label: activeView?.label }, objectDef.name, servedViews, viewLabel, unlabelledViewText, language),
                   },
                 };
                 if (viewId) {
@@ -3891,7 +3891,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                 }
             }
         },
-    }), [objectDef, onEdit, activeViewSearch, activeViewFilter, activeViewSort, activeView?.id, activeView?.name, activeView?.label, navigate, viewId, isAdmin, location.pathname, location.search, viewLabel, unlabelledViewText, servedViews]);
+    }), [objectDef, onEdit, activeViewSearch, activeViewFilter, activeViewSort, activeView?.id, activeView?.name, activeView?.label, navigate, viewId, isAdmin, location.pathname, location.search, viewLabel, unlabelledViewText, servedViews, language]);
 
     // The header's primary action, drawn the same in both of the header's
     // faces (below). [#5153] `objectCanCreate && createVisible` — the

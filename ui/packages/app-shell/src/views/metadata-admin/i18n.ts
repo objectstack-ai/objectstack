@@ -2179,6 +2179,10 @@ const ENGINE_STRINGS_EN: Record<string, string> = {
   'engine.edit.refsScanning': 'Scanning references…',
   'engine.edit.refsEmptyTitle': 'No references found',
   'engine.edit.refsEmptyDesc': 'Nothing in the metadata graph points at this item. Safe to delete.',
+  // #25916 — the references table's column headers.
+  'engine.edit.refsColFromType': 'From type',
+  'engine.edit.refsColFromName': 'From name',
+  'engine.edit.refsColPath': 'Path',
   // …and its FAILED state (objectui#5110), which must never be confusable with
   // the empty one above: the copy states that the check did not complete and
   // deliberately makes no claim — in either direction — about whether deleting
@@ -5812,6 +5816,9 @@ const ENGINE_STRINGS_ZH: Record<string, string> = {
   'engine.edit.refsScanning': '正在扫描引用…',
   'engine.edit.refsEmptyTitle': '未找到引用',
   'engine.edit.refsEmptyDesc': '元数据图中没有任何项指向它,可以安全删除。',
+  'engine.edit.refsColFromType': '来源类型',
+  'engine.edit.refsColFromName': '来源名称',
+  'engine.edit.refsColPath': '路径',
   // …以及它的失败态(objectui#5110):必须与上面的空态不可混淆 —— 文案只说明检查
   // 没有完成,对「删除是否安全」不做任何方向的断言,因为这个问题根本没有被回答。
   // 后续改写务必保留这一性质;「未找到引用」正是此状态要避免的那句话。
