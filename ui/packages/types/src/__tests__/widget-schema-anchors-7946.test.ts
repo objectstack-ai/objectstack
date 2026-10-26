@@ -151,9 +151,18 @@ export type assertionAggregateFieldStaysOptional =
  * one the renderer's `aggregateGroupByKey` (`gb.alias || gb.field`) resolves. An
  * earlier draft declared this arm locally with `field?: string`, which published
  * a node that cannot resolve a category axis at all.
+ *
+ * Pinned on the members that renderer reads, not on the whole spec arm: a key
+ * or a granularity the spec adds to the structured node is not a red here.
  */
+type AggregateGroupBy = NonNullable<NonNullable<ObjectChartSchema['aggregate']>['groupBy']>;
+type StructuredGroupBy = Exclude<AggregateGroupBy, string>;
+export type assertionAggregateGroupByAdmitsAName =
+  Expect<Equal<Extract<AggregateGroupBy, string>, string>>;
 export type assertionAggregateGroupByAdmitsStructuredNode =
-  Expect<Equal<NonNullable<NonNullable<ObjectChartSchema['aggregate']>['groupBy']>, string | { field: string; dateGranularity?: 'day' | 'week' | 'month' | 'quarter' | 'year'; alias?: string }>>;
+  Expect<Equal<Pick<StructuredGroupBy, 'field' | 'alias'>, { field: string; alias?: string }>>;
+export type assertionAggregateGroupByKeepsTheFiveGranularities =
+  Expect<Equal<Exclude<'day' | 'week' | 'month' | 'quarter' | 'year', NonNullable<StructuredGroupBy['dateGranularity']>>, never>>;
 /** The helpers can FAIL — synthetic controls. */
 export type assertionExtendsBaseCanFail = Expect<Equal<ExtendsBase<{ objectName: string }>, false>>;
 export type assertionEqualCanFail = Expect<Equal<Equal<any, string | undefined>, false>>;
