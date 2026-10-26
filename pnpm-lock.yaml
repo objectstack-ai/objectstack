@@ -6075,9 +6075,6 @@ importers:
       '@object-ui/core':
         specifier: workspace:*
         version: link:../core
-      '@object-ui/data-objectstack':
-        specifier: workspace:*
-        version: link:../data-objectstack
       '@object-ui/i18n':
         specifier: workspace:*
         version: link:../i18n
@@ -6094,6 +6091,9 @@ importers:
         specifier: 19.3.0
         version: 19.3.0(react@19.3.0)
     devDependencies:
+      '@object-ui/data-objectstack':
+        specifier: workspace:*
+        version: link:../data-objectstack
       '@object-ui/test-support':
         specifier: workspace:*
         version: link:../test-support
