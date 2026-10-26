@@ -48,6 +48,7 @@ import fs from 'fs';
 import { createHash, randomBytes } from 'crypto';
 import { createRequire } from 'module';
 import { pathToFileURL, fileURLToPath } from 'url';
+import { consoleMapStyleOrigin, readConsoleMapStyleUrl } from '@objectstack/cloud-connection';
 
 // ─── Constants ──────────────────────────────────────────────────────
 
@@ -723,7 +724,9 @@ function readExtraConnectSources(env: NodeJS.ProcessEnv): string[] {
 /**
  * The default map style the Console's map view loads when the view names none
  * (objectui `plugin-map`, `DEFAULT_MAP_STYLE`). Its style, tiles and glyphs are
- * all on this host.
+ * all on this host. It stays allowed when the operator names the deployment's
+ * own default in `OS_CONSOLE_MAP_STYLE_URL`: a view may still name it, and a
+ * Console build that does not read the served default yet still loads it.
  */
 const DEFAULT_MAP_STYLE_ORIGIN = 'https://demotiles.maplibre.org';
 
@@ -760,9 +763,13 @@ const DEFAULT_MAP_STYLE_ORIGIN = 'https://demotiles.maplibre.org';
  *   values, and images inside an email template preview.
  * - `connect-src`: the server itself (`'self'`, which also covers the
  *   same-origin realtime WebSocket and the metadata event stream), the default
- *   map style's host, the error-reporting endpoint when the runtime serves a
- *   DSN (`telemetry.errorReporting.dsn` from `GET /api/v1/runtime/config`), and
- *   the hosts an operator names in `OS_CONSOLE_CSP_CONNECT_SRC`.
+ *   map style's host, the origin of the deployment's own default map style
+ *   when the operator names one in `OS_CONSOLE_MAP_STYLE_URL` (the URL
+ *   `GET /api/v1/runtime/config` serves as `mapStyleUrl`, read through the
+ *   same `readConsoleMapStyleUrl`), the error-reporting endpoint when the
+ *   runtime serves a DSN (`telemetry.errorReporting.dsn` from
+ *   `GET /api/v1/runtime/config`), and the hosts an operator names in
+ *   `OS_CONSOLE_CSP_CONNECT_SRC`.
  * - `default-src 'self'` covers the rest the Console uses: the module workers
  *   maplibre starts from its own file, the PWA manifest, and the same-origin
  *   frames (the Studio's live canvas). The build ships no web fonts.
@@ -776,12 +783,14 @@ function consoleContentSecurityPolicy(input: {
   nonce: string;
   reactPages: boolean;
   errorReportingOrigin: string | undefined;
+  mapStyleOrigin: string | undefined;
   extraConnectSources: readonly string[];
   embeddable: boolean;
 }): string {
   const scriptSrc = ["'self'", `'nonce-${input.nonce}'`, "'wasm-unsafe-eval'"];
   if (input.reactPages) scriptSrc.push("'unsafe-eval'");
   const connectSrc = ["'self'", DEFAULT_MAP_STYLE_ORIGIN];
+  if (input.mapStyleOrigin !== undefined) connectSrc.push(input.mapStyleOrigin);
   if (input.errorReportingOrigin !== undefined) connectSrc.push(input.errorReportingOrigin);
   connectSrc.push(...input.extraConnectSources);
   const directives: string[][] = [
@@ -912,6 +921,10 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
       // Read once, at boot: a malformed value refuses here, loudly, rather
       // than reaching the header of every document.
       const extraConnectSources = readExtraConnectSources(process.env);
+      // The deployment's default map style (#26001), by the reader the
+      // runtime-config door uses, so the policy allows the very URL served.
+      const mapStyleUrl = readConsoleMapStyleUrl(process.env);
+      const mapStyleOrigin = mapStyleUrl === undefined ? undefined : consoleMapStyleOrigin(mapStyleUrl);
 
       const indexPath = path.join(absoluteDist, 'index.html');
       if (!fs.existsSync(indexPath)) {
@@ -997,6 +1010,7 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
           nonce,
           reactPages,
           errorReportingOrigin: shell?.errorReportingOrigin,
+          mapStyleOrigin,
           extraConnectSources,
           embeddable: reqPath.startsWith(`${PUBLIC_FORM_PAGE}/`),
         });

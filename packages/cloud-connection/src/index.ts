@@ -55,6 +55,11 @@ export { CloudConnectionPlugin, createCloudConnectionPlugin } from './cloud-conn
 export type { CloudConnectionPluginConfig } from './cloud-connection-plugin.js';
 export { RuntimeConfigPlugin } from './runtime-config-plugin.js';
 export type { RuntimeConfigPluginConfig, RuntimeFeatureOverrides, RuntimeConfigPlanFeatures, PlatformStage } from './runtime-config-plugin.js';
+// #26001 — the deployment's default map style, one operator env var with two
+// readers: this package's runtime-config door, and the CLI's Console mount,
+// which allows its origin in the document's `connect-src`. One reader, so the
+// two cannot believe the value on different terms.
+export { CONSOLE_MAP_STYLE_URL_ENV, readConsoleMapStyleUrl, consoleMapStyleOrigin } from './console-map-style.js';
 // #12681 — the SPA's client error-reporting SOURCE carried on that payload,
 // and the canonical fail-closed way to read it. The reader is exported
 // deliberately: "no DSN means do not send" is a claim about consumer code, and

@@ -28,11 +28,12 @@
  * it must not carry credentials.
  *
  * Contract, strict on purpose: the value is an ABSOLUTE `https:` URL whose
- * host is a DNS name, with no user name, password or whitespace. Empty or whitespace-only
- * reads as unset. Anything else refuses the boot, naming the variable, the
- * same way a malformed `OS_CONSOLE_CSP_CONNECT_SRC` entry does: a map style
- * the Console could not load, or a policy that names the wrong origin, is a
- * misconfiguration the operator must see at once, never a quietly grey map.
+ * host is a DNS name, with no user name, password or whitespace. Empty or
+ * whitespace-only reads as unset. Anything else refuses the boot, naming the
+ * variable, the same way a malformed `OS_CONSOLE_CSP_CONNECT_SRC` entry does:
+ * a map style the Console could not load, or a policy that names the wrong
+ * origin, is a misconfiguration the operator must see at once, never a
+ * quietly grey map.
  */
 
 /** The variable an operator names the deployment's default map style document in. */

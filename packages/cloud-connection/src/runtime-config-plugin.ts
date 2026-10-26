@@ -13,6 +13,7 @@
  *   {
  *     cloudUrl: string,            // base URL of the upstream cloud ('' = same origin)
  *     upgradeUrl?: string,         // absolute URL of the control plane's upgrade / billing entry — absent unless declared (#14514)
+ *     mapStyleUrl?: string,        // the deployment's default map style (OS_CONSOLE_MAP_STYLE_URL) — absent unless set (#26001)
  *     singleEnvironment: boolean,
  *     defaultOrgId?, defaultEnvironmentId?,   // multi-tenant, per-hostname
  *     features: { installLocal, marketplace, aiStudio, autoPublishAiBuilds, ... },
@@ -44,6 +45,24 @@
  * Refused loudly at mount, never coerced, like every other knob in this file.
  * Host option only, no env var: the value belongs to the distribution whose
  * control plane serves the page, and the cloud subclass fills it.
+ *
+ * ## `mapStyleUrl` — the deployment's default map style, from the operator (#26001)
+ *
+ * A map view that names no `mapStyle` falls back to a built-in style on a
+ * public demo host, which an intranet deployment cannot reach. The operator
+ * names the deployment's own style document in `OS_CONSOLE_MAP_STYLE_URL`, and
+ * this door serves it, verbatim, as the top-level `mapStyleUrl`. Operator env
+ * only (ruling A on #26001): no host option, no Setup setting, no spec key,
+ * because the CLI's Console mount allows the same URL's origin in the Console
+ * document's `connect-src`, and widening that policy is the operator's act
+ * alone. Both read the value through `readConsoleMapStyleUrl`
+ * (`console-map-style.ts`), so they cannot disagree on what was set.
+ *
+ * Default-absent, the same shape as `branding.stage`: unset or empty serves no
+ * key. A value that is not an absolute `https:` URL on a host name refuses the
+ * boot from `start()`, naming the variable, rather than being warned about and
+ * dropped: the Console mount refuses the same value, and a map style that is
+ * silently not served is the grey map this key exists to remove.
  *
  * ## `branding` — the Branding settings, then the deployment's own (#24766)
  *
@@ -266,6 +285,7 @@ import {
     type TelemetryRefusal,
 } from './telemetry-posture.js';
 import type { IHttpServer } from '@objectstack/spec/contracts';
+import { readConsoleMapStyleUrl } from './console-map-style.js';
 
 /**
  * The `env-registry` slot's hostname resolvers — see the call site for both
@@ -776,6 +796,13 @@ export class RuntimeConfigPlugin implements Plugin {
     private readonly upgradeUrl: string | undefined;
     /** The refused spelling, kept so `start()` can name it once — same reason as `refusedStage`. */
     private readonly refusedUpgradeUrl: string | undefined;
+    /**
+     * The deployment's default map style (`OS_CONSOLE_MAP_STYLE_URL`), or
+     * `undefined` for "send no key". Read in `start()`, which refuses a bad
+     * value: a throw from the constructor would be caught by a host's wiring
+     * and turn into a missing door instead of a refused boot.
+     */
+    private mapStyleUrl: string | undefined;
     /** The deployment's logo (host option, then `OS_LOGO_URL`); a Branding setting outranks it. */
     private readonly logoUrl: string | undefined;
     private readonly faviconUrl: string | undefined;
@@ -883,6 +910,9 @@ export class RuntimeConfigPlugin implements Plugin {
     init = async (_ctx: PluginContext): Promise<void> => {};
 
     start = async (ctx: PluginContext): Promise<void> => {
+        // Before anything is mounted, so a refused value fails this plugin's
+        // start and with it the boot (#26001).
+        this.mapStyleUrl = readConsoleMapStyleUrl(typeof process !== 'undefined' ? process.env : {});
         ctx.hook('kernel:ready', async () => {
             // [#4251] Read canonical-first with a REAL per-name fallback:
             // `getService` THROWS for an empty slot, so a single try around
@@ -1066,6 +1096,9 @@ export class RuntimeConfigPlugin implements Plugin {
                     // link", so a present-and-undefined property must never
                     // reach a non-JSON consumer or a test.
                     ...(this.upgradeUrl !== undefined ? { upgradeUrl: this.upgradeUrl } : {}),
+                    // The operator's default map style (#26001); spread for
+                    // the same key-presence reason.
+                    ...(this.mapStyleUrl !== undefined ? { mapStyleUrl: this.mapStyleUrl } : {}),
                     singleEnvironment: resolvedSingleEnv,
                     defaultOrgId,
                     defaultEnvironmentId,
