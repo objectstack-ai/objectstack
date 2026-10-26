@@ -42,7 +42,7 @@ import { FullscreenEditor } from '../../custom/fullscreen-editor';
 import { CharacterCount } from '../../custom/character-count';
 import { cn } from '../../lib/utils';
 import React from 'react';
-import { SchemaRendererContext, usePredicateScope, isPermissionError, extractWriteErrorMessage, extractFieldErrors, declaredUserMessage } from '@object-ui/react';
+import { SchemaRendererContext, usePredicateScope, isPermissionError, extractWriteErrorMessage, extractFieldErrors, declaredUserMessage, delegationScopeMessage } from '@object-ui/react';
 import { createSafeTranslation } from '@object-ui/i18n';
 
 /**
@@ -3048,8 +3048,15 @@ ComponentRegistry.register('form',
         // construction rather than by us guessing what a 403 body contains.
         // Status-agnostic on purpose: 403 is where this was reported
         // (objectui#5210), not a fence the contract draws.
+        // A delegated administrator's out-of-scope write (`403
+        // DELEGATION_SCOPE_VIOLATION`) is the one denial whose reason is shown:
+        // it describes only the caller's own scope, and it tells them which
+        // boundary to fix (objectstack#26059, Q3). It is read before
+        // `isPermissionError`, which answers true for any 403; every other
+        // denial keeps the fixed line (objectstack#24914 B′).
         const errorMessage =
           declaredUserMessage(error) ??
+          delegationScopeMessage(error) ??
           (isPermissionError(error)
             ? t('form.noPermissionToSave')
             : extractWriteErrorMessage(error) ?? t('form.submitFailed'));

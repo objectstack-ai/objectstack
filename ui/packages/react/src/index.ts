@@ -84,7 +84,7 @@ export type { PredicateGateKind } from './utils/visibilityDiagnostic.js';
 
 // Write-error surfacing utilities (shared by drag-write plugins so a failed
 // PATCH — e.g. an RLS 403 — is never silently swallowed).
-export { extractWriteErrorMessage, isPermissionError, extractFieldErrors, classifyLoadError, declaredUserMessage } from './utils/error-message.js';
+export { extractWriteErrorMessage, isPermissionError, extractFieldErrors, classifyLoadError, declaredUserMessage, delegationScopeMessage } from './utils/error-message.js';
 export type { WriteFieldError, LoadErrorKind } from './utils/error-message.js';
 
 // Built-in i18n support
