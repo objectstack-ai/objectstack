@@ -959,7 +959,6 @@ import ts from 'typescript';
 import type { z } from 'zod';
 import type { WithoutCatchall } from './zod-catchall-type';
 
-import { AIConfigSchema, AIFieldSuggestionSchema, AIFormAssistSchema, AIRecommendationItemSchema, AIRecommendationsSchema, NLQueryResultSchema, NLQuerySchema } from '../zod/ai.zod.js';
 import { AppComponentSchema, AppSchemaRendererNodeSchema, MenuItemSchema as AppMenuItemSchema, NavigationAreaSchema, NavigationItemSchema } from '../zod/app.zod.js';
 import { BaseSchema, ComponentConfigSchema, ComponentInputSchema, ComponentMetaSchema, KeyedI18nLabelSchema, SchemaNodeSchema } from '../zod/base.zod.js';
 import { CloudWorkspaceTimezoneNoticeSchema } from '../zod/cloud.zod.js';
@@ -980,7 +979,6 @@ import { AlertDialogSchema, ContextMenuSchema, DialogSchema, DrawerSchema, Dropd
 import { ReportBuilderSchema, ReportComponentSchema, ReportExportConfigSchema, ReportFieldSchema, ReportFilterSchema, ReportGroupBySchema, ReportSectionSchema, ReportViewerSchema } from '../zod/reports.zod.js';
 import { DetailSectionNodeSchema, DetailViewFieldSchema, DetailViewSchema, DetailViewSectionSchema, DetailViewTabSchema, FilterUISchema, SortUISchema, ViewSwitcherSchema } from '../zod/views.zod.js';
 
-import type { AIConfig as Ts_AIConfig, AIFieldSuggestion as Ts_AIFieldSuggestion, AIFormAssistSchema as Ts_AIFormAssistSchema, AIRecommendationItem as Ts_AIRecommendationItem, AIRecommendationsSchema as Ts_AIRecommendationsSchema, NLQueryResult as Ts_NLQueryResult, NLQuerySchema as Ts_NLQuerySchema } from '../ai';
 import type { AppComponentSchema as Ts_AppComponentSchema, AppSchemaRendererNodeSchema as Ts_AppSchemaRendererNodeSchema, NavigationArea as Ts_NavigationArea } from '../app';
 import type { BaseSchema as Ts_BaseSchema, ComponentConfig as Ts_ComponentConfig, ComponentInput as Ts_ComponentInput, ComponentMeta as Ts_ComponentMeta, KeyedI18nLabel as Ts_KeyedI18nLabel } from '../base';
 import type { CloudWorkspaceTimezoneNoticeSchema as Ts_CloudWorkspaceTimezoneNoticeSchema } from '../cloud';
@@ -1821,13 +1819,6 @@ export type assertionNarrowerOperatorIsBlindToAMirroredOnlyKey =
 
 /** Mirror VALUES, keyed `<file>#<export>`. Runtime, so the census below can read the keys. */
 const MIRRORS = {
-  'ai.zod.ts#AIConfigSchema': AIConfigSchema,
-  'ai.zod.ts#AIFieldSuggestionSchema': AIFieldSuggestionSchema,
-  'ai.zod.ts#AIFormAssistSchema': AIFormAssistSchema,
-  'ai.zod.ts#AIRecommendationItemSchema': AIRecommendationItemSchema,
-  'ai.zod.ts#AIRecommendationsSchema': AIRecommendationsSchema,
-  'ai.zod.ts#NLQueryResultSchema': NLQueryResultSchema,
-  'ai.zod.ts#NLQuerySchema': NLQuerySchema,
   'app.zod.ts#AppComponentSchema': AppComponentSchema,
   // objectui#11515 — the zod-only arm's TS twin.
   'app.zod.ts#AppSchemaRendererNodeSchema': AppSchemaRendererNodeSchema,
@@ -2036,13 +2027,6 @@ const MIRRORS = {
 
 /** The declaration each mirror restates. Same keys as `MIRRORS` — pinned below. */
 interface Declared {
-  'ai.zod.ts#AIConfigSchema': Ts_AIConfig;
-  'ai.zod.ts#AIFieldSuggestionSchema': Ts_AIFieldSuggestion;
-  'ai.zod.ts#AIFormAssistSchema': Ts_AIFormAssistSchema;
-  'ai.zod.ts#AIRecommendationItemSchema': Ts_AIRecommendationItem;
-  'ai.zod.ts#AIRecommendationsSchema': Ts_AIRecommendationsSchema;
-  'ai.zod.ts#NLQueryResultSchema': Ts_NLQueryResult;
-  'ai.zod.ts#NLQuerySchema': Ts_NLQuerySchema;
   'app.zod.ts#AppComponentSchema': Ts_AppComponentSchema;
   'app.zod.ts#AppSchemaRendererNodeSchema': Ts_AppSchemaRendererNodeSchema;
   'app.zod.ts#NavigationAreaSchema': Ts_NavigationArea;
@@ -2274,24 +2258,6 @@ export type DeclaredTypeOf< K extends MirrorKey, P extends keyof Declared[K] > =
  * new drift on a listed mirror fails, and so does a listed key that has been fixed.
  */
 interface KnownDrift {
-  /**
-   * RUNTIME SLOT (objectui#6124 shape, settled by objectui#10874): `ai-recommendations`
-   * registers the raw `AIRecommendations` component, `SchemaRenderer` spreads the
-   * node's own keys onto its props, and it CALLS both (`onSelect?.(item)`,
-   * `onDismiss?.(item)`), so the TS side declares the callables and the mirror
-   * refuses them by name (`handlerKeyRefusal(…, 'runtime-slot')`). The pair was born
-   * ledgered by objectui#10859 against a TS twin that still read `string`; the entry
-   * is unchanged in content, and only its reason moved into this class.
-   */
-  'ai.zod.ts#AIRecommendationsSchema': 'onDismiss' | 'onSelect';
-  /**
-   * RUNTIME SLOT (objectui#6124 shape, settled by objectui#10874): `nl-query` registers
-   * the raw `NLQueryInput` component, which CALLS `onSubmit` off the spread props
-   * with the query text (`onSubmitProp?.(queryText)`), so the TS side declares the
-   * callable and the mirror refuses it by name — same history as
-   * `AIRecommendationsSchema` above.
-   */
-  'ai.zod.ts#NLQuerySchema': 'onSubmit';
   /**
    * INTERFACE-TO-PASSTHROUGH (objectui#8347), an artifact of this ratchet's
    * assignability test and ⛔ not a narrowing a document can hit. The member is a
@@ -4912,8 +4878,26 @@ const EXCLUSIONS: Readonly<Record<string, string>> = {
   // `data-display.zod.ts#HtmlSchema` left `MIRRORS` with it.
   'data-display.zod.ts#RetiredHtmlNodeSchema':
     'a RETIRED node type refusal arm (objectui#13449), not a mirror — its only member is the `type` literal it refuses on, and the TS half of that retirement is the ABSENCE of an `html` member in `DataDisplaySchema`',
-  'ai.zod.ts#AIComponentSchema':
-    "a union OVER the mirrors, not an object of its own — its members are checked individually above",
+  // objectstack#25921 — `@object-ui/plugin-ai` RETIRED. The three node types'
+  // refusal arms are the same kind as the rows above, pinned in
+  // `./plugin-ai-retired-25921.test.ts`; their former pairs left `MIRRORS` with
+  // them, and so did the four support-record pairs, whose TS twins are `never`
+  // tombstones now. The eight published names stay exported as `z.never()`
+  // tombstones until objectstack#25912's sunset rule: none mirrors anything.
+  'ai.zod.ts#RetiredAIFormAssistNodeSchema':
+    'a RETIRED node type refusal arm (objectstack#25921), not a mirror — its only member is the `type` literal it refuses on, and the TS half of that retirement is the ABSENCE of an `ai-form-assist` member in `AnySchema`',
+  'ai.zod.ts#RetiredAIRecommendationsNodeSchema':
+    'a RETIRED node type refusal arm (objectstack#25921), not a mirror — its only member is the `type` literal it refuses on, and the TS half of that retirement is the ABSENCE of an `ai-recommendations` member in `AnySchema`',
+  'ai.zod.ts#RetiredNLQueryNodeSchema':
+    'a RETIRED node type refusal arm (objectstack#25921), not a mirror — its only member is the `type` literal it refuses on, and the TS half of that retirement is the ABSENCE of an `nl-query` member in `AnySchema`',
+  'ai.zod.ts#AIConfigSchema': 'a RETIRED `z.never()` tombstone (objectstack#25921) — accepts nothing; its TS twin is `never`',
+  'ai.zod.ts#AIFieldSuggestionSchema': 'a RETIRED `z.never()` tombstone (objectstack#25921) — accepts nothing; its TS twin is `never`',
+  'ai.zod.ts#AIFormAssistSchema': 'a RETIRED `z.never()` tombstone (objectstack#25921) — accepts nothing; its TS twin is `never`',
+  'ai.zod.ts#AIRecommendationItemSchema': 'a RETIRED `z.never()` tombstone (objectstack#25921) — accepts nothing; its TS twin is `never`',
+  'ai.zod.ts#AIRecommendationsSchema': 'a RETIRED `z.never()` tombstone (objectstack#25921) — accepts nothing; its TS twin is `never`',
+  'ai.zod.ts#NLQueryResultSchema': 'a RETIRED `z.never()` tombstone (objectstack#25921) — accepts nothing; its TS twin is `never`',
+  'ai.zod.ts#NLQuerySchema': 'a RETIRED `z.never()` tombstone (objectstack#25921) — accepts nothing; its TS twin is `never`',
+  'ai.zod.ts#AIComponentSchema': 'a RETIRED `z.never()` tombstone (objectstack#25921) — it was the union over the three arms; `AnyComponentSchema` lists their refusal arms instead',
   'product-blocks.zod.ts#ProductBlockComponentSchema':
     "a union OVER the mirrors (objectui#12197), not an object of its own — its members are checked individually above",
   // objectui#10872 — the ADR-0080 public-block arms. Each is `BaseSchema` plus a

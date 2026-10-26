@@ -212,11 +212,11 @@ describe('select-type-check-scope — the verdict', () => {
   });
 
   it('names them all the same on an affected set that lacks them (objectui#12272)', () => {
-    // `...[base]` over `packages/plugin-ai` alone selects that one package, and
+    // `...[base]` over `packages/plugin-markdown` alone selects that one package, and
     // its `^build` closure holds none of fields, plugin-dashboard, plugin-grid.
-    const lacking = run(['packages/plugin-ai/src/index.ts'], () => ['@object-ui/plugin-ai']);
+    const lacking = run(['packages/plugin-markdown/src/index.tsx'], () => ['@object-ui/plugin-markdown']);
     expect(lacking.lines.at(-1)).toBe('scope=affected');
-    expect(lacking.lines).toContain('  @object-ui/plugin-ai');
+    expect(lacking.lines).toContain('  @object-ui/plugin-markdown');
     const tail = lacking.lines.slice(lacking.lines.findIndex((l) => l.startsWith('The repo-root programs')));
     expect(tail.slice(1, -1)).toEqual(ROOT_PROGRAM_PACKAGES.map((p) => `  ${p}`));
   });

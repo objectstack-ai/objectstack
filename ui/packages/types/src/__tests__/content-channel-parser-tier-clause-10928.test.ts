@@ -48,8 +48,9 @@
  * ## What is pinned, and what is deliberately not
  *
  * The clause as a substring, on the shared builder and on one arm from each of
- * the three sources that compose these messages (a literal, the shared
- * `neitherContentChannelGuidance`, and `ai.zod.ts`'s local builder), each read
+ * the sources that compose these messages (a literal and the shared
+ * `neitherContentChannelGuidance`; the third, `ai.zod.ts`'s local builder, left
+ * with `@object-ui/plugin-ai`, objectstack#25921), each read
  * through the arm's refusal with its code and path. Then the population: every
  * exported member whose refusal is the family-D sentence carries it, so a later
  * slice that copies an older literal goes red here. The rest of each message is
@@ -62,7 +63,6 @@ import * as Z from '../zod/index.zod';
 import { neitherContentChannelGuidance } from '../zod/tombstone.zod';
 import { AccordionSchema } from '../zod/disclosure.zod';
 import { ObjectGridSchema } from '../zod/objectql.zod';
-import { AIFormAssistSchema } from '../zod/ai.zod';
 
 /** The corrected clause, as every family-D / E3 refusal now carries it. */
 const CLAUSE =
@@ -99,7 +99,6 @@ describe('objectui#10928 — one arm per message source, read through its refusa
   const ARMS = [
     ['a literal (`accordion`)', AccordionSchema, 'accordion'],
     ['the shared builder (`object-grid`)', ObjectGridSchema, 'object-grid'],
-    ['ai.zod.ts\'s local builder (`ai-form-assist`)', AIFormAssistSchema, 'ai-form-assist'],
   ] as const;
 
   for (const [source, schema, type] of ARMS) {
@@ -123,9 +122,9 @@ describe('objectui#10928 — the population: every family-D refusal carries the 
     }
   }
 
-  it('the walk reaches all three message sources (non-vacuity, by name rather than by count)', () => {
+  it('the walk reaches both message sources (non-vacuity, by name rather than by count)', () => {
     const found = new Set(members.map((m) => `${m.name}.${m.key}`));
-    for (const name of ['AccordionSchema', 'ObjectGridSchema', 'AIFormAssistSchema']) {
+    for (const name of ['AccordionSchema', 'ObjectGridSchema']) {
       for (const key of CHANNELS) expect(found, `${name}.${key}`).toContain(`${name}.${key}`);
     }
   });

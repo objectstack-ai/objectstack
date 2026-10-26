@@ -415,7 +415,6 @@ Grouped by dependency weight — atoms and fields stay light, heavy widgets live
 | **[@object-ui/plugin-editor](./packages/plugin-editor)** | Rich text editor powered by Monaco |
 | **[@object-ui/plugin-markdown](./packages/plugin-markdown)** | Markdown rendering |
 | **[@object-ui/plugin-chatbot](./packages/plugin-chatbot)** | Chatbot interface |
-| **[@object-ui/plugin-ai](./packages/plugin-ai)** | Schema generation and conversational assistants (Vercel AI SDK) |
 
 ### Tooling
 
