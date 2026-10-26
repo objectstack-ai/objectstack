@@ -13,7 +13,7 @@ import { Search, Funnel, ArrowUpDown, X, EyeOff, Pencil, Group, Paintbrush, Down
 import type { FilterBuilderRowGroup } from '@object-ui/components';
 import { VALUELESS_FILTER_BUILDER_OPERATORS, isFilterValueComplete } from '@object-ui/components';
 import { ViewSwitcherDropdown } from './ViewSwitcher';
-import { ListEmptyState, hasDeclaredFilter } from './ListEmptyState';
+import { ListEmptyState, hasDeclaredFilter, filterNamesCurrentUser } from './ListEmptyState';
 import { ListViewCompactHeader, ListViewCompactRows } from './ListViewCompact';
 import { ViewSettingsPopover } from './components/ViewSettingsPopover';
 import { UserFilters } from './UserFilters';
@@ -939,6 +939,15 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // applied (objectui#11687): the "your filters" wording above would name
   // filters the user never set.
   'list.viewFilterNoMatchesMessage': 'No records match this view’s filter.',
+  // objectstack#25898 — emptied by a view filtered to the signed-in user (a
+  // "my …" view): the caller has none yet, which is not "no match".
+  'list.ownedNoneTitle': 'Nothing of yours yet',
+  'list.ownedNoneMessage': 'This view lists only records that are yours, and you don’t have any yet.',
+  // …and an unfiltered empty list for a caller who may not create: the
+  // first-run invitation would offer what they cannot do, over an object that
+  // may hold records they cannot see.
+  'list.noneVisibleTitle': 'No records you can see',
+  'list.noneVisibleMessage': 'There are no records here that you have access to. If you expected to see some, ask your administrator for access.',
   'list.loading': 'Loading records…',
   // Load FAILED (network / server error) — distinct from empty. Offer retry.
   'list.loadErrorTitle': 'Couldn\u2019t load records',
@@ -6220,6 +6229,15 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             // through the action runner by the one shared `EmptyStateLink`.
             link={schema.emptyState?.link}
             hasBaseFilter={hasDeclaredFilter(authoredFilter)}
+            // objectstack#25898 — a "my …" view (its filter names the caller).
+            baseFilterNamesCurrentUser={filterNamesCurrentUser(authoredFilter, filterScope.currentUserId)}
+            // objectstack#25898 — the `listNew` row of the affordance-to-grant
+            // map, the verdict the page's own New reads; asked only once the
+            // permission answer has loaded, since an unloaded provider answers
+            // every grant closed. Unknown keeps today's copy.
+            mayCreate={affordancePerms.isLoaded
+              ? resolveAffordance('listNew', { objectSchema: objectDef as SchemaLike, objectName: schema.objectName, perms: affordancePerms }).allowed
+              : undefined}
             // The USER's query (objectui#11687): the search box, the
             // user-filter chips, the filter panel's own conditions. The view's
             // declared `filter` is `hasBaseFilter`, not this.

@@ -535,7 +535,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "适合 URL 使用的标识符"
       },
       logo: {
-        label: "标识"
+        label: "徽标"
       },
       metadata: {
         label: "元数据",
