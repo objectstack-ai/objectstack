@@ -2624,7 +2624,7 @@
       "title": "Shell-hard-coded Administration targets + the retired System hub: every Administration target URL resolves to a real page (no RouteNotFound, no RecordDetailView for an object named 'system'), /apps/:app/system lands on the settings hub in one hop and every hub entry resolves, the five legacy system/* URLs redirect (users and organizations to their object routes, roles, positions and permissions to the Setup metadata catalog), and a member's shell offers no Administration entry",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2637,7 +2637,7 @@
           "a stock boot — the Administration target list is shell-hard-coded (not metadata), so no showcase-specific fixture; the settings hub lists the settings manifests the server returns for the signed-in user"
         ],
         "knownGaps": [
-          "the pinning suites (objectui apps/console/src/__tests__/AppContent.systemHubRoutes.test.tsx and AppContent.legacyRedirects.test.tsx) live entirely in the objectui repo — not runnable from this checkout (the standing 23-item fact); the browser walk below is the from-here oracle",
+          "the pinning suites (objectui apps/console/src/__tests__/AppContent.systemHubRoutes.test.tsx and AppContent.legacyRedirects.test.tsx) are in this checkout at ui/apps/console/src/__tests__/AppContent.systemHubRoutes.test.tsx and ui/apps/console/src/__tests__/AppContent.legacyRedirects.test.tsx: run them at the run's own framework SHA and cite their output. They mount the route table in a MemoryRouter with the page bodies stubbed (vi.mock), so they score the routing layer only — which URL resolves or redirects where (RUNNER rule 6, a pin scores only the layer it drives); that each target lands on a live, rendering page with the server's data stays the browser walk below",
           "the Administration cluster has NO rendering surface at the pin: UnifiedSidebar's home navigation (base Home + Documentation, and the isWorkspaceAdmin-gated sys-administration group) is mounted only inside ConsoleLayout, which sets the app context, and /home renders HomeLayout, which deliberately omits the sidebar. So the cluster's 9 entries are walked as target URLs (the same URLs other producers emit — the zero-app empty state's System Settings button, the home Quick Action, legacy bookmarks), never as clicks; a run that hunts for the cluster in a sidebar reads its absence as a defect (#21782 VF4)"
         ]
       },
@@ -2711,6 +2711,12 @@
           "date": "2026-10-19",
           "change": "acceptance[3] (clause, verify) corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24557, platform-core.home-admin-cluster-links acceptance[3]; wave anchor #24579 §3): the member's Help menu does not list documentation entries only — at the console pin 4016370a it also lists Keyboard shortcuts and About (objectui packages/app-shell/src/layout/AppHeader.tsx). The clause's point is unchanged: no Administration entry anywhere in the member's chrome",
           "ref": "#24632"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-26",
+          "change": "fixtures.knownGaps[0] re-pointed off the retired objectui-only pin fact — the seat's REVISE on #26119 (the same class as boot-health and url-overlay-contract): it said the two pinning suites live entirely in the objectui repo, are not runnable from this checkout, and cited the standing 23-item fact, which #26109 retires. Both are on origin/main under ui/apps/console/src/__tests__/; they run here and score the routing layer they drive, page bodies stubbed. No clause changed; the 'objectui …' provenance labels in source stay. Re-read at 1bbb7bf4",
+          "ref": "#25845"
         }
       ]
     },
