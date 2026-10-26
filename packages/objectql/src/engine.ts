@@ -159,6 +159,11 @@ import {
   // [#24497] The ONE grants resolver, the one the request path seeds a
   // context's grants, peer list and email (#24639) through — see `ScopedContext[SEED_USER_GRANTS]`.
   resolveUserAuthzGrants,
+  // [#25653] The app-automation elevation mark: set by a hook's
+  // `runAs: 'system'` derivation, carried across `createContext`'s parse —
+  // see `ScopedContext.withRunAs`.
+  markAppAutomationElevation,
+  carryAppAutomationElevation,
 } from '@objectstack/core';
 import { WriteEpoch, isWriteEpochOperation } from './write-epoch.js';
 import { bridgeAuthzInvalidation } from './authz-invalidation-bridge.js';
@@ -23095,8 +23100,12 @@ export class ObjectQL implements IObjectQLEngine {
    *   await users.find({ where: { status: 'active' } });
    */
   createContext(ctx: Partial<ExecutionContext>): ScopedContext {
+    // [#25653] The parse keeps declared keys only, so the app-automation
+    // elevation mark an action body's envelope carries is carried across it:
+    // dropped here, the body's `ctx.api` writes would reach the
+    // identity-assignment refusal unmarked.
     return new ScopedContext(
-      ExecutionContextSchema.parse(ctx),
+      carryAppAutomationElevation(ctx, ExecutionContextSchema.parse(ctx)),
       this
     );
   }
@@ -23390,12 +23399,18 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
    * `wrapDeclarativeHook`, for the duration of the handler call. `'inherit'`
    * never reaches here (the wrapper hands the original through by reference).
    *
-   *  - `'system'` → {@link sudo}: `{ ...triggering context, isSystem: true }`.
+   *  - `'system'` → {@link sudo}-shaped: `{ ...triggering context, isSystem: true }`.
    *    The same envelope the in-process `ctx.api.sudo()` idiom produced, so a
    *    hook that used to elevate by hand elevates identically by declaration
    *    — and now on the sandboxed surface too. `userId` / `tenantId` /
    *    `transaction` ride along: elevation is authorization, not anonymity
    *    (#5494), and the hook's writes stay inside the triggering transaction.
+   *    [#25653] It also carries the app-automation elevation mark
+   *    (`'hook'`, `@objectstack/core`), so the identity-assignment refusal
+   *    (plugin-security) judges the hook's writes to the four identity
+   *    objects as it judges a system flow's. Derived here, ⛔ never in
+   *    {@link sudo}: platform code elevates through `sudo()` and keeps writing
+   *    those objects.
    *  - `'user'` → `{ ...triggering context, isSystem: false }` when the
    *    trigger resolved a user — the pin de-elevates a hook fired by a
    *    `runAs:'system'` flow node or an `isSystem` service write that still
@@ -23405,7 +23420,12 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
    *    fall-open, never a silent re-badge as system).
    */
   withRunAs(runAs: Exclude<HookRunAs, 'inherit'>, ref: HookRunAsRef): IScopedContext {
-    if (runAs === 'system') return this.sudo();
+    if (runAs === 'system') {
+      return new ScopedContext(
+        markAppAutomationElevation({ ...this.executionContext, isSystem: true }, 'hook'),
+        this.engine
+      );
+    }
     if (!this.executionContext.userId) return new UnscopedHookApi(ref);
     return new ScopedContext(
       { ...this.executionContext, isSystem: false },
