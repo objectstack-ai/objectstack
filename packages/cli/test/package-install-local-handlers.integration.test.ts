@@ -310,6 +310,17 @@ async function probe(live: LiveStart, token: string): Promise<Phase> {
 
 const rec = (a: Answer) => a.body?.data ?? a.body?.record ?? a.body;
 
+/**
+ * Run phases that share no state at once, and wait for EVERY one to settle
+ * before reporting the first failure: a phase that rejects must not leave a
+ * sibling still booting after `afterAll` has stopped the process groups.
+ */
+async function allPhases(chains: Array<() => Promise<void>>): Promise<void> {
+  const settled = await Promise.allSettled(chains.map((chain) => chain()));
+  const failed = settled.find((s): s is PromiseRejectedResult => s.status === 'rejected');
+  if (failed) throw failed.reason;
+}
+
 const phases: Record<'install' | 'reinstall' | 'restart' | 'control', Phase | undefined> = {
   install: undefined, reinstall: undefined, restart: undefined, control: undefined,
 };
@@ -326,26 +337,35 @@ beforeAll(async () => {
   mkdirSync(runtimeDir, { recursive: true });
   const home = join(runtimeDir, 'home');
 
-  // ── boot 1: empty `os start`, install, probe, reinstall, probe ─────────
-  const first = await bootStart(runtimeDir, home);
-  const token = await authenticate(first);
-  installs.push(await packageInstall(appDir, first));
-  phases.install = await probe(first, token);
-  installs.push(await packageInstall(appDir, first));
-  phases.reinstall = await probe(first, token);
-  await stopGroup(first.child);
+  // Boots 1 and 2 share one home and run in order. Boot 3, the CONTROL, has
+  // its own cwd and home and only reads the package file, so it runs beside
+  // them; every boot binds a kernel-assigned port.
+  await allPhases([
+    // ── boot 1: empty `os start`, install, probe, reinstall, probe ─────────
+    async () => {
+      const first = await bootStart(runtimeDir, home);
+      const token = await authenticate(first);
+      installs.push(await packageInstall(appDir, first));
+      phases.install = await probe(first, token);
+      installs.push(await packageInstall(appDir, first));
+      phases.reinstall = await probe(first, token);
+      await stopGroup(first.child);
 
-  // ── boot 2: same home and cwd — the ledger rehydrates on kernel:ready ──
-  const second = await bootStart(runtimeDir, home);
-  phases.restart = await probe(second, await authenticate(second));
-  await stopGroup(second.child);
+      // ── boot 2: same home and cwd — the ledger rehydrates on kernel:ready ──
+      const second = await bootStart(runtimeDir, home);
+      phases.restart = await probe(second, await authenticate(second));
+      await stopGroup(second.child);
+    },
 
-  // ── boot 3: the CONTROL — the same file as the boot artifact ───────────
-  const controlDir = join(root, 'control');
-  mkdirSync(controlDir, { recursive: true });
-  const third = await bootStart(controlDir, join(controlDir, 'home'), ['--artifact', join(appDir, 'dist', 'objectstack.json')]);
-  phases.control = await probe(third, await authenticate(third));
-  await stopGroup(third.child);
+    // ── boot 3: the CONTROL — the same file as the boot artifact ───────────
+    async () => {
+      const controlDir = join(root, 'control');
+      mkdirSync(controlDir, { recursive: true });
+      const third = await bootStart(controlDir, join(controlDir, 'home'), ['--artifact', join(appDir, 'dist', 'objectstack.json')]);
+      phases.control = await probe(third, await authenticate(third));
+      await stopGroup(third.child);
+    },
+  ]);
 }, 4 * BOOT_TIMEOUT_MS);
 
 afterAll(async () => {

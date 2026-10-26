@@ -58,7 +58,9 @@
  * package — `@objectstack/cloud-connection` and `@objectstack/metadata-protocol`
  * included — resolved through its `exports` to `dist/`, so an ablation of either
  * package's source reaches this file only after that package is rebuilt. Every
- * boot runs in `beforeAll`; the `it`s only read what the phases recorded.
+ * boot runs in `beforeAll`; the `it`s only read what the phases recorded. The
+ * four orders run at once, each in its own cwd and home: one order's steps
+ * run in sequence, and no order reads another's.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -324,6 +326,17 @@ async function readAfterRestart(live: LiveStart, run: Run): Promise<void> {
   run.object = await http(live, 'GET', `/api/v1/data/${TASK}`, token);
 }
 
+/**
+ * Run phases that share no state at once, and wait for EVERY one to settle
+ * before reporting the first failure: a phase that rejects must not leave a
+ * sibling still booting after `afterAll` has stopped the process groups.
+ */
+async function allPhases(chains: Array<() => Promise<void>>): Promise<void> {
+  const settled = await Promise.allSettled(chains.map((chain) => chain()));
+  const failed = settled.find((s): s is PromiseRejectedResult => s.status === 'rejected');
+  if (failed) throw failed.reason;
+}
+
 const runs: Record<'hot' | 'restarted' | 'reseed' | 'reinstall', Run> = { hot: {}, restarted: {}, reseed: {}, reinstall: {} };
 
 beforeAll(async () => {
@@ -336,69 +349,84 @@ beforeAll(async () => {
   mkdirSync(join(otherAppDir, 'dist'), { recursive: true });
   writeFileSync(join(otherAppDir, 'dist', 'objectstack.json'), JSON.stringify(OTHER_ARTIFACT, null, 2), 'utf8');
 
-  // ── order 1: hot install → DELETE → restart ────────────────────────────
-  const hotDir = join(root, 'hot');
-  mkdirSync(hotDir, { recursive: true });
-  const hotHome = join(hotDir, 'home');
-  const a = await bootStart(hotDir, hotHome);
-  const aSession = await authenticate(a);
-  runs.hot.install = await packageInstall(appDir, a);
-  await grantThenUninstall(a, aSession, runs.hot);
-  await stopGroup(a.child);
-  const b = await bootStart(hotDir, hotHome);
-  await readAfterRestart(b, runs.hot);
-  await stopGroup(b.child);
+  // The four orders share nothing but the two package directories they read:
+  // each has its own cwd, home and ledger, and every boot binds a
+  // kernel-assigned port. So they run at once, and the file waits for the
+  // longest one rather than for their sum. Inside an order every step still
+  // waits for the one before it.
+  await allPhases([
+    // ── order 1: hot install → DELETE → restart ────────────────────────────
+    async () => {
+      const hotDir = join(root, 'hot');
+      mkdirSync(hotDir, { recursive: true });
+      const hotHome = join(hotDir, 'home');
+      const a = await bootStart(hotDir, hotHome);
+      const aSession = await authenticate(a);
+      runs.hot.install = await packageInstall(appDir, a);
+      await grantThenUninstall(a, aSession, runs.hot);
+      await stopGroup(a.child);
+      const b = await bootStart(hotDir, hotHome);
+      await readAfterRestart(b, runs.hot);
+      await stopGroup(b.child);
+    },
 
-  // ── order 2: install → restart → DELETE → restart ──────────────────────
-  // The DELETE meets a package the ledger REHYDRATED, not one this process
-  // hot-installed — the path that existed before #21322's change.
-  const coldDir = join(root, 'cold');
-  mkdirSync(coldDir, { recursive: true });
-  const coldHome = join(coldDir, 'home');
-  const c = await bootStart(coldDir, coldHome);
-  await authenticate(c);
-  runs.restarted.install = await packageInstall(appDir, c);
-  await stopGroup(c.child);
-  const d = await bootStart(coldDir, coldHome);
-  await grantThenUninstall(d, await authenticate(d), runs.restarted);
-  await stopGroup(d.child);
-  const e = await bootStart(coldDir, coldHome);
-  await readAfterRestart(e, runs.restarted);
-  await stopGroup(e.child);
+    // ── order 2: install → restart → DELETE → restart ──────────────────────
+    // The DELETE meets a package the ledger REHYDRATED, not one this process
+    // hot-installed — the path that existed before #21322's change.
+    async () => {
+      const coldDir = join(root, 'cold');
+      mkdirSync(coldDir, { recursive: true });
+      const coldHome = join(coldDir, 'home');
+      const c = await bootStart(coldDir, coldHome);
+      await authenticate(c);
+      runs.restarted.install = await packageInstall(appDir, c);
+      await stopGroup(c.child);
+      const d = await bootStart(coldDir, coldHome);
+      await grantThenUninstall(d, await authenticate(d), runs.restarted);
+      await stopGroup(d.child);
+      const e = await bootStart(coldDir, coldHome);
+      await readAfterRestart(e, runs.restarted);
+      await stopGroup(e.child);
+    },
 
-  // ── order 3: hot install → DELETE → hot install of ANOTHER package → restart ──
-  // The second install announces `metadata:reloaded` into the process the
-  // DELETE ran in, so whatever that process still counts as registered is
-  // re-seeded — the withdrawal is what keeps the uninstalled package out of it.
-  const reseedDir = join(root, 'reseed');
-  mkdirSync(reseedDir, { recursive: true });
-  const reseedHome = join(reseedDir, 'home');
-  const f = await bootStart(reseedDir, reseedHome);
-  const fSession = await authenticate(f);
-  runs.reseed.install = await packageInstall(appDir, f);
-  await grantThenUninstall(f, fSession, runs.reseed);
-  runs.reseed.otherInstall = await packageInstall(otherAppDir, f);
-  runs.reseed.afterOtherInstall = await readGrants(f, fSession.token);
-  await stopGroup(f.child);
-  const g = await bootStart(reseedDir, reseedHome);
-  await readAfterRestart(g, runs.reseed);
-  await stopGroup(g.child);
+    // ── order 3: hot install → DELETE → hot install of ANOTHER package → restart ──
+    // The second install announces `metadata:reloaded` into the process the
+    // DELETE ran in, so whatever that process still counts as registered is
+    // re-seeded — the withdrawal is what keeps the uninstalled package out of it.
+    async () => {
+      const reseedDir = join(root, 'reseed');
+      mkdirSync(reseedDir, { recursive: true });
+      const reseedHome = join(reseedDir, 'home');
+      const f = await bootStart(reseedDir, reseedHome);
+      const fSession = await authenticate(f);
+      runs.reseed.install = await packageInstall(appDir, f);
+      await grantThenUninstall(f, fSession, runs.reseed);
+      runs.reseed.otherInstall = await packageInstall(otherAppDir, f);
+      runs.reseed.afterOtherInstall = await readGrants(f, fSession.token);
+      await stopGroup(f.child);
+      const g = await bootStart(reseedDir, reseedHome);
+      await readAfterRestart(g, runs.reseed);
+      await stopGroup(g.child);
+    },
 
-  // ── order 4: hot install → DELETE → hot reinstall of the SAME package ──────
-  // The withdrawal's control: whatever `uninstallPackage` took from the running
-  // kernel, the install path registers again, in the same process.
-  const reinstallDir = join(root, 'reinstall');
-  mkdirSync(reinstallDir, { recursive: true });
-  const h = await bootStart(reinstallDir, join(reinstallDir, 'home'));
-  const hSession = await authenticate(h);
-  runs.reinstall.install = await packageInstall(appDir, h);
-  await grantThenUninstall(h, hSession, runs.reinstall);
-  runs.reinstall.reinstall = await packageInstall(appDir, h);
-  runs.reinstall.afterReinstall = {
-    object: await http(h, 'GET', `/api/v1/data/${TASK}`, hSession.token),
-    ...await readGrants(h, hSession.token),
-  };
-  await stopGroup(h.child);
+    // ── order 4: hot install → DELETE → hot reinstall of the SAME package ──────
+    // The withdrawal's control: whatever `uninstallPackage` took from the running
+    // kernel, the install path registers again, in the same process.
+    async () => {
+      const reinstallDir = join(root, 'reinstall');
+      mkdirSync(reinstallDir, { recursive: true });
+      const h = await bootStart(reinstallDir, join(reinstallDir, 'home'));
+      const hSession = await authenticate(h);
+      runs.reinstall.install = await packageInstall(appDir, h);
+      await grantThenUninstall(h, hSession, runs.reinstall);
+      runs.reinstall.reinstall = await packageInstall(appDir, h);
+      runs.reinstall.afterReinstall = {
+        object: await http(h, 'GET', `/api/v1/data/${TASK}`, hSession.token),
+        ...await readGrants(h, hSession.token),
+      };
+      await stopGroup(h.child);
+    },
+  ]);
 }, 9 * BOOT_TIMEOUT_MS);
 
 afterAll(async () => {
