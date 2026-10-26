@@ -582,6 +582,29 @@ export const objectForm = defineForm({
           { label: 'Public read/write — everyone reads and writes', value: 'public_read_write' },
           { label: 'Controlled by parent — derived from the master record', value: 'controlled_by_parent' },
         ] },
+        // [ADR-0055 §3 amendment · ruling 6398566164] The per-object sharing
+        // opt-ins, beside the OWD they refine. A composite over the one nested
+        // block, each sub-row declared so its label and help text reach the
+        // translation catalogs; the one leaf is a switch, the `enable` toggles'
+        // face. The help text states what the runtime does with the value and
+        // what its absence resolves to, the half an author cannot see from the
+        // schema.
+        {
+          field: 'sharing',
+          type: 'composite',
+          helpText: 'Per-object sharing opt-ins that refine the org-wide default above; they never replace it. Unset: the default of each opt-in applies.',
+          fields: [
+            {
+              field: 'controlledByParent',
+              label: 'Controlled by parent',
+              type: 'composite',
+              helpText: "Read only while sharingModel is 'controlled by parent'; refused on any other sharing model.",
+              fields: [
+                { field: 'ownerMayEdit', label: 'Owner may edit', type: 'boolean', helpText: "On: the owner of a detail row (its owner_id) may update that row by id with read access to the master; everyone else, and every insert, delete, multi-row update and on-behalf-of write, still needs edit access to the master. Off (the default): every write of a detail needs edit access to its master." },
+              ],
+            },
+          ],
+        },
         // #20349 — the two ADR-0066 access keys, beside `sharingModel`, the third
         // leg of the same story (grant coverage, capability gate, record
         // visibility).

@@ -343,6 +343,7 @@ export {
   SECURITY_DELEGATION_MISSING_REASON,
   SECURITY_CBP_NO_RELATION,
   SECURITY_CBP_AMBIGUOUS_RELATION,
+  SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
 } from './validate-security-posture.js';
 export type { SecurityFinding, SecuritySeverity } from './validate-security-posture.js';
 

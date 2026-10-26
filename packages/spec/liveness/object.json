@@ -158,6 +158,28 @@
       "evidence": "packages/plugins/plugin-sharing/src/sharing-service.ts#effectiveSharingModel (`schema?.sharingModel ?? schema?.security?.sharingModel`, collapsed onto the three behaviours the service enforces; `controlled_by_parent` folds to the master-derived branch and an unrecognised stored value fails CLOSED to `private`)",
       "note": "ADR-0055 high-risk class (sharing): the `controlled_by_parent` value derives a detail object's access from its master — the security layer injects `masterFK IN (accessible master ids)` on reads and requires master edit-access on by-id writes. The proof asserts a member who cannot read the master can neither read nor by-id-write the detail, and is not over-blocked on a master they own. 2026-08-28: RE-ANCHORED (commit 93ea19bca) and REPOINTED — `sharing-service.ts:54` had rotted onto a blank line between an interface and a `makeShareId` docblock. Re-closed by hand against c459da6bc."
     },
+    "sharing": {
+      "status": "live",
+      "verifiedAt": "2026-10-26",
+      "evidence": "packages/spec/src/data/object.zod.ts#controlledByParentOwnerMayEdit (the ONE reader of the `sharing` block: `sharing?.controlledByParent?.ownerMayEdit === true`, exported beside the declaration); packages/plugins/plugin-security/src/security-plugin-cbp-relation.ts#resolveCbpRelation (reads it onto the resolved relation's `ownerMayEdit`, only where the registered schema carries `owner_id`)",
+      "note": "ADR-0055 §3 amendment (#25760, ruling 6398566164). The block carries per-object sharing opt-ins that refine `sharingModel`; one nested block today, drilled below. The parse refuses `ownerMayEdit: true` off a `controlled_by_parent` detail (object.zod.ts#refuseControlledByParentOwnerMayEditOffDetail), so the key cannot be declared where nothing reads it.",
+      "children": {
+        "controlledByParent": {
+          "status": "live",
+          "verifiedAt": "2026-10-26",
+          "evidence": "packages/spec/src/data/object.zod.ts#controlledByParentOwnerMayEdit (reads `controlledByParent.ownerMayEdit` under `sharing`); packages/plugins/plugin-security/src/security-plugin-cbp-relation.ts#resolveCbpRelation (the runtime read, onto `CbpRelation.ownerMayEdit`)",
+          "note": "The opt-ins read only under `sharingModel: 'controlled_by_parent'` (ADR-0055 §3 amendment, #25760).",
+          "children": {
+            "ownerMayEdit": {
+              "status": "live",
+              "verifiedAt": "2026-10-26",
+              "evidence": "packages/plugins/plugin-security/src/security-plugin-cbp-write-gate.ts#assertControlledByParentWrite (the owner leg: on a by-id `update` of a detail whose relation carries `ownerMayEdit`, a non-delegated caller who is the stored row's `owner_id` and can READ the master row passes the master-write gate; every other write takes the ADR-0055 §3 chain walk); packages/plugins/plugin-security/src/security-plugin-cbp-relation.ts#resolveCbpRelation (resolves `ownerMayEdit` beside the relation, `false` and reported once when the schema carries no `owner_id`); packages/lint/src/validate-security-posture.ts#callerIdentityKeyedFields (the lint arm `security-controlled-by-parent-owner-policy-without-opt-in` flags an owner-keyed update policy on a detail that has not declared `ownerMayEdit`)",
+              "note": "ADR-0055 §3 amendment (#25760, ruling 6398566164): the owner of a detail row updates it by id with read on the master. Pinned through the real SecurityPlugin + ObjectQL over SqlDriver in packages/plugins/plugin-security/src/controlled-by-parent-owner-may-edit.test.ts: an owner who reads the master is admitted and the row changes; a non-owner, a delete, an insert, a predicate update, a delegated write and an owner who cannot read the master are refused by the master gate; a detail without the opt-in refuses the owner as before."
+            }
+          }
+        }
+      }
+    },
     "defaultRowScope": {
       "status": "live",
       "verifiedAt": "2026-10-19",

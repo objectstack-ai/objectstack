@@ -75,6 +75,7 @@ import {
 // it reads (`CbpRelationHost`).
 import {
   reportCbpMasterUnresolved,
+  reportOwnerMayEditWithoutOwnerColumn,
   reportRejectedReferenceAlias,
   resolveCbpRelation,
   type CbpRelationHost,
@@ -726,6 +727,23 @@ interface CbpRelation {
    * derives from. One rule for both flags, with one prescription.
    */
   masterNotWritable: string | null;
+  /**
+   * [ADR-0055 §3 amendment · ruling 6398566164] The object opted its detail
+   * rows' owners into writing with READ on the master —
+   * `sharing.controlledByParent.ownerMayEdit: true`, read through the spec's
+   * one reader (`controlledByParentOwnerMayEdit`, `@objectstack/spec/data`) —
+   * AND the registry's schema carries the `owner_id` column the gate compares
+   * the caller against. Both, or `false`: an opt-in on an object with no owner
+   * column names nobody, so it is inert here (reported once per object by
+   * {@link SecurityPlugin.reportOwnerMayEditWithoutOwnerColumn}) rather than
+   * a widening the stored rows cannot honour.
+   *
+   * Read by the by-id `update` leg of
+   * {@link SecurityPlugin.assertControlledByParentWrite} and by nothing else:
+   * an insert, a delete, a predicate write and a delegated write keep the
+   * master-edit rule whatever this says.
+   */
+  ownerMayEdit: boolean;
 }
 
 /**
@@ -4454,13 +4472,41 @@ export class SecurityPlugin implements Plugin {
     // [#25223 cut 2] The body moved to `security-plugin-cbp-relation.ts` (see `CbpRelationHost`).
     const readCbpRelCache = () => this.cbpRelCache;
     const readQl = () => this.ql;
-    const host: Pick<CbpRelationHost, 'cbpRelCache' | 'ql' | 'reportCbpMasterUnresolved' | 'reportRejectedReferenceAlias'> = {
+    const host: Pick<CbpRelationHost, 'cbpRelCache' | 'ql' | 'reportCbpMasterUnresolved' | 'reportOwnerMayEditWithoutOwnerColumn' | 'reportRejectedReferenceAlias'> = {
       get cbpRelCache() { return readCbpRelCache(); },
       get ql() { return readQl(); },
       reportCbpMasterUnresolved: (...a) => this.reportCbpMasterUnresolved(...a),
+      reportOwnerMayEditWithoutOwnerColumn: (...a) => this.reportOwnerMayEditWithoutOwnerColumn(...a),
       reportRejectedReferenceAlias: (...a) => this.reportRejectedReferenceAlias(...a),
     };
     return resolveCbpRelation.call(host, object);
+  }
+
+  /**
+   * [ADR-0055 §3 amendment · ruling 6398566164] Report that a
+   * `controlled_by_parent` object declares
+   * `sharing.controlledByParent.ownerMayEdit: true` while its registered
+   * schema carries no `owner_id` column — `ownership` is `business_unit`,
+   * `org` or `none`, or the object is platform-managed — so the opt-in names
+   * nobody and the gate keeps the master-edit rule for every caller.
+   *
+   * The parse cannot refuse this half (the injected-column plan lives in a
+   * module that imports `object.zod.ts`, the cycle that file's attached-block
+   * refusal stops at too), so it is said here, once per object per cache
+   * generation, on the same channel and at the same granularity as
+   * {@link SecurityPlugin.reportCbpMasterUnresolved}: the only call site is
+   * `resolveCbpRelation`'s resolution body, which runs on a `cbpRelCache` miss
+   * alone and re-arms when metadata changes. `warn`, not `error`, by the
+   * degradation-log-level question: nothing claimed persisted is lost, and the
+   * answer is the narrow one — the default rule, not a fall-open.
+   */
+  private reportOwnerMayEditWithoutOwnerColumn(object: string): void {
+    // The body lives in `security-plugin-cbp-relation.ts` (see `CbpRelationHost`).
+    const readLogger = () => this.logger;
+    const host: Pick<CbpRelationHost, 'logger'> = {
+      get logger() { return readLogger(); },
+    };
+    reportOwnerMayEditWithoutOwnerColumn.call(host, object);
   }
 
   /**
