@@ -208,6 +208,21 @@ export const DETAIL_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'detail.deleteComment': 'Delete comment',
   'detail.via': 'via {{source}}',
   'detail.viewSource': 'View source',
+  // objectstack#25959 — a run of consecutive updates by one actor, folded into
+  // one feed row: its summary, its entry count, the "N more" tail of a long
+  // field list, and the expand toggle's two labels.
+  'detail.foldedUpdates': 'Updated {{fields}}',
+  'detail.foldedUpdateCount': '{{count}} updates',
+  'detail.foldedUpdateCount_one': '{{count}} update',
+  'detail.foldedUpdateCount_other': '{{count}} updates',
+  'detail.foldedMoreFields': '{{count}} more',
+  'detail.foldedMoreFields_one': '{{count}} more',
+  'detail.foldedMoreFields_other': '{{count}} more',
+  'detail.expandFolded': 'Show each update',
+  'detail.collapseFolded': 'Hide updates',
+  // …and the punctuation that joins its field list: the shared list key the
+  // form's field lists already use, not a second spelling of it.
+  'validation.formInvalidJoiner': ', ',
   // Replies
   'detail.replyCount': '{{count}} reply',
   'detail.replyCount_one': '{{count}} reply',

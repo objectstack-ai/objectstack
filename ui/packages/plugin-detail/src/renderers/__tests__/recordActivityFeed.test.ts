@@ -194,6 +194,10 @@ describe('sys_activity row → FeedItem', () => {
       createdAt: '2026-03-04T05:06:07.000Z',
       sourceObject: 'sys_email',
       sourceId: 'email-9',
+      // objectstack#25959: what the timeline's fold keys on. A row with no
+      // `actor_id` names the system (`null`).
+      activityType: 'updated',
+      actorId: null,
     });
   });
 
@@ -258,6 +262,8 @@ describe('a scheduled activity reaches the feed (objectui#5840)', () => {
       createdAt: '2026-04-01T09:00:00.000Z',
       sourceObject: 'crm_event',
       sourceId: 'evt-3',
+      activityType: 'scheduled',
+      actorId: null,
     });
   });
 

@@ -160,8 +160,8 @@ the `organization_id` auto-stamp middleware, the `sys_organization`
 post-create seed-replay pipeline, the default-organization bootstrap,
 and the `cloneTenantSeedData` export.
 
-**New package**: [`@objectstack/plugin-org-scoping`](packages/plugins/plugin-org-scoping/README.md)
-ships the row-level Organization scoping primitives — `organization_id`
+**New package**: `@objectstack/plugin-org-scoping` (since retired from this
+repository) ships the row-level Organization scoping primitives — `organization_id`
 auto-stamp, per-org seed replay, default-org bootstrap, orphan-row
 claim, and a new `org-scoping` service that `plugin-security` probes at
 start time to decide whether to keep wildcard `tenant_isolation` RLS
@@ -1027,7 +1027,7 @@ Followup to M10.30a. Walked every Setup menu in a real tenant; produced verdict 
 - **Dynamic seed values** (`@objectstack/runtime` SeedLoader) — `Dataset.records` now accepts `cel\`...\`` expressions for fields whose value depends on the install-time clock or identity. SeedLoader walks records and evaluates expressions through `ExpressionEngine` with a single per-load pinned `now`, so package authors can ship `close_date: cel\`daysFromNow(45)\`` without baking their laptop's timestamp into the artifact. Determinism gate enforced via SHA-1 comparison of two consecutive `objectstack build` runs. Resolves D11.
 - **CRM example migrated to CEL** (`examples/app-crm`) — All 4 formula fields (`lead.full_name`, `contact.full_name`, `campaign.response_rate`, `campaign.roi`) re-written in CEL using the `coalesce()` / ternary patterns. 48 dynamic-date seed values migrated from `new Date()` (compile-time) to `cel\`daysFromNow(N)\`` / `cel\`daysAgo(N)\`` (install-time). Browser-verified end-to-end via `pnpm dev:crm`: `Lead.full_name` renders "Lisa Thompson", `Campaign.roi` renders `1907.04` in the dashboard.
 - **`planFormulaProjection` evaluates on default REST projection** (`@objectstack/objectql`) — Previously formulas were only computed when the caller passed an explicit `?fields=` projection. The REST default returns all columns but no formulas, so `Field.type === 'formula'` columns came back as `null` in the dashboard's auto-generated views. Fix: when `requestedFields` is empty/undefined, target every field in the schema for formula evaluation while leaving `projected` undefined so the driver still returns the default column set.
-- **New `objectstack-formula` skill** ([`skills/objectstack-formula/SKILL.md`](skills/objectstack-formula/SKILL.md)) and rewritten [`content/docs/guides/formula.mdx`](content/docs/guides/formula.mdx) — Author-facing documentation of the canonical CEL contract: stdlib reference, mandatory patterns for AI emission, mechanical translation table from the legacy Salesforce-flavor DSL, and the determinism contract.
+- **New `objectstack-formula` skill** ([`skills/objectstack-formula/SKILL.md`](skills/objectstack-formula/SKILL.md)) and rewritten [`content/docs/data-modeling/formulas.mdx`](content/docs/data-modeling/formulas.mdx) — Author-facing documentation of the canonical CEL contract: stdlib reference, mandatory patterns for AI emission, mechanical translation table from the legacy Salesforce-flavor DSL, and the determinism contract.
 
 ### Removed — M9 Expression Unification
 - **Custom Salesforce-flavor formula engine** (`@objectstack/objectql`) — Deleted `packages/objectql/src/formula.ts` (433 LoC hand-written recursive-descent parser exposing 22 functions: `CONCAT`/`UPPER`/`IF`/`AND`/`OR`/`ISBLANK`/`TODAY`/…) and its companion `packages/spec/docs/formula-functions.md`. The engine had no formal grammar, no public training corpus, no AST persistence, and was a single-vendor surface. **Salesforce compatibility is not pursued** — see [north-star §8](content/docs/concepts/north-star.mdx) "No private expression DSL". Authors targeting Salesforce semantics rewrite their formulas in CEL using the translation table in the formula skill. Resolves D9.
@@ -1352,7 +1352,6 @@ Followup to M10.30a. Walked every Setup menu in a real tenant; produced verdict 
   - All commands support `--url` and `--token` flags, or use stored credentials from `~/.objectstack/credentials.json`
   - Multiple output formats: `--format json|table|yaml` (yaml available on all commands)
   - Environment variable support: `OBJECTSTACK_URL`, `OBJECTSTACK_TOKEN`
-  - See [REMOTE_API_COMMANDS.md](./REMOTE_API_COMMANDS.md) for full documentation
 
 ### Changed
 - **i18n: `I18nLabelSchema` now accepts `string` only** — `label`, `description`, `title`,
