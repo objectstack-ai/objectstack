@@ -160,7 +160,6 @@ const pt = {
     email: "Por favor, insira um endereço de e-mail válido",
     url: "Por favor, insira uma URL válida",
     pattern: "O formato de {{field}} é inválido",
-    formInvalid: "Verifique os campos destacados: {{fields}}",
     formInvalidJoiner: ", ",
     unique: "{{field}} deve ser único",
   },

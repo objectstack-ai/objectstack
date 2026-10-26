@@ -165,7 +165,6 @@ const es = {
     email: "Por favor, introduzca un correo electrónico válido",
     url: "Por favor, introduzca una URL válida",
     pattern: "El formato de {{field}} no es válido",
-    formInvalid: "Por favor, revise los campos resaltados: {{fields}}",
     formInvalidJoiner: ", ",
     unique: "El campo {{field}} debe ser único",
   },

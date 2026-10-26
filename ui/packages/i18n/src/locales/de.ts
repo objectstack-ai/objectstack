@@ -158,7 +158,6 @@ const de = {
     email: "Bitte geben Sie eine gültige E-Mail-Adresse ein",
     url: "Bitte geben Sie eine gültige URL ein",
     pattern: "{{field}} hat ein ungültiges Format",
-    formInvalid: "Bitte überprüfen Sie die markierten Felder: {{fields}}",
     formInvalidJoiner: ", ",
     unique: "{{field}} muss eindeutig sein",
   },

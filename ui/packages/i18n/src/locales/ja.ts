@@ -158,7 +158,6 @@ const ja = {
     email: "有効なメールアドレスを入力してください",
     url: "有効なURLを入力してください",
     pattern: "{{field}}の形式が正しくありません",
-    formInvalid: "ハイライトされた項目を確認してください: {{fields}}",
     formInvalidJoiner: "、",
     unique: "{{field}}は一意である必要があります",
   },
