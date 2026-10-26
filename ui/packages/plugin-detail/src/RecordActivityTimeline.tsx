@@ -37,7 +37,9 @@ import { RichTextCommentInput } from './RichTextCommentInput';
 import { CommentAttachment, type Attachment } from './CommentAttachment';
 import { CommentBody } from './CommentAuthorControls';
 import { useDisplayLocale } from '@object-ui/i18n';
+import { useRecordContext, useSafeFieldLabel } from '@object-ui/react';
 import { useDetailTranslation } from './useDetailTranslation';
+import { foldFeedItems, type ActivityTimelineEntry } from './renderers/recordActivityFeed';
 
 /**
  * Which slice of the record feed the timeline shows.
@@ -241,6 +243,18 @@ function filterItems(items: FeedItem[], mode: FeedFilterMode): FeedItem[] {
   }
 }
 
+/** The distinct changed fields of a run, in first-seen order. */
+function changedFieldsOf(items: readonly FeedItem[]): string[] {
+  const seen = new Set<string>();
+  for (const item of items) {
+    for (const field of item.changedFields ?? []) seen.add(field);
+  }
+  return Array.from(seen);
+}
+
+/** How many field labels a folded row names before it says "+N". */
+const FOLD_FIELDS_SHOWN = 3;
+
 /**
  * RecordActivityTimeline — Unified timeline renderer for Airtable-style activity feeds.
  *
@@ -355,6 +369,37 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
     return map;
   }, [filtered, enableThreading]);
 
+  // Runs of consecutive updates by one actor, folded into one row each
+  // (objectstack#25959). Folded at render from the rows the reader sees; the
+  // feed itself keeps every entry.
+  const timelineEntries = React.useMemo(() => foldFeedItems(rootItems), [rootItems]);
+  // Which folded rows the reader has expanded, by the fold's id.
+  const [expandedFolds, setExpandedFolds] = React.useState<ReadonlySet<string>>(() => new Set());
+  const toggleFold = React.useCallback((id: string) => {
+    setExpandedFolds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  // A changed field's label: the object's field label where the page has the
+  // object schema (`RecordContextProvider`), through the same translated
+  // `fieldLabel` the record's own sections use; the machine name otherwise.
+  const recordContext = useRecordContext();
+  const { fieldLabel } = useSafeFieldLabel();
+  const labelOfField = React.useCallback(
+    (name: string): string => {
+      const objectName = recordContext?.objectName;
+      const def = (recordContext?.objectSchema as { fields?: Record<string, { label?: unknown }> } | undefined)
+        ?.fields?.[name];
+      const authored = typeof def?.label === 'string' && def.label ? def.label : name;
+      return objectName ? fieldLabel(objectName, name, authored) : authored;
+    },
+    [recordContext?.objectName, recordContext?.objectSchema, fieldLabel],
+  );
+
   const handleFilterChange = React.useCallback(
     (mode: FeedFilterMode) => {
       if (onFilterChange) {
@@ -417,6 +462,211 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
       setIsLoadingMore(false);
     }
   }, [onLoadMore]);
+
+  // One feed item's row. A folded run renders each of its entries with this
+  // same function when expanded (objectstack#25959).
+  const renderItem = (item: FeedItem): React.ReactNode => {
+    const Icon = FEED_TYPE_ICONS[item.type] || Zap;
+    const colorClass =
+      FEED_TYPE_COLORS[item.type] || 'bg-gray-100 text-gray-600';
+    // Threading (objectui#12144). The reply LIST shows only under a
+    // `replyCount` above zero, the one threading gate: the host that
+    // read the rows sets it. The reply INPUT does not wait for a
+    // first reply, so a comment with none offers it wherever the
+    // host hands over `onAddReply`.
+    const replies =
+      (item.replyCount ?? 0) > 0 ? (repliesByParent.get(item.id) ?? NO_REPLIES) : NO_REPLIES;
+    const offersReply = !!onAddReply && canTakeReply(item);
+    // Undefined on a row that cannot store a reaction: no Add
+    // reaction button, and its chips render disabled (objectui#11035).
+    const toggleReaction =
+      enableReactions && onToggleReaction && canStoreReaction(item)
+        ? (emoji: string) => onToggleReaction(item.id, emoji)
+        : undefined;
+
+    return (
+      <div key={item.id}>
+        <div className="flex gap-3 relative">
+          {/* Icon */}
+          <div
+            className={cn(
+              'shrink-0 h-8 w-8 rounded-full flex items-center justify-center z-10',
+              colorClass,
+            )}
+          >
+            {item.actorAvatarUrl ? (
+              <img
+                src={item.actorAvatarUrl}
+                alt={item.actor}
+                className="h-8 w-8 rounded-full object-cover"
+              />
+            ) : (
+              <Icon className="h-3.5 w-3.5" />
+            )}
+          </div>
+          {/* Content */}
+          <div className="flex-1 min-w-0 pt-1">
+            <div className="flex items-center gap-2 mb-0.5">
+              <span className="text-sm font-medium">{item.actor}</span>
+              {item.source && (
+                <span className="text-xs text-muted-foreground">
+                  {t('detail.via', { source: item.source })}
+                </span>
+              )}
+              <span className="text-xs text-muted-foreground">
+                {formatTimestamp(item.createdAt, t, displayLocale)}
+              </span>
+              {item.edited && (
+                <span className="text-xs text-muted-foreground italic">{t('detail.edited')}</span>
+              )}
+              {item.pinned && (
+                <span className="text-xs text-amber-600">📌 {t('detail.pinned')}</span>
+              )}
+            </div>
+
+            {/* Body text, and the author's Edit and Delete on their own
+                comment (objectui#12268). The host decides whose
+                comment it is (`authoredByViewer`) and hands each
+                handler over under the caller's grant; a row that
+                offers neither renders the same paragraph as before. */}
+            <CommentBody
+              item={item}
+              onEditComment={onEditComment}
+              onDeleteComment={onDeleteComment}
+              bodyClassName="text-sm whitespace-pre-wrap break-words text-muted-foreground"
+            />
+
+            {/* Drill to source rich entity (ADR-0052 ActivityPointer) */}
+            {item.sourceObject && item.sourceId != null && (
+              <a
+                href={`/objects/${item.sourceObject}/${item.sourceId}`}
+                className="mt-1 inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                data-testid="activity-source-link"
+              >
+                {t('detail.viewSource')}
+                <span aria-hidden>→</span>
+              </a>
+            )}
+
+            {/* Field changes */}
+            {item.type === 'field_change' && item.fieldChanges && (
+              <div className="space-y-1 mt-1">
+                {item.fieldChanges.map((change, idx) => (
+                  <FieldChangeItem key={idx} change={change} />
+                ))}
+              </div>
+            )}
+
+            {/* Reactions */}
+            {enableReactions && item.reactions && item.reactions.length > 0 && (
+              <div className="mt-1.5">
+                <ReactionPicker
+                  reactions={item.reactions}
+                  onToggleReaction={toggleReaction}
+                />
+              </div>
+            )}
+
+            {/* Add reaction button (even if no reactions yet) */}
+            {(!item.reactions || item.reactions.length === 0) && toggleReaction && (
+              <div className="mt-1.5">
+                <ReactionPicker
+                  reactions={[]}
+                  onToggleReaction={toggleReaction}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Threading */}
+        {enableThreading && (replies.length > 0 || offersReply) && (
+          <ThreadedReplies
+            parentItem={item}
+            replies={replies}
+            onAddReply={onAddReply}
+            showReplyInput={offersReply}
+            onEditComment={onEditComment}
+            onDeleteComment={onDeleteComment}
+          />
+        )}
+      </div>
+    );
+  };
+
+  // A run of consecutive updates by one actor, as one row (objectstack#25959):
+  // who, when the latest entry was written, how many entries, and the union of
+  // the fields they changed. The toggle expands the run to its entries, each
+  // rendered exactly as an unfolded row.
+  const renderFold = (entry: Extract<ActivityTimelineEntry, { kind: 'fold' }>): React.ReactNode => {
+    const latest = entry.items[entry.items.length - 1];
+    const count = entry.items.length;
+    const labels = changedFieldsOf(entry.items).map(labelOfField);
+    const shown = labels.slice(0, FOLD_FIELDS_SHOWN);
+    const rest = labels.length - shown.length;
+    const named = rest > 0 ? [...shown, t('detail.foldedMoreFields', { count: rest })] : shown;
+    // No field named on any entry (an unstamped row, or a reader served none
+    // of the fields) still reads as updates, and still counts.
+    // Joined with the pack's list punctuation, the key the form's field lists
+    // use: `Intl.ListFormat` was measured and rejected there, because its
+    // `unit` styles join zh and ru with no separator at all.
+    const summary = named.length > 0
+      ? t('detail.foldedUpdates', { fields: named.join(t('validation.formInvalidJoiner')) })
+      : t('detail.activityUpdated');
+    const expanded = expandedFolds.has(entry.id);
+    const Icon = FEED_TYPE_ICONS.field_change;
+    return (
+      <div key={entry.id} data-testid="activity-fold" data-fold-count={count}>
+        <div className="flex gap-3 relative">
+          <div
+            className={cn(
+              'shrink-0 h-8 w-8 rounded-full flex items-center justify-center z-10',
+              FEED_TYPE_COLORS.field_change,
+            )}
+          >
+            {latest.actorAvatarUrl ? (
+              <img
+                src={latest.actorAvatarUrl}
+                alt={latest.actor}
+                className="h-8 w-8 rounded-full object-cover"
+              />
+            ) : (
+              <Icon className="h-3.5 w-3.5" />
+            )}
+          </div>
+          <div className="flex-1 min-w-0 pt-1">
+            <div className="flex items-center gap-2 mb-0.5">
+              <span className="text-sm font-medium">{latest.actor}</span>
+              <span className="text-xs text-muted-foreground">
+                {formatTimestamp(latest.createdAt, t, displayLocale)}
+              </span>
+              <span className="text-xs text-muted-foreground" data-testid="activity-fold-count">
+                {t('detail.foldedUpdateCount', { count })}
+              </span>
+            </div>
+            <p className="text-sm whitespace-pre-wrap break-words text-muted-foreground">{summary}</p>
+            <button
+              type="button"
+              aria-expanded={expanded}
+              onClick={() => toggleFold(entry.id)}
+              className="mt-1 inline-flex items-center gap-1 text-xs text-primary hover:underline"
+            >
+              <ChevronDown
+                className={cn('h-3 w-3 transition-transform', expanded && 'rotate-180')}
+                aria-hidden="true"
+              />
+              {expanded ? t('detail.collapseFolded') : t('detail.expandFolded')}
+            </button>
+          </div>
+        </div>
+        {expanded && (
+          <div className="mt-4 space-y-4" data-testid="activity-fold-entries">
+            {entry.items.map((item) => renderItem(item))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <section
@@ -571,134 +821,9 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
             <div className="absolute left-4 top-2 bottom-2 w-px bg-border" />
 
             <div className="space-y-4">
-              {rootItems.map((item) => {
-                const Icon = FEED_TYPE_ICONS[item.type] || Zap;
-                const colorClass =
-                  FEED_TYPE_COLORS[item.type] || 'bg-gray-100 text-gray-600';
-                // Threading (objectui#12144). The reply LIST shows only under a
-                // `replyCount` above zero, the one threading gate: the host that
-                // read the rows sets it. The reply INPUT does not wait for a
-                // first reply, so a comment with none offers it wherever the
-                // host hands over `onAddReply`.
-                const replies =
-                  (item.replyCount ?? 0) > 0 ? (repliesByParent.get(item.id) ?? NO_REPLIES) : NO_REPLIES;
-                const offersReply = !!onAddReply && canTakeReply(item);
-                // Undefined on a row that cannot store a reaction: no Add
-                // reaction button, and its chips render disabled (objectui#11035).
-                const toggleReaction =
-                  enableReactions && onToggleReaction && canStoreReaction(item)
-                    ? (emoji: string) => onToggleReaction(item.id, emoji)
-                    : undefined;
-
-                return (
-                  <div key={item.id}>
-                    <div className="flex gap-3 relative">
-                      {/* Icon */}
-                      <div
-                        className={cn(
-                          'shrink-0 h-8 w-8 rounded-full flex items-center justify-center z-10',
-                          colorClass,
-                        )}
-                      >
-                        {item.actorAvatarUrl ? (
-                          <img
-                            src={item.actorAvatarUrl}
-                            alt={item.actor}
-                            className="h-8 w-8 rounded-full object-cover"
-                          />
-                        ) : (
-                          <Icon className="h-3.5 w-3.5" />
-                        )}
-                      </div>
-                      {/* Content */}
-                      <div className="flex-1 min-w-0 pt-1">
-                        <div className="flex items-center gap-2 mb-0.5">
-                          <span className="text-sm font-medium">{item.actor}</span>
-                          {item.source && (
-                            <span className="text-xs text-muted-foreground">
-                              {t('detail.via', { source: item.source })}
-                            </span>
-                          )}
-                          <span className="text-xs text-muted-foreground">
-                            {formatTimestamp(item.createdAt, t, displayLocale)}
-                          </span>
-                          {item.edited && (
-                            <span className="text-xs text-muted-foreground italic">{t('detail.edited')}</span>
-                          )}
-                          {item.pinned && (
-                            <span className="text-xs text-amber-600">📌 {t('detail.pinned')}</span>
-                          )}
-                        </div>
-
-                        {/* Body text, and the author's Edit and Delete on their own
-                            comment (objectui#12268). The host decides whose
-                            comment it is (`authoredByViewer`) and hands each
-                            handler over under the caller's grant; a row that
-                            offers neither renders the same paragraph as before. */}
-                        <CommentBody
-                          item={item}
-                          onEditComment={onEditComment}
-                          onDeleteComment={onDeleteComment}
-                          bodyClassName="text-sm whitespace-pre-wrap break-words text-muted-foreground"
-                        />
-
-                        {/* Drill to source rich entity (ADR-0052 ActivityPointer) */}
-                        {item.sourceObject && item.sourceId != null && (
-                          <a
-                            href={`/objects/${item.sourceObject}/${item.sourceId}`}
-                            className="mt-1 inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                            data-testid="activity-source-link"
-                          >
-                            {t('detail.viewSource')}
-                            <span aria-hidden>→</span>
-                          </a>
-                        )}
-
-                        {/* Field changes */}
-                        {item.type === 'field_change' && item.fieldChanges && (
-                          <div className="space-y-1 mt-1">
-                            {item.fieldChanges.map((change, idx) => (
-                              <FieldChangeItem key={idx} change={change} />
-                            ))}
-                          </div>
-                        )}
-
-                        {/* Reactions */}
-                        {enableReactions && item.reactions && item.reactions.length > 0 && (
-                          <div className="mt-1.5">
-                            <ReactionPicker
-                              reactions={item.reactions}
-                              onToggleReaction={toggleReaction}
-                            />
-                          </div>
-                        )}
-
-                        {/* Add reaction button (even if no reactions yet) */}
-                        {(!item.reactions || item.reactions.length === 0) && toggleReaction && (
-                          <div className="mt-1.5">
-                            <ReactionPicker
-                              reactions={[]}
-                              onToggleReaction={toggleReaction}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Threading */}
-                    {enableThreading && (replies.length > 0 || offersReply) && (
-                      <ThreadedReplies
-                        parentItem={item}
-                        replies={replies}
-                        onAddReply={onAddReply}
-                        showReplyInput={offersReply}
-                        onEditComment={onEditComment}
-                        onDeleteComment={onDeleteComment}
-                      />
-                    )}
-                  </div>
-                );
-              })}
+              {timelineEntries.map((entry) =>
+                entry.kind === 'fold' ? renderFold(entry) : renderItem(entry.item),
+              )}
             </div>
           </div>
         )}

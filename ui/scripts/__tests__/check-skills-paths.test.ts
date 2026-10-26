@@ -16,6 +16,8 @@ import {
   readBaseline,
   BASELINE_FILE,
 } from '../check-skills-paths.mjs';
+import { SKILL_BUNDLE } from '../skill-bundle-root.mjs';
+import { globMatches, jobBlock, rootCi, uiFilterGlobs, uiRun, UI_JOBS } from './helpers/root-ci';
 
 /**
  * objectui#3735 — the test for `scripts/check-skills-paths.mjs`.
@@ -516,7 +518,9 @@ describe('wiring — the gate is reachable by name, beside its baseline', () => 
   // the monorepo: GitHub runs the root `.github/workflows/` alone, and no
   // workflow there runs this gate. objectstack#25880 ports the `repo-gates.yml`
   // gates (row 24 of the objectstack#25697 workflow roster) into the root `Lint
-  // UI` job and brings these pins back against that job, by path.
+  // UI` job and brings these pins back against that job, by path. The Lint UI
+  // home and the filter that starts it on a skills-only change are pinned by
+  // the last case below.
 
   it('is exposed as a root package script', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
@@ -525,5 +529,21 @@ describe('wiring — the gate is reachable by name, beside its baseline', () => 
 
   it('ships its baseline next to the script', () => {
     expect(fs.existsSync(path.join(repoRoot, BASELINE_FILE))).toBe(true);
+  });
+
+  it('runs in Lint UI, which a skills-only change starts: the root `ui` filter covers the bundle', () => {
+    // The bundle left `ui/` for the repository root's `SKILL_BUNDLE`
+    // (objectstack#26097), where `ui/**` does not reach it, so a skills-only
+    // pull request started no ui job until the filter named that root
+    // (objectstack#25712).
+    const ci = rootCi();
+    const lint = jobBlock(ci, UI_JOBS.lint);
+    expect(lint).toContain(uiRun('check:skills-paths'));
+    expect(lint).toContain("needs.filter.outputs.ui != 'false'");
+    const probe = `${SKILL_BUNDLE}/any`;
+    expect(
+      uiFilterGlobs(ci).some((glob) => globMatches(glob, probe)),
+      `no \`ui:\` filter glob covers ${SKILL_BUNDLE}/`,
+    ).toBe(true);
   });
 });

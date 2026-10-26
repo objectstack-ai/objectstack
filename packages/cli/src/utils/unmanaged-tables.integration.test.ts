@@ -16,7 +16,7 @@
  *     host's objects) would report every platform table as unmanaged.
  *  2. **The declared set is the deployment's own.** The fixture is #12938's
  *     shape — a host `objectstack.config.ts` whose whole object set comes from
- *     a plugin, which is what ObjectStack Cloud's control plane has — so the
+ *     a plugin, which is what ObjectOS Cloud's control plane has — so the
  *     composition this sweep requires is the one it actually gets in the field.
  *  3. **The catalog query runs.** The three statements are written for three
  *     dialects; this exercises the sqlite one through the driver's own raw

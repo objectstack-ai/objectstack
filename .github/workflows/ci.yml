@@ -163,8 +163,10 @@ jobs:
       crosspkg: ${{ github.event_name != 'merge_group' && steps.changes.outputs.crosspkg || 'true' }}
       # The objectui tree under `ui/` (objectstack#25677). Three outputs, read
       # together by the four `* UI` jobs at the bottom of this file:
-      #   ui            — a path under ui/, or a root file the ui jobs build
-      #                   from (the lockfile, the workspace, turbo.json, ci.yml);
+      #   ui            — a path under ui/, a root file the ui jobs build from
+      #                   (the lockfile, the workspace, turbo.json), or a root
+      #                   the ui gates read (every root workflow, the prompts,
+      #                   the objectui skill bundle; see the filter below);
       #   ui_consumers  — one of the seven packages objectui installs from this
       #                   tree changed, so the Console is compiled (Type Check
       #                   UI) and built (Build & E2E UI) against the new shape in
@@ -279,6 +281,7 @@ jobs:
               - 'tsconfig.json'
               - 'tsconfig.base.json'
               - 'tsconfig.test.base.json'
+              - 'vitest.preset.mts'
               - '.github/workflows/ci.yml'
               # BUILD INPUTS outside every package (#21202): turbo.json itself,
               # its `globalDependencies`, and each `$TURBO_ROOT$/…` input of a
@@ -446,14 +449,29 @@ jobs:
               # narrower audits entry is left as the package that declared it
               # spelled it, exactly as the two narrower `skills/` entries were.
               - 'docs/**'
-            # The objectui tree and the root files the ui jobs build from. A
-            # change to the guard runs the guard, so ci.yml itself is listed.
+            # The objectui tree, the root files the ui jobs build from, and the
+            # three roots outside ui/ that the ui jobs' gates and tests read
+            # (objectstack#25712):
+            #   - every root workflow, not ci.yml alone: Lint UI's pre-install
+            #     import graph check scans all of `.github/workflows/` for ui
+            #     scripts run before an install. ci.yml, the guard itself, is
+            #     one of them. Measured over the 211 merges of the 7 days before
+            #     this entry: 3 changed another workflow and no ui path;
+            #   - `.github/prompts/**`, where objectui's prompts moved in
+            #     objectstack#25957 and which Lint UI's prompt-keys check reads;
+            #   - `skills/objectui/**`, objectui's skill bundle since
+            #     objectstack#26097. Lint UI's skill gates (skills-paths,
+            #     skill-examples, skill-eval-tokens, doc-json,
+            #     shell-escape-residue) and Test UI's skill readers find it
+            #     through `ui/scripts/skill-bundle-root.mjs`.
             ui:
               - 'ui/**'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
               - 'turbo.json'
-              - '.github/workflows/ci.yml'
+              - '.github/workflows/**'
+              - '.github/prompts/**'
+              - 'skills/objectui/**'
             # The seven packages objectui installs from this tree (the set its
             # `.objectstack-pin` used to pack). A change here compiles and builds
             # the Console in the same PR — the check the retired Spec Shape Gate
@@ -3797,10 +3815,11 @@ jobs:
       # when the tree moved under `ui/` (it reads only this repository's
       # `.github/workflows/`), and which objectstack#25712 deleted with the
       # rest of `ui/.github/workflows/`. They judge what objectui ships
-      # — `ui/content/docs/**`, `ui/skills/**`, the package READMEs and the
+      # — `ui/content/docs/**`, the skill bundle (`skills/objectui/**` at the
+      # repository root since objectstack#26097), the package READMEs and the
       # documented component types — so the change most likely to trip them is
       # a docs-only or skills-only PR, which the `filter` job's `ui` globs
-      # already include.
+      # include.
       #
       # Ported as that workflow ran them, in its order: the install-free gates
       # here, before the install; the gates that read built `dist/*.d.ts` after
@@ -3882,6 +3901,18 @@ jobs:
         id: install
         if: ${{ !cancelled() }}
         run: pnpm install --frozen-lockfile
+
+      # The spec liveness ledger cites the renderer in-repo, under ui/
+      # (objectstack#26150), so a ui/ change can delete a file a ledger row
+      # cites, move a cited line past the end of its file, drop an anchored
+      # symbol or stop naming the cited key. Spec Liveness Check does not run on
+      # a ui/-only pull request (its `paths:` are the spec side) and is not a
+      # required context, so the gate runs here too, where every ui/ change
+      # starts it (objectstack#25712 F26). It runs tsx over spec's sources and
+      # needs the install alone; about 3 s.
+      - name: Spec Liveness Check — Check the liveness ledger's citations, ui/ included
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: pnpm --filter @objectstack/spec check:liveness
 
       - name: Build the @objectstack packages objectui consumes
         run: |

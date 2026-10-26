@@ -22,7 +22,7 @@
       "dependsOn": ["^build"],
       "outputs": [],
       "env": ["OS_TEST_TIERS", "OS_TEST_SHARD"],
-      "inputs": ["$TURBO_DEFAULT$", "!dist/**", "!coverage/**", "!.turbo/**"]
+      "inputs": ["$TURBO_DEFAULT$", "!dist/**", "!coverage/**", "!.turbo/**", "$TURBO_ROOT$/vitest.preset.mts"]
     },
     "test:repo": {
       "dependsOn": ["^build"],
