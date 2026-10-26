@@ -3437,8 +3437,9 @@ jobs:
           pnpm --dir ui run check:bash32-floor
 
       # ── objectui's Repo Gates (objectstack#25880) ────────────────────────
-      # The nineteen gates of `ui/.github/workflows/repo-gates.yml`, which
-      # GitHub stopped running when the tree moved under `ui/` (it reads only
+      # Eighteen of the nineteen gates of `ui/.github/workflows/repo-gates.yml`
+      # (the last is noted below), which GitHub stopped running when the tree
+      # moved under `ui/` (it reads only
       # this repository's `.github/workflows/`). They judge what objectui ships
       # — `ui/content/docs/**`, `ui/skills/**`, the package READMEs and the
       # documented component types — so the change most likely to trip them is
@@ -3463,13 +3464,12 @@ jobs:
         if: ${{ !cancelled() }}
         run: pnpm --dir ui run check:action-ref-convention
 
-      # Self-test first: a scan whose recogniser is broken reports a clean tree.
-      - name: Pre-Install Import Graph Check — Check the pre-install gates' import graphs
-        if: ${{ !cancelled() }}
-        run: |
-          pnpm --dir ui run check:pre-install-import-graph --self-test
-          pnpm --dir ui run check:pre-install-import-graph
-
+      # Not yet here, the nineteenth: `Pre-Install Import Graph Check`
+      # (`check:pre-install-import-graph`). It derives its population from
+      # `ui/.github/workflows/`, where ten workflows still run the deleted
+      # `scripts/objectstack-pin.mjs`, so it is red on `main` today for that
+      # reason alone. It joins this list when `ui/.github/` is retired
+      # (objectstack#25712), retargeted to this job.
       - name: Shell Escape Residue Scan — Check for machine-produced shell-escape residue in fenced examples
         if: ${{ !cancelled() }}
         run: pnpm --dir ui run check:shell-escape-residue
