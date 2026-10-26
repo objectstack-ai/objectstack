@@ -351,7 +351,10 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // 94 once objectui#13355 added `connectAgent.apiKey.confirmTitle`, the
     // API-key confirm that names the key („{{name}}“) — one interpolated span,
     // runtime data.
-    expect(okSpans, 'correctly paired spans').toBe(94);
+    // 96 once objectstack-ai/objectstack#26172 added `form.createdNamed` and
+    // `.updatedNamed`, the record-save toasts that name the record
+    // („{{title}}“) — one interpolated span each, runtime data.
+    expect(okSpans, 'correctly paired spans').toBe(96);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -413,8 +416,10 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // `detail.deleteRowConfirmation`, one more matched pair. 93 / 93 / 0 after
     // objectui#13330 added `console.objectView.managedUsers.inviteLine`, one
     // more matched pair. 94 / 94 / 0 after objectui#13355 added
-    // `connectAgent.apiKey.confirmTitle`, one more matched pair.
-    expect({ open, close, rdq }).toEqual({ open: 94, close: 94, rdq: 0 });
+    // `connectAgent.apiKey.confirmTitle`, one more matched pair. 96 / 96 / 0
+    // after objectstack-ai/objectstack#26172 added `form.createdNamed` and
+    // `.updatedNamed`, one matched pair each.
+    expect({ open, close, rdq }).toEqual({ open: 96, close: 96, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);

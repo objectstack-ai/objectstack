@@ -258,9 +258,9 @@ localStorage / auth gotchas.
     When a cloud decision's **mechanism half** governs open code here, this repo carries its own ADR — own number, a
     `## Provenance` section naming the cloud record and its date, the commercial half left in cloud — and the cloud
     record gains a one-line pointer. Files never move between registries and numbers are never reassigned.
-14. **⛔ A governed surface lands only the way its tier allows — Tier H by the maintainer's hand or by an authorized
-    approval, Tier S by the owning seat on a contract-tier review of record; before that record no AI seat merges,
-    queues, or arms auto-merge on a PR whose diff touches one.** The governed surfaces are `docs/adr/**`,
+14. **⛔ A governed surface lands only the way its tier allows — Tier H by the maintainer's hand (merge or enqueue)
+    or an authorized approval, Tier S by the owning seat on a contract-tier review of record; before that record no AI
+    seat merges, queues, or arms auto-merge on a PR whose diff touches one.** The governed surfaces are `docs/adr/**`,
     `docs/NORTH-STAR.md`, `.claude/**` (agents, hooks and settings — not only skills), `skills/**`, `AGENTS.md`,
     `CLAUDE.md` and `.github/workflows/**`, and under `ui/` `ui/docs/adr/**`, `ui/.claude/**`, `ui/skills/**`,
     `ui/AGENTS.md`, `ui/CLAUDE.md` and `ui/.github/workflows/**`, all Tier H. The register is `GOVERNED_SURFACES` in
@@ -284,7 +284,7 @@ localStorage / auth gotchas.
     paths are register rows the queue leg regenerates byte-exact clears with zero approvals — an uncertified
     recompute, drift or a hand-authored sibling keeps it governed. ⛔ **No agent seat submits an approving review on a
     governed-surface PR, under any account** — an authorized account is agent-operated too; "CI is green" carries no
-    information about a governance change.
+    information about a governance change. An authorized account's enqueue is a review record too: ⛔ never a seat's.
 
     **Already armed or queued when you read this?** Disable auto-merge AND convert it back to **draft**, which disarms
     an unqueued PR; no seat act, those two included, is measured to dequeue one (`platform-readings.md`, queue
@@ -513,8 +513,8 @@ Even inside your own worktree, operate defensively:
    so re-read it rather than recalling it); (b) the **Version Packages** PR, or any PR whose merge performs a
    release (**Prime Directive #15**); (c) a PR whose **changed lines exceed 3,000** (`additions + deletions`,
    generated files included) — it lands the way a Tier H surface does: an authorized APPROVED review and then
-   the owning seat, or a human merge. Read the PR's file list (`get_files`), **its author and its size** before
-   you arm anything.
+   the owning seat, or the maintainer's merge or enqueue. Read the PR's file list (`get_files`), **its author and
+   its size** before you arm anything.
 
    **Green means the gate-carrying jobs' `conclusion` is `success`** — not "no failure
    yet"; `in_progress` is not a pass. Arming a red PR does not queue it, it hides it:

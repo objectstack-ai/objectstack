@@ -94,3 +94,33 @@ export function workspaceChunkTests(frameworkPackagesDir: string | null): Worksp
     lint: new RegExp('(@objectstack[\\\\/+]lint|^' + prefix + 'lint[\\\\/])'),
   };
 }
+
+/**
+ * objectui's own `packages/` directory, seen from a console directory
+ * (`apps/console` → `../../packages`) — the same in both layouts. Pure.
+ */
+export function objectuiPackagesDir(consoleDir: string): string {
+  return path.resolve(consoleDir, '../../packages');
+}
+
+/**
+ * The matcher `emitChunkMembershipReport` in `apps/console/vite.config.ts`
+ * attributes a module id with: capture 1 is the objectui package name, capture
+ * 2 the package-relative rest of the id.
+ *
+ * It is anchored on objectui's OWN `packages/` directory, and the monorepo is
+ * why. Inside it the framework's packages are workspace links that Vite
+ * resolves to `<monorepo root>/packages/<name>/...` (see the top of this file),
+ * and four of those names are objectui package names too: `cli`, `core`,
+ * `sdui-parser` and `types`. An unanchored `/packages/<name>/` segment reads
+ * `@objectstack/core`'s `dist/index.js` — reached through `@objectstack/client`
+ * and rightly grouped into `vendor-objectstack` — as a module of objectui's
+ * `packages/core`, and the membership verdict then reports `framework`'s
+ * declared package as having strayed into a vendor chunk. That verdict was
+ * about attribution, not about where any objectui module landed. Standalone
+ * the anchor changes nothing: no other `packages/` directory is in the graph.
+ */
+export function workspaceModuleMatcher(packagesDir: string): RegExp {
+  const prefix = escapeRegExp(packagesDir.split(path.sep).join('/'));
+  return new RegExp('^' + prefix + '[\\\\/]([^\\\\/]+)[\\\\/](.*)$');
+}

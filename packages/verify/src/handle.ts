@@ -107,7 +107,6 @@ import type { TenancyService } from '@objectstack/plugin-auth';
 import type { AutomationEngine } from '@objectstack/service-automation';
 
 /** Any row the engine hands back. Untyped on purpose: the engine's, not the handle's. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type EngineRow = Record<string, any>;
 
 /**
@@ -628,7 +627,6 @@ function namesSystem(opts: AsUser | AsSystem, door: string): boolean {
 }
 
 function refusalFrom(status: number, body: unknown, fallback: string): VerifyRefusal {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const b = body as any;
   const envelope = b?.error && typeof b.error === 'object' ? b.error : undefined;
   const message =
@@ -700,7 +698,6 @@ export async function createHandle(kernel: ObjectKernel, origin: string): Promis
     }
     const { status, body: rb } = res.response;
     if (status >= 400) throw refusalFrom(status, rb, `${method} ${API_PREFIX}${path} answered ${status}`);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (rb as any)?.data;
   };
 

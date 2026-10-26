@@ -113,7 +113,9 @@ describe('objectui#6152 round 12 — the installed list overlay\'s `options` bag
     expect(SPEC_BAG_OPTIONAL._zod.def.type).toBe('optional');
     expect(SPEC_BAG._zod.def.type).toBe('object');
     expect(catchallOf(SPEC_BAG)).toBe('never');
-    expect(KINDS).toEqual(['calendar', 'chart', 'gallery', 'gantt', 'kanban', 'map', 'timeline', 'tree']);
+    // The kinds this package's blocks cover, by name (#26238); the bag's key
+    // set is then compared with the spec's own rule, derived on both sides.
+    for (const kind of Object.keys(ARMS)) expect(KINDS).toContain(kind);
     expect(Object.keys(SPEC_BAG.shape).sort()).toEqual(KINDS);
   });
 

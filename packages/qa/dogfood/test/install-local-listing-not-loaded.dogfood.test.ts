@@ -63,7 +63,7 @@ const loadableInstallBody = {
   manifest: { id: LOADABLE, name: 'qa_21822', version: '1.0.0', type: 'app', scope: 'project', engines: { protocol: `^${PROTOCOL_MAJOR}` } },
 };
 
-async function json(res: Response): Promise<{ status: number; body: any }> { // eslint-disable-line @typescript-eslint/no-explicit-any
+async function json(res: Response): Promise<{ status: number; body: any }> {
   return { status: res.status, body: await res.json().catch(() => null) };
 }
 
@@ -74,37 +74,37 @@ async function captureOutput<T>(run: () => Promise<T>): Promise<{ value: T; line
   const stderr = process.stderr.write.bind(process.stderr);
   const warn = console.warn;
   const error = console.error;
-  (process.stdout as any).write = (chunk: unknown, ...rest: any[]) => { lines.push(String(chunk)); return stdout(chunk as any, ...rest); }; // eslint-disable-line @typescript-eslint/no-explicit-any
-  (process.stderr as any).write = (chunk: unknown, ...rest: any[]) => { lines.push(String(chunk)); return stderr(chunk as any, ...rest); }; // eslint-disable-line @typescript-eslint/no-explicit-any
+  (process.stdout as any).write = (chunk: unknown, ...rest: any[]) => { lines.push(String(chunk)); return stdout(chunk as any, ...rest); };
+  (process.stderr as any).write = (chunk: unknown, ...rest: any[]) => { lines.push(String(chunk)); return stderr(chunk as any, ...rest); };
   console.warn = (...args: unknown[]) => { lines.push(args.map(String).join(' ')); warn(...args); };
   console.error = (...args: unknown[]) => { lines.push(args.map(String).join(' ')); error(...args); };
   try {
     return { value: await run(), lines };
   } finally {
-    (process.stdout as any).write = stdout; // eslint-disable-line @typescript-eslint/no-explicit-any
-    (process.stderr as any).write = stderr; // eslint-disable-line @typescript-eslint/no-explicit-any
+    (process.stdout as any).write = stdout;
+    (process.stderr as any).write = stderr;
     console.warn = warn;
     console.error = error;
   }
 }
 
 type Item = Record<string, unknown> & { manifestId: string };
-const itemsOf = (listing: { body: any }): Item[] => listing.body?.data?.items ?? []; // eslint-disable-line @typescript-eslint/no-explicit-any
-const itemOf = (listing: { body: any }, manifestId: string): Item | undefined => itemsOf(listing).find((i) => i.manifestId === manifestId); // eslint-disable-line @typescript-eslint/no-explicit-any
+const itemsOf = (listing: { body: any }): Item[] => listing.body?.data?.items ?? [];
+const itemOf = (listing: { body: any }, manifestId: string): Item | undefined => itemsOf(listing).find((i) => i.manifestId === manifestId);
 
 describe('dogfood: the install-local listing marks a package the restart refused to load as not loaded (#21822)', () => {
   let stack: VerifyStack | undefined;
   let storageDir: string;
   let dbDir: string;
-  let crmInstall: { status: number; body: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
-  let loadableInstall: { status: number; body: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
+  let crmInstall: { status: number; body: any };
+  let loadableInstall: { status: number; body: any };
   let crmVersion: string;
-  let beforeRestart: { status: number; body: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
+  let beforeRestart: { status: number; body: any };
   let bootLines: string[];
-  let afterRestart: { status: number; body: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
+  let afterRestart: { status: number; body: any };
   let listLines: string[];
-  let uninstall: { status: number; body: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
-  let afterUninstall: { status: number; body: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
+  let uninstall: { status: number; body: any };
+  let afterUninstall: { status: number; body: any };
 
   const boot = (databaseFile: string) => bootShowcase({
     databaseFile,

@@ -125,6 +125,68 @@ import { OPERATOR_PREFIX_KEY_PATTERN, bannedKeyPattern } from '../shared/refinem
  * matches; the shared corpus carries the literal, column, negative, NULL-offset,
  * NULL-base and `$not`-wrapped rows on both.
  *
+ * ## `$now` — the current instant, shifted by whole days (#25808, ruled 2026-10-26)
+ *
+ * A dataset could not count "reviews started more than N days ago, where N is
+ * the SLA held in another column of the same record": `addDays` puts a
+ * whole-day offset on a COLUMN, and the now-anchored placeholders
+ * (`{N_days_ago}` and kin) take a literal N. The ruling (letter A) adds the
+ * symmetric anchor — {@link NowAnchorSchema}:
+ *
+ * @example
+ * // review_started_at < now + review_sla_days_offset  — the "overdue by
+ * // type" count, the column holding the NEGATIVE number of SLA days
+ * { "$lt": { "$now": true, "addDays": { "$field": "review_sla_days_offset" } } }
+ *
+ * @example
+ * // created_at >= now - 30 days, with its time of day — unlike "{30_days_ago}",
+ * // which names the calendar DAY thirty days back
+ * { "$gte": { "$now": true, "addDays": -30 } }
+ *
+ * `$now: true` is the instant the query runs at — ONE instant for the whole
+ * filter, pinned by the engine's placeholder resolver beside `{now}` — and
+ * `addDays` is the offset grammar `FieldReferenceSchema.addDays` already
+ * declares, sign rule included: an integer literal of any sign (a negative
+ * value subtracts; there is no `subDays`), or a nested `{ $field }` naming a
+ * NUMERIC column of the SAME record, whose value is added as whole days (so
+ * "now minus the column" is a column that holds a negative number). `addDays`
+ * is REQUIRED: the unshifted instant already has a spelling, the `{now}`
+ * placeholder, and this anchor exists for the offset. It is legal exactly
+ * where a `{ $field }` reference is — the whole comparand of the six scalar
+ * comparisons — and refused in every list position for the same reason.
+ *
+ * Execution, on both paths and held to the same rows by the shared corpus
+ * (`cross-field-conformance-cases.ts`, the now-anchor section):
+ *
+ * - **The target column decides the form.** Against a `datetime` column the
+ *   shifted instant keeps its time of day; against a `date` column it is read
+ *   as its UTC calendar day — the reading every instant comparand gets on a
+ *   `date` column — and shifted day for day. The anchor applies to a `date`
+ *   or `datetime` target only: on a number, a text or a `time`, day
+ *   arithmetic has no meaning and the comparison is refused loudly.
+ * - **A NULL offset column contributes ZERO days** (`COALESCE`, as for
+ *   `addDays` on a reference): a row with no SLA days counts as overdue the
+ *   moment the anchor passes. The anchor itself is never NULL, so the
+ *   comparison is total: a NULL target fails the orderings and `$eq`, and
+ *   satisfies `$ne`; `$not` is the exact complement.
+ * - **SQL push-down** (`@objectstack/driver-sql`, on SQLite, PostgreSQL and
+ *   MySQL) binds the instant and compiles `instant + offset days` through the
+ *   same per-dialect day arithmetic as the reference offset; the offset column
+ *   rides the 2026-08-06 rulings as it stands — same-table (a dotted path is
+ *   refused), declared, never the tenant-isolation column, NUMERIC class.
+ *   `NativeSQLStrategy` declines the anchor as it declines every cross-field
+ *   comparand (2026-08-12), so a dataset `filter` and a measure `filter`
+ *   reach the engine path, where the driver compiles it.
+ * - **The memory evaluator** (`matchesFilter`) adds the days to the instant in
+ *   the target value's own form; `driver-mongodb` refuses the anchor as it
+ *   refuses a `{ $field }` reference.
+ *
+ * Both standing rulings hold unchanged: the offset column is a column of the
+ * SAME record (letter A; a path-valued offset — B′ — was not taken), and no
+ * JOIN is planned for it.
+ *
+ * @see https://github.com/objectstack-ai/objectstack/issues/25808 (the `$now` anchor)
+ *
  * ## LIST positions are NOT part of this declaration (#7596, ruled 2026-08-11)
  *
  * A reference may be the whole comparand of a scalar comparison. It may **not**
@@ -237,6 +299,91 @@ function fieldReferenceIssueMessage(input: unknown): string | undefined {
 
 export type FieldReference = z.input<typeof FieldReferenceSchema>;
 
+/**
+ * [#25808] The author-facing refusal for a `$now` anchor that fails its own
+ * declaration. Three defects, one sentence each, the prescription shared with
+ * {@link addDaysOffsetMessage}: `$now` is not the literal `true` (the anchor
+ * is a flag, never a value — an instant to compare against is written as a
+ * literal or as the `{now}` placeholder), the offset is missing (the
+ * unshifted instant is `{now}`), or the offset is malformed (the `addDays`
+ * sentence, verbatim).
+ */
+function nowAnchorMessage(input: unknown): string {
+  const prescription =
+    'A now-anchored comparand is { "$now": true, "addDays": <offset> }: the current instant '
+    + 'shifted by whole days, where addDays is an integer literal of any sign (a negative value '
+    + 'subtracts) or a nested { "$field": "numeric_column" } reference to a column of the same '
+    + 'record. For the unshifted instant write the "{now}" placeholder.';
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return prescription;
+  const node = input as Record<string, unknown>;
+  if (node.$now !== true) {
+    return `$now must be the literal true (it is a flag, not a value), not ${JSON.stringify(node.$now)}. ${prescription}`;
+  }
+  if (!('addDays' in node) || node.addDays === undefined) {
+    return `A { "$now": true } comparand must carry an addDays offset. ${prescription}`;
+  }
+  return addDaysOffsetMessage(node.addDays);
+}
+
+/**
+ * [#25808] A now-anchored comparand: the instant the query runs at, shifted by
+ * a whole-day offset — an integer literal of any sign, or a `{ $field }`
+ * reference to a numeric column of the same record. The offset is REQUIRED
+ * (the bare instant is the `{now}` placeholder). See the schema docblock
+ * above for the execution contract on both paths.
+ *
+ * Its own object rather than a `$field` variant: there is no referenced
+ * column, so none of a reference's column rules apply to the anchor itself —
+ * only to the offset column, through the same `addDays` grammar.
+ */
+export const NowAnchorSchema = lazySchema(() => closedObject(z.object({
+  $now: z.literal(true, {
+    error: (issue) => nowAnchorMessage({ $now: issue.input, addDays: 0 }),
+  }).describe('The anchor flag: the instant the query runs at. Always the literal true.'),
+  addDays: z.union([z.number().int(), AddDaysReferenceSchema], {
+    error: (issue) => (issue.input === undefined
+      ? nowAnchorMessage({ $now: true })
+      : addDaysOffsetMessage(issue.input)),
+  }).describe(
+    'Whole-day offset added to the current instant before comparing — REQUIRED: an integer literal '
+    + 'of any sign (negative subtracts; whole days only), or a { $field } reference to a numeric '
+    + 'column of the same record. A NULL offset column contributes zero days. Against a datetime '
+    + 'column the shifted instant keeps its time of day; against a date column it is read as its UTC '
+    + 'calendar day. Compiles on SQL push-down on every dialect, with the offset column held to the '
+    + 'same-table, declared, non-tenant, numeric rules; evaluates identically in memory.',
+  ),
+}).strict()).describe(
+  'A now-anchored comparand: { $now: true, addDays: <integer | { $field }> } — the current instant '
+  + 'shifted by whole days, the offset read from a numeric column of the same record or written as '
+  + 'a literal. Legal exactly where a { $field } reference is.',
+));
+
+export type NowAnchor = z.input<typeof NowAnchorSchema>;
+
+/**
+ * [#25808] Is `value` shaped like a `$now` anchor — a non-array object carrying
+ * a `$now` key? SHAPE only, as {@link isFieldReferenceShape} is for a
+ * reference: the author's intent is recognised so a malformed anchor is
+ * refused by its own sentence rather than as a plain object. The resolved form
+ * the engine hands the executors (`$now` holding the pinned ISO instant) is
+ * the same shape.
+ */
+function isNowAnchorShape(value: unknown): boolean {
+  return !!value && typeof value === 'object' && !Array.isArray(value) && '$now' in value;
+}
+
+/**
+ * [#25808] The message a scalar-comparison slot answers when a `$now` anchor
+ * fails ITS OWN schema — the twin of {@link fieldReferenceIssueMessage}, so
+ * the operator door repeats the anchor's pointed sentence instead of zod's
+ * generic union text.
+ */
+function nowAnchorIssueMessage(input: unknown): string | undefined {
+  if (!isNowAnchorShape(input)) return undefined;
+  const result = NowAnchorSchema.safeParse(input);
+  return result.success ? undefined : nowAnchorMessage(input);
+}
+
 // ============================================================================
 // 3.1 Comparison Operators
 // ============================================================================
@@ -251,8 +398,9 @@ export type FieldReference = z.input<typeof FieldReferenceSchema>;
 const EQ_DESCRIPTION =
   'Equal to — the DEFAULT operator: a bare value written against a field key is the same '
   + 'condition as this one. Lowered to `=` on the SQL family and to `$eq` on MongoDB. The '
-  + 'comparand is a literal, or a { $field } reference to another column of the same table '
-  + '($eq is one of the six scalar comparisons a reference may be the whole comparand of). '
+  + 'comparand is a literal, a { $field } reference to another column of the same table, or a '
+  + '{ $now: true, addDays } anchor ($eq is one of the six scalar comparisons a reference or an '
+  + 'anchor may be the whole comparand of). '
   + '`{ "$eq": null }` is the has-NO-value predicate — the same question `{ "$null": true }` '
   + 'asks, and it is about the VALUE, never about whether a key is present.';
 
@@ -263,8 +411,9 @@ const EQ_DESCRIPTION =
  */
 const NE_DESCRIPTION =
   'Not equal to. Lowered to `<>` / `!=` on the SQL family and to `$ne` on MongoDB. The '
-  + 'comparand is a literal, or a { $field } reference to another column of the same table '
-  + '($ne is one of the six scalar comparisons a reference may be the whole comparand of). '
+  + 'comparand is a literal, a { $field } reference to another column of the same table, or a '
+  + '{ $now: true, addDays } anchor ($ne is one of the six scalar comparisons a reference or an '
+  + 'anchor may be the whole comparand of). '
   + '`{ "$ne": null }` is the HAS-A-VALUE predicate — the same question `{ "$exists": true }` '
   + 'asks: it matches rows whose field holds a value, never rows that merely carry the key.';
 
@@ -351,7 +500,8 @@ export const EqualityOperatorSchema = lazySchema(() => z.object({
  * docblock.
  */
 const ORDERING_COMPARAND_DESCRIPTION =
-  'Comparand is a number, a Date, a string, or a { $field } reference (optionally carrying a whole-day addDays offset). '
+  'Comparand is a number, a Date, a string, a { $field } reference (optionally carrying a whole-day addDays offset), '
+  + 'or a { $now: true, addDays } anchor (the current instant shifted by whole days, the offset a literal or a numeric column of the same record). '
   + 'STRING is the form the platform itself produces: the date-macro resolver '
   + 'returns only strings ("{current_year_start}" -> "2026-01-01"), and the '
   + 'guaranteed spellings are an ISO calendar day (YYYY-MM-DD), a UTC ISO-8601 '
@@ -485,12 +635,15 @@ function nullOrderingComparandMessage(op: string): string {
  * reachable surface still refusing the platform's own output).
  */
 const orderingComparandSchema = (op: '$gt' | '$gte' | '$lt' | '$lte', label: string) =>
-  z.union([z.number(), z.date(), z.string(), FieldReferenceSchema], {
+  z.union([z.number(), z.date(), z.string(), FieldReferenceSchema, NowAnchorSchema], {
     // [#14080] null gets the pointed null sentence; [#14104] a `{ $field }`
     // that fails its own schema (a bad `addDays`) gets the reference's own
-    // first sentence, so the author is told at the operator door too.
+    // first sentence, so the author is told at the operator door too;
+    // [#25808] a `$now` anchor that fails its own schema, the anchor's.
     error: (issue) => (
-      issue.input === null ? nullOrderingComparandMessage(op) : fieldReferenceIssueMessage(issue.input)
+      issue.input === null
+        ? nullOrderingComparandMessage(op)
+        : fieldReferenceIssueMessage(issue.input) ?? nowAnchorIssueMessage(issue.input)
     ),
   }).optional().describe(`${label}. ${ORDERING_COMPARAND_DESCRIPTION}`);
 
@@ -614,11 +767,25 @@ const setMembershipSchema = (op: '$in' | '$nin') =>
         });
         return;
       }
-      if (!isFieldReferenceShape(member)) return;
+      if (isFieldReferenceShape(member)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [index],
+          message: listPositionFieldReferenceMessage(`${op} member at index ${index}`),
+        });
+        return;
+      }
+      // [#25808] …and a now-anchored comparand, for the same reason: no
+      // backend resolves one inside a list, and every executor refuses the
+      // position by name. Ruled out here so an `$nin` exclusion the author
+      // wrote cannot be dropped by a position nothing evaluates.
+      if (!isNowAnchorShape(member)) return;
       ctx.addIssue({
         code: 'custom',
         path: [index],
-        message: listPositionFieldReferenceMessage(`${op} member at index ${index}`),
+        message: `A { "$now": true, "addDays": … } comparand is not a valid ${op} member at index ${index}. `
+          + 'It is legal exactly where a { "$field" } reference is — as the whole comparand of a scalar '
+          + 'comparison ($eq/$ne/$gt/$gte/$lt/$lte) — never as a list member.',
       });
     });
   });
@@ -626,7 +793,8 @@ const setMembershipSchema = (op: '$in' | '$nin') =>
 /** The `describe()` both `$in` and `$nin` carry, stating the two ruled-out member shapes. */
 const SET_MEMBER_DESCRIPTION =
   'Membership list. Members are literal values of any type the column stores. A '
-  + '{ $field } reference is NOT a member shape: no backend resolves one inside a list'
+  + '{ $field } reference is NOT a member shape, nor is a { $now: true, addDays } anchor: no '
+  + 'backend resolves either inside a list'
   + ' — put it in a scalar comparison ($eq/$ne/$gt/$gte/$lt/$lte) instead. null is NOT '
   + 'a member shape either: state absence explicitly with the null predicate — '
   + '"one of […] OR has no value" is { "$or": [{ "$in": […] }, { "$null": true }] }.';
@@ -2725,8 +2893,11 @@ function convertComparison(node: [string, string, unknown]): FilterCondition {
   // All four `$eq` spellings of {@link AST_OPERATOR_MAP} are covered — the
   // condition below is that key set, and `filter.test.ts` pins the two lists
   // together so a fifth spelling cannot enter the map and miss this branch.
+  // [#25808] …and a `$now` anchor, for the same reason: `{ at: { $now: true,
+  // addDays: 1 } }` reads as an operator spec named `$now`, which nothing
+  // implements, so the anchor is lowered to the explicit `$eq` too.
   if (op === '=' || op === '==' || op === 'equals' || op === 'eq') {
-    return isFieldReferenceComparand(value)
+    return isFieldReferenceComparand(value) || isNowAnchorShape(value)
       ? ({ [field]: { $eq: value } } as FilterCondition)
       : ({ [field]: value } as FilterCondition);
   }

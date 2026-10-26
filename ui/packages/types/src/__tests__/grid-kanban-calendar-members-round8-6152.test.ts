@@ -122,8 +122,13 @@ describe('objectui#6152 round 8 — the mirror members are the rows\' own, by re
     const local = (ObjectGridSchema.shape.operations as unknown as { unwrap: () => Shaped }).unwrap().shape;
     const row = (SpecObjectGridPropsSchema.shape.operations as unknown as { unwrap: () => Shaped }).unwrap().shape;
     for (const key of ['create', 'update', 'delete', 'export']) expect(local[key]).toBe(row[key]);
-    expect(Object.keys(row).sort()).toEqual(['create', 'delete', 'export', 'update']);
-    expect(Object.keys(local).sort()).toEqual(['create', 'delete', 'export', 'import', 'read', 'update']);
+    // The row's toggles by name, and the local face is exactly the row's plus
+    // the two local tombstones — derived, so a toggle the spec adds rides both
+    // sides (#26238).
+    expect(Object.keys(row)).toEqual(expect.arrayContaining(['create', 'delete', 'export', 'update']));
+    expect(Object.keys(row)).not.toContain('read');
+    expect(Object.keys(row)).not.toContain('import');
+    expect(Object.keys(local).sort()).toEqual([...Object.keys(row), 'import', 'read'].sort());
   });
 });
 

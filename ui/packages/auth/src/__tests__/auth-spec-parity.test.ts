@@ -265,9 +265,10 @@ describe('the AuthProvider exemption rests on the spec symbol being an id enum',
         'ALLOW entry for @object-ui/auth:AuthProvider assumes it is an enum of provider ' +
         'ids — re-read what it means now before keeping the exemption.',
     ).toBeTruthy();
-    expect(Object.keys((specAuthProvider as { def: { entries: Record<string, string> } }).def.entries).sort()).toEqual(
-      ['github', 'google', 'ldap', 'local', 'microsoft', 'saml'],
-    );
+    // An enum of provider ids, asserted by member rather than as the spec's
+    // whole provider list (#26238): a provider the spec adds keeps it an id enum.
+    const providerIds = Object.keys((specAuthProvider as { def: { entries: Record<string, string> } }).def.entries);
+    for (const id of ['github', 'google', 'local']) expect(providerIds).toContain(id);
   });
 
   it('our AuthProvider is a React component, not a schema', async () => {

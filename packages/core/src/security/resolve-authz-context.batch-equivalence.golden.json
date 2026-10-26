@@ -6,6 +6,7 @@
         "everyone"
       ],
       "permissions": [],
+      "directPermissions": [],
       "systemPermissions": [],
       "org_user_ids": [
         "u_empty"
@@ -75,6 +76,7 @@
         "everyone"
       ],
       "permissions": [],
+      "directPermissions": [],
       "systemPermissions": [],
       "org_user_ids": [
         "u_multi",
@@ -156,6 +158,7 @@
         "everyone"
       ],
       "permissions": [],
+      "directPermissions": [],
       "systemPermissions": [],
       "org_user_ids": [
         "u_lapsed",
@@ -241,6 +244,7 @@
         "read_all",
         "base_access"
       ],
+      "directPermissions": [],
       "systemPermissions": [
         "record_write"
       ],
@@ -334,6 +338,10 @@
         "everyone"
       ],
       "permissions": [
+        "admin_full_access",
+        "org_tools"
+      ],
+      "directPermissions": [
         "admin_full_access",
         "org_tools"
       ],
@@ -436,6 +444,9 @@
         "low",
         "organization_admin"
       ],
+      "directPermissions": [
+        "low"
+      ],
       "systemPermissions": [],
       "org_user_ids": [
         "u_ta"
@@ -523,6 +534,7 @@
       "permissions": [
         "ai_seat"
       ],
+      "directPermissions": [],
       "systemPermissions": [],
       "org_user_ids": [
         "u_ai"
@@ -602,6 +614,7 @@
         "everyone"
       ],
       "permissions": [],
+      "directPermissions": [],
       "systemPermissions": [],
       "org_user_ids": [
         "u_noai"
@@ -674,6 +687,9 @@
         "key_scope_b",
         "key_scope_a",
         "ai_seat",
+        "extra"
+      ],
+      "directPermissions": [
         "extra"
       ],
       "systemPermissions": [],
@@ -749,6 +765,7 @@
         "everyone"
       ],
       "permissions": [],
+      "directPermissions": [],
       "systemPermissions": [],
       "org_user_ids": [
         "u_lim",
@@ -2029,6 +2046,7 @@
         "everyone"
       ],
       "permissions": [],
+      "directPermissions": [],
       "systemPermissions": [],
       "org_user_ids": [
         "u_noorg"

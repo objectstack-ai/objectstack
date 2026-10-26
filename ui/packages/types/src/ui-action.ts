@@ -1109,8 +1109,20 @@ export interface ActionResult {
    * e.g. a `flow` action that paused at a screen and opened the flow-runner. The
    * action hasn't "completed yet", so a "success" toast on open would be
    * misleading; the follow-up surface owns its own completion messaging.
+   * That the success IS a hand-off is {@link ActionResult.handedOff}'s to say.
    */
   silent?: boolean;
+
+  /**
+   * The success is a HAND-OFF, not a completion: the action opened a follow-up
+   * surface that owns the rest — a `flow` run paused at a screen (the flow
+   * runner finishes it) or one that ended refused (the refusal notice says
+   * why). The runner performs no post-success hop (`ActionSchema.onSuccess`)
+   * for it: the hop follows a result the action completed with, and a hand-off
+   * has none. `silent` is a different fact, about the toast alone — a run that
+   * completes with the flow's own success copy is `silent` and still hops.
+   */
+  handedOff?: boolean;
 
   /**
    * An undoable operation captured by the handler (e.g. an `undoable` update

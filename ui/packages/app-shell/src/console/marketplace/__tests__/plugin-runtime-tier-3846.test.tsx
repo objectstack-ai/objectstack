@@ -57,7 +57,7 @@ describe('objectui#3846 — the trust-tier label map answers to the spec enum', 
   it('covers exactly the tiers PluginRuntimeSchema declares', () => {
     // The producer's own list, read from the schema rather than retyped.
     const declared = [...PluginRuntimeSchema.options].sort();
-    expect(declared).toEqual(['node', 'sandbox', 'worker']);
+    for (const tier of ['node', 'sandbox', 'worker']) expect(declared).toContain(tier);
     expect(Object.keys(RUNTIME_FALLBACK).sort()).toEqual(declared);
   });
 

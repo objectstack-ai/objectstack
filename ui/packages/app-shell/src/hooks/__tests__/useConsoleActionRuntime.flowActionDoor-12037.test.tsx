@@ -138,7 +138,7 @@ describe('objectui#12037 — a declared flow action is started through the actio
     const { result, url } = await click(ROW_CLICK);
 
     expect(url).toBe(`/api/v1/actions/${OBJECT}/showcase_bulk_reassign`);
-    expect(result).toEqual({ success: true, silent: true });
+    expect(result).toEqual({ success: true, silent: true, handedOff: true });
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByRole('heading', { name: 'New Assignee' })).toBeTruthy();
 
