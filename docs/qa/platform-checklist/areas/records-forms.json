@@ -861,7 +861,7 @@
           "seeded invoices: INV-1002 (draft), INV-1001 (sent), INV-1003 (paid)"
         ],
         "knownGaps": [
-          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
+          "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import."
         ]
       },
       "steps": [
@@ -959,7 +959,7 @@
         {
           "revision": 5,
           "date": "2026-10-26",
-          "change": "automated.ref, from Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read at ui/e2e/live/field-conditional-rules.spec.ts on main cc378e93. (1) It claimed the spec pins acceptance[2]'s client lock; at paid on the New dialog the spec asserts tax_rate enabled and no read-only group, since INSERT is exempt from readonlyWhen (objectui#13436), and no pin drives an edit form of a paid invoice, so acceptance[2] joins the unpinned list. (2) It says both pins read the DOM by Playwright locator with no screenshot step. (3) It no longer names the row-action spec dropped at revision 3, which a ref parser read as a pin. No clause changed",
+          "change": "automated.ref, from Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read at ui/e2e/live/field-conditional-rules.spec.ts on main cc378e93. (1) It claimed the spec pins acceptance[2]'s client lock; at paid on the New dialog the spec asserts tax_rate enabled and no read-only group, since INSERT is exempt from readonlyWhen (objectui#13436), and no pin drives an edit form of a paid invoice, so acceptance[2] joins the unpinned list. (2) It says both pins read the DOM by Playwright locator with no screenshot step. (3) It no longer names the row-action spec dropped at revision 3, which a ref parser read as a pin. fixtures.knownGaps[0], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
           "ref": "#25846"
         }
       ]
@@ -982,7 +982,7 @@
           "a draft invoice with editable lines (INV-1002) and a paid one (INV-1003); for clause 5, INV-1002 must carry a SECOND line with a DISTINCT stored position. The stock INV-1002 ships one line, and a line added through the data API with no position defaults to 0, which collides with the first; seed it with position 1, or any value the first line does not hold — AND with its `amount` (quantity × unit_price): amount is computed in the client and stored as sent (examples/app-showcase/src/data/objects/invoice.object.ts, the amount field's comment), so a line staged over the data API without it carries amount null and the invoice total ignores it (QA run #24616). Or add the line through the grid, which computes it. On an invoice whose lines share a stored position the grid legitimately re-emits the sibling's position on save: it stamps row[sortField] = index on every change (GridField), with the sort field deriveDetail picks from the child (position)"
         ],
         "knownGaps": [
-          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
+          "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import."
         ]
       },
       "steps": [
@@ -1095,7 +1095,7 @@
         {
           "revision": 9,
           "date": "2026-10-26",
-          "change": "automated.ref, from Tier 1 run #25815 (6679644a, pin b41ed7f68956): (1) it no longer names the grid-file-upload spec dropped at revision 8, which a ref parser read as a pin; the drop and its reason stay in history revision 8. (2) It says both remaining pins are Playwright live specs that score only in a browser run against a booted stack, and only the halves named. No clause changed",
+          "change": "automated.ref, from Tier 1 run #25815 (6679644a, pin b41ed7f68956): (1) it no longer names the grid-file-upload spec dropped at revision 8, which a ref parser read as a pin; the drop and its reason stay in history revision 8. (2) It says both remaining pins are Playwright live specs that score only in a browser run against a booted stack, and only the halves named. fixtures.knownGaps[0], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
           "ref": "#25846"
         }
       ]
@@ -1120,7 +1120,7 @@
           "showcase_invoice.contact dependsOn ['account'] — the dependent LOOKUP twin (contact picker scoped to the chosen account's people; seed gives Northwind 26 contacts, Contoso 2, Fabrikam 1)"
         ],
         "knownGaps": [
-          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
+          "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import."
         ]
       },
       "steps": [
@@ -1216,7 +1216,7 @@
         {
           "revision": 6,
           "date": "2026-10-26",
-          "change": "acceptance[1].verify says its pin is a Playwright live spec (Tier 1 run #25815 (6679644a, pin b41ed7f68956)): it scores acceptance[1] and negative[0] only when the run executes it against a booted showcase. No clause changed",
+          "change": "acceptance[1].verify says its pin is a Playwright live spec (Tier 1 run #25815 (6679644a, pin b41ed7f68956)): it scores acceptance[1] and negative[0] only when the run executes it against a booted showcase. fixtures.knownGaps[0], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
           "ref": "#25846"
         }
       ]
@@ -1239,7 +1239,7 @@
           "seeded products for the catalog lookup (SKUs incl. SERVICE-HR, WIDGET-A; picking one auto-fills description + unit_price)"
         ],
         "knownGaps": [
-          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
+          "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import."
         ]
       },
       "steps": [
@@ -1352,7 +1352,7 @@
         {
           "revision": 8,
           "date": "2026-10-26",
-          "change": "From Tier 1 run #25815 (6679644a, pin b41ed7f68956): (1) automated.ref no longer names the summary-rollup spec it dropped at revision 5, which a ref parser read as a pin. (2) acceptance[0].verify says the batch count, as well as the two-line invoice payload, stays the run's: master-detail.spec.ts reads the first batch of a one-child Project save. No clause changed",
+          "change": "From Tier 1 run #25815 (6679644a, pin b41ed7f68956): (1) automated.ref no longer names the summary-rollup spec it dropped at revision 5, which a ref parser read as a pin. (2) acceptance[0].verify says the batch count, as well as the two-line invoice payload, stays the run's: master-detail.spec.ts reads the first batch of a one-child Project save. fixtures.knownGaps[0], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
           "ref": "#25846"
         }
       ]
@@ -1362,7 +1362,7 @@
       "title": "Related lists derive from the relationship and page on the server — never fetch every child row — and are read-gated on both ends",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1379,7 +1379,7 @@
         ],
         "knownGaps": [
           "STALE (QA run #24616): the child-read-gate clause needs two members bound to the manager and contributor positions, and a stock boot provides them — the search:qa-contributor-bound-member recipe (invite, sign-up, then an admin POST of sys_user_position; run it twice, once with position 'manager', once with 'contributor'). It is not blocked(fixture) on a single-user boot; the paging clauses still run on the seeded admin alone",
-          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
+          "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import."
         ]
       },
       "steps": [
@@ -1492,6 +1492,12 @@
           "date": "2026-10-20",
           "change": "automated.stale removed — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired detail-related-list.spec.ts, the only pin, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. Its blob is 48a1d10e59da at the old pin 12dc7b47c340 and f12f7237fd6f at both 0b36ffa and 616df6598b42: it now reads the record id from the /record/ID route a Northwind row opens, and finds the primary Projects list in its own tab. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, it asserts acceptance[2], the one clause the ref claims, so the ref keeps it and loses its stale note. No clause changed",
           "ref": "#24857"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-26",
+          "change": "fixtures.knownGaps[1], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
+          "ref": "#25846"
         }
       ]
     },
@@ -1700,7 +1706,7 @@
           "an importable showcase object (e.g. showcase_contact) and a GBK-encoded CSV fixture; the pinned unit suites carry their own byte fixtures"
         ],
         "knownGaps": [
-          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact.",
+          "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import.",
           "acceptance[2] (the legacy-fallback notice) is PIN-ONLY BY DESIGN, never a live leg. The wizard takes the per-row legacy path only when its data source has no importRecords, and the console's ObjectStackAdapter always provides one (objectui packages/data-objectstack/src/index.ts), so no live server reaches the path. QA run #21782 recorded it blocked(dependency); parked on #22017 row 3. Score it ONLY from importLegacyReferenceGuard.test.tsx run with cwd ui/ in this checkout (present on main at cc378e93, as at objectui 0abd4f9f8769: 'blocks the import and writes nothing when a lookup column is mapped'). A run that does not execute that suite records blocked(environment: ui/ suite not run), never a hand-driven verdict"
         ]
       },
@@ -1787,7 +1793,7 @@
         {
           "revision": 7,
           "date": "2026-10-26",
-          "change": "The pinned suites run from ui/ in this checkout: steps[0], knownGaps[1] and acceptance[0]–[2].verify named an objectui checkout at the retired .objectui-sha pin. Tier 1 run #25815 (6679644a, pin b41ed7f68956) read the pins as objectui files that score acceptance[0]–[2] only when an objectui pin worktree runs them; with the objectui tree under ui/, the three files are at ui/packages/plugin-grid on main cc378e93 and score when that tree's vitest runs them. The legacy-path blocked reason is reworded to match. No clause changed",
+          "change": "The pinned suites run from ui/ in this checkout: steps[0], knownGaps[1] and acceptance[0]–[2].verify named an objectui checkout at the retired .objectui-sha pin. Tier 1 run #25815 (6679644a, pin b41ed7f68956) read the pins as objectui files that score acceptance[0]–[2] only when an objectui pin worktree runs them; with the objectui tree under ui/, the three files are at ui/packages/plugin-grid on main cc378e93 and score when that tree's vitest runs them. The legacy-path blocked reason is reworded to match. fixtures.knownGaps[0], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
           "ref": "#25846"
         }
       ]
@@ -2137,7 +2143,7 @@
         ],
         "knownGaps": [
           "the stock task gantt view (examples/app-showcase/src/ui/views/task.view.ts, listViews.gantt) declares NO dependenciesField / lockField / parentField, so the auto-schedule, locked-task and subtree-drag surfaces are unreachable LIVE on stock fixtures. ⚠ All three ARE GanttConfig keys (packages/spec/src/ui/view.zod.ts#GanttConfigSchema). QA run #21782 read `lockField` as no spec key; that is wrong, so the variants need no re-point. The objectui pins `automated` names per clause are component-layer evidence for A2 and A3, never their pass (RUNNER rule 6): those api clauses are scored from live row reads. The one sub-leg no pin reaches is a DIRECT drag on a locked LEAF bar: GanttView.tsx returns from the drag start for a locked task, but only the summary-drag and link-drop locked cases are unit-pinned. It needs the view extended live, with lockField pointing at a boolean on showcase_task such as `done` (a view overlay or a scratch copy). That recipe is not run-proven, so score the sub-leg blocked(fixture) until a run proves it. Re-confirmed by QA run #23163 (objectstack 36b2889c, objectui 1fb1ced36243): the stock view still declares no lockField, and no pin reaches the direct leaf drag. The nearest pin, GanttView.tree.test.tsx ('omits drag/resize/progress handles and the dependency dot on a locked bar'), proves a locked leaf loses its resize grips and link dot, NOT that dragging its body writes nothing, so it does not score the sub-leg either",
-          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
+          "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import."
         ]
       },
       "variants": [
@@ -2230,7 +2236,7 @@
         {
           "revision": 6,
           "date": "2026-10-26",
-          "change": "From Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read in ui/packages/plugin-gantt on main cc378e93. (1) automated.ref and knownGaps[0] scored acceptance[1] and [2] from component and unit cases that stop at the component's update callback; those clauses' oracle is api, so the cases are now named as evidence of their layer only. (2) The ref named objectui 0abd4f9f8769 for the mapping while the run pinned b41ed7f68956; it now says the cases are present at both. No clause changed",
+          "change": "From Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read in ui/packages/plugin-gantt on main cc378e93. (1) automated.ref and knownGaps[0] scored acceptance[1] and [2] from component and unit cases that stop at the component's update callback; those clauses' oracle is api, so the cases are now named as evidence of their layer only. (2) The ref named objectui 0abd4f9f8769 for the mapping while the run pinned b41ed7f68956; it now says the cases are present at both. fixtures.knownGaps[1], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
           "ref": "#25846"
         }
       ]
@@ -2312,7 +2318,7 @@
       "fixtures": {
         "app": "showcase",
         "knownGaps": [
-          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
+          "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import."
         ]
       },
       "steps": [
@@ -2379,7 +2385,7 @@
         {
           "revision": 4,
           "date": "2026-10-26",
-          "change": "acceptance[2].verify, from Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read at ui/packages/plugin-form/src/discardGuard.test.tsx on main cc378e93. (1) It ran the suite from an objectui checkout at the retired .objectui-sha pin; it now runs from ui/ in this checkout. (2) The '14/14' from QA run #23163 does not match this tree, which holds 11 it() cases; the verify names the count and its tree. (3) The suite covers the X close, Cancel and pristine paths but no Escape or backdrop click, so those legs of acceptance[0] and negative[0] are named as hand-driven. No clause changed",
+          "change": "acceptance[2].verify, from Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read at ui/packages/plugin-form/src/discardGuard.test.tsx on main cc378e93. (1) It ran the suite from an objectui checkout at the retired .objectui-sha pin; it now runs from ui/ in this checkout. (2) The '14/14' from QA run #23163 does not match this tree, which holds 11 it() cases; the verify names the count and its tree. (3) The suite covers the X close, Cancel and pristine paths but no Escape or backdrop click, so those legs of acceptance[0] and negative[0] are named as hand-driven. fixtures.knownGaps[0], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
           "ref": "#25846"
         }
       ]
@@ -2465,7 +2471,7 @@
           "10 seeded tasks spanning statuses/priorities/estimate_hours so a 2-condition toolbar filter returns a non-trivial subset (examples/app-showcase/src/data/seed/index.ts)"
         ],
         "knownGaps": [
-          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
+          "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import."
         ]
       },
       "steps": [
@@ -2572,7 +2578,7 @@
         {
           "revision": 7,
           "date": "2026-10-26",
-          "change": "automated.ref, from Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read at ui/e2e/live/user-filters.spec.ts on main cc378e93. (1) acceptance[4]'s two user-filters cases reproduce the filter on page.reload() and check the URL param and the record-count bar's '2' only. They never capture the data request the clause's network oracle names, nor compare row identity, so the ref now says that half is driven by hand. (2) The ref no longer names the saved-view spec it dropped at revision 5, which a ref parser read as a pin. No clause changed",
+          "change": "automated.ref, from Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read at ui/e2e/live/user-filters.spec.ts on main cc378e93. (1) acceptance[4]'s two user-filters cases reproduce the filter on page.reload() and check the URL param and the record-count bar's '2' only. They never capture the data request the clause's network oracle names, nor compare row identity, so the ref now says that half is driven by hand. (2) The ref no longer names the saved-view spec it dropped at revision 5, which a ref parser read as a pin. fixtures.knownGaps[0], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
           "ref": "#25846"
         }
       ]
@@ -2698,7 +2704,7 @@
           "a record with both a details-body field and a header-highlight field for the two-surface inline-edit fold-in (RecordDetailView highlight fields)"
         ],
         "knownGaps": [
-          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
+          "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import."
         ]
       },
       "steps": [
@@ -2798,7 +2804,7 @@
         {
           "revision": 5,
           "date": "2026-10-26",
-          "change": "automated.ref rewritten from Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read at ui/packages/plugin-form/src/occSave.test.tsx on main cc378e93. (1) The overwrite case runs over a mocked data source, so it pins acceptance[3]'s client re-key only, not its api oracle. (2) The modal Keep editing / Overwrite case runs in jsdom; acceptance[1]'s dom oracle wants a rendered dialog, and the inline ConcurrentUpdateDialog half has no pin. (3) The ref no longer names the inline-edit spec it dropped at revision 4, which a ref parser read as a pin; its pointer to a list-view-capabilities 'automated.stale' key that no longer exists goes with it. No clause changed",
+          "change": "automated.ref rewritten from Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read at ui/packages/plugin-form/src/occSave.test.tsx on main cc378e93. (1) The overwrite case runs over a mocked data source, so it pins acceptance[3]'s client re-key only, not its api oracle. (2) The modal Keep editing / Overwrite case runs in jsdom; acceptance[1]'s dom oracle wants a rendered dialog, and the inline ConcurrentUpdateDialog half has no pin. (3) The ref no longer names the inline-edit spec it dropped at revision 4, which a ref parser read as a pin; its pointer to a list-view-capabilities 'automated.stale' key that no longer exists goes with it. fixtures.knownGaps[0], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
           "ref": "#25846"
         }
       ]
@@ -3232,7 +3238,7 @@
           "the bulk actions above, so the BulkActionBar and both its aggregate and per-record dispatch are exercisable (objectui plugin-grid BulkActionBar)"
         ],
         "knownGaps": [
-          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
+          "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import."
         ]
       },
       "steps": [
@@ -3322,7 +3328,7 @@
         {
           "revision": 5,
           "date": "2026-10-26",
-          "change": "automated.ref says what its three files score, from Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read under ui/packages/plugin-grid on main cc378e93. (1) None exercises resolveBulkRows' paged fan-out or HARD_CAP (acceptance[1], [4], negative[0]). The run's 'unpinned even at component level' does not hold: bulkFanoutHostParams.test.tsx, not in the ref, drives the fan-out and the cap at component level, so the ref names it as evidence of that layer only. (2) The Clear case in bulkActionRefresh.test.tsx pins acceptance[3] and negative[2] in jsdom, and their dom oracle needs the browser. No clause changed",
+          "change": "automated.ref says what its three files score, from Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read under ui/packages/plugin-grid on main cc378e93. (1) None exercises resolveBulkRows' paged fan-out or HARD_CAP (acceptance[1], [4], negative[0]). The run's 'unpinned even at component level' does not hold: bulkFanoutHostParams.test.tsx, not in the ref, drives the fan-out and the cap at component level, so the ref names it as evidence of that layer only. (2) The Clear case in bulkActionRefresh.test.tsx pins acceptance[3] and negative[2] in jsdom, and their dom oracle needs the browser. fixtures.knownGaps[0], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
           "ref": "#25846"
         }
       ]
@@ -3442,7 +3448,7 @@
           "a writable record and an action that declares `undoable: true` with operation 'update' (a patch of one field) — at objectui 1fb1ced36243 the ONLY path that pushes an Undo op: useConsoleActionRuntime and RecordDetailView attach the toast Undo for `undoable` actions, while inline grid and form edits push none. objectui react/src/hooks/useGlobalUndo.ts + core globalUndoManager hold the stack. ⚠ The stock showcase declares NO undoable action (examples/app-showcase has zero `undoable` keys), and a runtime-authored action is not joined into the served object's actions[] (records-forms.action-location-matrix knownGaps), so the action must ship PACKAGED in the showcase — see `blocked`"
         ],
         "knownGaps": [
-          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact.",
+          "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import.",
           "BLOCKED(fixture) on stock, all four clauses (QA run #23163, objectstack 36b2889c, objectui 1fb1ced36243). Inline edits push no Undo op at this pin — only actions declaring `undoable` do — and the showcase declares none, while a runtime-authored undoable action is not served. The item becomes runnable when examples/app-showcase ships a packaged undoable update action on a writable object (operation 'update' with a patch, so the Undo captures the prior value of every written field — ActionSchema.undoable in packages/spec/src/ui/action.zod.ts). Lift `blocked` in the revision that names that fixture. ⛔ Do not score an inline edit's missing Undo as this item's FAIL: the console never offers one by design"
         ]
       },
@@ -3520,7 +3526,7 @@
         {
           "revision": 4,
           "date": "2026-10-26",
-          "change": "automated.ref says UndoManager.test.ts scores no clause: it tests only the in-memory undo/redo stack, and no clause of this item is a stack-semantics clause (Tier 1 run #25815 (6679644a, pin b41ed7f68956)). No clause changed",
+          "change": "automated.ref says UndoManager.test.ts scores no clause: it tests only the in-memory undo/redo stack, and no clause of this item is a stack-semantics clause (Tier 1 run #25815 (6679644a, pin b41ed7f68956)). fixtures.knownGaps[0], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
           "ref": "#25846"
         }
       ]
@@ -3540,12 +3546,12 @@
         "app": "showcase",
         "requires": [
           "an import-job-capable client wired into the console AND an object with an async-import route (framework packages/rest/src/rest-route-ledger.ts: POST /api/v1/data/:object/import/jobs, /import/jobs/:jobId/{cancel,undo,results}) — the STOCK console already satisfies the client half (run #21845, console pin 2e818d0b51ec); no extra wiring is needed",
-          "the objectui import specs, which self-gate on IMPORT_CONSOLE_LIVE=1 (console) or a reachable import harness /live.html",
-          "RUNTIME FIXTURE — the live-gated console spec (proved by run #21845; nothing committed in either repo): in an objectui checkout, run e2e/import-console/import-console-undo.spec.ts with IMPORT_CONSOLE_LIVE=1 against the booted showcase, from a SCRATCH COPY of the spec whose page goto path is the console-mounted /_console/apps/{app}/{object} (the spec's own path does not carry the /_console mount the framework serves the console under). The spec imports a name,email,status CSV and counts rows on LIVE_IMPORT_OBJECT, and NO showcase object carries those three fields — author a scratch object first (e.g. qa_lead with name / email / status text fields and a declared sharingModel, in a writable package, published) and run with LIVE_IMPORT_APP=showcase_app LIVE_IMPORT_OBJECT=qa_lead, as QA run #23949 did"
+          "the objectui import specs (ui/e2e/import-console and ui/e2e/import-harness in this checkout), which self-gate on IMPORT_CONSOLE_LIVE=1 (console) or a reachable import harness /live.html",
+          "RUNTIME FIXTURE — the live-gated console spec (proved by run #21845; nothing committed in either repo): from ui/ in this checkout, run e2e/import-console/import-console-undo.spec.ts under its own config (playwright.import-console.config.ts) with IMPORT_CONSOLE_LIVE=1 against the booted showcase, from a SCRATCH COPY of the spec whose page goto path is the console-mounted /_console/apps/{app}/{object} (the spec's own path does not carry the /_console mount the framework serves the console under). The spec imports a name,email,status CSV and counts rows on LIVE_IMPORT_OBJECT, and NO showcase object carries those three fields — author a scratch object first (e.g. qa_lead with name / email / status text fields and a declared sharingModel, in a writable package, published) and run with LIVE_IMPORT_APP=showcase_app LIVE_IMPORT_OBJECT=qa_lead, as QA run #23949 did"
         ],
         "knownGaps": [
           "CLOSED for runs by the live-gated console spec in requires (#21845): e2e/import-console/import-console-undo.spec.ts skips unless IMPORT_CONSOLE_LIVE=1, and its goto path needs the /_console mount — with both supplied it runs against the stock console. A skip without the gate is the control, never a result. The harness twin e2e/import-harness/import-undo.spec.ts still skips unless the harness origin serves /live.html; it is optional evidence, and the API half below needs no gate at all",
-          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact.",
+          "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import.",
           "HAND-DRIVEN CONSOLE ROUTE, measured by QA run #24616 without the gated spec: on showcase_task's list, Import → Preview → tick 'Import in the background (runs as an undoable job)' → import → History → 'Undo import'. The Undo asks a NATIVE window.confirm (objectui plugin-grid ImportWizard.tsx), which Playwright dismisses by default, so an unhandled dialog makes Undo a silent no-op (automation-input): accept it (page.on('dialog', d => d.accept())). showcase_contact's list shows no Import button (it sits in the header's overflow menu there); showcase_task's does"
         ]
       },
@@ -3642,7 +3648,7 @@
         {
           "revision": 7,
           "date": "2026-10-26",
-          "change": "From Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read at ui/e2e/import-console/import-console-undo.spec.ts and ui/e2e/import-harness/import-undo.spec.ts on main cc378e93. (1) acceptance[3]: the specs read the job list once, before undo, and confirm the revert through a UI testid, so revertedAt is never read off GET /import/jobs; the ref no longer says they cover it. (2) acceptance[1]: they count with an unfiltered GET and records.length, a page-bounded length, not the marker-filter count; the ref and acceptance[1].verify say so. (3) The ref says a self-skip or the crm_app / crm_lead default scores nothing. No clause changed",
+          "change": "From Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read at ui/e2e/import-console/import-console-undo.spec.ts and ui/e2e/import-harness/import-undo.spec.ts on main cc378e93. (1) acceptance[3]: the specs read the job list once, before undo, and confirm the revert through a UI testid, so revertedAt is never read off GET /import/jobs; the ref no longer says they cover it. (2) acceptance[1]: they count with an unfiltered GET and records.length, a page-bounded length, not the marker-filter count; the ref and acceptance[1].verify say so. (3) The ref says a self-skip or the crm_app / crm_lead default scores nothing. fixtures.knownGaps[1], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93; fixtures.requires[1] and [2] name the specs under ui/ for the same reason. No clause changed",
           "ref": "#25846"
         }
       ]
