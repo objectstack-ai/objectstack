@@ -134,7 +134,7 @@ describe('narrowStateMachineOptions', () => {
 
 describe('gateFormFields narrows a state-machine select (#25933)', () => {
   const gate = (mode: string, previousValues?: Record<string, unknown>) =>
-    gateFormFields([statusField(), titleField()], {
+    gateFormFields<Record<string, any>>([statusField(), titleField()], {
       perms: null,
       objectName: 'showcase_task',
       mode,
@@ -145,7 +145,7 @@ describe('gateFormFields narrows a state-machine select (#25933)', () => {
   it('narrows on an edit form handed its persisted record', () => {
     const [status, title] = gate('edit', { status: 'done' });
     expect(values(status.options)).toEqual(['in_progress', 'done']);
-    expect(values((status as any).field.options)).toEqual(['in_progress', 'done']);
+    expect(values(status.field.options)).toEqual(['in_progress', 'done']);
     expect(title).toEqual(titleField());
   });
 
