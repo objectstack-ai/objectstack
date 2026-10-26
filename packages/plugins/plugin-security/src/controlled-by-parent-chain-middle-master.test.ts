@@ -228,8 +228,8 @@ beforeAll(async () => {
   await engine.syncSchemas();
 
   // The two delegators exist as users, so the on-behalf-of link resolves rather
-  // than failing closed. Each holds the manager's set through a stored position
-  // row owned by ORG — the organization the delegated request runs in, the only
+  // than failing closed. Each holds the manager's set through a stored direct
+  // grant row owned by ORG — the organization the delegated request runs in, the only
   // one a grant row applies in (ADR-0131 D10: an organization-less row applies
   // nowhere); only DELEGATOR_MEMBER is an organization member, so only it
   // carries the floor.
@@ -243,12 +243,12 @@ beforeAll(async () => {
   // organization named here. DELEGATOR_UNBOUND's row is ORG's without a
   // membership: under `single` the session's organization is kept without one,
   // and no `sys_member` row means no `org_member` floor.
-  const positions = (engine as any).getDriver('sys_user_position');
+  const grants = (engine as any).getDriver('sys_user_permission_set');
   for (const row of [
-    { id: 'up_unbound', user_id: DELEGATOR_UNBOUND, position: MANAGER_SET.name, organization_id: ORG },
-    { id: 'up_member', user_id: DELEGATOR_MEMBER, position: MANAGER_SET.name, organization_id: ORG },
+    { id: 'ups_unbound', user_id: DELEGATOR_UNBOUND, permission_set: MANAGER_SET.name, organization_id: ORG },
+    { id: 'ups_member', user_id: DELEGATOR_MEMBER, permission_set: MANAGER_SET.name, organization_id: ORG },
   ]) {
-    await positions.create('sys_user_position', row);
+    await grants.create('sys_user_permission_set', row);
   }
 
   let security: unknown;
