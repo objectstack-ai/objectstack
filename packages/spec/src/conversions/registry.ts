@@ -8743,8 +8743,9 @@ const translationComponentSubmitLabelRemoved: MetadataConversion = {
       // Bare data/item shape: the groups sit at the entry's top level.
       let next = stripFromData(entry, path);
       // Bundle shape: locale code → data. Judged structurally (a dict whose
-      // `pages` is a dict) rather than by key spelling — `LocaleSchema` is an
-      // open string, so the locale keys cannot be enumerated. A strip-only
+      // `pages` is a dict) rather than by key spelling — `LocaleSchema` judges
+      // only a tag's shape, an open-ended set, so the locale keys cannot be
+      // enumerated. A strip-only
       // walk makes a false positive a no-op: it removes nothing unless the
       // exact `pages.<name>.components.<id>.submitLabel` path is present.
       for (const [locale, data] of Object.entries(next)) {
@@ -14403,7 +14404,8 @@ const translationWidgetSubCaptionRemoved: MetadataConversion = {
       // Bare data/item shape: the groups sit at the entry's top level.
       let next = stripFromData(entry, path);
       // Bundle shape: locale code → data, judged structurally (a dict whose
-      // `dashboards` is a dict) because `LocaleSchema` is an open string. A
+      // `dashboards` is a dict) because `LocaleSchema` judges only a tag's
+      // shape, an open-ended set the locale keys cannot be enumerated from. A
       // strip-only walk makes a false positive a no-op: it removes nothing
       // unless the exact `dashboards.<name>.widgets.<id>.subCaption` path is
       // present.
