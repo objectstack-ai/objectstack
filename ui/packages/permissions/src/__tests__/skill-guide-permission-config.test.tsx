@@ -54,12 +54,12 @@ const skillsBase = path.resolve(repoRoot, '..');
 const GUIDE = path.join(skillsBase, 'skills/objectui/guides/auth-permissions.md');
 
 // --- 8< --- guide example begin --- 8< ---
-// A role definition carries identity and inheritance only. Its grants live in
+// A `RoleDefinition` carries identity and inheritance only. Its grants live in
 // `ObjectPermissionConfig.roles` below, keyed by object — that is the single
-// wired home for "what may this role do".
-const roles: RoleDefinition[] = [
+// wired home for "what may this grant key do".
+const definitions: RoleDefinition[] = [
   { name: 'admin', label: 'Administrator' },
-  { name: 'viewer', label: 'Viewer', inherits: ['base'] },  // Role inheritance
+  { name: 'viewer', label: 'Viewer', inherits: ['base'] },  // inherits another definition
 ];
 
 const permissions: ObjectPermissionConfig[] = [
@@ -67,7 +67,7 @@ const permissions: ObjectPermissionConfig[] = [
     object: 'contacts',
     publicAccess: ['read'],  // Public actions (no auth needed)
     // `roles` is required, and it is the level that decides *who* a rule
-    // applies to. Field and row rules nest under the role name; they carry
+    // applies to. Field and row rules nest under the grant key; they carry
     // no `roles` member of their own.
     roles: {
       admin: {
@@ -75,7 +75,7 @@ const permissions: ObjectPermissionConfig[] = [
       },
       viewer: {
         actions: ['read'],
-        // Only admin sees salary: the restriction is declared on the role
+        // Only admin sees salary: the restriction is declared on the key
         // it restricts, and admin simply has no entry for the field.
         fieldPermissions: [{ field: 'salary', read: false, mask: '****' }],
       },
@@ -145,7 +145,7 @@ describe('objectui#4812 — the guide example is the shape the types declare', (
     // the unguarded `objectConfig.roles[roleName]`.
     const asViewer = () =>
       evaluatePermission({
-        roles,
+        roles: definitions,
         permissions,
         userRoles: ['viewer'],
         user: { id: 'v', roles: ['viewer'] },
@@ -157,7 +157,7 @@ describe('objectui#4812 — the guide example is the shape the types declare', (
 
     expect(
       evaluatePermission({
-        roles,
+        roles: definitions,
         permissions,
         userRoles: ['admin'],
         user: { id: 'a', roles: ['admin'] },
@@ -169,7 +169,7 @@ describe('objectui#4812 — the guide example is the shape the types declare', (
 
   it('returns the row filter verbatim — the package interpolates nothing', () => {
     const result = evaluatePermission({
-      roles,
+      roles: definitions,
       permissions,
       userRoles: ['owner'],
       user: { id: 'u-1', roles: ['owner'] },
@@ -211,7 +211,7 @@ describe('objectui#4812 — a malformed config denies rather than crashing the r
   it('evaluator: non-public action on a roles-less config is a denial, not a TypeError', () => {
     const call = () =>
       evaluatePermission({
-        roles,
+        roles: definitions,
         permissions: ROLELESS,
         userRoles: ['viewer'],
         user: { id: 'v', roles: ['viewer'] },
@@ -226,7 +226,7 @@ describe('objectui#4812 — a malformed config denies rather than crashing the r
   it('evaluator: the publicAccess channel still answers first', () => {
     expect(
       evaluatePermission({
-        roles,
+        roles: definitions,
         permissions: ROLELESS,
         userRoles: ['viewer'],
         user: { id: 'v', roles: ['viewer'] },
@@ -238,7 +238,7 @@ describe('objectui#4812 — a malformed config denies rather than crashing the r
 
   it('provider: every read survives a roles-less config', () => {
     render(
-      <PermissionProvider roles={roles} permissions={ROLELESS} userRoles={['viewer']}>
+      <PermissionProvider roles={definitions} permissions={ROLELESS} userRoles={['viewer']}>
         <Probe />
       </PermissionProvider>,
     );
@@ -254,7 +254,7 @@ describe('objectui#4812 — a malformed config denies rather than crashing the r
 
   it('provider: a well-formed config is unaffected by the guard', () => {
     render(
-      <PermissionProvider roles={roles} permissions={permissions} userRoles={['viewer']}>
+      <PermissionProvider roles={definitions} permissions={permissions} userRoles={['viewer']}>
         <Probe />
       </PermissionProvider>,
     );

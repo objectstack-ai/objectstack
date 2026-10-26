@@ -30,7 +30,7 @@ kanbans, CRUDs, forms, grids.
 | Start a new project — CLI, Vite, Tailwind, config files | [`guides/project-setup.md`](./guides/project-setup.md) |
 | Write unit / DOM / E2E tests for components, schemas and plugins | [`guides/testing.md`](./guides/testing.md) |
 | Responsive behaviour, breakpoints, touch gestures | [`guides/mobile.md`](./guides/mobile.md) |
-| Auth, roles, tenants, client-side permission guards | [`guides/auth-permissions.md`](./guides/auth-permissions.md) |
+| Auth, positions, tenants, client-side permission guards | [`guides/auth-permissions.md`](./guides/auth-permissions.md) |
 | Multi-language text and formatters | [`guides/i18n.md`](./guides/i18n.md) |
 
 **Rules — read before writing schemas.** These are the non-negotiables, and they
