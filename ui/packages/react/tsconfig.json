@@ -3,7 +3,6 @@
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": "src",
-    "jsx": "react-jsx",
     "noEmit": false,
     "declaration": true,
     // The incremental build RECORD, pinned OUTSIDE the published build output.

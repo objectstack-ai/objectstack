@@ -32,7 +32,8 @@
  *     violation into the envelope — the by-id `driver.update` call and the
  *     predicate `driver.updateMany` call — and the scoped-repository facade a
  *     hook reaches as `ctx.api.object(name)` inherits it; and
- *   - **nothing else moves**: a NOT NULL violation, a deadlock, a missing table
+ *   - **nothing else moves**: a NOT NULL violation on a column no field declares
+ *     ([#24768]: on a declared field it is the validator's `ValidationError`), a deadlock, a missing table
  *     and an unreachable store leave BOTH exits as the very object the driver
  *     threw — asserted on IDENTITY, not on a message match, one pin per class
  *     per exit (triage ruling, 2026-09-02).
@@ -140,8 +141,14 @@ const memoryDuplicate = () =>
 
 /* -------- the negative side: failures that must NOT change shape --------- */
 
+/**
+ * [#24768] On a column NO field of `doc` declares: a NOT NULL refusal on a
+ * declared field is the engine's `ValidationError` now
+ * (`engine-not-null-refusal.test.ts`), and this one is what still leaves as the
+ * driver threw it.
+ */
 const notNullViolation = () =>
-  Object.assign(new Error('NOT NULL constraint failed: doc.title'), {
+  Object.assign(new Error('NOT NULL constraint failed: doc.legacy_col'), {
     code: 'SQLITE_CONSTRAINT_NOTNULL',
   });
 
@@ -484,7 +491,7 @@ describe('engine.update — a driver unique violation is a DUPLICATE_RECORD enve
 
   describe('nothing that is not a unique violation changes shape', () => {
     const controls: Array<[string, () => unknown]> = [
-      ['a NOT NULL violation', notNullViolation],
+      ['a NOT NULL violation on an undeclared column', notNullViolation],
       ['a missing table', missingTable],
       ['a deadlock', deadlock],
       ['an unreachable store', unreachableStore],

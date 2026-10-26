@@ -42,5 +42,6 @@
   "skills/objectstack-query/rules/filters.md": 2,
   "skills/objectstack-ui/rules/list-views.md": 1,
   "skills/objectstack-ui/rules/navigation.md": 1,
-  "skills/objectstack-upgrade/references/examples-upgrade.md": 1
+  "skills/objectstack-upgrade/references/examples-upgrade.md": 1,
+  "skills/objectui/guides/auth-permissions.md": 13
 }

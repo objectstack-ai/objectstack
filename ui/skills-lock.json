@@ -4,7 +4,7 @@
     "objectui": {
       "source": "local",
       "sourceType": "local",
-      "path": "./skills/objectui"
+      "path": "../skills/objectui"
     },
     "shadcn": {
       "source": "shadcn/ui",
