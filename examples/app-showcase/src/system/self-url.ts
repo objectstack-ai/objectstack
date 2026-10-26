@@ -32,7 +32,10 @@
  * **When this is read matters.** These are ordinary Node modules evaluated at
  * config load, so the read happens in whichever process loads
  * objectstack.config.ts. On the `os dev` / `os serve` path that is the serving
- * process itself, so the value follows the live environment. On the
+ * process itself, so the value follows the live environment; `os dev` also
+ * recompiles `dist/objectstack.json` in that environment before it boots, so
+ * the served connector metadata carries the same value (#26130), except under
+ * `os dev --no-compile`, which serves the metadata as last built. On the
  * artifact-only path (`os build` once, then `os start --artifact`) the
  * connector metadata is serialized into `dist/objectstack.json`, so the value
  * is frozen at BUILD time — set the env for the build, not just the boot.

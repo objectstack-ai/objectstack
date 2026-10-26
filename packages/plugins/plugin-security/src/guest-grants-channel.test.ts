@@ -5,15 +5,17 @@
  *
  *  - D3 (Enforced by): the set resolution treats the sets the guest envelope
  *    carries — the `guest` anchor's bindings `resolveAuthzContext` resolved —
- *    as any requested set; and the position-name fold, the authenticated
- *    baseline and `everyone` never reach the guest (D3 item 3).
+ *    as any requested set; and a set sharing the anchor's name, the
+ *    authenticated baseline and `everyone` never reach the guest (D3 item 3).
+ *    The position-name fold that once made the first of those a live channel
+ *    is retired for every principal (#24757).
  *  - D4: a guest that reaches a data operation acting in no organization, on
  *    a deployment where the guest entry's organization step refuses, meets the
  *    located refusal at the CRUD gate — `NOT_IMPLEMENTED` (501), before the
  *    operation runs and before any set resolves.
  *
  * Every pin carries its control: the same resolution for a signed-in human
- * (who still folds and still takes the baseline), and the same gate on a
+ * (who still takes the baseline), and the same gate on a
  * single-organization deployment (an ordinary 403 for a guest holding nothing).
  *
  * Harness mirrors `zero-set-deny-baseline.test.ts`; the engine double adds the
@@ -114,16 +116,21 @@ describe('ADR-0138 D3 — the set resolution treats the guest\'s bound sets as a
     expect(names(sets)).toEqual([BOUND_SET.name]);
   });
 
-  it('the position-name fold never reaches the guest (D3 item 3)', async () => {
+  it('a set sharing the anchor\'s name never reaches the guest (D3 item 3)', async () => {
     const { security } = await boot({ organizations: ['org_one'] });
     const guest = await security.resolvePermissionSetsForContext({ ...GUEST, permissions: [], tenantId: 'org_one' });
     expect(names(guest)).toEqual([]);
-    // Control: the fold is real — a signed-in human holding a position of that
-    // name still resolves the same-named set through it, beside the baseline.
+    // Nor a signed-in human holding a position of that name: the shared name
+    // grants nothing to anyone (#24757) — only the baseline resolves.
     const human = await security.resolvePermissionSetsForContext({
       principalKind: 'human', userId: 'u_synth', positions: ['guest'], permissions: [], tenantId: 'org_one',
     });
-    expect(names(human)).toEqual(['guest', 'member_default']);
+    expect(names(human)).toEqual(['member_default']);
+    // Control: the set is real — named by the context, it resolves.
+    const named = await security.resolvePermissionSetsForContext({
+      principalKind: 'human', userId: 'u_synth', positions: [], permissions: ['guest'], tenantId: 'org_one',
+    });
+    expect(names(named)).toEqual(['guest', 'member_default']);
   });
 
   it('the authenticated baseline never reaches the guest (D3 item 3)', async () => {

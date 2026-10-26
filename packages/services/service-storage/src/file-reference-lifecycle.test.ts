@@ -1081,6 +1081,9 @@ describe('File Reference Ownership (ADR-0104 D3 wave 2)', () => {
  * file ids; `file-reference-read-verdict.integration.test.ts` pins the real
  * binding against the door. Each refusal pin below is ablated in the PR that
  * introduced it.
+ *
+ * [#26043] A file the verdict refuses refuses the write at the field, before
+ * the driver runs; an id that names no file gets the same answer.
  */
 describe('a write references only a file its caller may read', () => {
   const CALLER = { userId: 'u_writer', tenantId: 'org_1' };
@@ -1146,16 +1149,26 @@ describe('a write references only a file its caller may read', () => {
   const ownedByP1 = () => file({ ref_object: 'product', ref_id: 'p1', ref_field: 'image' });
   const sysFileWrites = (engine: Engine) =>
     engine.calls.filter((c) => (c.op === 'update' || c.op === 'insert') && c.object === 'sys_file');
+  const refusedBy = (p: Promise<unknown>) => p.then(() => null, (e) => e);
+
+  /** [#26043] The field refusal, as the HTTP boundary answers it: one `invalid_value` entry per refused field. */
+  const expectFieldRefused = (err: unknown, fields: string[]) => {
+    const answered = resolveThrownHttpError(err);
+    expect({ status: answered.status, code: answered.code }).toEqual({ status: 400, code: 'VALIDATION_FAILED' });
+    expect((answered.details?.fields as any[]).map((f) => [f.field, f.code]))
+      .toEqual(fields.map((f) => [f, 'invalid_value']));
+  };
 
   describe('a file another record owns', () => {
-    it('is not copied for a caller the verdict refuses: the value is kept as written', async () => {
+    it('is refused at the field for a caller the verdict refuses, and not copied', async () => {
       const engine = fakeEngine({ files: [ownedByP1()], records: { product: [{ id: 'p1', image: 'file_a' }] } });
       const { authorizeRead } = verdict([]);
       const { storage } = installWith(engine, authorizeRead);
 
-      const row = await insertAs(engine, 'product', { image: 'file_a' }, 'p2');
+      const err = await refusedBy(insertAs(engine, 'product', { image: 'file_a' }, 'p2'));
 
-      expect(row.image).toBe('file_a');
+      expectFieldRefused(err, ['image']);
+      expect((engine.tables.product ?? []).map((r) => r.id)).toEqual(['p1']);
       expect(storage.download).not.toHaveBeenCalled();
       expect(storage.upload).not.toHaveBeenCalled();
       expect(engine.tables.sys_file).toHaveLength(1);
@@ -1163,7 +1176,7 @@ describe('a write references only a file its caller may read', () => {
       expect(sysFileWrites(engine)).toEqual([]);
     });
 
-    it('is not copied by an update for a caller the verdict refuses', async () => {
+    it('is refused at the field by an update for a caller the verdict refuses, and not copied', async () => {
       const engine = fakeEngine({
         files: [ownedByP1()],
         records: { product: [{ id: 'p1', image: 'file_a' }, { id: 'p2', image: null }] },
@@ -1171,9 +1184,10 @@ describe('a write references only a file its caller may read', () => {
       const { authorizeRead } = verdict([]);
       const { storage } = installWith(engine, authorizeRead);
 
-      const row = await updateAs(engine, 'product', 'p2', { image: 'file_a' });
+      const err = await refusedBy(updateAs(engine, 'product', 'p2', { image: 'file_a' }));
 
-      expect(row?.image).toBe('file_a');
+      expectFieldRefused(err, ['image']);
+      expect(engine.tables.product.find((r) => r.id === 'p2')?.image).toBeNull();
       expect(storage.download).not.toHaveBeenCalled();
       expect(engine.tables.sys_file).toHaveLength(1);
       expect(engine.tables.sys_file[0]).toMatchObject({ ref_id: 'p1' });
@@ -1199,25 +1213,28 @@ describe('a write references only a file its caller may read', () => {
   });
 
   describe('a file no record owns', () => {
-    it('is not claimed for a caller the verdict refuses', async () => {
+    it('is refused at the field for a caller the verdict refuses, and not claimed', async () => {
       const engine = fakeEngine({ files: [file()] });
       const { authorizeRead } = verdict([]);
       installWith(engine, authorizeRead);
 
-      const row = await insertAs(engine, 'product', { image: 'file_a' }, 'p1');
+      const err = await refusedBy(insertAs(engine, 'product', { image: 'file_a' }, 'p1'));
 
-      expect(row.image).toBe('file_a');
+      expectFieldRefused(err, ['image']);
+      expect(engine.tables.product ?? []).toEqual([]);
       expect(engine.tables.sys_file[0].ref_id ?? null).toBeNull();
       expect(sysFileWrites(engine)).toEqual([]);
     });
 
-    it('is not claimed by an update for a caller the verdict refuses', async () => {
+    it('is refused at the field by an update for a caller the verdict refuses, and not claimed', async () => {
       const engine = fakeEngine({ files: [file()], records: { product: [{ id: 'p1', image: null }] } });
       const { authorizeRead } = verdict([]);
       installWith(engine, authorizeRead);
 
-      await updateAs(engine, 'product', 'p1', { image: 'file_a' });
+      const err = await refusedBy(updateAs(engine, 'product', 'p1', { image: 'file_a' }));
 
+      expectFieldRefused(err, ['image']);
+      expect(engine.tables.product[0].image).toBeNull();
       expect(engine.tables.sys_file[0].ref_id ?? null).toBeNull();
       expect(sysFileWrites(engine)).toEqual([]);
     });
@@ -1227,7 +1244,7 @@ describe('a write references only a file its caller may read', () => {
       const { authorizeRead } = verdict([]);
       installWith(engine, authorizeRead);
 
-      await insertAs(engine, 'product', { image: 'file_a' }, 'p1');
+      expectFieldRefused(await refusedBy(insertAs(engine, 'product', { image: 'file_a' }, 'p1')), ['image']);
 
       expect(engine.tables.sys_file[0]).toMatchObject({ status: 'deleted', deleted_at: '2026-01-01T00:00:00.000Z' });
       expect(engine.tables.sys_file[0].ref_id ?? null).toBeNull();
@@ -1243,19 +1260,53 @@ describe('a write references only a file its caller may read', () => {
       expect(engine.tables.sys_file[0]).toMatchObject({ ref_object: 'product', ref_id: 'p1', ref_field: 'image' });
     });
 
-    it('each id of a multiple:true field is judged on its own', async () => {
+    it('one id of a multiple:true field the caller may not read refuses the field, and none of its ids is taken', async () => {
       const engine = fakeEngine({ files: [file(), file({ id: 'file_b', key: 'user/file_b.png' })] });
       const { authorizeRead } = verdict(['file_b']);
       installWith(engine, authorizeRead);
 
-      const row = await insertAs(engine, 'product', { gallery: ['file_a', 'file_b'] }, 'p1');
+      expectFieldRefused(await refusedBy(insertAs(engine, 'product', { gallery: ['file_b', 'file_a'] }, 'p1')), ['gallery']);
 
-      expect(row.gallery).toEqual(['file_a', 'file_b']);
       expect(engine.tables.sys_file.map((f) => [f.id, f.ref_id ?? null])).toEqual([
         ['file_a', null],
-        ['file_b', 'p1'],
+        ['file_b', null],
       ]);
     });
+  });
+
+  it('[#26043] an id that names no file gets the answer a file the caller may not read gets', async () => {
+    const engine = fakeEngine({ files: [file()] });
+    const { authorizeRead } = verdict([]);
+    installWith(engine, authorizeRead);
+
+    const unreadable = await refusedBy(insertAs(engine, 'product', { image: 'file_a' }, 'p1'));
+    const nowhere = await refusedBy(insertAs(engine, 'product', { image: 'file_nowhere' }, 'p2'));
+
+    expectFieldRefused(nowhere, ['image']);
+    expect(resolveThrownHttpError(nowhere)).toEqual(resolveThrownHttpError(unreadable));
+    expect(engine.tables.product ?? []).toEqual([]);
+  });
+
+  it('[#26043] every refused field is named, in one answer', async () => {
+    const engine = fakeEngine({ files: [file()] });
+    const { authorizeRead } = verdict([]);
+    installWith(engine, authorizeRead);
+
+    const err = await refusedBy(insertAs(engine, 'product', { image: 'file_a', gallery: ['file_nowhere'] }, 'p1'));
+
+    expectFieldRefused(err, ['image', 'gallery']);
+  });
+
+  it('[#26043] a refused field fails the write before another field\'s file is copied', async () => {
+    const engine = fakeEngine({ files: [ownedByP1()], records: { product: [{ id: 'p1', image: 'file_a' }] } });
+    const { authorizeRead } = verdict(['file_a']);
+    const { storage } = installWith(engine, authorizeRead);
+
+    const err = await refusedBy(insertAs(engine, 'product', { image: 'file_a', gallery: ['file_nowhere'] }, 'p2'));
+
+    expectFieldRefused(err, ['gallery']);
+    expect(storage.download).not.toHaveBeenCalled();
+    expect(engine.tables.sys_file).toHaveLength(1);
   });
 
   it('constraint verdicts do not run ahead of the read check', async () => {
@@ -1269,9 +1320,10 @@ describe('a write references only a file its caller may read', () => {
     const { authorizeRead } = verdict([]);
     installWith(engine, authorizeRead);
 
-    const row = await insertAs(engine, 'product', { image: 'file_a' }, 'p1');
+    const err = await refusedBy(insertAs(engine, 'product', { image: 'file_a' }, 'p1'));
 
-    expect(row.image).toBe('file_a');
+    // The read refusal, not the constraint's `ERR_FILE_CONSTRAINT`.
+    expectFieldRefused(err, ['image']);
     expect(engine.tables.sys_file[0].ref_id ?? null).toBeNull();
   });
 
@@ -1298,7 +1350,7 @@ describe('a write references only a file its caller may read', () => {
     installWith(engine, authorizeRead);
     const context = { ...CALLER, permissions: ['member_default'], __operationPrivate: 'dropped' };
 
-    await insertAs(engine, 'product', { image: 'file_a' }, 'p2', { session, context });
+    await refusedBy(insertAs(engine, 'product', { image: 'file_a' }, 'p2', { session, context }));
 
     expect(asked.length).toBeGreaterThan(0);
     for (const q of asked) {

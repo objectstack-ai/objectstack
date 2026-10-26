@@ -223,6 +223,22 @@ export interface KanbanBoardProps {
    * (objectui#12082) — so no card offers a drag that would be refused.
    */
   cardsMovable?: boolean
+  /**
+   * The per-column drop gate (#25933): whether a card that sits in
+   * `fromColumnId` may be dropped into `toColumnId`. Absent, every column takes
+   * every card, as before. `ObjectKanban` derives it from the object's
+   * blocking `state_machine` rule on the grouped field, so a move the server is
+   * bound to refuse is never offered:
+   *
+   *  - while a card is dragged, every column it may not enter is dimmed
+   *    (`data-kanban-drop-blocked`) and draws no drop highlight;
+   *  - a drop into such a column is refused here, before the mover runs: the
+   *    card stays where it was and `onCardMove` is not called.
+   *
+   * The card's own column is never asked — a same-column drop moves nothing.
+   * The server still refuses an invalid move, and the mover's rollback stays.
+   */
+  canDropCard?: (fromColumnId: string, toColumnId: string) => boolean
 }
 
 /**
@@ -680,6 +696,7 @@ function KanbanColumnView({
   suppressEmptyPlaceholder,
   countsAreWindowed,
   collapsed,
+  dropBlocked,
   onToggleCollapse,
 }: {
   column: KanbanColumn
@@ -708,6 +725,12 @@ function KanbanColumnView({
    */
   collapsed?: boolean
   /**
+   * The card being dragged may not enter this lane (#25933,
+   * {@link KanbanBoardProps.canDropCard}): the lane is dimmed and draws no
+   * drop highlight. A drop here is refused by the board's drag-end handler.
+   */
+  dropBlocked?: boolean
+  /**
    * Toggles the lane's collapse. Present only on a lane that DECLARED
    * `collapsed: true`, and its presence is what puts the disclosure in the
    * heading — see `LaneHeading`.
@@ -716,12 +739,14 @@ function KanbanColumnView({
 }) {
   const { t } = useKanbanT()
   const safeCards = cards || [];
-  const { setNodeRef, isOver } = useSortable({
+  const { setNodeRef, isOver: pointerOver } = useSortable({
     id: column.id,
     data: {
       type: "column",
     },
   })
+  // A lane the dragged card may not enter never claims the drop (#25933).
+  const isOver = pointerOver && !dropBlocked
 
   // objectui#12619 — a lane the board pages for itself carries the server's
   // count of its records and a "Load more" while it holds more than it drew.
@@ -755,6 +780,8 @@ function KanbanColumnView({
       ref={setNodeRef}
       role="group"
       aria-label={column.title}
+      aria-disabled={dropBlocked || undefined}
+      data-kanban-drop-blocked={dropBlocked ? "" : undefined}
       style={box.style}
       className={cn(
         "relative flex flex-col rounded-xl border border-border/60 bg-muted/15 snap-start max-h-full min-h-0 transition-all duration-200 shadow-sm hover:shadow-md overflow-hidden",
@@ -764,6 +791,7 @@ function KanbanColumnView({
         // drop. This is critical for empty columns where there's no card
         // gap-indicator from SortableContext to show drop position.
         isOver && "ring-2 ring-primary/60 bg-primary/5",
+        dropBlocked && "opacity-40",
         column.className
       )}
     >
@@ -879,14 +907,14 @@ function moveOutcomeSentence(outcome: unknown, movedSentence: string): string | 
   return movedSentence
 }
 
-export default function KanbanBoard({ columns, onCardMove, onCardClick, className, quickAdd, onQuickAdd, coverImageField, conditionalFormatting, objectFields, swimlaneField, countsAreWindowed, cardsMovable = true }: KanbanBoardProps) {
+export default function KanbanBoard({ columns, onCardMove, onCardClick, className, quickAdd, onQuickAdd, coverImageField, conditionalFormatting, objectFields, swimlaneField, countsAreWindowed, cardsMovable = true, canDropCard }: KanbanBoardProps) {
   const hasDnd = useHasDndProvider()
 
   if (hasDnd) {
     return (
       <KanbanCardsMovable.Provider value={cardsMovable}>
         <DndBridge>
-          {(dnd) => <KanbanBoardInner columns={columns} onCardMove={onCardMove} onCardClick={onCardClick} className={className} dnd={dnd} quickAdd={quickAdd} onQuickAdd={onQuickAdd} coverImageField={coverImageField} conditionalFormatting={conditionalFormatting} objectFields={objectFields} swimlaneField={swimlaneField} countsAreWindowed={countsAreWindowed} />}
+          {(dnd) => <KanbanBoardInner columns={columns} onCardMove={onCardMove} onCardClick={onCardClick} className={className} dnd={dnd} quickAdd={quickAdd} onQuickAdd={onQuickAdd} coverImageField={coverImageField} conditionalFormatting={conditionalFormatting} objectFields={objectFields} swimlaneField={swimlaneField} countsAreWindowed={countsAreWindowed} canDropCard={canDropCard} />}
         </DndBridge>
       </KanbanCardsMovable.Provider>
     )
@@ -894,12 +922,12 @@ export default function KanbanBoard({ columns, onCardMove, onCardClick, classNam
 
   return (
     <KanbanCardsMovable.Provider value={cardsMovable}>
-      <KanbanBoardInner columns={columns} onCardMove={onCardMove} onCardClick={onCardClick} className={className} dnd={null} quickAdd={quickAdd} onQuickAdd={onQuickAdd} coverImageField={coverImageField} conditionalFormatting={conditionalFormatting} objectFields={objectFields} swimlaneField={swimlaneField} countsAreWindowed={countsAreWindowed} />
+      <KanbanBoardInner columns={columns} onCardMove={onCardMove} onCardClick={onCardClick} className={className} dnd={null} quickAdd={quickAdd} onQuickAdd={onQuickAdd} coverImageField={coverImageField} conditionalFormatting={conditionalFormatting} objectFields={objectFields} swimlaneField={swimlaneField} countsAreWindowed={countsAreWindowed} canDropCard={canDropCard} />
     </KanbanCardsMovable.Provider>
   )
 }
 
-function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, quickAdd, onQuickAdd, coverImageField: _coverImageField, conditionalFormatting, objectFields, swimlaneField, countsAreWindowed }: KanbanBoardProps & { dnd: ReturnType<typeof useDnd> | null }) {
+function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, quickAdd, onQuickAdd, coverImageField: _coverImageField, conditionalFormatting, objectFields, swimlaneField, countsAreWindowed, canDropCard }: KanbanBoardProps & { dnd: ReturnType<typeof useDnd> | null }) {
   const { t } = useKanbanT()
   const [activeCard, setActiveCard] = React.useState<KanbanCard | null>(null)
 
@@ -1066,10 +1094,23 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
     })
   )
 
+  /**
+   * The column the dragged card left, for the drop gate (#25933). Held only
+   * while a drag is live; `null` otherwise, which leaves every lane open.
+   */
+  const [dragFromColumnId, setDragFromColumnId] = React.useState<string | null>(null)
+  /** Whether the dragged card may NOT enter `columnId` — see {@link KanbanBoardProps.canDropCard}. */
+  const isDropBlocked = (columnId: string): boolean =>
+    canDropCard != null &&
+    dragFromColumnId != null &&
+    String(columnId) !== String(dragFromColumnId) &&
+    !canDropCard(String(dragFromColumnId), String(columnId))
+
   const handleDragStart = (event: DragStartEvent) => {
     const { active } = event
     const card = findCard(active.id as string)
     setActiveCard(card)
+    setDragFromColumnId(card ? findColumnByCardId(card.id)?.id ?? null : null)
 
     // Bridge to ObjectUI spec DnD system
     if (dnd && card) {
@@ -1110,9 +1151,18 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
     }
   }
 
+  // A cancelled drag (Escape, or the pointer lost) moves nothing; it only has
+  // to put the lanes the drop gate dimmed back to normal.
+  const handleDragCancel = () => {
+    setActiveCard(null)
+    setDragFromColumnId(null)
+    if (dnd) dnd.endDrag()
+  }
+
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event
     setActiveCard(null)
+    setDragFromColumnId(null)
 
     if (!over) {
       if (dnd) dnd.endDrag()
@@ -1131,6 +1181,18 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
     const overColumn = findColumnByCardId(overId) || findColumnById(overId)
 
     if (!activeColumn || !overColumn) {
+      if (dnd) dnd.endDrag()
+      return
+    }
+
+    if (
+      activeColumn.id !== overColumn.id &&
+      canDropCard != null &&
+      !canDropCard(String(activeColumn.id), String(overColumn.id))
+    ) {
+      // A lane the drop gate closed (#25933): refused here, before any
+      // optimistic move or write — the card stays in its column, and the
+      // mover is not asked for a move the server is bound to refuse.
       if (dnd) dnd.endDrag()
       return
     }
@@ -1334,6 +1396,7 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
       collisionDetection={closestCorners}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
+      onDragCancel={handleDragCancel}
       accessibility={dndAccessibility}
     >
       <div ref={boardRef} className="flex flex-col min-w-0 min-h-0 h-full">
@@ -1571,11 +1634,14 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
                       // misalignment objectui#8797 measured, self-inflicted.
                       const collapsed = isColumnCollapsed(col)
                       const box = laneBox(columnInlineStyle, collapsed)
+                      const dropBlocked = isDropBlocked(col.id)
                       return (
                         <div
                           key={col.id}
                           style={box.style}
-                          className={cn(box.className, "min-h-[60px] rounded-md bg-card/20 p-2")}
+                          aria-disabled={dropBlocked || undefined}
+                          data-kanban-drop-blocked={dropBlocked ? "" : undefined}
+                          className={cn(box.className, "min-h-[60px] rounded-md bg-card/20 p-2", dropBlocked && "opacity-40")}
                         >
                           {!collapsed && (
                             <SortableContext items={laneCards.map(c => c.id)} strategy={verticalListSortingStrategy}>
@@ -1602,6 +1668,7 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
             <KanbanColumnView
               key={column.id}
               column={column}
+              dropBlocked={isDropBlocked(column.id)}
               cards={column.cards}
               onCardClick={onCardClick}
               quickAdd={quickAdd}
