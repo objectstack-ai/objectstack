@@ -182,6 +182,8 @@ export type AssignmentRule = z.input<typeof AssignmentRuleSchema>;
 /** Post-parse shape of {@link AssignmentRule} — defaults applied, transforms run (ADR-0122). */
 export type AssignmentRuleParsed = z.infer<typeof AssignmentRuleSchema>;
 export type AssignmentRuleEntry = z.input<typeof AssignmentRuleEntrySchema>;
+/** The parsed entry: `criteria` and `load` arrive as their evaluated-expression form. */
+export type AssignmentRuleEntryParsed = z.infer<typeof AssignmentRuleEntrySchema>;
 export type AssignmentTarget = z.input<typeof AssignmentTargetSchema>;
 
 /**

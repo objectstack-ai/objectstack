@@ -45,16 +45,16 @@ are `manifest`, `packages`, `objects`, `objectExtensions`, `picklists`,
 `picklistExtensions`, `views`, `apps`, `pages`, `dashboards`, `reports`,
 `datasets`, `actions`, `flows`, `jobs`,
 `emailTemplates`, `docs`, `books`, `positions`, `permissions`,
-`capabilities`, `sharingRules`, `apis`, `webhooks`, `api`, `server`,
+`capabilities`, `sharingRules`, `queues`, `assignmentRules`, `apis`, `webhooks`, `api`, `server`,
 `agents`, `tools`, `skills`, `hooks`, `functions`, `mappings`,
 `analyticsCubes`, `connectors`, `data` (seed), `datasources`,
 `datasourceMapping`, `translations`, `i18n`, `plugins`, `devPlugins`,
 `devHint`, `devLogins`, `demoStaff`, `requires`, `tiers`, `onEnable`, `appName`, `email`, `sms`.
 
 There is deliberately **no** top-level `workflows` or `approvals` collection:
-an approval is authored as a flow with Approval nodes (ADR-0019), and record
-state machines are a `state_machine` validation rule on each object
-(ADR-0020). A phantom key like `roles:` or `policies:` is **not** a silent
+an approval is authored as a flow with Approval nodes, and record
+state machines are a `state_machine` validation rule on each object.
+A phantom key like `roles:` or `policies:` is **not** a silent
 no-op — the top level refuses it and the stack fails to load:
 
 ```
