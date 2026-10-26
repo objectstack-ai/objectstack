@@ -1064,7 +1064,7 @@ function selfTest() {
    * with the producer's stderr above it.
    *
    * With `rerunAfter`, the producer runs a second time after that edit, and
-   * the returned `moved` lists every path under `scripts/` whose bytes the
+   * the returned `moved` lists every path the producer writes whose bytes the
    * second run changed — the re-record row's reading.
    */
   const mkProducedInTree = ({ rerunAfter } = {}) => {
@@ -1112,8 +1112,8 @@ function selfTest() {
       }
       return new Map(files.map((file) => [file.split(sep).join('/'), existsSync(join(root, file)) ? readFileSync(join(root, file), 'utf8') : null]));
     };
-    const first = written();
     rerunAfter(root, git);
+    const first = written();
     produce();
     const second = written();
     const moved = [...new Set([...first.keys(), ...second.keys()])].filter((file) => first.get(file) !== second.get(file)).sort();
@@ -1123,14 +1123,17 @@ function selfTest() {
 
   // The re-record row (#26051): one registry package's source moves and the
   // artefact does not, so the second run must rewrite that package's record
-  // and nothing else — no other package record, not the shared header (its
-  // `generatedAt` is carried while the artefact is byte-identical), not the
-  // artefact. A producer that rewrites every record, or stamps a fresh date,
-  // names the extra path here; one that skips the moved package names that.
+  // and nothing else — no other package record, not the shared header, not the
+  // artefact. The header is back-dated first, as a run on an earlier day left
+  // it: `generatedAt` is carried while the artefact is byte-identical, so a
+  // producer that stamps today's date names the header here, one that moves
+  // another record names it, and one that skips the moved package names that.
   const rerecorded = mkProducedInTree({
     rerunAfter: (r, git) => {
       writeFileSync(join(r, pkgDir('@object-ui/plugin-grid'), 'src', 'index.ts'), 'export const id = "moved";\n');
       git('add', '-A');
+      const p = join(r, READ_PATHS.record);
+      writeFileSync(p, JSON.stringify({ ...JSON.parse(readFileSync(p, 'utf8')), generatedAt: '2000-01-01' }, null, 2) + '\n');
     },
   });
   const rerecordedWant = [`${REGISTRY_RECORDS}/plugin-grid.json`];
