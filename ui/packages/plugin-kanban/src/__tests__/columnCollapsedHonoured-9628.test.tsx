@@ -66,7 +66,7 @@ import React from 'react';
 import { describe, it, expect } from 'vitest';
 import { render, screen, within, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import { KanbanColumnSchema, ObjectKanbanSchema } from '@object-ui/types/zod';
+import { KanbanColumnSchema, ObjectKanbanSchema, deriveStrictAuthoringSchema } from '@object-ui/types/zod';
 
 import { KanbanRenderer } from '../index';
 // Pay the board's lazy chunk at import time rather than inside a `findBy`
@@ -121,15 +121,16 @@ describe('both published faces declare the key (objectui#9628)', () => {
     expect(parsed.success && (parsed.data as { collapsed?: boolean }).collapsed).toBe(true);
   });
 
-  it('CONTROL — an undeclared lane key is dropped rather than kept, so the two above are readings', () => {
-    const parsed = KanbanColumnSchema.safeParse({
-      id: 'todo',
-      title: 'To Do',
-      cards: [],
-      collapsedd: true,
-    });
-    expect(parsed.success).toBe(true);
-    expect(parsed.success && 'collapsedd' in (parsed.data as object)).toBe(false);
+  it('CONTROL — the strict twin refuses an undeclared lane key and accepts `collapsed`, so the two above are readings', () => {
+    // The tolerant mirror keeps an undeclared key since objectstack#25923 made
+    // every mirror object `.passthrough()` (it was dropped before), so survival
+    // through a tolerant parse no longer tells a declared key from an
+    // undeclared one. The strict authoring twin does: it refuses by name.
+    const strict = deriveStrictAuthoringSchema(KanbanColumnSchema);
+    const lane = { id: 'todo', title: 'To Do', cards: [] };
+    expect(KanbanColumnSchema.safeParse({ ...lane, collapsedd: true }).success).toBe(true);
+    expect(strict.safeParse({ ...lane, collapsedd: true }).success).toBe(false);
+    expect(strict.safeParse({ ...lane, collapsed: true }).success).toBe(true);
   });
 });
 
