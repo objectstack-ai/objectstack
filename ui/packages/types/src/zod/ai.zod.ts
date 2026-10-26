@@ -111,7 +111,7 @@ const neitherChannel = (node: string, renders: string) =>
  * retirement tombstones since objectui#10874. It stays exported beside its
  * TypeScript twin, which also stays.
  */
-export const AIConfigSchema = z.object({
+export const AIConfigSchema = z.looseObject({
   provider: z.enum(['openai', 'anthropic', 'google', 'azure', 'custom']).optional().describe('AI provider to use'),
   // `AIModelType | string` on the TypeScript face — the named models are
   // examples, not a closed set, so the accepted value is any string.
@@ -125,7 +125,7 @@ export const AIConfigSchema = z.object({
 /**
  * AI Field Suggestion — mirrors `AIFieldSuggestion` (`../ai.ts`).
  */
-export const AIFieldSuggestionSchema = z.object({
+export const AIFieldSuggestionSchema = z.looseObject({
   fieldName: z.string().describe('Name of the field being suggested'),
   value: z.any().describe('Suggested value for the field'),
   confidence: z.number().describe('Confidence score (0-1)'),
@@ -180,7 +180,7 @@ export const AIFormAssistSchema = BaseSchema.extend({
 /**
  * AI Recommendation Item — mirrors `AIRecommendationItem` (`../ai.ts`).
  */
-export const AIRecommendationItemSchema = z.object({
+export const AIRecommendationItemSchema = z.looseObject({
   id: z.string().describe('Unique identifier'),
   title: z.string().describe('Recommendation title'),
   description: z.string().optional().describe('Recommendation description'),
@@ -188,7 +188,7 @@ export const AIRecommendationItemSchema = z.object({
   category: z.string().optional().describe('Recommendation category'),
   metadata: z.record(z.string(), z.any()).optional().describe('Additional metadata'),
   action: z
-    .object({
+    .looseObject({
       type: z.string().describe('Action type'),
       target: z.string().optional().describe('Action target'),
     })
@@ -242,13 +242,13 @@ export const AIRecommendationsSchema = BaseSchema.extend({
 /**
  * Natural Language Query Result — mirrors `NLQueryResult` (`../ai.ts`).
  */
-export const NLQueryResultSchema = z.object({
+export const NLQueryResultSchema = z.looseObject({
   query: z.string().describe('Original query string'),
   parsedQuery: z.record(z.string(), z.any()).optional().describe('Parsed query representation'),
   data: z.array(z.any()).optional().describe('Result data'),
   columns: z
     .array(
-      z.object({
+      z.looseObject({
         name: z.string().describe('Column name'),
         label: z.string().optional().describe('Display label'),
         type: z.string().optional().describe('Column data type'),
@@ -282,7 +282,7 @@ export const NLQuerySchema = BaseSchema.extend({
   showHistory: z.boolean().optional().describe('Show query history'),
   history: z
     .array(
-      z.object({
+      z.looseObject({
         query: z.string().describe('Query string'),
         timestamp: z.string().describe('Timestamp of the query'),
       }),

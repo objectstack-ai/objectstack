@@ -105,7 +105,10 @@ vi.mock('../../../providers/MetadataProvider', () => ({
 vi.mock('../../../context/NavigationContext', () => ({
   useNavigationContext: () => ({ currentAppName: 'crm' }),
 }));
-vi.mock('../../../hooks/useCanAuthorMetadata', () => ({ useCanAuthorMetadata: () => true }));
+vi.mock('../../../hooks/useCanAuthorMetadata', () => ({
+  useCanAuthorMetadata: () => true,
+  useCanReadPendingDrafts: () => true,
+}));
 // The page's one inbox seam: both sources, their answers and their read grants.
 vi.mock('../../../hooks/useHomeInbox', () => ({
   useHomeInbox: () => ({

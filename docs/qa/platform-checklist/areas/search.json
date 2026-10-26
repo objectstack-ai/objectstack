@@ -64,7 +64,7 @@
       "title": "$search is a server-resolved cross-field match: terms AND-ed, fields OR-ed, case-insensitive, select labels mapped to values",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai)"],
@@ -97,7 +97,7 @@
         {
           "clause": "fields are OR-ed within one query: the unrestricted 'retail' search also returns the name-hit control (Acme Retail) alongside the industry hit",
           "oracle": "api",
-          "verify": "both Northwind and a name-containing-'retail' account appear in one result set",
+          "verify": "both Northwind and a name-containing-'retail' account appear in one result set. The pin in automated.ref proves this half as 'some returned name contains retail' (names.some over the lowercased names), not by naming Acme Retail: it satisfies this verify, and a run that wants Acme Retail by name reads it off the response body",
           "evidence": "the response body"
         },
         {
@@ -141,7 +141,8 @@
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item transcribed from the search-conformance ledger and its HTTP-level dogfood proof, seeded names (Northwind/Acme Retail/Contoso) verified in the showcase seed", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-08-11", "change": "case-fold made separately assertable, and aligned TOWARD the declaration per the #4706 Q2 = A ruling (case-insensitive is the declared truth; the product-side conformance gap is #7641's job, not this file's). Run #7629 scored the old clause FAIL and showed why it had gone unnoticed for a release: one clause conflated two mechanisms — textual case-fold and select label→value mapping — and the label half passes on a case-SENSITIVE build because optionValuesMatching lowercases in JS, so a green tick (and a green dogfood pin) said nothing about the textual half. Now split into two clauses with a ['name']-narrowed probe that pins the textual case-fold away from the select path, a step and a negative for the lowercase-name assertion the run identified as the missing one, and knownGaps recording the #7641 expected FAIL plus the pin's blind spot. The variant string 'case-insensitive $contains' was self-contradictory under Q2 = A and now names $icontains semantics. Title, docblock citation and the case-insensitive declaration itself are deliberately UNCHANGED", "ref": "#7647" },
-        { "revision": 3, "date": "2026-08-12", "change": "the executor caught up with the declaration, so the item records a CLOSED gap instead of an open one. #7641 moved search-filter.ts fieldClausesForTerm from `$contains` to `$icontains` for textual types (and for the select raw-value fallback); the label→value `$in` path is untouched, and the `__search` companion clause deliberately stays `$contains` because both of its sides are already lowercase. No clause substance changed and the case-insensitive declaration is again deliberately UNCHANGED — this revision only flips the tense of knownGaps, the textual clause's verify note, the two negatives and the search-filter.ts source citation, which all read as if the gap were still open. The second knownGap is closed by the same PR: the dogfood pin now carries the ['name']-narrowed lowercase-vs-capitalized assertion it was missing, so the pin and the textual clause finally cover the same mechanism", "ref": "#7641" }
+        { "revision": 3, "date": "2026-08-12", "change": "the executor caught up with the declaration, so the item records a CLOSED gap instead of an open one. #7641 moved search-filter.ts fieldClausesForTerm from `$contains` to `$icontains` for textual types (and for the select raw-value fallback); the label→value `$in` path is untouched, and the `__search` companion clause deliberately stays `$contains` because both of its sides are already lowercase. No clause substance changed and the case-insensitive declaration is again deliberately UNCHANGED — this revision only flips the tense of knownGaps, the textual clause's verify note, the two negatives and the search-filter.ts source citation, which all read as if the gap were still open. The second knownGap is closed by the same PR: the dogfood pin now carries the ['name']-narrowed lowercase-vs-capitalized assertion it was missing, so the pin and the textual clause finally cover the same mechanism", "ref": "#7641" },
+        { "revision": 4, "date": "2026-10-26", "change": "acceptance[1].verify says how the pin proves the name-hit control (checklist-accuracy finding a1 of QA run #25815, release-18.2.0-tier1 at 6679644a; wave anchor #25807): showcase-search.dogfood.test.ts asserts that some returned name contains 'retail', not that Acme Retail is named, which is what this verify asks for. The clause is unchanged", "ref": "#25847" }
       ]
     },
     {
@@ -149,7 +150,7 @@
       "title": "$searchFields narrows and can never widen; a name outside the searchable set is 400 INVALID_FIELD at the ingress, never silently dropped",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai)"],
@@ -187,7 +188,7 @@
         {
           "clause": "both wire spellings (bare search/searchFields in the query POST body, $search/$searchFields on GET) reach the same executor with the same verdicts",
           "oracle": "api",
-          "verify": "the GET spelling reproduces the POST results and refusals",
+          "verify": "the GET spelling reproduces the POST results and refusals. No pin drives the GET $search / $searchFields spelling: score it from the live pair",
           "evidence": "paired responses"
         }
       ],
@@ -196,14 +197,15 @@
         "silent dropping of the override (200, results identical to the unrestricted search) is equally a FAIL — refusal must be loud"
       ],
       "traps": ["dispatcher-vs-hono-route"],
-      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/showcase-search.dogfood.test.ts" },
+      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/showcase-search.dogfood.test.ts, for acceptance[0] only ('$searchFields narrows: \"retail\" restricted to name matches nothing'; the ['industry'] half rides in its multi-field case). It drives only POST /data/showcase_account/query with bare search / searchFields and carries no $searchFields refusal case, so acceptance[1], [2] and [3] and both negatives have no end-to-end pin and are the run's. packages/rest/src/list-view-grouping-query-door.test.ts refuses a grouped query's unscannable searchFields with 400 INVALID_FIELD at the route-handler level; it stops above the live showcase boot and corroborates acceptance[1] without scoring it" },
       "source": [
         "packages/qa/dogfood/test/search-conformance.ledger.ts (row search-fields-override: intersection + ingress gate, #4254)",
         "packages/metadata-protocol/src/protocol.ts#assertSearchFieldsAreSearchable (assertSearchFieldsAreSearchable — 400 INVALID_FIELD; $-spelling normalization)",
         "packages/objectql/src/search-filter.ts#resolveSearchFields (resolveSearchFields intersection; companion excluded from resolution — 'invisible to $searchFields overrides and to clients')"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new item from the conformance ledger's override row and the #4254 ingress-gate source, including the companion-invisibility clause from search-filter.ts", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "new item from the conformance ledger's override row and the #4254 ingress-gate source, including the companion-invisibility clause from search-filter.ts", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-10-26", "change": "automated.ref scoped to acceptance[0] and acceptance[3].verify marks the GET spelling unpinned (checklist-accuracy findings a1/n0/n1 and a3 of QA run #25815, release-18.2.0-tier1 at 6679644a; wave anchor #25807). The bare ref claimed the whole item, but showcase-search.dogfood.test.ts has no $searchFields refusal case and drives only the POST spelling; the route-handler INVALID_FIELD evidence sits in packages/rest tests outside the ref. No clause is loosened", "ref": "#25847" }
       ]
     },
     {
@@ -315,7 +317,7 @@
       "title": "Pinyin recall is gated end-to-end by OS_SEARCH_PINYIN_ENABLED: on, latin pinyin (full + initials) hits CJK names; off, it does not — while CJK terms keep matching",
       "since": "v15.1",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["seeded admin (admin@objectos.ai)"],
@@ -328,7 +330,7 @@
           "a readable boot log for BOTH boots (debug level) — the OFF-side oracle is the loaded-plugin roster, so the run needs the loaded-plugin roster from each boot — the banner's `Plugins: N loaded` line and the plugins it names. No boot prints the `requires` list itself (packages/cli/src/commands/serve.ts builds it from served capabilities and never logs it; the banner, packages/cli/src/utils/format.ts, prints the plugin count), not just the ON-side output"
         ],
         "knownGaps": [
-          "the plugin's own inert line ('OS_SEARCH_PINYIN_ENABLED is off — inert') is UNOBTAINABLE in a CLI-served deployment and must not be used as the OFF-side oracle: the CLI gates one layer upstream and omits `pinyin-search` from `requires` when the flag is off, so the plugin is never loaded and never reaches its own inert branch. Run #7629 measured 47 loaded plugins with the flag off vs 48 with it on (51 vs 52 on main c91af8ed6 under #24036; 52 vs 53 at 5b14b7f3 under QA run #24574), and found ZERO occurrences of 'pinyin' in a 1.2 MB debug boot log. The clause below therefore reads the roster difference; the inert line is kept only as the alternative oracle for a host that loads the plugin unconditionally"
+          "the plugin's own inert line ('OS_SEARCH_PINYIN_ENABLED is off — inert') is UNOBTAINABLE in a CLI-served deployment and must not be used as the OFF-side oracle: the CLI gates one layer upstream and omits `pinyin-search` from `requires` when the flag is off, so the plugin is never loaded and never reaches its own inert branch. Run #7629 measured 47 loaded plugins with the flag off vs 48 with it on (51 vs 52 on main c91af8ed6 under #24036; 52 vs 53 at 5b14b7f3 under QA run #24574, and again at 6679644a under QA run #25817), and found ZERO occurrences of 'pinyin' in a 1.2 MB debug boot log. The clause below therefore reads the roster difference; the inert line is kept only as the alternative oracle for a host that loads the plugin unconditionally"
         ]
       },
       "steps": [
@@ -338,7 +340,7 @@
         "POST /api/v1/data/showcase_account/query { search: 'huaning' } and { search: 'hnkj' } — both must return 华宁科技",
         "confirm the seeded rows were companion-backfilled on this very boot (rows written by seeds BEFORE hook binding are reconciled by the kernel:bootstrapped backfill — no restart needed) by checking the boot log for the backfill, then verify in the browser that the list quick-search / ⌘K / lookup picker send the same $search and hit",
         "restart the server with OS_SEARCH_PINYIN_ENABLED=false and re-run the same queries",
-        "capture the OFF-side inertness from the plugin ROSTER, not from a plugin log line: record the loaded-plugin roster on both boots — the banner's `Plugins: N loaded` and the plugins it names; the CLI omits `pinyin-search` from `requires` when the flag is off, but prints no `requires` list, so the roster is the readable form and grep the whole debug boot log for 'pinyin' — zero occurrences is the proof. Only if the host loaded the plugin anyway does the plugin's own inert line become the thing to capture"
+        "capture the OFF-side inertness from the plugin ROSTER, not from a plugin log line: record the loaded-plugin roster on both boots — the banner's `Plugins: N loaded` and the plugins it names; the CLI omits `pinyin-search` from `requires` when the flag is off, but prints no `requires` list, so the roster is the readable form and grep the whole debug boot log for 'pinyin' — zero occurrences is the proof. Name the run's directory, database file and log files with no 'pinyin' in them (e.g. /tmp/RUN/off-boot.log): the boot log echoes those paths, so a path that spells 'pinyin' puts hits in the grep that are the runner's, not the plugin's. Only if the host loaded the plugin anyway does the plugin's own inert line become the thing to capture"
       ],
       "acceptance": [
         {
@@ -362,7 +364,7 @@
         {
           "clause": "OFF is inert end-to-end, not half-disabled — and under CLI serving the gate sits one layer UPSTREAM of the plugin: with the flag off the CLI does not add `pinyin-search` to `requires`, so the plugin is never loaded (no hooks, no backfill, pinyin-pro never imported, and its own 'is off — inert' line never printed). A host that loads the plugin unconditionally takes the in-plugin inert branch instead. Either route satisfies the ADR-0049 no-half-state design: column provisioning and population share the SINGLE decision point resolveSearchPinyinEnabled",
           "oracle": "log",
-          "verify": "diff the two boots' loaded-plugin roster — the OFF boot is exactly one plugin short and PinyinSearchPlugin is the missing entry (the CLI left `pinyin-search` out of `requires`, which no boot prints — the roster is how it is read; #7629 measured 47 vs 48; main c91af8ed6 measured 51 vs 52; 5b14b7f3 measured 52 vs 53, QA run #24574 — the absolute count moves with the plugin set, the one-plugin difference with PinyinSearchPlugin as the missing entry is the oracle) — and confirm a full-text grep of the OFF debug boot log yields ZERO 'pinyin' occurrences. Do NOT wait for the plugin's inert line: it cannot appear when the plugin was never loaded, and treating its absence as a failure is the trap this clause was rewritten to remove. If the roster shows the plugin WAS loaded, then the inert line is required instead. No backfill activity on either route",
+          "verify": "diff the two boots' loaded-plugin roster — the OFF boot is exactly one plugin short and PinyinSearchPlugin is the missing entry (the CLI left `pinyin-search` out of `requires`, which no boot prints — the roster is how it is read; #7629 measured 47 vs 48; main c91af8ed6 measured 51 vs 52; 5b14b7f3 measured 52 vs 53, QA run #24574; 6679644a measured 52 vs 53, QA run #25817 — the absolute count moves with the plugin set, the one-plugin difference with PinyinSearchPlugin as the missing entry is the oracle) — and confirm a full-text grep of the OFF debug boot log yields ZERO 'pinyin' occurrences, with the run's own paths named neutrally (steps[6]): a hit that is the runner's file path is not the plugin. Do NOT wait for the plugin's inert line: it cannot appear when the plugin was never loaded, and treating its absence as a failure is the trap this clause was rewritten to remove. If the roster shows the plugin WAS loaded, then the inert line is required instead. No backfill activity on either route",
           "evidence": "both boots' plugin roster lines (`Plugins: N loaded` and the named plugins) + the zero-hit grep over the OFF boot log (or, plugin-loaded hosts only, the inert line)"
         },
         {
@@ -398,7 +400,8 @@
         { "revision": 2, "date": "2026-08-11", "change": "the OFF-inertness clause now names an oracle that exists. It demanded a specific plugin log line ('OS_SEARCH_PINYIN_ENABLED is off — inert') which run #7629 proved unobtainable under CLI serving: the flag gates one layer upstream, the CLI omits pinyin-search from `requires`, the plugin is never loaded, and a 1.2 MB debug boot log contained zero occurrences of 'pinyin' (47 loaded plugins off vs 48 on). That is a STRONGER proof of inertness than the log line would have been, so the clause now reads the plugin roster / `requires` difference plus the zero-hit grep, and keeps the inert line only as the alternative oracle for a host that loads the plugin unconditionally — the run is told which route it is on by the roster itself. Step 7, the fixtures requirement and the plugin source citation follow; knownGaps records the unobtainability so the next author does not restore the log-line oracle. This was the item's ONLY partial in #7629 — the substance (both flag sides, per-variant recall, backfill) is unchanged", "ref": "#7647" },
         { "revision": 3, "date": "2026-08-18", "change": "re-targeted clause 3's OFF-side expectation at the initials forms. It demanded that 'zhangwei' stop returning 张伟 with the flag off, but the seeded contact carries email zhangwei@huaning.example and email is searchable:true, so the term still matches through the source column — correct behaviour that the clause scores as the flag failing to disable. The initials (zw / hnkj / wf) have no source-column spelling and are the honest discriminator (#9467 CF-4)", "ref": "#9386" },
         { "revision": 4, "date": "2026-10-17", "change": "clause 2 named 'wf' as an account initials form, but 'wf' is the initials of the seeded CONTACT 王芳 (company 华宁科技); the clause now places 'wf' on showcase_contact and 'hnkj' on showcase_account, and its ⛔ note adds 'wangfang', which still matches 王芳 through her email with the flag off. The roster counts in clause 3 and the knownGap gain the current reading (51 vs 52) and clause 3 states that the one-plugin difference, not the absolute count, is the oracle. Re-run on main c91af8ed6: flag ON (stock, zh-CN default) contact zhangwei/zw/张 → 张伟, contact wf → 王芳, account huaning/hnkj/华 → 华宁科技; flag OFF (OS_SEARCH_PINYIN_ENABLED=false, fresh DB, debug log) contact zw → 0, wf → 0, 张 → 张伟, zhangwei → 张伟 and wangfang → 王芳 (email column), account hnkj → 0, huaning and 华 → 华宁科技; banner 'Plugins: 51 loaded' OFF vs 52 ON, the difference PinyinSearchPlugin, and zero 'pinyin' occurrences in the 589 KB OFF debug boot log", "ref": "#24036" },
-        { "revision": 5, "date": "2026-10-19", "change": "fixtures.requires[3], fixtures.knownGaps[0], steps[6] and acceptance[3] (verify, evidence) corrected from QA run #24574 (18.0 sweep, 5b14b7f3; carried by #24593), re-read at objectstack f89d29e382. The item asked for each boot's `requires` list, which no boot prints: packages/cli/src/commands/serve.ts builds `requires` from the served capabilities and never logs it, and the banner (packages/cli/src/utils/format.ts) prints `Plugins: N loaded`. The roster is the readable form, and the one-plugin difference with PinyinSearchPlugin as the missing entry stays the oracle. The 5b14b7f3 count (52 vs 53) is recorded beside the older readings; the absolute count still moves with the plugin set. No clause substance changed. Wave anchor #24579 §3", "ref": "#24671" }
+        { "revision": 5, "date": "2026-10-19", "change": "fixtures.requires[3], fixtures.knownGaps[0], steps[6] and acceptance[3] (verify, evidence) corrected from QA run #24574 (18.0 sweep, 5b14b7f3; carried by #24593), re-read at objectstack f89d29e382. The item asked for each boot's `requires` list, which no boot prints: packages/cli/src/commands/serve.ts builds `requires` from the served capabilities and never logs it, and the banner (packages/cli/src/utils/format.ts) prints `Plugins: N loaded`. The roster is the readable form, and the one-plugin difference with PinyinSearchPlugin as the missing entry stays the oracle. The 5b14b7f3 count (52 vs 53) is recorded beside the older readings; the absolute count still moves with the plugin set. No clause substance changed. Wave anchor #24579 §3", "ref": "#24671" },
+        { "revision": 6, "date": "2026-10-26", "change": "steps[6], acceptance[3].verify and knownGaps[0] corrected (checklist-accuracy findings of QA run #25817, release-18.2.0-manual-set at 6679644a; wave anchor #25807): the zero-'pinyin' grep was polluted by runner file paths that contain 'pinyin', so the step and the verify ask for neutral names; and the plugin counts at 6679644a are 53 with the flag on and 52 with it off. The clause and its one-plugin oracle are unchanged", "ref": "#25847" }
       ]
     },
     {
@@ -692,7 +695,7 @@
       "title": "Global search (GET /api/v1/search) skips what the caller cannot read instead of failing: an unreadable object is never queried, named or counted; a readable object is searched only on fields the caller may query; row scope still narrows every searched object",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -772,7 +775,7 @@
       ],
       "automated": {
         "kind": "api",
-        "ref": "packages/qa/dogfood/test/search-skip-unreadable.dogfood.test.ts ('dogfood: global search skips the objects a member cannot read': the walled object refused at its own door, the unscoped search never names it, objects= with it answers the readable hits only and alone equals a no-such-object name, the admin control) + packages/metadata-protocol/src/protocol.search-skip-unreadable.test.ts (12 cases, incl. 'a partial queryable set is handed to the engine as searchFields' and 'an object with NO queryable search field is skipped, unqueried and uncounted'). Row scope (acceptance[3]) and the hidden-field case (acceptance[4]) have no end-to-end pin yet, see knownGaps"
+        "ref": "packages/qa/dogfood/test/search-skip-unreadable.dogfood.test.ts ('dogfood: global search skips the objects a member cannot read': the walled object refused at its own door, the unscoped search never names it, objects= with it answers the readable hits only and alone equals a no-such-object name, the admin control; it runs on its own planted skipsearch_open / skipsearch_walled objects and skipsearch_member permission set, not this item's W, showcase_invoice and provisioned member, so it corroborates acceptance[0]-[2] on a planted pair and never reads the stock fixture, and its unscoped case asserts no totalObjects — only the mixed and walled-only cases do — so acceptance[0]'s count half is the run's) + packages/metadata-protocol/src/protocol.search-skip-unreadable.test.ts (12 cases, incl. 'a partial queryable set is handed to the engine as searchFields' and 'an object with NO queryable search field is skipped, unqueried and uncounted'). Row scope (acceptance[3]) and the hidden-field case (acceptance[4]) have no end-to-end pin yet, see knownGaps"
       },
       "source": [
         "packages/metadata-protocol/src/protocol.ts#searchAll (before an object is queried, the security service's canReadObject is asked with the caller's context and a refused object is skipped; each readable object is searched only on getQueryableFields, handed to the engine as searchFields; an object left with none is skipped; a read failure on a readable object, or an admission check that throws, still fails the search)",
@@ -799,6 +802,12 @@
           "date": "2026-10-19",
           "change": "fixtures.requires[2], steps[4] and steps[5] corrected from QA run #24593 (18.0 sweep round 2, ba4afcc2), re-read at objectstack f89d29e382. (1) searchAll caps each object at perObject = 5 by default (max 25, protocol.ts searchAll) and `truncated` describes only the overall limit, so step 5's literal query returns 5 admin hits without INV-1003 and reads as acceptance[3]'s admin half failing; the step now sends perObject=25. (2) The suggested hidden-field value is unusable on a fresh boot: last_login_ip is stamped from the trusted proxy's forwarded header (sys-user.object.ts) and is null after a direct sign-in, and ban_reason is null; the measured stock V is `role` = `user`. No clause changed. Wave anchor #24579 round 2 §3 (6272314386)",
           "ref": "#24671"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-26",
+          "change": "automated.ref says what the dogfood pin runs on (checklist-accuracy finding a0-a2 of QA run #25815, release-18.2.0-tier1 at 6679644a; wave anchor #25807): it plants skipsearch_open / skipsearch_walled rather than reading the showcase objects the steps name, and its unscoped case does not assert totalObjects. The clauses are unchanged",
+          "ref": "#25847"
         }
       ]
     }

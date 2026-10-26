@@ -48,7 +48,7 @@ interface BaseSchema {
   className?: string;
 
   /** Dynamic Behavior */
-  hidden?: boolean | ExpressionWire; // e.g. "${data.role != 'admin'}"
+  hidden?: boolean | ExpressionWire; // e.g. "${data.status != 'active'}"
   disabled?: boolean | ExpressionWire; // same wire as hidden
 
   /** Layout Slots */
