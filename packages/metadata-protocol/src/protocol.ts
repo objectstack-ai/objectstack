@@ -165,7 +165,7 @@ import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSp
 // live transport in through `attachMetadataMutationPubSub`.
 import type { IPubSub } from '@objectstack/spec/contracts';
 import { RLS_MEMBERSHIP_RESOLVER_SERVICE } from '@objectstack/spec/contracts';
-import { ALL_CONVERSIONS, applyConversionsToFlow, applyConversionsToStoredItem, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
+import { applyConversionsToFlow, applyConversionsToStoredItem, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
 import { type FormView, type I18nLabel, isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
 // structurally mention `FormFieldInput` (FormView `sections[].fields`), and
@@ -399,6 +399,8 @@ import { artifactLockLayerAt, lookupArtifactItem, shippedArtifactsOf, shippingPa
 import { namesWithOwnStoredRow, readActiveOverlayRows, readItemActiveRows, storedOverlayEntries } from './protocol-stored-overlay-reads.js';
 // [#25467 cut 17] The object-owner verdicts: which contributor kind a stored object row registers as, and handing an adopted object's name to its rebound row.
 import { classifyObjectContribution, releaseAdoptedObjectOwner } from './protocol-object-owner.js';
+// [#25467 cut 18] The flow save's retired-spelling replay verdict (#23903 ruling B′): does a save newly introduce a retired spelling no stored row carries.
+import { flowSaveReplaysRetired } from './protocol-flow-save-replay.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -3355,7 +3357,7 @@ function isoFromValidDate(value: unknown): unknown {
  *   predates the flip" is a fact; a save never knows that, exactly as the
  *   engine's canonicalizer does not.
  */
-const FLOW_FALLBACK_VERDICT_NOT_REPLAYED: readonly string[] = [
+export const FLOW_FALLBACK_VERDICT_NOT_REPLAYED: readonly string[] = [
     'flow-decision-mode-inclusive-explicit',
 ];
 
@@ -6603,59 +6605,11 @@ export class ObjectStackProtocolImplementation implements
         source?: string;
         writeFace?: MetadataWriteFace;
     }, mode: 'draft' | 'publish'): Promise<boolean> {
-        if (request.source !== undefined) return true;
-        if (request.writeFace === 'package-duplicate' || request.writeFace === 'package-unmanaged-import') return true;
-        const retired = new Set(ALL_CONVERSIONS.filter((c) => c.retiredFromLoadPath).map((c) => c.id));
-        // The site of a notice's path, ids standing in for the indexes of the
-        // array elements that carry one, read on the converted body it names.
-        const siteOf = (root: unknown, path: string): string => {
-            let at: unknown = root;
-            let site = '';
-            for (const [, key, index] of path.matchAll(/([^.[\]]+)|\[(\d+)\]/g)) {
-                if (key !== undefined) {
-                    site += site === '' ? key : `.${key}`;
-                    at = at !== null && typeof at === 'object' ? (at as Record<string, unknown>)[key] : undefined;
-                    continue;
-                }
-                const element: unknown = Array.isArray(at) ? at[Number(index)] : undefined;
-                const id = element !== null && typeof element === 'object' ? (element as { id?: unknown }).id : undefined;
-                site += typeof id === 'string' && id !== '' ? `[#${id}]` : '[' + index + ']';
-                at = element;
-            }
-            return site;
+        // [#25467 cut 18] The body moved to `protocol-flow-save-replay.ts` (see `FlowSaveReplayHost`).
+        const host: ThisParameterType<typeof flowSaveReplaysRetired> = {
+            getOverlayRepo: (...a) => this.getOverlayRepo(...a),
         };
-        const retiredHits = (body: unknown): Set<string> => {
-            const fired: ConversionNotice[] = [];
-            const converted = applyConversionsToFlow(body, {
-                includeRetired: true,
-                excludeConversionIds: FLOW_FALLBACK_VERDICT_NOT_REPLAYED,
-                onNotice: (n) => { if (retired.has(n.conversionId)) fired.push(n); },
-            });
-            const root = { flows: [converted] };
-            return new Set(fired.map((n) => `${n.conversionId}|${n.from}|${siteOf(root, n.path)}`));
-        };
-        // The request's retired hits; each one a stored row carries is struck off.
-        const uncarried = retiredHits(request.item);
-        const strikeCarried = (body: unknown): void => {
-            if (uncarried.size === 0) return;
-            for (const hit of retiredHits(body)) uncarried.delete(hit);
-        };
-        const repo = this.getOverlayRepo();
-        const ref = { type: 'flow', name: request.name, org: 'env' } as Parameters<typeof repo.headAt>[0];
-        const member = itemDiscriminator('flow', request.item);
-        const state: 'active' | 'draft' = mode === 'draft' ? 'draft' : 'active';
-        const target = await repo.headAt(ref, { state, packageId: request.packageId ?? null, member });
-        if (target.head) {
-            strikeCarried(target.head.body);
-            if (uncarried.size === 0) return true;
-            if (state !== 'draft') return false;
-        } else if (state !== 'draft') {
-            return false;
-        }
-        const active = (await repo.headAt(ref, { state: 'active', packageId: target.packageId, member })).head;
-        if (!active) return false;
-        strikeCarried(active.body);
-        return uncarried.size === 0;
+        return flowSaveReplaysRetired.call(host, request, mode);
     }
 
     /**
