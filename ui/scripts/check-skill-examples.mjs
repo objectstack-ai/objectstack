@@ -544,11 +544,11 @@ export const MARKED_FLOOR = new Map([
   // the population measured 39 marked / 46 parsing before, 70 / 70 after.
   // 70 -> 69 (objectstack#25926): the "Data-dependent" `json` fence in
   // `skills/objectui/guides/schema-expressions.md` was DELETED, not unmarked.
-  // It taught `visibleOn`, which that card retires (ADR-0089: `visibleWhen` is
-  // the one conditional-visibility predicate), and the guide's token ceiling
-  // (scripts/check-skills-token-ratchet.mjs) left no room to keep a second
-  // example beside the rewritten one that now teaches `visibleWhen`. The fence
-  // was green at deletion; nothing here routes around a red.
+  // It was a `hidden` template example (`"hidden": "${!data.items || …}"`)
+  // that duplicated the syntax block above it, and the guide's token ceiling
+  // (scripts/check-skills-token-ratchet.mjs) had no room for both once that
+  // block was rewritten for the retired `visibleOn` / `hiddenOn` / `disabledOn`
+  // spellings. The fence was green at deletion; nothing here routes around a red.
   ['json', 69],
 ]);
 

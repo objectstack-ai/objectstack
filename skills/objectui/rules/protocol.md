@@ -109,9 +109,8 @@ as React props (`packages/react/src/SchemaRenderer.tsx`), which those renderers
 ignore. A key parked under `props` is therefore dropped: the component renders
 an empty frame, and the envelope itself lands in the DOM as the invalid
 attribute `props="[object Object]"`. Silent for every key except the node-gate
-predicates (`visibleWhen` / `visible` / `hidden` / `disabled`, and their
-retired spellings), which are refused by name on the
-console, with the migration, instead of gating nothing.
+predicates (`visibleWhen` / `visible` / `hidden` / `disabled`), which are
+refused by name on the console, with the migration, instead of gating nothing.
 
 **❌ WRONG — renders an empty card:**
 <!-- doc-json: fragment — deliberate counter-example: a title parked under props never reaches the card renderer, and props is no declared key -->
