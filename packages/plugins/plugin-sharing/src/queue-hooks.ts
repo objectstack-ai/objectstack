@@ -40,7 +40,13 @@
 import type { SharingRuleRow } from '@objectstack/spec/contracts';
 import type { OptionalSharingLogger } from './logger-shapes.js';
 import { ruleRegrantQueue } from './rule-hooks.js';
-import { QUEUE_MEMBER_OBJECT, QUEUE_OBJECT, type OwnershipQueueService } from './ownership-queue-service.js';
+import { METADATA_ACTIVATION_TABLE } from '@objectstack/core';
+import {
+  QUEUE_ACTIVATION_TYPE,
+  QUEUE_MEMBER_OBJECT,
+  QUEUE_OBJECT,
+  type OwnershipQueueService,
+} from './ownership-queue-service.js';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
@@ -241,7 +247,7 @@ function queueNamesOf(object: string, hookCtx: any): Set<string> {
   return out;
 }
 
-/** Bind the recompute on the queue's own tables. */
+/** Bind the recompute on the queue's own tables and on the activation ledger's `queue` rows. */
 export function bindQueueRecipientRecompute(
   engine: MinimalEngine,
   service: QueueRecipientRuleService,
@@ -266,5 +272,25 @@ export function bindQueueRecipientRecompute(
         { object, packageId: QUEUE_RECIPIENT_RECOMPUTE_PACKAGE, priority: 190 },
       );
     }
+  }
+  // A declared queue switched on or off in the activation ledger changes whom
+  // it reaches (off: nobody), so the queue-recipient rules naming it are
+  // recomputed on the ledger write. Not caught here: as the declared-sharing-
+  // rule switch's reconcile, a failure is the write's, so the activation door
+  // never answers 200 over a switched-off queue's grants still standing.
+  for (const event of ['afterInsert', 'afterUpdate', 'afterDelete']) {
+    engine.registerHook(
+      event,
+      async (hookCtx: any) => {
+        // The update patch carries `{ id, active, … }`; type and name come from
+        // the pre-image, an insert's from the row itself.
+        const row = { ...(hookCtx?.previous ?? {}), ...(hookCtx?.result ?? hookCtx?.input?.data ?? {}) };
+        if (row.metadata_type !== QUEUE_ACTIVATION_TYPE) return;
+        const name = present(row.name);
+        if (!name) return;
+        await recomputeQueueRecipientRules(service, new Set([name]), logger, { object: METADATA_ACTIVATION_TABLE, event });
+      },
+      { object: METADATA_ACTIVATION_TABLE, packageId: QUEUE_RECIPIENT_RECOMPUTE_PACKAGE, priority: 190 },
+    );
   }
 }

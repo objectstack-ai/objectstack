@@ -61,6 +61,8 @@ interface EngineOptions {
     unbound?: boolean;
     /** Throw this from every ledger write — a hook refusal or a store failure. */
     writeError?: Error;
+    /** The metadata registry's declared items by type; absent, the registry cannot list. */
+    registryItems?: Record<string, Row[]>;
 }
 
 /** A table-backed engine double: the store's keyed find/insert/update and the resolver's `$in` read. */
@@ -89,6 +91,9 @@ function makeEngine(opts: EngineOptions = {}) {
     const engine: any = {
         registry: {
             getObject: (name: string) => (name === LEDGER && !opts.omitLedger ? { name: LEDGER } : undefined),
+            ...(opts.registryItems
+                ? { listItems: (type: string) => opts.registryItems![type] ?? [] }
+                : {}),
         },
         async find(object: string, options: any) {
             const rows = (tables[object] ?? []).filter((r) => matches(r, options?.where));
@@ -727,5 +732,80 @@ describe('the catalog activation door — a declared webhook', () => {
         const h = boot('single', {}, declaredWebhooks({ [HOOK]: {} }));
         expect(statusOf(await flip(h, TENANT_ADMIN(), `/_activation/webhook/${HOOK}`))).toBe(200);
         expect(h.tables[LEDGER][0].package_id ?? null).toBeNull();
+    });
+});
+
+// [ADR-0142 D1] A DECLARED ownership queue is switched through the same door and
+// the same ledger: `:type` `queue`, the name resolved by the `ownership-queue`
+// service's `declaredQueueNamed`, which answers a switched-off queue too so the
+// switch can be turned back on. The effect on resolution and on queue-recipient
+// grants is pinned beside that service (plugin-sharing `ownership-queue.test.ts`).
+describe('the catalog activation door — a declared queue', () => {
+    const QUEUE = 'support_intake';
+    const ownershipQueue = (declared: Record<string, { packageId?: string }> = { [QUEUE]: { packageId: 'crm' } }) => ({
+        'ownership-queue': {
+            async declaredQueueNamed(name: string) {
+                return declared[name] ? { name, ...declared[name] } : null;
+            },
+        },
+    });
+
+    it('`single`: a tenant admin holding `manage_metadata` switches it off — one ledger row of type queue, its package recorded', async () => {
+        const h = boot('single', {}, ownershipQueue());
+        const res = await flip(h, TENANT_ADMIN(), `/_activation/queue/${QUEUE}`);
+        expect(statusOf(res)).toBe(200);
+        expect(res.response?.body?.data).toEqual({ type: 'queue', name: QUEUE, enabled: false });
+        expect(h.tables[LEDGER]).toEqual([
+            expect.objectContaining({ metadata_type: 'queue', name: QUEUE, package_id: 'crm', active: false }),
+        ]);
+    });
+
+    it('`group`: the switch is the platform operator\'s — a tenant admin is refused 403 and nothing is written', async () => {
+        const h = boot('group', {}, ownershipQueue());
+        const refused = await flip(h, TENANT_ADMIN(), `/_activation/queue/${QUEUE}`);
+        expect(statusOf(refused)).toBe(403);
+        expect(messageOf(refused)).toContain('a declared queue');
+        expect(h.writes).toEqual([]);
+        expect(statusOf(await flip(h, PLATFORM_OPERATOR(), `/_activation/queue/${QUEUE}`))).toBe(200);
+    });
+
+    it('an organization\'s own queue is 404 and writes nothing; no queue service is 503', async () => {
+        const h = boot('single', {}, ownershipQueue());
+        const unknown = await flip(h, TENANT_ADMIN(), '/_activation/queue/our_own_queue');
+        expect(statusOf(unknown)).toBe(404);
+        expect(messageOf(unknown)).toContain('sys_queue');
+        const bare = boot('single');
+        const unavailable = await flip(bare, TENANT_ADMIN(), `/_activation/queue/${QUEUE}`);
+        expect(statusOf(unavailable)).toBe(503);
+        expect(codeOf(unavailable)).toBe('SERVICE_UNAVAILABLE');
+        expect([...h.writes, ...bare.writes]).toEqual([]);
+    });
+});
+
+// [ADR-0142 D5] A DECLARED assignment rule is switched through the same door:
+// `:type` `assignment_rule`, the name resolved in the engine's metadata registry,
+// the one the engine's evaluator lists on every insert and skips a switched-off
+// rule from (objectql `assignment-rules.ts`).
+describe('the catalog activation door — a declared assignment rule', () => {
+    const RULE = 'case_intake';
+    const registryItems = { assignment_rule: [{ name: RULE, object: 'crm_case', _packageId: 'crm' }] };
+
+    it('`single`: a tenant admin holding `manage_metadata` switches it off — one ledger row, its package recorded', async () => {
+        const h = boot('single', { registryItems });
+        const res = await flip(h, TENANT_ADMIN(), `/_activation/assignment_rule/${RULE}`);
+        expect(statusOf(res)).toBe(200);
+        expect(res.response?.body?.data).toEqual({ type: 'assignment_rule', name: RULE, enabled: false });
+        expect(h.tables[LEDGER]).toEqual([
+            expect.objectContaining({ metadata_type: 'assignment_rule', name: RULE, package_id: 'crm', active: false }),
+        ]);
+    });
+
+    it('an undeclared name is 404; an engine whose registry cannot list is 503 — never a write', async () => {
+        const h = boot('single', { registryItems });
+        expect(statusOf(await flip(h, TENANT_ADMIN(), '/_activation/assignment_rule/nowhere'))).toBe(404);
+        const bare = boot('single');
+        const unavailable = await flip(bare, TENANT_ADMIN(), `/_activation/assignment_rule/${RULE}`);
+        expect(statusOf(unavailable)).toBe(503);
+        expect([...h.writes, ...bare.writes]).toEqual([]);
     });
 });

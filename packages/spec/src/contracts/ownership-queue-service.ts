@@ -110,10 +110,11 @@ export interface IOwnershipQueueService {
   queuesOf(userId: string, organizationId: string | null): Promise<string[]>;
 
   /**
-   * The declared queue named `name` — `null` when no package declares it or
-   * the activation ledger switches it off. Optional: the activation door looks
-   * a `queue` row's subject up through it, and answers 503 when the
-   * registered service does not carry it.
+   * The declared queue named `name`, whether or not the activation ledger
+   * switches it off — `null` when no package declares it. Optional: the
+   * activation door looks a `queue` row's subject up through it (a queue
+   * switched off must stay addressable to be switched back on), and answers
+   * 503 when the registered service does not carry it.
    */
   declaredQueueNamed?(name: string): Promise<{ name: string; packageId?: string } | null>;
 }

@@ -141,7 +141,8 @@ describe('[ADR-0142 D1/D2] OwnershipQueueService — resolution', () => {
     const svc = service(makeEngine({ declared: SUPPORT_DECLARED, tables }));
     expect(await svc.resolveQueue('support_tier1', 'org_a')).toBeNull();
     expect(await svc.expandMembers('support_tier1', 'org_a')).toEqual([]);
-    expect(await svc.declaredQueueNamed('support_tier1')).toBeNull();
+    // Still addressable by the activation door, so it can be switched back on.
+    expect(await svc.declaredQueueNamed('support_tier1')).toEqual({ name: 'support_tier1', packageId: 'com.acme.support' });
     // The name stays reserved: the authored-row guard still refuses it.
     expect(svc.isDeclaredQueueName('support_tier1')).toBe(true);
   });
@@ -429,5 +430,23 @@ describe('[ADR-0142 D7] queue-recipient rules recompute on a queue-membership wr
     }, { warn });
     await expect(engine.fire('afterDelete', 'sys_queue', { previous: { name: 'billing' } })).resolves.toBeUndefined();
     expect(warn).toHaveBeenCalled();
+  });
+
+  it('a declared queue switched in the activation ledger recomputes the rules naming it; other ledger rows do not', async () => {
+    const engine = makeEngine();
+    const svc = ruleService();
+    bindQueueRecipientRecompute(engine as any, svc);
+    // The update patch carries no type or name: they come from the pre-image.
+    await engine.fire('afterUpdate', METADATA_ACTIVATION_TABLE, {
+      previous: { id: 'a1', metadata_type: 'queue', name: 'support_tier1', active: true },
+      result: { id: 'a1', active: false },
+      input: { data: { active: false } },
+    });
+    expect(svc.revokeRuleGrantsForRetiredRecipients.mock.calls.map((c: any[]) => c[0].id)).toEqual(['r1']);
+    await engine.fire('afterInsert', METADATA_ACTIVATION_TABLE, {
+      result: { metadata_type: 'sharing_rule', name: 'support_tier1', active: false },
+    });
+    expect(svc.revokeRuleGrantsForRetiredRecipients).toHaveBeenCalledTimes(1);
+    await ruleRegrantQueue.whenIdle();
   });
 });

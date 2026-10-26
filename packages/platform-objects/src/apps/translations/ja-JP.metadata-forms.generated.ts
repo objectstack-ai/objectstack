@@ -2417,6 +2417,14 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     label: "共有ルール",
     description: "パッケージが宣言するレコード共有ルール。組織は自身のルールを設定で作成します"
   },
+  queue: {
+    label: "キュー",
+    description: "名前付きの担当者の集まり。レコードはその中の誰かが引き受けるまでここに置かれます。組織は自身のキューを設定で用意します"
+  },
+  assignment_rule: {
+    label: "割り当てルール",
+    description: "パッケージが宣言するルール。新しいレコードをキューまたは担当者に振り分けます"
+  },
   agent: {
     label: "AI エージェント",
     sections: {

@@ -209,12 +209,13 @@ export class OwnershipQueueService implements IOwnershipQueueService {
   // ── Helpers the plugin's other modules read ────────────────────────────────
 
   /**
-   * The declared queue named `name`, unless the activation ledger switches it
-   * off — the reader the activation door looks a `queue` row's subject up
-   * through, and the first half of {@link resolveQueue}.
+   * The declared queue named `name`, switched on or off — the reader the
+   * activation door looks a `queue` row's subject up through. It ignores the
+   * ledger on purpose: a queue switched off must stay addressable, or the door
+   * could never switch it back on. {@link resolveQueue} reads the ledger.
    */
   async declaredQueueNamed(name: string): Promise<{ name: string; packageId?: string } | null> {
-    const item = await this.declaredQueueItem(name);
+    const item = this.declaredItems().find((q) => q.name === name);
     if (!item) return null;
     const packageId = str(item._packageId ?? item.packageId);
     return { name: item.name, ...(packageId ? { packageId } : {}) };

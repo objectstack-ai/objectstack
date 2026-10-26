@@ -2417,6 +2417,14 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     label: "Regla de Compartición",
     description: "Una regla que un paquete declara para compartir registros; las organizaciones crean las suyas en Configuración"
   },
+  queue: {
+    label: "Cola",
+    description: "Un conjunto de personas con nombre donde los registros esperan hasta que una de ellas los toma; las organizaciones preparan las suyas en Configuración"
+  },
+  assignment_rule: {
+    label: "Regla de Asignación",
+    description: "Una regla que un paquete declara para dirigir los registros nuevos a una cola o a una persona"
+  },
   agent: {
     label: "Agente de IA",
     sections: {

@@ -2417,6 +2417,14 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     label: "共享规则",
     description: "软件包声明的记录共享规则；组织在设置中编写自己的规则"
   },
+  queue: {
+    label: "队列",
+    description: "一组具名的人员，记录可停留其中，直到其中一人认领；组织在设置中配置自己的队列"
+  },
+  assignment_rule: {
+    label: "分配规则",
+    description: "软件包声明的规则，把新记录分配到某个队列或某个人"
+  },
   agent: {
     label: "AI 代理",
     sections: {
