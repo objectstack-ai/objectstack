@@ -1421,8 +1421,9 @@ export const BASELINE = Object.freeze({
    * lowered with (the objectstack#25925 entry on
    * {@link MAX_EAGER_CLOSURE_GZIP_BYTES} carries the instrument and the reading
    * it superseded, ⛔ not restated here). Measured on `main` itself, not on a
-   * branch commit: the pull request that re-pins it edits this file only, which
-   * reaches no bundler input, so it cannot move the figure it pins.
+   * branch commit: the pull request that re-pins it edits this file and its
+   * unit test only, which reach no bundler input, so it cannot move the figure
+   * it pins.
    *
    * ⚠️ The paragraph below describes the reading this one superseded, the
    * previous baseline `b6f11d3` (3,072,056 across 85 of 2291 chunks), kept as
