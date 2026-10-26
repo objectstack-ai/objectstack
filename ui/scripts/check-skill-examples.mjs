@@ -542,7 +542,14 @@ export const MARKED_FLOOR = new Map([
   // json/jsonc fences in the corpus now parses under its own tag and carries
   // the marker. Raising the number is the ADD direction this list documents:
   // the population measured 39 marked / 46 parsing before, 70 / 70 after.
-  ['json', 70],
+  // 70 -> 69 (objectstack#25926): the "Data-dependent" `json` fence in
+  // `skills/objectui/guides/schema-expressions.md` was DELETED, not unmarked.
+  // It taught `visibleOn`, which that card retires (ADR-0089: `visibleWhen` is
+  // the one conditional-visibility predicate), and the guide's token ceiling
+  // (scripts/check-skills-token-ratchet.mjs) left no room to keep a second
+  // example beside the rewritten one that now teaches `visibleWhen`. The fence
+  // was green at deletion; nothing here routes around a red.
+  ['json', 69],
 ]);
 
 /**
