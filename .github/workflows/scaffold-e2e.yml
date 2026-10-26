@@ -259,7 +259,7 @@ jobs:
           cd "$RUNNER_TEMP"
           node "$GITHUB_WORKSPACE/packages/create-objectstack/bin/create-objectstack.js" skills-probe --skip-install --skip-skills
           cd skills-probe
-          expected=$(for d in "$GITHUB_WORKSPACE"/skills/*/; do [ -f "${d}SKILL.md" ] && basename "$d"; done | sort)
+          expected=$(for d in "$GITHUB_WORKSPACE"/skills/*/; do if [ -f "${d}SKILL.md" ]; then basename "$d"; fi; done | sort)
           if [ -z "$expected" ]; then
             echo "::error::skills/ holds no <skill>/SKILL.md — the curated catalog this step compares against is empty"
             exit 1
