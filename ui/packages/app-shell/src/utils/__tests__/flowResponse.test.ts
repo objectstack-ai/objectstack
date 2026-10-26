@@ -569,9 +569,9 @@ describe('interpretFlowResponse — a refusal met inside the run, by the record-
         "Duplicate record refused on 'crm_account': a unique constraint already holds these values. No record was written.";
     const RAW_ERROR = `Node 'create_account' failed: create_record(crm_account) failed: ${INNER_MESSAGE}`;
     const USER_TEXT = '该客户名称已被另一位销售代表占用，请联系主管。';
-    const UNIQUE = { code: 'UNIQUE_VIOLATION', message: INNER_MESSAGE };
-    const DENIED = { code: 'PERMISSION_DENIED', message: "insufficient privileges to create crm_account" };
-    const RULE = { code: 'VALIDATION_FAILED', message: 'Account name must not contain a URL.' };
+    const UNIQUE = { code: 'UNIQUE_VIOLATION', message: INNER_MESSAGE } as const;
+    const DENIED = { code: 'PERMISSION_DENIED', message: 'insufficient privileges to create crm_account' } as const;
+    const RULE = { code: 'VALIDATION_FAILED', message: 'Account name must not contain a URL.' } as const;
 
     /** The trigger/resume door's `400 FLOW_FAILED`, proven real by the spec's own schemas. */
     function flowFailed(details: Record<string, unknown>, userMessage?: string) {
@@ -608,7 +608,7 @@ describe('interpretFlowResponse — a refusal met inside the run, by the record-
         expect((zh as { error: string }).error).not.toContain('crm_account');
     });
 
-    it("a producer-marked userMessage wins over the inner refusal, verbatim", () => {
+    it('a producer-marked userMessage wins over the inner refusal, verbatim', () => {
         expect(failed400(flowFailed({ innerRefusal: UNIQUE }, USER_TEXT))).toMatchObject({ error: USER_TEXT });
         expect(failed400(flowFailed({ innerRefusal: DENIED }, USER_TEXT))).toMatchObject({ error: USER_TEXT });
     });
