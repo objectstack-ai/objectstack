@@ -19,6 +19,7 @@ import {
   packedFiles,
   toolingConventionFrom,
 } from '../check-published-dist-tooling.mjs';
+import { rootWorkflow, rootWorkflowFiles } from './helpers/root-ci';
 
 /**
  * objectui#4846 — no published package's build output may carry tooling material.
@@ -472,23 +473,19 @@ describe('wiring', () => {
     );
   });
 
-  it('runs nightly', () => {
-    const workflow = fs.readFileSync(path.join(repoRoot, '.github/workflows/published-dist-gate.yml'), 'utf8');
-    expect(workflow).toContain('schedule:');
-    expect(workflow).toContain('workflow_dispatch:');
-    expect(workflow).toContain('check:published-dist');
-  });
+  // `runs nightly` retired with objectstack#25712. It read objectui's
+  // `published-dist-gate.yml`, which runs nowhere under the monorepo: GitHub
+  // runs the root `.github/workflows/` alone. That workflow is row 23 of the
+  // objectstack#25697 workflow roster, "kept, follow-up port", and the port
+  // brings the pin back against the root file that schedules the scan.
 
   it('is NOT wired into any per-PR workflow — the ruling forbade a per-PR full-repo build', () => {
-    const workflowsDir = path.join(repoRoot, '.github/workflows');
-    const perPr = fs
-      .readdirSync(workflowsDir)
-      .filter((file) => file.endsWith('.yml') || file.endsWith('.yaml'))
-      .filter((file) => file !== 'published-dist-gate.yml')
-      .filter((file) => /^on:[\s\S]*?\bpull_request:/m.test(fs.readFileSync(path.join(workflowsDir, file), 'utf8')));
+    // Asked of the root `.github/workflows/`, the only workflows GitHub runs
+    // under the monorepo (objectstack#25712); `ui/.github/` runs nowhere.
+    const perPr = rootWorkflowFiles().filter((file) => /^on:[\s\S]*?\bpull_request:/m.test(rootWorkflow(file)));
     expect(perPr.length).toBeGreaterThan(0); // the scan itself must not be empty
     for (const file of perPr) {
-      const text = fs.readFileSync(path.join(workflowsDir, file), 'utf8');
+      const text = rootWorkflow(file);
       expect(text.includes(GATE) || text.includes('check:published-dist'), file).toBe(false);
     }
   });

@@ -445,71 +445,22 @@ describe('objectui#5646 — the real file the instance was written in', () => {
 // Wiring
 // ---------------------------------------------------------------------------
 
-describe('wiring — the gate is reachable and every PR shape starts it', () => {
+describe('wiring — the gate is reachable by name', () => {
   const SCRIPT = 'scripts/check-vi-mock-specifiers.mjs';
-  const WORKFLOW = 'repo-gates.yml';
-  const workflowDir = path.join(repoRoot, '.github/workflows');
-  const workflowFiles = fs.readdirSync(workflowDir).filter((f) => f.endsWith('.yml'));
 
-  /**
-   * A workflow's YAML with whole-line comments removed — this workflow's header
-   * discusses `paths` and `paths-ignore` in prose, and the sibling cheap gates
-   * name each other's scripts in theirs. A scan that counted comments would
-   * report filters and duplicate homes that no file has.
-   */
-  const yamlOf = (file: string) =>
-    fs
-      .readFileSync(path.join(workflowDir, file), 'utf8')
-      .split('\n')
-      .filter((line) => !/^\s*#/.test(line))
-      .join('\n');
+  // Retired with objectstack#25712: `has a workflow that gates pull requests,
+  // not just pushes`, `subscribes merge_group — a required check that skips a
+  // queue build stalls it`, `runs it in NO path-filtered workflow`, `has
+  // exactly one home`, and `installs nothing before running the gate — the
+  // cheap tier, mechanically`. Each read objectui's `repo-gates.yml`, this
+  // gate's only home, and that file runs nowhere under the monorepo: GitHub
+  // runs the root `.github/workflows/` alone, and no workflow there runs this
+  // gate. objectstack#25880 ports the `repo-gates.yml` gates (row 24 of the
+  // objectstack#25697 workflow roster) into the root `Lint UI` job and brings
+  // these pins back against that job, by path.
 
   it('is exposed as a root package script', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
     expect(pkg.scripts['check:vi-mock-specifiers']).toBe(`node ${SCRIPT}`);
-  });
-
-  it('has a workflow that gates pull requests, not just pushes', () => {
-    expect(fs.existsSync(path.join(workflowDir, WORKFLOW)), 'a check nothing runs is not a gate').toBe(true);
-    const yaml = yamlOf(WORKFLOW);
-    expect(yaml).toMatch(new RegExp(`run:\\s*node\\s+${SCRIPT.replace(/[.]/g, '\\.')}`));
-    expect(yaml).toMatch(/^\s*pull_request:/m);
-    expect(yaml).toMatch(/^\s*push:/m);
-  });
-
-  it('subscribes merge_group — a required check that skips a queue build stalls it', () => {
-    // objectui#3523: `main` sits behind an enforced queue, and a required
-    // context that never reports on the queue build does not fail it, it hangs
-    // it until the ruleset's 60-minute timeout.
-    expect(yamlOf(WORKFLOW)).toMatch(/^\s*merge_group:/m);
-  });
-
-  it('runs it in NO path-filtered workflow', () => {
-    // A mock can be written into any package, so no path filter is correct —
-    // and reporting on every PR shape is also what makes the check requirable.
-    expect(workflowFiles.length, 'the workflow directory scan returned implausibly few files').toBeGreaterThan(5);
-    for (const file of workflowFiles) {
-      const yaml = yamlOf(file);
-      if (!yaml.includes(SCRIPT)) continue;
-      expect(yaml, `${file} runs ${SCRIPT} behind a paths-ignore`).not.toMatch(/paths-ignore:/);
-      expect(yaml, `${file} runs ${SCRIPT} behind a paths filter — see objectui#3448`).not.toMatch(/^\s+paths:/m);
-    }
-  });
-
-  it('has exactly one home', () => {
-    // A second copy in a path-filtered workflow is how a gate ends up looking
-    // covered while the change it exists for still slips past.
-    expect(workflowFiles.filter((f) => yamlOf(f).includes(SCRIPT))).toEqual([WORKFLOW]);
-  });
-
-  it('installs nothing before running the gate — the cheap tier, mechanically', () => {
-    // Since objectui#12214 the home is `repo-gates.yml`, ONE job that installs
-    // after its install-free gates: the property is now an ORDER -- this gate's
-    // step sits before the job's `pnpm install` -- and no longer an absence.
-    const yaml = yamlOf(WORKFLOW);
-    const gateAt = yaml.indexOf(SCRIPT);
-    const installAt = yaml.indexOf('pnpm install');
-    expect(gateAt).toBeGreaterThan(-1);
-    expect(installAt === -1 || gateAt < installAt, 'the gate step moved below the install step').toBe(true);
   });
 });

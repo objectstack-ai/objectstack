@@ -2096,22 +2096,17 @@ describe('objectui#7896 — every package README is inside the scan surface', ()
   });
 });
 
-describe('wiring — the gate is reachable and a docs-only PR starts it', () => {
-  const workflowDir = path.join(repoRoot, '.github/workflows');
-  const workflowPath = path.join(workflowDir, 'repo-gates.yml');
-  const workflowFiles = fs.readdirSync(workflowDir).filter((f) => f.endsWith('.yml'));
-
-  /**
-   * A workflow's YAML with whole-line comments removed — these headers name each
-   * other's scripts in prose, and a scan that counted comments would report
-   * duplicate homes that no file has.
-   */
-  const yamlOf = (file: string) =>
-    fs
-      .readFileSync(path.join(workflowDir, file), 'utf8')
-      .split('\n')
-      .filter((line) => !/^\s*#/.test(line))
-      .join('\n');
+describe('wiring — the gate is reachable by name, and needs no install', () => {
+  // Retired with objectstack#25712: `has a workflow that gates pull requests,
+  // not just pushes`, `runs it in NO path-filtered workflow — the change that
+  // breaks it is docs-only`, `has exactly one home`, the install ORDER half of
+  // `needs no install`, and the header-count pin further down. Each read
+  // objectui's `repo-gates.yml`, this gate's only home, and that file runs
+  // nowhere under the monorepo: GitHub runs the root `.github/workflows/`
+  // alone, and no workflow there runs this gate. objectstack#25880 ports the
+  // `repo-gates.yml` gates (row 24 of the objectstack#25697 workflow roster)
+  // into the root `Lint UI` job and brings these pins back against that job, by
+  // path.
 
   it('is exposed as a root package script', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {
@@ -2120,46 +2115,9 @@ describe('wiring — the gate is reachable and a docs-only PR starts it', () => 
     expect(pkg.scripts['check:doc-types']).toBe(`node ${SCRIPT}`);
   });
 
-  it('has a workflow that gates pull requests, not just pushes', () => {
-    expect(fs.existsSync(workflowPath), 'a check nothing runs is not a gate').toBe(true);
-    const yaml = yamlOf('repo-gates.yml');
-    expect(yaml).toMatch(new RegExp(`run:\\s*node\\s+${SCRIPT.replace(/[.]/g, '\\.')}`));
-    expect(yaml).toMatch(/^\s*pull_request:/m);
-    expect(yaml).toMatch(/^\s*push:/m);
-    expect(yaml).toMatch(/^\s*merge_group:/m);
-  });
-
-  it('runs it in NO path-filtered workflow — the change that breaks it is docs-only', () => {
-    // The whole reason this is its own workflow. `ci.yml`'s type-check job
-    // excludes `content/**` from the diff that decides whether its gates run, so
-    // a PR editing only `content/docs/**` would start this gate nowhere.
-    expect(workflowFiles.length, 'the workflow directory scan returned implausibly few files').toBeGreaterThan(5);
-    for (const file of workflowFiles) {
-      const yaml = yamlOf(file);
-      if (!yaml.includes(SCRIPT)) continue;
-      expect(yaml, `${file} runs ${SCRIPT} behind a paths-ignore — a docs-only change would not start it`).not.toMatch(
-        /paths-ignore:/,
-      );
-      expect(yaml, `${file} runs ${SCRIPT} behind a paths filter — see objectui#3448`).not.toMatch(/^\s+paths:/m);
-    }
-  });
-
-  it('has exactly one home', () => {
-    expect(workflowFiles.filter((f) => yamlOf(f).includes(SCRIPT))).toEqual(['repo-gates.yml']);
-  });
-
-  it('needs no install, so it can afford to run unfiltered', () => {
+  it('needs no install: its import graph reaches no package', () => {
     // The moment this needs `pnpm install` it stops being cheap enough to run on
     // every PR shape, and the filter that follows is the hole.
-    // Since objectui#12214 the home is `repo-gates.yml`, ONE job that installs
-    // after its install-free gates: the property is now an ORDER -- this gate's
-    // step sits before the job's `pnpm install` -- and no longer an absence.
-    const yaml = yamlOf('repo-gates.yml');
-    const gateAt = yaml.indexOf(`run: node ${SCRIPT}`);
-    const installAt = yaml.indexOf('pnpm install');
-    expect(gateAt).toBeGreaterThan(-1);
-    expect(installAt === -1 || gateAt < installAt, 'the gate step moved below the install step').toBe(true);
-
     // Walk the WHOLE static import graph, not just the gate's own first line.
     // objectui#6092 converted this gate's entry guard to `./invoked-as.mjs`, a
     // relative import — install-free, but not spelled `node:`. Asserting on the
@@ -2190,77 +2148,12 @@ describe('wiring — the gate is reachable and a docs-only PR starts it', () => 
     expect(external, `the gate's import graph reaches a package, so it needs an install: ${external}`).toEqual([]);
   });
 
-  /**
-   * objectui#7448. The header of this workflow described its scan surface as
-   * "184 pages (144 `.mdx` + 40 `.md`)". Every part of that had drifted by the
-   * time the card was worked — the gate's own verdict line reported 188 doc
-   * files, and the `.md` half of the split was four short — and NO check went
-   * red over the whole distance, because nothing fails on a stale number written
-   * in a comment. That is the same lesson `UNGATED_DOCS`'s header in
-   * `check-doc-snippet-types.mjs` records after both halves of its own copied
-   * count went stale ("a pointer to the list now rather than a copy of its
-   * length").
-   *
-   * Changing 184 to 188 would only have restarted that clock. This is what makes
-   * the class fail loudly instead: the header may state the population — which
-   * trees, which extensions — but never count it. `doc-fence-languages.yml`
-   * carries the twin of this pin in its own test file; one gate, one home, so
-   * each workflow's header is asserted beside its own gate rather than in a
-   * shared sweep that would own neither.
-   *
-   * Deliberately narrow, and narrow in the same place as the other two copies:
-   * a numeral qualifying a document-population noun, with at most two words
-   * allowed to sit between the two. Issue references (ruled out at the pattern
-   * level by the negative lookbehind, not by luck), `node-version`,
-   * `timeout-minutes` and "the fifth instance of the shape" are all numbers
-   * this header legitimately carries, and
-   * none of them rots when a page is added or deleted. It also means the header
-   * must not quote another header's stale literal verbatim — this pin cannot
-   * tell a quotation from a claim, and refusing both is the safe direction for a
-   * check on prose accuracy.
-   *
-   * ⭐ Those two intervening words are objectui#7888, and they are the sentence
-   * above implemented rather than a new rule. This pin and its twin in
-   * `check-doc-fence-languages.test.ts` both said "a numeral DIRECTLY
-   * qualifying" and both coded it as strict adjacency, so a single adjective
-   * defeated them. Measured: run verbatim over `check-links.yml`'s header as it
-   * stood on `origin/main` at `83fe6e741` — a header carrying TWO live drifted
-   * counts — the adjacent-only pattern reported ONE of them. It found the
-   * sentence about the files the published site is built from, and scored the
-   * one reading "holds 15 INTERNAL documents" clean — which was the count that
-   * had drifted furthest (15 against a measured 17), because an adjective sat
-   * between the numeral and the noun. The pattern below is the third copy's,
-   * carried here verbatim (objectui#7825, PR objectui#7885,
-   * `check-links-workflow.test.ts`), with the noun set unchanged; the word
-   * DIRECTLY is gone from the sentence above because keeping it would only have
-   * inverted the same gap between what this pin claims and what it does.
-   *
-   * Both twin headers were clean under BOTH patterns when this was carried
-   * across, so this closes a proven hole rather than a live violation.
-   */
-  it('its header states the population and never counts it — no count can rot here', () => {
-    const header = headerComments(fs.readFileSync(workflowPath, 'utf8'));
-
-    // objectui#7901 — the floor first, or the assertion below is vacuous. The
-    // count half cannot distinguish a header that carries no counts from a
-    // header this pin has stopped reading; both score `[]`. Measured when this
-    // was added, so it is latent rather than live: the extraction returned 4312
-    // characters from this header, 10.8 times the floor. It read 4514 at 11.3
-    // before objectui#7967 made this extraction strip the `#` markers: 202 of
-    // those characters were markers, and none of them were prose.
-    expect(
-      header.length,
-      'doc-component-types.yml: the header prose this pin reads came back empty or near-empty, so it asserted over nothing',
-    ).toBeGreaterThan(MIN_HEADER_PROSE);
-
-    const counts = documentCounts(header);
-    expect(
-      counts,
-      `doc-component-types.yml's header states a page count (${counts.join(', ')}). Nothing fails when ` +
-        'it drifts, so it will. State the population — or point at the gate\u2019s own verdict line, which ' +
-        'prints the live figure on every run — instead of copying a number into a comment (objectui#7448).',
-    ).toEqual([]);
-  });
+  // The header-count pin (objectui#7448, widened by objectui#7888, floored by
+  // objectui#7901) retired with the pins above: it read `repo-gates.yml`'s
+  // header. The three controls below stay. They exercise `documentCounts` and
+  // `headerComments` on synthetic text and read no workflow, and once
+  // objectstack#25880 gives this gate a root home they are the controls of the
+  // pin that comes back against that file's header.
 
   /**
    * The positive control for the pin above — objectui#7914.

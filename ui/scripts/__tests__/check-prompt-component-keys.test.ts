@@ -282,15 +282,16 @@ describe('the repository this gate guards', () => {
 // ── 4. wiring: a check nothing runs is not a gate ────────────────────────────
 
 describe('wiring', () => {
-  const workflowDir = path.join(repoRoot, '.github/workflows');
-  const yamlOf = (file: string) =>
-    fs
-      .readFileSync(path.join(workflowDir, file), 'utf8')
-      .split('\n')
-      .filter((line) => !/^\s*#/.test(line))
-      .join('\n');
-  const workflowFiles = fs.readdirSync(workflowDir).filter((f) => f.endsWith('.yml'));
-  const homes = workflowFiles.filter((f) => yamlOf(f).includes(SCRIPT));
+  // Retired with objectstack#25712: `has exactly one home, and that workflow
+  // gates pull requests`, `runs unfiltered — the change that breaks it is a
+  // markdown-only change`, and the install ORDER half of `needs no install, so
+  // it can afford to run unfiltered`. Each read objectui's `repo-gates.yml`,
+  // this gate's only home, and that file runs nowhere under the monorepo:
+  // GitHub runs the root `.github/workflows/` alone, and no workflow there runs
+  // this gate. objectstack#25880 ports the `repo-gates.yml` gates (row 24 of
+  // the objectstack#25697 workflow roster) into the root `Lint UI` job and
+  // brings these pins back against that job, by path. That case's import-graph
+  // walk reads no workflow and stays below.
 
   it('is exposed as a root package script', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {
@@ -299,33 +300,7 @@ describe('wiring', () => {
     expect(pkg.scripts['check:prompt-keys']).toBe(`node ${SCRIPT}`);
   });
 
-  it('has exactly one home, and that workflow gates pull requests', () => {
-    expect(homes.length, 'one gate, one home').toBe(1);
-    const yaml = yamlOf(homes[0]);
-    expect(yaml).toMatch(/^\s*pull_request:/m);
-    expect(yaml).toMatch(/^\s*push:/m);
-    expect(yaml).toMatch(/^\s*merge_group:/m);
-  });
-
-  it('runs unfiltered — the change that breaks it is a markdown-only change', () => {
-    // `ci.yml`'s type-check job decides whether to run with a diff that excludes
-    // `'**/*.md'`, and `.github/prompts/**` is nothing but `.md`. Behind a paths
-    // filter this gate would be blind to the only PR shape that can break it.
-    const yaml = yamlOf(homes[0]);
-    expect(yaml, `${homes[0]} runs ${SCRIPT} behind a paths-ignore`).not.toMatch(/paths-ignore:/);
-    expect(yaml, `${homes[0]} runs ${SCRIPT} behind a paths filter`).not.toMatch(/^\s+paths:/m);
-  });
-
-  it('needs no install, so it can afford to run unfiltered', () => {
-    // Since objectui#12214 the home is `repo-gates.yml`, ONE job that installs
-    // after its install-free gates: the property is now an ORDER -- this gate's
-    // step sits before the job's `pnpm install` -- and no longer an absence.
-    const yaml = yamlOf(homes[0]);
-    const gateAt = yaml.indexOf('scripts/check-prompt-component-keys.mjs');
-    const installAt = yaml.indexOf('pnpm install');
-    expect(gateAt).toBeGreaterThan(-1);
-    expect(installAt === -1 || gateAt < installAt, 'the gate step moved below the install step').toBe(true);
-
+  it('needs no install: its import graph reaches no package', () => {
     // Walk the WHOLE static import graph, not just this gate's first line: it
     // imports a sibling gate, and "needs no node_modules" has to stay true of
     // everything it reaches, not of its own header.

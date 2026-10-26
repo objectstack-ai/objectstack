@@ -24,6 +24,7 @@ import {
   ruleCountFor,
   walkedFiles,
 } from '../check-lint-rule-coverage.mjs';
+import { rootWorkflow, rootWorkflowFiles } from './helpers/root-ci';
 
 /**
  * objectui#7908 -- `eslint.config.js` resolves ZERO rules for every
@@ -689,10 +690,9 @@ describe('this repository', () => {
     // in when it was closed `not planned`. If someone adds the step, this line
     // is what fails, and it points at the header paragraph that has to be
     // rewritten. A missing assertion would have left the claim uncheckable.
-    const workflows = fs
-      .readdirSync(path.join(repoRoot, '.github/workflows'))
-      .map((f) => fs.readFileSync(path.join(repoRoot, '.github/workflows', f), 'utf8'))
-      .join('\n');
+    // Asked of the root `.github/workflows/`, the only workflows GitHub runs
+    // under the monorepo (objectstack#25712); `ui/.github/` runs nowhere.
+    const workflows = rootWorkflowFiles().map(rootWorkflow).join('\n');
     expect(workflows).not.toContain('check:lint-rule-coverage');
   });
 });

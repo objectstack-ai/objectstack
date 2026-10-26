@@ -8,7 +8,9 @@
  * `lint-ui`), and every objectui command in them is spelled
  * `pnpm --dir ui run <alias>`. A pin in this directory that asks "does CI run
  * this gate, and in the right place" asks it of that file, by path, through
- * this module. It never reads a copy under `ui/.github/`: nothing runs one.
+ * this module, and a pin that asks whether ANY workflow runs something asks
+ * the root `.github/workflows/` directory through `rootWorkflowFiles()`. It
+ * never reads a copy under `ui/.github/`: nothing runs one.
  *
  * What the port did not carry (the coverage lane, the docs job, the shard
  * aggregate, the affected-test and type-check-scope selectors, the timings
@@ -28,12 +30,34 @@ export const UI_JOBS = {
   buildE2e: 'build-e2e-ui',
 } as const;
 
+/** The directory GitHub runs: `.github/workflows/` at the workspace root. */
+export const rootWorkflowsDir = path.join(workspaceRoot(), '.github/workflows');
+
 /** The workflow GitHub runs: `.github/workflows/ci.yml` at the workspace root. */
-export const rootCiPath = path.join(workspaceRoot(), '.github/workflows/ci.yml');
+export const rootCiPath = path.join(rootWorkflowsDir, 'ci.yml');
 
 /** That workflow's text. */
 export function rootCi(): string {
   return fs.readFileSync(rootCiPath, 'utf8');
+}
+
+/**
+ * Every workflow file in that directory, by name. Throws on a scan that reads
+ * implausibly few, the reading that would make every "no workflow names this"
+ * pin vacuous.
+ */
+export function rootWorkflowFiles(): string[] {
+  const files = fs
+    .readdirSync(rootWorkflowsDir)
+    .filter((f) => /\.ya?ml$/.test(f))
+    .sort();
+  if (files.length < 10) throw new Error(`${rootWorkflowsDir}: the scan read ${files.length} workflow file(s)`);
+  return files;
+}
+
+/** One root workflow's text, by file name. */
+export function rootWorkflow(file: string): string {
+  return fs.readFileSync(path.join(rootWorkflowsDir, file), 'utf8');
 }
 
 /** How the root workflow spells one of objectui's root scripts. */

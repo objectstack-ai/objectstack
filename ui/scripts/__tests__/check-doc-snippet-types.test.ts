@@ -4,7 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { parse as parseYaml } from 'yaml';
 
 // Plain-JS CI helper; its types are inferred from the .mjs source by
 // `tsconfig.scripts.json` (`allowJs`), so no `@ts-expect-error` here.
@@ -1890,61 +1889,18 @@ describe('the printed build command says what it does NOT build (objectui#7795)'
   });
 });
 
-describe('wiring — a script nothing runs is not a gate', () => {
-  const workflowDir = path.join(repoRoot, '.github/workflows');
-  const workflowPath = path.join(workflowDir, 'repo-gates.yml');
-  const workflowFiles = fs.readdirSync(workflowDir).filter((f) => f.endsWith('.yml'));
-
-  /** A workflow's YAML with whole-line comments removed — the headers in this
-   *  repository name other workflows and other scripts in prose. */
-  const yamlOf = (file: string): string =>
-    fs
-      .readFileSync(path.join(workflowDir, file), 'utf8')
-      .split('\n')
-      .filter((line) => !/^\s*#/.test(line))
-      .join('\n');
-
-  it('has a workflow that gates pull requests, not just pushes', () => {
-    expect(fs.existsSync(workflowPath), 'a check nothing runs is not a gate').toBe(true);
-    const yaml = yamlOf('repo-gates.yml');
-    expect(yaml).toContain('pull_request:');
-    expect(yaml).toContain(SCRIPT);
-  });
-
-  it('runs it in NO path-filtered workflow — the change that breaks a snippet is docs-only', () => {
-    expect(workflowFiles.length, 'the workflow directory scan returned implausibly few files').toBeGreaterThan(5);
-    for (const file of workflowFiles) {
-      const yaml = yamlOf(file);
-      if (!yaml.includes(SCRIPT)) continue;
-      expect(yaml, `${file} filters paths and would miss a docs-only change`).not.toMatch(
-        /^\s*paths(-ignore)?:/m,
-      );
-    }
-  });
-
-  it('lives in exactly one workflow — one gate, one home', () => {
-    expect(workflowFiles.filter((f) => yamlOf(f).includes(SCRIPT))).toEqual(['repo-gates.yml']);
-  });
-
-  it('builds a FILTER, never the whole workspace', () => {
-    const yaml = yamlOf('repo-gates.yml');
-    expect(yaml).toContain('--build-filter');
-    expect(yaml, 'the 2026-08-16 ruling on objectui#4846 rejected a per-PR full-repo build').not.toMatch(
-      /run: pnpm( exec turbo run)? build\s*$/m,
-    );
-  });
-
-  it('builds BEFORE it invokes the gate, so a precondition exit is not a state CI can reach', () => {
-    const yaml = yamlOf('repo-gates.yml');
-    const build = yaml.indexOf('turbo run build');
-    const invoke = yaml.search(new RegExp(`run: node ${SCRIPT.replace(/[.\\/]/g, '\\$&')}\\s*$`, 'm'));
-    expect(build, 'the workflow must build the packages the covered snippets import').toBeGreaterThan(-1);
-    expect(invoke, 'the workflow must invoke the gate itself').toBeGreaterThan(-1);
-    expect(
-      build,
-      'invoked before its own build, the gate would red a healthy pull request on a precondition',
-    ).toBeLessThan(invoke);
-  });
+describe('wiring — the build filter it emits, and its name at the root', () => {
+  // Retired with objectstack#25712: `has a workflow that gates pull requests,
+  // not just pushes`, `runs it in NO path-filtered workflow — the change that
+  // breaks a snippet is docs-only`, `lives in exactly one workflow — one gate,
+  // one home`, `builds a FILTER, never the whole workspace`, and `builds BEFORE
+  // it invokes the gate`. Each read objectui's `repo-gates.yml`, this gate's
+  // only home, and that file runs nowhere under the monorepo: GitHub runs the
+  // root `.github/workflows/` alone, and no workflow there runs this gate.
+  // objectstack#25880 ports the `repo-gates.yml` gates (row 24 of the
+  // objectstack#25697 workflow roster) into the root `Lint UI` job and brings
+  // these pins back against that job, by path. The cases below hold what the
+  // gate emits and how it is named, and read no workflow.
 
   /**
    * objectui#5911 — the emitted list must be BUILDABLE, not merely accurate.
@@ -1994,122 +1950,11 @@ describe('wiring — a script nothing runs is not a gate', () => {
   });
 });
 
-/**
- * The step's own shell, executed — objectui#6221.
- *
- * The defect this pins was not in the gate but in the SHELL wrapped around it:
- * `echo "args=$(node …)" >> "$GITHUB_OUTPUT"` gives the step `echo`'s status, so
- * a gate that exited non-zero read as a gate that named no packages, and the
- * build step below it expanded to a bare `turbo run build` over the whole
- * workspace — the one thing this workflow's header forbids, with no signal
- * anywhere. A regex over the YAML would pin the letter of the fix; these run the
- * step scripts the workflow actually carries, under the runner's own default
- * shell (`bash -e {0}`), with `node` and `pnpm` shimmed so that what is measured
- * is the shell's handling of a failure rather than the gate's behaviour.
- */
-describe('the build-filter steps propagate failure instead of silently building everything (objectui#6221)', () => {
-  const stepScript = (name: string): string => {
-    const workflow = parseYaml(fs.readFileSync(path.join(repoRoot, '.github/workflows/repo-gates.yml'), 'utf8')) as {
-      jobs: Record<string, { steps?: { name?: string; run?: string }[] }>;
-    };
-    const step = Object.values(workflow.jobs)
-      .flatMap((job) => job.steps ?? [])
-      .find((s) => s.name === name);
-    expect(step?.run, `repo-gates.yml must keep a step named "${name}" with a run: script`).toBeTypeOf(
-      'string',
-    );
-    return step!.run!;
-  };
-
-  /** Run a step's `run:` script as the runner does, with the named executables shimmed. */
-  const runStep = (script: string, shims: Record<string, string>, env: Record<string, string> = {}) => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-snippet-step-'));
-    const bin = path.join(dir, 'bin');
-    fs.mkdirSync(bin);
-    for (const [name, body] of Object.entries(shims)) {
-      fs.writeFileSync(path.join(bin, name), body);
-      fs.chmodSync(path.join(bin, name), 0o755);
-    }
-    const scriptPath = path.join(dir, 'step.sh');
-    fs.writeFileSync(scriptPath, script);
-    const githubOutput = path.join(dir, 'github_output');
-    fs.writeFileSync(githubOutput, '');
-    const turboArgv = path.join(dir, 'turbo_argv');
-    // `bash -e {0}` is the default shell for a `run:` step on a Linux runner.
-    const proc = spawnSync('bash', ['-e', scriptPath], {
-      encoding: 'utf8',
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_OUTPUT: githubOutput, TURBO_ARGV: turboArgv, ...env },
-    });
-    return {
-      status: proc.status,
-      stderr: proc.stderr,
-      githubOutput: fs.readFileSync(githubOutput, 'utf8'),
-      turboInvoked: fs.existsSync(turboArgv),
-      turboArgv: fs.existsSync(turboArgv) ? fs.readFileSync(turboArgv, 'utf8').trim() : null,
-    };
-  };
-
-  // objectui#12214 folded this gate into `repo-gates.yml`: its derive step is
-  // named after the check, and ONE build step serves the three gates that read
-  // built types. The empty-filter refusal moved into the derive step, because
-  // the shared build always carries `--filter='./packages/*'` and so can no
-  // longer turn an empty filter into an unfiltered workspace build.
-  const DERIVE = 'Doc Snippet Type Check — Derive the packages the covered snippets import';
-  const BUILD = 'Build every package the gates below read';
-  const failingGate = '#!/usr/bin/env bash\necho "the filter could not be derived" >&2\nexit 3\n';
-  const silentGate = '#!/usr/bin/env bash\nexit 0\n';
-  const healthyGate = '#!/usr/bin/env bash\necho "--filter=@object-ui/core --filter=@object-ui/react"\n';
-  const recordingPnpm = '#!/usr/bin/env bash\necho "$*" > "$TURBO_ARGV"\n';
-
-  it('fails the filter step when the gate fails, and writes no output at all', () => {
-    const result = runStep(stepScript(DERIVE), { node: failingGate });
-    expect(result.status, 'a failed filter must not read as a successful step').not.toBe(0);
-    expect(result.stderr, 'the step must say what failed, not just fail').toContain('--build-filter');
-    expect(result.stderr, 'a failure the log does not annotate is a failure someone has to go looking for').toContain(
-      '::error::',
-    );
-    expect(
-      result.githubOutput,
-      'an `args=` line written after a failed gate is the empty filter that becomes an unfiltered build',
-    ).toBe('');
-  });
-
-  it('writes the derived filter through unchanged when the gate succeeds', () => {
-    const result = runStep(stepScript(DERIVE), { node: healthyGate });
-    expect(result.status).toBe(0);
-    expect(result.githubOutput.trim()).toBe('args=--filter=@object-ui/core --filter=@object-ui/react');
-  });
-
-  it('refuses an empty filter in the derive step, and writes no output', () => {
-    const result = runStep(stepScript(DERIVE), { node: silentGate });
-    expect(result.status, 'an empty filter can only mean something upstream went wrong').not.toBe(0);
-    expect(result.stderr, "the refusal must be the step's own, not a shell error that happens to mention a filter").toContain(
-      '::error::',
-    );
-    expect(result.githubOutput).toBe('');
-  });
-
-  it('hands turbo the derived packages as separate words, beside every package under packages/', () => {
-    const result = runStep(stepScript(BUILD), { pnpm: recordingPnpm }, {
-      SKILL_FILTER: '',
-      SNIPPET_FILTER: '--filter=@object-ui/core --filter=@object-ui/react',
-    });
-    expect(result.status).toBe(0);
-    expect(result.turboArgv).toBe(
-      'exec turbo run build --filter=./packages/* --filter=@object-ui/core --filter=@object-ui/react',
-    );
-  });
-
-  it('never runs an unfiltered workspace build, even with no derived filter at all', () => {
-    const result = runStep(stepScript(BUILD), { pnpm: recordingPnpm }, { SKILL_FILTER: '', SNIPPET_FILTER: '' });
-    expect(result.status).toBe(0);
-    expect(result.turboArgv).toBe('exec turbo run build --filter=./packages/*');
-  });
-
-  it('never puts the gate back inside a command substitution whose status is discarded', () => {
-    expect(
-      stepScript(DERIVE),
-      'the step status would be `echo`\'s again, and a failed gate would read as an empty filter',
-    ).not.toMatch(/echo\s+"?args=\$\(/);
-  });
-});
+// `the build-filter steps propagate failure instead of silently building
+// everything (objectui#6221)` retired with objectstack#25712, all six cases.
+// They ran the `run:` scripts of two `repo-gates.yml` steps under the runner's
+// shell, and that file runs nowhere under the monorepo: GitHub runs the root
+// `.github/workflows/` alone, and no workflow there carries those steps.
+// objectstack#25880 ports the `repo-gates.yml` gates (row 24 of the
+// objectstack#25697 workflow roster) into the root `Lint UI` job; it brings
+// these back against the steps that derive and build the filter there, by path.
