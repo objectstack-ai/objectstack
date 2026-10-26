@@ -255,6 +255,16 @@ const ENGINE_STRINGS_EN: Record<string, string> = {
   'engine.position.grants.byName': '(by name)',
   'engine.position.grants.byNameHint':
     'Granted because this permission set has the same name as the position. The position does not list it, but holders get it.',
+  // objectstack#26187 — the Setup position page's read-only previews of the
+  // permission sets the position names (`PositionPermissionSetsSection.tsx`).
+  'engine.position.sets.title': 'Permission sets',
+  'engine.position.sets.hint':
+    'What each permission set this position names grants, in the order it names them. Open a set to change it.',
+  'engine.position.sets.empty': 'This position names no permission sets.',
+  'engine.position.sets.loading': 'Loading…',
+  'engine.position.sets.notFound': 'Permission set "{name}" was not found.',
+  'engine.position.sets.readFailed': 'Permission set "{name}" could not be read.',
+  'engine.position.sets.open': 'Open this permission set',
   'engine.list.emptyType': 'No {type} items registered',
   'engine.list.emptyQuery': 'No matches for "{query}"',
   'engine.list.createHint': 'Click "New" above to create the first {type}.',
@@ -4062,6 +4072,13 @@ const ENGINE_STRINGS_ZH: Record<string, string> = {
   'engine.position.grants.none': '无',
   'engine.position.grants.byName': '（同名）',
   'engine.position.grants.byNameHint': '因与岗位同名而授予。岗位定义未列出它，但持有人会获得它。',
+  'engine.position.sets.title': '权限集',
+  'engine.position.sets.hint': '此岗位列出的每个权限集授予的权限，按列出顺序显示。打开权限集可修改它。',
+  'engine.position.sets.empty': '此岗位未列出任何权限集。',
+  'engine.position.sets.loading': '加载中…',
+  'engine.position.sets.notFound': '未找到权限集"{name}"。',
+  'engine.position.sets.readFailed': '无法读取权限集"{name}"。',
+  'engine.position.sets.open': '打开此权限集',
   'engine.list.emptyType': '暂无 {type} 条目',
   'engine.list.emptyQuery': '没有匹配 "{query}" 的结果',
   'engine.list.createHint': '点击上方"新建"创建第一个 {type}。',

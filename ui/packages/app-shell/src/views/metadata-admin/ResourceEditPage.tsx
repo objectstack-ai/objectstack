@@ -152,18 +152,28 @@ import { errorCodeIs, errorCodeIsAnyOf } from '@object-ui/types';
 import { useCanAuthorMetadata, useCanReadAuthoringTrail } from '../../hooks/useCanAuthorMetadata.js';
 import { environmentScopeSuffix, isEnvironmentScope, useWalledCatalogReadOnly } from './catalog-scope.js';
 import { PositionHoldersSection } from './PositionHoldersSection.js';
+import { PositionPermissionSetsSection } from './PositionPermissionSetsSection.js';
 import { declarationOnlyAuthoredObject } from './sharing-rule-catalog.js';
 import { useRegisterUnsavedEdits } from '../../chrome/unsavedEdits.js';
 import { RefusalMessage } from '../../components/RefusalMessage.js';
 
+/** What an environment section is handed: the item's name and its definition on screen. */
+interface EnvironmentSectionProps {
+  name: string;
+  draft: Readonly<Record<string, unknown>>;
+}
+
 /**
  * objectui#7611 — the Setup half of an item, rendered under its definition in
- * the ENVIRONMENT scope (`catalog-scope.ts`): who holds it. Keyed by type and
+ * the ENVIRONMENT scope (`catalog-scope.ts`), in this order. Keyed by type and
  * internal to this page; the permission set's half lives in its own editor,
  * `PermissionMatrixEditPage`, which renders `AssignedUsersSection`.
+ *
+ * A position has two: who holds it, and — objectstack#26187 — what each
+ * permission set it names grants, read-only, one preview per set.
  */
-const ENVIRONMENT_SECTIONS: Readonly<Record<string, React.ComponentType<{ name: string }>>> = {
-  position: PositionHoldersSection,
+const ENVIRONMENT_SECTIONS: Readonly<Record<string, ReadonlyArray<React.ComponentType<EnvironmentSectionProps>>>> = {
+  position: [PositionHoldersSection, PositionPermissionSetsSection],
 };
 
 /**
@@ -2114,7 +2124,7 @@ function MetadataResourceEditPageImpl({
   const readOnly = !canWrite && !createMode;
   const envScope = isEnvironmentScope(searchParams);
   const scopeSuffix = environmentScopeSuffix(searchParams);
-  const EnvironmentSection = envScope && !createMode && !embedded ? ENVIRONMENT_SECTIONS[type] : undefined;
+  const environmentSections = envScope && !createMode && !embedded ? ENVIRONMENT_SECTIONS[type] : undefined;
 
   // #2272 — designer deep-link: `?sel=nav:<id>` selects the nav item with
   // that spec `id` (stable across reorders, unlike the positional selection
@@ -3246,9 +3256,11 @@ function MetadataResourceEditPageImpl({
             {/* objectui#7611 — under the designer, too: `position` renders
                 through its preview, so the section takes a bounded strip
                 below the canvas instead of squeezing it. */}
-            {EnvironmentSection && (
+            {environmentSections && (
               <div className={PreviewComponent ? 'shrink-0 max-h-[35vh] overflow-y-auto' : undefined}>
-                <EnvironmentSection name={name} />
+                {environmentSections.map((EnvironmentSection, i) => (
+                  <EnvironmentSection key={i} name={name} draft={draft} />
+                ))}
               </div>
             )}
           </div>
