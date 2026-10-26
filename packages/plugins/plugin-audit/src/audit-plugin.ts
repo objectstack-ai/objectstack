@@ -1,8 +1,21 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import { effectiveTenancyPosture, resolveLocalizationContext, type TenancyPostureSource } from '@objectstack/core';
-import type { IDataEngine, II18nService, ISecurityService, ISharingService } from '@objectstack/spec/contracts';
+import {
+  classifyAdmissionTenancyPosture,
+  effectiveTenancyPosture,
+  resolveLocalizationContext,
+  type TenancyPostureSource,
+} from '@objectstack/core';
+import type {
+  IAuthService,
+  IDataEngine,
+  IHttpServer,
+  II18nService,
+  ISecurityService,
+  ISharingService,
+} from '@objectstack/spec/contracts';
+import type { TenancyPosture } from '@objectstack/spec/security';
 import { SysAuditLog, SysActivity, SysComment, SysCommentReaction } from './objects/index.js';
 // `sys_notification` was parked here "until that [ADR-0030] migration lands".
 // It has landed, so the contribution moved to @objectstack/service-messaging —
@@ -17,6 +30,12 @@ import { installAuditWriters, type AuditI18nSurface, type MessagingEmitSurface }
 import { installReadAuditWriter, type ReadAuditWriterHandle } from './read-audit.js';
 import { createAuthEventAuditSink } from './auth-event-audit.js';
 import { installCommentAccessHooks, installCommentReadVisibility } from './comment-access-hooks.js';
+import {
+  COMMENT_REACTION_REMOVE_ROUTE,
+  platformCallerResolver,
+  registerCommentReactionRoutes,
+  type CommentReactionEngine,
+} from './comment-reaction-routes.js';
 import { admitMentionRecipients } from './mention-recipient-gate.js';
 import { installActivityReadVisibility } from './activity-read-visibility.js';
 import { installActivityFieldRedaction } from './activity-field-redaction.js';
@@ -329,6 +348,7 @@ export class AuditPlugin implements Plugin {
   }
 
   async start(ctx: PluginContext): Promise<void> {
+    this.mountUnreactDoor(ctx);
     // ObjectQL engine is only resolvable after the kernel is ready.
     ctx.hook('kernel:ready', async () => {
       let engine: IDataEngine | null = null;
@@ -761,6 +781,43 @@ export class AuditPlugin implements Plugin {
   }
 
   /**
+   * Mount the unreact door (`comment-reaction-routes.ts`) on the kernel's HTTP
+   * server: a member removes their own comment reaction, and only theirs,
+   * without an object-level `delete` grant (maintainer ruling 6422861164,
+   * letter A). Every service the door reads is read per request, so a provider
+   * that registers after this hook is still seen. A kernel with no HTTP server
+   * mounts nothing, and says so.
+   */
+  private mountUnreactDoor(ctx: PluginContext): void {
+    const optional = <T>(name: string): T | undefined => {
+      try {
+        return ctx.getService<T>(name) ?? undefined;
+      } catch {
+        return undefined;
+      }
+    };
+    // `http.server` is the canonical name; `http-server` the deprecated alias.
+    const http = optional<IHttpServer>('http.server') ?? optional<IHttpServer>('http-server');
+    if (!http) {
+      ctx.logger.warn(
+        `AuditPlugin: no HTTP server is registered, so the unreact door (DELETE ${COMMENT_REACTION_REMOVE_ROUTE}) ` +
+          'is not mounted, and a member whose grants carry no delete on sys_comment_reaction cannot remove their own reaction.',
+      );
+      return;
+    }
+    const getEngine = () => optional<IDataEngine>('objectql') ?? optional<IDataEngine>('data');
+    registerCommentReactionRoutes(http, {
+      getEngine: () => getEngine() as unknown as CommentReactionEngine | undefined,
+      resolveCaller: platformCallerResolver({
+        getEngine,
+        getAuth: () => optional<IAuthService>('auth'),
+        resolveTenancyPosture: () => resolveAdmissionTenancyPosture(ctx),
+      }),
+    });
+    ctx.logger.info(`AuditPlugin: unreact door mounted at DELETE ${COMMENT_REACTION_REMOVE_ROUTE}`);
+  }
+
+  /**
    * [#8992] Flush the record-view tail on shutdown.
    *
    * Batching is what keeps the ledger write off the read path, and the price of
@@ -775,4 +832,21 @@ export class AuditPlugin implements Plugin {
     this.readAuditWriter = null;
     if (writer) await writer.stop();
   }
+}
+
+/**
+ * The tenancy posture in force, for the unreact door's admission (the
+ * resolver's two posture-conditional API-key refusals). Read through the
+ * kernel's async accessor, per request, and classified by the platform's one
+ * rule (`classifyAdmissionTenancyPosture`): a `tenancy` service never
+ * registered is a kernel with no organization wall, answered `undefined`; one
+ * that is registered and cannot answer rejects, and the door answers that
+ * outage. A host with no async accessor registers no `tenancy` service either.
+ */
+async function resolveAdmissionTenancyPosture(ctx: PluginContext): Promise<TenancyPosture | undefined> {
+  const kernel = ctx.getKernel?.() as
+    | { getServiceAsync?: <T>(name: string, scopeId?: string) => Promise<T> }
+    | undefined;
+  if (!kernel || typeof kernel.getServiceAsync !== 'function') return undefined;
+  return classifyAdmissionTenancyPosture(() => kernel.getServiceAsync!<TenancyPostureSource>('tenancy'));
 }
