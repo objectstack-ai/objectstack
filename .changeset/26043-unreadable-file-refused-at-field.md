@@ -6,6 +6,8 @@ fix(storage)!: a record write naming a file its caller may not read is refused a
 
 A record write that names a file its caller may not read is now refused at that field, instead of saving the id as written. The answer is one `400 VALIDATION_FAILED` whose `fields[]` names each such field with the ADR-0114 code `invalid_value`, the same envelope the public form door gives an anonymous submission that carries a file. It names the field only. An id that names no file of the acting organization gets the same answer, so the write cannot tell the two apart. Nothing is claimed, copied or written. System writes and writes with no caller context reference files as before, and an authorization-store outage still fails the write with its declared envelope.
 
+A file governed by a record's rule also gets the record-governed link lifetime at the download door.
+
 Clause-②: no (narrowing) — a record write that names a file its caller may not read, or an id no file of the organization has, was saved and is now refused. Nothing that was refused becomes accepted.
 
 Metadata-protocol: none (a write-time refusal on file fields; nothing a metadata author writes changes)
