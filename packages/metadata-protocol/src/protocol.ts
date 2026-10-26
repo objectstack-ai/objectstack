@@ -164,7 +164,6 @@ import {
     type QueryAliasConflict,
     type DroppedFieldsEvent, type QueryAST, type EngineQueryOptionsParsed,
     type ValidationAdvisoryEvent,
-    discriminateDefaultValueShape,
     externalBindingDatasourceRefusal,
 } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSpellingRefusal, unrecognisedMetaTypeRefusal } from '@objectstack/spec/shared';
@@ -393,6 +392,10 @@ import {
     stripMaterializedFromRegistry,
     stripServedObjectColumns,
 } from './protocol-registry-materialize.js';
+// [#25467 cut 12] The publish backfill pair: the judgement and the write half.
+import { applyPublishBackfill, planPublishBackfill } from './protocol-publish-backfill.js';
+// [#25467 cut 12] The `_drafts` list read and the one-draft discard.
+import { discardDraftInItsScope, listDrafts } from './protocol-drafts.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -634,7 +637,7 @@ export function isObjectOfDisabledPackage(registry: any, name: string): boolean 
  * isObjectOfDisabledPackage} is: a host whose registry cannot answer has no
  * item hidden.
  */
-function isItemOfDisabledPackage(registry: any, item: unknown): boolean {
+export function isItemOfDisabledPackage(registry: any, item: unknown): boolean {
     return typeof registry?.isPackageDisabled === 'function'
         && registry.isPackageDisabled((item as { _packageId?: unknown } | null | undefined)?._packageId) === true;
 }
@@ -1328,7 +1331,7 @@ export interface MetadataIssueEntry {
  * the request named it, plus the literal its draft declares. Built only by
  * `planPublishBackfill`, so every value here was judged before the publish.
  */
-interface PublishBackfillEntry {
+export interface PublishBackfillEntry {
     object: string;
     field: string;
     value: unknown;
@@ -1340,20 +1343,20 @@ interface PublishBackfillEntry {
  * `updated` counts the rows this publish wrote, so a row that already held a
  * value (a database column DEFAULT fills one on the SQL driver) is not counted.
  */
-type PublishBackfillReceipt = {
+export type PublishBackfillReceipt = {
     success: boolean;
     fields: Array<{ object: string; field: string; updated: number; error?: string; code?: string }>;
 };
 
 /** [#24253] Rows read and written per round of one field's backfill. */
-const PUBLISH_BACKFILL_PAGE_SIZE = 200;
+export const PUBLISH_BACKFILL_PAGE_SIZE = 200;
 
 /**
  * [#24253] The 400 a `publishPackageDrafts` backfill request is refused with:
  * every entry that cannot be honoured, by path, in one answer, before anything
  * is promoted or written. The headline names the first; `issues[]` names all.
  */
-function publishBackfillRefusal(
+export function publishBackfillRefusal(
     packageId: string,
     issues: MetadataIssueEntry[],
 ): Error & { code: 'VALIDATION_ERROR'; status: 400; issues: MetadataIssueEntry[] } {
@@ -2689,7 +2692,7 @@ export function resolveBundleMemberSelector(type: string, member: unknown): stri
  * registry call or a body comparison: the selector itself, or the canonical
  * member when none was named. `undefined` for a type with no members.
  */
-function bundleMemberDiscriminator(type: string, member: string | undefined): string | undefined {
+export function bundleMemberDiscriminator(type: string, member: string | undefined): string | undefined {
     const disc = ITEM_KEY_DISCRIMINATORS[canonicalMetaType(type)];
     if (!disc) return undefined;
     return member?.trim() || disc.canonical;
@@ -3919,7 +3922,7 @@ function clientFacingRowFailureText(err: unknown, fallback: string): string {
  * tolerance over a producer that does not need it (Prime Directive #12) —
  * the same call #8136 recorded at those sites for the message.
  */
-function clientFacingFailureCode(err: unknown): string | undefined {
+export function clientFacingFailureCode(err: unknown): string | undefined {
     const code = (err as { code?: unknown } | null | undefined)?.code;
     if (!code) return undefined;
     if (typeof code === 'string' && ErrorCode.safeParse(code).success) return code;
@@ -13460,6 +13463,37 @@ export class ObjectStackProtocolImplementation implements
         // rows returned ungrouped, looking exactly like a served query.
         this.assertGroupByFieldsExist(request.object, options.groupBy);
         this.assertAggregationFieldsExist(request.object, options.aggregations);
+        // [#25819] An aggregate axis sent as an EMPTY list, with no non-empty
+        // axis beside it, asks for an aggregate of nothing. The routing below
+        // reads it as no aggregate and handed the key to `engine.find`, which
+        // refuses an option it does not execute with an uncoded error whose
+        // words carry the quoted object name — read at the REST door as the
+        // unknown-object heuristic: `404 OBJECT_NOT_FOUND`, "Object '…' is not
+        // registered", for a registered object. No shipped caller sends `[]`
+        // meaning the plain rows, so it is refused for what it is. An empty
+        // list beside a non-empty one is served as before (`groupBy` with
+        // `aggregations: []` lists the groups).
+        {
+            const emptyAxes = (['groupBy', 'aggregations'] as const)
+                .filter((k) => Array.isArray(options[k]) && options[k].length === 0);
+            const servedAxis = (['groupBy', 'aggregations'] as const)
+                .some((k) => Array.isArray(options[k]) && options[k].length > 0);
+            if (emptyAxes.length > 0 && !servedAxis) {
+                const named = emptyAxes.map((k) => `'query.${k}'`).join(' and ');
+                const err: any = new Error(
+                    `${named} ${emptyAxes.length > 1 ? 'are empty lists' : 'is an empty list'} on object `
+                    + `'${request.object}': an aggregate query names at least one aggregation, or a non-empty `
+                    + `'groupBy' to list its groups. The query was NOT run. Send e.g. { "aggregations": `
+                    + `[{ "function": "count", "alias": "n" }] }, or omit ${emptyAxes.map((k) => `'${k}'`).join(' and ')} `
+                    + 'for the plain rows.',
+                );
+                err.status = 400;
+                err.code = 'INVALID_QUERY';
+                err.param = emptyAxes[emptyAxes.length - 1];
+                err.object = request.object;
+                throw err;
+            }
+        }
         // [#21086] A stored metadata body is served only as its type's read
         // projection (see `redactStoredMetadataRows` below), and a GROUP KEY
         // cannot be projected — so grouping by the body column of a
@@ -23480,24 +23514,14 @@ export class ObjectStackProtocolImplementation implements
             updatedBy: string | null;
         }>;
     }> {
-        await this.ensureOverlayIndex();
-        // [ADR-0131 D6] The environment's pending drafts.
-        const repo = this.getOverlayRepo();
-        const drafts = await repo.listDrafts({
-            ...(request?.type ? { type: PLURAL_TO_SINGULAR[request.type] ?? request.type } : {}),
-            ...(request?.packageId ? { packageId: request.packageId } : {}),
-        });
-        // [#23073] The declared header (`ListDraftsResponseSchema`), with the
-        // row's stored member on every draft of a bundled type: absent there
-        // means the canonical member, which is spelled out here.
-        const served = drafts.filter((draft) => draft.type === 'package'
-            || !isItemOfDisabledPackage(this.engine?.registry, { _packageId: draft.packageId }));
-        return {
-            drafts: served.map(({ member: stored, ...header }) => {
-                const member = bundleMemberDiscriminator(header.type, stored);
-                return member === undefined ? header : { ...header, member };
-            }),
+        // [#25467 cut 12] The body moved to `protocol-drafts.ts` (see `DraftsHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof listDrafts> = {
+            get engine() { return readEngine(); },
+            ensureOverlayIndex: (...a) => this.ensureOverlayIndex(...a),
+            getOverlayRepo: (...a) => this.getOverlayRepo(...a),
         };
+        return listDrafts.call(host, request);
     }
 
     /**
@@ -23680,76 +23704,13 @@ export class ObjectStackProtocolImplementation implements
         entries: ReadonlyArray<{ object: string; field: string }>,
         drafts: ReadonlyArray<{ type: string; name: string; member?: string }>,
     ): Promise<PublishBackfillEntry[]> {
-        const repo = this.getOverlayRepo();
-        const issues: MetadataIssueEntry[] = [];
-        const plan: PublishBackfillEntry[] = [];
-        const draftFields = new Map<string, Record<string, any> | undefined>();
-        for (const [i, e] of entries.entries()) {
-            const path = `backfill.${i}`;
-            const draft = drafts.find((d) => canonicalMetaType(d.type) === 'object' && d.name === e.object);
-            if (!draft) {
-                issues.push({
-                    path,
-                    message: `Package '${packageId}' has no pending draft of object '${e.object}': a backfill fills `
-                        + 'fields this publish adds, so it names an object drafted in this package.',
-                    code: 'custom',
-                });
-                continue;
-            }
-            if (!draftFields.has(e.object)) {
-                const ref = { type: draft.type, name: draft.name, org: 'env' } as unknown as Parameters<typeof repo.get>[0];
-                const body = typeof repo.get === 'function'
-                    ? (await repo.get(ref, { state: 'draft' }))?.body as { fields?: unknown } | undefined
-                    : undefined;
-                const fields = body?.fields;
-                draftFields.set(
-                    e.object,
-                    fields && typeof fields === 'object' && !Array.isArray(fields) ? fields as Record<string, any> : undefined,
-                );
-            }
-            const def = draftFields.get(e.object)?.[e.field];
-            if (!def || typeof def !== 'object') {
-                issues.push({
-                    path,
-                    message: `The draft of object '${e.object}' declares no field '${e.field}'.`,
-                    code: 'custom',
-                });
-                continue;
-            }
-            const live = this.engine?.registry?.getObject?.(e.object) as { fields?: Record<string, unknown> } | undefined;
-            if (live?.fields && Object.prototype.hasOwnProperty.call(live.fields, e.field)) {
-                issues.push({
-                    path,
-                    message: `Field '${e.object}.${e.field}' already exists on the published object, so this publish does `
-                        + 'not add it: a backfill fills only fields a publish adds. Change existing rows through the data API.',
-                    code: 'custom',
-                });
-                continue;
-            }
-            const dv = (def as { defaultValue?: unknown }).defaultValue;
-            if (dv === undefined || dv === null) {
-                issues.push({
-                    path,
-                    message: `Field '${e.object}.${e.field}' declares no defaultValue, so there is no value to write: `
-                        + 'declare one on the field, or drop it from the backfill.',
-                    code: 'custom',
-                });
-                continue;
-            }
-            const shape = discriminateDefaultValueShape(dv);
-            if (shape !== 'literal') {
-                issues.push({
-                    path,
-                    message: `Field '${e.object}.${e.field}' declares a ${shape === 'token' ? 'runtime token' : 'expression'} `
-                        + 'defaultValue, resolved for each new record as it is created; a backfill writes a literal value only.',
-                    code: 'custom',
-                });
-                continue;
-            }
-            plan.push({ object: e.object, field: e.field, value: dv });
-        }
-        if (issues.length > 0) throw publishBackfillRefusal(packageId, issues);
-        return plan;
+        // [#25467 cut 12] The body moved to `protocol-publish-backfill.ts` (see `PublishBackfillHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof planPublishBackfill> = {
+            get engine() { return readEngine(); },
+            getOverlayRepo: (...a) => this.getOverlayRepo(...a),
+        };
+        return planPublishBackfill.call(host, packageId, entries, drafts);
     }
 
     /**
@@ -23772,83 +23733,13 @@ export class ObjectStackProtocolImplementation implements
         plan: ReadonlyArray<PublishBackfillEntry>,
         context: unknown,
     ): Promise<PublishBackfillReceipt> {
-        const fields: PublishBackfillReceipt['fields'] = [];
-        for (const e of plan) {
-            let updated = 0;
-            const written = new Set<string>();
-            try {
-                for (;;) {
-                    const rows = (await this.engine.find(e.object, {
-                        where: { [e.field]: { $null: true } },
-                        limit: PUBLISH_BACKFILL_PAGE_SIZE,
-                        context,
-                    } as never)) as Array<{ id?: unknown }> | null | undefined;
-                    const ids = (rows ?? []).map((r) => r?.id).filter((id): id is string | number =>
-                        typeof id === 'string' || typeof id === 'number').map(String);
-                    if (ids.length === 0) break;
-                    const stuck = ids.find((id) => written.has(id));
-                    if (stuck !== undefined) {
-                        throw Object.assign(new Error(
-                            `Record '${stuck}' of '${e.object}' still has no '${e.field}' after it was written, so a hook `
-                            + 'or rule on the object cleared it; the backfill stopped there.',
-                        ), { status: 422 });
-                    }
-                    const res = await this.updateManyData({
-                        object: e.object,
-                        records: ids.map((id) => ({ id, data: { [e.field]: e.value } })),
-                        options: { continueOnError: false } as UpdateManyDataRequest['options'],
-                        context,
-                    });
-                    for (const r of res.results ?? []) {
-                        if (!r.success) continue;
-                        const dropped = (r as { droppedFields?: DroppedFieldsEvent[] }).droppedFields
-                            ?.find((ev) => ev.fields.includes(e.field));
-                        if (dropped) {
-                            throw Object.assign(new Error(
-                                `The write of '${e.field}' to record '${String(r.id)}' of '${e.object}' was dropped `
-                                + `(${dropped.reason}): this caller cannot set the field; the backfill stopped there.`,
-                            ), { status: 403 });
-                        }
-                        const kept = (r as { data?: Record<string, unknown> }).data;
-                        if (kept && Object.prototype.hasOwnProperty.call(kept, e.field) && kept[e.field] == null) {
-                            throw Object.assign(new Error(
-                                `Record '${String(r.id)}' of '${e.object}' was written with '${e.field}' left empty, so a `
-                                + 'hook or rule on the object cleared it; the backfill stopped there.',
-                            ), { status: 422 });
-                        }
-                        written.add(String(r.id));
-                        updated++;
-                    }
-                    if (!res.success) {
-                        const failedRow = (res.results ?? []).find((r) => !r.success);
-                        const rowError = (failedRow as { errors?: Array<{ code?: string; message?: string }> } | undefined)?.errors?.[0];
-                        const failure = {
-                            error: `Record '${String(failedRow?.id)}' of '${e.object}' was not written: `
-                                + `${rowError?.message ?? 'the write failed'}; the backfill stopped there.`,
-                            ...(rowError?.code ? { code: rowError.code } : {}),
-                        };
-                        fields.push({ object: e.object, field: e.field, updated, ...failure });
-                        console.warn(`[Protocol] publishPackageDrafts backfill of '${e.object}.${e.field}' (package '${packageId}'): ${failure.error}`);
-                        break;
-                    }
-                }
-                if (!fields.some((f) => f.object === e.object && f.field === e.field)) {
-                    fields.push({ object: e.object, field: e.field, updated });
-                }
-            } catch (err: unknown) {
-                const code = clientFacingFailureCode(err);
-                console.warn(
-                    `[Protocol] publishPackageDrafts backfill of '${e.object}.${e.field}' (package '${packageId}') `
-                    + `stopped after ${updated} row(s): ${(err as Error)?.message ?? String(err)}`,
-                );
-                fields.push({
-                    object: e.object, field: e.field, updated,
-                    error: clientFacingFailureText(err, 'the backfill failed; the reason is in the server log'),
-                    ...(code ? { code } : {}),
-                });
-            }
-        }
-        return { success: fields.every((f) => f.error === undefined), fields };
+        // [#25467 cut 12] The body moved to `protocol-publish-backfill.ts` (see `PublishBackfillHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof applyPublishBackfill> = {
+            get engine() { return readEngine(); },
+            updateManyData: (...a) => this.updateManyData(...a),
+        };
+        return applyPublishBackfill.call(host, packageId, plan, context);
     }
 
     /**
@@ -24909,17 +24800,11 @@ export class ObjectStackProtocolImplementation implements
         draft: { type: string; name: string; member?: string; packageId?: string | null },
         actor: string | undefined,
     ): Promise<void> {
-        await this.deleteMetaItem({
-            type: draft.type,
-            name: draft.name,
-            state: 'draft',
-            ...(actor ? { actor } : {}),
-            ...(draft.member !== undefined ? { member: draft.member } : {}),
-            // [#23165, ADR-0048] The package the draft was listed under: the
-            // discard removes THAT package's draft, never another package's
-            // draft of the same name.
-            ...(draft.packageId !== undefined ? { packageId: draft.packageId } : {}),
-        });
+        // [#25467 cut 12] The body moved to `protocol-drafts.ts` (see `DraftsHost`).
+        const host: ThisParameterType<typeof discardDraftInItsScope> = {
+            deleteMetaItem: (...a) => this.deleteMetaItem(...a),
+        };
+        return discardDraftInItsScope.call(host, draft, actor);
     }
 
     /**

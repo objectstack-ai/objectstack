@@ -87,6 +87,9 @@ const PRODUCERS: Readonly<Record<string, number>> = {
   // The served lock state and the stored-row decline, moved out of `protocol.ts`
   // whole on the same terms.
   'protocol-lock-state.ts': 1,
+  // The publish backfill pair, moved out of `protocol.ts` whole on the same
+  // terms.
+  'protocol-publish-backfill.ts': 3,
   'sys-metadata-repository.ts': 5,
   'runtime-authoring-gate.ts': 1,
 };

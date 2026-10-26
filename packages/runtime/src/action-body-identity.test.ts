@@ -19,6 +19,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { appAutomationElevationOf, markAppAutomationElevation } from '@objectstack/core';
 import { HttpDispatcher } from './http-dispatcher.js';
 import {
     buildActionApi,
@@ -112,7 +113,12 @@ describe('#3914 — buildActionExecutionContext', () => {
     });
 
     it('yields a usable elevated context for an anonymous / self-invoked call', () => {
-        expect(buildActionExecutionContext(undefined)).toEqual({ isSystem: true });
+        expect(buildActionExecutionContext(undefined)).toEqual(markAppAutomationElevation({ isSystem: true }, 'action'));
+    });
+
+    it('[#25653] carries the action-body elevation mark, so the identity-assignment refusal sees the body', () => {
+        expect(appAutomationElevationOf(buildActionExecutionContext({ userId: 'user_42' }))).toBe('action');
+        expect(appAutomationElevationOf(buildActionExecutionContext(undefined))).toBe('action');
     });
 });
 
@@ -172,7 +178,7 @@ describe('#3914 — ctx.api (buildActionApi)', () => {
             },
         };
         const api = buildActionApi(deps, ql, { userId: 42 });
-        expect(api.__context).toEqual({ isSystem: true });
+        expect(api.__context).toEqual(markAppAutomationElevation({ isSystem: true }, 'action'));
     });
 
     it('returns undefined for an engine with no createContext (sandbox fallback stays in charge)', () => {

@@ -1070,3 +1070,290 @@ describe('File Reference Ownership (ADR-0104 D3 wave 2)', () => {
     expect(engine.calls.filter((c) => c.op === 'update' && c.object === 'sys_file')).toHaveLength(0);
   });
 });
+
+/**
+ * [#25692] A write references only a file its caller may read.
+ *
+ * The hooks ask the read verdict the storage plugin binds (the download
+ * door's own judgement) of the WRITE's caller, before copy-on-claim and
+ * before the claim. Here the verdict is a stand-in that admits a fixed set of
+ * file ids; `file-reference-read-verdict.integration.test.ts` pins the real
+ * binding against the door. Each refusal pin below is ablated in the PR that
+ * introduced it.
+ */
+describe('a write references only a file its caller may read', () => {
+  const CALLER = { userId: 'u_writer', tenantId: 'org_1' };
+  const session = { userId: CALLER.userId, organizationId: CALLER.tenantId };
+
+  /** A verdict that admits only `readable`, recording every question asked. */
+  function verdict(readable: string[]) {
+    const asked: Array<{ fileId: unknown; context: any }> = [];
+    const authorizeRead = vi.fn(async (f: Record<string, unknown>, context: any) => {
+      asked.push({ fileId: f.id, context });
+      return readable.includes(String(f.id));
+    });
+    return { authorizeRead, asked };
+  }
+
+  function installWith(engine: Engine, authorizeRead: any, storage: any = fakeStorage()) {
+    installFileReferenceHooks(engine, () => storage, silentLogger(), authorizeRead);
+    return { storage };
+  }
+
+  /** {@link driveInsert}, as a signed-in caller's write carries it: a hook
+   * session plus the caller's context on the operation options. */
+  async function insertAs(
+    engine: Engine,
+    object: string,
+    data: Record<string, unknown>,
+    id: string,
+    caller: { session?: any; context?: any } = { session, context: CALLER },
+  ) {
+    const ctx: any = {
+      object,
+      event: 'beforeInsert',
+      input: { data, options: caller.context ? { context: caller.context } : {} },
+      session: caller.session,
+      dispatch: recordDispatch(),
+    };
+    await engine.trigger('beforeInsert', ctx);
+    const row: Record<string, unknown> & { id: string } = { ...(ctx.input.data as Record<string, unknown>), id };
+    (engine.tables[object] ??= []).push(row);
+    ctx.event = 'afterInsert';
+    ctx.result = row;
+    await engine.trigger('afterInsert', ctx);
+    return row;
+  }
+
+  async function updateAs(engine: Engine, object: string, id: string, data: Record<string, unknown>) {
+    const ctx: any = {
+      object,
+      event: 'beforeUpdate',
+      input: { id, data, options: { context: CALLER } },
+      session,
+      dispatch: recordDispatch(),
+    };
+    await engine.trigger('beforeUpdate', ctx);
+    const row = (engine.tables[object] ?? []).find((r) => String(r.id) === String(id));
+    if (row) Object.assign(row, ctx.input.data);
+    ctx.event = 'afterUpdate';
+    ctx.result = row;
+    await engine.trigger('afterUpdate', ctx);
+    return row;
+  }
+
+  const ownedByP1 = () => file({ ref_object: 'product', ref_id: 'p1', ref_field: 'image' });
+  const sysFileWrites = (engine: Engine) =>
+    engine.calls.filter((c) => (c.op === 'update' || c.op === 'insert') && c.object === 'sys_file');
+
+  describe('a file another record owns', () => {
+    it('is not copied for a caller the verdict refuses: the value is kept as written', async () => {
+      const engine = fakeEngine({ files: [ownedByP1()], records: { product: [{ id: 'p1', image: 'file_a' }] } });
+      const { authorizeRead } = verdict([]);
+      const { storage } = installWith(engine, authorizeRead);
+
+      const row = await insertAs(engine, 'product', { image: 'file_a' }, 'p2');
+
+      expect(row.image).toBe('file_a');
+      expect(storage.download).not.toHaveBeenCalled();
+      expect(storage.upload).not.toHaveBeenCalled();
+      expect(engine.tables.sys_file).toHaveLength(1);
+      expect(engine.tables.sys_file[0]).toMatchObject({ id: 'file_a', ref_object: 'product', ref_id: 'p1', ref_field: 'image' });
+      expect(sysFileWrites(engine)).toEqual([]);
+    });
+
+    it('is not copied by an update for a caller the verdict refuses', async () => {
+      const engine = fakeEngine({
+        files: [ownedByP1()],
+        records: { product: [{ id: 'p1', image: 'file_a' }, { id: 'p2', image: null }] },
+      });
+      const { authorizeRead } = verdict([]);
+      const { storage } = installWith(engine, authorizeRead);
+
+      const row = await updateAs(engine, 'product', 'p2', { image: 'file_a' });
+
+      expect(row?.image).toBe('file_a');
+      expect(storage.download).not.toHaveBeenCalled();
+      expect(engine.tables.sys_file).toHaveLength(1);
+      expect(engine.tables.sys_file[0]).toMatchObject({ ref_id: 'p1' });
+    });
+
+    it('CONTROL — is copied for a caller the verdict admits, exactly as before; the copy is claimed without a second question', async () => {
+      const engine = fakeEngine({ files: [ownedByP1()], records: { product: [{ id: 'p1', image: 'file_a' }] } });
+      const { authorizeRead, asked } = verdict(['file_a']);
+      const { storage } = installWith(engine, authorizeRead);
+
+      const row = await insertAs(engine, 'product', { image: 'file_a' }, 'p2');
+
+      expect(row.image).not.toBe('file_a');
+      expect(storage.download).toHaveBeenCalledWith('user/file_a.png');
+      const copy = engine.tables.sys_file.find((f) => f.id === row.image)!;
+      expect(copy).toMatchObject({ ref_object: 'product', ref_id: 'p2', ref_field: 'image' });
+      expect(engine.tables.sys_file[0]).toMatchObject({ id: 'file_a', ref_id: 'p1' });
+      // The verdict was asked about the SOURCE only — the stand-in admits
+      // nothing else, so a claim that re-asked about the copy would have
+      // left it unclaimed.
+      expect(asked.map((q) => q.fileId)).toEqual(['file_a']);
+    });
+  });
+
+  describe('a file no record owns', () => {
+    it('is not claimed for a caller the verdict refuses', async () => {
+      const engine = fakeEngine({ files: [file()] });
+      const { authorizeRead } = verdict([]);
+      installWith(engine, authorizeRead);
+
+      const row = await insertAs(engine, 'product', { image: 'file_a' }, 'p1');
+
+      expect(row.image).toBe('file_a');
+      expect(engine.tables.sys_file[0].ref_id ?? null).toBeNull();
+      expect(sysFileWrites(engine)).toEqual([]);
+    });
+
+    it('is not claimed by an update for a caller the verdict refuses', async () => {
+      const engine = fakeEngine({ files: [file()], records: { product: [{ id: 'p1', image: null }] } });
+      const { authorizeRead } = verdict([]);
+      installWith(engine, authorizeRead);
+
+      await updateAs(engine, 'product', 'p1', { image: 'file_a' });
+
+      expect(engine.tables.sys_file[0].ref_id ?? null).toBeNull();
+      expect(sysFileWrites(engine)).toEqual([]);
+    });
+
+    it('a tombstoned file is not brought back for a caller the verdict refuses', async () => {
+      const engine = fakeEngine({ files: [file({ status: 'deleted', deleted_at: '2026-01-01T00:00:00.000Z' })] });
+      const { authorizeRead } = verdict([]);
+      installWith(engine, authorizeRead);
+
+      await insertAs(engine, 'product', { image: 'file_a' }, 'p1');
+
+      expect(engine.tables.sys_file[0]).toMatchObject({ status: 'deleted', deleted_at: '2026-01-01T00:00:00.000Z' });
+      expect(engine.tables.sys_file[0].ref_id ?? null).toBeNull();
+    });
+
+    it('CONTROL — is claimed for a caller the verdict admits', async () => {
+      const engine = fakeEngine({ files: [file()] });
+      const { authorizeRead } = verdict(['file_a']);
+      installWith(engine, authorizeRead);
+
+      await insertAs(engine, 'product', { image: 'file_a' }, 'p1');
+
+      expect(engine.tables.sys_file[0]).toMatchObject({ ref_object: 'product', ref_id: 'p1', ref_field: 'image' });
+    });
+
+    it('each id of a multiple:true field is judged on its own', async () => {
+      const engine = fakeEngine({ files: [file(), file({ id: 'file_b', key: 'user/file_b.png' })] });
+      const { authorizeRead } = verdict(['file_b']);
+      installWith(engine, authorizeRead);
+
+      const row = await insertAs(engine, 'product', { gallery: ['file_a', 'file_b'] }, 'p1');
+
+      expect(row.gallery).toEqual(['file_a', 'file_b']);
+      expect(engine.tables.sys_file.map((f) => [f.id, f.ref_id ?? null])).toEqual([
+        ['file_a', null],
+        ['file_b', 'p1'],
+      ]);
+    });
+  });
+
+  it('constraint verdicts do not run ahead of the read check', async () => {
+    const engine = fakeEngine({
+      files: [file({ mime_type: 'application/pdf', size: 10_000_000 })],
+      registry: {
+        sys_file: REGISTRY.sys_file,
+        product: { name: 'product', fields: { id: { type: 'text' }, image: { type: 'image', accept: ['image/*'], maxSize: 1000 } } },
+      },
+    });
+    const { authorizeRead } = verdict([]);
+    installWith(engine, authorizeRead);
+
+    const row = await insertAs(engine, 'product', { image: 'file_a' }, 'p1');
+
+    expect(row.image).toBe('file_a');
+    expect(engine.tables.sys_file[0].ref_id ?? null).toBeNull();
+  });
+
+  it('CONTROL — a file the caller may read is still judged against its field\'s declaration', async () => {
+    const engine = fakeEngine({
+      files: [file({ mime_type: 'application/pdf', size: 10 })],
+      registry: {
+        sys_file: REGISTRY.sys_file,
+        product: { name: 'product', fields: { id: { type: 'text' }, image: { type: 'image', accept: ['image/*'] } } },
+      },
+    });
+    const { authorizeRead } = verdict(['file_a']);
+    installWith(engine, authorizeRead);
+
+    const err = await insertAs(engine, 'product', { image: 'file_a' }, 'p1').then(() => null, (e) => e);
+
+    expect(err).toBeInstanceOf(FileConstraintError);
+    expect({ code: err.code, status: err.status }).toEqual({ code: 'ERR_FILE_CONSTRAINT', status: 400 });
+  });
+
+  it('asks the verdict of the write\'s caller context, taken from the operation options', async () => {
+    const engine = fakeEngine({ files: [ownedByP1()], records: { product: [{ id: 'p1', image: 'file_a' }] } });
+    const { authorizeRead, asked } = verdict([]);
+    installWith(engine, authorizeRead);
+    const context = { ...CALLER, permissions: ['member_default'], __operationPrivate: 'dropped' };
+
+    await insertAs(engine, 'product', { image: 'file_a' }, 'p2', { session, context });
+
+    expect(asked.length).toBeGreaterThan(0);
+    for (const q of asked) {
+      expect(q.fileId).toBe('file_a');
+      expect(q.context).toMatchObject({ userId: 'u_writer', tenantId: 'org_1', permissions: ['member_default'] });
+      expect(q.context).not.toHaveProperty('__operationPrivate');
+    }
+  });
+
+  it('an authorization-store outage fails the write rather than reading as either answer', async () => {
+    const engine = fakeEngine({ files: [ownedByP1()], records: { product: [{ id: 'p1', image: 'file_a' }] } });
+    const outage = Object.assign(new Error('authorization store unavailable'), { code: 'SERVICE_UNAVAILABLE', status: 503 });
+    const authorizeRead = vi.fn(async () => { throw outage; });
+    const { storage } = installWith(engine, authorizeRead);
+
+    const err = await insertAs(engine, 'product', { image: 'file_a' }, 'p2').then(() => null, (e) => e);
+
+    expect(err).toBe(outage);
+    expect(storage.download).not.toHaveBeenCalled();
+    // The before hook threw, so the driver never wrote the record.
+    expect((engine.tables.product ?? []).map((r) => r.id)).toEqual(['p1']);
+  });
+
+  describe('writes with no caller to ask reference files as before', () => {
+    it('a system write is not asked, and copies as before', async () => {
+      const engine = fakeEngine({ files: [ownedByP1()], records: { product: [{ id: 'p1', image: 'file_a' }] } });
+      const { authorizeRead } = verdict([]);
+      installWith(engine, authorizeRead);
+
+      const row = await insertAs(engine, 'product', { image: 'file_a' }, 'p2', {
+        session: { ...session, isSystem: true },
+        context: { ...CALLER, isSystem: true },
+      });
+
+      expect(authorizeRead).not.toHaveBeenCalled();
+      expect(row.image).not.toBe('file_a');
+    });
+
+    it('a context-less programmatic write is not asked, and claims as before', async () => {
+      const engine = fakeEngine({ files: [file()] });
+      const { authorizeRead } = verdict([]);
+      installWith(engine, authorizeRead);
+
+      await insertAs(engine, 'product', { image: 'file_a' }, 'p1', {});
+
+      expect(authorizeRead).not.toHaveBeenCalled();
+      expect(engine.tables.sys_file[0]).toMatchObject({ ref_id: 'p1' });
+    });
+
+    it('no verdict bound (a bare kernel): nothing is asked, and files are claimed as before', async () => {
+      const engine = fakeEngine({ files: [file()] });
+      install(engine);
+
+      await insertAs(engine, 'product', { image: 'file_a' }, 'p1');
+
+      expect(engine.tables.sys_file[0]).toMatchObject({ ref_id: 'p1' });
+    });
+  });
+});

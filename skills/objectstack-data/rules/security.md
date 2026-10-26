@@ -21,15 +21,18 @@ export const salesUser = definePermissionSet({
 ```
 
 - `permissionSets:` is **refused at load** with an `Unrecognized key(s) on this
-  stack definition` error naming the key; `ObjectStackDefinitionSchema`
-  (`node_modules/@objectstack/spec/src/stack.zod.ts`) enumerates the keys.
+  stack definition` error naming the key; `ObjectStackDefinitionSchema` enumerates
+  the keys.
 - Bits: `allowCreate` / `allowRead` / `allowEdit` / `allowDelete`, plus
   `allowTransfer` (ownership change), `viewAllRecords` / `modifyAllRecords`
   (super-user, bypass sharing).
 - Source: `node_modules/@objectstack/spec/src/security/permission.zod.ts`
-- **`isDefault: true` = the `everyone` baseline (ADR-0090 D5).** It may carry app
-  capabilities declared under `capabilities:` (`defineCapability`) and granted via
-  `systemPermissions`; lint and boot refuse a platform capability or undeclared name there.
+- **`isDefault: true` = the `everyone` baseline (ADR-0090 D5).** A published package
+  declares **exactly one**, anchor-safe: `describeAnchorForbiddenBits(set, 'everyone')`
+  (`@objectstack/spec/security`) returns `null`, else lint
+  (`security-anchor-high-privilege`) and the binding refuse it. With none, invited
+  members get nothing until an admin assigns each; no gate counts them. Its
+  `systemPermissions` may name only app capabilities declared under `capabilities:`.
 - `enable.apiMethods` also restricts the HTTP surface.
 
 ## Assigning a permission set to a user
@@ -108,16 +111,14 @@ bridge (warns). The compiler resolves these
 | `current_user.positions` | the caller's positions (for `IN`; ADR-0090 D3) |
 | `current_user.KEY` | the set an object's `membershipKeys.KEY` declares (for `IN`) |
 
-- Source: `node_modules/@objectstack/spec/src/security/rls.zod.ts` (policy
-  shape, predicate grammar, `check` composition).
+- Source: `node_modules/@objectstack/spec/src/security/rls.zod.ts`.
 - Prefer the built-in `member_default` owner scoping (`owner_only_writes` /
   `owner_only_deletes`) and the object's `sharingModel` (ADR-0056 D1) over
   hand-written policies for the common cases.
 
 ## Sensitive fields — `secret` type + `requiredPermissions`
 
-`maskingRule` is **live** (plugin-security's FieldMasker enforces it). The real
-channels are:
+`maskingRule` is **live** (FieldMasker). Two more channels:
 
 **Encrypted-at-rest values — `type: 'secret'` (ADR-0100).** For reversible
 machine credentials (DB passwords, API keys, tokens): the engine encrypts the
@@ -147,7 +148,6 @@ fields: {
 ```
 
 - Source: `node_modules/@objectstack/spec/src/data/field.zod.ts`
-  (`secret` field type, `requiredPermissions`)
 
 ## Multi-tenancy
 
@@ -155,8 +155,8 @@ Organization count is a **deployment posture** fact, never object metadata.
 `single` (default) = one logical tenant: the bootstrapped Default Organization
 only, a second refused (`403`); sub-units are business units. Tenants as
 `sys_organization` rows need a walled posture (`group`/`isolated`; open core,
-ADR-0132) — ⛔ never `single` + your own RLS. See ADR-0093, ADR-0105 §"Today's
-two postures", https://objectstack.ai/docs/deployment/tenancy-modes.
+ADR-0132) — ⛔ never `single` + your own RLS. See ADR-0093,
+https://objectstack.ai/docs/deployment/tenancy-modes.
 
 Within a posture, `tenancy` on the object is the row-level knob (stamped on
 write, enforced on read); **strict**, two keys:

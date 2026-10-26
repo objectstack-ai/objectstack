@@ -78,7 +78,8 @@ describe('a retired custom-SQL metric type is refused, never emitted', () => {
   it('still wraps the aggregate types', async () => {
     const sql = await sqlFor({ cube: 'orders', measures: ['count', 'total'] });
     expect(sql).toContain('COUNT(*) AS "count"');
-    expect(sql).toContain('SUM(amount) AS "total"');
+    // [#25907] A `sum` answers its empty-group identity in the statement.
+    expect(sql).toContain('COALESCE(SUM(amount), 0) AS "total"');
   });
 });
 
@@ -105,14 +106,14 @@ describe('an expression containing a dot is not mistaken for a join path', () =>
 
   it('emits the expression intact and registers no phantom join', async () => {
     const sql = await dottedSql({ cube: 'orders', measures: ['acct_total'] });
-    expect(sql).toContain('SUM(COALESCE(account.amount, 0) / 2) AS "acct_total"');
+    expect(sql).toContain('COALESCE(SUM(COALESCE(account.amount, 0) / 2), 0) AS "acct_total"');
     expect(sql).not.toContain('"COALESCE(account"');
     expect(sql).not.toContain('LEFT JOIN "COALESCE(account"');
   });
 
   it('still lowers a real relationship path into a qualified column and a join', async () => {
     const sql = await dottedSql({ cube: 'orders', measures: ['acct_amount'] });
-    expect(sql).toContain('SUM("account"."amount") AS "acct_amount"');
+    expect(sql).toContain('COALESCE(SUM("account"."amount"), 0) AS "acct_amount"');
     expect(sql).toContain('LEFT JOIN "account" ON "orders"."account" = "account"."id"');
   });
 });

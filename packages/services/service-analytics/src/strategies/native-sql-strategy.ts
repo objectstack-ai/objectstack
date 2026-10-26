@@ -248,6 +248,76 @@ export function windowClauseSql(
 }
 
 /**
+ * [#25907] The NULL placement an `ORDER BY` key states, per dialect — `null`
+ * where the dialect has no spelling for it, so the driver's placement stands.
+ *
+ * A key can still order a NULL after the empty-group identity moved into the
+ * statement ({@link withEmptyGroupIdentity}): an aggregate with no identity
+ * (`avg`, `min`, `max`) over nothing, and a NULL dimension value. Left to the
+ * driver, SQLite sorts it lowest and PostgreSQL highest, so the same sorted,
+ * paged query answered a different page per dialect; and the dataset door's
+ * post-pass re-sorts a pushed-down page with `applyOrdering`, which keeps NULL
+ * last in both directions, so on SQLite the window was cut on one order and
+ * shown in another. The stated placement is that comparator's: last, in both
+ * directions, the order the ObjectQL face answers too.
+ *
+ * MySQL has no `NULLS LAST`, and `unknown` covers it among others (see
+ * {@link OFFSET_ONLY_LIMIT_SQL}); no one spelling parses on every dialect it
+ * covers, so those two keep the driver's placement. ⛔ An `IS NULL` sort
+ * expression is not that spelling: PostgreSQL resolves a name inside an
+ * expression against the INPUT columns, never the select alias, so a measure
+ * aliased like a column would sort on that column. ⚠️ The `mysql` cell is NOT
+ * MEASURED, the same declared skip as {@link OFFSET_ONLY_LIMIT_SQL}'s.
+ */
+const NULLS_LAST_SQL: Readonly<Record<AnalyticsSqlDialect, string | null>> = {
+  sqlite: 'NULLS LAST',
+  postgres: 'NULLS LAST',
+  mysql: null,
+  unknown: null,
+};
+
+/**
+ * [#25907] The `ORDER BY` clause a statement carries for `order`, for
+ * `dialect`, or `''` for no order. Each key names a select alias and states
+ * the dialect's NULL placement ({@link NULLS_LAST_SQL}).
+ */
+export function orderClauseSql(
+  order: Readonly<Record<string, 'asc' | 'desc'>> | undefined,
+  dialect: AnalyticsSqlDialect,
+): string {
+  const keys = Object.entries(order ?? {});
+  if (keys.length === 0) return '';
+  const nulls = NULLS_LAST_SQL[dialect];
+  return ` ORDER BY ${keys
+    .map(([member, dir]) => `"${member}" ${dir.toUpperCase()}${nulls ? ` ${nulls}` : ''}`)
+    .join(', ')}`;
+}
+
+/**
+ * [#25907, #21042] An aggregate's SQL, answering the identity the platform
+ * declares for it over NOTHING (`emptyGroupValueFor`, spec
+ * `data/aggregation-policy.ts`) where SQL answers NULL.
+ *
+ * `SUM` over a group whose aggregand is NULL in every row, or over no row a
+ * measure-scoped filter admits, is NULL in SQL; summing nothing is `0`, the
+ * answer the engine and the ObjectQL face give (#15546). This face folded the
+ * NULL in JavaScript after the rows came back, by which time `ORDER BY` and
+ * `LIMIT` / `OFFSET` had placed and paged it as a NULL: the folded `0` sat
+ * where no `0` sorts, and the page differed per dialect. `COALESCE` in the
+ * select list puts the identity where the sort and the window read it, on
+ * every dialect, and the echoed statement says so.
+ *
+ * Read from the policy, never restated, so `avg` / `min` / `max` (no identity)
+ * keep their NULL. `count` / `count_distinct` are not wrapped: SQL `COUNT`
+ * answers `0` over nothing on every dialect, the identity already.
+ */
+function withEmptyGroupIdentity(aggregate: string, aggregateSql: string): string {
+  const identity = emptyGroupValueFor(aggregate);
+  if (identity === undefined || aggregate === 'count' || aggregate === 'count_distinct') return aggregateSql;
+  return `COALESCE(${aggregateSql}, ${identity})`;
+}
+
+/**
  * A dot-separated chain of bare identifiers — `amount`, `account.amount`,
  * `account.owner.region`. Distinguishes a relationship PATH, which
  * {@link NativeSQLStrategy.qualifyAndRegisterJoin} lowers into joins, from a SQL
@@ -1112,38 +1182,19 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
 
     const rows = await ctx.executeRawSql!(objectName, sql, params);
 
-    // [#21042, #15546] A measure whose aggregate answers NULL over nothing — SQL
-    // `SUM` over a group whose aggregand is NULL in every row, or over no row a
-    // measure-scoped filter admits — answers the identity the platform declares
-    // for that aggregate over NOTHING (`emptyGroupValueFor`, spec
-    // `data/aggregation-policy.ts`): summing nothing is `0`, a measured fact.
-    // The engine and the ObjectQL face fold it (`driver-sql`'s
-    // `foldEmptyAggregateAnswers`, the rows path); this face answered `null` for
-    // the same group. Read from the policy, never restated, for EVERY measure —
-    // a measure-scoped one carries its aggregate in the same `type` — so
-    // `avg` / `min` / `max` (no identity, `undefined`) keep their NULL. Only `null` folds, before the
-    // presenter, in `driver-sql`'s order: an `undefined` would be a column
-    // never projected, a different defect that must stay visible. The dataset
+    // [#21042, #15546 → #25907] A measure whose aggregate answers NULL over
+    // nothing answers the identity the platform declares for it
+    // (`emptyGroupValueFor`) IN the statement — `withEmptyGroupIdentity`, at the
+    // measure's compile — never here: folded after the rows came back, the
+    // `ORDER BY` and window had already placed and paged the NULL. The dataset
     // door's `DatasetExecutor` fill still runs after this and is idempotent on
-    // a folded row.
+    // an answered identity.
     // [#25778] A dataset duration measure is absent from the cube and carries
-    // its aggregate in the dataset scope; it folds by that aggregate, and it
-    // answers a number whatever its aggregate.
+    // its aggregate in the dataset scope; its identity is answered in the
+    // statement the same way (`resolveDurationMeasureSql`), and it answers a
+    // number whatever its aggregate.
     const durations = (ctx as DatasetScopedStrategyContext).getDatasetScope?.(query.cube!)?.measureDurations;
     const durationOf = (member: string) => durationMeasureIn(durations, member, cube.name);
-    const folds: Array<readonly [string, number]> = [];
-    for (const member of query.measures ?? []) {
-      const identity = emptyGroupValueFor(durationOf(member)?.aggregate ?? this.lookupMember(cube, member, 'measure')?.type);
-      if (identity !== undefined) folds.push([member, identity]);
-    }
-    if (folds.length > 0 && Array.isArray(rows)) {
-      for (const row of rows) {
-        if (!row || typeof row !== 'object') continue;
-        for (const [member, identity] of folds) {
-          if (row[member] === null) row[member] = identity;
-        }
-      }
-    }
 
     // [#20889] A measure column `fields[]` declares `number` answers a number,
     // on every dialect. The SQL client hands an aggregate back as the wire type
@@ -1480,13 +1531,12 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     if (groupByClauses.length > 0) {
       sql += ` GROUP BY ${groupByClauses.join(', ')}`;
     }
-    if (query.order && Object.keys(query.order).length > 0) {
-      const orderClauses = Object.entries(query.order).map(([f, d]) => `"${f}" ${d.toUpperCase()}`);
-      sql += ` ORDER BY ${orderClauses.join(', ')}`;
-    }
     // [#21365] The dialect of the driver `execute()` hands this statement to —
-    // the base object's, the one `executeRawSql` is called with.
-    sql += windowClauseSql(query.limit, query.offset, sqlDialectFor(ctx, this.extractObjectName(cube)));
+    // the base object's, the one `executeRawSql` is called with. [#25907] The
+    // order states its NULL placement in it.
+    const dialect = sqlDialectFor(ctx, this.extractObjectName(cube));
+    sql += orderClauseSql(query.order, dialect);
+    sql += windowClauseSql(query.limit, query.offset, dialect);
 
     return { sql, params };
   }
@@ -1781,7 +1831,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
 
     if (predicate !== null) {
       const wrapConditional = CONDITIONAL_AGGREGATE_SQL[aggregate];
-      if (wrapConditional) return wrapConditional(col, predicate);
+      if (wrapConditional) return withEmptyGroupIdentity(aggregate, wrapConditional(col, predicate));
       // [#10298] Deliberately BARE — an undeclared 500, the tier
       // {@link aggregateOfMeasure} answers in. The conditional table is keyed
       // identically to {@link AGGREGATE_SQL} (`aggregation-lockstep.test.ts`),
@@ -1800,7 +1850,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // {@link aggregateOfMeasure} admitted `aggregate` FROM this table, and
     // refused (bare, undeclared 500, the spec's own words) every type it does
     // not key, before anything was lowered.
-    return AGGREGATE_SQL[aggregate](col);
+    return withEmptyGroupIdentity(aggregate, AGGREGATE_SQL[aggregate](col));
   }
 
   /**
@@ -1810,7 +1860,9 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
    * through the host's temporal repair, as a filter on it does, so a legacy
    * SQLite column that still holds epoch integers measures the same instants.
    * Under a measure filter the operand takes the conditional aggregate, as
-   * every other measure's does.
+   * every other measure's does, and over nothing it answers its aggregate's
+   * declared identity in the statement ({@link withEmptyGroupIdentity}), so a
+   * `sum` with no record carrying both columns sorts and pages as its `0`.
    */
   private resolveDurationMeasureSql(
     cube: Cube,
@@ -1838,9 +1890,12 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       this.qualifyAndRegisterJoin(field, parentTable, joins, cube),
     );
     const operand = durationOperandSql(dialect, column(duration.from), column(duration.to), duration.unit);
-    return predicate !== null
-      ? CONDITIONAL_AGGREGATE_SQL[duration.aggregate](operand, predicate)
-      : AGGREGATE_SQL[duration.aggregate](operand);
+    return withEmptyGroupIdentity(
+      duration.aggregate,
+      predicate !== null
+        ? CONDITIONAL_AGGREGATE_SQL[duration.aggregate](operand, predicate)
+        : AGGREGATE_SQL[duration.aggregate](operand),
+    );
   }
 
   private resolveFieldSql(

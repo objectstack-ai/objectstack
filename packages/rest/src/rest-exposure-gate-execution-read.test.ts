@@ -17,7 +17,9 @@
 // The `object` binding is replaced, for this file, by the same schema behind a
 // proxy that records the name of each document it parses, through the
 // registry's own public overlay (`registerMetadataTypeSchema`), and restored
-// after. Everything else is real: the REST route handlers over the real
+// after. [#25783] A FRESH proxy per test: verdicts are memoized per schema
+// object and document content, so a document an earlier test diagnosed would
+// otherwise be answered without a parse, and its row would record nothing. Everything else is real: the REST route handlers over the real
 // `ObjectStackProtocolImplementation` over a real `SchemaRegistry`, with the
 // real data call behind the gate for the code object (see `host`).
 //
@@ -33,7 +35,7 @@
 //  3. CONTROL — the served read is unchanged: `GET /api/v1/meta/object/NAME`
 //     still serves `_diagnostics`, and the instrument records it.
 
-import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterAll, afterEach } from 'vitest';
 import { SchemaRegistry, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { getMetadataTypeSchema, registerMetadataTypeSchema } from '@objectstack/spec/kernel';
@@ -67,7 +69,7 @@ const OBJECT_SCHEMA = getMetadataTypeSchema('object');
 /** The `name` of every object document diagnosed since the last reset. */
 let diagnosed: unknown[] = [];
 
-beforeAll(() => {
+beforeEach(() => {
     if (!OBJECT_SCHEMA) throw new Error('no registered `object` schema to instrument');
     const recording = new Proxy(OBJECT_SCHEMA, {
         get(target, prop, receiver) {
