@@ -40,21 +40,41 @@ function makeSettings(timezoneByOrganization: Record<string, string>) {
   };
 }
 
-/** An engine double holding one tenant `sys_setting` row per organization. */
-function makeQl(timezoneByOrganization: Record<string, string>) {
-  const rows: Row[] = Object.entries(timezoneByOrganization).map(([organization_id, value]) => ({
+/** One tenant `sys_setting` timezone row per organization. */
+function timezoneRows(timezoneByOrganization: Record<string, string>): Row[] {
+  return Object.entries(timezoneByOrganization).map(([organization_id, value]) => ({
     namespace: 'localization',
     key: 'timezone',
     scope: 'tenant',
     organization_id,
     value,
   }));
+}
+
+/** Equality and `$in` per field; any other operator or combinator throws rather than matching on a guess. */
+function matches(row: Row, where: Record<string, unknown> | undefined): boolean {
+  if (!where) return true;
+  return Object.entries(where).every(([field, cond]) => {
+    if (field.startsWith('$')) throw new Error(`this double does not implement the where combinator ${field}`);
+    const value = row[field] ?? null;
+    if (cond !== null && typeof cond === 'object') {
+      const operators = Object.keys(cond);
+      if (operators.length !== 1 || operators[0] !== '$in') {
+        throw new Error(`this double does not implement the where operator(s) ${operators.join(', ')} on ${field}`);
+      }
+      return (cond as any).$in.includes(value);
+    }
+    return value === (cond ?? null);
+  });
+}
+
+/** An engine double that applies the `where` it is handed and holds the caller's bound. */
+function makeQl(tables: Record<string, Row[]>) {
   return {
     registry: { getObject: (name: string) => ({ name }) },
     find: async (object: string, options: any) => {
-      if (object !== 'sys_setting') return [];
-      const where = options?.where ?? {};
-      return rows.filter((r) => r.organization_id === where.organization_id);
+      const rows = (tables[object] ?? []).filter((r) => matches(r, options?.where));
+      return typeof options?.limit === 'number' ? rows.slice(0, options.limit) : rows;
     },
   };
 }
@@ -82,7 +102,7 @@ describe('ResolveLocalizationInput.organizationId — the runtime', () => {
   });
 
   it('resolves the organization timezone through the direct sys_setting fallback, scoped by organizationId', async () => {
-    const loc = await resolveLocalizationContext({ ql: makeQl(ORGANIZATIONS), organizationId: 'org_paris' });
+    const loc = await resolveLocalizationContext({ ql: makeQl({ sys_setting: timezoneRows(ORGANIZATIONS) }), organizationId: 'org_paris' });
     expect(loc.timezone).toBe('Europe/Paris');
   });
 
