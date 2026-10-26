@@ -89,14 +89,14 @@ export function stateMachineNextValues(
   if (currentValue === undefined || currentValue === null) return null;
   const from = String(currentValue);
 
-  let reachable: Set<string> | null = null;
+  const perRule: Set<string>[] = [];
   for (const rule of rules) {
     if (!isBlockingUpdateMachine(rule, fieldName)) continue;
     const allowed = rule.transitions[from];
     // An undeclared from-state is not policed by this rule.
     if (!Array.isArray(allowed)) continue;
-    const next = new Set<string>([from, ...allowed.map((s) => String(s))]);
-    reachable = reachable === null ? next : new Set([...reachable].filter((v) => next.has(v)));
+    perRule.push(new Set<string>([from, ...allowed.map((s) => String(s))]));
   }
-  return reachable;
+  if (perRule.length === 0) return null;
+  return perRule.reduce((acc, next) => new Set([...acc].filter((v) => next.has(v))));
 }
