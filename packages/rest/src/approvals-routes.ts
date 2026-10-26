@@ -361,7 +361,9 @@ export function registerApprovalsEndpoints(this: ApprovalsRouteHost, basePath: s
                 const { object, recordId } = req.params;
                 const lock = await svc.getRecordLock(object, recordId, context ?? {});
                 if (!lock) {
-                    sendEnvelopeError(res, 404, 'RECORD_NOT_FOUND', `Record '${recordId}' of '${object}' not found`);
+                    // One body for both causes, byte for byte: the sentence
+                    // names neither the id nor why, so it cannot tell them apart.
+                    sendEnvelopeError(res, 404, 'RECORD_NOT_FOUND', `No such '${object}' record`);
                     return;
                 }
                 sendOk(res, { locked: lock.locked === true });
