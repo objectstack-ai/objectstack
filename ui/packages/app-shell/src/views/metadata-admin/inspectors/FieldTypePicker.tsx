@@ -46,6 +46,15 @@
  * matches and a group with none is dropped. The arrow keys move through what
  * is left and Enter picks the highlighted type.
  *
+ * ## The highlighted type (objectstack#26194)
+ *
+ * With no query the current type is highlighted, so Enter re-chooses it and
+ * commits nothing. A query highlights the first listed type it names — by
+ * name, id or English name — and the first listed type when it names none.
+ * The first row alone is not enough: a type whose description holds the
+ * query can sit in an earlier group than the type the query names ("Number"
+ * lists Phone, "A phone number.", above Number).
+ *
  * Module-private: imported by `ObjectFieldInspector` and the Studio's Add field
  * popover (`studio-design/AddFieldPopover`), exported from no barrel.
  */
@@ -131,22 +140,43 @@ function inDescription(description: string, query: string): boolean {
 }
 
 /**
- * Whether a type matches the search: its name as shown, its category as shown,
- * its id (`master_detail` also as `master detail`) and the catalog's English
- * name, as substrings, so an author finds a type by any of the words they know
- * it by while still typing them; and its one-line description, as whole words
- * (see {@link inDescription}).
+ * Whether `query` names the type: its name as shown, its id (`master_detail`
+ * also as `master detail`) or the catalog's English name holds it, as a
+ * substring.
+ */
+function names(row: TypeRow, query: string): boolean {
+  const haystacks = [row.name, row.id, row.id.replace(/_/g, ' '), FIELD_TYPE_META[row.id].label];
+  return haystacks.some((h) => h.toLowerCase().includes(query));
+}
+
+/**
+ * Whether a type matches the search: the query names it (see {@link names})
+ * or its category as shown holds it, so an author finds a type by any of the
+ * words they know it by while still typing them; or its one-line description
+ * holds it as whole words (see {@link inDescription}).
  */
 function matches(row: TypeRow, heading: string, query: string): boolean {
   if (!query) return true;
-  const haystacks = [
-    row.name,
-    heading,
-    row.id,
-    row.id.replace(/_/g, ' '),
-    FIELD_TYPE_META[row.id].label,
-  ];
-  return haystacks.some((h) => h.toLowerCase().includes(query)) || inDescription(row.description, query);
+  return names(row, query) || heading.toLowerCase().includes(query) || inDescription(row.description, query);
+}
+
+/** The search as matched: trimmed and lower-cased. */
+const normalise = (search: string) => search.trim().toLowerCase();
+
+/** The groups with only the types that match `query`; a group with none is dropped. */
+function filterGroups(groups: TypeGroup[], query: string): TypeGroup[] {
+  return groups
+    .map((g) => ({ ...g, rows: g.rows.filter((r) => matches(r, g.heading, query)) }))
+    .filter((g) => g.rows.length > 0);
+}
+
+/**
+ * The type a non-empty query highlights (objectstack#26194): the first listed
+ * type it names, else the first listed type; `''` when nothing is listed.
+ */
+function highlightFor(shown: TypeGroup[], query: string): string {
+  const rows = shown.flatMap((g) => g.rows);
+  return (rows.find((r) => names(r, query)) ?? rows[0])?.id ?? '';
 }
 
 export function FieldTypePicker({ label, value, onCommit, disabled, locale: localeProp }: FieldTypePickerProps) {
@@ -172,18 +202,35 @@ export function FieldTypePicker({ label, value, onCommit, disabled, locale: loca
     [locale],
   );
 
-  const query = search.trim().toLowerCase();
-  const shown = React.useMemo(
-    () =>
-      groups
-        .map((g) => ({ ...g, rows: g.rows.filter((r) => matches(r, g.heading, query)) }))
-        .filter((g) => g.rows.length > 0),
-    [groups, query],
-  );
+  const query = normalise(search);
+  const shown = React.useMemo(() => filterGroups(groups, query), [groups, query]);
 
   // The current type, from the catalog; a stored type it does not list is
   // shown as itself, flagged.
   const current = value in FIELD_TYPE_META ? FIELD_TYPE_META[value as FieldTypeId] : undefined;
+
+  // The highlighted row, as cmdk's controlled `value`. A change of the search
+  // makes cmdk highlight the list's first row once the rows have rendered; the
+  // highlight the query asks for is held here until then and replaces that
+  // choice (`''` lets it stand). `active` is cleared on the change so the
+  // replacement reaches cmdk even when it equals the highlight before it.
+  const [active, setActive] = React.useState(current?.id ?? '');
+  const pendingHighlight = React.useRef<string | null>(null);
+
+  const onSearchChange = (next: string) => {
+    setSearch(next);
+    const nextQuery = normalise(next);
+    pendingHighlight.current = nextQuery
+      ? highlightFor(filterGroups(groups, nextQuery), nextQuery)
+      : (current?.id ?? '');
+    setActive('');
+  };
+
+  const onActiveChange = (next: string) => {
+    const pending = pendingHighlight.current;
+    pendingHighlight.current = null;
+    setActive(pending || next);
+  };
   const CurrentIcon = current?.Icon;
   const triggerText = current
     ? t(`engine.fieldType.${current.id}`, locale)
@@ -212,6 +259,10 @@ export function FieldTypePicker({ label, value, onCommit, disabled, locale: loca
         onOpenChange={(next) => {
           setOpen(next);
           if (!next) setSearch('');
+          if (next) {
+            pendingHighlight.current = null;
+            setActive(current?.id ?? '');
+          }
         }}
       >
         <PopoverTrigger asChild>
@@ -244,12 +295,13 @@ export function FieldTypePicker({ label, value, onCommit, disabled, locale: loca
               (`aria-labelledby`), so the name goes there, not on the input. */}
           <Command
             shouldFilter={false}
-            defaultValue={current?.id}
+            value={active}
+            onValueChange={onActiveChange}
             label={t('designer.canvas.searchFieldType', locale)}
           >
             <CommandInput
               value={search}
-              onValueChange={setSearch}
+              onValueChange={onSearchChange}
               placeholder={t('designer.canvas.searchFieldType', locale)}
             />
             <CommandList ref={listRef} label={label} className="max-h-80">

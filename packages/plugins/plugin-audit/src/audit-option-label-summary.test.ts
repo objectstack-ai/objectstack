@@ -103,6 +103,7 @@ import { createMemoryI18n } from '@objectstack/core';
 import { installAuditWriters } from './audit-writers.js';
 import { zhCNObjects } from './translations/zh-CN.objects.generated.js';
 import { singlePostureDefaultOrganization } from './__tests__/single-posture-tenancy.js';
+import { summaryAsRead } from './__tests__/summary-as-read.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -347,7 +348,16 @@ async function boot(opts: { locale?: string; i18n?: unknown } = {}) {
     getI18n: () => opts.i18n as any,
     getLocale: async () => opts.locale,
   });
-  return { engine, ...stub };
+  // [#26167] The summaries as a reader in `opts.locale` is served them: the
+  // row stores the English sentence and its code, and the field and option
+  // labels are localized per READER (`summary-as-read.ts`).
+  const readerSummaries = () =>
+    Array.from(stub.storeFor('sys_activity').values()).map((r) => summaryAsRead(r, opts.i18n, opts.locale, engine));
+  const readerSummary = () => {
+    const all = readerSummaries();
+    return all[all.length - 1];
+  };
+  return { engine, readerSummaries, readerSummary, ...stub };
 }
 
 const summariesOf = (storeFor: (o: string) => Map<string, Record<string, unknown>>) =>
@@ -387,17 +397,19 @@ const setStage = (engine: any, id: string, stage: string) =>
 
 describe('[#7289] tracked-change branch — select option labels resolve through the bundle', () => {
   it('localizes the option label on BOTH sides of the diff (the reported string)', async () => {
-    const { engine, storeFor } = await boot({ locale: 'zh-CN', i18n: makeI18n() });
+    const { engine, storeFor, readerSummary } = await boot({ locale: 'zh-CN', i18n: makeI18n() });
     await seed(engine);
 
     await setStage(engine, 'deal_1', 'closed_won');
 
     // Was `阶段: Proposal → Closed Won` — localized frame, authored values.
-    expect(lastSummary(storeFor)).toBe('阶段: 提案中 → 已赢单');
+    // [#26167] Stored in English with the option VALUES; read in zh-CN.
+    expect(lastSummary(storeFor)).toBe('Stage: Proposal → Closed Won');
+    expect(readerSummary()).toBe('阶段: 提案中 → 已赢单');
   });
 
   it('falls back to the AUTHORED option label per VALUE, not per field', async () => {
-    const { engine, storeFor } = await boot({ locale: 'zh-CN', i18n: makeI18n() });
+    const { engine, readerSummary } = await boot({ locale: 'zh-CN', i18n: makeI18n() });
     await seed(engine);
 
     // `stage.options.on_hold` is absent from the bundle; `proposal` is present.
@@ -405,22 +417,22 @@ describe('[#7289] tracked-change branch — select option labels resolve through
     // the translate limb, which is the trap #7291 measured on its raw-id case.
     await setStage(engine, 'deal_1', 'on_hold');
 
-    expect(lastSummary(storeFor)).toBe('阶段: 提案中 → On Hold');
+    expect(readerSummary()).toBe('阶段: 提案中 → On Hold');
   });
 
   it('localizes the BARE-STRING option shape, whose authored label is the value', async () => {
-    const { engine, storeFor } = await boot({ locale: 'zh-CN', i18n: makeI18n() });
+    const { engine, readerSummary } = await boot({ locale: 'zh-CN', i18n: makeI18n() });
     await seed(engine);
 
     // `options: ['p1', 'p2']` → the authored label chain has only `ov` in it.
     // `p1` is in the bundle, `p2` is not, so both directions are pinned here.
     await engine.update('biz_deal', { priority: 'p1' }, { where: { id: 'deal_1' } } as any);
 
-    expect(lastSummary(storeFor)).toBe('优先级: p2 → 最高');
+    expect(readerSummary()).toBe('优先级: p2 → 最高');
   });
 
   it('renders String(value) for a value matching NO declared option, bundle key or not', async () => {
-    const { engine, storeFor } = await boot({ locale: 'zh-CN', i18n: makeI18n() });
+    const { engine, readerSummary } = await boot({ locale: 'zh-CN', i18n: makeI18n() });
     await seed(engine);
 
     // The bundle DOES declare `channel.options.phone_call = '电话'`, and
@@ -431,11 +443,11 @@ describe('[#7289] tracked-change branch — select option labels resolve through
     // by the translate limb being dead.
     await engine.update('biz_deal', { channel: 'phone_call' }, { where: { id: 'deal_1' } } as any);
 
-    expect(lastSummary(storeFor)).toBe('渠道: 网页 → phone_call');
+    expect(readerSummary()).toBe('渠道: 网页 → phone_call');
   });
 
   it('leaves the reference branch (#7230 / #7291) rendering titles beside the options', async () => {
-    const { engine, storeFor } = await boot({ locale: 'zh-CN', i18n: makeI18n() });
+    const { engine, readerSummary } = await boot({ locale: 'zh-CN', i18n: makeI18n() });
     await seed(engine);
 
     await engine.update(
@@ -446,7 +458,7 @@ describe('[#7289] tracked-change branch — select option labels resolve through
 
     // Option label from the bundle, record title from the read: the two
     // resolutions are independent and both must be present in one summary.
-    expect(lastSummary(storeFor)).toBe('阶段: 提案中 → 已赢单; 负责人: ∅ → 张伟');
+    expect(readerSummary()).toBe('阶段: 提案中 → 已赢单; 负责人: ∅ → 张伟');
   });
 
   it('keeps the authored option label when no i18n service is resolvable', async () => {
@@ -474,7 +486,7 @@ describe('[#7289] tracked-change branch — select option labels resolve through
 
 describe('[#7289] fired-milestone branch — option labels stay AUTHORED, on purpose', () => {
   it('renders the authored option label inside the untranslated author sentence', async () => {
-    const { engine, storeFor } = await boot({ locale: 'zh-CN', i18n: makeI18n() });
+    const { engine, storeFor, readerSummaries } = await boot({ locale: 'zh-CN', i18n: makeI18n() });
     await seed(engine);
 
     // Two writes, and the first one is the CONTROL: it proves the locale is
@@ -486,13 +498,15 @@ describe('[#7289] fired-milestone branch — option labels stay AUTHORED, on pur
     await setStage(engine, 'deal_2', 'archived');
 
     const all = summariesOf(storeFor);
-    expect(all[all.length - 2]).toBe('阶段: 提案中 → 已赢单');
+    expect(readerSummaries()[all.length - 2]).toBe('阶段: 提案中 → 已赢单');
 
     // `{stage}` → the AUTHORED `Archived`, although the bundle declares
     // `stage.options.archived = '已归档'`. `{owner}` → `张伟`, because #7290's
     // title resolution is locale-INDEPENDENT data, not a translation. The
     // author's sentence and the author's option label stay in one language.
     expect(all[all.length - 1]).toBe('Deal moved to Archived by 张伟');
+    // [#26167] …and a zh-CN READER is served it as written: no summary code.
+    expect(readerSummaries()[all.length - 1]).toBe('Deal moved to Archived by 张伟');
   });
 
   // ⚠️ Status-quo pin, not coverage of this change: the locale is OFF here, so
@@ -517,7 +531,7 @@ describe('[#7289] fired-milestone branch — option labels stay AUTHORED, on pur
 
 describe('[#7289] localizing an option label is a bundle lookup and adds no reads', () => {
   it('a tracked option-only change pays ZERO reads, on a row that HOLDS references', async () => {
-    const { engine, reads, storeFor } = await boot({ locale: 'zh-CN', i18n: makeI18n() });
+    const { engine, reads, readerSummary } = await boot({ locale: 'zh-CN', i18n: makeI18n() });
     await seed(engine);
     const before = { user: reads.findOn['sys_user'] ?? 0, acct: reads.findOn['crm_account'] ?? 0 };
 
@@ -530,7 +544,7 @@ describe('[#7289] localizing an option label is a bundle lookup and adds no read
 
     expect((reads.findOn['sys_user'] ?? 0) - before.user).toBe(0);
     expect((reads.findOn['crm_account'] ?? 0) - before.acct).toBe(0);
-    expect(lastSummary(storeFor)).toBe('阶段: 提案中 → 已赢单');
+    expect(readerSummary()).toBe('阶段: 提案中 → 已赢单');
   });
 
   // ⚠️ Retained as a forward guard, not as coverage of this change: a create

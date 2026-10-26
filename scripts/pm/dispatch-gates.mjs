@@ -5098,16 +5098,17 @@ const IDENTIFIER_TOKEN = /[A-Za-z_$][\w$]*/g;
  * destructured default puts braces in the SIGNATURE, and counting those closes
  * the body before it opens. `release-rehearsal-clone.mjs` writes two of them
  * among its fixture builders — and, the half this docblock asserted backwards
- * once, THREE self-test ENTRY POINTS in the `scripts/` tree carry one TODAY, so
+ * once, self-test ENTRY POINTS in the `scripts/` tree carry one TODAY, so
  * this repairs live files rather than guarding against a future spelling:
  *
  *   `scripts/check-test-completeness.mjs#selfTest`
- *   `scripts/measure-position-name-fold-census.mjs#selfTest`
- *       both `function selfTest({ quiet = false } = {})`
+ *       `function selfTest({ quiet = false } = {})`
  *   `scripts/workspace-enumerator.mjs#selfTest`
  *       `export function selfTest({ root = null } = {})`
  *
- * Measured at 6193e576d — bytes `maskSelfTests` changes in each file, this
+ * At 6193e576d there were three; the third, the position-name fold census
+ * (also `function selfTest({ quiet = false } = {})`), was deleted with the fold
+ * in #24757. Measured there — bytes `maskSelfTests` changes in each file, this
  * module against a staged copy of the one on `origin/main`: 30 -> 14848,
  * 30 -> 3961, 34 -> 6294. Thirty bytes is the destructured parameter and
  * nothing else; the entire self-test body was surviving the mask. The control

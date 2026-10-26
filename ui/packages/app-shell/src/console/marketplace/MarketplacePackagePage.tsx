@@ -80,6 +80,7 @@ import {
   type LocalInstallStrippedLock,
   type CloudInstallationInfo,
 } from './marketplaceApi.js';
+import { useDependencyMissingText } from './dependencyMissing.js';
 import { getCloudBase, getRuntimeConfig, isMarketplaceEnabled } from '../../runtime-config.js';
 import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
 import { useMetadata } from '../../providers/MetadataProvider.js';
@@ -144,6 +145,7 @@ export function MarketplacePackagePage() {
   const { packageId, appName } = useParams<{ packageId?: string; appName?: string }>();
   const { isAdmin, isResolved } = useWorkspaceAdminStatus();
   const { t, language } = useObjectTranslation();
+  const dependencyMissingText = useDependencyMissingText();
   // Dates and numbers on this surface read the display locale; a bare
   // `toLocale*()` call used the MACHINE's locale (objectui#9909).
   const displayLocale = useDisplayLocale();
@@ -637,7 +639,13 @@ export function MarketplacePackagePage() {
       // remedy, and the page has nothing to add to it.
       const code = e?.code;
       let msg = e?.message ?? String(e);
-      if (errorCodeIs(e, 'MANIFEST_CONFLICT')) {
+      // ADR-0141 D2 — an unsatisfied declared dependency, drawn from the
+      // refusal's facts in the reader's locale; without facts the envelope's
+      // message stands.
+      const dependencyMissing = dependencyMissingText(e);
+      if (dependencyMissing) {
+        msg = dependencyMissing;
+      } else if (errorCodeIs(e, 'MANIFEST_CONFLICT')) {
         msg = t('marketplace.install.localManifestConflict', { message: msg });
       } else if (errorCodeIs(e, 'UNAUTHENTICATED')) {
         msg = t('marketplace.install.localUnauthorized');

@@ -44,6 +44,7 @@ import {
   resolveNameField,
   resolveAffordance,
   isDeadlineSettled,
+  stateMachineNextValues,
   type SchemaLike,
 } from '@object-ui/core';
 import { getBadgeColorClasses, getBadgeHexAppearance, getCellRenderer, resolveCellRendererType } from '@object-ui/fields';
@@ -1805,6 +1806,25 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
     perms,
   }).allowed;
 
+  // The board's drop gate (#25933): a lane is a value of `groupBy`, so when the
+  // object's blocking `state_machine` rule governs that same field, a card may
+  // enter only the lanes its column's value may move to. The read is the one
+  // the grid's inline editor and the record form use (`stateMachineNextValues`
+  // in `@object-ui/core`), so a warning-only, inactive or insert-only machine
+  // closes nothing, and neither does an undeclared from-state. The
+  // "Uncategorized" lane is the mover's own business (it writes nothing for a
+  // drop INTO it), so the gate leaves it open. The server still refuses an
+  // invalid move and `handleCardMove`'s rollback stays.
+  const canDropCard = React.useMemo(() => {
+    const groupBy = schema.groupBy;
+    if (!groupBy || !objectDef) return undefined;
+    return (fromColumnId: string, toColumnId: string): boolean => {
+      if (toColumnId === KANBAN_UNCOLUMNED_ID) return true;
+      const reachable = stateMachineNextValues(objectDef, groupBy, fromColumnId);
+      return reachable === null || reachable.has(String(toColumnId));
+    };
+  }, [schema.groupBy, objectDef]);
+
   // Pre-evaluate the target column's `requiredWhen` predicates and collect what
   // the move makes required BEFORE writing anything (objectui#4254). The board
   // used to PATCH the column value alone into a refusal the user could neither
@@ -2011,6 +2031,8 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
         // and the cards are drawn not movable otherwise (see `cardMoveGranted`).
         onCardMove={cardMoveGranted ? handleCardMove : undefined}
         cardsMovable={cardMoveGranted}
+        // #25933: the lanes a dragged card may enter — see `canDropCard`.
+        canDropCard={canDropCard}
         schema={{
           ...effectiveSchema,
           // `5591f03bd` — the lane headers count rows that came back, so when

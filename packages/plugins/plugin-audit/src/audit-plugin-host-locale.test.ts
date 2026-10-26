@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 // STATIC on purpose, like audit-writers.test.ts: the plugin's own kernel:ready
 // hook imports the translation bundle lazily, and a static import here moves
 // that cold-start cost to collection, which no test's timeout is charged for.
@@ -17,7 +17,32 @@ import { AuditPlugin, type AuditPluginOptions } from './audit-plugin.js';
  * The settings service answers `ja-JP` throughout, so every outcome is
  * distinguishable: the host's locale (zh-CN), the settings fallback (ja-JP),
  * and the English literal a locale-less write degrades to.
+ *
+ * [#26167] What the write locale localizes is the @mention notification title:
+ * `sys_activity.summary` is stored in English and served in each READER's
+ * locale, so it is the title these cases read. The plugin wires the real
+ * recipient gate, which this fake engine cannot answer, so the writers are
+ * handed a messaging double and an admitting gate — every other option is the
+ * plugin's own.
  */
+const mentionTitles = vi.hoisted(() => [] as string[]);
+vi.mock('./audit-writers.js', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('./audit-writers.js')>();
+  return {
+    ...mod,
+    installAuditWriters: (engine: any, packageId: string, opts: any) =>
+      mod.installAuditWriters(engine, packageId, {
+        ...opts,
+        getMessaging: () => ({
+          emit: async (e: any) => {
+            if (e.topic === 'collab.mention') mentionTitles.push(String(e.payload?.title));
+            return {};
+          },
+        }),
+        admitMentionRecipients: async ({ mentions }: { mentions: string[] }) => [...mentions],
+      }),
+  };
+});
 
 interface CapturedRow {
   object: string;
@@ -93,6 +118,7 @@ function makeSettings(locale = 'ja-JP') {
 }
 
 async function boot(options?: AuditPluginOptions, services: { settings?: unknown } = { settings: makeSettings() }) {
+  mentionTitles.length = 0;
   const { engine, fire, created } = makeEngine();
   const i18n = createMemoryI18n();
   for (const [locale, data] of Object.entries(AuditTranslations)) {
@@ -141,87 +167,107 @@ async function boot(options?: AuditPluginOptions, services: { settings?: unknown
       result: { id: `q-${name}`, name },
       session: { organizationId: tenant, userId: user },
     });
+  // An @mention of `recipient` in an organization, by `Alice` — the write whose title the locale picks.
+  const mention = (tenant = 'org-1', recipient = 'user-2', id = 'c-1') =>
+    fire('afterInsert', {
+      object: 'sys_comment',
+      input: {},
+      result: {
+        id,
+        thread_id: 'person_qualification:q-1',
+        author_id: 'user-1',
+        author_name: 'Alice',
+        body: 'hello',
+        mentions: JSON.stringify([recipient]),
+      },
+      session: { organizationId: tenant, userId: 'user-1' },
+    });
+  const titles = () => [...mentionTitles];
   const summaries = () => created.filter((c) => c.object === 'sys_activity').map((c) => c.row.summary);
   const localeWarns = () => warns.filter((w) => w.msg.includes('getLocale'));
-  return { insert, summaries, created, localeWarns };
+  return { insert, mention, titles, summaries, created, localeWarns };
 }
 
-const ZH = '创建了 Qualification "OC-00001"';
-const JA = 'Qualification「OC-00001」を作成しました';
-const EN = 'Created Qualification "OC-00001"';
+const ZH = 'Alice 提到了你';
+const JA = 'Aliceさんがあなたをメンションしました';
+const EN = 'Alice mentioned you';
 
 describe('AuditPlugin — host locale resolver (AuditPluginOptions.getLocale)', () => {
-  it('pin: a create on a tracked object writes sys_activity.summary in the resolver\'s locale', async () => {
+  it('pin: an @mention title is written in the resolver\'s locale; the activity summary asks it nothing', async () => {
     const calls: Array<[string | undefined, string | undefined]> = [];
-    const { insert, summaries, localeWarns } = await boot({
+    const { insert, mention, titles, summaries, localeWarns } = await boot({
       getLocale: async (tenantId, userId) => {
         calls.push([tenantId, userId]);
         return 'zh-CN';
       },
     });
+    // [#26167] The summary is stored in English, whatever the resolver says…
     await insert();
-    expect(summaries()).toEqual([ZH]);
-    // Asked with the write's organization and user, ahead of the settings read.
-    expect(calls).toEqual([['org-1', 'user-1']]);
+    expect(summaries()).toEqual(['Created Qualification "OC-00001"']);
+    expect(calls).toEqual([]);
+    // …and the title is the resolver's language.
+    await mention();
+    expect(titles()).toEqual([ZH]);
+    // Asked with the write's organization and the mentioned recipient, ahead of the settings read.
+    expect(calls).toEqual([['org-1', 'user-2']]);
     expect(localeWarns()).toEqual([]);
   });
 
   it('a synchronous answer counts, and is used in its canonical form', async () => {
-    const { insert, summaries } = await boot({ getLocale: () => ' zh-cn ' });
-    await insert();
-    expect(summaries()).toEqual([ZH]);
+    const { mention, titles } = await boot({ getLocale: () => ' zh-cn ' });
+    await mention();
+    expect(titles()).toEqual([ZH]);
   });
 
   it('fallback: a resolver answering undefined gives today\'s settings-derived locale', async () => {
-    const { insert, summaries, localeWarns } = await boot({ getLocale: async () => undefined });
-    await insert();
-    expect(summaries()).toEqual([JA]);
+    const { mention, titles, localeWarns } = await boot({ getLocale: async () => undefined });
+    await mention();
+    expect(titles()).toEqual([JA]);
     expect(localeWarns()).toEqual([]);
   });
 
   it('fallback: null and a blank string are "no answer" too, silently', async () => {
     const asNull = await boot({ getLocale: (async () => null) as unknown as AuditPluginOptions['getLocale'] });
-    await asNull.insert();
-    expect(asNull.summaries()).toEqual([JA]);
+    await asNull.mention();
+    expect(asNull.titles()).toEqual([JA]);
     expect(asNull.localeWarns()).toEqual([]);
 
     const blank = await boot({ getLocale: () => '   ' });
-    await blank.insert();
-    expect(blank.summaries()).toEqual([JA]);
+    await blank.mention();
+    expect(blank.titles()).toEqual([JA]);
     expect(blank.localeWarns()).toEqual([]);
   });
 
-  it('absent: with no option the summary is the settings-derived one (the existing-behaviour control)', async () => {
+  it('absent: with no option the title is the settings-derived one (the existing-behaviour control)', async () => {
     const withSettings = await boot();
-    await withSettings.insert();
-    expect(withSettings.summaries()).toEqual([JA]);
+    await withSettings.mention();
+    expect(withSettings.titles()).toEqual([JA]);
 
     // An options bag without the member is the same as no bag at all.
     const emptyBag = await boot({});
-    await emptyBag.insert();
-    expect(emptyBag.summaries()).toEqual([JA]);
+    await emptyBag.mention();
+    expect(emptyBag.titles()).toEqual([JA]);
 
     // And no settings service either: the built-in en-US default — English.
     const bare = await boot(undefined, {});
-    await bare.insert();
-    expect(bare.summaries()).toEqual([EN]);
+    await bare.mention();
+    expect(bare.titles()).toEqual([EN]);
   });
 
   it('throw: falls through to the settings-derived locale, logged once at warn with the error, and the write lands', async () => {
     let calls = 0;
-    const { insert, summaries, created, localeWarns } = await boot({
+    const { mention, titles, localeWarns } = await boot({
       getLocale: () => {
         calls += 1;
         throw new Error('locale store unreachable');
       },
     });
-    await insert('org-1', 'user-1', 'OC-00001');
+    await mention('org-1', 'user-2', 'c-1');
     // A second scope asks again (the writer memoizes per tenant/user) and throws again.
-    await insert('org-2', 'user-2', 'OC-00002');
+    await mention('org-2', 'user-3', 'c-2');
     expect(calls).toBe(2);
-    expect(summaries()).toEqual([JA, 'Qualification「OC-00002」を作成しました']);
-    // The audited write is not failed by the host's fault: both ledger rows landed.
-    expect(created.filter((c) => c.object === 'sys_audit_log')).toHaveLength(2);
+    // The notification is not failed by the host's fault: both titles landed.
+    expect(titles()).toEqual([JA, JA]);
     const warned = localeWarns();
     expect(warned).toHaveLength(1);
     expect(warned[0].msg).toMatch(/host getLocale resolver threw/);
@@ -229,20 +275,20 @@ describe('AuditPlugin — host locale resolver (AuditPluginOptions.getLocale)', 
   });
 
   it('throw: a rejected promise falls through the same way', async () => {
-    const { insert, summaries, localeWarns } = await boot({
+    const { mention, titles, localeWarns } = await boot({
       getLocale: () => Promise.reject(new Error('timeout')),
     });
-    await insert();
-    expect(summaries()).toEqual([JA]);
+    await mention();
+    expect(titles()).toEqual([JA]);
     expect(localeWarns()).toHaveLength(1);
     expect(localeWarns()[0].meta).toEqual({ err: 'timeout' });
   });
 
   it('an answer that is not a well-formed BCP-47 tag falls back, logged once at warn', async () => {
-    const { insert, summaries, localeWarns } = await boot({ getLocale: () => 'zh_CN' });
-    await insert('org-1', 'user-1', 'OC-00001');
-    await insert('org-2', 'user-2', 'OC-00002');
-    expect(summaries()).toEqual([JA, 'Qualification「OC-00002」を作成しました']);
+    const { mention, titles, localeWarns } = await boot({ getLocale: () => 'zh_CN' });
+    await mention('org-1', 'user-2', 'c-1');
+    await mention('org-2', 'user-3', 'c-2');
+    expect(titles()).toEqual([JA, JA]);
     const warned = localeWarns();
     expect(warned).toHaveLength(1);
     expect(warned[0].msg).toContain('"zh_CN"');

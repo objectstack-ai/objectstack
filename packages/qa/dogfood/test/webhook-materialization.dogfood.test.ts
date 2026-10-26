@@ -69,7 +69,6 @@ describe('objectstack verify WEBHOOK: a declared webhook is dispatched from the 
   });
 
   it('writes no sys_webhook row for the declared webhook, and dispatches it with object→object_name applied', async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const engine = (await stack.kernel.getServiceAsync('objectql')) as any;
     const rows = await engine.find('sys_webhook', {
       filter: { name: 'wm_task_changed' },
@@ -78,7 +77,6 @@ describe('objectstack verify WEBHOOK: a declared webhook is dispatched from the 
     expect(rows, 'the retired seeder wrote a sys_webhook row for a declared webhook').toEqual([]);
 
     // The reader the plugin bound on the data engine alone — no realtime here.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const declaredWebhooks = (await stack.kernel.getServiceAsync('declaredWebhooks')) as any;
     expect(declaredWebhooks, 'the declared-webhook reader was not bound').toBeTruthy();
     const declared = await declaredWebhooks.declaredWebhookNamed('wm_task_changed');

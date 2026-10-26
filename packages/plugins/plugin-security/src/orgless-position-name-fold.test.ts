@@ -7,8 +7,10 @@
  *
  * ## The seam
  *
- * `resolvePermissionSetsForContextUnmemoized` requests
- * `[...positions, ...permissions]` as permission-set NAMES, and anything not
+ * `resolvePermissionSetsForContextUnmemoized` requested
+ * `[...positions, ...permissions]` as permission-set NAMES until #24757
+ * retired the position-name fold (it now requests `permissions` alone), and
+ * anything not
  * declared in metadata or bootstrap was read from `sys_permission_set` by name
  * (the loader reads the security catalog instead since ADR-0131 D3/D4, so no
  * row reaches it at all; the pins below hold either way). With no active
@@ -33,11 +35,11 @@
  * (`grantAppliesInTenant`). An organization-less grant row applies nowhere:
  * the 18.0 ownership ceremony (ADR-0131 D10) attributes every such row before
  * an upgraded database boots, so one is invalid state, not a "global" grant.
- * So the negative pins below are paired with preservation pins: the grants a
- * principal holds in its own organization (a position folded onto the
- * catalog's same-named set, a user grant) resolve while that organization is
- * active and confer nothing with none active, and a legacy organization-less
- * grant row confers nothing either way.
+ * So the negative pins below are paired with preservation pins: a user grant a
+ * principal holds in its own organization resolves while that organization is
+ * active and confers nothing with none active, and a legacy organization-less
+ * grant row confers nothing either way. A position sharing the catalog's
+ * same-named set confers that set in neither case (#24757).
  *
  * ## The rig
  *
@@ -338,20 +340,23 @@ describe('[#20555] with no active organization, another organization\'s set name
 });
 
 describe('[#20555] what the rule keeps', () => {
-  it('a position folded onto a global same-named set resolves while its owner is active, and not with none active', async () => {
+  it('a position sharing a global set\'s name does not resolve that set — with its owner active, or with none (#24757)', async () => {
     const r = await rig();
     const home = await resolve(r, USER_GLOBAL, ORG_HOME);
+    // Held, and the catalog does carry a set of the same name (the grant
+    // below resolves its sibling `platform_ops` from the same catalog), so the
+    // absence is the retired fold's and not a missing set.
     expect(home.positions).toContain('ops_lead');
-    expect(home.byName.get('ops_lead')?.systemPermissions).toEqual(['probe.global_ops_lead']);
+    expect(home.byName.get('ops_lead')).toBeUndefined();
+    expect([...home.capabilities].filter((c) => c === 'probe.global_ops_lead')).toEqual([]);
     const orgless = await resolve(r, USER_GLOBAL);
     expect(orgless.positions).not.toContain('ops_lead');
     expect(orgless.byName.get('ops_lead')).toBeUndefined();
   }, 120_000);
 
-  it('the owned grants resolve with the principal\'s own organization active', async () => {
+  it('the owned grant resolves with the principal\'s own organization active', async () => {
     const r = await rig();
     const home = await resolve(r, USER_GLOBAL, ORG_HOME);
-    expect(home.byName.get('ops_lead')?.systemPermissions).toEqual(['probe.global_ops_lead']);
     expect(home.byName.get('platform_ops')?.systemPermissions).toEqual(['probe.global_platform_ops']);
     expect(home.setNames).not.toContain('org_member');
   }, 120_000);

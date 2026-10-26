@@ -80,6 +80,7 @@ const AUTHZ = {
   email: 'manager@example.com',
   positions: ['sales_manager'],
   permissions: ['contact_read', 'contact_write'],
+  directPermissions: [],
   systemPermissions: [],
   org_user_ids: [HUMAN],
   accessible_org_ids: [ORG],

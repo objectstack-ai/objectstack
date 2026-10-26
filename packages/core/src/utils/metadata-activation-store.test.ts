@@ -55,7 +55,6 @@ const TABLE = 'sys_metadata_activation';
  * gate then reports the matcher UNJUDGED, and unjudged is never treated as
  * passing.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function matches(row: any, where: any): boolean {
     return Object.entries(where ?? {}).every(([k, v]) => {
         // Equality ONLY, and a loud REFUSAL for anything else rather than a
@@ -84,22 +83,17 @@ function matches(row: any, where: any): boolean {
  * read by `metadata_type` and a double that answered every row regardless would
  * pin nothing about the discriminator — which is this file's whole subject.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function makeStoreEngine(rows: any[] = []) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const calls: Array<{ op: string; object: string; data?: any; options?: any }> = [];
     const engine = {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         find: vi.fn(async (object: string, options?: any) => {
             calls.push({ op: 'find', object, options });
             return rows.filter((r) => matches(r, options?.where));
         }),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         insert: vi.fn(async (object: string, data: any, options?: any) => {
             calls.push({ op: 'insert', object, data, options });
             return { id: 'row_new', ...data };
         }),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         update: vi.fn(async (object: string, data: any, options?: any) => {
             // Routed through the producer's OWN dispatch predicate, so this
             // fake cannot be looser than the engine it stands in for — #4434

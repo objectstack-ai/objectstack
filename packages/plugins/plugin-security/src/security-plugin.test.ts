@@ -3680,15 +3680,15 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
 
   /**
    * In-memory harness (modelled on the D6/D12 explain harness) that resolves the
-   * delegator's sets from `sys_user_position` and answers the `sys_user`
+   * delegator's sets from `sys_user_permission_set` and answers the `sys_user`
    * existence check. Business-object (`task`) reads route to `taskFindOne` so a
    * write pre-image can be made visible or hidden per test; sys_* reads route to
    * the seeded tables. Every set named in `metadata.list()` resolves by name.
    */
   const makeD10Harness = (opts: {
     sets: PermissionSet[];
-    agentPositions: string[];
-    delegatorPositions: string[] | null; // null → delegator has NO sys_user row (deleted)
+    agentSets: string[];
+    delegatorSets: string[] | null; // null → delegator has NO sys_user row (deleted)
     schemaExtra?: Record<string, any>;
     taskFindOne?: (query: any) => any;
   }) => {
@@ -3699,10 +3699,12 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
       sys_permission_set: [],
       sys_position: [],
     };
-    if (opts.delegatorPositions !== null) {
+    if (opts.delegatorSets !== null) {
       tables.sys_user.push({ id: DELEGATOR, email: 'delegator@x' });
-      for (const p of opts.delegatorPositions) {
-        tables.sys_user_position.push({ user_id: DELEGATOR, position: p, organization_id: D10_ORG });
+      // Direct grants: a position grants only what its definition names, and
+      // this harness declares no position definitions.
+      for (const p of opts.delegatorSets) {
+        tables.sys_user_permission_set.push({ user_id: DELEGATOR, permission_set: p, organization_id: D10_ORG });
       }
     }
     const matches = (row: any, where: any): boolean =>
@@ -3719,6 +3721,13 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
     const ql: any = {
       registerMiddleware: (mw: any) => { if (!middleware) middleware = mw; },
       getSchema: () => baseSchema,
+      // The security catalog the direct grants below are read through
+      // (ADR-0131 D4): every set in `opts.sets`, by name.
+      registry: {
+        getItem: (type: string, name: string) => (type === 'permission' ? opts.sets.find((s) => s.name === name) : undefined),
+        listItems: (type: string) => (type === 'permission' ? opts.sets : []),
+        isPackageDisabled: () => false,
+      },
       async find(object: string, o: any) {
         const rows = (tables[object] ?? []).filter((r) => matches(r, o?.where));
         return typeof o?.limit === 'number' ? rows.slice(0, o.limit) : rows;
@@ -3768,7 +3777,7 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
   };
 
   const agentCtx = (extra?: Record<string, any>) => ({
-    userId: AGENT, tenantId: D10_ORG, positions: ['agent_set'], permissions: [],
+    userId: AGENT, tenantId: D10_ORG, positions: [], permissions: ['agent_set'],
     onBehalfOf: { userId: DELEGATOR, principalKind: 'human' }, principalKind: 'agent',
     ...(extra ?? {}),
   });
@@ -3783,19 +3792,19 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
   } as any);
 
   it('agent may EDIT but delegator is read-only → update DENIED (agent cannot exceed the user it acts for)', async () => {
-    const { h } = await boot({ sets: [editor('agent_set'), reader('del_set')], agentPositions: ['agent_set'], delegatorPositions: ['del_set'] });
+    const { h } = await boot({ sets: [editor('agent_set'), reader('del_set')], agentSets: ['agent_set'], delegatorSets: ['del_set'] });
     const opCtx: any = { object: 'task', operation: 'update', data: { id: 'r1', name: 'x' }, options: { where: { id: 'r1' } }, context: agentCtx() };
     await expect(h.run(opCtx)).rejects.toMatchObject({ name: 'PermissionDeniedError' });
   });
 
   it('delegator may EDIT but agent is read-only → update DENIED (symmetry)', async () => {
-    const { h } = await boot({ sets: [reader('agent_set'), editor('del_set')], agentPositions: ['agent_set'], delegatorPositions: ['del_set'] });
+    const { h } = await boot({ sets: [reader('agent_set'), editor('del_set')], agentSets: ['agent_set'], delegatorSets: ['del_set'] });
     const opCtx: any = { object: 'task', operation: 'update', data: { id: 'r1', name: 'x' }, options: { where: { id: 'r1' } }, context: agentCtx() };
     await expect(h.run(opCtx)).rejects.toMatchObject({ name: 'PermissionDeniedError' });
   });
 
   it('both grant edit → update is ALLOWED', async () => {
-    const { h } = await boot({ sets: [editor('agent_set'), editor('del_set')], agentPositions: ['agent_set'], delegatorPositions: ['del_set'], taskFindOne: () => ({ id: 'r1' }) });
+    const { h } = await boot({ sets: [editor('agent_set'), editor('del_set')], agentSets: ['agent_set'], delegatorSets: ['del_set'], taskFindOne: () => ({ id: 'r1' }) });
     const opCtx: any = { object: 'task', operation: 'update', data: { id: 'r1', name: 'x' }, options: { where: { id: 'r1' } }, context: agentCtx() };
     await expect(h.run(opCtx)).resolves.toBeDefined();
   });
@@ -3805,7 +3814,7 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
     const capGated = { requiredPermissions: ['export_data'] }; // array form → gates EVERY op
     const agentWithCap: PermissionSet = { name: 'agent_set', label: 'a', objects: { task: { allowRead: true } }, systemPermissions: ['export_data'] } as any;
     const delNoCap = reader('del_set');
-    const { h } = await boot({ sets: [agentWithCap, delNoCap], agentPositions: ['agent_set'], delegatorPositions: ['del_set'], schemaExtra: capGated });
+    const { h } = await boot({ sets: [agentWithCap, delNoCap], agentSets: ['agent_set'], delegatorSets: ['del_set'], schemaExtra: capGated });
     const opCtx: any = { object: 'task', operation: 'find', ast: { where: undefined }, context: agentCtx() };
     await expect(h.run(opCtx)).rejects.toMatchObject({ name: 'PermissionDeniedError' });
   });
@@ -3820,7 +3829,7 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
   it('read filter is the AND (intersection) of the agent and delegator RLS', async () => {
     const { h } = await boot({
       sets: [rlsReader('agent_set', 'owner_id = current_user.id'), rlsReader('del_set', 'manager_id = current_user.id')],
-      agentPositions: ['agent_set'], delegatorPositions: ['del_set'],
+      agentSets: ['agent_set'], delegatorSets: ['del_set'],
     });
     const opCtx: any = { object: 'task', operation: 'find', ast: { where: undefined }, context: agentCtx() };
     await h.run(opCtx);
@@ -3832,10 +3841,10 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
   it('non-delegated principal is byte-identical (only the agent filter, no delegator read)', async () => {
     const { h } = await boot({
       sets: [rlsReader('agent_set', 'owner_id = current_user.id'), rlsReader('del_set', 'manager_id = current_user.id')],
-      agentPositions: ['agent_set'], delegatorPositions: ['del_set'],
+      agentSets: ['agent_set'], delegatorSets: ['del_set'],
     });
     // Same context, but WITHOUT onBehalfOf.
-    const opCtx: any = { object: 'task', operation: 'find', ast: { where: undefined }, context: { userId: AGENT, tenantId: D10_ORG, positions: ['agent_set'], permissions: [] } };
+    const opCtx: any = { object: 'task', operation: 'find', ast: { where: undefined }, context: { userId: AGENT, tenantId: D10_ORG, positions: [], permissions: ['agent_set'] } };
     await h.run(opCtx);
     expect(opCtx.ast.where).toEqual({ owner_id: AGENT });
   });
@@ -3844,7 +3853,7 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
     const agentViewAll: PermissionSet = { name: 'agent_set', label: 'a', objects: { task: { allowRead: true, viewAllRecords: true } } } as any;
     const delScoped = rlsReader('del_set', 'owner_id = current_user.id');
     const { h } = await boot({
-      sets: [agentViewAll, delScoped], agentPositions: ['agent_set'], delegatorPositions: ['del_set'],
+      sets: [agentViewAll, delScoped], agentSets: ['agent_set'], delegatorSets: ['del_set'],
       schemaExtra: { sharingModel: 'private' },
     });
     const opCtx: any = { object: 'task', operation: 'find', ast: { where: undefined }, context: agentCtx() };
@@ -3858,7 +3867,7 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
   it('masks a field the delegator cannot read even though the agent can', async () => {
     const agentFull = reader('agent_set');
     const delMask: PermissionSet = { name: 'del_set', label: 'd', objects: { task: { allowRead: true } }, fields: { 'task.salary': { readable: false, editable: false } } } as any;
-    const { h } = await boot({ sets: [agentFull, delMask], agentPositions: ['agent_set'], delegatorPositions: ['del_set'] });
+    const { h } = await boot({ sets: [agentFull, delMask], agentSets: ['agent_set'], delegatorSets: ['del_set'] });
     const opCtx: any = { object: 'task', operation: 'find', ast: { where: undefined }, result: [{ id: 'r1', name: 'A', salary: 999 }], context: agentCtx() };
     await h.run(opCtx);
     expect(opCtx.result[0].name).toBe('A');
@@ -3869,7 +3878,7 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
   it("stashes the agent's own depth AND the delegator's depth SEPARATELY (identity-scoped OWD intersection)", async () => {
     const agentViewAll: PermissionSet = { name: 'agent_set', label: 'a', objects: { task: { allowRead: true, viewAllRecords: true } } } as any;
     const delOwn: PermissionSet = { name: 'del_set', label: 'd', objects: { task: { allowRead: true, readScope: 'own' } } } as any;
-    const { h } = await boot({ sets: [agentViewAll, delOwn], agentPositions: ['agent_set'], delegatorPositions: ['del_set'], schemaExtra: { sharingModel: 'private' } });
+    const { h } = await boot({ sets: [agentViewAll, delOwn], agentSets: ['agent_set'], delegatorSets: ['del_set'], schemaExtra: { sharingModel: 'private' } });
     const ctx: any = agentCtx();
     const opCtx: any = { object: 'task', operation: 'find', ast: { where: undefined }, context: ctx };
     await h.run(opCtx);
@@ -3903,7 +3912,7 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
   it('[#16549] a ceiling silent about depth contributes NO owner narrowing — the delegator\'s viewAllRecords stands', async () => {
     const { h } = await boot({
       sets: [silentCeiling('agent_set'), viewAllDelegator('del_set')],
-      agentPositions: ['agent_set'], delegatorPositions: ['del_set'],
+      agentSets: ['agent_set'], delegatorSets: ['del_set'],
       schemaExtra: { sharingModel: 'private' },
     });
     const ctx: any = agentCtx();
@@ -3920,7 +3929,7 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
     const delOwn: PermissionSet = { name: 'del_set', label: 'd', objects: { task: { allowRead: true, readScope: 'own' } } } as any;
     const { h } = await boot({
       sets: [silentCeiling('agent_set'), delOwn],
-      agentPositions: ['agent_set'], delegatorPositions: ['del_set'],
+      agentSets: ['agent_set'], delegatorSets: ['del_set'],
       schemaExtra: { sharingModel: 'private' },
     });
     const ctx: any = agentCtx();
@@ -3937,7 +3946,7 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
     const declaringCeiling: PermissionSet = { name: 'agent_set', label: 'a', objects: { task: { allowRead: true, readScope: 'own' } } } as any;
     const { h } = await boot({
       sets: [declaringCeiling, viewAllDelegator('del_set')],
-      agentPositions: ['agent_set'], delegatorPositions: ['del_set'],
+      agentSets: ['agent_set'], delegatorSets: ['del_set'],
       schemaExtra: { sharingModel: 'private' },
     });
     const ctx: any = agentCtx();
@@ -3958,7 +3967,7 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
     } as any;
     const { h } = await boot({
       sets: [silentWriteCeiling, modifyAllDelegator],
-      agentPositions: ['agent_set'], delegatorPositions: ['del_set'],
+      agentSets: ['agent_set'], delegatorSets: ['del_set'],
       schemaExtra: { sharingModel: 'private' },
     });
     const ctx: any = agentCtx();
@@ -3978,7 +3987,7 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
     } as any;
     const { h } = await boot({
       sets: [silentCeiling('agent_set'), modifyAllDelegator],
-      agentPositions: ['agent_set'], delegatorPositions: ['del_set'],
+      agentSets: ['agent_set'], delegatorSets: ['del_set'],
     });
     await expect(h.run({
       object: 'task', operation: 'update', data: { id: 'r1', name: 'x' },
@@ -3997,7 +4006,7 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
     } as any;
     const { h } = await boot({
       sets: [silentWriteCeiling, transferringDelegator],
-      agentPositions: ['agent_set'], delegatorPositions: ['del_set'],
+      agentSets: ['agent_set'], delegatorSets: ['del_set'],
     });
     // The delegator holds transfer via modifyAllRecords; the ceiling does not
     // declare `allowTransfer` and D10 requires BOTH. ⛔ The ruling explicitly
@@ -4017,7 +4026,7 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
       const declaringCeiling: PermissionSet = { name: 'agent_set', label: 'a', objects: { task: { allowRead: true, readScope: 'own' } } } as any;
       const { h } = await boot({
         sets: [declaringCeiling, viewAllDelegator('del_set')],
-        agentPositions: ['agent_set'], delegatorPositions: ['del_set'],
+        agentSets: ['agent_set'], delegatorSets: ['del_set'],
       });
       const verdict = await h.security().describeDelegationNarrowing('task', agentCtx());
       expect(verdict.narrowed).toBe(true);
@@ -4035,7 +4044,7 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
     it('reports NO narrowing for a silent ceiling — an un-narrowed delegated read carries no statement', async () => {
       const { h } = await boot({
         sets: [silentCeiling('agent_set'), viewAllDelegator('del_set')],
-        agentPositions: ['agent_set'], delegatorPositions: ['del_set'],
+        agentSets: ['agent_set'], delegatorSets: ['del_set'],
       });
       const verdict = await h.security().describeDelegationNarrowing('task', agentCtx());
       expect(verdict).toEqual({ narrowed: false });
@@ -4044,16 +4053,16 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
     it('reports NO narrowing for a NON-delegated principal', async () => {
       const { h } = await boot({
         sets: [silentCeiling('agent_set'), viewAllDelegator('del_set')],
-        agentPositions: ['agent_set'], delegatorPositions: ['del_set'],
+        agentSets: ['agent_set'], delegatorSets: ['del_set'],
       });
-      const humanCtx = { userId: DELEGATOR, tenantId: D10_ORG, positions: ['del_set'], permissions: [] };
+      const humanCtx = { userId: DELEGATOR, tenantId: D10_ORG, positions: [], permissions: ['del_set'] };
       expect(await h.security().describeDelegationNarrowing('task', humanCtx)).toEqual({ narrowed: false });
     });
 
     it('reports NO narrowing for a system context — a diagnostic never speaks for the engine\'s own writer', async () => {
       const { h } = await boot({
         sets: [silentCeiling('agent_set'), viewAllDelegator('del_set')],
-        agentPositions: ['agent_set'], delegatorPositions: ['del_set'],
+        agentSets: ['agent_set'], delegatorSets: ['del_set'],
       });
       expect(await h.security().describeDelegationNarrowing('task', { isSystem: true })).toEqual({ narrowed: false });
     });
@@ -4061,7 +4070,7 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
     it('a DANGLING delegator is a denial upstream, not a narrowing — the probe stays silent', async () => {
       const { h } = await boot({
         sets: [silentCeiling('agent_set')],
-        agentPositions: ['agent_set'], delegatorPositions: null,
+        agentSets: ['agent_set'], delegatorSets: null,
       });
       expect(await h.security().describeDelegationNarrowing('task', agentCtx())).toEqual({ narrowed: false });
     });
@@ -4069,15 +4078,15 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
 
   // ── fail-closed on a dangling delegation link ───────────────────────────
   it('delegator no longer exists → fail CLOSED (PermissionDeniedError, not baseline access)', async () => {
-    const { h } = await boot({ sets: [reader('agent_set')], agentPositions: ['agent_set'], delegatorPositions: null });
+    const { h } = await boot({ sets: [reader('agent_set')], agentSets: ['agent_set'], delegatorSets: null });
     const opCtx: any = { object: 'task', operation: 'find', ast: { where: undefined }, context: agentCtx() };
     await expect(h.run(opCtx)).rejects.toMatchObject({ name: 'PermissionDeniedError' });
   });
 
   // ── explain attribution (D6 × D10) ──────────────────────────────────────
   it('explain reports the D10 intersection deny when the delegator lacks the grant', async () => {
-    const { plugin } = await boot({ sets: [editor('agent_set'), reader('del_set')], agentPositions: ['agent_set'], delegatorPositions: ['del_set'] });
-    const caller = { userId: AGENT, positions: ['agent_set'], permissions: [], onBehalfOf: { userId: DELEGATOR } };
+    const { plugin } = await boot({ sets: [editor('agent_set'), reader('del_set')], agentSets: ['agent_set'], delegatorSets: ['del_set'] });
+    const caller = { userId: AGENT, positions: [], permissions: ['agent_set'], onBehalfOf: { userId: DELEGATOR } };
     const d = await plugin.explainAccessForCaller({ object: 'task', operation: 'update' }, caller);
     expect(d.allowed).toBe(false);
     const crud = d.layers.find((l) => l.layer === 'object_crud');

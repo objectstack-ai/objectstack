@@ -86,11 +86,9 @@ function makeEngine(seed: MemberRow[] = []) {
   return {
     rows,
     insert,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     find: vi.fn(async (model: string, q: any) =>
       model === 'sys_member' ? rows.filter((r) => match(r, q?.where)).slice(0, q?.limit ?? 100) : [],
     ),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     findOne: vi.fn(async (model: string, q: any) =>
       {
         assertEngineFindOnePredicate(model, q);
@@ -107,11 +105,9 @@ interface ManagerOpts {
   membershipPolicy?: 'auto' | 'invite-only';
   /** What `tenancy.defaultOrgId()` answers. `null` = no unambiguous target. */
   defaultOrgId?: string | null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   databaseHooks?: any;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function hooksFor(opts: ManagerOpts): any {
   const manager = new AuthManager({
     secret: 'test-secret-at-least-32-chars-long',
@@ -119,14 +115,11 @@ function hooksFor(opts: ManagerOpts): any {
     dataEngine: opts.engine,
     ...(opts.membershipPolicy ? { membershipPolicy: opts.membershipPolicy } : {}),
     getTenancy: () => ({ defaultOrgId: async () => opts.defaultOrgId ?? null }),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const hooks = (manager as any).composeDatabaseHooks(opts.databaseHooks);
   // What the adapter's `create` does for a `sys_user` row inside the creating
   // request (`onRecordCreated`; the real wiring is pinned in
   // `user-created-in-request.test.ts`).
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   hooks.__stageCreated = (request: unknown, userId: string) => (manager as any).stageUserCreatedInRequest(request, userId);
   return hooks;
 }
@@ -136,7 +129,6 @@ function hooksFor(opts: ManagerOpts): any {
  * session minted inside ONE endpoint context (the request), and
  * `user.create.after` is deferred past both. Returns the session hook's result.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function firstSessionOfCreation(hooks: any, session: Record<string, unknown> = { userId: USER }): Promise<any> {
   const request = {};
   hooks.__stageCreated(request, USER);
@@ -251,7 +243,6 @@ describe("[#8247 rule 2] a user's FIRST session settles the membership before re
 
     it('the HOST session hook still chains first and still wins', async () => {
       const engine = makeEngine();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const hostHook = vi.fn(async (session: any) => ({
         data: { ...session, activeOrganizationId: 'org_host' },
       }));
@@ -274,7 +265,6 @@ describe("[#8247 rule 2] a user's FIRST session settles the membership before re
         find: vi.fn(async () => { throw new Error('db down'); }),
         insert: vi.fn(async () => { throw new Error('db down'); }),
       };
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const hooks = hooksFor({ engine: engine as any, defaultOrgId: DEFAULT_ORG });
       const result = await firstSessionOfCreation(hooks);
       expect(result?.data?.activeOrganizationId).toBeUndefined();
