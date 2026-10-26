@@ -372,6 +372,42 @@ export class ExplainObjectNotFoundError extends Error {
   }
 }
 
+/**
+ * [ADR-0142 D3/D4] A caller-supplied `queue` names no queue that resolves in
+ * the row's organization → `422 QUEUE_NOT_FOUND`.
+ *
+ * Raised by the ownership gate (middleware step 3.5) before the write: on an
+ * insert that names a queue, and on a MOVE (an update whose `queue` differs
+ * from the stored one). A queue resolves when a declared queue of that name is
+ * switched on, or the organization has a `sys_queue` row of that name; the
+ * column holds the machine name, so an id or a label resolves nowhere.
+ *
+ * Not a verdict: the name is wrong, and no grant would make it right. So the
+ * message does NOT carry the `[Security] Access denied` prefix, which is a
+ * MATCHER that would re-flatten this refusal into a 403 at the transports
+ * (see the classes above), and it carries both `status` and `statusCode`.
+ * An assignment rule whose target resolves nowhere is never this refusal: the
+ * row is written ownerless and the engine warns (ADR-0142 D5).
+ */
+export class QueueNotFoundError extends Error {
+  readonly code = 'QUEUE_NOT_FOUND';
+  readonly status = 422;
+  readonly statusCode = 422;
+  readonly object: string;
+  readonly queue: string;
+  constructor(object: string, queue: unknown) {
+    const name = typeof queue === 'string' ? queue : JSON.stringify(queue) ?? String(queue);
+    super(
+      `No queue named '${name}' exists in this organization, so a record of '${object}' cannot be put in it. `
+      + `Name a queue by its machine name (lowercase snake_case): one an installed app declares, or one of the `
+      + `organization's own queues.`,
+    );
+    this.name = 'QueueNotFoundError';
+    this.object = object;
+    this.queue = name;
+  }
+}
+
 export function isPermissionDeniedError(e: unknown): e is PermissionDeniedError {
   if (!e || typeof e !== 'object') return false;
   const anyE = e as any;

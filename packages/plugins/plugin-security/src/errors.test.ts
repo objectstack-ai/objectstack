@@ -41,6 +41,7 @@ const FLOOR = [
   'MasterReferenceMissingError',
   'MaskedValueWriteError',
   'ExplainObjectNotFoundError',
+  'QueueNotFoundError',
 ];
 
 /**

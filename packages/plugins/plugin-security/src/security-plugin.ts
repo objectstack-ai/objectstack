@@ -275,6 +275,8 @@ import {
 } from '@objectstack/spec/security';
 import {
   RLS_MEMBERSHIP_RESOLVER_SERVICE,
+  OWNERSHIP_QUEUE_SERVICE,
+  type IOwnershipQueueService,
   type IRlsMembershipResolver,
   type SharingWriteVerdict,
   type AuthoredRowWriteVerdict,
@@ -2134,7 +2136,7 @@ export class SecurityPlugin implements Plugin {
       const readLogger = () => this.logger;
       const readPermissionEvaluator = () => this.permissionEvaluator;
       const readQl = () => this.ql;
-      const host: Pick<AuthzMiddlewareHost, 'addressedByIdWriteId' | 'addressedPredicateWrite' | 'assertControlledByParentWrite' | 'callerCannotReadAddressedRow' | 'collectRLSPolicies' | 'composeWriteTenantWall' | 'computeControlledByParentFilter' | 'computeForbiddenFieldWrites' | 'computeLayeredRlsFilter' | 'computePartialMaskRules' | 'computeQueryGuardFieldPerms' | 'computeRlsFilter' | 'computeWriteCheckFilter' | 'delegatedAdminGate' | 'delegatorOwnWriteFloorOptions' | 'engineOperationScope' | 'epoch' | 'extractSingleId' | 'fieldMasker' | 'getCallerPreImage' | 'getObjectFieldNames' | 'logger' | 'maskOperationResult' | 'permissionEvaluator' | 'ql' | 'raiseWriteWallRefusal' | 'readableRowsScopeForPredicateWrite' | 'resolveCallerPosture' | 'resolveOperationPrincipals' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'writeCheckFieldOptions'> = {
+      const host: Pick<AuthzMiddlewareHost, 'addressedByIdWriteId' | 'addressedPredicateWrite' | 'assertControlledByParentWrite' | 'callerCannotReadAddressedRow' | 'collectRLSPolicies' | 'composeWriteTenantWall' | 'computeControlledByParentFilter' | 'computeForbiddenFieldWrites' | 'computeLayeredRlsFilter' | 'computePartialMaskRules' | 'computeQueryGuardFieldPerms' | 'computeRlsFilter' | 'computeWriteCheckFilter' | 'delegatedAdminGate' | 'delegatorOwnWriteFloorOptions' | 'engineOperationScope' | 'epoch' | 'extractSingleId' | 'fieldMasker' | 'getCallerPreImage' | 'getObjectFieldNames' | 'logger' | 'maskOperationResult' | 'ownershipQueues' | 'permissionEvaluator' | 'ql' | 'raiseWriteWallRefusal' | 'readableRowsScopeForPredicateWrite' | 'resolveCallerPosture' | 'resolveOperationPrincipals' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingWriteVerdict' | 'writeCheckFieldOptions'> = {
         addressedByIdWriteId: (...a) => this.addressedByIdWriteId(...a),
         addressedPredicateWrite: (...a) => this.addressedPredicateWrite(...a),
         assertControlledByParentWrite: (...a) => this.assertControlledByParentWrite(...a),
@@ -2158,6 +2160,7 @@ export class SecurityPlugin implements Plugin {
         getObjectFieldNames: (...a) => this.getObjectFieldNames(...a),
         get logger() { return readLogger(); },
         maskOperationResult: (...a) => this.maskOperationResult(...a),
+        ownershipQueues: (...a) => this.ownershipQueues(...a),
         get permissionEvaluator() { return readPermissionEvaluator(); },
         get ql() { return readQl(); },
         raiseWriteWallRefusal: (...a) => this.raiseWriteWallRefusal(...a),
@@ -2166,6 +2169,7 @@ export class SecurityPlugin implements Plugin {
         resolveOperationPrincipals: (...a) => this.resolveOperationPrincipals(...a),
         resolvePermissionSetsForContext: (...a) => this.resolvePermissionSetsForContext(...a),
         resolvePreImageFloorDrop: (...a) => this.resolvePreImageFloorDrop(...a),
+        resolveSharingWriteVerdict: (...a) => this.resolveSharingWriteVerdict(...a),
         writeCheckFieldOptions: (...a) => this.writeCheckFieldOptions(...a),
       };
       registerAuthzMiddleware.call(host, ctx, ql, metadata);
@@ -2338,7 +2342,7 @@ export class SecurityPlugin implements Plugin {
     const readQl = () => this.ql;
     const readResolveKernelService = () => this.resolveKernelService;
     const readTenancyPosture = () => this.tenancyPosture;
-    const host: Pick<ExplainAccessHost, 'baselinePermissionSets' | 'checkControlledByParentWrite' | 'collectRLSPolicies' | 'computeLayeredRlsFilter' | 'computeReadPartialMaskRules' | 'computeRlsFilter' | 'delegatedAdminGate' | 'foldFieldRequiredPermissions' | 'getObjectSecurityMeta' | 'permissionEvaluator' | 'ql' | 'readRowById' | 'resolveKernelService' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingReadFilter' | 'resolveWriteScopeForSharing' | 'tenancyPosture'> = {
+    const host: Pick<ExplainAccessHost, 'baselinePermissionSets' | 'checkControlledByParentWrite' | 'collectRLSPolicies' | 'computeLayeredRlsFilter' | 'computeReadPartialMaskRules' | 'computeRlsFilter' | 'delegatedAdminGate' | 'foldFieldRequiredPermissions' | 'getObjectSecurityMeta' | 'permissionEvaluator' | 'ql' | 'readRowById' | 'resolveKernelService' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingReadFilter' | 'resolveSharingWriteVerdict' | 'resolveWriteScopeForSharing' | 'tenancyPosture'> = {
       baselinePermissionSets: this.baselinePermissionSets,
       checkControlledByParentWrite: (...a) => this.checkControlledByParentWrite(...a),
       collectRLSPolicies: (...a) => this.collectRLSPolicies(...a),
@@ -2355,6 +2359,7 @@ export class SecurityPlugin implements Plugin {
       resolvePermissionSetsForContext: (...a) => this.resolvePermissionSetsForContext(...a),
       resolvePreImageFloorDrop: (...a) => this.resolvePreImageFloorDrop(...a),
       resolveSharingReadFilter: (...a) => this.resolveSharingReadFilter(...a),
+      resolveSharingWriteVerdict: (...a) => this.resolveSharingWriteVerdict(...a),
       resolveWriteScopeForSharing: (...a) => this.resolveWriteScopeForSharing(...a),
       get tenancyPosture() { return readTenancyPosture(); },
     };
@@ -2565,13 +2570,29 @@ export class SecurityPlugin implements Plugin {
     context: any,
     permissionSets: PermissionSet[],
     delegated: boolean,
+    onVerdict?: (verdict: SharingWriteVerdict) => void,
   ): Promise<boolean> {
     // [#25223 cut 10] The body moved to `security-plugin-sharing-verdicts.ts` (see `SharingVerdictsHost`).
     const host: Pick<SharingVerdictsHost, 'collectRLSPolicies' | 'resolveSharingWriteVerdict'> = {
       collectRLSPolicies: (...a) => this.collectRLSPolicies(...a),
       resolveSharingWriteVerdict: (...a) => this.resolveSharingWriteVerdict(...a),
     };
-    return resolvePreImageFloorDrop.call(host, rlsOperation, object, recordId, context, permissionSets, delegated);
+    return resolvePreImageFloorDrop.call(host, rlsOperation, object, recordId, context, permissionSets, delegated, onVerdict);
+  }
+
+  /**
+   * [ADR-0142 D3/D4] The ownership-queue service (`plugin-sharing`), resolved
+   * at use — or `null` when no plugin registers it. The ownership gate reads
+   * it to resolve a supplied `queue` and to test a member; with none, every
+   * supplied queue resolves nowhere (`QUEUE_NOT_FOUND`), the fail-closed
+   * answer. A stack that DECLARES queues cannot boot without it (the engine's
+   * `kernel:ready` refusal), so `null` here means no queue was ever declared.
+   */
+  private ownershipQueues(): Pick<IOwnershipQueueService, 'resolveQueue' | 'isMember'> | null {
+    const svc = this.resolveKernelService?.(OWNERSHIP_QUEUE_SERVICE) as
+      | Pick<IOwnershipQueueService, 'resolveQueue' | 'isMember'>
+      | undefined;
+    return svc && typeof svc.resolveQueue === 'function' && typeof svc.isMember === 'function' ? svc : null;
   }
 
   /**

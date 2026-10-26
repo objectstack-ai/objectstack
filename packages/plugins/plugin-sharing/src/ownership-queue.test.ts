@@ -9,6 +9,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { QUEUE_FIELD_DEF } from '@objectstack/spec/data';
 import { METADATA_ACTIVATION_TABLE } from '@objectstack/core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { OwnershipQueueService, specsReadBusinessUnits } from './ownership-queue-service.js';
 import { SharingService } from './sharing-service.js';
 import {
@@ -67,8 +68,14 @@ function makeEngine(opts: {
       (tables[object] ??= []).push({ ...data });
       return data;
     },
-    async update() { return {}; },
-    async delete() { return {}; },
+    async update(_object: string, data: any, options?: any) {
+      assertEngineUpdateDispatch(data, options);
+      return {};
+    },
+    async delete(_object: string, options?: any) {
+      assertEngineDeleteDispatch(options);
+      return {};
+    },
     registerHook(event: string, handler: (ctx: any) => any, o?: { object?: string; packageId?: string }) {
       hooks.push({ event, object: String(o?.object), handler, packageId: o?.packageId });
     },

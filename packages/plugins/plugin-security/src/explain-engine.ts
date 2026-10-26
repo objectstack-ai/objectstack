@@ -475,6 +475,21 @@ export interface ExplainEngineDeps {
     context: any,
   ) => Promise<ControlledByParentWriteOutcome>;
   /**
+   * [ADR-0142 D3] Is `userId` a member of queue `queue` in `organizationId`?
+   * The queue service's holder check — the question the sharing service's
+   * queue basis asks of a record that sits in a queue (`owner_id` empty,
+   * `queue` set). Optional: absent, a record's queue is not reported.
+   */
+  queueMember?: (userId: string, queue: string, organizationId: string | null) => Promise<boolean>;
+  /**
+   * [ADR-0142 D4] The tri-state sharing write verdict for the record, the one
+   * the ownership gate reads to admit a CLAIM (an update of an unowned
+   * record's `owner_id` to the principal) without the transfer grant: only
+   * `allow` admits it. Asked for a `transfer` explanation of an unowned
+   * record. Optional: absent, no claim is reported.
+   */
+  claimVerdict?: (object: string, recordId: string, context: any) => Promise<'allow' | 'deny' | 'abstain' | string>;
+  /**
    * [#21771] Enforcement's own read question for an addressed by-id write:
    * would the read door, asked by this principal, NOT return the record?
    * `true` only for absence; a read-time policy refusal answers `false`, and a
@@ -1813,6 +1828,39 @@ async function applyRecordAttribution(
       effect: recipMatchesUser ? 'admits' : 'neutral',
     };
   });
+  // [ADR-0142 D3/D4] The queue story, attributed on this layer beside the
+  // shares, because the sharing service decides it: a record that SITS in a
+  // queue (`owner_id` empty, `queue` set) is read and edited by the queue's
+  // members — never deleted, so a delete explanation reports nothing — and a
+  // `transfer` of an unowned record by the principal is a CLAIM when the
+  // sharing model positively admits them, which needs no transfer grant.
+  if (recordExists && engineOp !== 'delete' && hasOwnerField && (ownerRaw == null || ownerRaw === '') && context?.userId != null) {
+    const row = record as Record<string, unknown>;
+    const sittingIn = typeof row.queue === 'string' && row.queue !== '' ? row.queue : null;
+    if (sittingIn && deps.queueMember) {
+      const organizationId = row.organization_id != null && row.organization_id !== ''
+        ? String(row.organization_id)
+        : (context?.tenantId != null ? String(context.tenantId) : null);
+      const member = await deps.queueMember(String(context.userId), sittingIn, organizationId).catch(() => false);
+      shareRules.push({
+        kind: 'queue_membership',
+        name: sittingIn,
+        via: member ? 'member of the queue the record sits in' : 'not a member of the queue the record sits in',
+        effect: member ? 'admits' : 'neutral',
+      });
+    }
+    if (engineOp === 'transfer' && deps.claimVerdict) {
+      const verdict = await deps.claimVerdict(object, recordId, context).catch(() => 'deny');
+      shareRules.push({
+        kind: 'queue_claim',
+        name: sittingIn ?? OWNER_FIELD,
+        via: verdict === 'allow'
+          ? 'a claim: the record is unowned and the sharing model admits the principal, so taking it needs no transfer grant'
+          : 'not a claim: the sharing model does not positively admit the principal to this unowned record',
+        effect: verdict === 'allow' ? 'admits' : 'neutral',
+      });
+    }
+  }
   // A rejected read filter is not a `null` one: the matcher reads `null` as
   // "no filter" and admits the row, while the find it explains fails.
   const sharingFilterOrFault = deps.sharingReadFilter && recordExists
