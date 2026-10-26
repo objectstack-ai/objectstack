@@ -3707,7 +3707,10 @@ jobs:
   # `started_at` from the Actions jobs endpoint, before Build UI Deps existed
   # (so each run includes a cold seven-package build of up to 288 s):
   #   - Lint UI: n=42, min 71 s, median 112 s, p95 524 s, max 558 s (9.3 min)
-  #     => max(27.9, 24.3) => 30, the value it was ported with.
+  #     => max(27.9, 24.3) => 30, the value it was ported with. Re-derived
+  #     for objectui's Repo Gates (objectstack#25880), which add ~174 s (their
+  #     first PR run, 286 s, less the 112 s median): 558 + 174 = 732 s
+  #     (12.2 min) => max(36.6, 27.2) => 40.
   #   - Build & E2E UI: n=51, min 106 s, median 170 s, p95 423 s, max 457 s
   #     (7.6 min) => max(22.9, 22.6) => 25, down from objectui's 30 plus the
   #     15 the port added for the in-job build, which no derivation backed.
@@ -3718,7 +3721,7 @@ jobs:
     needs: [filter, ui-deps]
     if: ${{ !cancelled() && needs.filter.outputs.ui_tree != 'false' && needs.filter.outputs.ui != 'false' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     permissions:
       contents: read
     env:
@@ -3787,7 +3790,95 @@ jobs:
           pnpm --dir ui run check:bash32-floor --self-test
           pnpm --dir ui run check:bash32-floor
 
+      # ── objectui's Repo Gates (objectstack#25880) ────────────────────────
+      # The nineteen gates of `ui/.github/workflows/repo-gates.yml`, which
+      # GitHub stopped running when the tree moved under `ui/` (it reads only
+      # this repository's `.github/workflows/`). They judge what objectui ships
+      # — `ui/content/docs/**`, `ui/skills/**`, the package READMEs and the
+      # documented component types — so the change most likely to trip them is
+      # a docs-only or skills-only PR, which the `filter` job's `ui` globs
+      # already include.
+      #
+      # Ported as that workflow ran them, in its order: the install-free gates
+      # here, before the install; the gates that read built `dist/*.d.ts` after
+      # this job's last build, below. Every step keeps its `<check> — <step>`
+      # name, and every one runs `if: !cancelled()` (or on the install / build
+      # it needs), so one red gate never hides another of these; each script's
+      # header is the authority on what it checks. Dropped in the port: the
+      # `.objectstack-pin` restore / build / save (the merged tree builds
+      # `@objectstack/*` from the workspace, see the header above
+      # `type-check-ui`) and the turbo-cache report / prune bookkeeping (this
+      # job's own restore and save serve the build below).
+      - name: Control Byte Scan — Scan tracked text files for raw control bytes
+        if: ${{ !cancelled() }}
+        run: pnpm --dir ui run check:control-bytes
+
+      - name: Action Ref Convention — Check action reference spelling against the declared convention
+        if: ${{ !cancelled() }}
+        run: pnpm --dir ui run check:action-ref-convention
+
+      # Self-test first: a scan whose recogniser is broken reports a clean
+      # tree. It derives its population from this repository's workflows, so
+      # it walks this job's install-free steps, itself included.
+      - name: Pre-Install Import Graph Check — Check the pre-install gates' import graphs
+        if: ${{ !cancelled() }}
+        run: |
+          pnpm --dir ui run check:pre-install-import-graph --self-test
+          pnpm --dir ui run check:pre-install-import-graph
+
+      - name: Shell Escape Residue Scan — Check for machine-produced shell-escape residue in fenced examples
+        if: ${{ !cancelled() }}
+        run: pnpm --dir ui run check:shell-escape-residue
+
+      - name: Inert vi.mock Specifier Check — Check every relative vi.mock specifier resolves
+        if: ${{ !cancelled() }}
+        run: pnpm --dir ui run check:vi-mock-specifiers
+
+      - name: Inert vi.mock Specifier Check — Check every covered vi.mock factory inherits the real export surface
+        if: ${{ !cancelled() }}
+        run: pnpm --dir ui run check:vi-mock-inherit
+
+      - name: Internal Docs Link Check — Check internal docs links
+        if: ${{ !cancelled() }}
+        run: pnpm --dir ui run docs:check-links
+
+      - name: Doc Fence Language Check — Check that no fence spelling hides a TypeScript block
+        if: ${{ !cancelled() }}
+        run: |
+          pnpm --dir ui run check:doc-fences --self-test
+          pnpm --dir ui run check:doc-fences
+
+      - name: Doc Example Id Check — Check documented example ids against the catalog registry
+        if: ${{ !cancelled() }}
+        run: pnpm --dir ui run check:doc-example-ids
+
+      - name: Doc Component Type Check — Check documented component types against the registry
+        if: ${{ !cancelled() }}
+        run: pnpm --dir ui run check:doc-types
+
+      - name: Doc Component Type Check — Check prompt-taught component keys render
+        if: ${{ !cancelled() }}
+        run: pnpm --dir ui run check:prompt-keys
+
+      - name: Skill Guide Path Check — Check paths stated in the skill guides
+        if: ${{ !cancelled() }}
+        run: pnpm --dir ui run check:skills-paths
+
+      - name: Skill Eval Token Check — Self-test the oracle and the whole-token rule, both directions
+        if: ${{ !cancelled() }}
+        run: pnpm --dir ui run check:skill-eval-tokens --self-test
+
+      - name: Skill Eval Token Check — Check every eval must_contain token against the guides
+        if: ${{ !cancelled() }}
+        run: pnpm --dir ui run check:skill-eval-tokens
+
+      - name: Docs Route Eager Closure Check — Weigh the docs route eager closure
+        if: ${{ !cancelled() }}
+        run: pnpm --dir ui run check:docs-route-closure
+
       - name: Install dependencies
+        id: install
+        if: ${{ !cancelled() }}
         run: pnpm install --frozen-lockfile
 
       - name: Build the @objectstack packages objectui consumes
@@ -3824,6 +3915,93 @@ jobs:
 
       - name: Verify the ui CLI's own check command passes on the ui tree
         run: pnpm --dir ui run check
+
+      # ── objectui's Repo Gates that read the built type surface ───────────
+      # Gated on the install alone, so a red lint step above hides none of
+      # them. The two derive steps capture the gate's status before writing
+      # the output: a command substitution inside `echo` reports `echo`'s
+      # status, and a failed derivation would read as an empty filter.
+      - name: Skill Example Check — Derive the packages the marked examples import
+        id: ui-skill-filter
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          status=0
+          args="$(pnpm --dir ui run --silent check:skill-examples --build-filter)" || status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "::error::Could not derive the build filter: \`check:skill-examples --build-filter\` exited $status. Refusing to continue — carrying on would build every package instead of the ones the marked examples import." >&2
+            exit "$status"
+          fi
+          case "$args" in
+            *--filter=*) ;;
+            *)
+              echo "::error::The derived build filter names no package (got: '$args'). Refusing to continue." >&2
+              exit 1
+              ;;
+          esac
+          echo "args=$args" >> "$GITHUB_OUTPUT"
+
+      - name: Doc Snippet Type Check — Derive the packages the covered snippets import
+        id: ui-snippet-filter
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          status=0
+          args="$(pnpm --dir ui run --silent check:doc-snippets --build-filter)" || status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "::error::Could not derive the build filter: \`check:doc-snippets --build-filter\` exited $status. Refusing to continue — carrying on would build every package instead of the ones the covered snippets import." >&2
+            exit "$status"
+          fi
+          case "$args" in
+            *--filter=*) ;;
+            *)
+              echo "::error::The derived build filter names no package (got: '$args'). Refusing to continue." >&2
+              exit 1
+              ;;
+          esac
+          echo "args=$args" >> "$GITHUB_OUTPUT"
+
+      # One build for the gates below: every package under `ui/packages/` (the
+      # README export check reads each one's declared type entry) in union with
+      # the two derived closures. The derived filters are lists of `--filter=`
+      # words and stay unquoted so they word-split. ⛔ Never an unfiltered
+      # `turbo run build`.
+      - name: Build every ui package the gates below read
+        id: ui-gate-build
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        env:
+          SKILL_FILTER: ${{ steps.ui-skill-filter.outputs.args }}
+          SNIPPET_FILTER: ${{ steps.ui-snippet-filter.outputs.args }}
+        run: pnpm exec turbo run build --concurrency=4 --filter='./ui/packages/*' $SKILL_FILTER $SNIPPET_FILTER
+
+      - name: Skill Example Check — Self-test the marker convention, both directions
+        if: ${{ !cancelled() && steps.ui-gate-build.outcome == 'success' }}
+        run: pnpm --dir ui run check:skill-examples --self-test
+
+      - name: Skill Example Check — Check the marked skill examples against the built types
+        if: ${{ !cancelled() && steps.ui-gate-build.outcome == 'success' }}
+        run: pnpm --dir ui run check:skill-examples
+
+      # Report-only: exits 0 whatever it finds, non-zero only when the
+      # instrument is broken. Before the blocking gate, so its census is read
+      # on exactly the runs where the corpus moved.
+      - name: Doc Snippet Type Check — Census the code emitted from template literals (report-only)
+        if: ${{ !cancelled() && steps.ui-gate-build.outcome == 'success' }}
+        run: pnpm --dir ui run check:doc-snippets --emit-census
+
+      - name: Doc Snippet Type Check — Compile documentation snippets against the built types
+        if: ${{ !cancelled() && steps.ui-gate-build.outcome == 'success' }}
+        run: pnpm --dir ui run check:doc-snippets
+
+      - name: Doc Snippet Type Check — Compile JSDoc `@example` blocks against the built types
+        if: ${{ !cancelled() && steps.ui-gate-build.outcome == 'success' }}
+        run: pnpm --dir ui run check:doc-examples
+
+      - name: Doc Snippet Type Check — Judge JSON doc fences through the strict authoring face
+        if: ${{ !cancelled() && steps.ui-gate-build.outcome == 'success' }}
+        run: pnpm --dir ui run check:doc-json
+
+      - name: README Export Check — Check every README self-import against the real export surface
+        if: ${{ !cancelled() && steps.ui-gate-build.outcome == 'success' }}
+        run: pnpm --dir ui run check:readme-exports
 
       # Bookkeeping after the last checking step (the ui jobs' header): the
       # seed keeps only the entries this job's turbo runs used.
