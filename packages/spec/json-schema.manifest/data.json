@@ -120,6 +120,7 @@
     "data/NoSQLQueryOptions",
     "data/NoSQLTransactionOptions",
     "data/NormalizedFilter",
+    "data/NowAnchor",
     "data/Object",
     "data/ObjectAccessConfig",
     "data/ObjectCapabilities",

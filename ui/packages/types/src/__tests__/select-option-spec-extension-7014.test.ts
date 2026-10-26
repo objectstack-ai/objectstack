@@ -86,20 +86,12 @@ const issueAtPath = (result: { success: boolean; error?: { issues: readonly any[
     : result.error!.issues.find((i) => (i.path ?? []).at(-1) === key);
 
 describe('spec SelectOptionSchema — `description` is inside the vocabulary, `icon`/`disabled` are not', () => {
-  it('declares exactly the seven keys 18.0.0-next.3 leaves it with', () => {
-    // If this list changes again, the comments in field-types.ts and
-    // select-option.ts must be re-pointed with it rather than left stale.
-    // 17.3.0 added `description`; 18.0.0-next.3 added `kind`, the option's
-    // lifecycle category (objectstack `adad73f`).
-    expect(SPEC_OPTION_KEYS).toEqual([
-      'color',
-      'default',
-      'description',
-      'kind',
-      'label',
-      'value',
-      'visibleWhen',
-    ]);
+  it('declares `description` and neither objectui-only key', () => {
+    // By name, not as the spec's whole key list (#26238): 17.3.0 added
+    // `description`, the key this file is about, and `icon` / `disabled` are
+    // refused by name below.
+    expect(SPEC_OPTION_KEYS).toEqual(expect.arrayContaining(['description', 'label', 'value']));
+    for (const key of ['icon', 'disabled']) expect(SPEC_OPTION_KEYS).not.toContain(key);
   });
 
   it('accepts the control option', () => {

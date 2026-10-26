@@ -322,6 +322,22 @@ function isFieldReferenceShape(value: unknown): value is Record<string, unknown>
     && '$field' in value;
 }
 
+/**
+ * [#25808] A `{ $now: true, addDays }` now-anchored comparand by SHAPE — a
+ * non-array object carrying a `$now` key — the test `@objectstack/formula`'s
+ * evaluator and `driver-sql`'s compiler apply. `$now` is `true` as authored
+ * and the tree's pinned ISO instant once the engine's token resolver has run
+ * (`having` resolves AFTER these doors, a per-aggregation filter too), so the
+ * static judges below accept both spellings and read neither.
+ */
+function isNowAnchorShape(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object'
+    && value !== null
+    && !Array.isArray(value)
+    && !(value instanceof Date)
+    && '$now' in value;
+}
+
 /** A bounded rendering of an offending value, for a human reading a 400. */
 function preview(value: unknown): string {
   let text: string;
@@ -644,6 +660,91 @@ function unresolvedFieldReferenceError(
 /** [#20099] A reference its own declaration refuses — today, a malformed `addDays`. */
 function malformedFieldReferenceError(path: string, detail: string): Error {
   return invalidFilterError(`The { "$field" } reference at ${path} is malformed: ${detail}`);
+}
+
+/**
+ * [#25808] A `{ $now }` anchor its own declaration refuses (`NowAnchorSchema`):
+ * `$now` that is neither `true` nor the resolver's pinned instant, a missing
+ * `addDays`, an offset that is neither an integer nor a `{ $field }`.
+ */
+function malformedNowAnchorError(path: string, detail: string): Error {
+  return invalidFilterError(`The { "$now" } comparand at ${path} is malformed: ${detail}`);
+}
+
+/**
+ * [#25808] The anchor's own declaration, as a reason or `undefined` — the
+ * `where` compiler's reading (`driver-sql`'s `nowAnchorOf` /
+ * `fieldReferenceOffsetOf`), so a shape it refuses is refused here too.
+ */
+function nowAnchorViolation(anchor: Record<string, unknown>): string | undefined {
+  const at = anchor.$now;
+  if (at !== true && !(typeof at === 'string' && Number.isFinite(Date.parse(at)))) {
+    return `$now must be the literal true (the resolver pins it to the current instant), not ${preview(at)}.`;
+  }
+  const offset = anchor.addDays;
+  if (offset === undefined) {
+    return 'a { "$now": true } comparand must carry an addDays offset — an integer literal of any sign or a '
+      + '{ "$field" } reference to a numeric column; for the unshifted instant write the "{now}" placeholder.';
+  }
+  if (typeof offset === 'number') {
+    return Number.isInteger(offset) ? undefined : `addDays ${String(offset)} is not an integer (whole days only).`;
+  }
+  if (isFieldReferenceShape(offset) && typeof offset.$field === 'string') return undefined;
+  return `addDays ${preview(offset)} is neither an integer nor a { "$field": "numeric_column" } reference.`;
+}
+
+/**
+ * [#25808] The class rule `driver-sql` applies to a now-anchored comparand in
+ * a `where`, as a reason or `undefined`: the target column is temporal (the
+ * anchor is an instant shifted by whole days), and a column offset is numeric.
+ * A class the declaration cannot tell is not judged — {@link offsetPairViolation}'s
+ * convention.
+ */
+function nowAnchorClassViolation(
+  field: string,
+  anchor: Record<string, unknown>,
+  classes: ReadonlyMap<string, AggregatedColumnClass | undefined>,
+): string | undefined {
+  const targetClass = classes.get(field);
+  if (targetClass !== undefined && targetClass !== 'date' && targetClass !== 'datetime') {
+    return `a now-anchored comparand is an instant shifted by whole days, and "${field}" is ${targetClass} — `
+      + 'only a date or datetime column can be compared against it.';
+  }
+  const offset = anchor.addDays;
+  if (!isFieldReferenceShape(offset)) return undefined;
+  const offsetRef = String(offset.$field);
+  const offsetClass = classes.get(offsetRef);
+  if (offsetClass !== undefined && offsetClass !== 'numeric') {
+    return `the addDays offset "${offsetRef}" (${offsetClass}) is not a numeric column, and a day offset `
+      + 'must be a number of days.';
+  }
+  return undefined;
+}
+
+/**
+ * [#25808] A now-anchored comparand the aggregated row's classes refuse — the
+ * `having` twin of {@link columnPairError}, naming the columns because they
+ * are the author's own query.
+ */
+function nowAnchorClassError(field: string, op: string, path: string, reason: string): Error {
+  return invalidFilterError(
+    `Operator "${op}" on column "${field}" at ${path} compares against a now-anchored comparand `
+    + `({ "$now": true, "addDays": … }), which cannot be evaluated here: ${reason}`,
+  );
+}
+
+/**
+ * [#25808] A `{ $now }` anchor outside the six scalar comparisons — the twin of
+ * {@link fieldReferencePositionError}, for the same positions and reason.
+ */
+function nowAnchorPositionError(field: string, op: string, path: string, index?: number): Error {
+  const at = index === undefined ? '' : ` at index ${index} of its value list`;
+  return invalidFilterError(
+    `Operator "${op}" on field "${field}" at ${path} compares against a now-anchored comparand `
+    + `({ "$now": true, "addDays": … })${at}. The anchor is evaluated only as the WHOLE comparand of a scalar `
+    + `comparison — $eq, $ne, $gt, $gte, $lt or $lte — never as a list member or a text pattern. Compare `
+    + `against a literal here, or write the test as one of those comparisons.`,
+  );
 }
 
 /**
@@ -1463,6 +1564,22 @@ function withheldAggregationReferenceError(root: string): Error {
 }
 
 /**
+ * [#25808] A `{ $now }` anchor in a per-aggregation filter that `where`'s
+ * rules refuse — a non-temporal target, an undeclared or non-numeric offset
+ * column. Withheld as {@link withheldAggregationReferenceError} withholds, for
+ * its reason.
+ */
+function withheldAggregationNowAnchorError(root: string): Error {
+  return invalidFilterError(
+    `A now-anchored comparand ({ "$now": true, "addDays": … }) in \`${root}\` cannot be evaluated. It `
+    + `compares a date or datetime field the object declares against the current instant shifted by an `
+    + `integer or a numeric field's worth of days; evaluated anyway, its count would be silently wrong. `
+    + `The fields, the operator and the reason are withheld from the message, as for the same comparison `
+    + `in a \`where\`; the full diagnostic is in the server log.`,
+  );
+}
+
+/**
  * [#20148] Judge every scalar-comparison `{ $field }` reference in one
  * per-aggregation filter against the object's declaration — the same
  * traversal {@link assertNodeIsEvaluable} takes, which has already run: `$and`
@@ -1512,6 +1629,13 @@ export function assertAggregationFilterReferencesAreDeclared(
     );
     throw withheldAggregationReferenceError(root);
   };
+  const refuseAnchor = (field: string, op: string, path: string, reason: string): never => {
+    declared.reportWithheld(
+      `Operator "${op}" on field "${field}" at ${path} compares against a now-anchored comparand `
+      + `({ "$now": true, "addDays": … }), which cannot be evaluated here: ${reason}`,
+    );
+    throw withheldAggregationNowAnchorError(root);
+  };
   const walk = (cond: unknown, path: string): void => {
     if (!cond || typeof cond !== 'object') return;
     for (const [key, value] of Object.entries(cond)) {
@@ -1528,7 +1652,22 @@ export function assertAggregationFilterReferencesAreDeclared(
       if (key.startsWith('$')) continue;
       if (typeof value !== 'object' || value === null || value instanceof Date || Array.isArray(value)) continue;
       for (const [op, target] of Object.entries(value)) {
-        if (!REFERENCE_COMPARISON_OPERATORS.has(op) || !isFieldReferenceShape(target)) continue;
+        if (!REFERENCE_COMPARISON_OPERATORS.has(op)) continue;
+        // [#25808] A now-anchored comparand: its offset column is declared and
+        // numeric, its target temporal — `where`'s rules for the same anchor.
+        if (isNowAnchorShape(target)) {
+          const at = `${here}.${op}`;
+          const offset = target.addDays;
+          if (isFieldReferenceShape(offset) && !names.has(String(offset.$field))) {
+            refuseAnchor(key, op, at,
+              `the addDays offset "${String(offset.$field)}" is not a declared field${ofObject} — `
+              + `only declared fields can be referenced.`);
+          }
+          const reason = nowAnchorClassViolation(key, target, classes);
+          if (reason !== undefined) refuseAnchor(key, op, at, reason);
+          continue;
+        }
+        if (!isFieldReferenceShape(target)) continue;
         const at = `${here}.${op}`;
         const ref = String(target.$field);
         if (!names.has(ref)) {
@@ -1637,6 +1776,8 @@ function assertConditionIsEvaluable(
   for (const op of keys) {
     const target = spec[op];
     if (op === '$field') throw bareFieldReferenceError(field, spec, path);
+    // [#25808] The bare `{ field: { $now: true, addDays } }` spelling, likewise.
+    if (op === '$now') throw nowAnchorPositionError(field, op, path);
     if (op === '$icontains' && (typeof target !== 'string' || target === '')) {
       throw icontainsComparandError(field, target, `${path}.${op}`);
     }
@@ -1665,14 +1806,22 @@ function assertConditionIsEvaluable(
         if (target.addDays !== undefined && scope.classes) {
           assertOffsetPairIsTemporal(field, op, target, `${path}.${op}`, scope.classes);
         }
+      } else if (isNowAnchorShape(target)) {
+        // [#25808] A now-anchored comparand: well-formed by its declaration,
+        // its offset column one the row has, the classes as `where` reads them.
+        assertNowAnchorResolves(field, op, target, `${path}.${op}`, scope);
       }
       continue;
     }
     if (Array.isArray(target)) {
       const index = target.findIndex(isFieldReferenceShape);
       if (index !== -1) throw fieldReferencePositionError(field, op, `${path}.${op}`, index);
+      const anchorIndex = target.findIndex(isNowAnchorShape);
+      if (anchorIndex !== -1) throw nowAnchorPositionError(field, op, `${path}.${op}`, anchorIndex);
     } else if (isFieldReferenceShape(target)) {
       throw fieldReferencePositionError(field, op, `${path}.${op}`);
+    } else if (isNowAnchorShape(target)) {
+      throw nowAnchorPositionError(field, op, `${path}.${op}`);
     }
   }
 }
@@ -1700,6 +1849,58 @@ function assertReferenceResolves(
   for (const name of names) {
     if (!columns.includes(String(name))) throw unresolvedFieldReferenceError(String(name), path, columns);
   }
+}
+
+/**
+ * [#25808] A now-anchored comparand in a scalar comparison: well-formed by its
+ * own declaration, its column offset (when it carries one) naming a column the
+ * aggregated row has, and the class rule `where` applies — target temporal,
+ * offset numeric — where the position's classes are known.
+ */
+function assertNowAnchorResolves(
+  field: string,
+  op: string,
+  anchor: Record<string, unknown>,
+  path: string,
+  scope: EvaluableScope,
+): void {
+  const detail = nowAnchorViolation(anchor);
+  if (detail !== undefined) throw malformedNowAnchorError(path, detail);
+  const offset = anchor.addDays;
+  if (scope.columns && isFieldReferenceShape(offset) && !scope.columns.includes(String(offset.$field))) {
+    throw unresolvedFieldReferenceError(String(offset.$field), path, scope.columns);
+  }
+  if (scope.classes) {
+    const reason = nowAnchorClassViolation(field, anchor, scope.classes);
+    if (reason !== undefined) throw nowAnchorClassError(field, op, path, reason);
+  }
+}
+
+/**
+ * [#25808] Evaluate `value <op> { $now, addDays }` on one row — the twin of
+ * {@link compareWithReference}, through the same evaluator, which owns the
+ * anchor's arithmetic (`resolveNowAnchor`): the instant shifted by whole days
+ * in the FORM of the value it meets, so a `date` column (handed here in its
+ * storage form, a calendar day) is compared day for day and a `datetime`
+ * column instant for instant — the rows `driver-sql`'s compiler answers.
+ * A column offset is re-keyed onto the probe as a reference's is.
+ */
+function compareWithNowAnchor(
+  row: Record<string, any>,
+  value: unknown,
+  op: string,
+  anchor: Record<string, unknown>,
+): boolean {
+  const probe: Record<string, unknown> = { value };
+  const resolved: Record<string, unknown> = { $now: anchor.$now };
+  const offset = anchor.addDays;
+  if (isFieldReferenceShape(offset)) {
+    probe.offset = row?.[String(offset.$field)];
+    resolved.addDays = { $field: 'offset' };
+  } else if (offset !== undefined) {
+    resolved.addDays = offset;
+  }
+  return matchesFilterCondition(probe, { value: { [op]: resolved } } as FilterCondition);
 }
 
 /**
@@ -2058,6 +2259,12 @@ function checkCondition(
     // nothing, or everything, silently.
     if (REFERENCE_COMPARISON_OPERATORS.has(op) && isFieldReferenceShape(target)) {
       if (!compareWithReference(row, value, op, target)) return false;
+      continue;
+    }
+    // [#25808] A now-anchored comparand, likewise — handed the value in the
+    // column's storage form, which decides the form the anchor is shifted in.
+    if (REFERENCE_COMPARISON_OPERATORS.has(op) && isNowAnchorShape(target)) {
+      if (!compareWithNowAnchor(row, form(value), op, target)) return false;
       continue;
     }
     // [#20148] The comparison and list arms read a `Date` bound — or a `Date`

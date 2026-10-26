@@ -11,6 +11,8 @@
  * `containment-declared-slot-9910.test.ts`, because the two failure modes are
  * OPPOSITE: a flag-only cell drawing nothing is the fallback silently
  * re-introduced, and a slot-only cell drawing the warning is the defect.
+ * Since #25712 one copy serves both, and the last block carries the cases the
+ * renderer's file pinned beyond the 2×2.
  *
  * The second half uses the REAL served entries: in the tracked
  * `sdui.manifest.json` (regenerated at the console pin, `0bf85eaa`) exactly
@@ -19,9 +21,8 @@
  * package's tests keep reading only this package.
  */
 import { describe, expect, it } from 'vitest';
-import { manifestFromConfigs, validateTree } from '../index.js';
-import { CHILD_LIST_KEY, acceptsChildren } from '../validate.js';
-import type { Manifest, ManifestComponent, SchemaElement } from '../types.js';
+import { CHILD_LIST_KEY, acceptsChildren, manifestFromConfigs, validateTree } from '../index.js';
+import type { Diagnostic, Manifest, ManifestComponent, SchemaElement } from '../types.js';
 
 const CONTAINMENT = 'not-a-container';
 const SLOT = { name: 'children', type: 'slot' } as const;
@@ -283,4 +284,71 @@ describe('#19969 — the five served entries where the flag and the declared inp
       expect(containment(withChildren(type), manifest)).toEqual([CONTAINMENT]);
     },
   );
+});
+
+describe('objectui#9910 — the base key, the retired spelling, and the layout flag', () => {
+  // The renderer's copy pinned these beside its 2×2, over a manifest whose rows
+  // nest a declared `text` child so nothing draws `unknown-component`.
+  const manifest: Manifest = manifestFromConfigs([
+    // flag, no slot — a layout container that renders `items[].children`, never
+    // `schema.children` (the `page:tabs` shape)
+    { type: 'flag-only', namespace: 'ui', isContainer: true, inputs: [{ name: 'items', type: 'array' }] },
+    // slot, no flag — a label-fallback reader (the `button` / `badge` shape)
+    { type: 'slot-only', namespace: 'ui', inputs: [{ name: 'label', type: 'string' }, SLOT] },
+    // both — a layout container that renders the list (the `flex` shape)
+    { type: 'both', namespace: 'ui', isContainer: true, inputs: [{ name: 'gap', type: 'number' }, SLOT] },
+    // neither — a leaf
+    { type: 'neither', namespace: 'ui', inputs: [{ name: 'content', type: 'string' }] },
+    // the page kinds publish `children` typed `array`, not `slot` — the NAME is
+    // the declaration, so this row must read as accepting children too
+    { type: 'array-typed', namespace: 'ui', inputs: [{ name: 'children', type: 'array', of: 'object' }] },
+    // the child every row nests, declared so it never draws `unknown-component`
+    { type: 'text', namespace: 'ui', inputs: [{ name: 'content', type: 'string' }] },
+  ] as unknown as Parameters<typeof manifestFromConfigs>[0]);
+
+  const CHILD = { type: 'text', content: 'measured' };
+  const codes = (node: unknown): string[] =>
+    validateTree(node as SchemaElement, manifest).diagnostics.map((d: Diagnostic) => d.code);
+  const withChildren = (type: string) => ({ type, children: [CHILD] });
+
+  it('a declared `children` slot is never type-checked or reported as a prop — the key is base', () => {
+    // `children` is in `BASE_PROPS`, so the prop walk skips it before the
+    // declared input is ever consulted: no `unknown-prop`, no `type-mismatch`,
+    // whichever coarse type the declaration carries.
+    for (const type of ['slot-only', 'both', 'array-typed', 'flag-only', 'neither']) {
+      const found = codes(withChildren(type));
+      expect(found.filter((c) => c === 'unknown-prop' || c === 'type-mismatch')).toEqual([]);
+    }
+    // …and the reachability control: the nested child resolved everywhere.
+    for (const type of ['slot-only', 'both', 'array-typed', 'flag-only', 'neither']) {
+      expect(codes(withChildren(type))).not.toContain('unknown-component');
+    }
+  });
+
+  it('the retired `body` spelling follows the SAME predicate', () => {
+    // `checkRetiredBodyDialect` is handed `acceptsChildren(comp)`, so the two
+    // spellings cannot disagree about which components take a list.
+    const under = (type: string) =>
+      validateTree({ type, body: [CHILD] } as unknown as SchemaElement, manifest).diagnostics.filter((d) =>
+        d.message.includes('"body"'),
+      );
+    // slot declared ⇒ the list would be accepted under `children`, so `body`
+    // is answered as a retired key that names the replacement
+    expect(under('slot-only').map((d) => d.code)).toEqual(['unknown-prop']);
+    expect(under('slot-only')[0]!.message).toContain('"children"');
+    // flag only ⇒ no list is accepted here, so `body` draws the containment
+    // sentence — the flag does not rescue the retired spelling either
+    expect(under('flag-only').map((d) => d.code)).toEqual([CONTAINMENT]);
+    expect(under('neither').map((d) => d.code)).toEqual([CONTAINMENT]);
+  });
+
+  it('the manifest still CARRIES `isContainer` for the consumers that read layout containment', () => {
+    // Q2-A keeps the field: `manifestFromConfigs` projects it unchanged, the
+    // react-page scope builder and the public layout ledger read it, and this
+    // tier ignores it. Asserted so a later "clean-up" that drops the projection
+    // is a visible decision rather than a side effect.
+    expect(manifest.components['flag-only']!.isContainer).toBe(true);
+    expect(manifest.components['both']!.isContainer).toBe(true);
+    expect(manifest.components['slot-only']!.isContainer).toBeUndefined();
+  });
 });

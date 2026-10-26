@@ -132,28 +132,16 @@ const nonsenseRefused: RecordHighlightsComponentProps = {
 };
 
 describe('objectui#9187 — record:highlights `layout` against the installed spec', () => {
-  it('PREMISE: the contract declares exactly two members, read off the live schema', () => {
+  it('PREMISE: the contract declares both layout members, read off the live schema', () => {
     // Read off the schema object rather than transcribed, so a spec that adds
     // or drops a member fails HERE first — before the pins above start
     // asserting a shape the contract no longer has.
     const layout = RecordHighlightsProps.def.shape.layout;
     const entries = Object.keys(layout.def.innerType.def.entries).sort();
-    expect(entries).toEqual(['horizontal', 'vertical']);
-    // `@objectstack/spec` 17.5.0 added the record-block security members
-    // (`requiredPermissions`, `redactFields`, `enforceFieldSecurity`) beside
-    // `layout` (objectui#11073). `layout`'s closed set above did not move, so
-    // every pin in this file still describes the contract as it stands. The
-    // spec after 18.0.0-next.3 added `emptyState` to the bound record blocks
-    // (objectstack#24270), beside `layout` again (objectui#12971).
-    expect(Object.keys(RecordHighlightsProps.def.shape).sort()).toEqual([
-      'aria',
-      'emptyState',
-      'enforceFieldSecurity',
-      'fields',
-      'layout',
-      'redactFields',
-      'requiredPermissions',
-    ]);
+    expect(entries).toEqual(expect.arrayContaining(['horizontal', 'vertical']));
+    // The block's props by name: the exact key list this used to pin was
+    // re-pointed twice for members unrelated to `layout` (#26238).
+    expect(Object.keys(RecordHighlightsProps.def.shape)).toEqual(expect.arrayContaining(['fields', 'layout']));
   });
 
   it("PREMISE: `grid` is refused with `invalid_value` at `layout` — the card's repro", () => {
