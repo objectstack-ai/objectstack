@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 30 — spawns the real producer once per single-cause fixture: three boots of the built CLI, one per dev-door compile decision (`os serve --dev`, `os dev --no-compile`, production `os serve`), each over a freshly written build-time artifact; 15.0 s locally on a shared container, x 1.25, no CI reading yet
+// test-budget: 20 — spawns the real producer once per single-cause fixture: three boots of the built CLI, one per dev-door compile decision (`os serve --dev`, `os dev --no-compile`, production `os serve`), each over a freshly written build-time artifact; 13.9 s, the slowest of three local runs on a shared container, x 1.25, no CI reading yet
 
 /**
  * #26242 — on a direct `os serve --dev` boot, a connector value the config
