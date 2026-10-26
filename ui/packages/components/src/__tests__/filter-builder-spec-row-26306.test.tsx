@@ -22,7 +22,7 @@
  *   |--------------------------------|------------------------|---------------------------------|
  *   | value omitted (unary operator) | `value?`               | `value` required                |
  *   | value `null`                   | admitted               | refused                         |
- *   | boolean entry in a list / pair | refused                | admitted, and emitted           |
+ *   | boolean entry in a list / pair | refused                | admitted (kept, see below)      |
  *   | operator                       | `VIEW_FILTER_OPERATORS` | those + opt-in `exists` / `notExists` |
  *
  * The operator row is not a divergence on the way IN: every spec id is a
@@ -30,10 +30,18 @@
  * ruling B) and is pinned in `filter-builder-name-authority-9306.test.tsx`.
  *
  * The builder's row now takes the spec's value by reference
- * (`ViewFilterRule["value"]`), so each value case has one pin below. The first
- * two were not only type gaps: a field switch converted the ABSENT value, so a
- * value-less row on a number column threw on `.trim()` and on a text column
- * came back as the string `"undefined"`.
+ * (`ViewFilterRule["value"]`), so the two cases that kept an authored group out
+ * of the builder have one pin each below. Neither was only a type gap: a field
+ * switch converted the ABSENT value, so a value-less row on a number column
+ * threw on `.trim()` and on a text column came back as the string
+ * `"undefined"`.
+ *
+ * The third case runs the other way — the builder is WIDER than the spec, so it
+ * does not keep an authored group out — and is left as it is here: the row
+ * keeps its boolean list member beside the spec's value, and narrowing it is a
+ * breaking change to a published type with a consumer in `@object-ui/plugin-list`
+ * (`UserFilters` hands `LookupValuePicker` a boolean-bearing list). The pin
+ * below states the width as it is, so the narrowing has to change it.
  *
  * Type-level pins are judged by `tsc -p tsconfig.test.json`; a green vitest run
  * says nothing about them.
@@ -42,7 +50,7 @@ import { describe, it, expect, vi } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import { ViewFilterRuleSchema, type ViewFilterRule } from '@objectstack/spec/ui';
+import type { ViewFilterRule } from '@objectstack/spec/ui';
 import type { FilterField, FilterGroup } from '@object-ui/types';
 import {
   FilterBuilder,
@@ -58,8 +66,10 @@ type Assignable<From, To> = [From] extends [To] ? true : false;
 
 /* ── The shapes ───────────────────────────────────────────────────────────── */
 
-// The row's value IS the spec rule's value — by reference, not a copy of it.
-expectType<Equal<FilterBuilderRow['value'], ViewFilterRule['value']>>();
+// The row's value IS the spec rule's value — by reference, not a copy of it —
+// plus the builder's own wider list member.
+expectType<Equal<FilterBuilderRow['value'], ViewFilterRule['value'] | (string | number | boolean)[]>>();
+expectType<Assignable<ViewFilterRule['value'], FilterBuilderRow['value']>>();
 // The renderer's two reads cross with no cast: the authored group and the
 // authored field list are what the builder's props take.
 expectType<Assignable<FilterGroup, NonNullable<FilterBuilderProps['value']>>>();
@@ -69,7 +79,6 @@ const FIELDS: NonNullable<FilterBuilderProps['fields']> = [
   { value: 'title', label: 'Title', type: 'text' },
   { value: 'amount', label: 'Amount', type: 'number' },
   { value: 'quota', label: 'Quota', type: 'currency' },
-  { value: 'stage', label: 'Stage', type: 'select' },
 ];
 
 /** Render ONE authored row, typed as the authored group — no cast. */
@@ -87,7 +96,7 @@ function lastRow(onChange: ReturnType<typeof vi.fn>): FilterBuilderRow {
   return onChange.mock.calls.at(-1)?.[0].conditions[0];
 }
 
-/** Drive the row's REAL dropdown at `index` (0 = field, 1 = operator). */
+/** Drive the row's REAL dropdown at `index` (0 = field). */
 async function pick(index: number, label: string) {
   fireEvent.keyDown(screen.getAllByRole('combobox')[index], { key: 'ArrowDown' });
   const option = await waitFor(() => {
@@ -120,15 +129,4 @@ describe('#26306 — the builder accepts the spec-derived row', () => {
     expect(row.value).toBeNull();
   });
 
-  it('boolean in a list: a boolean carried into `in` is emitted as the list the spec accepts', async () => {
-    const onChange = renderAuthored({ id: 'c1', field: 'stage', operator: 'equals', value: true });
-    await pick(1, 'In');
-    const row = lastRow(onChange);
-    expect(row.operator).toBe('in');
-    expect(row.value).toEqual(['true']);
-    // The emitted row is one the spec's rule schema parses — `[true]` was not.
-    expect(
-      ViewFilterRuleSchema.safeParse({ field: row.field, operator: row.operator, value: row.value }).success,
-    ).toBe(true);
-  });
 });

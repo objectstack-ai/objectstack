@@ -97,13 +97,14 @@ const offVocabulary: FilterBuilderRow = {
   value: 1,
 };
 
-// The value extension: the SPEC rule's value, by reference (#26306) — never the
+// The value extension: the SPEC rule's value, by reference (#26306), plus the
+// builder's own boolean-bearing list — never the
 // authority's `value?: any`, which would switch the typing of every exported
 // value helper off in silence. Optional, as the spec's is: a value-less
 // operator is authored with no value, and a required member refused the
 // authored group the renderer hands over. The per-case pins live in
 // `filter-builder-spec-row-26306.test.tsx`.
-expectType<Equal<FilterBuilderRow['value'], ViewFilterRule['value']>>();
+expectType<Equal<FilterBuilderRow['value'], ViewFilterRule['value'] | (string | number | boolean)[]>>();
 const rowWithoutValue: FilterBuilderRow = { id: 'c1', field: 'a', operator: 'is_null' };
 // …and still not `any`: a value the spec refuses is refused here.
 const objectValue: FilterBuilderRow = {

@@ -72,10 +72,12 @@ import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover"
  *     `narrowFilterValueToOptions`, …) is typed on this member, so `any` here
  *     would switch their checking off in silence. OPTIONAL and admitting
  *     `null`, as the spec's is: a value-less operator (`is_null`, `is_empty`,
- *     …) is authored with no `value`, so a required member refused the
- *     authored `FilterGroup` the `filter-builder` renderer hands over. A list
- *     or pair holds strings and numbers only, as the spec's does — a boolean
- *     carried into one is spelled as its string (`normalizeToArray`).
+ *     …) is authored with no `value`, and a required member refused the
+ *     authored `FilterGroup` the `filter-builder` renderer hands over. One
+ *     member is the builder's own and WIDER than the spec's: a list entry may
+ *     be a boolean, because a boolean scalar carried into a list operator
+ *     (`reshapeFilterValue`, `normalizeToArray`) stays a boolean. The spec's
+ *     list holds strings and numbers only.
  *
  * Its own NAME, not the authority's (objectui#6349, batch 12). Under the
  * authority's name this was a second declaration of `FilterBuilderCondition`
@@ -88,7 +90,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover"
 export interface FilterBuilderRow
   extends Omit<AuthoredFilterBuilderCondition, "operator" | "value"> {
   operator: FilterBuilderOperator
-  value?: ViewFilterRule["value"]
+  value?: ViewFilterRule["value"] | (string | number | boolean)[]
 }
 
 /**
@@ -866,25 +868,25 @@ export function retypeFilterValue(
 
   switch (filterValueArity(operator)) {
     case "list": {
-      const carried: (string | number)[] = []
+      const carried: (string | number | boolean)[] = []
       for (const entry of normalizeToArray(value)) {
         const converted = convertScalarToFamily(entry, family)
-        if (converted !== undefined && converted !== "") carried.push(toListEntry(converted))
+        if (converted !== undefined && converted !== "") carried.push(converted)
       }
       return carried
     }
     case "pair": {
       const [min = "", max = ""] = normalizeToArray(value)
-      const lower = toListEntry(convertScalarToFamily(min, family) ?? "")
-      const upper = toListEntry(convertScalarToFamily(max, family) ?? "")
+      const lower = convertScalarToFamily(min, family) ?? ""
+      const upper = convertScalarToFamily(max, family) ?? ""
       return lower === "" && upper === "" ? [] : [lower, upper]
     }
     default: {
       const scalar = Array.isArray(value) ? (value[0] ?? "") : value
       // A row with no value — the spec's value-less operators are authored
       // without one — keeps having none. Converting the absence instead read
-      // `undefined` as a value: the text family spelled it `"undefined"` and
-      // the number family threw on `.trim()`.
+      // it as a value: the text family spelled `undefined` as the string
+      // `"undefined"`, and the number family threw on `.trim()`.
       if (isValueUnset(scalar)) return scalar
       return convertScalarToFamily(scalar, family) ?? ""
     }
@@ -1112,7 +1114,7 @@ export function isFilterValueComplete(
 /** The two bounds a `pair` row edits, with the gaps filled in for rendering. */
 function toPairBounds(
   value: FilterBuilderRow["value"],
-): [string | number, string | number] {
+): [string | number | boolean, string | number | boolean] {
   const [min = "", max = ""] = normalizeToArray(value)
   return [min, max]
 }
@@ -1370,22 +1372,10 @@ function displayScalarValue(value: FilterBuilderRow["value"]): string {
   return isValueUnset(value) ? "" : String(value)
 }
 
-/**
- * One entry of a list or pair value, in the spec's element vocabulary: a
- * `ViewFilterRule` list holds strings and numbers, never booleans. A boolean
- * that reaches a list — an authored `equals true` row whose operator is then
- * switched to `in` — is spelled as its string, which is also the key a static
- * option compares on (`allowed.has(String(entry))`), so the entry the user
- * chose stays the entry they see.
- */
-function toListEntry(entry: string | number | boolean): string | number {
-  return typeof entry === "boolean" ? String(entry) : entry
-}
-
 /** Normalize a filter value into an array for multi-select scenarios */
-function normalizeToArray(value: FilterBuilderRow["value"]): (string | number)[] {
+function normalizeToArray(value: FilterBuilderRow["value"]): (string | number | boolean)[] {
   if (Array.isArray(value)) return value
-  if (!isValueUnset(value)) return [toListEntry(value)]
+  if (!isValueUnset(value)) return [value]
   return []
 }
 
@@ -1835,7 +1825,7 @@ function FilterBuilder({
       // refusal. `|| undefined` so a complete pair carries NO attribute at all.
       const boundInvalid = (index: 0 | 1) => (missingBound === index ? true : undefined)
       const setBound = (index: 0 | 1, raw: string) => {
-        const next: [string | number, string | number] = [bounds[0], bounds[1]]
+        const next: [string | number | boolean, string | number | boolean] = [bounds[0], bounds[1]]
         // The same one reading as the field-switch path (objectui#4875), in
         // place of `parseFloat(raw) || 0`: a bound is a clean number or it is
         // not filled in (`""`). A half-read bound (`"42abc"` → 42) or an
@@ -1843,7 +1833,7 @@ function FilterBuilder({
         // silently narrows a RANGE, and `0` is a plausible-looking bound.
         // `convertScalarToFamily("", "number")` is `""`, so the old
         // `raw !== ""` guard is subsumed rather than dropped.
-        next[index] = numeric ? toListEntry(convertScalarToFamily(raw, "number") ?? "") : raw
+        next[index] = numeric ? (convertScalarToFamily(raw, "number") ?? "") : raw
         // Both bounds cleared → back to the "nothing filled in yet" shape the
         // write path drops, rather than persisting an empty range.
         updateCondition(condition.id, {
@@ -2305,13 +2295,13 @@ function TemporalValueEditor({
 // ============================================================================
 
 interface MultiValueInputProps {
-  values: (string | number)[]
+  values: (string | number | boolean)[]
   /** The `<input type>` the field's own type asks for (`text` / `number` / …). */
   inputType: string
   /** Numeric field → committed tokens are numbers, so the wire carries numbers. */
   numeric: boolean
   testId: string
-  onChange: (next: (string | number)[]) => void
+  onChange: (next: (string | number | boolean)[]) => void
 }
 
 /**
@@ -2346,7 +2336,7 @@ function MultiValueInput({ values, inputType, numeric, testId, onChange }: Multi
     if (next === undefined || next === "") return
     setDraft("")
     if (values.some((v) => String(v) === String(next))) return
-    onChange([...values, toListEntry(next)])
+    onChange([...values, next])
   }
 
   const removeAt = (index: number) => {

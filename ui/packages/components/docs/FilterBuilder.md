@@ -136,9 +136,9 @@ interface FilterBuilderRow {
   id: string;                    // Row identifier (required)
   field: string;                 // Field value
   operator: FilterBuilderOperator; // Operator id (see below)
-  value?: ViewFilterRule['value']; // `@objectstack/spec/ui`: optional (value-less
-                                   // operators carry none), may be null; a list or
-                                   // pair holds strings and numbers
+  value?: ViewFilterRule['value'] | (string | number | boolean)[];
+  // `ViewFilterRule` from `@objectstack/spec/ui`: optional (value-less operators
+  // carry none) and may be null; the builder's own list may also hold booleans
 }
 ```
 
