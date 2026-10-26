@@ -330,13 +330,17 @@ describe('#25647 — a computed recipient address must be a user', () => {
     it.each([
         ['names no channel (inbox, the default)', undefined],
         ['names inbox only', ['inbox']],
-    ])('E5: a node that %s mails nobody, so its computed address goes to messaging as before', async (_label, channels) => {
+    ])('E5: a node that %s mails nobody, so the screen does not run; its computed address must still reach a user (#25758)', async (_label, channels) => {
         const { engine, emitted } = bootUnchecked();
         engine.registerFlow('applicant_notice', notifyFlow({ recipients: [CEL('record.contact_text')], channels }));
         const run = await engine.execute('applicant_notice', onCreate('lead_1', LEAD));
-        expect(run.success).toBe(true);
-        expect(emitted).toHaveLength(1);
-        expect(emitted[0].audience).toEqual(['stranger@outside.example']);
+        // No directory to check it: refused as undeliverable, not by the mail screen.
+        expect(run.success).toBe(false);
+        expect(emitted).toHaveLength(0);
+        const runs = await engine.listRuns('applicant_notice');
+        const message = runs[0]?.steps.find((s) => s.nodeId === 'notify')?.error?.message ?? '';
+        expect(message).toContain('Only the email channel sends to an address');
+        expect(message).not.toContain('A computed recipient must be a user');
     });
 
     it('E6: a node whose channel list includes email screens its computed address', async () => {

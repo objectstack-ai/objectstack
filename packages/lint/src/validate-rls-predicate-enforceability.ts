@@ -435,17 +435,22 @@ function boundsOverrunOf(bridged: string): CelBoundsOverrun | null {
  * ──────────────────────────────────────────────────────────────────────────── */
 
 /**
- * A judged predicate: a row policy's `using` or `check`, or [#25234] a
+ * A judged predicate: a row policy's `using` or `check`, [#25234] a
  * membership key's `filter`, which the security plugin compiles the same way
- * and AND-s into the roster read that resolves the key.
+ * and AND-s into the roster read that resolves the key, or [#25866] a field
+ * permission entry's `when` (`permissions[].fields[<object>.<field>].when`),
+ * the row condition the write gate compiles by the same compiler
+ * (`RLSCompiler.compileRowPredicate`) and judges in process on the row it
+ * writes.
  */
-type Clause = 'using' | 'check' | 'filter';
+type Clause = 'using' | 'check' | 'filter' | 'when';
 
 /** How a finding names the judged predicate. */
 const CLAUSE_LABEL: Readonly<Record<Clause, string>> = {
   using: 'RLS using',
   check: 'RLS check',
   filter: 'membership key filter',
+  when: 'field permission when',
 };
 
 /** What a dropped policy no longer does, per clause. */
@@ -461,15 +466,25 @@ const DROPPED_OUTCOME: Readonly<Record<'using' | 'check', string>> = {
  */
 const FILTER_DROPPED = 'the key never resolves and every policy reading it matches no rows';
 
+/**
+ * [#25866] What a refused field permission `when` costs: the write gate
+ * compiles it per request, and a condition that yields no filter leaves the
+ * entry unjudged, so the entry is applied as its LOCK on every row — it votes
+ * no edit grant anywhere, on a grant and a lock alike.
+ */
+const WHEN_DROPPED = 'the entry cannot be judged and is applied as its lock on every row';
+
 /** The clause that closes every verdict whose policy the runtime drops. */
 function droppedClause(clause: Clause): string {
   if (clause === 'filter') return `so ${FILTER_DROPPED}`;
+  if (clause === 'when') return `so ${WHEN_DROPPED}`;
   return `so the policy is dropped and ${DROPPED_OUTCOME[clause]}`;
 }
 
 /** The same outcome as a sentence, after a verdict that ends one of its own. */
 function droppedSentence(clause: Clause): string {
   if (clause === 'filter') return `So ${FILTER_DROPPED}.`;
+  if (clause === 'when') return `So ${WHEN_DROPPED}.`;
   return `The policy is dropped and ${DROPPED_OUTCOME[clause]}.`;
 }
 
@@ -1212,6 +1227,7 @@ const REFUSED_COMPARISON: Readonly<Record<Clause, string>> = {
   using: 'so the SQL drivers refuse every read it scopes (INVALID_FILTER / 400)',
   check: 'so the write check refuses the writes it judges (INVALID_FILTER / 400)',
   filter: 'so the roster read is refused (INVALID_FILTER / 400) and the key never resolves',
+  when: 'so the entry cannot be judged and is applied as its lock on every row',
 };
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -1513,7 +1529,7 @@ function referenceFindings(
     const account = describeFieldPathVerdict(
       verdict,
       fieldPath,
-      clause === 'filter' ? 'membership key filter field' : `${CLAUSE_LABEL[clause]} predicate field`,
+      clause === 'filter' ? 'membership key filter field' : clause === 'when' ? 'field permission when field' : `${CLAUSE_LABEL[clause]} predicate field`,
     );
     if (!account) continue;
     findings.push({
@@ -1903,6 +1919,32 @@ export function validateRlsPredicateEnforceability(
   // The permission sets' policies (`permissions[].rowLevelSecurity[]`).
   recordsOf(cfg.permissions).forEach((ps, psIndex) => {
     const psName = str(ps.name) || String(psIndex);
+    // [#25866] Each field permission entry's row condition
+    // (`permissions[].fields["<object>.<field>"].when`). The write gate
+    // compiles it by the same compiler an RLS `check` reaches
+    // (`RLSCompiler.compileRowPredicate`, in process over the row it writes),
+    // against the key's object — the head of the key before its first `.` —
+    // so it is judged by the same passes, with that object as its target. A
+    // condition that cannot compile is not dropped there: the entry is
+    // applied as its lock on every row, and this is the rule that says so
+    // at authoring time.
+    const fields = ps.fields;
+    if (fields && typeof fields === 'object' && !Array.isArray(fields)) {
+      for (const [key, entry] of Object.entries(fields as AnyRec)) {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+        const source = str((entry as AnyRec).when);
+        if (!source.trim()) continue;
+        const dot = key.indexOf('.');
+        const object = dot > 0 ? key.slice(0, dot) : '';
+        findings.push(
+          ...judgeClause(graph, source, 'when', {
+            object,
+            where: `permission set "${psName}" field permission "${key}"`,
+            path: `permissions[${psIndex}].fields[${JSON.stringify(key)}]`,
+          }, undefined, membership),
+        );
+      }
+    }
     recordsOf(ps.rowLevelSecurity).forEach((policy, pIndex) => {
       const object = str(policy.object);
       findings.push(
