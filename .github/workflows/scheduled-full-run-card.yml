@@ -87,8 +87,13 @@ on:
     #
     # Every name listed here must have an entry in `CARD_CADENCES`
     # (scripts/ci/scheduled-full-run.mjs), which refuses a name it does not
-    # hold rather than default one, so a card never prints the wrong cadence.
-    workflows: ['CI', 'Lint & Type Check']
+    # hold rather than default one, so a card never prints the wrong cadence;
+    # its self-test holds this list and that map to the same names.
+    #
+    # `UI Coverage` (ui-coverage-nightly.yml, #25924) is the nightly one: the
+    # ui coverage thresholds are enforced there and nowhere else, so a red
+    # night files `nightly full run: red on main (UI Coverage)`.
+    workflows: ['CI', 'Lint & Type Check', 'UI Coverage']
     types: [completed]
 
 permissions: {}

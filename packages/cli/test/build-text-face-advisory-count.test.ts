@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 60 — spawns the real producer once per single-cause fixture: three spawns of the source CLI, `os build` over the multi-package stack in the text and `--json` faces and over the single-package control; each spawn's floor is the source entry loading all 72 commands (about 8.5 s, `os --version` included); slowest CI reading 41.41 s (run 40200279306) in the window of shard-timings refresh run 40275747937 (PR #25960), over 10 s in 5 of 5 runs that executed it, x 1.25, rounded up
 
 /**
  * #18780 — `os build`'s TEXT face counted per-package advisories it never
