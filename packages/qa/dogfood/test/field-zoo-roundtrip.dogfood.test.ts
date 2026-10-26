@@ -18,6 +18,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { SECRET_MASK } from '@objectstack/objectql';
+import { FILE_REFERENCE_TYPES } from '@objectstack/spec/data';
 import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
 
@@ -27,6 +28,8 @@ describe('dogfood: field-type capability matrix round-trips over HTTP (#2004)', 
   let record: Record<string, unknown>;
   /** Resolved reference ids, keyed by field — the assertions compare to these. */
   const referenceIds: Record<string, string> = {};
+  /** Uploaded `sys_file` ids, keyed by media field — the assertions compare to these. */
+  const fileIds: Record<string, string> = {};
 
   beforeAll(async () => {
     stack = await bootShowcase();
@@ -54,13 +57,38 @@ describe('dogfood: field-type capability matrix round-trips over HTTP (#2004)', 
       referenceIds[target.field] = id as string;
     }
 
+    // [#26043] Upload a REAL file for each media field. A write naming an id
+    // that is no file of the organization is now refused at the field, as one
+    // naming a file the writer may not read is, so the matrix's stand-in ids
+    // would be refused. What this file proves for the media family is
+    // unchanged: the stored id round-trips as the same file.
+    for (const c of MATRIX) {
+      if (!FILE_REFERENCE_TYPES.has(c.type) || !('write' in c.check) || c.check.write === undefined) continue;
+      const bytes = `zoo ${c.field}`;
+      const presign = await stack.apiAs(token, 'POST', '/storage/upload/presigned', {
+        filename: `${c.field}.txt`, mimeType: 'text/plain', size: bytes.length,
+      });
+      expect(presign.status, `presign for ${c.field}`).toBe(200);
+      const { data } = (await presign.json()) as { data: { uploadUrl: string; fileId: string; headers?: Record<string, string> } };
+      const put = await stack.raw(String(data.uploadUrl).replace(/^https?:\/\/[^/]+/, ''), {
+        method: 'PUT', headers: data.headers ?? { 'content-type': 'text/plain' }, body: bytes,
+      });
+      expect(put.status, `upload for ${c.field}`).toBeLessThan(300);
+      const complete = await stack.apiAs(token, 'POST', '/storage/upload/complete', { fileId: data.fileId });
+      expect(complete.status, `complete for ${c.field}`).toBe(200);
+      fileIds[c.field] = String(data.fileId);
+    }
+
     // Build the create body from every entry that carries a `write` value
     // (+ required name). `present`/`computed` server-owned fields are skipped.
-    // A reference placeholder resolves to the id seeded above.
+    // A reference placeholder resolves to the id seeded above, and a media
+    // field to the file uploaded above.
     const body: Record<string, unknown> = { name: 'zoo-roundtrip' };
     for (const c of MATRIX) {
       if (!('write' in c.check) || c.check.write === undefined) continue;
-      body[c.field] = c.field in referenceIds ? referenceIds[c.field] : c.check.write;
+      body[c.field] = c.field in referenceIds
+        ? referenceIds[c.field]
+        : c.field in fileIds ? fileIds[c.field] : c.check.write;
     }
 
     const created = await stack.apiAs(token, 'POST', '/data/showcase_field_zoo', body);
@@ -88,6 +116,13 @@ describe('dogfood: field-type capability matrix round-trips over HTTP (#2004)', 
       const actual = record[c.field];
       switch (c.check.kind) {
         case 'equal':
+          // A media field reads back in its expanded form, the file object
+          // the stored id resolves to (ADR-0104 D3 wave 2), so its `id` is
+          // the stored id.
+          if (c.field in fileIds) {
+            expect(actual).toMatchObject({ id: fileIds[c.field] });
+            break;
+          }
           expect(actual).toEqual(
             c.field in referenceIds ? referenceIds[c.field] : c.check.write,
           );
