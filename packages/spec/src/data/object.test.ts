@@ -8,6 +8,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 // (#5286).
 import { ObjectSchema, ObjectCapabilities, IndexSchema, ObjectFieldGroupSchema, ObjectExternalBindingSchema, ObjectAccessConfigSchema, LifecycleSchema, TenancyConfigSchema, isTenancyDisabled, isPublicSharingEnabled, resolveCrudAffordances, type ServiceObject } from './object.zod';
 import { resolveInjectedSystemColumns } from './injected-system-columns';
+import { RETIRED_KEY_UPGRADE_GUIDE_SENTENCE } from '../shared/protocol-upgrade-guide';
 import { projectPublishedJsonSchema } from '../../scripts/lib/refinement-projection';
 import { collectDroppedRefinements } from '../../scripts/lib/dropped-refinements';
 import { Field } from './field.zod';
@@ -76,8 +77,11 @@ describe('ObjectCapabilities', () => {
       const message = result.success ? '' : result.error.issues.map((i) => i.message).join('\n');
       expect(message).toContain(`\`${key}\``);
       expect(message, 'the migration command is the durable reference').not.toMatch(/#\d{3,5}/);
-      // The prescription names the source rewrite (the #3207 conversion).
-      expect(message).toContain('os migrate meta --from 16');
+      // The prescription names the source rewrite the #3207 conversion used to
+      // perform; the step aged out with the 16.x kits (#25767), so the house
+      // sentence says so and links the guide instead of naming `--from 16`.
+      expect(message).toContain('This edit left `os migrate meta` with the protocol-16.x step (support floor 17)');
+      expect(message).not.toContain('os migrate meta --from 16');
     }
     // `trash` additionally points at the parked soft-delete issue — the
     // parking spot the 2026-08-02 #3207 ruling designates (#1893, the old
@@ -127,7 +131,7 @@ describe('ObjectCapabilities', () => {
   it('emission order: which key is wrong → the fix → the history, last', () => {
     const message = capabilityRejection({ trash: false, searchible: true });
     const preamble = 'Unrecognized key(s) on `enable`:';
-    const fix = 'os migrate meta --from 16';
+    const fix = '`enable.trash` was removed';
     const history = 'every flag carries an enforcement contract';
 
     expect(message.startsWith(preamble)).toBe(true);
@@ -452,19 +456,24 @@ describe('IndexSchema', () => {
  * the PRESCRIPTION, not merely the rejection.
  */
 describe('IndexSchema retired keys', () => {
-  it('REJECTS `type`, with the fix and the reason in the message', () => {
+  // #25767: both tombstones were 16.x retirement kits and aged out (ADR-0087
+  // D2 = A). The index shape is strict, so each key is refused as an unknown
+  // key and the refusal's trailing sentence names the protocol upgrade guide,
+  // which carries the two prescriptions from here. Still never a silent strip.
+  it('REFUSES `type` as a strict unknown key, pointing at the upgrade guide', () => {
     expect(() => IndexSchema.parse({ fields: ['tags'], type: 'gin' }))
-      .toThrow(/`indexes\[\]\.type` was removed.*no driver ever read it.*Delete the key/s);
+      .toThrow(/Unrecognized key\(s\) on this index: `type`[\s\S]*https:\/\/objectstack\.ai\/docs\/protocol-upgrade/);
   });
 
-  it('REJECTS `partial`, naming the database-layer replacement', () => {
+  it('REFUSES `partial` the same way', () => {
     expect(() => IndexSchema.parse({ fields: ['name'], partial: "state = 'active'" }))
-      .toThrow(/`indexes\[\]\.partial` was removed.*Delete the key.*CREATE \[UNIQUE\] INDEX/s);
+      .toThrow(/Unrecognized key\(s\) on this index: `partial`[\s\S]*https:\/\/objectstack\.ai\/docs\/protocol-upgrade/);
   });
 
-  it('points at the CLI conversion rather than naming the conversion id', () => {
+  it('no longer names a migrate step — the floor rose past the one that carried these', () => {
     for (const bad of [{ fields: ['a'], type: 'btree' }, { fields: ['a'], partial: 'x' }]) {
-      expect(() => IndexSchema.parse(bad)).toThrow(/os migrate meta --from 16/);
+      expect(() => IndexSchema.parse(bad)).not.toThrow(/os migrate meta --from/);
+      expect(() => IndexSchema.parse(bad)).toThrow();
     }
   });
 
@@ -494,7 +503,7 @@ describe('IndexSchema retired keys', () => {
       label: 'Invoice',
       fields: { name: { type: 'text', label: 'Name' } },
       indexes: [{ fields: ['name'], partial: "state = 'active'" }],
-    })).toThrow(/`indexes\[\]\.partial` was removed/s);
+    })).toThrow(/Unrecognized key\(s\) on this index: `partial`/);
   });
 });
 
@@ -2199,6 +2208,7 @@ describe('tenancy unknown-key message order — bullets before the explainer', (
     expect(messageFor({ tenantfield: 'org_id' })).toBe(
       'Unrecognized key(s) on `tenancy`: `tenantfield`. ' +
       'Did you mean `tenantfield` → `tenantField`? ' +
+      `${RETIRED_KEY_UPGRADE_GUIDE_SENTENCE} ` +
       EXPLAINER,
     );
   });
@@ -2207,7 +2217,7 @@ describe('tenancy unknown-key message order — bullets before the explainer', (
     // No tombstone, no near key: no bullet at all — the front matter and the
     // explainer carry everything the old catch-all bullet said.
     expect(messageFor({ zzNotAKey: 1 })).toBe(
-      `Unrecognized key(s) on \`tenancy\`: \`zzNotAKey\`. ${EXPLAINER}`,
+      `Unrecognized key(s) on \`tenancy\`: \`zzNotAKey\`. ${RETIRED_KEY_UPGRADE_GUIDE_SENTENCE} ${EXPLAINER}`,
     );
   });
 });
@@ -2702,7 +2712,10 @@ describe('managedBy: retiring the overloaded `system` bucket', () => {
     expect(msg).toMatch(/managedBy/s);
     expect(msg).toMatch(/removed in @objectstack\/spec 17/s);
     expect(msg).toMatch(/system-data/s);
-    expect(msg).toMatch(/os migrate meta --from 16/s);
+    // The automated fix rode the protocol-17 step, which aged out with the 16.x
+    // kits (#25767): the house sentence says so and links the guide.
+    expect(msg).toMatch(/support floor 17/s);
+    expect(msg).not.toMatch(/os migrate meta --from 16/s);
   });
 
   it('accepts the replacement value', () => {

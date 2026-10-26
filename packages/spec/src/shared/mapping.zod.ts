@@ -101,7 +101,7 @@ export const FieldMappingSchema = lazySchema(() => z.object({
     + '`none`/`constant`/`map`/`split`/`join`/`lookup` — with its settings in `params`), '
     + 'applied by the REST import path, which rejects `javascript` with a 400 rather than '
     + 'pretending to run it. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
+    + 'This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.',
   ),
 
   /**

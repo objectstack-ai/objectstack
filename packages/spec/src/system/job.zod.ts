@@ -171,7 +171,7 @@ const JOB_ID_RETIRED =
   + 'key, the `sys_job` row key, and the `JobExecution.jobId` stamp. Two jobs differing only '
   + 'in `id` were the same job. Delete the key; rename the job via `name` if you need a '
   + 'different identity. '
-  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+  + 'This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.';
 
 /**
  * `job.timeout` → `job.timeoutMs` (#14478). The unit lived only in the
@@ -277,8 +277,7 @@ const JOB_RETRY_POLICY_NO_ATTEMPTS =
   + 'Until @objectstack/spec 18 the loader wrote `maxRetries: 3` into a block that omitted it (the pre-17 '
   + 'default); it no longer does, and a retry is a decision the job states, because a retry re-runs '
   + 'whatever the failed attempt already did. '
-  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies '
-  + 'the ones it can prove, and you apply the rest by hand.';
+  + 'This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.';
 
 export const JobSchema = lazySchema(() => strictObject({
   surface: 'this job',

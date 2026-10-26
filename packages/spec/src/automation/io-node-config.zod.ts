@@ -108,26 +108,26 @@ const NOTIFY_KEY_GUIDANCE: Readonly<Record<string, string>> = {
     + 'spelling the loader rewrote to `recipients` until this release. Use `recipients`. Rename the key; the value '
     + '(who gets notified) is unchanged. If `recipients` is also present, the two name DIFFERENT recipients — '
     + 'decide who gets notified, put them on `recipients`, and delete `to`. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
+    + 'This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.',
   subject:
     'The `notify` node config key `subject` was removed in @objectstack/spec 18 (ADR-0087 D2) — it was the '
     + 'email-idiom spelling the loader rewrote to `title` until this release. Use `title`. Rename the key; the '
     + 'value (the heading text) is unchanged. If `title` is also present with a DIFFERENT value, reconcile them '
     + 'onto `title`. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
+    + 'This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.',
   body:
     'The `notify` node config key `body` was removed in @objectstack/spec 18 (ADR-0087 D2) — it was the '
     + 'email-idiom spelling the loader rewrote to `message` until this release. Use `message`. Rename the key; '
     + 'the value (the body text) is unchanged. If `message` is also present with a DIFFERENT value, reconcile '
     + 'them onto `message`. (`body` IS canonical on an `http` node — the key is wrong only here.) '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
+    + 'This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.',
   url:
     'The `notify` node config key `url` was removed in @objectstack/spec 18 (ADR-0087 D2) — `url` elsewhere on '
     + 'the platform means "HTTP endpoint to call" (`http` node, webhooks), a different concept from an in-app '
     + 'click target, and the loader rewrote it to `actionUrl` until this release. Use `actionUrl`. Rename the '
     + 'key; the value (the click-through link) is unchanged. If `actionUrl` is also present with a DIFFERENT '
     + 'link, reconcile them onto `actionUrl`. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
+    + 'This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.',
   source:
     'The nested `notify` node config `source: { object, id }` was removed in @objectstack/spec 18 (ADR-0087 D2) — '
     + 'the click-through target is the flat PAIR `sourceObject` + `sourceId`, which the loader lifted the nested '
@@ -136,7 +136,7 @@ const NOTIFY_KEY_GUIDANCE: Readonly<Record<string, string>> = {
     + 'value, reconcile onto the flat pair and delete `source`. '
     + 'Note the pair only takes effect together: a half-specified target is dropped so the inbox never renders a '
     + 'dead link. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
+    + 'This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.',
 };
 
 /**

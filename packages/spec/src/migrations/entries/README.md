@@ -35,8 +35,15 @@ Write **one new file**, named `<protocol major>.<id>.ts` with `/` and `:` replac
 `__`, then run `pnpm --filter @objectstack/spec gen:migration-registry`:
 
 ```
-17 + data/AggregationNode:distinct  →  retired-keys/17.data__AggregationNode__distinct.ts
+18 + data/AggregationNode:distinct  →  retired-keys/18.data__AggregationNode__distinct.ts
 ```
+
+The major in the name is the one the retirement **happens in** (the build's
+`CURRENT_MAJOR`), and it is also the entry's lifetime: a kit lives one protocol major
+after the one it retired in and leaves when the next major is cut (ADR-0087 amendment
+2026-10-26, #25767 — at 18 every `17.*` file left with step 17). A row must never leave
+AHEAD of its tombstone; the deletion gate dates a tombstone whose row is gone by the
+previous major's release tag instead.
 
 ```ts
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.

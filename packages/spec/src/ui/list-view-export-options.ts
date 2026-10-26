@@ -49,7 +49,7 @@ export const LIST_VIEW_EXPORT_PDF_RETIRED =
   + "not produce documents: to let users print a list as shown, set the view's `allowPrinting`; "
   + 'a printable document (an invoice, a delivery order, a letter) is a page that declares '
   + '`print` — its paper, margins and running header and footer — with its blocks in `regions`. '
-  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+  + 'This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.';
 
 /**
  * Export formats the platform actually delivers (#8010): `csv`/`json` on both

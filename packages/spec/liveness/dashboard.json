@@ -166,21 +166,6 @@
           "evidence": "packages/rest/src/meta-item-read-gate.ts#filterDashboardForUser (ADR-0057 D10 — the widget is stripped from the payload when the named kernel service is not registered; fail-open when the kernel cannot be probed); packages/rest/src/rest.test.ts#filterDashboardForUser (the pin: drops widgets whose gate reports the service absent, keeps them when it is present)",
           "note": "server-side capability gate: the widget is stripped from the payload when the named kernel service is not registered (fail-open when the kernel cannot be probed). The authoritative half of the pair — read it as the counter-example to judging a widget key from the renderer repo alone. 2026-08-28: RE-ANCHORED (commit 8f10a79f7) and REPOINTED, both legs — `rest-server.ts:1921-1931` had rotted onto the auth-gate normalization comment in `computeExecCtx`, ~380 lines above the widget gate, and `rest.test.ts:3271-3305` onto a NAV-level case (\"ITEM level: nav entries the caller cannot satisfy are stripped\") ~600 lines above the widget suite — a different gate's tests, still in range and still plausible. Re-closed by hand against 8cb96ec41."
         },
-        "actionUrl": {
-          "status": "dead",
-          "verifiedAt": "2026-08-04",
-          "note": "CALL GRAPH CLOSED BY HAND 2026-08-03, re-measured 2026-08-04 (objectui @91757a7). All 14 `actionUrl` occurrences in DashboardRenderer.tsx are scoped to `schema.header.actions[]` (:242-245 ActionDef build, :282-284 label i18n, :767-792 dispatch) — that is the DashboardHeaderAction schema, a different shape. Nothing anywhere read `widget.actionUrl`. The second-order cost is settled in the same change: packages/lint/src/validate-dashboard-action-refs.ts enforced ERROR-severity reference integrity on this key while its docblock called it 'the per-widget button', so a dangling target failed the build for an affordance that never rendered — that widget branch is deleted, with a pin test asserting it stays silent. Retired 2026-08-04 via #5010 / ADR-0049 D2 (retiredKey tombstone + the protocol-17 `dashboard-widget-action-aria-removed` conversion). The row stays because the tombstone keeps the key in the walked shape — the rls.priority precedent — and no authorWarn is needed: authoring it is now a tsc error and a parse error carrying the prescription."
-        },
-        "actionType": {
-          "status": "dead",
-          "verifiedAt": "2026-08-04",
-          "note": "Same absence as `actionUrl`, same measurement (objectui @91757a7): every `actionType` read in the dashboard renderer belongs to `header.actions[]`. Its only consumer was the action-ref lint, picking which resolution rule to apply to the (unrendered) `actionUrl`; that branch is gone too. Retired 2026-08-04 via #5010 / ADR-0049 D2 (retiredKey tombstone + the protocol-17 `dashboard-widget-action-aria-removed` conversion). The row stays because the tombstone keeps the key in the walked shape — the rls.priority precedent — and no authorWarn is needed: authoring it is now a tsc error and a parse error carrying the prescription."
-        },
-        "actionIcon": {
-          "status": "dead",
-          "verifiedAt": "2026-08-04",
-          "note": "The starkest of the three: zero references in either repo outside this schema declaration and one objectui type comment listing spec-derived keys (packages/types/src/complex.ts:676). Not even the action-ref lint looked at it. Retired 2026-08-04 via #5010 / ADR-0049 D2 (retiredKey tombstone + the protocol-17 `dashboard-widget-action-aria-removed` conversion). The row stays because the tombstone keeps the key in the walked shape — the rls.priority precedent — and no authorWarn is needed: authoring it is now a tsc error and a parse error carrying the prescription."
-        },
         "filter": {
           "status": "live",
           "verifiedAt": "2026-08-03",
@@ -234,16 +219,6 @@
           "verifiedAt": "2026-08-28",
           "evidence": "packages/lint/src/validate-widget-bindings.ts#validateWidgetBindings (the per-widget `suppressed(rule)` closure — `Array.isArray(w.suppressWarnings) && w.suppressWarnings.includes(rule)` — consulted by every WARNING-severity diagnostic in this rule set; errors are deliberately not suppressible)",
           "note": "build-time only, and that IS its contract — the key exists to silence a named build diagnostic, so the lint reading it is the whole feature (contrast `actionUrl`, where a lint reads the key but the promised runtime affordance does not exist). 2026-08-28: RE-ANCHORED (commit 8f10a79f7) and REPOINTED — `:367` had rotted onto a closing brace in the measure-aggregate branch, ~18 lines past the read. Recorded because it is a class this batch met four times: the four rule-id positions the old citation listed (`:346, :417, :610, :640`) were BARE line suffixes with no path in front of them, so `PATH_RE` never matched them and they were prose no check has ever resolved, bounded or key-checked. Re-closed by hand against 8cb96ec41."
-        },
-        "responsive": {
-          "status": "dead",
-          "verifiedAt": "2026-08-24",
-          "note": "The key this drill exists for. Nothing in either repo ever read `widget.responsive` — DashboardRenderer / DashboardEditor / plugin-designer name it only in comments. Its literal namesake `view.list.responsive` was judged dead and removed in the 2026-07-30 #3896 sweep precisely because `view` IS drilled through `children`; this one was never asked, and survived on that silence alone. Retired 2026-08-03 via #4876 / PR #4995 (retiredKey tombstone + the protocol-17 `dashboard-widget-responsive-removed` conversion). CORRECTED 2026-08-24 (#11027): this note used to call `useResponsiveConfig` the 'one real per-breakpoint consumer', fed by `page.components[].responsive` — measured false: that hook (and `ResponsiveProtocol`, the second implementation) had zero callers, so the page key was retired too (protocol-18 `page-component-responsive-removed`) and the tombstone here no longer prescribes it. The row stays because the tombstone keeps the key in the walked shape — the rls.priority precedent — and no authorWarn is needed: authoring it is now a tsc error and a parse error."
-        },
-        "aria": {
-          "status": "dead",
-          "verifiedAt": "2026-08-04",
-          "note": "CALL GRAPH CLOSED BY HAND 2026-08-03, re-measured 2026-08-04 across both repos: no consumer of `widget.aria` anywhere. The `aria-*` attributes in DashboardRenderer / DatasetWidget are the renderer's own DOM attributes, and objectui's one `.aria` read (plugin-view/src/ObjectView.tsx:989) is the VIEW's. Same false-compliance shape as the dashboard-level `aria` removed in the #3896 sweep — an accessibility guarantee an author can declare and nothing honours. The shared AriaProps shape is untouched and stays live on `page.aria` / `page.components[].aria` and the list view `aria` (this ledger's own `page.props.aria` and `view.props.list.children.aria` rows) — corrected 2026-08-08 (#6756): it does NOT stay live on `app.aria`, whose `app.json` row is `dead` and which the protocol-17 `app-dead-authoring-keys-removed` conversion strips. Retired 2026-08-04 via #5010 / ADR-0049 D2 (retiredKey tombstone + the protocol-17 `dashboard-widget-action-aria-removed` conversion). The row stays because the tombstone keeps the key in the walked shape — the rls.priority precedent — and no authorWarn is needed: authoring it is now a tsc error and a parse error carrying the prescription."
         }
       }
     },
@@ -278,16 +253,6 @@
       "evidenceScope": "in-repo",
       "evidence": "packages/rest/src/meta-item-read-gate.ts#holdsRequiredPermissions is the ONE predicate the `/meta` read gate asks of every carrier of the key (an app, its navigation entries, a list view, a dashboard): the caller must hold every capability named, and an absent or empty list is no gate. The `dashboard` arm of packages/rest/src/meta-item-read-gate.ts#createMetaItemReadGate refuses a dashboard whose capabilities the caller does not all hold, 403 PERMISSION_DENIED (the app's whole refusal), on every door and before the ADR-0057 D10 widget gate — so a dashboard's direct URL is refused by the server — and packages/rest/src/meta-item-read-gate.ts#createMetaListReadGate leaves it out of `GET /meta/dashboard`. Pinned per audience (holder served, non-holder not served, no key served to all) on every `/meta/:type/:name` door by packages/rest/src/meta-alternate-door-read-gates.test.ts, and across both transports by packages/runtime/src/domains/meta-item-read-gate-parity.test.ts and packages/runtime/src/domains/meta-list-read-gate-parity.test.ts",
       "note": "planned → live 2026-10-10 (#22639, the rest half of the ruling of record 6095014058, letter A): the `/meta` read gate enforces the key on the list read and the by-name read of `dashboard`. The prior PLANNED note (#22611) is superseded and its flip instruction discharged in this same edit: `authorWarn` / `authorHint` dropped, and the describe's not-enforced clause deleted (packages/spec/src/ui/audience-required-permissions.ts). Boundaries: the refusal is WHOLE and reaches an author as anyone (the app's whole refusal, ruling 5856774816); a caller with no signed-in user is not gated (the app arm's rule — an anonymous caller is refused before any `/meta` read of this type). What the console shows a refused direct URL is objectui's half, filed when this one is accepted. The lint resolves the capability names (packages/lint/src/validate-capability-references.ts), since a misspelled one now hides the dashboard from everyone."
-    },
-    "aria": {
-      "status": "dead",
-      "verifiedAt": "2026-07-30",
-      "note": "REMOVED 2026-07-30 (#3896 close-out sweep) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-17 close-out conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); no dashboard renderer applied it."
-    },
-    "performance": {
-      "status": "dead",
-      "verifiedAt": "2026-07-30",
-      "note": "REMOVED 2026-07-30 (#3896 close-out sweep) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-17 close-out conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); dashboard performance tuning was never implemented."
     }
   }
 }

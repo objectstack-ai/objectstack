@@ -89,8 +89,12 @@ describe('FieldMapping.transform is retired, and says so', () => {
     // It must name the live mechanism, not merely refuse: an author who wrote a
     // transform wants to know where transforms actually run.
     expect(result.error!.issues[0]!.message).toMatch(/mapping\.fieldMapping\[\]\.transform/s);
-    // And the migration command, since an ADR-0087 conversion covers this key.
-    expect(result.error!.issues[0]!.message).toMatch(/os migrate meta --from 16/s);
+    // The ADR-0087 conversion that covered this key rode the protocol-17 step,
+    // which aged out with the 16.x kits (#25767); the tombstone itself stays
+    // because this base is a plain `z.object` (a delete would strip in silence),
+    // and its house sentence now says the step is gone and links the guide.
+    expect(result.error!.issues[0]!.message).toMatch(/support floor 17/s);
+    expect(result.error!.issues[0]!.message).not.toMatch(/os migrate meta --from 16/s);
   });
 
   // `the surviving extender inherits the tombstone` stood here, asserting

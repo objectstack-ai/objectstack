@@ -527,12 +527,11 @@ const retiredComponentProps = (type: string) => {
  * JSON Schema and the authorable surface are byte-identical to the unmarked
  * key; it only records the instance in a module-private registry.
  *
- * {@link retiredComponentSlot} marks a TOMBSTONED spelling of a slot:
- * `page:card.body`, retired by #5775 (maintainer ruling 2026-08-06, direction
- * A — one composition key, `children`). It is not an authorable spelling, and
- * the authoring walks do not descend it; the renderers still read it as a
- * back-compat fallback for STORED documents, which is exactly the population
- * the conversion walker normalizes, so that walker keeps descending it.
+ * The registry's `retired` flag marked a TOMBSTONED spelling of a slot
+ * (`page:card.body`, retired by #5775) for the conversion walker alone. That
+ * tombstone aged out with the protocol-16.x retirements (ADR-0087 amendment
+ * 2026-10-26, #25767), so no row sets it today; the flag stays because the walk
+ * contract exposes it, and the next retired slot spelling sets it again.
  */
 const COMPONENT_SLOT_DECLARATIONS = new WeakMap<object, { readonly retired: boolean }>();
 
@@ -543,12 +542,6 @@ const COMPONENT_SLOT_DECLARATIONS = new WeakMap<object, { readonly retired: bool
  */
 function componentSlot<T extends z.ZodType>(schema: T): T {
   COMPONENT_SLOT_DECLARATIONS.set(schema, { retired: false });
-  return schema;
-}
-
-/** {@link componentSlot} for a tombstoned spelling of a slot — see the block above. */
-function retiredComponentSlot<T extends z.ZodType>(schema: T): T {
-  COMPONENT_SLOT_DECLARATIONS.set(schema, { retired: true });
   return schema;
 }
 
@@ -635,7 +628,7 @@ export const PageHeaderProps = strictObject({
       + 'off-spec second spelling of the header\'s second line, which the loader rewrote to `subtitle` until '
       + 'this release; `subtitle` is the declared key. Use `subtitle`. Rename the key; the value '
       + '(the second line\'s text) is unchanged. '
-      + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
+      + 'This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.',
   },
 }, {
   /**
@@ -655,34 +648,6 @@ export const PageHeaderProps = strictObject({
     'Page title. Omit to let the renderer derive the heading from the record (the default for record pages) — set explicitly on non-record pages (dashboard, landing) with no record to derive from.',
   ),
   subtitle: I18nLabelSchema.optional().describe('Page subtitle'),
-  /**
-   * REMOVED (#6946, maintainer ruling 2026-08-09 「全部接受」 on objectui#3829,
-   * route (c) — retire upstream).
-   *
-   * A header icon nothing has ever drawn. `PageHeaderRenderer` resolves `icon`
-   * only per header ACTION (`action.icon`,
-   * inside the action pipeline) and never off the header's own props bag;
-   * `@object-ui/layout`'s `<PageHeader>` accepts an `icon` REACT prop from a
-   * host but — unlike `actions`, whose `schema?.actions ??
-   * schema?.properties?.actions` fallback sits four lines away in the same
-   * function — gives it no schema fallback, so an authored node cannot reach
-   * it. objectui's registration publishes no `icon` input either, which is
-   * what put this key in that repo's `UNPUBLISHED_EXEMPTIONS` map as a B-class
-   * "spec declares it, NO renderer read point" entry.
-   *
-   * The live mechanism is the record chrome (`recordChrome`, on by default)
-   * for the header's own identity, and each action's own `icon` for the
-   * buttons beside it.
-   */
-  icon: retiredKey(
-    '`page:header` property `icon` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — '
-    + 'no renderer ever read it: objectui resolves `icon` only per header action (`action.icon`), '
-    + 'never off the header\'s own props bag, and the component registry never published it as an '
-    + 'input, so an authored value was accepted and dropped. Delete the key. The header\'s own '
-    + 'identity is drawn by the record chrome (`recordChrome`, on by default) and each action '
-    + 'carries its own `icon`. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
   /**
    * REMOVED (#20758, ADR-0049 enforce-or-remove through the ADR-0087 D2 route,
    * the way `icon` above left this row; the spec half of objectui#11166).
@@ -850,18 +815,6 @@ export const PageTabsProps = strictObject({
    */
   tabStyle: z.enum(['line', 'card', 'pill']).default('line')
     .describe("Tab-strip visual style: 'line' underlines the active tab, 'card' frames each tab, 'pill' renders rounded pills"),
-  /**
-   * REMOVED (#6776). The declared spelling of `tabStyle`, unauthorable in any
-   * flat or JSX carrier because a page component's own dispatch key is also
-   * called `type`. The live mechanism is `tabStyle`.
-   */
-  type: retiredKey(
-    '`page:tabs` property `type` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — '
-    + 'a props key named `type` collides with the page component\'s own dispatch key, so it is '
-    + 'unauthorable in the flat and JSX carriers and was never validated in them. Rename the key '
-    + 'to `tabStyle`; the value (`line` | `card` | `pill`) is unchanged. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
   position: z.enum(['top', 'left']).default('top'),
   /**
    * Keep the tab strip visible when there is only one tab (#4001 batch A).
@@ -1021,32 +974,6 @@ export const PageCardProps = strictObject({
   title: I18nLabelSchema.optional(),
   bordered: z.boolean().default(true),
   /**
-   * REMOVED (#6946, maintainer ruling 2026-08-09 「全部接受」 on objectui#3829,
-   * route (c) — retire upstream).
-   *
-   * A card action list nothing has ever rendered. `PageCardRenderer`
-   * (`containers.tsx`) reads exactly four keys — `title`, `bordered`,
-   * `body ?? children`, `footer` — and returns a `<Card>` built from them;
-   * there is no actions area in the markup and no `actions` input in the
-   * registration, which is what put this key in objectui's
-   * `UNPUBLISHED_EXEMPTIONS` map as a B-class "spec declares it, NO renderer
-   * read point" entry. The card's sibling `page:header` DOES read `actions`
-   * off its bag, so the divergence was invisible to anyone reading the two
-   * declarations side by side.
-   *
-   * The live mechanism is composition: author the buttons as components in
-   * `children` or `footer` (`element:button`, `record:quick_actions`).
-   */
-  actions: retiredKey(
-    '`page:card` property `actions` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — '
-    + 'no renderer ever read it: objectui\'s card renderer builds its `<Card>` from `title`, '
-    + '`bordered`, `children` and `footer` only, has no actions area, and the component registry '
-    + 'never published it as an input, so an authored value was accepted and dropped. Delete the '
-    + 'key and author the buttons as components in the card\'s `children` or `footer` '
-    + '(`element:button`, `record:quick_actions`), which is what actually renders. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-  /**
    * Card content, in order — the canonical composition slot, matching every
    * other container (`grid`, `flex`, `page:section`, `page:tabs` items).
    *
@@ -1058,22 +985,6 @@ export const PageCardProps = strictObject({
    * (Prime Directive #12). `footer` is a genuinely distinct slot and stays.
    */
   children: componentSlot(z.array(z.unknown()).optional().describe('Card content components, in order (the card body slot)')),
-  /**
-   * REMOVED (#5775). `body` was the declared spelling of the slot every other
-   * container calls `children`; the two are the same slot, and the renderer
-   * already reads both. The live mechanism is `children`.
-   *
-   * Marked a RETIRED slot spelling (#20940): the authoring walks do not
-   * descend it, the ADR-0087 conversion walker does — see
-   * {@link retiredComponentSlot}.
-   */
-  body: retiredComponentSlot(retiredKey(
-    '`page:card` property `body` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — '
-    + 'it was a second spelling of the composition slot every other container calls `children`, '
-    + 'and the renderer reads both. Rename the key to `children`; the value (an array of child '
-    + 'components) is unchanged. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  )),
   /**
    * Slot for footer content — a declared, rendered slot distinct from
    * `children` (objectui's `PageCardRenderer` draws it under the body), so
@@ -1319,35 +1230,6 @@ export const RecordDetailsProps = strictObject({
   guidanceSets: COMPONENT_LEVEL_GUIDANCE,
 }, {
   columns: z.enum(['1', '2', '3', '4']).default('2').describe('Number of columns for field layout (1-4)'),
-  /**
-   * REMOVED (#6946, maintainer ruling 2026-08-09 「全部接受」 on objectui#3818 —
-   * the removal direction).
-   *
-   * The declared `auto` | `custom` semantics were never implemented. objectui's
-   * `RecordDetailsRenderer` does read `layout`, but only to test it against
-   * `inline` | `compact` — two values this enum never permitted — so BOTH legal
-   * values fell to the same `vertical` branch and the key selected nothing.
-   * That is why it survived `check:react-declaration-parity`: objectui's
-   * registry declared `layout` with the same `auto` | `custom` enum this schema
-   * did, and the gate compares two DECLARATIONS, never a declaration against a
-   * renderer (AGENTS.md). A third spelling, `stacked` | `inline` | `compact`,
-   * sat in `@object-ui/types`' mirror — three declarations of one key, none of
-   * them the branch the renderer takes.
-   *
-   * The live mechanism is what you author: `sections` renders the explicit
-   * groups (the old `custom`), and omitting it falls back to the object's
-   * `highlightFields` (the old `auto`). objectui#3818 deletes the input and the
-   * dead branch on the next pin bump.
-   */
-  layout: retiredKey(
-    '`record:details` property `layout` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — '
-    + 'its declared `auto` | `custom` semantics were never implemented: the renderer tests `layout` '
-    + 'only against `inline` | `compact`, two values the schema never permitted, so both legal '
-    + 'values took the same branch and the key selected nothing. Delete the key — the body is '
-    + 'already chosen by what you author: `sections` renders the explicit groups (the old '
-    + '`custom`), and omitting it falls back to the object\'s `highlightFields` (the old `auto`). '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
   /**
    * Field groups rendered as the detail body, IN ORDER.
    *
@@ -3377,40 +3259,6 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
   placeholder: I18nLabelSchema.optional().describe('Placeholder text'),
   /** Shown in place of the row list when the query returns nothing. */
   emptyText: I18nLabelSchema.optional().describe('Text shown when the query returns no records (default "No records")'),
-  /**
-   * REMOVED (#5775). A synonym of `labelField` — the same concept in two
-   * spellings, of which only `labelField` was ever read.
-   */
-  displayField: retiredKey(
-    '`element:record_picker` property `displayField` was removed in @objectstack/spec 17.0.0 '
-    + '(ADR-0087 D2) — it was a required declaration no renderer ever read, while the '
-    + 'renderer honoured `labelField` for the same thing and defaulted to `name`. Rename the key '
-    + 'to `labelField`; the value (a field name) is unchanged. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-  /**
-   * REMOVED (#5775). ADR-0049 enforce-or-remove: the control has no search
-   * box, so this narrowed nothing.
-   */
-  searchFields: retiredKey(
-    '`element:record_picker` property `searchFields` was removed in @objectstack/spec 17.0.0 '
-    + '(ADR-0049) — the picker renders a plain single-select with no search input, so no '
-    + 'renderer ever read it and it narrowed nothing. Delete the key. To restrict which records '
-    + 'the picker offers, use the component-level `dataSource.filter`, which the query path '
-    + 'does apply. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-  /**
-   * REMOVED (#5775). ADR-0049 enforce-or-remove: the control is a single-select
-   * `Select`, and a page variable binds one record id.
-   */
-  multiple: retiredKey(
-    '`element:record_picker` property `multiple` was removed in @objectstack/spec 17.0.0 '
-    + '(ADR-0049) — the picker is a single-select `Select` and the bound page variable '
-    + 'holds one record id, so `multiple: true` selected nothing extra and reported success. '
-    + 'Delete the key; multi-record selection is not implemented on this element. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 }));
@@ -8748,7 +8596,7 @@ export interface PageComponentSlotPosition {
  * `page:card.footer`.
  *
  * A key is a slot exactly when its row wraps the key's schema in
- * `componentSlot` / `retiredComponentSlot` (module-private, top of this file);
+ * `componentSlot` (module-private, top of this file);
  * a key of a panel list's element object (`items: z.array(z.object({ children
  * }))`) so marked yields a panel position. The walks match a position by SHAPE
  * on every component, not by the type whose row declared it: `properties` is an

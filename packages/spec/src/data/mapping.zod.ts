@@ -44,14 +44,14 @@ const RETIRED_EXTRACT_QUERY =
   + 'export path that does not exist. Delete the key. Exports run through the ordinary '
   + 'query API (`POST /api/v1/data/:object/query`); if a mapping-driven export is ever '
   + 'designed, this is where it plugs back in. '
-  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+  + 'This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.';
 
 const RETIRED_ERROR_POLICY =
   '`mapping.errorPolicy` was removed in @objectstack/spec 17.0.0 (ADR-0049) — no '
   + 'import code ever read it, so `skip` / `abort` / `retry` selected between three '
   + 'behaviours that were all the same behaviour. Delete the key. Error handling on the '
   + 'import path belongs to the import REQUEST\'s own options, not to the stored mapping. '
-  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+  + 'This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.';
 
 const RETIRED_BATCH_SIZE =
   '`mapping.batchSize` was removed in @objectstack/spec 17.0.0 (ADR-0049) — no '
@@ -61,7 +61,7 @@ const RETIRED_BATCH_SIZE =
   + 'the seed loader\'s and the NoSQL driver cursor\'s are all LIVE and enforced — but each is '
   + 'a DIFFERENT key on a different type sizing its own path, and none of them sizes a '
   + 'mapping import. '
-  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+  + 'This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.';
 
 const MAPPING_RETIRED_KEY_GUIDANCE: Readonly<Record<string, string>> = {
   extractQuery: RETIRED_EXTRACT_QUERY,

@@ -156,7 +156,19 @@ const CORPORA: Corpus[] = [
   },
 ];
 
-const MARKER = /(?:Run )?`os migrate meta --from \d+`/g;
+const MARKER = /(?:Run )?`os migrate meta --from \d+`|This edit left `os migrate meta` with the protocol-\d+\.x step/g;
+
+/**
+ * [#25767] The POST-FLOOR house form. A 17.x retirement's prescription used to
+ * name `os migrate meta --from 16`; the support floor is 17 since the 2026-10-26
+ * ruling (ADR-0087 D2 = A), so that command refuses, and the sentence says what
+ * is still true: the step exists on a release that carries it, the edit is
+ * applied by hand otherwise, and the protocol upgrade guide is where the
+ * prescription lives from here. Same anchoring as the `--from` house form: last
+ * sentence of its literal, nothing after the closing period.
+ */
+const POST_FLOOR_AT_MARKER =
+  /^This edit left `os migrate meta` with the protocol-\d+\.x step \(support floor \d+\): apply it by hand, or run the tool on a release that still carries the step — https:\/\/objectstack\.ai\/docs\/protocol-upgrade\.['"]/;
 
 /**
  * House form, anchored at the marker: the sentence must be the LAST sentence
@@ -247,7 +259,7 @@ function judgeReconstructed({ merged, segments }: Reconstructed, file: string): 
   for (const m of merged.matchAll(MARKER)) {
     const at = m.index ?? 0;
     const rest = merged.slice(at);
-    const ok = HOUSE_AT_MARKER.test(rest) || MIXED_AT_MARKER.test(rest);
+    const ok = HOUSE_AT_MARKER.test(rest) || MIXED_AT_MARKER.test(rest) || POST_FLOOR_AT_MARKER.test(rest);
     judged.push({
       file, line: lineAt(segments, at), excerpt: rest.slice(0, 120).replace(/\n/g, ' '), ok,
     });

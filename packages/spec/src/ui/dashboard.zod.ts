@@ -392,8 +392,8 @@ const COMPARE_TO_OFFSET_RETIRED =
   + "(`'7d'`, `'1M'`, …) there is no faithful one-key rewrite: state the window you want on the "
   + "widget's own `filter` and compare it with `previousPeriod`, which shifts by whatever length "
   + 'that window resolves to. '
-  + 'Run `os migrate meta --from 16` to list the mechanical edits for the `1y` case; `--write` applies the ones it can prove, '
-  + 'and the other durations are reported for you to re-state.';
+  + 'The `1y` case left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool '
+  + 'on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade; the other durations you re-state yourself.';
 
 // The two string arms. They parsed, and on a dataset widget they then did
 // NOTHING — DatasetWidget dropped them deliberately, because forwarding one made
@@ -407,30 +407,7 @@ const COMPARE_TO_STRING_RETIRED = (kind: 'previousPeriod' | 'previousYear') =>
   + 'analytics executor actually reads it (`DatasetSelection.compareTo`). Add `dimension` only '
   + 'when the selection has more than one dated time dimension; with one, the executor resolves '
   + 'it. '
-  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
-
-// ── Per-widget action button prescriptions (#5010) ───────────────────────────
-//
-// `//` rather than `/** */` deliberately, per the `COMPARE_TO_*` block above:
-// build-docs lifts JSDoc onto the reference page, and an upgrade note is not a
-// doc for a shape that still exists.
-//
-// The three keys read as one affordance ("give this widget its own button"), so
-// they share one prescription and name each other — an author who removes only
-// `actionUrl` should learn in the same breath that its two companions are gone
-// too, rather than hitting three parse errors in three edit rounds.
-const WIDGET_ACTION_RETIRED = (key: 'actionUrl' | 'actionType' | 'actionIcon') =>
-  `\`dashboard.widgets[].${key}\` was removed in @objectstack/spec 17.0.0 `
-  + '(ADR-0049 enforce-or-remove) — a dashboard widget has NO action button, and never had one. '
-  + 'No renderer draws per-widget chrome for it: every action the dashboard dispatches comes from '
-  + '`header.actions[]`. The three keys `actionUrl` / `actionType` / `actionIcon` went together; '
-  + 'delete all three. '
-  + 'Put the affordance on the dashboard header instead — '
-  + "`header: { actions: [{ label, actionUrl, actionType, icon }] }` — which IS dispatched "
-  + '(`DashboardHeaderAction`, same vocabulary, and `icon` is the header spelling of '
-  + '`actionIcon`). For a per-ROW affordance, the widget to reach for is a `table`/`pivot` '
-  + 'bound to a dataset: its rows are clickable and drill through the semantic layer. '
-  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+  + 'This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.';
 
 /**
  * The one widget `type` that reads `options.stageOrder`.
@@ -1177,19 +1154,6 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
    */
   requiresService: z.string().optional().describe('Hide the widget unless the named kernel service is registered').meta({ title: 'Requires Service' }),
 
-  // `actionUrl` / `actionType` / `actionIcon` REMOVED (#5010, ADR-0049 D2):
-  // the three keys described a per-widget header action BUTTON that no renderer
-  // has ever drawn. Re-measured 2026-08-04 against objectui@91757a7: all 14
-  // `actionUrl` reads in `DashboardRenderer.tsx` are scoped to
-  // `schema.header.actions[]` (a `DashboardHeaderAction`, a different schema);
-  // `actionIcon` has zero references in either repo outside this declaration.
-  // The one consumer of the pair was `packages/lint`'s reference-integrity rule,
-  // which failed builds when a NEVER-RENDERED button pointed at a missing
-  // action — its widget branch goes with the keys, in this same change.
-  actionUrl: retiredKey(WIDGET_ACTION_RETIRED('actionUrl')),
-  actionType: retiredKey(WIDGET_ACTION_RETIRED('actionType')),
-  actionIcon: retiredKey(WIDGET_ACTION_RETIRED('actionIcon')),
-
   /**
    * Presentation-scope filter (MongoDB-style), ANDed into the dataset query as
    * `runtimeFilter`. [#20116] It is charted through the analytics `where` door
@@ -1424,61 +1388,6 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
    */
   suppressWarnings: z.array(z.string()).optional().describe('Build diagnostic rule ids suppressed on this widget').meta({ title: 'Suppress Warnings' }),
 
-  // `responsive` REMOVED (#4876): authorable and inert, exactly like the
-  // same-named `view.responsive` retired four days earlier (#3896 close-out).
-  // No objectui code read `widget.responsive` — DashboardRenderer /
-  // DashboardEditor / plugin-designer mention it only in comments. It escaped
-  // the #3896 sweep through a liveness-ledger drill gap, not on evidence:
-  // `dashboard.json` declared no `children` on `widgets`, so no widget-level
-  // key had ever been classified (#4956).
-  //
-  // CORRECTED (#11027): this tombstone used to redirect authors to
-  // `page.components[].responsive` as the live home of the shared
-  // `ResponsiveConfig` shape, on the belief that objectui `useResponsiveConfig`
-  // read it. Measured 2026-08 across both repos, that hook (and the second
-  // implementation, `ResponsiveProtocol`) had ZERO callers — the prescribed
-  // destination applied no breakpoint behaviour either. The page key and the
-  // shape are retired too (`page.zod.ts` tombstone, ADR-0049 D2); the live
-  // per-breakpoint channel is `responsiveStyles` (ADR-0065).
-  responsive: retiredKey(
-    '`dashboard.widgets[].responsive` was removed in @objectstack/spec 17.0.0 (ADR-0049 D2) — ' +
-    'no renderer ever read it, so per-widget breakpoint overrides were never applied: the value ' +
-    'parsed, validated, and then did nothing. The dashboard grid reflows by its own layout rules ' +
-    '(`columns` + `gap` on the dashboard, the `layout` box on each widget). Delete the key. ' +
-    'This message used to point at `page.components[].responsive` as the live home of the shared ' +
-    '`ResponsiveConfig` shape; that key was measured equally unread and removed with the shape ' +
-    'with it. For breakpoint behaviour that IS applied, use `responsiveStyles` on a page ' +
-    'component (ADR-0065) — per-breakpoint CSS maps compiled to id-scoped CSS at render. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-
-  // `aria` REMOVED (#5010, ADR-0049 D2): the same "false compliance" the
-  // dashboard-level `aria` was retired for in the #3896 close-out (see the
-  // tombstone on `DashboardSchema` below) — declared ARIA attributes never
-  // reached the DOM, so a dashboard could claim accessibility work that had
-  // measurably not happened. Call graph closed by hand across both repos
-  // 2026-08-04: no consumer of `widget.aria` anywhere. The `aria-*` attributes
-  // in `DashboardRenderer` / `DatasetWidget` are the renderer's OWN DOM props,
-  // and objectui's single `.aria` read (`plugin-view/ObjectView.tsx:989`) is a
-  // `view`'s. The shared `AriaPropsSchema` is untouched — it stays live on
-  // `page.aria` / `page.components[].aria` and on the list view's `aria`,
-  // which really are applied (`action.aria` carries the shape too, but the
-  // ledger grades that one PARTIAL). It is NOT live on `app.aria`: that key
-  // is a `retiredKey()` tombstone removed in the same 17.0.0 by the 2026-06
-  // app liveness audit, and `os migrate meta --from 16` strips it — so the
-  // "lift it up to the app" repair this note used to imply was a dead end
-  // that also lost the block (#6756).
-  aria: retiredKey(
-    '`dashboard.widgets[].aria` was removed in @objectstack/spec 17.0.0 (ADR-0049 D2) — ' +
-    'no renderer ever applied it, so ARIA attributes declared on a widget silently did not reach ' +
-    'the DOM: the key promised accessibility compliance it did not deliver. This is the same ' +
-    'removal the dashboard-level `aria` got in 17.0.0. Delete the key. The dashboard ' +
-    'renderer emits its own `aria-*` attributes for the widget grid; author a `title` (and ' +
-    '`description`) on the widget instead — those ARE what the renderer labels the card with. ' +
-    'The shared `AriaProps` shape is NOT gone: it stays live on `page.aria`, ' +
-    '`page.components[].aria` and the list view `aria`. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
   // ADR-0021 single-form: every widget binds a `dataset` and selects `values`
   // (both required above) — there is no inline-query shape to disambiguate.
   //
@@ -1851,21 +1760,6 @@ export const DashboardSchema = lazySchema(() => strictObject({
    */
   requiredPermissions: z.array(z.string()).optional().describe(AUDIENCE_REQUIRED_PERMISSIONS_DESCRIPTION),
 
-  // `aria` / `performance` REMOVED (#3896 audit close-out): authorable and
-  // inert — no DashboardRenderer path applied either (ledger: dead; the
-  // report twins were removed in the report-liveness close-out).
-  aria: retiredKey(
-    '`dashboard.aria` was removed in @objectstack/spec 17.0.0 (audit close-out) — no ' +
-    'dashboard renderer ever applied it, so declared ARIA attributes silently did not reach ' +
-    'the DOM. Delete the key. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-  performance: retiredKey(
-    '`dashboard.performance` was removed in @objectstack/spec 17.0.0 (audit ' +
-    'close-out) — no renderer or runtime read it; dashboard performance tuning was never ' +
-    'implemented. Delete the key. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
   /**
    * ADR-0010 §3.7 — Package-level protection envelope. Package
    * authors declare lock policy here, in a code package's source;

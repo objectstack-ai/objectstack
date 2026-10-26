@@ -121,12 +121,13 @@ describe('Row-Level Security (RLS) Protocol', () => {
       expect(result.enabled).toBe(true);
     });
 
-    it('priority is RETIRED: absent parses clean, authored rejects with the prescription', () => {
+    it('priority is RETIRED: absent parses clean, authored is refused as an unknown key naming the upgrade guide', () => {
       // Removed by the 2026-07-30 #3896 security audit: no outcome depends on
       // an order (reads OR-combine; a write's check is chosen per operation,
       // then OR-combined), so the promised "conflict resolution" cannot
-      // exist and nothing ever read the key. The tombstone keeps the removal
-      // audible instead of silently stripping an authored value.
+      // exist and nothing ever read the key. Its tombstone was a 16.x kit and
+      // aged out at 18 (#25767); the strict shape keeps the removal audible
+      // instead of silently stripping an authored value.
       const policy = {
         name: 'test_policy',
         object: 'account',
@@ -138,7 +139,10 @@ describe('Row-Level Security (RLS) Protocol', () => {
       const authored = { ...policy, priority: 10 } as never;
       const r = RowLevelSecurityPolicySchema.safeParse(authored);
       expect(r.success).toBe(false);
-      expect(JSON.stringify(!r.success ? r.error.issues : [])).toContain('removed in @objectstack/spec 17.0.0');
+      const issues = JSON.stringify(!r.success ? r.error.issues : []);
+      expect(issues).toContain('unrecognized_keys');
+      expect(issues).toContain('`priority`');
+      expect(issues).toContain('https://objectstack.ai/docs/protocol-upgrade');
     });
 
     it('should handle policies for all operations', () => {
@@ -551,12 +555,10 @@ describe('unknown keys are rejected, not stripped', () => {
     }
   });
 
-  it('keeps the retired `priority` tombstone prescription (not a bare strict error)', () => {
-    const result = RowLevelSecurityPolicySchema.safeParse({ ...policy, priority: 10 });
-    expect(result.success).toBe(false);
-    const messages = result.error!.issues.map((i) => i.message).join('\n');
-    expect(messages).toContain('`rowLevelSecurity[].priority` was removed');
-    expect(messages).toContain('Delete the key');
+  it('refuses the aged-out `priority` as a strict unknown key, with the upgrade guide (#25767)', () => {
+    const issue = unknownKeyIssue({ ...policy, priority: 10 })!;
+    expect(issue.keys).toEqual(['priority']);
+    expect(issue.message).toContain('https://objectstack.ai/docs/protocol-upgrade');
   });
 });
 

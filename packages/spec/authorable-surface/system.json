@@ -984,7 +984,6 @@
     "system/RetryPolicy:jitter",
     "system/RetryPolicy:maxRetries",
     "system/RetryPolicy:maxRetryDelayMs",
-    "system/RetryPolicy:retryDelayMs [RETIRED]",
     "system/RouteHandlerMetadata:handler",
     "system/RouteHandlerMetadata:metadata",
     "system/RouteHandlerMetadata:method",

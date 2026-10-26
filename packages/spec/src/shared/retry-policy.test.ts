@@ -70,52 +70,33 @@ describe('RetryPolicy is a single declaration across entries', () => {
     expect(parsed.jitter).toBe(false);
   });
 
-  it('keeps the `retryDelayMs` tombstone loud from both entries', () => {
+  it('refuses the aged-out `retryDelayMs` from both entries as an unknown key naming the upgrade guide', () => {
+    // Its tombstone was a 16.x retirement kit and left the shape at 18 (#25767,
+    // ADR-0087 D2 = A); the shape is strict, so the spelling is still refused
+    // loudly — as an unknown key, with the guide the rename now lives in.
     for (const entry of [Automation.RetryPolicySchema, System.RetryPolicySchema]) {
       const parse = () => entry.parse({ retryDelayMs: 500 });
-      expect(parse).toThrow(/backoffMs/);
+      expect(parse).toThrow(/Unrecognized key\(s\) on this retry policy: `retryDelayMs`/);
+      expect(parse).toThrow(/https:\/\/objectstack\.ai\/docs\/protocol-upgrade/);
     }
   });
 
-  // The tombstone STRING is not documentation. `shared/retired-key.ts` says so
-  // in its own words — "an agent bumping `@objectstack/spec` sees THIS string,
-  // not our docs site" — which makes its enumeration of carrying surfaces
-  // contract, not prose. It went stale exactly once and in the worst direction:
-  // it kept listing "an ETL pipeline's `retry`" after #6414 deleted the whole L2
-  // layer, so the one message guaranteed to reach an upgrading author named a
-  // fourth place to write `backoffMs` on which `tsc` now reports TS2724/TS2305
-  // (#6630). Nothing could see that: every pre-existing assertion on this string
-  // matched `/backoffMs/` or `/retryDelayMs/`, i.e. the prescription, never the
-  // enumeration. Pin the enumeration in BOTH directions.
-  //
-  // Note on the assertion shape: there is no ADR-0112 `code`/`status` envelope
-  // to assert here. `retiredKey()` is a Zod `never` whose issue carries the
-  // guidance as its `message`, so for this rejection class the wording IS the
-  // whole contract (#5240) and the message is the only thing worth asserting.
-  it('the tombstone enumerates exactly the surfaces that still carry the policy', () => {
+  // The tombstone that used to enumerate the carrying surfaces here (pinned in
+  // both directions after it went stale once, #6630) aged out at 18 with its
+  // kit (#25767). What the one message guaranteed to reach an upgrading author
+  // says now is the strict refusal — the key, this surface's own name, and the
+  // guide the rename lives in — and it must not name a retired layer either.
+  it('the refusal names this surface and the upgrade guide, and nothing retired', () => {
     const result = RetryPolicySchema.safeParse({ retryDelayMs: 500 });
     expect(result.success).toBe(false);
     const message = result.error!.issues.map((issue) => issue.message).join('\n');
-
-    // Every surface that builds from `retryPolicyShape()` today, spelled the way
-    // an author writes it. A prescription naming a scope NARROWER than the truth
-    // is the #4964 defect (a real surface left out reads as "not converged").
-    for (const live of ['`job.retryPolicy`', "`try_catch` node's `retry`", '`flow.errorHandling`']) {
-      expect(message, `the prescription must still name ${live}`).toContain(live);
-    }
-
-    // ...and nothing retired. Wider than the truth is the #6630 defect: the
-    // export absence is pinned in `automation/sync-retirement.test.ts`, so a
-    // surface named here that cannot be imported there is a signpost to a
-    // compile error.
-    expect(
-      message,
-      'the prescription must not point at the retired ETL layer',
-    ).not.toMatch(/\bETL\b/i);
-
-    // None of the above may be bought by weakening the prescription itself.
-    expect(message).toContain('Rename the key to `backoffMs`');
-    expect(message).toContain('os migrate meta --from 16');
+    expect(message).toContain('Unrecognized key(s) on this retry policy: `retryDelayMs`');
+    expect(message).toContain('https://objectstack.ai/docs/protocol-upgrade');
+    // Wider than the truth is the #6630 defect: the export absence is pinned in
+    // `automation/sync-retirement.test.ts`, so a surface named here that cannot
+    // be imported there is a signpost to a compile error.
+    expect(message, 'the refusal must not point at the retired ETL layer').not.toMatch(/\bETL\b/i);
+    expect(message).not.toContain('os migrate meta --from 16');
   });
 });
 
@@ -196,10 +177,10 @@ describe('RetryPolicySchema refuses a key it does not declare', () => {
     expect(System.JobSchema.safeParse({ ...job, retryPolicy: declared }).success).toBe(true);
   });
 
-  it('the retryDelayMs tombstone keeps its own refusal — the rename — rather than becoming an unknown key', () => {
+  it('the aged-out retryDelayMs is an unknown key of the policy now — one refusal, at the policy (#25767)', () => {
     const result = RetryPolicySchema.safeParse({ retryDelayMs: 500 });
     expect(result.success ? [] : result.error.issues.map((issue) => ({ code: issue.code, path: issue.path })))
-      .toEqual([{ code: 'invalid_type', path: ['retryDelayMs'] }]);
+      .toEqual([{ code: 'unrecognized_keys', path: [] }]);
   });
 });
 
@@ -294,7 +275,8 @@ describe('every retry surface carries ONE contract', () => {
       ...minimalFlow, errorHandling: { strategy: 'retry', maxRetries: 2, retryDelayMs: 500 },
     });
     expect(flowRetired.success).toBe(false);
-    expect(JSON.stringify(flowRetired.error!.issues)).toMatch(/backoffMs/);
+    expect(JSON.stringify(flowRetired.error!.issues)).toMatch(/unrecognized_keys[^}]*`retryDelayMs`/);
+    expect(JSON.stringify(flowRetired.error!.issues)).toContain('https://objectstack.ai/docs/protocol-upgrade');
   });
 
   it('accepts a policy authored once and pasted onto any surface', () => {

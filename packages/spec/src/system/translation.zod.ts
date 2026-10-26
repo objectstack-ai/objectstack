@@ -649,8 +649,7 @@ const TRANSLATION_KEY_GUIDANCE: Record<LegacyObjectFirstKey | 'validationMessage
     + 'message on the rule itself (`object.validations[].message`), which the engine '
     + 'evaluates and returns on every rejected write, and translate it under the object-scoped '
     + "group 'objects.<object_name>._validations.<rule_name>.message', which the write "
-    + 'path resolves. Delete this key. Run '
-    + '`os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
+    + 'path resolves. Delete this key. This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.',
   o: "`o` is the retired object-first dialect, which no resolver reads — use 'objects.<object_name>'",
   app: "`app` is the retired object-first dialect, which no resolver reads — use 'apps.<app_name>'",
   nav: "`nav` is the retired object-first dialect, which no resolver reads — use 'apps.<app_name>.navigation.<node_id>.label'",

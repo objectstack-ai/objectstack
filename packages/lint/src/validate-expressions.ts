@@ -2852,8 +2852,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
                 // so this site is a member of `retired-key-migrate-sentence.test.ts`'s
                 // widened scan (#7030) on the same textual shape as the spec corpus — no
                 // interpolation lives in this clause, so nothing is lost switching quote style.
-                'Run `os migrate meta --from 16` to list the mechanical edits for existing '
-                  + 'sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
+                'This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.',
               source: JSON.stringify({ id: node.id, type: node.type, config: cfg }),
             });
           } else if (!fn) {

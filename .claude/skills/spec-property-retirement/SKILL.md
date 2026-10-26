@@ -191,11 +191,15 @@ conversion 是消费者跟的;D3 条目是升级方的 agent 读的。三个都�
       注册中了 `ui/FormView:aria`,protocol 11 的 `flow.node.type` 注册中了任意
       `.type`(#4658)。对每个常见叶名,保证早已失效。
       *条目同时启动老化时钟(#5898):* 门 (c) 读同一张表来决定这个墓碑的
-      `authorable-surface/` 行何时可删(~两个 major),所以你把它写在哪个 major 下,时钟就从那个
-      release 数起。比这张表更老的退役是**未申报的、因此不可删的** ——
-      没有东西能诚实地给它们定日期(叶匹配曾把 `data/Index:type` 的日期从一个不相干
-      的 `flow.node.type` 定到 major 11,而 baseline 文件自己的 git 历史始于
-      17.0.0-rc.0)。要删那类行,先考证它真实的 major、补条目、在 PR 里写明。
+      `authorable-surface/` 行何时可删(一个 major:退役套件活过退役所在 major 的下一个
+      major,再下一个 major 切出时离开 —— ADR-0087 2026-10-26 修订,#25767;此前是 ~两个
+      major),所以你把它写在哪个 major 下,时钟就从那个 release 数起。比这张表更老的退役
+      由第二个来源定日期:上一个 major 的 release tag(`@objectstack/spec@<当前 major - 1>.0.0`)
+      的 authorable surface 上已经带 `[RETIRED]` 的行,退役早于那次切分,套件已活满一个
+      major,可删;tag 不可读(离线)时只按表判,只会更严。两个来源都不认的墓碑**不可删**
+      ——叶匹配曾把 `data/Index:type` 的日期从一个不相干的 `flow.node.type` 定到 major 11,
+      而 baseline 文件自己的 git 历史始于 17.0.0-rc.0。要删那类行,先考证它真实的 major、
+      补条目、在 PR 里写明。
       ⚠ 永不加一行你定不了日期的:这里的估计会被之后每个门当成事实读。
 - [ ] **`surface` 保持散文 —— 它不再被匹配。** 按作者写元数据的方式写
       (`flow.nodes[].outputSchema`),那也是 upgrade guide 打印的。多键 conversion
@@ -208,8 +212,8 @@ conversion 是消费者跟的;D3 条目是升级方的 agent 读的。三个都�
       条目,它**一处也拦不住**:`applyConversionsToStoredItem`(钉死)、automation
       engine 的 flow rehydration、`applyArtifactForwardConversions`。对*改名*它意味着
       「没有 alias 窗口,故意的」;对**默认值翻转**,只有确知输入早于翻转的 seam 才可重
-      放,其余按 id 退订 `excludeConversionIds` —— `app-hidden-to-unpublished` 在 artifact
-      门即如此。
+      放,其余按 id 退订 `excludeConversionIds` —— `flow-decision-mode-inclusive-explicit` 在
+      artifact 门即如此(`app-hidden-to-unpublished` 曾是另一例,随 ≤16.x 套件在 #25767 退役)。
 - [ ] **一步 D3 链**,在 `packages/spec/src/migrations/registry.ts.template`(`registry.ts` 由
       `gen:migration-registry` 从它与 `entries/` 整文件生成并被 git 忽略,在 `registry.ts` 里手改不会
       进提交);`conversion.toMajor` **必须等于**该步的 major。**18 步**:conversion 只进

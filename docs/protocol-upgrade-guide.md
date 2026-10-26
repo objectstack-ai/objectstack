@@ -5,10 +5,9 @@ This file is a pointer. The guide is generated from the ADR-0087 registries and 
 **Address:** the docs site, one page per protocol major.
 
 - Every major: https://objectstack.ai/docs/protocol-upgrade
-- Protocol 16 → 17: https://objectstack.ai/docs/protocol-upgrade/17
 - Protocol 17 → 18: https://objectstack.ai/docs/protocol-upgrade/18
 
-Protocol N's page is `https://objectstack.ai/docs/protocol-upgrade/N`, so a link to one major keeps resolving after the next major opens. The site builds from `main`, so each page says whether its major is released, in prerelease, or not released yet. A hop leaves the site only when the migration chain's support floor rises past it (ADR-0087 D3).
+Protocol N's page is `https://objectstack.ai/docs/protocol-upgrade/N`, so a link to one major keeps resolving after the next major opens. The site builds from `main`, so each page says whether its major is released, in prerelease, or not released yet. A hop leaves the site when the migration chain's support floor rises past it, which happens at every major cut since ADR-0087's 2026-10-26 amendment (#25767): the floor is one major below the current one, so the 16 → 17 hop left with the 16.x retirement kits at 18. The schema's strict unknown-key refusal links every retired key here, and a kit's prescription lives in the release that carried it (its CHANGELOG, and the generated guide shipped in that `@objectstack/spec` release).
 
 **The copy a release shipped:** every `@objectstack/spec` release after 17.7.0 carries `protocol-upgrade-guide.md` in the package (`node_modules/@objectstack/spec/protocol-upgrade-guide.md`) and attached to its `@objectstack/spec@VERSION` GitHub Release.
 

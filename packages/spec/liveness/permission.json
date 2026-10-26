@@ -221,12 +221,6 @@
           "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts#getApplicablePolicies (`(policy as { enabled?: boolean }).enabled === false` excluded BEFORE object / positions / operation matching; absent = active per the schema default) — pinned by the enabled-gate cases in packages/plugins/plugin-security/src/security-plugin.test.ts",
           "note": "ENFORCED 2026-07-30, by the security-subset re-verification this stamp records. Until then the entry claimed live citing rls-compiler.ts, and NOTHING read the property: policies OR-combine (any match allows access), so a policy an admin disabled kept CONTRIBUTING ITS GRANT — the schema's own describe ('Disabled policies are not evaluated') was false in the over-share direction, the #3896 shape. Same enforce-or-remove resolution as `positions` (ADR-0049). 2026-08-28: RE-ANCHORED (commit 9ee2dcfbd) — path-only citation upgraded to an anchor, on the entry whose whole history is that its citation once named a file nothing in it read. Re-closed by hand against c459da6bc."
         },
-        "priority": {
-          "status": "dead",
-          "verifiedAt": "2026-07-30",
-          "evidence": "packages/spec/src/security/rls.zod.ts (retiredKey tombstone — authored values REJECT with the prescription; z.input types the key never)",
-          "note": "REMOVED 2026-07-30, same day the audit corrected it (was live citing rls-compiler.ts, which never reads it — confirmed across the load site, the projection round-trip and the compiler). Not merely unimplemented: under OR-combination the promised 'conflict resolution' semantics cannot exist, so it went straight to the #3715/#3950 remove disposition inside the v17 breaking window. Tombstoned rather than deleted so the removal is audible; drop the tombstone (and this entry) ~two majors out."
-        },
         "tags": {
           "status": "dead",
           "verifiedAt": "2026-09-27",

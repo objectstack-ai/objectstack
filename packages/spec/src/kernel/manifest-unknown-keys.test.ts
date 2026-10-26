@@ -340,7 +340,6 @@ describe('the accept side does not move, and `main` is declared', () => {
 
   it('a retired key still answers with its tombstone prescription — closing the surface did not replace it with a bare refusal', () => {
     for (const [key, value] of [
-      ['loading', { strategy: 'lazy' }],
       ['capabilities', { implements: [] }],
       ['configuration', { title: 'Cfg' }],
       ['extensions', { a: 1 }],
@@ -355,6 +354,17 @@ describe('the accept side does not move, and `main` is declared', () => {
       expect(tombstone!.message).toMatch(new RegExp(`manifest\\.${key}.*removed in @objectstack/spec 17`, 's'));
       expect(unrecognized(result), `${key} is a tombstone, not an unknown key`).toBeUndefined();
     }
+  });
+
+  it('an aged-out retired key (`loading`, a 16.x kit) is refused as an unknown key naming the upgrade guide', () => {
+    // #25767 (ADR-0087 D2 = A): the tombstone left the shape one major after
+    // it retired, so the closed surface is what keeps the removal loud — the
+    // strict refusal names the key and the guide the prescription moved to.
+    const result = ManifestSchema.safeParse({ ...legal(), loading: { strategy: 'lazy' } });
+    expect(result.success).toBe(false);
+    const issue = unrecognized(result)!;
+    expect(issue.keys).toEqual(['loading']);
+    expect(issue.message).toContain('https://objectstack.ai/docs/protocol-upgrade');
   });
 
   it('a near miss of a retired key is refused WITHOUT being pointed at the tombstone', () => {

@@ -768,6 +768,34 @@ const generatedKeys = new Set(generatedSchemas.keys());
 /** The protocol major this build is: the major any retirement it makes belongs to. */
 const CURRENT_MAJOR = Number.parseInt(SPEC_VERSION, 10);
 
+/**
+ * A tombstone may be deleted once it is this many majors old: one, since the
+ * 2026-10-26 ruling on #25767 (D2 = A) — a retirement kit lives through the
+ * protocol major AFTER the one it retired in, and leaves when the next major is
+ * cut. At major 18 that keeps the 17.x and 18.x kits and removes everything
+ * retired at or below 16.x; major 19 repeats the move one major on. Two sources
+ * date a deleted `[RETIRED]` line, read in this order by check (c)'s proof 1
+ * (the deletion gate further down):
+ *
+ *   - the registry: an EXACT `${defKey}:${name}` row in RETIRED_KEYS_BY_MAJOR,
+ *     whose major is the one the retirement happened in (the row's region);
+ *   - the previous major's release tag (`@objectstack/spec@<CURRENT_MAJOR - 1>.0.0`):
+ *     a line that was ALREADY `[RETIRED]` on the authorable surface the day that
+ *     major was cut predates the cut, so its kit has lived its one major. The
+ *     tag is immutable and lives on origin, so neither the registry row a PR can
+ *     write nor the one it can delete moves this clock — which is also why a
+ *     region whose rows have left the registry (every ≤16.x row did on #25767)
+ *     stays datable without a backfill.
+ */
+const TOMBSTONE_AGE_MAJORS = 1;
+
+/**
+ * The release tag whose surface dates a tombstone the registry no longer names.
+ * `TOMBSTONE_AGE_MAJORS` behind the current major, at its `.0.0` cut — the
+ * commit where every retirement of the previous major's kit was already marked.
+ */
+const TOMBSTONE_DATING_TAG = `@objectstack/spec@${CURRENT_MAJOR - TOMBSTONE_AGE_MAJORS}.0.0`;
+
 // ─── Where a registration is WRITTEN ──────────────────────────────────
 // RETIRED_KEYS_BY_MAJOR, RETIRED_DEFS_BY_MAJOR and every step's `semantic`
 // list are GENERATED into src/migrations/registry.ts from one file per entry
@@ -1148,9 +1176,10 @@ if (surfaceDoc) {
       `   the manifest deletion gate, and refuses the deletion unless it holds (#4650 proofs\n` +
       `   2 and 3). ⚠️ It waives THIS file's tombstone requirement only — plugin manifests,\n` +
       `   connector configs and other non-metadata authoring go through their own gates.\n\n` +
-      `   Separately, a tombstone that has aged out (~two majors) may have its line deleted\n` +
+      `   Separately, a tombstone that has aged out (one major, #25767) may have its line deleted\n` +
       `   too — check (c) proof 1, which requires the exact key be declared in\n` +
-      `   RETIRED_KEYS_BY_MAJOR. Do it in the same PR, deliberately.\n\n` +
+      `   RETIRED_KEYS_BY_MAJOR or already [RETIRED] at ${TOMBSTONE_DATING_TAG}. Do it in the\n` +
+      `   same PR, deliberately.\n\n` +
       `   The routes and their preconditions are the spec-property-retirement playbook's\n` +
       `   (.claude/skills/); ADR-0104 and #4650 are the decisions behind them.`,
     );
@@ -1263,8 +1292,8 @@ if (surfaceDoc) {
   // (b3) A nested entry whose path this build does not emit at all. For a
   //      TOP-LEVEL key that state is the aged-out steady state (b2) exempts
   //      above — the tombstone carried `[RETIRED]` in `authorable-surface/`,
-  //      aged two majors, and check (c) let the line go, with evidence at every
-  //      step. A nested key reaches NONE of that: it has no baseline line (0
+  //      aged one major (#25767), and check (c) let the line go, with evidence
+  //      at every step. A nested key reaches NONE of that: it has no baseline line (0
   //      dotted entries on the shipped surface), so checks (a0)/(a)/(b)/(c) are
   //      structurally blind to it and no gated route can produce a registered
   //      nested row whose path is absent. The one origin left is that the row is
@@ -1330,15 +1359,17 @@ if (surfaceDoc) {
 // A deletion is legitimate on exactly one of FOUR proofs, each computed
 // inside this gate — never argued in a PR description:
 //
-//   1. aged-out tombstone — the base entry carried `[RETIRED]` AND its EXACT
-//      `${defKey}:${name}` is declared in RETIRED_KEYS_BY_MAJOR at a major
-//      ≥ TOMBSTONE_AGE_MAJORS behind the current one (the "~two majors" this
-//      file's description has always promised, now enforced). Since #5898 this
+//   1. aged-out tombstone — the base entry carried `[RETIRED]` AND either its
+//      EXACT `${defKey}:${name}` is declared in RETIRED_KEYS_BY_MAJOR at a major
+//      ≥ TOMBSTONE_AGE_MAJORS behind the current one (one major since the
+//      2026-10-26 ruling on #25767; "~two majors" before it), or the line was
+//      already `[RETIRED]` on the authorable surface at the previous major's
+//      release tag (TOMBSTONE_DATING_TAG above), which dates the retirement
+//      before that cut without a registry row. Since #5898 the registry half
 //      reads the same exact-key table check (b) reads, not a leaf-name match
-//      against the conversion registry — see TOMBSTONE_AGE_MAJORS below for the
-//      two false positives that matching produced and why the 97 pre-existing
-//      tombstones are left undeclared (and therefore undeletable) rather than
-//      backfilled from a source that cannot date them;
+//      against the conversion registry — see TOMBSTONE_AGE_MAJORS above and the
+//      note below it for the two false positives that matching produced; the tag half is what dates
+//      the tombstones that table never named (#25767);
 //   2. the def is not reachable from the metadata-type roots (2026-08-02
 //      ruling on #4650): no metadata document is ever parsed by it, so its
 //      entry was over-collection and there is no author to tombstone for.
@@ -1374,8 +1405,62 @@ if (surfaceDoc) {
 // — "reachable enough", "prescribed enough" — waives a deletion silently, and
 // this gate's whole history (#4638, #4643, #4662) is that direction of error.
 
-/** A tombstone may be deleted once its registration is this many majors old. */
-const TOMBSTONE_AGE_MAJORS = 2;
+/**
+ * The authorable keys that were `[RETIRED]` at {@link TOMBSTONE_DATING_TAG},
+ * carried through declared def renames, or null when the tag cannot be read
+ * here (an offline container, or a checkout whose remote does not carry the
+ * tag). Resolved at most once per run and only when a deleted line asks for it,
+ * so a build that deletes nothing never pays the probe — and in a shallow
+ * checkout the fetch is `--depth=1` of the one tag, guarded by the probe,
+ * exactly as `resolveSurfaceBase()` fetches origin/main (#6359): it buys the
+ * ability to NAME the tag and nothing else.
+ *
+ * Null is not a pass. The caller falls back to the registry alone and refuses
+ * what the registry cannot date, so an environment that cannot see the tag can
+ * only be STRICTER than one that can.
+ */
+let tombstoneDatingSurface: { rev: string; retired: Set<string> } | null | undefined;
+function retiredAtTombstoneDatingTag(git: GitRun): { rev: string; retired: Set<string> } | null {
+  if (tombstoneDatingSurface !== undefined) return tombstoneDatingSurface;
+  const ref = `refs/tags/${TOMBSTONE_DATING_TAG}`;
+  let probe = git('rev-parse', '--verify', '--quiet', `${ref}^{commit}`);
+  if (probe.status !== 0) {
+    git('fetch', '--quiet', '--depth=1', 'origin', `+${ref}:${ref}`);
+    probe = git('rev-parse', '--verify', '--quiet', `${ref}^{commit}`);
+  }
+  if (probe.status !== 0) {
+    console.log(
+      `ℹ️  authorable-surface deletion check (#4650): release tag ${TOMBSTONE_DATING_TAG} is not\n` +
+        `   readable in this checkout and could not be fetched, so deleted tombstone lines are dated\n` +
+        `   by RETIRED_KEYS_BY_MAJOR alone here (#25767). That can only refuse more, never less.`,
+    );
+    tombstoneDatingSurface = null;
+    return null;
+  }
+  const rev = probe.stdout.trim();
+  const surface = readSurfaceKeysAtRev(
+    git,
+    rev,
+    AUTHORABLE_SURFACE_DIR_NAME,
+    'keys',
+    `authorable-surface deletion check (#4650) — tombstone dating at ${TOMBSTONE_DATING_TAG} (#25767)`,
+  );
+  if (!surface) {
+    console.log(
+      `ℹ️  authorable-surface deletion check (#4650): no ${SURFACE_FILE_NAME} at ${TOMBSTONE_DATING_TAG}\n` +
+        `   (${rev.slice(0, 12)}), so deleted tombstone lines are dated by RETIRED_KEYS_BY_MAJOR alone here.`,
+    );
+    tombstoneDatingSurface = null;
+    return null;
+  }
+  const retired = new Set<string>();
+  for (const entry of surface.entries) {
+    if (!entry.endsWith(RETIRED_MARK)) continue;
+    retired.add(carryAuthorableKey(entry.replace(RETIRED_MARK, '')));
+  }
+  tombstoneDatingSurface = { rev, retired };
+  return tombstoneDatingSurface;
+}
 
 // The aging clock reads RETIRED_KEYS_BY_MAJOR — `registeredRetiredKeys()` above,
 // the same exact-key map check (b) reads. There is no leaf-name matching left in
@@ -1400,17 +1485,20 @@ const TOMBSTONE_AGE_MAJORS = 2;
 //     conversion `stack.api.requireAuth` (#3963). The clock was started from a
 //     different KIND of change to the same surface.
 //
-// Why the historical mapping is not backfilled, and what happens instead: a
-// tombstone with no entry in RETIRED_KEYS_BY_MAJOR cannot prove its age, so its
-// baseline line stays. That is fail-closed by construction rather than by
-// estimate — see the table's "Historical tombstones" section for why neither
-// available source could date the 97 pre-existing rows honestly (leaf-matching
-// the conversion registry is the very inference #4659 removed; this file's own
-// git history begins at 17.0.0-rc.0, so it dates every one of them at major 17
-// — an artifact of the baseline's birth, not archaeology). Deleting one of those
-// lines is therefore a deliberate, reviewable act: declare its exact key under
-// its true major in the table, and check (b2) verifies the entry still names a
-// key this build tombstones.
+// Why the historical mapping is not backfilled, and what dates it instead: a
+// tombstone with no entry in RETIRED_KEYS_BY_MAJOR is dated by the previous
+// major's release tag — `[RETIRED]` on the surface at `@objectstack/spec@17.0.0`
+// means retired at or before the 17 cut, i.e. a ≤16.x kit, which at major 18 has
+// lived its one major (#25767). Leaf-matching the conversion registry is the
+// very inference #4659 removed, and this file's own git history begins at
+// 17.0.0-rc.0, so it dates every pre-existing tombstone at major 17 — an
+// artifact of the baseline's birth, not archaeology; the tag reads the SAME
+// artifact but asks a different question of it, "was it already marked when
+// the major was cut", which the birth of the file cannot fake. A tombstone the
+// registry does not name AND the tag does not carry stays: fail-closed by
+// construction rather than by estimate. Deleting such a line is a deliberate,
+// reviewable act: declare its exact key under its true major in the table, and
+// check (b2) verifies the entry still names a key this build tombstones.
 
 interface SurfaceReachability {
   /** The metadata-type roots the BFS started from. */
@@ -2850,19 +2938,37 @@ let gitResolvedAnchor: { rev: string; keys: string[] } | null = null;
         }
         const registeredAt = declaredRetired.get(key);
         if (registeredAt === undefined) {
+          // The second dating source (#25767): a line that was already marked
+          // when the previous major was cut belongs to the kit that major
+          // retired, and that kit has lived its one major. Read lazily — only a
+          // deleted tombstone the registry does not name asks for the tag.
+          const dated = retiredAtTombstoneDatingTag(gitInPackage);
+          if (dated !== null && dated.retired.has(key)) {
+            allowed.push(
+              `${key} — [RETIRED] at ${baseRev} and already [RETIRED] at release tag ` +
+                `${TOMBSTONE_DATING_TAG} (${dated.rev.slice(0, 12)}; current major ${CURRENT_MAJOR}): ` +
+                `tombstone aged out (#25767).`,
+            );
+            continue;
+          }
+          const tagVerdict =
+            dated === null
+              ? `and release tag ${TOMBSTONE_DATING_TAG} could not be read here to date it`
+              : `and it was not [RETIRED] at release tag ${TOMBSTONE_DATING_TAG} (${dated.rev.slice(0, 12)})`;
           violations.push(
             `${key} — def ${how}; tombstoned, but no entry in RETIRED_KEYS_BY_MAJOR names this\n` +
-              `       EXACT key, so there is nothing that dates the retirement and its aging clock\n` +
-              `       has no start. Until #5898 a leaf-name match against unrelated ADR-0087\n` +
-              `       clauses supplied one by coincidence (a flow node's '.type' dated an index\n` +
-              `       type's tombstone) — always erring early, since it took the Math.min.`,
+              `       EXACT key, ${tagVerdict}, so there is\n` +
+              `       nothing that dates the retirement and its aging clock has no start. Until\n` +
+              `       #5898 a leaf-name match against unrelated ADR-0087 clauses supplied one by\n` +
+              `       coincidence (a flow node's '.type' dated an index type's tombstone) — always\n` +
+              `       erring early, since it took the Math.min.`,
           );
           continue;
         }
         if (CURRENT_MAJOR - registeredAt < TOMBSTONE_AGE_MAJORS) {
           violations.push(
             `${key} — def ${how}; tombstone registered at major ${registeredAt}, current major is\n` +
-              `       ${CURRENT_MAJOR} — a tombstone must age ≥ ${TOMBSTONE_AGE_MAJORS} majors before its line is deleted.`,
+              `       ${CURRENT_MAJOR} — a tombstone must age ≥ ${TOMBSTONE_AGE_MAJORS} major before its line is deleted (#25767).`,
           );
           continue;
         }
@@ -2893,15 +2999,16 @@ let gitResolvedAnchor: { rev: string; keys: string[] } | null = null;
             `   compared against the baseline at merge base ${baseRev} with origin/main,\n` +
             `   which this commit cannot rewrite.\n\n` +
             `   A line may only leave this file when:\n` +
-            `     1. its key was tombstoned (\`retiredKey()\` → "[RETIRED]") AND that key is\n` +
+            `     1. its key was tombstoned (\`retiredKey()\` → "[RETIRED]") AND either that key is\n` +
             `        declared — EXACTLY, as '\${defKey}:\${name}' — in RETIRED_KEYS_BY_MAJOR\n` +
-            `        under a major ≥ ${TOMBSTONE_AGE_MAJORS} behind this one (≤ v${CURRENT_MAJOR - TOMBSTONE_AGE_MAJORS}). Tombstones that\n` +
-            `        predate that table are deliberately undeclared: nothing could date them\n` +
-            `        honestly, so they are NOT deletable until someone establishes the true\n` +
-            `        major and writes it down (#5898) — as one entry file under\n` +
-            `        ${entryDirOf('retired-key')}, named for that major per\n` +
-            `        ${MIGRATION_ENTRIES_README}, then \`${MIGRATION_REGISTRY_COMMAND}\`;\n` +
-            `        the table is generated, ⛔ never typed. The\n` +
+            `        under a major ≥ ${TOMBSTONE_AGE_MAJORS} behind this one (≤ v${CURRENT_MAJOR - TOMBSTONE_AGE_MAJORS}), or its line was\n` +
+            `        already [RETIRED] on the authorable surface at release tag\n` +
+            `        ${TOMBSTONE_DATING_TAG} — retired before that cut, so its kit has lived the one\n` +
+            `        major it is owed (#25767). A tombstone that neither source dates is NOT\n` +
+            `        deletable until someone establishes the true major and writes it down\n` +
+            `        (#5898) — as one entry file under ${entryDirOf('retired-key')}, named for\n` +
+            `        that major per ${MIGRATION_ENTRIES_README}, then\n` +
+            `        \`${MIGRATION_REGISTRY_COMMAND}\`; the table is generated, ⛔ never typed. The\n` +
             `        D2 conversion (src/conversions/registry.ts) naming the surface stays\n` +
             `        required — it is the prescription consumers follow — but it is no longer\n` +
             `        what dates the clock; or\n` +

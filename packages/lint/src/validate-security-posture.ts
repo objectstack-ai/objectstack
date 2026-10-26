@@ -100,7 +100,7 @@
  * | a pre-D4 stored `sys_metadata` sibling in the gate's universe | no — cancels in the diff|
  * | **`os lint` on a RAW object-literal config** (never parses;   | **yes — fires**         |
  * |   `loadConfig` returns the default export as authored, and   |                         |
- * |   `owd-legacy-read-aliases` is `retiredFromLoadPath`, so      |                         |
+ * |   `owd-legacy-read-aliases` is retired (#25767), so           |                         |
  * |   `normalizeStackInput` leaves the alias intact)              |                         |
  * | **`defineStack(x, { strict: false })`**                        | **yes — fires**         |
  * | **`check:doc-security-posture`** (docs gate: statically        | **yes — fires**; its    |
@@ -164,7 +164,8 @@ const CANONICAL_OWD = ['private', 'public_read', 'public_read_write', 'controlle
  * THREE — "The legacy aliases `read`, `read_write`, `full` are **removed from
  * the zod enum**" — and only these three have a retirement behind them: the
  * `owd-legacy-read-aliases` ADR-0087 stored-row conversion for the two `read*`
- * spellings, and the `13.owd-full-alias-removed` semantic entry for `full`.
+ * spellings (a ≤16.x kit, retired on #25767), and the `13.owd-full-alias-removed`
+ * semantic entry for `full`.
  */
 const OWD_RETIRED_ALIAS_FIX: Record<string, string> = {
   read: 'public_read',

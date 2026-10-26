@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { describe, expect, it } from 'vitest';
 
 import { lazySchema } from './lazy-schema';
+import { RETIRED_KEY_UPGRADE_GUIDE_SENTENCE } from './protocol-upgrade-guide';
 import { strictObject } from './strict-object';
 import { keySetMatches } from './suggestions.zod';
 
@@ -239,12 +240,13 @@ describe('message order — the fix comes before the history', () => {
     expect(m.split(HISTORY)).toHaveLength(2);
   });
 
-  it('is unchanged when there is no fix to offer', () => {
-    // No rename, no prescription — the sentence follows the key statement
-    // directly, exactly as it always did. Full-message pin, so any stray
-    // separator or duplicated clause fails here.
+  it('is unchanged in SHAPE when there is no fix to offer', () => {
+    // No rename, no prescription — the key statement, then the one sentence
+    // every refusal carries since #25767 (the pointer to the upgrade guide,
+    // where an aged-out retirement's prescription lives), then the history.
+    // Full-message pin, so any stray separator or duplicated clause fails here.
     expect(messageFor({ nonsense: 1 }))
-      .toBe(`Unrecognized key(s) on this widget: \`nonsense\`. ${HISTORY}`);
+      .toBe(`Unrecognized key(s) on this widget: \`nonsense\`. ${RETIRED_KEY_UPGRADE_GUIDE_SENTENCE} ${HISTORY}`);
   });
 });
 

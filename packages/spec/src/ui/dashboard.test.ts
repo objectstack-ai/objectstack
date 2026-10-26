@@ -540,7 +540,7 @@ describe('date-range preset vocabulary — one source, in the spec', () => {
 describe('DashboardWidgetSchema — retired `responsive`', () => {
   const widget = { id: 'orders_kpi', type: 'metric', dataset: 'orders', values: ['total'] };
 
-  it('REJECTS an authored `responsive` with the prescription (not "unrecognized key")', () => {
+  it('REFUSES an authored `responsive` as a strict unknown key, pointing at the upgrade guide (#25767)', () => {
     let message = '';
     try {
       DashboardWidgetSchema.parse({
@@ -549,24 +549,13 @@ describe('DashboardWidgetSchema — retired `responsive`', () => {
       });
     } catch (e) { message = String((e as Error).message); }
 
-    // The prescription itself, in the four parts an upgrading author needs:
-    // the fully-qualified key, the version, the issue, and the fix.
-    expect(message).toMatch(/dashboard\.widgets\[\]\.responsive/);
-    expect(message).toMatch(/removed in @objectstack\/spec 17\.0\.0/);
-    expect(message).toMatch(/ADR-0049 D2/);
-    expect(message).toMatch(/Delete the key/);
-    // The redirect correction (#11027): this message used to prescribe
-    // `page.components[].responsive` as the live home of the shared shape;
-    // that key measured equally unread and is retired too, so the message
-    // must (a) say so rather than silently dropping the old promise — an
-    // author who followed it needs the correction — and (b) point at the
-    // channel that IS applied.
-    expect(message).toMatch(/page\.components\[\]\.responsive[\s\S]*/);
-    expect(message).toMatch(/responsiveStyles/);
-    // `.strict()` on this schema would answer a DELETED key with a generic
-    // unrecognized-key error. The tombstone is what makes it a prescription —
-    // if this ever regresses to the strict path, this assertion is the tripwire.
-    expect(message).not.toMatch(/Unrecognized key/);
+    // The tombstone was a 16.x retirement kit and aged out (ADR-0087 D2 = A):
+    // the strict widget shape refuses the key, and the refusal's trailing
+    // sentence names the guide that carries the prescription (the #11027
+    // `responsiveStyles` redirect included) from here. Never a silent strip.
+    expect(message).toMatch(/Unrecognized key\(s\)[^\n]*`responsive`/);
+    expect(message).toMatch(/Keys retired before the previous protocol major are no longer prescribed here/);
+    expect(message).toMatch(/https:\/\/objectstack\.ai\/docs\/protocol-upgrade/);
   });
 
   it('still accepts a widget with no `responsive` (the retirement strips nothing else)', () => {
@@ -622,47 +611,26 @@ describe('DashboardWidgetSchema — retired action trio + `aria`', () => {
     ['actionUrl', 'export_dashboard_pdf'],
     ['actionType', 'script'],
     ['actionIcon', 'download'],
-  ] as const)('REJECTS an authored `%s` with the prescription', (key, value) => {
+  ] as const)('REFUSES an authored `%s` as a strict unknown key, pointing at the upgrade guide (#25767)', (key, value) => {
     const message = parseWith({ [key]: value });
 
-    // The prescription, in the parts an upgrading author needs: the
-    // fully-qualified key, the version, the ADR, and the fix. NOT the tracker
-    // id — it resolves to nothing for the author reading this refusal.
-    expect(message).toMatch(new RegExp(`dashboard\\.widgets\\[\\]\\.${key}`));
-    expect(message).toMatch(/removed in @objectstack\/spec 17\.0\.0/);
-    expect(message).toMatch(/ADR-0049 enforce-or-remove/);
-    expect(message).not.toMatch(/#\d{3,5}\b/);
-    // The three went together — an author who deletes only the one key they
-    // were told about would hit this same error twice more.
-    expect(message).toMatch(/delete all three/i);
-    // It must name the surviving home, or this reads as "dashboards cannot have
-    // buttons" rather than "the button belongs on the header".
-    expect(message).toMatch(/header\.actions\[\]/);
-    // The tombstone is what makes it a prescription; a plain `.strict()`
-    // rejection of a DELETED key would be a generic unrecognized-key error.
-    expect(message).not.toMatch(/Unrecognized key/);
+    // The trio's tombstones were 16.x retirement kits and aged out (ADR-0087
+    // D2 = A). The strict widget shape refuses each key; the "delete all
+    // three, the button lives on `header.actions[]`" prescription is the
+    // guide's now, named by the refusal's trailing sentence. Never a strip.
+    expect(message).toMatch(new RegExp(`Unrecognized key\\(s\\)[^\\n]*\`${key}\``));
+    expect(message).toMatch(/Keys retired before the previous protocol major are no longer prescribed here/);
+    expect(message).toMatch(/https:\/\/objectstack\.ai\/docs\/protocol-upgrade/);
   });
 
-  it('REJECTS an authored `aria` with the prescription, naming its surviving homes', () => {
+  it('REFUSES an authored `aria` the same way (#25767)', () => {
     const message = parseWith({ aria: { ariaLabel: 'Total orders' } });
 
-    expect(message).toMatch(/dashboard\.widgets\[\]\.aria/);
-    expect(message).toMatch(/removed in @objectstack\/spec 17\.0\.0/);
-    expect(message).toMatch(/ADR-0049 D2/);
-    expect(message).toMatch(/Delete the key/);
-    // The shared shape survives elsewhere. Without this, the message reads as
-    // "AriaProps is gone", which would send an author deleting live metadata.
-    //
-    // ⚠️ This assertion used to require `/app\.aria/` — and `App.aria` is a
-    // `retiredKey()` tombstone removed in this same 17.0.0, so the pin was
-    // holding the prescription ON a dead surface (#6756). Re-aimed at the
-    // surfaces that really do still declare `aria: AriaPropsSchema` and are
-    // graded `live` in the liveness ledger. The full both-directions
-    // enumeration pin lives in `aria-carrier-tombstones.test.ts`.
-    expect(message).toMatch(/page\.aria/);
-    expect(message).toMatch(/page\.components\[\]\.aria/);
-    expect(message).not.toMatch(/app\.aria/i);
-    expect(message).not.toMatch(/Unrecognized key/);
+    // The surviving `aria` carriers (`page.aria`, `page.components[].aria`)
+    // are enumerated in `aria-carrier-tombstones.test.ts`; this refusal no
+    // longer names them itself — the guide does.
+    expect(message).toMatch(/Unrecognized key\(s\)[^\n]*`aria`/);
+    expect(message).toMatch(/https:\/\/objectstack\.ai\/docs\/protocol-upgrade/);
   });
 
   it('still accepts a widget carrying none of the four (nothing else was stripped)', () => {

@@ -26,6 +26,7 @@ import {
 } from './spec-changes.js';
 
 const CONVERSION_IDS = new Set(ALL_CONVERSIONS.map((c) => c.id));
+const CONVERSION_TO_MAJOR = new Map(ALL_CONVERSIONS.map((c) => [c.id, c.toMajor] as const));
 
 /**
  * Ruling B (ADR-0087 D3; the contract is `SemanticMigration` in `./types.ts`):
@@ -89,7 +90,12 @@ describe('migration chain (ADR-0087 D3)', () => {
             links++;
             if (!CONVERSION_IDS.has(id)) {
               dangling.push(`protocol ${major}: ${s.id} → ${id} (no registered conversion has this id)`);
-            } else if (!replayed.has(id)) {
+            } else if (!replayed.has(id) && CONVERSION_TO_MAJOR.get(id)! > MIGRATION_SUPPORT_FLOOR) {
+              // A conversion of a major AT or BELOW the floor has no step left
+              // to replay it: its step aged out with the floor (ADR-0087
+              // amendment, #25767) while the conversion row stays registered
+              // for the stored-row door. Such a link pairs with the edit that
+              // door applies, so it is not dangling.
               dangling.push(`protocol ${major}: ${s.id} → ${id} (registered, but no step at or below ${major} replays it)`);
             }
           }
@@ -212,232 +218,6 @@ describe('migration chain (ADR-0087 D3)', () => {
       const chain = composeMigrationChain(MIGRATION_SUPPORT_FLOOR, PROTOCOL_MAJOR);
       expect(chain.length).toBeGreaterThan(0);
       expect(chain[0]!.toMajor).toBe(MIGRATION_SUPPORT_FLOOR + 1);
-    });
-  });
-
-  // The rationale is not decoration: `docs/protocol-upgrade-guide.md` is a pure
-  // projection of it (ADR-0087 D4, `gen:upgrade-guide`), so this string IS the
-  // page an author upgrading 16 → 17 reads. A stale present-tense claim here is
-  // published advice, which is why it gets pinned like a prescription.
-  describe('protocol-17 rationale — the app-area section states the CURRENT fact', () => {
-    const rationale17 = () => MIGRATIONS_BY_MAJOR[17]!.rationale;
-
-    it('does not repeat the retired "the server does not walk `areas`" claim', () => {
-      // #4722 (same 17.0.0 window) made `filterAppForUser` run the same
-      // `filterNav` over every `areas[].navigation`. The sentence that survived
-      // #4651 told an upgrading author to restructure their navigation tree for
-      // a gate they can now write in place. Same pin as the schema-side
-      // prescriptions carry since #5336 (`packages/spec/src/ui/app.test.ts`).
-      expect(rationale17()).not.toMatch(/does not walk/i);
-      // The rationale still QUOTES the retired boundary — naming what changed
-      // is how a reader who remembers the old advice knows to drop it — so the
-      // pin is on the tense, which is the whole defect: the claim may appear as
-      // history ("was enforced by the shell only"), never as current fact.
-      expect(rationale17()).not.toMatch(/is enforced by the shell only/i);
-      expect(rationale17()).toMatch(/was CLOSED by/);
-    });
-
-    it('names the server-side fix in words and the two trees an item gate is now enforced in', () => {
-      const r = rationale17();
-      expect(r).toMatch(/was CLOSED by a server-side fix inside this same 17\.0\.0 window/);
-      expect(r).toMatch(/`filterAppForUser` now runs the SAME `filterNav` over every/);
-      expect(r).toMatch(/BOTH trees/);
-      expect(r).toMatch(/areas\[\]\.navigation/);
-    });
-
-    it('does not read as reviving the area-LEVEL keys', () => {
-      // The retirement verdict is untouched: what #4722 enforces are the ITEMS
-      // inside an area, never a gate of the area's own. A rationale that merely
-      // went quiet about `areas[]` would leave the reader with the old boundary;
-      // one that over-corrects would read as an un-retirement.
-      const r = rationale17();
-      expect(r).toMatch(/stay retired/);
-      expect(r).toMatch(/no gate of its own/);
-    });
-
-    it('keeps `visible` client-side only — the half the server-side item gate did NOT change', () => {
-      // The newly tempting false belief is "areas are gated now, so `visible`
-      // is fine". `visible` (CEL) is still evaluated in the browser at every
-      // level, so it hides an entry that has already been served.
-      const r = rationale17();
-      expect(r).toMatch(/client-side ONLY/);
-      expect(r).toMatch(/`visible` \(CEL\)/);
-      expect(r).toMatch(/never in `visible`/);
-    });
-
-    it('still carries the area-gate removal history the step exists to explain', () => {
-      // The first half is a record of the state AT the retirement and of why
-      // route B (remove) beat route A (enforce). Correcting the caveat must not
-      // erase it — an upgrading author needs to know the keys were fail-open,
-      // not merely unread.
-      const r = rationale17();
-      expect(r).toMatch(/areas\[\]\.visible/);
-      expect(r).toMatch(/FAIL-OPEN access gates/);
-      expect(r).toMatch(/At the time of the retirement/);
-      expect(r).toMatch(/must not invent an authorization mechanism/);
-    });
-  });
-
-  // Same class as the block above, one field over. A `semantic` entry's `reason`
-  // is projected verbatim into `docs/protocol-upgrade-guide.md` and
-  // `spec-changes.json` (ADR-0087 D4), so a falsified premise recorded here is
-  // PUBLISHED advice — not a code comment. This entry (#5015) explained its two
-  // orphans by pointing one level up at #4610, and repeated #4610's stated
-  // evidence: the `./ui` notification wrappers were "deleted for zero consumers".
-  // objectui#3310 disproved that at 17.0.0-rc.1 — `packages/types/src/index.ts`
-  // re-exported both names with `export … from '@objectstack/spec/ui'` and
-  // `NotificationProtocol.ts` consumed them through the `@object-ui/types`
-  // barrel, two hops an import-statement-level scan cannot see (the third miss
-  // of that class, after #4667 / #4709). The RETIREMENT is untouched; only the
-  // sentence that justified it moves.
-  describe('protocol-17 NotificationAction / EmbedConfig entry — stops republishing the falsified zero-consumer claim', () => {
-    const entry = () =>
-      MIGRATIONS_BY_MAJOR[17]!.semantic.find(
-        (s) => s.id === 'ui-notification-action-embed-config-retired',
-      );
-
-    it('finds the entry, and it still explains the dual-source orphaning (anti-vacuity)', () => {
-      expect(entry()).toBeDefined();
-      // The orphaning is stated in words, not by tracker number: the reason is
-      // printed to the author by `os migrate meta`.
-      expect(entry()!.reason).toMatch(/dual-source cleanup removed the `\.\/ui` copies/);
-      expect(entry()!.reason).toMatch(/NotificationConfigSchema/);
-    });
-
-    it('never asserts the wrappers were deleted for having zero consumers', () => {
-      // Pinned on the ASSERTION, not on the words: the entry may still name the
-      // claim in order to correct it — going quiet about it would leave a reader
-      // who remembers the old guide believing the old reason.
-      expect(entry()!.reason).not.toMatch(/(deleted|removed) for (having )?zero consumers/i);
-    });
-
-    it('names the correction and keeps the removal itself standing', () => {
-      const r = entry()!.reason;
-      expect(r).toMatch(/falsified/);
-      expect(r).toMatch(/objectui, which re-exported both names/);
-      // ⛔ A correction to the evidence is not an un-retirement.
-      expect(r).toMatch(/removal itself stands/);
-    });
-  });
-
-  // Third of the same class, one field over again: `acceptanceCriteria` is the
-  // "Done when" line `gen:upgrade-guide` projects verbatim, so a caveat that has
-  // been overtaken by an enforcement is a published instruction to hand-audit a
-  // mistake the engine now refuses on its own. #6746 (#6667) added
-  // `AutomationEngine.refuseUndeclaredSuspension`
-  // (`packages/services/service-automation/src/engine.ts`), called from
-  // `executeNode` on every `result.suspend === true`, which made this entry's
-  // "warned about by NEITHER channel — check those by hand" false in the
-  // direction that costs a reader work. #6749 fixed the TSDoc half; this is the
-  // registry channel it explicitly excluded (#6844).
-  describe('protocol-17 resumeAuthority default-flip entry — supportsPause is enforced now, so stop asking for a hand-audit', () => {
-    const entry = () =>
-      MIGRATIONS_BY_MAJOR[17]!.semantic.find(
-        (s) => s.id === 'action-descriptor-resume-authority-default-flip',
-      );
-
-    it('finds the entry, and it still states the resumeAuthority criterion (anti-vacuity)', () => {
-      // Guards the whole block against passing because the entry vanished: every
-      // negative below is vacuously true on `undefined`, and a `.find()` that
-      // stops matching is exactly how that happens.
-      expect(entry()).toBeDefined();
-      expect(entry()!.acceptanceCriteria).toMatch(/resumeAuthority/);
-      expect(entry()!.acceptanceCriteria).toMatch(/supportsPause/);
-    });
-
-    it('no longer tells the reader to hand-check the supportsPause mismatch', () => {
-      // Pinned on the INSTRUCTION, not on wording: the entry may still name the
-      // old gap in order to say it closed — going quiet would leave a reader who
-      // remembers the published guide still doing the audit by hand.
-      const a = entry()!.acceptanceCriteria;
-      expect(a).not.toMatch(/check (those|them) by\s+hand/i);
-      expect(a).not.toMatch(/is a declaration nothing\s+enforces/i);
-      expect(a).not.toMatch(/warned about by NEITHER channel/i);
-    });
-
-    it('names the enforcing mechanism and that a `fault` edge cannot route it', () => {
-      // Matched by idiom, not by sentence: the reader has to be able to FIND the
-      // guard, which is what distinguishes this from a bare "it is enforced now".
-      const a = entry()!.acceptanceCriteria;
-      expect(a).toMatch(/refuseUndeclaredSuspension/);
-      expect(a).toMatch(/refuses that suspension/);
-      expect(a).toMatch(/guard-class/);
-      expect(a).toMatch(/`fault` edge/);
-    });
-
-    it('does not over-correct into "nothing left to check"', () => {
-      // The gate deliberately does NOT judge a descriptor-less executor
-      // (engine.ts `refuseUndeclaredSuspension`, "What it does NOT judge →
-      // Silence"; pinned by `supports-pause-runtime-enforcement.test.ts`'s
-      // descriptor-less case). Claiming total coverage would be the same defect
-      // as the old over-claim, pointing the other way.
-      const a = entry()!.acceptanceCriteria;
-      expect(a).toMatch(/NO descriptor/);
-      expect(a).toMatch(/resume route/);
-    });
-  });
-
-  // Fourth of the #5781 class, on the `replacement` field: a projected ledger
-  // string that asserted a runtime capability the tree does not deliver. The
-  // entry told an author displaced by the ETL layer's retirement that
-  // connector-attached sync "IS parsed and executed" — parsed is true
-  // (`AutomationEngine.registerConnector` runs `ConnectorSchema.parse`),
-  // executed never was: `syncConfig` has no reader outside `packages/spec`, the
-  // same measurement that retired `syncConfig.schedule` under ADR-0049. Because
-  // `replacement` is projected verbatim into `spec-changes.json` (which ships in
-  // the `@objectstack/spec` tarball) and into `docs/protocol-upgrade-guide.md`,
-  // the claim was published advice, not a code comment. ⚠️ Nothing in this repo
-  // cross-checks a projected ledger string against the tree it describes — the
-  // mechanism is a per-entry pin like this one, added after each defect is
-  // found. That gap is the recurring cause; this pin only closes THIS entry.
-  describe('protocol-17 `etl-pipeline-layer-retired` — states what happens to `syncConfig`, not a sync that never ran', () => {
-    const entry = () =>
-      MIGRATIONS_BY_MAJOR[17]!.semantic.find((s) => s.id === 'etl-pipeline-layer-retired');
-
-    it('finds the entry, and it still routes the author layer by layer (anti-vacuity)', () => {
-      // Guards every negative below against passing on `undefined`, which is
-      // exactly how a `.find()` that stops matching reads as green.
-      expect(entry()).toBeDefined();
-      expect(entry()!.replacement).toMatch(/Layer by layer/);
-      expect(entry()!.replacement).toMatch(/ConnectorSchema\.syncConfig/);
-    });
-
-    it('⛔ never claims connector-attached sync is executed', () => {
-      // Pinned on the CLAIM, not on the words: the entry may still name the
-      // execution question in order to answer it, which is what the corrected
-      // sentence does — going quiet would leave a reader who remembers the
-      // published guide still expecting a sync to run.
-      const r = entry()!.replacement;
-      expect(r).not.toMatch(/IS parsed and executed/);
-      expect(r).not.toMatch(/syncConfig[^.]{0,80}\bis executed\b/i);
-    });
-
-    it('says what `syncConfig` IS and what actually happens to it', () => {
-      // A false promise replaced by a vague one would be the same defect wearing
-      // a fix's clothes: the author has to come away knowing the block is a
-      // declared shape, and knowing where the parse happens.
-      const r = entry()!.replacement;
-      expect(r).toMatch(/PARSED AND VALIDATED but NOT\s+EXECUTED/);
-      expect(r).toMatch(/declared shape/);
-      expect(r).toMatch(/AutomationEngine\.registerConnector/);
-      expect(r).toMatch(/no\s+reader outside `packages\/spec`/);
-    });
-
-    it('names the surface that IS executed, so the author has somewhere to go', () => {
-      // The measurement behind this line: `connector_action`
-      // (`service-automation/src/builtin/connector-nodes.ts`) resolves the
-      // registered handler and awaits it. Without this the correction would
-      // leave the ETL-displaced author with no route at all.
-      const r = entry()!.replacement;
-      expect(r).toMatch(/`actions`/);
-      expect(r).toMatch(/connector_action/);
-    });
-
-    it('the retirement itself still stands — this is a correction to the advice', () => {
-      // ⛔ Correcting a projected sentence is not an un-retirement.
-      const r = entry()!.replacement;
-      expect(r).toMatch(/removed — no protocol surface replaces it/);
-      expect(entry()!.acceptanceCriteria).toMatch(/No source imports `ETLPipeline`/);
     });
   });
 
@@ -576,32 +356,38 @@ describe('migration chain (ADR-0087 D3)', () => {
     // hop's. Written against the constant rather than the literal 16: the next
     // floor move should re-point this replay, not delete it.
     const OLDEST_HOP = MIGRATION_SUPPORT_FLOOR + 1;
+    // Two protocol-17 shapes the oldest hop (17 → 18) rewrites: a job's
+    // `timeout` (renamed to `timeoutMs`) and an object's `externalSharingModel`
+    // (removed). The pair this used to drive (`execute` → `target`,
+    // `conditionalRequired` → `requiredWhen`) rode the 16 → 17 step, which
+    // aged out with the 16.x kits (#25767).
     const oldShape = () => ({
-      actions: [{ name: 'convert', label: 'Convert', type: 'script', execute: 'convertHandler' }],
+      jobs: [{
+        name: 'nightly_health_sweep',
+        schedule: { type: 'cron', expression: '0 1 * * *' },
+        handler: 'sweepProjectHealth',
+        timeout: 300000,
+      }],
       objects: [
-        {
-          name: 'crm_task',
-          label: 'Task',
-          fields: { due_date: { type: 'date', conditionalRequired: 'record.stage == "closed"' } },
-        },
+        { name: 'portal_case', label: 'Case', sharingModel: 'public_read', externalSharingModel: 'private' },
       ],
     });
 
     it('migrates the oldest supported major\'s shapes to canonical', () => {
       const result = applyMetaMigrations(oldShape(), MIGRATION_SUPPORT_FLOOR, OLDEST_HOP);
 
-      const action = (result.stack.actions as any[])[0];
-      expect(action).not.toHaveProperty('execute');
-      expect(action.target).toBe('convertHandler');
-      const field = (result.stack.objects as any[])[0].fields.due_date;
-      expect(field).not.toHaveProperty('conditionalRequired');
-      expect(field.requiredWhen).toBe('record.stage == "closed"');
+      const job = (result.stack.jobs as any[])[0];
+      expect(job).not.toHaveProperty('timeout');
+      expect(job.timeoutMs).toBe(300000);
+      const object = (result.stack.objects as any[])[0];
+      expect(object).not.toHaveProperty('externalSharingModel');
+      expect(object.sharingModel).toBe('public_read');
 
       // Two mechanical rewrites, named — a count alone would survive one of
       // them being replaced by an unrelated conversion firing on this shape.
       expect([...new Set(result.applied.map((a) => a.conversionId))].sort()).toEqual([
-        'action-execute-to-target',
-        'field-conditionalRequired-to-requiredWhen',
+        'job-timeout-to-timeout-ms',
+        'object-external-sharing-model-removed',
       ]);
       // Semantic TODOs are advisory per-major and always surfaced for the hop,
       // whatever the stack contains.
@@ -626,7 +412,7 @@ describe('migration chain (ADR-0087 D3)', () => {
       const result = applyMetaMigrations(oldShape(), MIGRATION_SUPPORT_FLOOR, OLDEST_HOP);
       expect(result.hops).toHaveLength(1);
       expect(result.hops[0]!.toMajor).toBe(OLDEST_HOP);
-      expect((result.hops[0]!.stack.actions as any[])[0].target).toBe('convertHandler');
+      expect((result.hops[0]!.stack.jobs as any[])[0].timeoutMs).toBe(300000);
     });
   });
 

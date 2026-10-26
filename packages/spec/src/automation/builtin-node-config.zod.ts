@@ -159,7 +159,7 @@ const CRUD_ALIAS_GUIDANCE = {
     + 'release. Use `objectName`. Rename the key; the value (the object name) is unchanged. If `objectName` is '
     + 'also present, this node names two different objects — decide which object it acts on, put it on '
     + '`objectName`, and delete `object`. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
+    + 'This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.',
   filters:
     'The CRUD node config key `filters` was removed in @objectstack/spec 18 (ADR-0087 D2) — it was a '
     + 'consumer-side executor fallback, which the loader rewrote to `filter` (singular) until this release. Use '
@@ -1347,7 +1347,7 @@ export const MapConfigSchema = lazySchema(() => strictObject({
       + 'Use `flowName`. Rename the key; the value (the per-item subflow\'s name) is unchanged. If `flowName` is '
       + 'also present, the two name DIFFERENT subflows — decide which flow runs per item, put it on `flowName`, and '
       + 'delete `flow`. '
-      + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
+      + 'This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.',
   },
 }, {
   /**

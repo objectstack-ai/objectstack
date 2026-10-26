@@ -35,11 +35,6 @@ import type { MigrationTodo, SemanticRelevance } from './types.js';
  * its question names.
  */
 const EXPECTED_RELEVANCE: Readonly<Record<string, readonly string[]>> = {
-  '17:dashboard-widget-compareto-offset': ['dashboards'],
-  '17:declarative-apis-endpoints-live': ['apis'],
-  '17:job-retry-policy-constraints-tightened': ['jobs'],
-  '17:sharing-rule-recipient-reconcile': ['sharingRules'],
-  '17:tool-requires-confirmation-retired': ['tools'],
   '18:agent-memory-store-retired-and-limits-required': ['agents'],
   '18:agent-structured-output-refused-members-retired': ['agents'],
   '18:analytics-cube-public-default-visible-enforced': ['analyticsCubes'],
@@ -83,10 +78,10 @@ describe('which entries carry a relevance question (ENUMERATION)', () => {
     expect(actual).toEqual(EXPECTED_RELEVANCE);
   });
 
-  it('is 26 entries: 5 of protocol 17 and 21 of protocol 18', () => {
+  it('is 21 entries, all of protocol 18 (the 5 protocol-17 rows left with step 17 on #25767)', () => {
     const keys = Object.keys(EXPECTED_RELEVANCE);
-    expect(keys).toHaveLength(26);
-    expect(keys.filter((k) => k.startsWith('17:'))).toHaveLength(5);
+    expect(keys).toHaveLength(21);
+    expect(keys.filter((k) => k.startsWith('17:'))).toHaveLength(0);
     expect(keys.filter((k) => k.startsWith('18:'))).toHaveLength(21);
   });
 
