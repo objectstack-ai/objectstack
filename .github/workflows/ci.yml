@@ -2714,9 +2714,10 @@ jobs:
       #
       # Scope: `turbo run build` steps only, i.e. `build` tasks. Since #22077
       # that is this step plus the build steps of the Test Core shards, the
-      # dogfood shards, Temporal Conformance and lint.yml's three Type Check
-      # build lanes, each carrying the four lines below verbatim; the PINS
-      # paragraph at the end says what keeps that set honest. `test` /
+      # dogfood shards, Temporal Conformance, Build UI Deps and lint.yml's
+      # three Type Check build lanes, each carrying the four lines below
+      # verbatim; the PINS paragraph at the end says what keeps that set
+      # honest. `test` /
       # `test:repo` stay off the remote: their cross-package inputs are
       # hand-declared, and a wrong hash replayed from a remote reaches every
       # run and cloud too. Build Docs forces execution and carries no
@@ -2756,8 +2757,8 @@ jobs:
       # `remote:rw` branch above) when the cache is off; a read-only run only
       # warns. Neither flag enters a task hash (83 of 83 identical with and
       # without, `--dry=json`, turbo 2.11.5). The carriers that assert are this
-      # step, Test Core's closure and lint.yml's three Type Check lanes; the
-      # verdict table is the script header's.
+      # step, Test Core's closure, Build UI Deps and lint.yml's three Type
+      # Check lanes; the verdict table is the script header's.
       #
       # PINS, for every step that carries these four lines (#22077). Each
       # carrier points back here.
