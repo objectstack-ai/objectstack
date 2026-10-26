@@ -24,14 +24,26 @@ import { ruleRegrantQueue } from './rule-hooks.js';
 
 type Row = Record<string, any>;
 
-/** Equality, `$in` and `$or` — every predicate shape the queue reads send. */
+/**
+ * Equality, `$in`, `$or` and `$and` — every predicate shape the queue reads
+ * send. Any other combinator or operator is refused rather than misread.
+ */
 function matches(row: Row, filter: any): boolean {
   if (!filter || typeof filter !== 'object') return true;
-  if (Array.isArray(filter.$or) && !filter.$or.some((f: any) => matches(row, f))) return false;
   for (const [k, v] of Object.entries(filter)) {
-    if (k === '$or') continue;
+    if (k === '$or') {
+      if (!(v as any[]).some((f) => matches(row, f))) return false;
+      continue;
+    }
+    if (k === '$and') {
+      if (!(v as any[]).every((f) => matches(row, f))) return false;
+      continue;
+    }
+    if (k.startsWith('$')) throw new Error(`test double: filter combinator '${k}' is not implemented`);
     const rv = row[k] ?? null;
-    if (v != null && typeof v === 'object' && '$in' in (v as any)) {
+    if (v != null && typeof v === 'object') {
+      const ops = Object.keys(v as object);
+      if (ops.length !== 1 || ops[0] !== '$in') throw new Error(`test double: operator ${ops.join(',')} on '${k}' is not implemented`);
       if (!(v as any).$in.includes(rv)) return false;
       continue;
     }
