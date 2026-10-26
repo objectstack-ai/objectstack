@@ -62,40 +62,44 @@ describe('Sharing Service Contract — recipient vocabularies, each under its ow
   });
 
   it('security ShareRecipientType is the RULE vocabulary and shares no declaration', () => {
-    // The authorable rule-recipient enum: SharingRuleRecipientType minus the
-    // reserved `queue`. Distinct concept, distinct values — `group` / `guest`
-    // were deliberately removed from it (ADR-0078) while the record-share ROW
-    // vocabulary keeps persisting `group` for forward compatibility (its
-    // `guest` went too, ADR-0138 D8).
+    // The authorable rule-recipient enum. Distinct concept, distinct values —
+    // `group` / `guest` were deliberately removed from it (ADR-0078) while the
+    // record-share ROW vocabulary keeps persisting `group` for forward
+    // compatibility (its `guest` went too, ADR-0138 D8).
     expect(ShareRecipientType.options).toEqual([
       'user',
       'team',
       'position',
       'unit_and_subordinates',
       'business_unit',
+      // [ADR-0142 D7] re-admitted with its implementation: the members of an
+      // ownership queue, expanded through the ownership-queue service.
+      'queue',
       // [#14103] the record-relative recipient — a user-typed field on the
       // matched record; per-record expansion is the services half (#15072).
       'field',
     ]);
     const ruleRecipient: SharingRuleRecipientType = 'queue';
-    // @ts-expect-error `queue` is reserved to the runtime rule contract — not authorable
-    const notAuthorable: (typeof ShareRecipientType.options)[number] = 'queue';
-    expect(ruleRecipient).toBe(notAuthorable);
+    const authorable: (typeof ShareRecipientType.options)[number] = 'queue';
+    expect(ruleRecipient).toBe(authorable);
   });
 
-  it('the stored-row union is exactly the authoring enum plus the reserved `queue`', () => {
+  it('the stored-row union is exactly the authoring enum (ADR-0142 D7)', () => {
     // `plugin-sharing`'s declared-rule bootstrap copies `sharedWith.type` onto
     // `sys_sharing_rule.recipient_type` member-for-member (an unmapped value is
     // skipped with a warning), so a member added to one list and not the other
     // is a rule that parses and is never seeded — the ADR-0078 shape. Pinned at
     // the TYPE level so the drift is a compile error, not a runtime surprise.
+    // Until `queue` was re-admitted the union was this enum plus that one
+    // reserved member; the two are now the same seven.
     type Authorable = (typeof ShareRecipientType.options)[number];
-    const inStep: Assert<Eq<Exclude<SharingRuleRecipientType, 'queue'>, Authorable>> = true;
+    const inStep: Assert<Eq<SharingRuleRecipientType, Authorable>> = true;
     expect(inStep).toBe(true);
     // And at the VALUE level: every authorable member is assignable to the
     // stored-row union (a runtime list, so a reader sees the members).
-    const stored: SharingRuleRecipientType[] = [...ShareRecipientType.options, 'queue'];
-    expect(stored).toHaveLength(ShareRecipientType.options.length + 1);
+    const stored: SharingRuleRecipientType[] = [...ShareRecipientType.options];
+    expect(stored).toHaveLength(7);
+    expect(stored).toContain('queue');
     expect(stored).toContain('field');
   });
 });

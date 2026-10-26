@@ -766,6 +766,13 @@ export const ERROR_CODE_LEDGER = {
     'OS_PROTOCOL_INCOMPATIBLE',
   ],
   '@objectstack/objectql': [
+    // [ADR-0142 D4] A by-id write carrying the engine-internal precondition
+    // (`expect`) matched no row: another writer moved the row first. 409 —
+    // the claim race's loser ("the record was taken") and the assignment
+    // cursor's lost advance, raised in `engine.ts`'s by-id update branch.
+    // Second EMITTER of the code `@objectstack/types` registers for the data
+    // door's optimistic-lock refusal; one condition, one vocabulary.
+    'CONCURRENT_UPDATE',
     // [#8846] single-row insert: the autonumber counter was re-seeded and the
     // value re-issued, and the driver still refused the write (`engine.ts`;
     // carries the driver's failure as `cause`). One of four unswept members of
@@ -1351,6 +1358,12 @@ export const ERROR_CODE_LEDGER = {
     // member: it is an extension code registered here, under that package and
     // now this one.
     'NOT_OVERRIDABLE',
+    // [ADR-0142 D3/D4] 422: a caller-supplied `queue` (an insert naming one, or
+    // a move) names no queue that resolves in the row's organization — neither
+    // a declared queue switched on there nor one of its `sys_queue` rows.
+    // Raised by the ownership gate (step 3.5) before the write; a rule's
+    // unresolved target is never a refusal (D5).
+    'QUEUE_NOT_FOUND',
     'SUGGESTION_NOT_FOUND',
     'SUGGESTION_STATE',           // suggestion exists but is not in a confirmable/dismissable state
   ],
