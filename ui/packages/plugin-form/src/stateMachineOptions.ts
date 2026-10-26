@@ -71,7 +71,9 @@ export function narrowStateMachineOptions<T extends Record<string, any>>(
 ): T[] {
   if (mode !== 'edit' || !previousValues || typeof previousValues !== 'object') return fields;
   return fields.map((f) => {
-    if (!f?.name || f.multiple || f.field?.multiple) return f;
+    if (!f?.name) return f;
+    // A multi-value select holds a set, not one state, so no machine applies.
+    if (f.multiple || f.field?.multiple) return f;
     const reachable = stateMachineNextValues(objectSchema, f.name, previousValues[f.name]);
     if (!reachable) return f;
     const ownOptions = Array.isArray(f.options);
