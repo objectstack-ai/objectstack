@@ -55,8 +55,14 @@ import Database from 'better-sqlite3';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI_ROOT = resolve(HERE, '..', '..', '..');
+/**
+ * The source entry, spawned by this process's own `node`, as the family's other spawners
+ * (`data-commands.absent-database`, `object-scope`, `unmapped-columns`) spawn it. Not through
+ * the `tsx` binary: the entry, its `src/` and its pinned `NODE_ENV=development` are the same
+ * either way, and the wrapper only adds a second process and its own transform, ~3.4 s of
+ * every spawn (#23181 slice 12: `tsx bin/run-dev.js --version` 8.28-8.44 s, `node` 4.93-4.99 s).
+ */
 const RUN_DEV = resolve(CLI_ROOT, 'bin', 'run-dev.js');
-const TSX = resolve(CLI_ROOT, '..', '..', 'node_modules', '.bin', 'tsx');
 const CASE_TIMEOUT_MS = 600_000;
 const SPAWN_TIMEOUT_MS = 240_000;
 
@@ -134,7 +140,7 @@ async function freePort(): Promise<number> {
  */
 function devBootOnce(): string {
   const r = spawnSync(
-    TSX,
+    process.execPath,
     [RUN_DEV, 'dev', '--port', String(port), '--compile', '--no-watch', '--no-restart', '--no-seed-admin'],
     { cwd: dir, env: env({ OS_MIGRATE_AND_EXIT: '1' }), encoding: 'utf8', timeout: SPAWN_TIMEOUT_MS },
   );
@@ -145,7 +151,7 @@ function devBootOnce(): string {
 
 /** One read-only `os migrate` door's `--json` document. */
 function migrateJson(args: string[]): any {
-  const r = spawnSync(TSX, [RUN_DEV, 'migrate', ...args, '--json'], {
+  const r = spawnSync(process.execPath, [RUN_DEV, 'migrate', ...args, '--json'], {
     cwd: dir, env: env(), encoding: 'utf8', timeout: SPAWN_TIMEOUT_MS,
   });
   expect(r.status, `os migrate ${args.join(' ')} failed:\n${`${r.stdout}\n${r.stderr}`.slice(-1500)}`).toBe(0);

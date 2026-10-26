@@ -1,0 +1,34 @@
+name: Bug report
+description: Something in ObjectOS does not work the way it should.
+body:
+  - type: dropdown
+    id: edition
+    attributes:
+      label: Edition
+      description: Which ObjectOS edition did you see this in?
+      options:
+        - ObjectOS Community (self-hosted, this repository's code)
+        - ObjectOS Cloud (cloud.objectos.ai)
+        - ObjectOS Enterprise (licensed, self-managed)
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The output of `os --version`, or the build shown under About in the Console's help menu.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened / What you expected
+      description: What you saw, and what you expected to see instead. Paste error messages as text.
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps
+      description: The steps that make it happen, starting from a fresh start if you can.
+      placeholder: |
+        1.
+        2.
+        3.
