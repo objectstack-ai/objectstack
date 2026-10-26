@@ -53,6 +53,14 @@ export interface ObjectPerm {
 export interface FieldPerm {
   readable?: boolean;
   editable?: boolean;
+  /**
+   * objectstack#25866 — a row condition on the EDIT vote, in the CEL of
+   * `rowLevelSecurity[].using`. The entry votes as declared on a row the
+   * condition matches and is absent on every other row. The spec refuses it
+   * beside `readable: false`, so the matrix clears it when Read is switched
+   * off and never authors that shape.
+   */
+  when?: string;
 }
 
 export interface PermissionSetDraft {
