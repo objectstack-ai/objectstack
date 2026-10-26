@@ -4,6 +4,7 @@ import { PAGE_COMPONENT_COPY_KEYS, FLOW_SCREEN_COPY_KEYS, FLOW_SCREEN_FIELD_COPY
 import { TEXT_SLOT_TEMPLATE_REFUSAL } from '../automation/flow-text-slot-template';
 import { FlowSchema } from '../automation/flow.zod';
 import { ScreenConfigSchema, ScreenFieldConfigSchema } from '../automation/builtin-node-config.zod';
+import { ALL_CONVERSIONS } from '../conversions/registry';
 import {
   TranslationDataSchema,
   TranslationBundleSchema,
@@ -83,6 +84,29 @@ describe('LocaleSchema', () => {
     const config = TranslationConfigSchema.safeParse({ defaultLocale: 'en', supportedLocales: ['en', 'zh_CN'] });
     expect(config.success).toBe(false);
     expect(config.error!.issues.map((i) => i.path.join('.'))).toEqual(['supportedLocales.1']);
+  });
+
+  it('data at rest: the conversion reports what it cannot rewrite instead of guessing', () => {
+    const conversion = ALL_CONVERSIONS.find((c) => c.id === 'translation-locale-tag-canonicalized')!;
+    const todos: { path: string; from: string }[] = [];
+    const notices: { path: string }[] = [];
+    const stack = {
+      translations: [
+        { name: 'qa_bad_locale', locale: 'not a locale!!', messages: { x: 'y' } },
+        // `zh_CN` means `zh-CN`, which the entry already holds with other strings.
+        { zh_CN: { messages: { x: 'a' } }, 'zh-CN': { messages: { x: 'b' } } },
+        // An identical twin is merged: nothing is lost.
+        { ja_JP: { messages: { x: 'c' } }, 'ja-JP': { messages: { x: 'c' } } },
+      ],
+    };
+    const out = conversion.apply(stack, (n) => notices.push(n), { reportTodo: (t) => todos.push(t) });
+    expect(todos.map((t) => t.path)).toEqual(['translations[0].locale', 'translations[1].zh_CN']);
+    expect(notices.map((n) => n.path)).toEqual(['translations[2].ja_JP']);
+    expect(out.translations).toEqual([
+      stack.translations[0],
+      stack.translations[1],
+      { 'ja-JP': { messages: { x: 'c' } } },
+    ]);
   });
 });
 
