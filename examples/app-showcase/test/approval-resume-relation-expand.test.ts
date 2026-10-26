@@ -58,7 +58,8 @@ import {
   TaskDoneNotifyOwnerFlow,
   NotifyOwnerSubflow,
 } from '../src/automation/flows/index.js';
-import { installDefaultOrganization } from './default-organization.testkit.js';
+import { ShowcaseSeedData } from '../src/data/seed/index.js';
+import { DEFAULT_ORGANIZATION_ID, installDefaultOrganization } from './default-organization.testkit.js';
 
 /** Everything the approvals service treats as an unconditional actor. */
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as any;
@@ -84,6 +85,62 @@ afterEach(async () => {
     try { await openDrivers.pop()?.disconnect?.(); } catch { /* noop */ }
   }
 });
+
+/** The dev admin: the Default Organization's `owner`, who clears the seeded invoice. */
+const ADMIN = { id: 'usr_admin', email: 'admin@objectos.ai', name: 'Admin' };
+/** A provisioned demo persona, owning the project the sweep test hops through. */
+const MEI = { id: 'usr_showcase_phone_demo', email: 'phone.demo@example.com', name: 'Mei Phone (demo)' };
+
+/**
+ * [#25758] The directory a dev boot has: the admin, an `owner` member of the
+ * Default Organization, and a provisioned persona. An inbox-only `notify`
+ * delivers an address only to the user who holds it, and `role:owner` expands
+ * through `sys_member`. The seeded invoice owners (grace@example.com here) are
+ * deliberately not users, as on a dev boot. Seeded through the driver, like
+ * the Default Organization: data at rest, not a write under test.
+ */
+async function installDirectory(engine: any): Promise<void> {
+  if (!engine.getSchema('sys_user')) {
+    engine.registry.registerObject(
+      {
+        name: 'sys_user',
+        label: 'User',
+        managedBy: 'better-auth',
+        fields: { email: { type: 'email', label: 'Email' }, name: { type: 'text', label: 'Name' } },
+      },
+      '@objectstack/example-showcase',
+    );
+  }
+  if (!engine.getSchema('sys_member')) {
+    engine.registry.registerObject(
+      {
+        name: 'sys_member',
+        label: 'Member',
+        managedBy: 'better-auth',
+        fields: {
+          user_id: { type: 'text', label: 'User' },
+          role: { type: 'text', label: 'Role' },
+          organization_id: { type: 'text', label: 'Organization' },
+        },
+      },
+      '@objectstack/example-showcase',
+    );
+  }
+  await engine.syncSchemas();
+  const users = engine.getDriverForObject('sys_user')!;
+  for (const user of [ADMIN, MEI]) {
+    if (!(await users.findOne('sys_user', { where: { id: user.id } }))) await users.create('sys_user', user);
+  }
+  const members = engine.getDriverForObject('sys_member')!;
+  if (!(await members.findOne('sys_member', { where: { id: 'mem_admin_owner' } }))) {
+    await members.create('sys_member', {
+      id: 'mem_admin_owner',
+      user_id: ADMIN.id,
+      role: 'owner',
+      organization_id: DEFAULT_ORGANIZATION_ID,
+    });
+  }
+}
 
 interface Booted {
   automation: AutomationEngine & Record<string, any>;
@@ -132,6 +189,7 @@ async function bootShowcaseApprovals(
   // A real `single` install's Default Organization: the system writes below
   // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
   await installDefaultOrganization(objectql);
+  await installDirectory(objectql);
 
   for (const flow of flows) automation.registerFlow(flow.name, flow);
 
@@ -342,7 +400,15 @@ function inboxSettled(booted: Booted, flowName: string, status: string): () => P
   };
 }
 
-/** Insert the demo's account + a `sent` invoice owned by a real rep. */
+/**
+ * The app's own seed row for INV-1010, a `sent` invoice: what a dev boot
+ * stores and the approval demo opens a sign-off on. [#25758] Its owner is one
+ * of the ADR-0055 isolation fixture's addresses, which no user holds.
+ */
+const SEEDED_INV_1010 = (ShowcaseSeedData.find((d: any) => d.object === 'showcase_invoice') as any)
+  .records.find((r: any) => r.name === 'INV-1010');
+
+/** Insert the demo's account + the seeded `sent` invoice INV-1010. */
 async function seedInvoice(data: any): Promise<{ invoice: any; account: any }> {
   const account = await one(await data.insert('showcase_account', {
     name: 'Fabrikam',
@@ -352,10 +418,10 @@ async function seedInvoice(data: any): Promise<{ invoice: any; account: any }> {
   }, SYS));
 
   const invoice = await one(await data.insert('showcase_invoice', {
-    name: 'INV-1010',
+    name: SEEDED_INV_1010.name,
     account: account.id,
-    owner: 'grace@example.com',
-    status: 'sent',
+    owner: SEEDED_INV_1010.owner,
+    status: SEEDED_INV_1010.status,
     issued_on: '2026-05-27',
     tax_rate: 20,
     region: 'emea',
@@ -393,7 +459,7 @@ async function pendingRequest(data: any): Promise<any> {
 }
 
 describe('#7381 — approving Invoice Dual Sign-off delivers the cleared notice', () => {
-  it('satisfies both unanimous slots and runs through to end_ok with the inbox message delivered', async () => {
+  it('approving the seeded INV-1010, whose owner is not a user, runs through to end_ok with the inbox message delivered', async () => {
     const booted = await bootShowcaseApprovals();
     const { invoice, account } = await seedInvoice(booted.data);
 
@@ -455,10 +521,10 @@ describe('#7381 — approving Invoice Dual Sign-off delivers the cleared notice'
 
     const notice = delivered[0];
     expect(notice.title).toBe('Invoice cleared: INV-1010');
-    // The recipient is the INVOICE's owner — the field that actually holds a
-    // person. This is the assertion the shipped `{record.account.owner}` could
-    // never satisfy, because `showcase_account` has no such field.
-    expect(notice.user_id).toBe('grace@example.com');
+    // [#25758] The seeded invoice's owner holds no account, as on a dev boot;
+    // the cleared notice reaches the organization's owner, a real user.
+    expect(await booted.data.findOne('sys_user', { where: { email: invoice.owner }, ...SYS })).toBeFalsy();
+    expect(notice.user_id).toBe(ADMIN.id);
     // The start node's `expand: ['account']` is what makes this readable — an
     // un-hydrated relation renders the raw FK, or nothing at all.
     expect(notice.body_md).toContain(account.name);
@@ -613,7 +679,7 @@ describe('#7381 — approving Invoice Dual Sign-off delivers the cleared notice'
       name: 'Compliance Audit',
       account: account.id,
       status: 'planned',
-      owner: 'grace@example.com',
+      owner: MEI.email,
     }, SYS));
 
     const task = one(await booted.data.insert('showcase_task', {
@@ -638,7 +704,7 @@ describe('#7381 — approving Invoice Dual Sign-off delivers the cleared notice'
     // annotation is free to name the only other way it can fail (#10106).
     const delivered = await deliveredInbox(booted, 'Project update', 1);
     expect(delivered, 'the subflow notified more than one recipient').toHaveLength(1);
-    expect(delivered[0].user_id, 'the recipient is not the project owner the hop names').toBe('grace@example.com');
+    expect(delivered[0].user_id, 'the recipient is not the project owner the hop names').toBe(MEI.id);
   }, 30_000);
 });
 

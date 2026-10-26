@@ -430,7 +430,13 @@ function FlowSecretControl({
 export interface FlowNodeConfigFieldProps {
   field: FlowConfigField;
   value: unknown;
-  onCommit: (value: unknown) => void;
+  /**
+   * Writes the field's value. `alongside` names sibling keys (beside the
+   * field's own key, under the same parent) written in the same patch — the
+   * recipients editor's `channels` for an email-field recipient
+   * (objectstack#25900). Most fields never pass it.
+   */
+  onCommit: (value: unknown, alongside?: Readonly<Record<string, unknown>>) => void;
   disabled?: boolean;
   locale?: string;
   /** Draft + node context so `reference` fields can resolve their options. */
@@ -651,7 +657,7 @@ export function FlowNodeConfigField({ field, value, onCommit, disabled, locale, 
           <FlowRecipientsField
             label={field.label}
             value={value}
-            onCommit={(v) => onCommit(v)}
+            onCommit={(v, alongside) => onCommit(v, alongside)}
             disabled={disabled}
             locale={locale}
             context={context}

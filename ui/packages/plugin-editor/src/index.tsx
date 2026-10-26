@@ -13,6 +13,11 @@ import { Skeleton } from '@object-ui/components';
 // Export types for external use
 export type { CodeEditorSchema } from './types';
 
+// The one place Monaco is loaded from: the host's own build, not a CDN. Every
+// other Monaco surface (the Studio's source editors) awaits it before mounting.
+export { configureBundledMonaco, isBundledMonacoLoaded } from './bundledMonaco';
+export type { BundledMonaco, MonacoLoaderConfig } from './bundledMonaco';
+
 // 🚀 Lazy load the implementation file
 // This ensures Monaco Editor is only loaded when the component is actually rendered
 const LazyMonacoEditor = React.lazy(() => import('./MonacoImpl'));
