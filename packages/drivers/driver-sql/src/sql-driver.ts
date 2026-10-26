@@ -157,6 +157,7 @@ import {
   type UndeliveredAttribute,
 } from './builtin-column-collision.js';
 import { recoverUnencodedJsonText } from './unencoded-json-text.js';
+import { withUpsertConflictClause } from './upsert-conflict-clause.js';
 // [#25521 cut 1] The catalog-introspection helpers (`introspectColumnOrder`,
 // `introspectColumns` and the foreign-key, primary-key and unique-constraint reads),
 // [cut 4] `introspectSchema`, the whole-schema read built on them, and [cut 5]
@@ -188,6 +189,11 @@ import {
   rollback,
   rollbackTransaction,
 } from './sql-driver-transactions.js';
+// [#25521 cut 6] The two in-place drift reconcilers of schema sync
+// (`applyDriftOpInPlace` and the SQLite table rebuild `rebuildSqliteTablePatched`);
+// the methods of the same names below hand each body the members it reads
+// (`SchemaSyncHost`).
+import { applyDriftOpInPlace, rebuildSqliteTablePatched } from './sql-driver-schema-sync.js';
 import { makeDatabaseDirectory, probeAbsentSqliteDatabaseFile, SqliteDatabaseFileError } from './sqlite-database-file.js';
 import { jsonMembershipPredicate } from '@objectstack/core';
 import knex, { Knex } from 'knex';
@@ -2256,6 +2262,30 @@ function refuseUndeclaredFieldType(column: string): never {
  * matching the twin: the two-argument form needs the ES2022 `ErrorOptions`
  * overload.
  */
+/**
+ * Whether a physical key index covers exactly the conflict target — the same
+ * columns, order-insensitively, which is how both `ON CONFLICT` dialects infer
+ * an arbiter index and the only reading under which a composite key means
+ * anything. Shared by {@link SqlDriver.assertConflictTargetHonoured} and
+ * {@link SqlDriver.assertConflictTargetBackedWithoutClause}.
+ */
+function indexCoversConflictTarget(index: PhysicalIndex, mergeKeys: readonly string[]): boolean {
+  const wanted = new Set(mergeKeys);
+  return index.columns.length === wanted.size && index.columns.every((c) => wanted.has(c));
+}
+
+/**
+ * The `cause` an introspection-based unbacked-target refusal carries, where the
+ * server's own sentence stands on a server-judged one: schema identifiers only,
+ * no row values.
+ */
+function unbackedConflictTargetCause(tableName: string, mergeKeys: readonly string[], keys: PhysicalIndex[]): Error {
+  const found = keys.map((i) => `${i.name}(${i.columns.join(', ')})`).join(', ');
+  return new Error(
+    `no PRIMARY KEY or UNIQUE index on "${tableName}" covers (${mergeKeys.join(', ')}); ` + `keys present: ${found}`,
+  );
+}
+
 function refuseUnbackedConflictTarget(object: string, mergeKeys: string[], cause: unknown): Error {
   const keys = mergeKeys.map((k) => `"${k}"`).join(', ');
   const err = new Error(
@@ -9495,9 +9525,7 @@ export class SqlDriver implements IDataDriver {
     const target = this.rotationWriteTarget(object) ?? object;
     const tableName = this.physicalTableByObject[target] ?? target;
 
-    const wanted = new Set(mergeKeys);
-    const covers = (i: PhysicalIndex): boolean =>
-      i.columns.length === wanted.size && i.columns.every((c) => wanted.has(c));
+    const covers = (i: PhysicalIndex): boolean => indexCoversConflictTarget(i, mergeKeys);
 
     type Verdict =
       | { kind: 'honoured' }
@@ -9588,15 +9616,36 @@ export class SqlDriver implements IDataDriver {
     // `cause` carries the ground truth an operator needs to act. Schema
     // identifiers only — no row values, matching the payload contract the
     // refusal already keeps.
-    const found = keys.map((i) => `${i.name}(${i.columns.join(', ')})`).join(', ');
-    throw refuseUnbackedConflictTarget(
-      object,
-      mergeKeys,
-      new Error(
-        `no PRIMARY KEY or UNIQUE index on "${tableName}" covers (${mergeKeys.join(', ')}); ` +
-          `keys present: ${found}`,
-      ),
-    );
+    throw refuseUnbackedConflictTarget(object, mergeKeys, unbackedConflictTargetCause(tableName, mergeKeys, keys));
+  }
+
+  /**
+   * [#8740] The unbacked-conflict-target refusal for an upsert statement that
+   * carries NO conflict clause — the one {@link upsert} sends when nothing is
+   * left to merge ({@link withUpsertConflictClause}).
+   *
+   * With a conflict clause, SQLite and PostgreSQL refuse an unbacked target
+   * themselves (the planner finds no arbiter index) and MySQL refuses it in
+   * {@link assertConflictTargetHonoured}. A plain INSERT asks the server
+   * nothing about the target, so without this check that path would accept on
+   * two dialects a call every dialect refuses when there is something to merge.
+   * So the answer is the same refusal, on every dialect, read from the same
+   * cached introspection MySQL's pre-flight reads, with the same certainty
+   * rule: a failed read or a table with no keys at all proceeds, and a refusal
+   * is re-read fresh first, so a stale cache can never refuse a backed target.
+   */
+  private async assertConflictTargetBackedWithoutClause(
+    object: string,
+    writeTable: string,
+    mergeKeys: string[],
+  ): Promise<void> {
+    const tableName = this.physicalTableByObject[writeTable] ?? writeTable;
+    const backed = (keys: PhysicalIndex[] | null): boolean =>
+      keys === null || keys.length === 0 || keys.some((i) => indexCoversConflictTarget(i, mergeKeys));
+    if (backed(await this.introspectKeyIndexes(tableName))) return;
+    const fresh = await this.introspectKeyIndexes(tableName, { fresh: true });
+    if (backed(fresh)) return;
+    throw refuseUnbackedConflictTarget(object, mergeKeys, unbackedConflictTargetCause(tableName, mergeKeys, fresh!));
   }
 
   /**
@@ -9974,8 +10023,8 @@ export class SqlDriver implements IDataDriver {
       // never reached it: `stampInsertTimestamps` puts a mergeable `updated_at`
       // in the payload there. [#11176] `stampUpsertUpdatedAt` now does the same
       // on Postgres and MySQL, so a TIMESTAMPED object no longer reaches this
-      // fallback on any dialect either — it is still reachable, and still #8740's
-      // to decide, for an object with no observed `updated_at` column.)
+      // fallback on any dialect either — it is still reachable for an object
+      // with no observed `updated_at` column.)
       //
       // The remedy keeps the emitted SQL byte-identical to what `main` emits
       // for this shape. Falling back to the CONFLICT-TARGET columns present in
@@ -9985,16 +10034,20 @@ export class SqlDriver implements IDataDriver {
       // mergeable column in this case. So this PR's net behavioural delta on the
       // degenerate path is nil rather than a #7011 regression.
       //
-      // The last-ditch `merge()` is left as-is: it needs the conflict target to
-      // be absent from the payload, which means the INSERT never supplies it, so
-      // on every dialect here the target is NULL and cannot collide — the DO
-      // UPDATE clause is unreachable rather than merely unused. Filed separately
-      // rather than widened into: merge-ALL is the wrong shape for "nothing to
-      // merge" on any dialect, and the alternatives are not accept-set-neutral
-      // (knex compiles `.ignore()` to MySQL's `insert ignore`, which swallows
-      // unrelated errors too — measured).
+      // [#8740] When the payload carries no conflict-target column either, there
+      // is nothing the merge leg may write, and the statement is a plain INSERT
+      // with no conflict clause: a collision surfaces as the driver's own
+      // unique-violation error and the stored row is left as it was. This used
+      // to fall back to knex's bare `merge()`, which is merge-ALL on every
+      // dialect: it re-admitted every insert-only column the lines above
+      // exclude. ⛔ Not `ignore()` either: knex lowers it on MySQL to
+      // `insert ignore`, which swallows unrelated errors and drops the conflict
+      // target. See {@link withUpsertConflictClause}.
       const noopMergeColumns = Object.keys(formatted).filter((c) => mergeKeys.includes(c));
       const columnsToMerge = mergeColumns.length > 0 ? mergeColumns : noopMergeColumns;
+      // …and that plain INSERT still refuses a conflict target nothing backs,
+      // as every dialect does when there is something to merge.
+      if (columnsToMerge.length === 0) await this.assertConflictTargetBackedWithoutClause(object, writeTable, mergeKeys);
 
       // [#21185] The fence for THIS attempt: the tenant column, and the value
       // the row is written under in storage form (what the statement sends).
@@ -10017,8 +10070,8 @@ export class SqlDriver implements IDataDriver {
         // is `injectTenantOnInsert`'s job (called above), which is exactly why
         // this one is deliberately not scoped.
         const builder = this.getBuilder(writeTable, writeOptions);
-        const insertion = builder.insert(formatted).onConflict(mergeKeys);
-        const merging = columnsToMerge.length > 0 ? insertion.merge(columnsToMerge) : insertion.merge();
+        const insertion = builder.insert(formatted);
+        const { statement, merges } = withUpsertConflictClause(insertion, mergeKeys, columnsToMerge);
         // [#21185] SQLite and PostgreSQL: the fence is a predicate INSIDE the
         // merge statement — `… DO UPDATE SET … WHERE` the stored tenant column
         // equals the written one — so a conflict on a row of another
@@ -10030,8 +10083,11 @@ export class SqlDriver implements IDataDriver {
         // a platform row with no organization is fenced off too. The target
         // table is named by its bare physical name, which both dialects accept
         // for the INSERT target in this clause, schema-qualified or not.
-        // MySQL takes no `WHERE` here; its fence runs after the statement.
-        await (fence && !this.isMysql ? merging.where(this.mergeLandsInWrittenOrganization(writeTable, fence.column)) : merging);
+        // MySQL takes no `WHERE` here; its fence runs after the statement. A
+        // plain INSERT ([#8740]) has no merge leg to fence.
+        await (merges && fence && !this.isMysql
+          ? statement.where(this.mergeLandsInWrittenOrganization(writeTable, fence.column))
+          : statement);
         if (mysqlFence) {
           // [#21185] One read, under the written tenant exactly; #8807's
           // identity verdict rides on it when a rival key made one owed.
@@ -14857,65 +14913,22 @@ export class SqlDriver implements IDataDriver {
   }
 
   /** Apply a single drift op in place (Postgres / MySQL). Returns false if unsupported. */
-  protected async applyDriftOpInPlace(op: DriftOp): Promise<boolean> {
-    // Index ops need no dialect-specific ALTER — route them to the portable path.
-    if (isIndexDriftOp(op)) return this.applyIndexDriftOp(op);
-    const { table, column } = op;
-    if (this.isPostgres) {
-      switch (op.type) {
-        case 'relax_not_null':
-          await this.knex.raw('ALTER TABLE ?? ALTER COLUMN ?? DROP NOT NULL', [table, column]);
-          return true;
-        case 'tighten_not_null':
-          await this.knex.raw('ALTER TABLE ?? ALTER COLUMN ?? SET NOT NULL', [table, column]);
-          return true;
-        case 'widen_varchar':
-        case 'narrow_varchar':
-          await this.knex.raw(`ALTER TABLE ?? ALTER COLUMN ?? TYPE varchar(${op.to})`, [table, column]);
-          return true;
-        case 'drop_column':
-          await this.knex.raw('ALTER TABLE ?? DROP COLUMN ??', [table, column]);
-          return true;
-        case 'drop_column_default':
-          await this.knex.raw('ALTER TABLE ?? ALTER COLUMN ?? DROP DEFAULT', [table, column]);
-          return true;
-      }
-    }
-    if (this.isMysql) {
-      // MySQL MODIFY restates the FULL column definition — reconstruct the
-      // type (with length for char types, so a nullability change never
-      // silently drops a varchar's declared length) from columnInfo.
-      const info: any = await this.knex(table).columnInfo();
-      const ci: any = info?.[column];
-      const colType: string | undefined = ci?.type
-        ? (/char/i.test(ci.type) && ci.maxLength ? `${ci.type}(${ci.maxLength})` : ci.type)
-        : undefined;
-      switch (op.type) {
-        case 'relax_not_null':
-          if (!colType) return false;
-          await this.knex.raw(`ALTER TABLE ?? MODIFY ?? ${colType} NULL`, [table, column]);
-          return true;
-        case 'tighten_not_null':
-          if (!colType) return false;
-          await this.knex.raw(`ALTER TABLE ?? MODIFY ?? ${colType} NOT NULL`, [table, column]);
-          return true;
-        case 'widen_varchar':
-        case 'narrow_varchar':
-          await this.knex.raw(`ALTER TABLE ?? MODIFY ?? varchar(${op.to})`, [table, column]);
-          return true;
-        case 'drop_column':
-          await this.knex.raw('ALTER TABLE ?? DROP COLUMN ??', [table, column]);
-          return true;
-        case 'drop_column_default':
-          // `ALTER … ALTER COLUMN … DROP DEFAULT` — the one ALTER COLUMN form
-          // MySQL accepts without restating the type, so it cannot lose a
-          // varchar length the way MODIFY can.
-          await this.knex.raw('ALTER TABLE ?? ALTER COLUMN ?? DROP DEFAULT', [table, column]);
-          return true;
-      }
-    }
-    this.logger.warn(`[schema-drift] ${op.type} on ${table}.${column} is unsupported on dialect '${this.dialectName}' — skipped`);
-    return false;
+  protected applyDriftOpInPlace(op: DriftOp): Promise<boolean> {
+    // [#25521 cut 6] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readDialectName = () => this.dialectName;
+    const readIsMysql = () => this.isMysql;
+    const readIsPostgres = () => this.isPostgres;
+    const readKnex = () => this.knex;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof applyDriftOpInPlace> = {
+      applyIndexDriftOp: (...a) => this.applyIndexDriftOp(...a),
+      get dialectName() { return readDialectName(); },
+      get isMysql() { return readIsMysql(); },
+      get isPostgres() { return readIsPostgres(); },
+      get knex() { return readKnex(); },
+      get logger() { return readLogger(); },
+    };
+    return applyDriftOpInPlace.call(host, op);
   }
 
   /**
@@ -14951,101 +14964,25 @@ export class SqlDriver implements IDataDriver {
    * by `lookup` fields are not re-added (ObjectStack enforces relationships at
    * the application layer, not via SQLite FK constraints).
    */
-  protected async rebuildSqliteTablePatched(table: string, ents: ManagedDriftEntry[]): Promise<ManagedDriftEntry[]> {
-    const relax = new Set<string>();
-    const tighten = new Set<string>();
-    const drop = new Set<string>();
-    const dropDefault = new Set<string>();
-    // The entries this rebuild ACTS on, filled by the same pass that fills the
-    // four sets — deliberately not a second list of op types to keep in sync
-    // with the branches below. An entry is honoured if and only if one of those
-    // branches took it, so the returned set cannot drift from the work done.
-    const honoured: ManagedDriftEntry[] = [];
-    for (const e of ents) {
-      if (e.op.type === 'relax_not_null') relax.add(e.op.column);
-      else if (e.op.type === 'tighten_not_null') tighten.add(e.op.column);
-      else if (e.op.type === 'drop_column') drop.add(e.op.column);
-      else if (e.op.type === 'drop_column_default') dropDefault.add(e.op.column);
-      // Everything else is IGNORED here and must be reported as such (#11722):
-      // widen/narrow varchar (SQLite ignores declared length — nothing to do),
-      // `manual_column_type_change` (no reconciler arm on ANY dialect, by
-      // decision), and any column op added later, which lands in this branch by
-      // default rather than being silently absorbed into `honoured`.
-      else continue;
-      honoured.push(e);
-    }
-
-    const physical = await this.introspectColumns(table);
-    const kept = physical.filter((c) => !drop.has(c.name));
-    const keptNames = kept.map((c) => c.name);
-    const fields = this.managedObjectFields.get(table) ?? {};
-    const tmp = `__os_mig_${table}`;
-
-    // FK enforcement must be toggled OUTSIDE the transaction (SQLite ignores
-    // the PRAGMA inside one). Off during the swap so the rename doesn't trip
-    // any dangling references mid-flight.
-    await this.knex.raw('PRAGMA foreign_keys = OFF');
-    try {
-      await this.knex.transaction(async (trx) => {
-        await trx.schema.dropTableIfExists(tmp);
-        await trx.schema.createTable(tmp, (t) => {
-          for (const c of kept) {
-            const col = this.buildRebuiltColumn(t, c);
-            if (!col) continue;
-            const nullable = relax.has(c.name) ? true : tighten.has(c.name) ? false : c.nullable;
-            if (!nullable && c.name !== 'id') col.notNullable();
-            if (c.name === 'created_at' || c.name === 'updated_at') {
-              // #11321: the SAME canonical default {@link createAuditTimestampColumn}
-              // emits, not `knex.fn.now()`. This method is SQLite-only (see the
-              // `isSqlite` branch in `applyMigrationEntries`), where
-              // `knex.fn.now()` is the zone-naive `CURRENT_TIMESTAMP` — so
-              // re-emitting it here would silently REVERT a table that was
-              // created with the canonical default the moment any unrelated
-              // drift (a relaxed NOT NULL, a dropped column) triggered a
-              // rebuild. A rebuild must hand back the column `initObjects`
-              // would have built.
-              col.defaultTo(this.nowColumnDefault('datetime'));
-            } else if (!dropDefault.has(c.name)) {
-              // Re-emit the METADATA-declared default. The rebuild dropped the
-              // original table, so a column whose default is not restated here
-              // comes back without one — which is precisely what a
-              // `drop_column_default` op wants, and precisely what a
-              // `defaultValue: 'NOW()'` sibling must not suffer.
-              const f = (fields as Record<string, any>)[c.name];
-              if (f) this.applyDeclaredColumnDefault(col, f, f.type || 'string');
-            }
-          }
-        });
-        const colList = keptNames.map((n) => `"${n}"`).join(', ');
-        await trx.raw(`INSERT INTO "${tmp}" (${colList}) SELECT ${colList} FROM "${table}"`);
-        await trx.schema.dropTable(table);
-        await trx.schema.renameTable(tmp, table);
-      });
-    } finally {
-      await this.knex.raw('PRAGMA foreign_keys = ON');
-    }
-
-    // Recreate unique constraints + declared indexes from metadata. The rebuild
-    // dropped the original table, so every index went with it — this is a fresh
-    // materialization, and it must produce the SAME constraints as
-    // `initObjects` would. It used to inline its own `uniq_<table>_<col>`
-    // single-column DDL, which is how a tenant-scoped field could silently
-    // regain a global unique index after any drift rebuild (#3696); both paths
-    // now share {@link syncTableIndexes}.
-    try {
-      const keptSet = new Set(keptNames);
-      await this.syncTableIndexes(
-        table,
-        fields,
-        this.managedObjectIndexes.get(table),
-        this.resolveTenantField(table),
-        keptSet,
-      );
-    } catch (e: any) {
-      this.logger.warn(`[schema-drift] could not fully recreate indexes for '${table}' after rebuild`, e?.message ?? e);
-    }
-
-    return honoured;
+  protected rebuildSqliteTablePatched(table: string, ents: ManagedDriftEntry[]): Promise<ManagedDriftEntry[]> {
+    // [#25521 cut 6] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readKnex = () => this.knex;
+    const readLogger = () => this.logger;
+    const readManagedObjectFields = () => this.managedObjectFields;
+    const readManagedObjectIndexes = () => this.managedObjectIndexes;
+    const host: ThisParameterType<typeof rebuildSqliteTablePatched> = {
+      applyDeclaredColumnDefault: (...a) => this.applyDeclaredColumnDefault(...a),
+      buildRebuiltColumn: (...a) => this.buildRebuiltColumn(...a),
+      introspectColumns: (...a) => this.introspectColumns(...a),
+      get knex() { return readKnex(); },
+      get logger() { return readLogger(); },
+      get managedObjectFields() { return readManagedObjectFields(); },
+      get managedObjectIndexes() { return readManagedObjectIndexes(); },
+      nowColumnDefault: (...a) => this.nowColumnDefault(...a),
+      resolveTenantField: (...a) => this.resolveTenantField(...a),
+      syncTableIndexes: (...a) => this.syncTableIndexes(...a),
+    };
+    return rebuildSqliteTablePatched.call(host, table, ents);
   }
 
   /**

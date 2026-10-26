@@ -2069,6 +2069,9 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "measures.derived": {
         label: "Derivada de"
+      },
+      "measures.duration": {
+        label: "Duración"
       }
     }
   },

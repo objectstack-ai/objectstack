@@ -71,6 +71,9 @@ import {
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 import { readDispatchedBody } from '../deferred-request-body.js';
+// [#9416, #25821, #25976] The one value-shape check every door that starts or
+// resumes a run asks — shared with the action door, so it lives beside both.
+import { objectValueFailure } from '../object-value-shape.js';
 // [#20552] The per-type credential redaction every metadata read exit applies,
 // and its write-path inverse — reused, never restated, for the definitions this
 // domain serves and overwrites.
@@ -114,9 +117,42 @@ import type { ObjectStackProtocolImplementation } from '@objectstack/metadata-pr
  * [#19846] It also states `callerParamKeys` — which keys of the params bag the
  * caller supplied, as opposed to the row id this builder seeds — so every route
  * sharing it carries the same caller-provenance signal.
+ *
+ * [#25821, #25976] A body, or a `params`, that is not a JSON object is refused
+ * here, thrown as the validation failure both dispatcher exits and the endpoint
+ * executor answer as `400 VALIDATION_FAILED` + `fields[]`. Every door that
+ * builds its context here calls this before `execute()`, so a refused trigger
+ * dispatches nothing and leaves no run row. See {@link objectValueFailure}.
  */
 export function buildAutomationContext(body: any, context: HttpProtocolContext): Record<string, unknown> {
-    const ctxBody = body && typeof body === 'object' ? body : {};
+    // [#25976] The BODY must be an object before its keys mean anything. This
+    // read used to be `body && typeof body === 'object' ? body : {}`, so a JSON
+    // string body dispatched the flow with an EMPTY bag, and an array passed the
+    // `typeof` guard and reached the flat-body branch below, which forwarded its
+    // indices as params. The resume door refuses the same body (#9416); this
+    // asks the same function. `undefined` / `null` stay the legal bodyless
+    // trigger, so `?? {}` survives for exactly those two.
+    const bodyFailure = objectValueFailure('(body)', body ?? {});
+    if (bodyFailure) {
+        throw validationFailure(`Invalid trigger body — ${bodyFailure.message}`, [bodyFailure]);
+    }
+    const ctxBody = (body ?? {}) as Record<string, any>;
+    // [#25821] The params bag must be an object before anything is read from
+    // it. The read below used to be `params && typeof params === 'object'`, so
+    // a string became an EMPTY bag and the flow ran with no inputs, an array
+    // was spread into an index-keyed bag, and a falsy value (`null`, `0`,
+    // `false`, `""`) took the flat-body branch, which forwarded the body's
+    // other keys instead. The resume door refuses the same class on its own
+    // object-valued keys (#9416); this asks its question through the same
+    // function. `undefined` is absent, as there — the flat-body branch below
+    // still serves a body with no `params` key.
+    const paramsFailure = objectValueFailure('params', ctxBody.params);
+    if (paramsFailure) {
+        throw validationFailure(
+            `Invalid trigger body — \`params\` ${paramsFailure.message}`,
+            [paramsFailure],
+        );
+    }
     // `{recordId, objectName, params}` (the UI/SDK request shape) → the
     // canonical AutomationContext shape:
     //  - `recordId` is exposed in `params.recordId` AND aliased to
@@ -125,13 +161,11 @@ export function buildAutomationContext(body: any, context: HttpProtocolContext):
     //  - `objectName` maps to the canonical `object` field.
     const recordId = ctxBody.recordId;
     const objectName = ctxBody.objectName ?? ctxBody.object;
-    const baseParams: Record<string, any> = (ctxBody.params && typeof ctxBody.params === 'object')
-        ? { ...ctxBody.params }
-        : {};
+    const baseParams: Record<string, any> = ctxBody.params !== undefined ? { ...ctxBody.params } : {};
     // Back-compat: when callers POST a flat body (no `params` wrapper),
     // forward unknown top-level keys as flow params so the original
     // `{ foo: 'bar' }` payload is not silently dropped.
-    if (!ctxBody.params) {
+    if (ctxBody.params === undefined) {
         const reserved = new Set(['recordId', 'objectName', 'object', 'event', 'params']);
         for (const [k, v] of Object.entries(ctxBody)) {
             if (reserved.has(k)) continue;
@@ -3267,11 +3301,13 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                  */
                 const jsonTypeOf = (v: unknown): string =>
                     v === null ? 'null' : Array.isArray(v) ? 'an array' : `a ${typeof v}`;
-                if (typeof rawBody !== 'object' || Array.isArray(rawBody)) {
-                    throw validationFailure(
-                        `Invalid resume body — expected an object with ${accepted}, received ${jsonTypeOf(rawBody)}`,
-                        [{ field: '(body)', code: 'invalid_type', message: `expected an object with ${accepted}` }],
-                    );
+                // [#25976] Asked through `objectValueFailure`, the check the
+                // trigger and action doors ask of their input too, so the three
+                // doors refuse one shape in one way; only the wording names this
+                // body's closed key set.
+                const bodyFailure = objectValueFailure('(body)', rawBody, `an object with ${accepted}`);
+                if (bodyFailure) {
+                    throw validationFailure(`Invalid resume body — ${bodyFailure.message}`, [bodyFailure]);
                 }
                 const b = rawBody as Record<string, unknown>;
                 // [commit a4331227b] The outer envelope is a CLOSED SET (maintainer ruling
@@ -3352,17 +3388,13 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // commit a4331227b pinned; before `resume()`, so nothing reaches the
                 // engine until the body is legal and the suspension stays
                 // intact for a corrected retry.
+                //
+                // The object-valued keys go through `objectValueFailure`, the
+                // one check the trigger door's `params` asks too (#25821).
                 const valueFailures: Array<{ field: string; code: 'invalid_type'; message: string }> = [];
                 for (const key of ['inputs', 'variables', 'output']) {
-                    const v = b[key];
-                    if (v === undefined) continue;
-                    if (v === null || typeof v !== 'object' || Array.isArray(v)) {
-                        valueFailures.push({
-                            field: key,
-                            code: 'invalid_type',
-                            message: `expected an object (a map of names to values), received ${jsonTypeOf(v)}`,
-                        });
-                    }
+                    const failure = objectValueFailure(key, b[key]);
+                    if (failure) valueFailures.push(failure);
                 }
                 if (b.branchLabel !== undefined && typeof b.branchLabel !== 'string') {
                     valueFailures.push({

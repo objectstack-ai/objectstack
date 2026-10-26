@@ -52,7 +52,8 @@ import { withSourceFallback } from './source-hash.js';
  * (`<locale>.source-hashes.generated.ts`, written by `os i18n extract
  * --source-hashes`). `zhCN` and friends carry `objects` as well as the
  * hand-authored sections, so this one call now covers both halves — the third
- * argument judging `apps`/`dashboards`/`pages`, the fourth judging `objects`.
+ * argument judging `apps`/`dashboards`/`datasets`/`pages`, the fourth judging
+ * `objects`.
  *
  * The module note in `source-hash.ts` records why the generated half was
  * excluded until now and why that reason was wrong. On the day this landed no

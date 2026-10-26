@@ -7,6 +7,8 @@
 // `view` write (`runRuntimeAuthoringRules`, the function the metadata write
 // path calls) resolving the field's type against its `objects` context.
 
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 import { FILE_REFERENCE_TYPES } from '@objectstack/spec/data';
@@ -161,5 +163,15 @@ describe('the runtime publish gate on a view write', () => {
       formViews: { apply: formOf([{ field: 'company' }, { field: 'email' }]) },
     });
     expect(errors.filter((e) => e.rule === PUBLIC_FORM_FILE_FIELD)).toEqual([]);
+  });
+});
+
+describe('the object a candidate submits into is the doors\' own function', () => {
+  const source = readFileSync(new URL('./validate-public-form-file-fields.ts', import.meta.url), 'utf8');
+
+  it('imports anonymousFormObjectName from @objectstack/spec/ui and keeps no retyped rung order', () => {
+    expect(source).toMatch(/anonymousFormObjectName,[\s\S]*?\} from '@objectstack\/spec\/ui'/);
+    expect(source).not.toContain('candidateObjectName');
+    expect(source).not.toContain('viewObjectName');
   });
 });

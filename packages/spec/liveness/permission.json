@@ -142,6 +142,13 @@
           "verifiedAt": "2026-08-28",
           "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts#getFieldPermissions (`if (perm.editable) result[fieldName].editable = true` — the same merge, write half)",
           "note": "FLS write-deny. 2026-08-28: RE-ANCHORED (commit 9ee2dcfbd) and REPOINTED — `permission-evaluator.ts:302` had rotted onto a docblock line naming the `vama_bypass` explain section. The two FLS keys are merged one line apart inside one function, so both entries now share one anchor and the pair can no longer drift independently. Re-closed by hand against c459da6bc."
+        },
+        "when": {
+          "status": "live",
+          "verifiedAt": "2026-10-26",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts#getFieldPermissions (the per-entry vote: `fieldPermissionVote(perm, when === undefined ? 'matched' : judge ? judge(when) : 'unjudged')` — a conditioned entry votes as declared on a matched row, is absent on an unmatched one, and is its lock when no row can be judged); packages/plugins/plugin-security/src/security-plugin-object-inputs.ts#computeForbiddenFieldWrites (the write gate's row judge: each distinct `when` compiled once by `RLSCompiler.compileRowPredicate` and judged in process by `storedFormCheckJudge` on each incoming row of an insert or the caller-read stored row of a by-id update); packages/plugins/plugin-security/src/rls-compiler.ts#compileRowPredicate (the compile: the same `current_user` context, field guard and comparand faces an RLS `check` clause takes); packages/core/src/security/effective-object-permissions.ts#fieldPermissionVote (the one vote the row-blind `/auth/me/permissions` merge shares); packages/plugins/plugin-security/src/explain-engine.ts#explainAccess (the `fls` layer names each row-conditioned entry as such); packages/lint/src/validate-rls-predicate-enforceability.ts#validateRlsPredicateEnforceability (the authoring judge: `permissions[].fields[].when` walked by the passes `using` / `check` take)",
+          "note": "[#25866, ruling of record 6408558941] A row condition on the EDIT vote only, in RLS `using`'s CEL; `readable: false` beside it is refused at parse (`FieldPermissionSchema`'s object refine). ADR-0066 ⑧ note of 2026-10-26: the condition narrows where an entry votes and does not change the union-without-deny posture. Classified live on landing with the readers above; no dogfood proof bound yet (the plugin-security middleware battery in `security-plugin.test.ts` pins insert-on-payload, update-on-stored-row, predicate-update-as-lock and unresolvable-condition-as-lock)."
         }
       }
     },

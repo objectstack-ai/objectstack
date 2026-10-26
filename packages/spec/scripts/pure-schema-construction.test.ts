@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: each build case runs the real tsup build (in-process, with the package's own main options and its esbuild plugin) once over the entry or fixture it pins, and the ./shared case bundles two consumers of that output; slowest CI reading 11.86 s (run 40214410982, refresh PR #25960's window (hourly runs 40200279306 to 40272142430)) x 1.25, rounded up
 //
 // The `pure-schema-construction` build plugin (`tsup.config.ts`) marks real
 // calls only (#20686). Its earlier line-prefix rule also rewrote a marked name

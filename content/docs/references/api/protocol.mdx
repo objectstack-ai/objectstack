@@ -1633,7 +1633,7 @@ One changed key path of the pending draft, and the last write that changed it.
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object name |
 | **permissions** | `{ allowCreate?: boolean; allowRead?: boolean; allowEdit?: boolean; allowDelete?: boolean; … }` | ✅ | Object-level permissions |
-| **fieldPermissions** | `Record<string, { readable?: boolean; editable?: boolean }>` | optional | Field-level permissions keyed by field name |
+| **fieldPermissions** | `Record<string, { readable?: boolean; editable?: boolean; when?: string }>` | optional | Field-level permissions keyed by field name |
 
 ### Nested Shape: `GetObjectPermissionsResponse.permissions`
 
@@ -1658,6 +1658,7 @@ One changed key path of the pending draft, and the last write that changed it.
 | :--- | :--- | :--- | :--- |
 | **readable** | `boolean` | optional (default: `true`) | Field read access |
 | **editable** | `boolean` | optional (default: `false`) | Field edit access |
+| **when** | `string` | optional | Row condition narrowing where this entry votes, authored in canonical CEL like `rowLevelSecurity[].using` (a field of this object compared with a literal or a `current_user.*` value using `==`, `!=`, `<`, `<=`, `>`, `>=` or `in`, combined with `&&` / `\|\|`; e.g. status in ["approved", "signing", "active"]). Absent, the entry votes on every row. Present, the entry votes as declared on the rows the condition matches and is ABSENT on every other row, so the most-permissive merge across the caller's sets and the rule that only declaring sets vote are unchanged: a set that locks a field only from a stage onward does not lock the rows before it, and a co-held set that says nothing about the field still lifts nothing. The write gate judges the condition on the stored row BEFORE an update (so a lock on `status in [...]` holds on an approved row even when the write changes `status`) and on the incoming row of an insert, as the caller sent it. It reaches the EDIT vote only — reads are judged row-blind — so `readable: false` beside a `when` is refused at parse time: keep `readable: true` (the default) on a row-conditioned entry. Where no row can be judged (a predicate update with no row address, a stored row the caller cannot read, a condition that does not resolve for the request) the entry is judged as its lock: it contributes no edit grant on that write. Validated like an RLS predicate at authoring and publish time: the fields it names must exist on the entry's object and it may not reach across a relation; a condition that cannot be lowered is refused there, never dropped at runtime. Readers that hold no row (`/auth/me/permissions`, the field projections, the write preview on an update) report a row-conditioned entry as its lock, so a client never advertises an edit the gate refuses. |
 
 
 ---

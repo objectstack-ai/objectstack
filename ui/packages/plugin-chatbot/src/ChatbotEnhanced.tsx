@@ -89,6 +89,7 @@ import {
   detectAuthoringVerdict,
   detectBuiltAppPackage,
   detectBuildChecklist,
+  detectPublishedBuildReview,
   buildProgressFromDraftReview,
   type BuildResultChecklist,
   type DraftReview,
@@ -4160,6 +4161,12 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                 const builtPackageId =
                   builtAppDraft?.draftReview?.packageId ??
                   (publishedBuild ? detectBuiltAppPackage(publishedBuild.result) : undefined);
+                // objectstack#25887 — the result card's next steps ride
+                // the published envelope too, so a published build (a replayed
+                // one included) draws them as a drafted build does.
+                const builtNextSteps =
+                  builtAppDraft?.draftReview?.nextSteps ??
+                  (publishedBuild ? detectPublishedBuildReview(publishedBuild.result)?.nextSteps : undefined);
                 // objectui#12724 — the result card's checklist: the LAST one
                 // the turn produced, so a `verify_build` that re-measured the
                 // build after a repair supersedes `apply_blueprint`'s.
@@ -4245,7 +4252,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                           // live-canvas runtime state.
                           appSegment={builtPackageId}
                           live={buildIsLive}
-                          nextSteps={builtAppDraft?.draftReview?.nextSteps}
+                          nextSteps={builtNextSteps}
                           checklist={buildChecklist}
                           onOpenBuiltApp={onOpenBuiltApp}
                           openBuiltAppLabel={openBuiltAppLabel}

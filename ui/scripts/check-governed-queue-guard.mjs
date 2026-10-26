@@ -2180,35 +2180,21 @@ export async function selfTest() {
     JSON.stringify({ exit: wholeGroup.exitCode, reads: wholeGroup.apiCalls }),
   );
 
-  // -- the WIRING pins: the workflow and the required-context register --------
+  // -- the WIRING pins: the required-context register ---------------------------
   //
-  // Without these, renaming the job detaches the context this repository has
-  // written down as blocking, and the name declared here becomes a name nothing
-  // publishes. Read from disk on purpose: a constant asserting against itself
-  // proves nothing.
-  try {
-    const wf = readFileSync(join(repoRoot, '.github', 'workflows', CHECK_WORKFLOW), 'utf8');
-    assert('the-workflow-exists-and-declares-the-job-id-this-file-names', wf.includes(`\n  ${CHECK_JOB_ID}:\n`), CHECK_JOB_ID);
-    assert('the-workflow-publishes-EXACTLY-the-context-name-this-file-declares', wf.includes(`name: ${CHECK_CONTEXT_NAME}\n`), CHECK_CONTEXT_NAME);
-    assert('the-workflow-triggers-on-merge_group-the-leg-that-actually-refuses', /^ {2}merge_group:\s*$/m.test(wf), 'merge_group trigger absent');
-    assert('the-workflow-triggers-on-pull_request-the-early-warning-leg', /^ {2}pull_request:\s*$/m.test(wf), 'pull_request trigger absent');
-    // ⭐ `ready_for_review` is the addition that matters: flipping a governed
-    // draft to ready is the first move of the exact sequence #6183 took, and it
-    // is NOT in GitHub's default `types:` set. Naming `types:` REPLACES the
-    // default set rather than extending it, so all four are restated.
-    assert('the-workflow-re-fires-on-ready_for_review-the-first-move-of-the-incident', /types:\s*\[opened, synchronize, reopened, ready_for_review\]/.test(wf), 'ready_for_review absent from types');
-    assert('the-workflow-invokes-THIS-script', wf.includes('scripts/check-governed-queue-guard.mjs'), 'invocation absent');
-    assert('the-workflow-runs-the-self-test-before-the-live-judgment', wf.indexOf('--self-test') < wf.indexOf('GITHUB_TOKEN'), 'the self-test does not precede the live step');
-    assert('the-workflow-checks-out-full-history-a-truncated-diff-answers-with-silence', /fetch-depth:\s*0/.test(wf), 'fetch-depth: 0 absent');
-    assert('the-workflow-declares-pull-requests-read-the-only-scope-the-review-read-needs', /pull-requests:\s*read/.test(wf), 'pull-requests: read absent');
-    // ⛔ A skipped job counts as SUCCESS in branch protection, so a path filter
-    // would hand the queue a green verdict for a diff the filter mis-scoped —
-    // on the one check whose entire job is to refuse. The path test belongs
-    // INSIDE the script, where "nothing governed" costs zero API calls.
-    assert('the-workflow-carries-no-paths-filter-a-skipped-guard-counts-as-SUCCESS', !/^\s*paths(-ignore)?:/m.test(wf), 'a paths filter would make this guard skippable');
-  } catch (error) {
-    assert('the-workflow-file-is-readable', false, String(error?.message ?? error).split('\n')[0]);
-  }
+  // Without this, the context this repository has written down as blocking
+  // drifts from the name declared here. Read from disk on purpose: a constant
+  // asserting against itself proves nothing.
+  //
+  // The workflow half (the job id, the published name, the merge_group and
+  // pull_request legs, `ready_for_review`, the invocation, the self-test before
+  // the live step, `fetch-depth: 0`, `pull-requests: read`, no paths filter)
+  // retired with objectstack#25712. It read objectui's
+  // `.github/workflows/governed-surface-guard.yml`, which runs nowhere under the
+  // monorepo: GitHub runs the repository root's workflows alone, and the root
+  // `governed-surface-guard.yml` guards the queue with its own register (row 11
+  // of the objectstack#25697 workflow roster, → sub-issue 4). A port brings
+  // these pins back against the root workflow that runs this script, by path.
   try {
     const gate = readFileSync(join(repoRoot, 'scripts', 'dependabot-merge-gate.mjs'), 'utf8');
     assert(
@@ -2235,8 +2221,8 @@ export async function selfTest() {
       'ordering guarantee measured with throwing spies, the retired head read measured ABSENT at one lookup ' +
       'per governed PR, the unreadable-review-list refusal, the seat-side --test predicate, the ruling-C ' +
       'landing narration (DRAFT, then an authorized approval, then the claiming seat lands it) pinned in the ' +
-      '--test, refusal and early-warning texts with the pre-ruling-C wording pinned ABSENT, and the workflow ' +
-      '+ required-context wiring pins), plus the SECOND queue predicate objectui#9018 added on the merge_group ' +
+      '--test, refusal and early-warning texts with the pre-ruling-C wording pinned ABSENT, and the ' +
+      'required-context wiring pin), plus the SECOND queue predicate objectui#9018 added on the merge_group ' +
       'leg — the contract-review carrier, read from the pull object under the scope the review read already ' +
       'needs, its label a hand-kept mirror with ' +
       'this file proven to import nothing out of scripts/pm/, fail-closed on an unreadable label set, on a ' +

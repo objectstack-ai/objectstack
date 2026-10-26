@@ -613,6 +613,61 @@ describe('validateRlsPredicateEnforceability — the four injections at ONE site
     // Without this, an always-fires implementation satisfies the table above.
     expect(ids(siteWith('using', 'is_private == false || owner_id == current_user.id'))).toEqual([]);
   });
+});
+
+// ── #25866: a field permission entry's `when` is judged by the same passes
+
+/**
+ * The card's shape: a lock on `crm_opportunity.amount` that applies on the
+ * rows a condition names (`status == 'approved'`), declared as
+ * `permissions[].fields["crm_opportunity.amount"].when`. The write gate
+ * compiles it by the compiler an RLS `check` reaches, so the lint rule judges
+ * it by the same passes, against the key's object.
+ */
+const fieldWhenSite = (when: unknown, key = 'crm_opportunity.amount') => ({
+  objects: [CRM_OPPORTUNITY],
+  permissions: [
+    {
+      name: 'sales_rep',
+      label: 'Sales Rep',
+      fields: { [key]: { readable: true, editable: false, when } },
+    },
+  ],
+});
+
+describe('validateRlsPredicateEnforceability — a field permission `when` is judged like an RLS predicate (#25866)', () => {
+  it.each([
+    ['not pushdownable', 'billing_address.country == "US"', [RLS_PREDICATE_UNENFORCEABLE]],
+    ['unparseable', 'status == = "approved"', [RLS_PREDICATE_UNPARSEABLE]],
+    ['unknown field', "stage == 'approved'", [RLS_PREDICATE_UNKNOWN_FIELD]],
+    ['unknown user variable', 'owner_id == current_user.nope', [RLS_PREDICATE_UNKNOWN_USER_VARIABLE]],
+  ])('%s', (_label, when, expected) => {
+    expect(validateRlsPredicateEnforceability(fieldWhenSite(when)).map((f) => f.rule)).toEqual(expected);
+  });
+
+  it('names the entry, the clause and the cost: the entry is applied as its lock', () => {
+    const [finding] = validateRlsPredicateEnforceability(fieldWhenSite("stage == 'approved'"));
+    expect(finding.path).toBe('permissions[0].fields["crm_opportunity.amount"].when');
+    expect(finding.where).toBe('permission set "sales_rep" field permission "crm_opportunity.amount"');
+    expect(finding.message).toContain('field permission when');
+    expect(finding.message).toContain('applied as its lock on every row');
+  });
+
+  it('leaves a condition the object declares and the caller can resolve silent', () => {
+    expect(ids(fieldWhenSite("status == 'approved' || owner_id == current_user.id"))).toEqual([]);
+  });
+
+  it('judges the condition against the KEY\'s object (the head before the first dot)', () => {
+    // `status` is a column of crm_opportunity, not of the undeclared object the
+    // key names — the graph's "object this stack does not define" skip holds,
+    // so no reference finding is invented for it.
+    expect(ids(fieldWhenSite("status == 'approved'", 'crm_nope.amount'))).toEqual([]);
+  });
+
+  it('skips an entry without a `when`, and a blank one, which Zod judges', () => {
+    expect(ids(fieldWhenSite(undefined))).toEqual([]);
+    expect(ids(fieldWhenSite('   '))).toEqual([]);
+  });
 
   it('is disjoint from the three SHAPE ids by construction', () => {
     // A shape fault never earns a reference id and vice versa: the reference

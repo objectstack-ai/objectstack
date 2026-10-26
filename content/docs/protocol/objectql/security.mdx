@@ -217,7 +217,7 @@ rowLevelSecurity:
 
 ## 3. Field-Level Security
 
-Field permissions are a map on the permission set keyed by `<object>.<field>`, each with two boolean flags (`FieldPermissionSchema`):
+Field permissions are a map on the permission set keyed by `<object>.<field>`, each with two boolean flags and an optional row condition (`FieldPermissionSchema`):
 
 ```yaml
 # sales_rep.permission.yml (continued)
@@ -256,9 +256,12 @@ fields:
   <object>.<field>:
     readable: true | false   # default true  — can see the field
     editable: true | false   # default false — can modify the field
+    when: "status == 'approved'"   # optional — a row condition on the EDIT vote, in RLS `using`'s CEL
 ```
 
 > There is no separate `create` flag for fields. `editable` governs both create-time and update-time writes; read stripping is governed by `readable`.
+
+> `when` narrows **where** the entry votes: on a matching row it votes as declared, on every other row it is absent (as if the set had not declared the field). The write gate judges the stored row before an update and each incoming row of an insert, in process; a row it cannot judge (a predicate update, a stored row the caller cannot read, a condition that does not resolve for the request) applies the entry as its lock. `readable: false` beside a `when` is refused at parse time, and `objectstack validate` judges the condition like an RLS predicate. Readers that hold no row (`/auth/me/permissions`, `os explain`) report the entry as its lock. See [Field-level security](/docs/permissions/field-level-security#row-conditioned-edit-locks-when).
 
 ### Static `readonly` fields on the write path
 

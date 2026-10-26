@@ -444,6 +444,10 @@ const ko = {
     selected_other: "{{count}}개 선택됨",
     edit: "편집",
     delete: "삭제",
+    // The inline-edit row buttons and the hover open affordance (#25916).
+    openRecord: "레코드 열기",
+    cancelChanges: "변경 취소",
+    saveRow: "행 저장",
   },
   grid: {
     bulkSelected: "{{count}}건 선택됨",
@@ -749,6 +753,10 @@ const ko = {
     noMatches: "일치하는 레코드가 없습니다",
     noMatchesMessage: "현재 필터나 검색어와 일치하는 레코드가 없습니다. 조건을 조정하거나 지워 보세요.",
     viewFilterNoMatchesMessage: "이 뷰의 필터와 일치하는 레코드가 없습니다.",
+    ownedNoneTitle: "아직 내 레코드가 없습니다",
+    ownedNoneMessage: "이 뷰에는 내 레코드만 표시되며, 아직 하나도 없습니다.",
+    noneVisibleTitle: "볼 수 있는 레코드가 없습니다",
+    noneVisibleMessage: "여기에는 접근 권한이 있는 레코드가 없습니다. 레코드가 보여야 한다면 관리자에게 접근 권한을 요청하세요.",
     loadErrorTitle: "레코드를 불러오지 못했습니다",
     loadErrorMessage: "이 데이터를 불러오는 중 문제가 발생했습니다. 연결을 확인하고 다시 시도하세요.",
     loadErrorForbiddenTitle: "접근 권한이 없습니다",
@@ -2409,6 +2417,8 @@ const ko = {
         stepInput: '입력',
         stepOutput: '출력',
         stepError: '오류',
+        // A client that lacks the method a panel calls (#25916).
+        clientMethodUnavailable: "이 클라이언트에서는 {{method}} 기능을 사용할 수 없습니다",
       },
       // objectui#13460 — the Integrations page's "Connect an AI agent" card (`AgentConnectSection`).
       agentConnect: {
@@ -4334,6 +4344,8 @@ const ko = {
       detailLoadFailed: '변경 상세 정보를 불러오지 못했습니다:',
       detailNone: '차이가 감지되지 않았습니다 — 초안이 게시된 버전과 일치합니다.',
       detailChangedKeys: '기타 변경:',
+      detailNewKeys: '포함:',
+      generatedGroup: '플랫폼에서 생성됨 ({{n}})',
       confirmNote: '게시하면 이 패키지의 대기 중인 초안 {{count}}개가 한 번에(원자적으로) 게시됩니다.',
       confirmNote_one: '게시하면 이 패키지의 대기 중인 초안 {{count}}개가 한 번에(원자적으로) 게시됩니다.',
       confirmNote_other: '게시하면 이 패키지의 대기 중인 초안 {{count}}개가 한 번에(원자적으로) 게시됩니다.',
@@ -4720,6 +4732,14 @@ const ko = {
       unknownType: "알 수 없는 메타데이터 보기 유형입니다. {{a}}, {{b}} 또는 {{c}}이어야 합니다.",
       unknownTypeNamed: "알 수 없는 메타데이터 보기 유형 “{{type}}”입니다. {{a}}, {{b}} 또는 {{c}}이어야 합니다.",
     },
+  },
+  reactPage: {
+    disabledTitle: "이 배포에서는 React 페이지가 비활성화되어 있습니다",
+    disabledBody: "{{kind}} 페이지는 작성자의 JavaScript를 애플리케이션에서 직접 실행하므로 배포에서 켜지 않는 한 꺼져 있습니다. 페이지 작성자를 신뢰하는 운영자는 서버에 {{flag}} 설정을 적용합니다(렌더러를 임베드하는 호스트는 {{call}} 호출).",
+    loadFailed: "React 런타임을 불러오지 못했습니다",
+    sourceRequired: "{{kind}} 페이지에는 비어 있지 않은 {{source}} 값이 필요합니다.",
+    loading: "React 런타임을 불러오는 중…",
+    error: "React 페이지 오류",
   },
 };
 

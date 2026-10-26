@@ -70,8 +70,11 @@
  * `../ui/analytics-carrier-filter.ts` precedent).
  */
 
+/** One bare identifier — a column name, or one hop of a path. */
+const IDENTIFIER = '[A-Za-z_][A-Za-z0-9_]*';
+
 /** A bare identifier, then zero or more `.identifier` hops — the column path. */
-const COLUMN_PATH = '[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*';
+const COLUMN_PATH = `${IDENTIFIER}(?:\\.${IDENTIFIER})*`;
 
 /**
  * A column of the object, a relationship path ending in one, or the row
@@ -87,6 +90,15 @@ export const ANALYTICS_COLUMN_REFERENCE = new RegExp(`^(?:\\*|${COLUMN_PATH})$`)
  * dimension's `sql` and a dataset dimension's `field`.
  */
 export const ANALYTICS_COLUMN_PATH = new RegExp(`^${COLUMN_PATH}$`);
+
+/**
+ * [#25778] {@link ANALYTICS_COLUMN_PATH} without the relationship hops — one
+ * column of the dataset's OWN object, by its bare name: the slot of a duration
+ * measure's `from` / `to` (`DatasetMeasureDurationSchema`,
+ * `../ui/dataset.zod.ts`), which reads two columns of the same row. Built from
+ * the same identifier as {@link COLUMN_PATH}.
+ */
+export const ANALYTICS_BASE_COLUMN = new RegExp(`^${IDENTIFIER}$`);
 
 /** The row wildcard — what a `count` aggregates (`COUNT(*)`). */
 const ROW_WILDCARD = '*';

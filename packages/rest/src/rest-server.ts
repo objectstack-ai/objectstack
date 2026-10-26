@@ -336,8 +336,6 @@ import { registerUiEndpoints, type UiRouteHost } from './ui-routes.js';
 import { registerFormEndpoints, type FormRouteHost } from './form-routes.js';
 // [#23050 slice 12] The CRUD routes' body moved to its own module — see its header.
 import { registerCrudEndpoints, type CrudRouteHost } from './crud-routes.js';
-// [#24715] A `/data` write's NOT NULL refusal, named by the field's label.
-import { labelNotNullRefusal as labelNotNullRefusalAnswer } from './not-null-refusal-label.js';
 // [#23050 slice 13a] The `/meta` type list, whole-store maintenance and per-type list
 // groups moved to their own module — see its header. That module is also the home of the
 // meta doors' request envelope `TransportScopedMetaRequest` and of `MetaRouteScope`.
@@ -2605,9 +2603,9 @@ export class RestServer {
      * envelope. Same env-scoped request shape the list read sends
      * (`metaListSource`).
      *
-     * [#24535] On the protocol's EXECUTION face where it has one: neither
-     * reader serves a byte of the item (the exposure gate reads `enable`, the
-     * NOT NULL relabel a field's `label` and `storage`), and the served face's
+     * [#24535] On the protocol's EXECUTION face where it has one: the reader
+     * serves no byte of the item (the exposure gate reads `enable`; the NOT NULL
+     * relabel that read a field's `label` retired with #24768), and the served face's
      * decoration was a full diagnostic `safeParse` of the object's definition on
      * every `/data` request. Same sources, overlay cache and governance either
      * way; a protocol without it is asked `getMetaItem`.
@@ -2628,40 +2626,6 @@ export class RestServer {
             };
             return byName.call(p, itemRequest);
         };
-    }
-
-    /**
-     * [#24715] Name a `/data` write's NOT NULL refusal by the field's label, in
-     * the caller's locale (`./not-null-refusal-label.ts` carries the rule, the
-     * localization and every case it leaves alone).
-     *
-     * Every other answer is handed back before anything is read. For a NOT NULL
-     * refusal this door resolves the protocol again (the handler's own was
-     * scoped to its `try`), reads the object by name ({@link objectItemReader},
-     * the read the exposure gate makes on every `/data` request) and resolves
-     * the i18n service. `context` is the execution context the handler handed
-     * the write, so its `locale` is the one the engine's validator was given;
-     * it is absent when the handler threw before resolving it.
-     */
-    private async labelNotNullRefusal(
-        answer: { status: number; body: Record<string, unknown> },
-        req: any,
-        environmentId: string | undefined,
-        context: { locale?: unknown } | undefined,
-    ): Promise<{ status: number; body: Record<string, unknown> }> {
-        const locale = context?.locale;
-        return labelNotNullRefusalAnswer(answer, {
-            object: typeof req?.params?.object === 'string' ? req.params.object : undefined,
-            readObject: async (name) => {
-                const read = this.objectItemReader(await this.resolveProtocol(environmentId, req), environmentId);
-                const item = ((read ? await read(name) : undefined) as { item?: unknown } | undefined)?.item;
-                return item !== null && typeof item === 'object' && (item as { name?: unknown }).name === name
-                    ? item
-                    : undefined;
-            },
-            locale: typeof locale === 'string' && locale.length > 0 ? locale : undefined,
-            resolveI18nService: () => this.resolveI18nService(environmentId, req),
-        });
     }
 
     /**
@@ -5584,7 +5548,6 @@ export class RestServer {
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
             enforceAuth: (...a) => this.enforceAuth(...a),
             enforceApiAccess: (...a) => this.enforceApiAccess(...a),
-            labelNotNullRefusal: (...a) => this.labelNotNullRefusal(...a),
         };
         registerCrudEndpoints.call(host, basePath);
     }

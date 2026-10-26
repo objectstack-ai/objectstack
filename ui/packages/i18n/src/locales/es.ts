@@ -455,6 +455,10 @@ const es = {
     selected_other: "{{count}} seleccionados",
     edit: "Editar",
     delete: "Eliminar",
+    // The inline-edit row buttons and the hover open affordance (#25916).
+    openRecord: "Abrir registro",
+    cancelChanges: "Descartar cambios",
+    saveRow: "Guardar fila",
   },
   grid: {
     bulkSelected: "{{count}} seleccionados",
@@ -775,6 +779,10 @@ const es = {
     noMatches: "No hay registros coincidentes",
     noMatchesMessage: "Ningún registro coincide con sus filtros o su búsqueda actuales. Pruebe a ajustarlos o borrarlos.",
     viewFilterNoMatchesMessage: "Ningún registro coincide con el filtro de esta vista.",
+    ownedNoneTitle: "Aún no tiene nada propio",
+    ownedNoneMessage: "Esta vista solo muestra sus propios registros, y todavía no tiene ninguno.",
+    noneVisibleTitle: "No hay registros que pueda ver",
+    noneVisibleMessage: "Aquí no hay registros a los que tenga acceso. Si esperaba ver alguno, pida acceso a su administrador.",
     loadErrorTitle: "No se pudieron cargar los registros",
     loadErrorMessage: "Algo salió mal al cargar estos datos. Compruebe su conexión y vuelva a intentarlo.",
     loadErrorForbiddenTitle: "No tiene acceso",
@@ -2461,6 +2469,8 @@ const es = {
         stepInput: 'Entrada',
         stepOutput: 'Salida',
         stepError: 'Error',
+        // A client that lacks the method a panel calls (#25916).
+        clientMethodUnavailable: "{{method}} no está disponible en este cliente",
       },
       // objectui#13460 — the Integrations page's "Connect an AI agent" card (`AgentConnectSection`).
       agentConnect: {
@@ -4425,6 +4435,8 @@ const es = {
       detailLoadFailed: 'No se pudieron cargar los detalles del cambio:',
       detailNone: 'No se detectaron diferencias — el borrador coincide con la versión publicada.',
       detailChangedKeys: 'También cambió:',
+      detailNewKeys: 'Incluye:',
+      generatedGroup: 'Generado por la plataforma ({{n}})',
       confirmNote: 'Publicar libera atómicamente los {{count}} borradores pendientes de este paquete.',
       confirmNote_one: 'Publicar libera atómicamente {{count}} borrador pendiente de este paquete.',
       confirmNote_many: 'Publicar libera atómicamente los {{count}} de borradores pendientes de este paquete.',
@@ -4835,6 +4847,14 @@ const es = {
       unknownType: "Tipo de vista de metadatos desconocido. Se esperaba {{a}}, {{b}} o {{c}}.",
       unknownTypeNamed: "Tipo de vista de metadatos desconocido «{{type}}». Se esperaba {{a}}, {{b}} o {{c}}.",
     },
+  },
+  reactPage: {
+    disabledTitle: "Las páginas React están desactivadas en esta implementación",
+    disabledBody: "Las páginas {{kind}} ejecutan el JavaScript del autor directamente en la aplicación, por lo que están desactivadas salvo que la implementación las active. Un operador que confía en los autores de sus páginas establece {{flag}} en el servidor (un host que integra el renderizador llama a {{call}}).",
+    loadFailed: "No se pudo cargar el entorno de ejecución de React",
+    sourceRequired: "Una página {{kind}} requiere un {{source}} no vacío.",
+    loading: "Cargando el entorno de ejecución de React…",
+    error: "Error en la página React",
   },
 };
 

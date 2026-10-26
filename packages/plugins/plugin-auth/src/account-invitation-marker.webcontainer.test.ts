@@ -102,6 +102,7 @@ describe('[#23343] the account-invitation marker under the WebContainer request-
     const res = await runAdminImportUsers(
       {
         getAuthApi: () => manager.getApi(),
+        getAuthContext: () => manager.getAuthContext(),
         getDataEngine: () => manager.getDataEngine() as never,
         phoneNumberEnabled: () => false,
         emailServiceAvailable: () => manager.isEmailServiceAvailable(),
@@ -166,6 +167,7 @@ describe('[#23343] the account-invitation marker under the WebContainer request-
     const res = await runAdminImportUsers(
       {
         getAuthApi: () => manager.getApi(),
+        getAuthContext: () => manager.getAuthContext(),
         getDataEngine: () => manager.getDataEngine() as never,
         phoneNumberEnabled: () => false,
         emailServiceAvailable: () => manager.isEmailServiceAvailable(),

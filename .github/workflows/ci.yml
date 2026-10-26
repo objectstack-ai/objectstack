@@ -38,7 +38,7 @@ on:
   # branch-protection-required check MUST carry this trigger, or queue builds
   # wait forever on a check that never reports.
   merge_group:
-  # ── THE HOURLY FULL RUN (#16467) ─────────────────────────────────────────
+  # ── THE SCHEDULED FULL RUN (#16467), every 4 hours since #25771 ──────────
   # `push` above now computes the Test Core package set with `--affected`
   # against `github.event.before`, so a merge no longer re-tests the whole
   # workspace it just tested in the queue. Something still has to run the FULL
@@ -48,16 +48,22 @@ on:
   # This is that run. Minute 0 rather than an offset minute ON PURPOSE, and
   # against the sibling convention in test-nightly-tiers.yml: the reading this
   # feeds — `scripts/ci/select-shard-timings-run.mjs` — wants one complete run
-  # per hour far more than it wants a short queue wait, and a run that starts
-  # a few minutes late is still the hour's run. What it must NOT do is collide
-  # with the next hour's, which the concurrency group below decides.
+  # per window far more than it wants a short queue wait, and a run that starts
+  # a few minutes late is still that window's run. What it must NOT do is
+  # collide with the next one, which the concurrency group below decides.
+  #
+  # EVERY 4 HOURS, not hourly (#25771, maintainer ruling Q6 = C): the job logic
+  # is unchanged — the run is still the full battery and still finds flakes on
+  # an unchanged SHA — at six runs a day instead of twenty-four, most of which
+  # re-tested a SHA an earlier run had already tested. Every runner-minute it
+  # spends competes with PR and merge-queue capacity.
   #
   # ⛔ This is a NEW TRIGGER KEY, not a widening of `push:`. The ⛔ above still
   # binds: `push:` stays filtered to `main`.
   schedule:
-    - cron: '0 * * * *'
+    - cron: '0 */4 * * *'
   # The same full battery, on demand: an operator who has just landed a fix for
-  # a red hourly run should not have to wait up to an hour to see it answered.
+  # a red scheduled run should not have to wait up to 4 hours to see it answered.
   # Treated as `full` by the selection script for the same reason `schedule` is.
   workflow_dispatch:
 
@@ -68,7 +74,7 @@ on:
 # run that tests ITS OWN merge: Test Core computes `--affected` against
 # `github.event.before` (see `on.schedule` above), so a push run that does not
 # finish leaves that merge's diff with no Test Core verdict on `main` until the
-# next hourly run. Main merges land every ~9–16 min and a push run takes ~27,
+# next scheduled full run. Main merges land every ~9–16 min and a push run takes ~27,
 # so under the old shared key `ci-CI-push-refs/heads/main` the next merge
 # cancelled it: 31 of 40 push runs on 2026-10-23 01:03Z–11:03Z, most of them
 # inside "Run this shard's tests". (The Turbo seed is NOT what was lost: the
@@ -86,7 +92,7 @@ on:
 # ⭐ `github.event_name` IS LOAD-BEARING TOO (#16467). A `schedule` and a
 # `workflow_dispatch` run on `main` both fall through to `refs/heads/main`;
 # without the event name they share one group and an on-demand run cancels the
-# hourly one (and, under any key that drops `github.event.after`, the next
+# scheduled one (and, under any key that drops `github.event.after`, the next
 # merge cancels both, which is how 36 of 60 hourly-era push runs died).
 #
 # ⛔ Do not "simplify" either segment away. `scripts/ci/scheduled-full-run.mjs
@@ -98,8 +104,8 @@ on:
 # those events too).
 #
 # `cancel-in-progress` stays `true`: with a per-commit push group it never
-# fires on a push, and for everything else it is the policy. Two hourly runs
-# overlapping means one of them is over an hour old, and an hour-old
+# fires on a push, and for everything else it is the policy. Two scheduled
+# runs overlapping means one of them is over 4 hours old, and a 4-hour-old
 # measurement of `main` is strictly the worse of the two. Test Core's wall clock
 # is well inside the cadence (~39 shard-minutes across the shards), so this is
 # the exceptional path, not the normal one.
@@ -109,7 +115,7 @@ concurrency:
 
 # ── THE TWO SPEEDS (#22998) ──────────────────────────────────────────────────
 # A `pull_request` or `merge_group` run carries the FAST SET: `Build Core`,
-# `Test Core` (affected-only) and `Build Docs`. `main`'s hourly `schedule` run,
+# `Test Core` (affected-only) and `Build Docs`. `main`'s 4-hourly `schedule` run,
 # its `push` runs and an on-demand `workflow_dispatch` carry the FULL BATTERY:
 # the fast set plus the three jobs below that spell
 #
@@ -243,7 +249,7 @@ jobs:
       # That failure direction is the dangerous one: every filter output would
       # come back `false`, `|| 'true'` supplies nothing (the output exists and
       # says `false`), and every downstream `!= 'false'` guard SKIPS — so the
-      # hourly full run would have been an entirely green, entirely empty run
+      # scheduled full run would have been an entirely green, entirely empty run
       # of nothing at all. An allow-list makes each new event fail toward
       # THE FILTER CONTRACT's half 1 instead: the step is skipped, its outputs
       # are the empty string, `|| 'true'` fills them in, and everything runs.
@@ -628,7 +634,7 @@ jobs:
     # (p + s + 10m) and the cap-deferred path (p + s + 20m) -- land before the
     # new value on every observation, AND the slowest `Test Core (N/8)` job
     # wall is at or under 80% of it. Read the pull_request and merge_group
-    # runs, not the hourly schedule alone: scheduled runs mostly replay the
+    # runs, not the 4-hourly schedule alone: scheduled runs mostly replay the
     # cache their commit's push run saved. It carries no other expiry — a
     # raise with no revert condition beside it becomes permanent by
     # forgetting — and the stall guard stays the primary hang detector.
@@ -772,7 +778,7 @@ jobs:
       #                 `main` was on before this merge landed (#16467). A zero
       #                 sha -- a first push, or a force-push that rewrote
       #                 history -- falls back to the FULL list, loudly.
-      #   schedule      the FULL list: the hourly run IS the full battery, and
+      #   schedule      the FULL list: the 4-hourly run IS the full battery, and
       #   workflow_     the on-demand rerun of it. Neither carries a diff base,
       #     dispatch    and neither should: they are the run that says whether
       #                 the whole workspace is green on `main`.
@@ -1266,6 +1272,11 @@ jobs:
       # attestation pair below to "match" this step — that pair is the
       # credential, not diagnostics, and check:shard-attestation pins its
       # unguarded shape statically.
+      # Retention: 4 days on a `schedule` run, 1 day otherwise (#25771). The
+      # weekly shard-timings refresh accumulates the scheduled runs whose
+      # summaries are still downloadable; hourly, one day held 24 of them, and
+      # at every 4 hours it takes four days to hold the same 24. Every other
+      # event's summary is read only inside its own run, so it stays at 1 day.
       - name: Publish this shard's turbo run summary
         if: always()
         continue-on-error: true
@@ -1274,7 +1285,7 @@ jobs:
           name: test-core-run-summary-${{ matrix.shard }}-of-8
           path: .turbo/runs/
           if-no-files-found: ignore
-          retention-days: 1
+          retention-days: ${{ github.event_name == 'schedule' && 4 || 1 }}
 
       # ── Predicted vs measured: this shard's timing drift (#16173, #16465) ──
       #
@@ -1490,10 +1501,11 @@ jobs:
             --shard "${{ matrix.shard }}/8" \
             --out "$RUNNER_TEMP/test-timings/shard-${{ matrix.shard }}.json"
 
-      # 1 day, matching the run-summary upload above: this is an intermediate
-      # the aggregator consumes minutes later in the SAME run. The 14-day
-      # retention this card asks for is on the MERGED table, published by
-      # `Test Core`.
+      # Retention matches the run-summary upload above (4 days on `schedule`,
+      # 1 day otherwise, #25771): the aggregator consumes this minutes later in
+      # the SAME run, and the shard-timings refresh reads the scheduled runs'
+      # captures beside their summaries. The 14-day retention this card asks
+      # for is on the MERGED table, published by `Test Core`.
       - name: Publish this shard's test timings
         if: always()
         continue-on-error: true
@@ -1502,7 +1514,7 @@ jobs:
           name: test-core-timings-${{ matrix.shard }}-of-8
           path: ${{ runner.temp }}/test-timings/
           if-no-files-found: ignore
-          retention-days: 1
+          retention-days: ${{ github.event_name == 'schedule' && 4 || 1 }}
 
       # A stall's full diagnostic reports (JS stacks, libuv handles, heap
       # summary per process) outlive the in-log digest — keep them so a #4250
@@ -1836,7 +1848,7 @@ jobs:
   # driver-memory, driver-mongodb, service-analytics) — the other backends the
   # temporal conformance matrix holds to one standard. Its NAME still says
   # "live PG + MySQL" on purpose: it was a required check until #22998 moved
-  # the job to the full battery, and its readers (the hourly run's red card,
+  # the job to the full battery, and its readers (the scheduled run's red card,
   # merge-queue triage history, every instruction that names it) find it by
   # that literal — renaming it is a contract change, not a tidy-up.
   temporal-conformance:
@@ -2734,7 +2746,7 @@ jobs:
       # too (`no caches are enabled`) and re-executes everything.
       #
       # Credentials go only to runs whose code has landed or is landing:
-      # `merge_group`, and any run on refs/heads/main (push, the hourly
+      # `merge_group`, and any run on refs/heads/main (push, the 4-hourly
       # schedule, workflow_dispatch on main). A `pull_request` run, and a
       # dispatch on any other branch, receives neither TURBO_TOKEN nor the
       # signing key, so code a PR adds can neither upload to the remote nor
@@ -3695,7 +3707,10 @@ jobs:
   # `started_at` from the Actions jobs endpoint, before Build UI Deps existed
   # (so each run includes a cold seven-package build of up to 288 s):
   #   - Lint UI: n=42, min 71 s, median 112 s, p95 524 s, max 558 s (9.3 min)
-  #     => max(27.9, 24.3) => 30, the value it was ported with.
+  #     => max(27.9, 24.3) => 30, the value it was ported with. Re-derived
+  #     for objectui's Repo Gates (objectstack#25880), which add ~174 s (their
+  #     first PR run, 286 s, less the 112 s median): 558 + 174 = 732 s
+  #     (12.2 min) => max(36.6, 27.2) => 40.
   #   - Build & E2E UI: n=51, min 106 s, median 170 s, p95 423 s, max 457 s
   #     (7.6 min) => max(22.9, 22.6) => 25, down from objectui's 30 plus the
   #     15 the port added for the in-job build, which no derivation backed.
@@ -3706,7 +3721,7 @@ jobs:
     needs: [filter, ui-deps]
     if: ${{ !cancelled() && needs.filter.outputs.ui_tree != 'false' && needs.filter.outputs.ui != 'false' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     permissions:
       contents: read
     env:
@@ -3775,7 +3790,95 @@ jobs:
           pnpm --dir ui run check:bash32-floor --self-test
           pnpm --dir ui run check:bash32-floor
 
+      # ── objectui's Repo Gates (objectstack#25880) ────────────────────────
+      # The gates of objectui's `repo-gates.yml`, which GitHub stopped running
+      # when the tree moved under `ui/` (it reads only this repository's
+      # `.github/workflows/`), and which objectstack#25712 deleted with the
+      # rest of `ui/.github/workflows/`. They judge what objectui ships
+      # — `ui/content/docs/**`, `ui/skills/**`, the package READMEs and the
+      # documented component types — so the change most likely to trip them is
+      # a docs-only or skills-only PR, which the `filter` job's `ui` globs
+      # already include.
+      #
+      # Ported as that workflow ran them, in its order: the install-free gates
+      # here, before the install; the gates that read built `dist/*.d.ts` after
+      # this job's last build, below. Every step keeps its `<check> — <step>`
+      # name, and every one runs `if: !cancelled()` (or on the install / build
+      # it needs), so one red gate never hides another of these; each script's
+      # header is the authority on what it checks. Dropped in the port: the
+      # `.objectstack-pin` restore / build / save (the merged tree builds
+      # `@objectstack/*` from the workspace, see the header above
+      # `type-check-ui`) and the turbo-cache report / prune bookkeeping (this
+      # job's own restore and save serve the build below). Retired since: the
+      # Action Ref Convention scan, which judged objectui's own workflows and
+      # went with them (objectstack#25712); a repository-wide action-ref
+      # convention needs a home that no `ui` path filter skips (sub-issue 4).
+      - name: Control Byte Scan — Scan tracked text files for raw control bytes
+        if: ${{ !cancelled() }}
+        run: pnpm --dir ui run check:control-bytes
+
+      # Self-test first: a scan whose recogniser is broken reports a clean
+      # tree. It derives its population from this repository's workflows, so
+      # it walks this job's install-free steps, itself included.
+      - name: Pre-Install Import Graph Check — Check the pre-install gates' import graphs
+        if: ${{ !cancelled() }}
+        run: |
+          pnpm --dir ui run check:pre-install-import-graph --self-test
+          pnpm --dir ui run check:pre-install-import-graph
+
+      - name: Shell Escape Residue Scan — Check for machine-produced shell-escape residue in fenced examples
+        if: ${{ !cancelled() }}
+        run: pnpm --dir ui run check:shell-escape-residue
+
+      - name: Inert vi.mock Specifier Check — Check every relative vi.mock specifier resolves
+        if: ${{ !cancelled() }}
+        run: pnpm --dir ui run check:vi-mock-specifiers
+
+      - name: Inert vi.mock Specifier Check — Check every covered vi.mock factory inherits the real export surface
+        if: ${{ !cancelled() }}
+        run: pnpm --dir ui run check:vi-mock-inherit
+
+      - name: Internal Docs Link Check — Check internal docs links
+        if: ${{ !cancelled() }}
+        run: pnpm --dir ui run docs:check-links
+
+      - name: Doc Fence Language Check — Check that no fence spelling hides a TypeScript block
+        if: ${{ !cancelled() }}
+        run: |
+          pnpm --dir ui run check:doc-fences --self-test
+          pnpm --dir ui run check:doc-fences
+
+      - name: Doc Example Id Check — Check documented example ids against the catalog registry
+        if: ${{ !cancelled() }}
+        run: pnpm --dir ui run check:doc-example-ids
+
+      - name: Doc Component Type Check — Check documented component types against the registry
+        if: ${{ !cancelled() }}
+        run: pnpm --dir ui run check:doc-types
+
+      - name: Doc Component Type Check — Check prompt-taught component keys render
+        if: ${{ !cancelled() }}
+        run: pnpm --dir ui run check:prompt-keys
+
+      - name: Skill Guide Path Check — Check paths stated in the skill guides
+        if: ${{ !cancelled() }}
+        run: pnpm --dir ui run check:skills-paths
+
+      - name: Skill Eval Token Check — Self-test the oracle and the whole-token rule, both directions
+        if: ${{ !cancelled() }}
+        run: pnpm --dir ui run check:skill-eval-tokens --self-test
+
+      - name: Skill Eval Token Check — Check every eval must_contain token against the guides
+        if: ${{ !cancelled() }}
+        run: pnpm --dir ui run check:skill-eval-tokens
+
+      - name: Docs Route Eager Closure Check — Weigh the docs route eager closure
+        if: ${{ !cancelled() }}
+        run: pnpm --dir ui run check:docs-route-closure
+
       - name: Install dependencies
+        id: install
+        if: ${{ !cancelled() }}
         run: pnpm install --frozen-lockfile
 
       - name: Build the @objectstack packages objectui consumes
@@ -3812,6 +3915,93 @@ jobs:
 
       - name: Verify the ui CLI's own check command passes on the ui tree
         run: pnpm --dir ui run check
+
+      # ── objectui's Repo Gates that read the built type surface ───────────
+      # Gated on the install alone, so a red lint step above hides none of
+      # them. The two derive steps capture the gate's status before writing
+      # the output: a command substitution inside `echo` reports `echo`'s
+      # status, and a failed derivation would read as an empty filter.
+      - name: Skill Example Check — Derive the packages the marked examples import
+        id: ui-skill-filter
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          status=0
+          args="$(pnpm --dir ui run --silent check:skill-examples --build-filter)" || status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "::error::Could not derive the build filter: \`check:skill-examples --build-filter\` exited $status. Refusing to continue — carrying on would build every package instead of the ones the marked examples import." >&2
+            exit "$status"
+          fi
+          case "$args" in
+            *--filter=*) ;;
+            *)
+              echo "::error::The derived build filter names no package (got: '$args'). Refusing to continue." >&2
+              exit 1
+              ;;
+          esac
+          echo "args=$args" >> "$GITHUB_OUTPUT"
+
+      - name: Doc Snippet Type Check — Derive the packages the covered snippets import
+        id: ui-snippet-filter
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          status=0
+          args="$(pnpm --dir ui run --silent check:doc-snippets --build-filter)" || status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "::error::Could not derive the build filter: \`check:doc-snippets --build-filter\` exited $status. Refusing to continue — carrying on would build every package instead of the ones the covered snippets import." >&2
+            exit "$status"
+          fi
+          case "$args" in
+            *--filter=*) ;;
+            *)
+              echo "::error::The derived build filter names no package (got: '$args'). Refusing to continue." >&2
+              exit 1
+              ;;
+          esac
+          echo "args=$args" >> "$GITHUB_OUTPUT"
+
+      # One build for the gates below: every package under `ui/packages/` (the
+      # README export check reads each one's declared type entry) in union with
+      # the two derived closures. The derived filters are lists of `--filter=`
+      # words and stay unquoted so they word-split. ⛔ Never an unfiltered
+      # `turbo run build`.
+      - name: Build every ui package the gates below read
+        id: ui-gate-build
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        env:
+          SKILL_FILTER: ${{ steps.ui-skill-filter.outputs.args }}
+          SNIPPET_FILTER: ${{ steps.ui-snippet-filter.outputs.args }}
+        run: pnpm exec turbo run build --concurrency=4 --filter='./ui/packages/*' $SKILL_FILTER $SNIPPET_FILTER
+
+      - name: Skill Example Check — Self-test the marker convention, both directions
+        if: ${{ !cancelled() && steps.ui-gate-build.outcome == 'success' }}
+        run: pnpm --dir ui run check:skill-examples --self-test
+
+      - name: Skill Example Check — Check the marked skill examples against the built types
+        if: ${{ !cancelled() && steps.ui-gate-build.outcome == 'success' }}
+        run: pnpm --dir ui run check:skill-examples
+
+      # Report-only: exits 0 whatever it finds, non-zero only when the
+      # instrument is broken. Before the blocking gate, so its census is read
+      # on exactly the runs where the corpus moved.
+      - name: Doc Snippet Type Check — Census the code emitted from template literals (report-only)
+        if: ${{ !cancelled() && steps.ui-gate-build.outcome == 'success' }}
+        run: pnpm --dir ui run check:doc-snippets --emit-census
+
+      - name: Doc Snippet Type Check — Compile documentation snippets against the built types
+        if: ${{ !cancelled() && steps.ui-gate-build.outcome == 'success' }}
+        run: pnpm --dir ui run check:doc-snippets
+
+      - name: Doc Snippet Type Check — Compile JSDoc `@example` blocks against the built types
+        if: ${{ !cancelled() && steps.ui-gate-build.outcome == 'success' }}
+        run: pnpm --dir ui run check:doc-examples
+
+      - name: Doc Snippet Type Check — Judge JSON doc fences through the strict authoring face
+        if: ${{ !cancelled() && steps.ui-gate-build.outcome == 'success' }}
+        run: pnpm --dir ui run check:doc-json
+
+      - name: README Export Check — Check every README self-import against the real export surface
+        if: ${{ !cancelled() && steps.ui-gate-build.outcome == 'success' }}
+        run: pnpm --dir ui run check:readme-exports
 
       # Bookkeeping after the last checking step (the ui jobs' header): the
       # seed keeps only the entries this job's turbo runs used.

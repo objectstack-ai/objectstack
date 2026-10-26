@@ -38,6 +38,8 @@ import {
   sitesIn,
 } from '../check-test-path-roots.mjs';
 
+import { jobBlock, rootCi, uiRun, UI_JOBS, withoutComments } from './helpers/root-ci';
+
 /**
  * The repo root, derived from THIS FILE's own location — never from
  * `process.cwd()`. That is the rule this file's subject enforces, and a test
@@ -236,13 +238,12 @@ describe('check-test-path-roots — the gate itself', () => {
     const pkg = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')) as { scripts: Record<string, string> };
     expect(pkg.scripts['check:test-path-roots']).toBe('node scripts/check-test-path-roots.mjs');
 
-    // `Lint` is in `REQUIRED_CONTEXTS` and subscribes `merge_group`; a step
+    // objectstack#25712: the job is the root `ci.yml`'s `lint-ui` (`Lint UI`, a
+    // required context of a workflow that subscribes `merge_group`), where
+    // objectstack#25697 ported objectui's `lint.yml`; read by path. A step
     // inside it gates without adding a context to the queue's required set.
-    const lint = readFileSync(join(REPO_ROOT, '.github/workflows/lint.yml'), 'utf8')
-      .split('\n')
-      .filter((line) => !/^\s*#/.test(line))
-      .join('\n');
-    expect(lint).toContain('node scripts/check-test-path-roots.mjs');
+    const lint = withoutComments(jobBlock(rootCi(), UI_JOBS.lint));
+    expect(lint).toContain(uiRun('check:test-path-roots'));
   });
 
   it('it goes through the one entry-guard predicate rather than hand-typing one', () => {

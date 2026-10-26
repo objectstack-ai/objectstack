@@ -9,7 +9,7 @@
       "title": "Provider-bound declarative connectors materialize at boot for every installed provider kind (rest/openapi/mcp), list with origin:'declarative' state:'ready', and dispatch end-to-end from connector_action",
       "since": "v15.1",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
@@ -32,7 +32,7 @@
         "for each of the three instances, record its descriptor: origin, state, and the actions[] array (key/label/inputSchema/outputSchema/effect)",
         "confirm showcase_erp_catalog is ABSENT from the runtime listing (it has no provider — descriptor only)",
         "POST /api/v1/automation/showcase_declarative_connector_ping/trigger and .../showcase_mcp_connector_echo/trigger (automation.execute); read each run via GET /automation/:name/runs",
-        "author the DeclarativeConnectorEntrySchema negatives in a scratch package and build each: (a) providerConfig with NO provider, (b) provider-bound entry that also authors actions[], (c) provider-bound entry with inline authentication { type: 'api-key', … }, (d) provider: 'no_such_provider'; capture all four rejections",
+        "author the DeclarativeConnectorEntrySchema negatives in a scratch package and build each: (a) providerConfig with NO provider, (b) provider-bound entry that also authors actions[], (c) provider-bound entry with inline authentication { type: 'api-key', … }; capture the three rejections. Then (d) provider: 'no_such_provider': it builds clean (provider is an open snake_case key, not an enum), so boot it and capture the fatal boot output acceptance[4] scores",
         "disable one declaration (enabled:false) and reboot; re-list"
       ],
       "acceptance": [
@@ -75,7 +75,7 @@
       ],
       "negative": [
         "the catalog descriptor (showcase_erp_catalog) appearing in the RUNTIME listing is a FAIL — descriptor vs instance is the #2612 boundary this whole surface is built on",
-        "any of the four malformed-entry builds passing clean is a FAIL (silent acceptance of an unmaterializable declaration)"
+        "any of the three malformed-entry builds (steps[5] (a)–(c)) passing clean is a FAIL (silent acceptance of an unmaterializable declaration); (d), the unknown provider, is refused at boot (acceptance[4]), not at build"
       ],
       "traps": [
         "stale-dist"
@@ -116,6 +116,12 @@
           "date": "2026-10-20",
           "change": "automated.ref narrowed to the one clause its pin asserts whole — checklist-accuracy finding of QA run #24779 (18.0 sweep round 3, 580fd4ed; wave anchor #24579 round 12, round 6's theme-B rule). Re-read at base 307ce4c4b4: the dogfood pin's two cases assert negative[0] whole and halves of acceptance[0]–[2] (the mcp variant; the other two variants' state, not their origin), so no acceptance clause is pin-scored and the ref now says so. `automated` stays, with negative[0]. No clause changed",
           "ref": "#24824"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-26",
+          "change": "negative[1] and steps[5] count the build rejections as three — checklist-accuracy finding of QA run #25815 (18.2.0 sweep, release-18.2.0-tier1, 6679644a; wave anchor #25807; card #25844): negative[1] said 'any of the four malformed-entry builds' while acceptance[3] lists three. The fourth probe, provider: 'no_such_provider', builds clean (connector.zod.ts declares provider as an open snake_case string) and is acceptance[4]'s boot error, so steps[5] now boots it. Read on main 9753d163. The same run read the automated.ref self-description as accurate; it is unchanged. No clause changed",
+          "ref": "#25844"
         }
       ]
     },
@@ -124,14 +130,14 @@
       "title": "An unreachable connector upstream degrades that ONE instance (CONNECTOR_UPSTREAM_UNAVAILABLE) instead of failing boot, retries on 5s→300s backoff, and recovers atomically — while config faults stay boot-fatal",
       "since": "v15.1",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
         "app": "showcase",
         "requires": [
           "the showcase_mcp_tools stdio instance — break its upstream deterministically by making its script unreachable: point providerConfig.transport.args at a nonexistent script (the experiment its own fixture comment prescribes, examples/app-showcase/src/system/connectors/index.ts#DevToolsMcpConnector), or move scripts/mcp-fixture.mjs out of the app, as QA run #24575 did. Do either in a SCRATCH copy of examples/app-showcase, for every boot of this item (steps[0] and steps[5]), never the shared tree. The path is relative to the serving process's cwd (./scripts/mcp-fixture.mjs), and moving the file is the variant steps[4] can undo with no config change",
-          "a config-fault twin for the both-sides check: the same entry with an invalid providerConfig shape (e.g. transport.kind: 'carrier_pigeon')"
+          "a config-fault twin for the both-sides check: the same entry with an invalid providerConfig shape (e.g. transport.kind: 'carrier_pigeon'). `os compile` accepts it — providerConfig is deliberately untyped in the spec (connector.zod.ts) — and only the provider factory refuses it, at boot, so the twin's refusal is read off the boot (steps[5]), never off a build"
         ]
       },
       "steps": [
@@ -139,7 +145,7 @@
         "GET /api/v1/automation/connectors; record the husk descriptor (state, degradedReason, actions)",
         "POST the flow that dispatches it (showcase_mcp_connector_echo trigger); capture the dispatch failure",
         "watch the log through at least three retry cycles; record the intervals",
-        "restore the upstream (fix the script path is a config CHANGE — instead restore by making the original path valid again, e.g. re-adding the file) WITHOUT restarting; wait one backoff cycle; re-read the descriptor. At the default `warn` log level the visible sign of the swap is the engine's warn `Connector 'showcase_mcp_tools' replaced`; the '[Automation] recovered connector instance …' line is info-level and prints only on a --log-level info boot (QA run #24575)",
+        "restore the upstream (fix the script path is a config CHANGE — instead restore by making the original path valid again, e.g. re-adding the file) WITHOUT restarting; wait one backoff cycle; re-read the descriptor — its state flipping to 'ready' with derived actions is the recovery signal. The engine's warn `Connector 'showcase_mcp_tools' replaced` is NOT one: it prints on every re-registration under the same name, a degraded husk re-registered by a failed retry included (plugin-extension-api.ts#assertSameOriginOrFree). The '[Automation] recovered connector instance …' line is info-level and prints only on a --log-level info boot (QA run #24575)",
         "separately, boot the config-fault twin and capture that boot's outcome",
         "trigger a metadata:reloaded reconcile WITHOUT a restart and confirm it retries immediately while the attempt count keeps climbing. A per-item publish announces one: QA run #24575 used PUT /api/v1/meta/view/NAME?mode=draft, then POST /api/v1/meta/view/NAME/publish, and the retry followed 1.2 s later. The PUT body is a current view item (ViewItemSchema, packages/spec/src/ui/view.zod.ts): { name: 'OBJECT.NAME', object, viewKind: 'list', config: { type: 'grid', data: { provider: 'object', object }, columns: [...] } }, its name qualified by the object (QA run #24779 used showcase_task.qa_b_reload_view). A flat { type, columns } body answers 422 unrecognized_keys, and nothing is published. ⛔ Not by touching or saving the entry's source: under os dev that rebuilds and RESTARTS the server (dev's --restart default), which discards the in-memory retry state instead of reconciling it. Only a config edit to the entry, a changed materialization signature, resets the backoff; this item does not drive that arm live"
       ],
@@ -213,6 +219,12 @@
           "date": "2026-10-20",
           "change": "steps[6] names the view body its per-item publish needs — checklist-accuracy finding of QA run #24779 (wave anchor #24579 round 12): a flat { type, columns } body answers 422 unrecognized_keys; the run published a view item carrying viewKind and config. Read at base 307ce4c4b4 against ViewItemSchema (view.zod.ts), which discriminates on viewKind and requires an OBJECT.view name. No clause changed",
           "ref": "#24824"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-26",
+          "change": "steps[4] and fixtures.requires[1] corrected — checklist-accuracy findings of QA run #25817 (18.2.0 sweep, release-18.2.0-manual-set, 6679644a; wave anchor #25807; card #25844). steps[4] offered the warn `Connector … replaced` as the visible sign of the swap; assertSameOriginOrFree prints it on a husk-to-husk re-registration too, so the descriptor state is the signal. fixtures.requires[1]: `os compile` accepts transport.kind 'carrier_pigeon'; only the boot refuses it. Read on main 9753d163. No clause changed",
+          "ref": "#25844"
         }
       ]
     },
@@ -388,7 +400,7 @@
       "title": "Descriptor-only connector contracts are audited at boot: declared-with-actions-but-unregistered warns with names + remedy; enabled:false is the deliberate, quiet catalog opt-out",
       "since": "v15.1",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "cli",
       "fixtures": {
@@ -414,13 +426,13 @@
         {
           "clause": "all three quiet conditions are individually verified: (a) enabled:false descriptor — quiet; (b) descriptor with a same-name runtime registration — quiet; (c) provider-bound instances — never audited by this gate (they materialize instead)",
           "oracle": "log",
-          "verify": "no audit warning on the stock boot, on the registered boot, or for the three provider-bound showcase instances",
+          "verify": "no audit warning on the stock boot, on the registered boot, or for the three provider-bound showcase instances. Condition (c) rests on the live boot alone: no case in connector-descriptor-audit.test.ts feeds a provider-bound instance to findInertDeclaredConnectors or to the kernel audit",
           "evidence": "the grepped boot logs per condition"
         },
         {
           "clause": "the audit re-runs on metadata reload, not only at boot — enabling the scratch descriptor at runtime surfaces the warning without a restart",
           "oracle": "log",
-          "verify": "the warn appears after the reload reconcile (plugin.ts wires auditDeclaredConnectors on both paths)",
+          "verify": "the warn appears after the reload reconcile (plugin.ts wires auditDeclaredConnectors on both paths). No pin drives the reload path: connector-descriptor-audit.test.ts's wiring cases fire kernel:ready only, so this clause is scored live or not at all",
           "evidence": "timestamped log"
         }
       ],
@@ -430,7 +442,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/services/service-automation/src/connector-descriptor-audit.test.ts"
+        "ref": "packages/services/service-automation/src/connector-descriptor-audit.test.ts — its pure findInertDeclaredConnectors cases and its 'kernel:ready audit (wiring)' cases on an in-process kernel: the BOOT half of acceptance[0] and of acceptance[1](a)/(b), as evidence beside the boot log. No case drives the metadata:reloaded path (acceptance[2]) or feeds a provider-bound instance (acceptance[1](c), negative[1])"
       },
       "source": [
         "docs/plans/release-15.1-test-plan.md §B6 (#2985)",
@@ -450,6 +462,12 @@
           "date": "2026-08-07",
           "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-26",
+          "change": "acceptance[1].verify, acceptance[2].verify and automated.ref scoped to what the pin drives — checklist-accuracy findings of QA run #25815 (18.2.0 sweep, release-18.2.0-tier1, 6679644a; wave anchor #25807; card #25844). a2: plugin.ts calls auditDeclaredConnectors on the metadata:reloaded and the kernel:ready paths, and the pin drives only kernel:ready, so the reload half had no pin. a1(c)/n1: no case feeds a provider-bound instance to findInertDeclaredConnectors or the kernel audit. Read on main 9753d163. No clause changed",
+          "ref": "#25844"
         }
       ]
     },
@@ -843,7 +861,7 @@
       "title": "Email templates resolve from the registry (no sys_email_template row since ADR-0131 D6/D10), resolve (name, locale) with en-US fallback, render {{path}} holes, gate on required variables and active:false, survive admin edits across redeploys — and the raw POST /api/v1/email/send door authenticates, refuses anonymous, and 400s malformed input",
       "since": "v15",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P2",
       "surface": "mixed",
       "fixtures": {
@@ -940,7 +958,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "packages/qa/dogfood/test/email-template-materialization.dogfood.test.ts"
+        "ref": "packages/qa/dogfood/test/email-template-materialization.dogfood.test.ts — on its own fixture package (auth.password_reset), not the showcase template: acceptance[0] (the registry serves the authored item beside the built-in and sendTemplate renders it, the subject exact and the body by containment), and halves only of acceptance[3] (the exact zh-CN member is reachable; not the no-folding case or the TEMPLATE_NOT_FOUND end) and of acceptance[5] (a Studio save sends on the next mail with no restart; not redeploy survival, not the declared-source reload). + packages/qa/dogfood/test/email-template-overlay-survives-boot.dogfood.test.ts ('after a cold boot the metadata door and the rendered mail both carry the admin's wording') — acceptance[5]'s redeploy-survival half on the showcase. + packages/qa/dogfood/test/email-template-two-locales-survive-boot.dogfood.test.ts ('control: a locale nobody saved keeps the package ladder') — acceptance[3]'s en-US rung for a locale with no row (ja-JP). acceptance[1], [2], [4], [6] and [7] rest on no pin: drive them by hand"
       },
       "source": [
         "packages/spec/src/system/email-template.zod.ts#fromOverride (requireds, dotted-name regex, aliases #5013, variables/required, fromOverride/replyTo/active)",
@@ -994,6 +1012,12 @@
           "date": "2026-10-16",
           "change": "knownGaps[1] and steps[1] name the HTTP-reachable send door (checklist-accuracy finding of QA run #23922, wave #23878). IEmailService.sendTemplate is not something a runner can call, and no shipped flow invokes it; #23922 drove every send through a scratch notify flow authored via POST /api/v1/automation (channels email, template, templateData), whose deliveries land in sys_email with the rendered subject and body. The step now names that door and reads the render off sys_email. Not loosened: the clauses score the same renders",
           "ref": "#24036"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-26",
+          "change": "automated.ref narrowed per clause and widened by two pins — checklist-accuracy findings of QA run #25815 (18.2.0 sweep, release-18.2.0-tier1, 6679644a; wave anchor #25807; card #25844). The ref named one e2e pin for an 8-clause item, so `kind: e2e` over-implied coverage: acceptance[1], [2], [4], [6] and [7] rest on no pin. a5: email-template-overlay-survives-boot.dogfood.test.ts pins the redeploy-survival half and was not in the ref. a3: email-template-two-locales-survive-boot.dogfood.test.ts's control case pins the locale ladder's en-US rung and was not in the ref. Read on main 9753d163. No clause changed",
+          "ref": "#25844"
         }
       ]
     },
@@ -1002,7 +1026,7 @@
       "title": "The flow notify node delivers to the recipient's inbox (sys_inbox_message + receipt), readable and markable over /notifications, recipient-scoped — with unimplemented channels dead-lettering, never faking delivery",
       "since": "v15",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1020,7 +1044,7 @@
         "knownGaps": [
           "channels push/slack/teams/webhook have NO delivery implementation (#3197 — notification.zod.ts says the dispatcher dead-letters them, and the enum's 'in-app' spelling vs the implemented 'inbox' channel is a known naming drift); this item tests inbox only and records the dead-letter behavior as a negative, not as deliverable channels",
           "THE OLD PERSONA-LOGIN RECIPE IS CLOSED (run #7690): `POST /api/v1/data/sys_account` answers 405, so the trick of inserting a credential row to turn a seeded demo persona into a real login no longer works. It is by design, not drift — sys_account is managedBy:'better-auth' and declares apiMethods ['get','list'] only, so HTTP answers 405 before the identity write guard's 403 (packages/platform-objects/src/identity/sys-account.object.ts, #1591 / ADR-0092 D2). Mint personas through better-auth instead: sign-up, or POST /api/v1/auth/admin/create-user as the platform admin (explicit password wins — #3031/#3033). Recorded here because every multi-persona item in this area pays for re-deriving it",
-          "acceptance[3]'s 501 half needs a served boot WITHOUT MessagingServicePlugin. A default boot always composes it: 'messaging' is on the always-on slate (packages/spec/src/kernel/platform-capabilities.ts#PLATFORM_ALWAYS_ON_CAPABILITIES), so even app-todo, which does not require it, answers 200 (#24036's re-run). `--preset minimal` mounts no slate (packages/core/src/capability-composition.ts#resolveServedCapabilities; minimal is ['core'] in packages/core/src/stack-auth.ts#STACK_TIER_PRESETS), and QA run #24615 proved the recipe on it: a SCRATCH copy of examples/app-todo whose requires is ['automation', 'triggers', 'auth'], booted with `objectstack dev --ui --seed-admin --preset minimal` (its plugin list carries no MessagingServicePlugin). Anonymous GET /api/v1/notifications → 401; the authenticated admin → 501 NOT_IMPLEMENTED ('Install @objectstack/service-messaging to enable'), and POST /notifications/read and /read/all the same 501. The copy adds 'auth' because app-todo with --preset minimal alone refuses to boot ('This stack mounts no auth …'). Score the 501 half on that boot and name it; the 401 half runs on stock"
+          "acceptance[3]'s 501 half needs a served boot WITHOUT MessagingServicePlugin. A default boot always composes it: 'messaging' is on the always-on slate (packages/spec/src/kernel/platform-capabilities.ts#PLATFORM_ALWAYS_ON_CAPABILITIES), so even app-todo, which does not require it, answers 200 (#24036's re-run). `--preset minimal` mounts no slate (packages/core/src/capability-composition.ts#resolveServedCapabilities; minimal is ['core'] in packages/core/src/stack-auth.ts#STACK_TIER_PRESETS), and QA run #24615 proved the recipe on it: a SCRATCH copy of examples/app-todo whose requires is ['automation', 'triggers', 'auth'], booted with `objectstack dev --ui --seed-admin --preset minimal` (its plugin list carries no MessagingServicePlugin). Anonymous GET /api/v1/notifications → 401; the authenticated admin → 501 NOT_IMPLEMENTED ('Install @objectstack/service-messaging to enable'), and POST /notifications/read and /read/all the same 501. The copy adds 'auth' because app-todo with --preset minimal alone refuses to boot ('This stack mounts no auth …'). Score the 501 half on that boot and name it; the 401 half runs on stock. The scratch copy needs a `node_modules` to resolve its dependencies: a symlink to the tree's own examples/app-todo/node_modules works (QA run #25817)"
         ]
       },
       "variants": [
@@ -1115,6 +1139,12 @@
           "date": "2026-10-20",
           "change": "checklist-accuracy findings of QA runs #24575 (5b14b7f3) and #24615 (ba4afcc2), 18.0 sweep; wave anchor #24579 §3 and its round 2 part 2. knownGaps[2] said no served boot lacks MessagingServicePlugin; `--preset minimal` mounts no always-on slate, and #24615 scored the 501 half on a scratch app-todo copy requiring automation, triggers and auth, so the gap carries that recipe and acceptance[3].verify names the boot. steps[5] reads the receipts as the recipient (the admin's /data view is owner-scoped); acceptance[4].verify counts delivery rows before and after, because inbox deliveries write them too. fixtures.requires[0] spells the recipients as the flow now declares them, one CEL value envelope. Not loosened: a fabricated inbox, delivery or receipt still FAILS",
           "ref": "#24717"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-26",
+          "change": "fixtures.knownGaps[2] says the app-todo scratch copy needs its node_modules — checklist-accuracy finding of QA run #25817 (18.2.0 sweep, release-18.2.0-manual-set, 6679644a; wave anchor #25807; card #25844): a symlink to the tree's copy works. No clause changed",
+          "ref": "#25844"
         }
       ]
     },
@@ -1191,7 +1221,7 @@
       "title": "The /api/v1/datasources admin lifecycle: all 11 routes behind ONE manage_platform_settings floor (drivers catalog included), runtime create with provenance+health, draft test probe, credential migration into the store, secret never echoes (hasSecret only), bad drafts 400 DATASOURCE_ADMIN_ERROR, unwired federation degrades 503 naming external-datasource",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1274,7 +1304,7 @@
         {
           "clause": "unknown name → 404 RESOURCE_NOT_FOUND; and the family IS ledgered — the rev-1 'unledgered tranche-3 gap' finding is CLOSED and must NOT be re-filed: the admin CRUD carries its own audited ledger (datasource-route-ledger.ts, 11 rows, all deliberately server-only — no SDK method reaches this family, filed as #7954) with a conformance test deriving both directions from the registrar, precisely because the mount style (registerDatasourceAdminRoutes straight on IHttpServer from serve.ts) is invisible to the dispatcher and REST ledgers",
           "oracle": "api",
-          "verify": "GET /api/v1/datasources/does-not-exist → 404 RESOURCE_NOT_FOUND; the ledger + gate at packages/services/service-datasource/src/datasource-route-ledger.ts (DATASOURCE_ROUTE_LEDGER) and datasource-route-ledger.conformance.test.ts — a run may cite the conformance test's pass as the parity evidence",
+          "verify": "GET /api/v1/datasources/does-not-exist → 404 RESOURCE_NOT_FOUND on the served stack (admin-routes.test.ts holds the 404 over a stubbed service only, route-layer evidence); the ledger + gate at packages/services/service-datasource/src/datasource-route-ledger.ts (DATASOURCE_ROUTE_LEDGER) and datasource-route-ledger.conformance.test.ts — a run may cite the conformance test's pass as the parity evidence for the ledger half, which it pins whole (automated.ref)",
           "evidence": "the 404 + the conformance-test output"
         }
       ],
@@ -1292,7 +1322,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/services/service-datasource/src/__tests__/admin-routes.test.ts + packages/services/service-datasource/src/__tests__/envelope.conformance.test.ts. Both mount the real route registrar on the real HonoHttpServer adapter over STUBBED datasource-admin and external-datasource services and a fake auth service: the route layer, and nothing below it runs. They score whole: acceptance[7] (its oracle is test: admin-routes' #4225 cases, each federation route's 503 naming external-datasource while datasource-admin still serves, and envelope's 'the external-datasource service is not wired'), negative[4] and negative[5] (attributions the route layer owns: the 503's service, and each route's refusal code, admin-routes' #4249 cases on both services). They hold route-layer halves only, evidence beside the live answer and never its pass (RUNNER rule 6): acceptance[0]'s admin half (the static catalog with its configSchema, mounted with no service), acceptance[2]'s inline secret split out of the draft, acceptance[4]'s 201 envelope, acceptance[6]'s service refusal answered 400 DATASOURCE_ADMIN_ERROR in the declared envelope, and acceptance[8]'s 404 RESOURCE_NOT_FOUND. Neither drives the capability floor (acceptance[1], and acceptance[0]'s anonymous 401), the real service, the secret binder or the store (acceptance[3], acceptance[5], and the persistence and health halves): drive os dev for every api clause"
+        "ref": "packages/services/service-datasource/src/__tests__/admin-routes.test.ts + packages/services/service-datasource/src/__tests__/envelope.conformance.test.ts. Both mount the real route registrar on the real HonoHttpServer adapter over STUBBED datasource-admin and external-datasource services and a fake auth service: the route layer, and nothing below it runs. They score whole: acceptance[7] (its oracle is test: admin-routes' #4225 cases, each federation route's 503 naming external-datasource while datasource-admin still serves, and envelope's 'the external-datasource service is not wired'), negative[4] and negative[5] (attributions the route layer owns: the 503's service, and each route's refusal code, admin-routes' #4249 cases on both services). They hold route-layer halves only, evidence beside the live answer and never its pass (RUNNER rule 6): acceptance[0]'s admin half (the static catalog with its configSchema, mounted with no service), acceptance[2]'s inline secret split out of the draft, acceptance[4]'s 201 envelope, acceptance[6]'s service refusal answered 400 DATASOURCE_ADMIN_ERROR in the declared envelope, and acceptance[8]'s 404 RESOURCE_NOT_FOUND. Neither drives the capability floor (acceptance[1], and acceptance[0]'s anonymous 401), the real service, the secret binder or the store (acceptance[3], acceptance[5], and the persistence and health halves): drive os dev for every api clause. + packages/services/service-datasource/src/datasource-route-ledger.conformance.test.ts — acceptance[8]'s LEDGER half whole: every mounted datasource-admin route has a ledger row and every row is mounted, both directions derived from the registrar against a non-empty enumeration. acceptance[8]'s 404 half stays a live reading"
       },
       "source": [
         "packages/services/service-datasource/src/admin-routes.ts#requireDatasourceAdmin (the eleven routes; the uniform floor docblock + requireDatasourceAdmin + DATASOURCE_ADMIN_CAPABILITY #9391/#9593; splitSecret keeps the secret out of the persisted draft; resolve()/badRequest() per-service attribution #4225/#4249; getDatasource credential-stripped + hasSecret; POST /test draft probe; POST /:name/migrate-credential)",
@@ -1339,6 +1369,12 @@
           "date": "2026-10-20",
           "change": "automated.ref narrowed per clause, and the credential-migration bind arm is no longer scored from its unit pin. PR #24891's carried finding (round 15 respelled this ref and left its scope, 'pins route behavior + envelope', unnarrowed), read under RUNNER rule 6 and the theme-B rule. Read at base feb09db14a: both ref pins mount registerDatasourceAdminRoutes on the real HonoHttpServer adapter over stubbed services and a fake auth service, so they score acceptance[7] (test oracle), negative[4] and negative[5] (attributions the route layer owns) whole, and hold only route-layer halves of acceptance[0], [2], [4], [6] and [8]. The capability floor has its own pin (admin-routes-auth-guard.test.ts), which this ref does not name. acceptance[3] (verify, evidence) and steps[8] scored the bind arm from datasource-credential-migration.test.ts, which drives the re-homing planner over row objects, under an api clause; that arm is now blocked(fixture) where the row cannot be planted, with the pin beside it, as the narrowed ref implies. No clause changed",
           "ref": "#24963"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-26",
+          "change": "automated.ref names the route-ledger conformance test, and acceptance[8].verify scopes its two halves — checklist-accuracy finding of QA run #25815 (18.2.0 sweep, release-18.2.0-tier1, 6679644a; wave anchor #25807; card #25844): acceptance[8]'s ledger half named datasource-route-ledger.conformance.test.ts as citable evidence, but the ref did not carry it, and the 404 half is pinned over a stubbed service only. Read on main 9753d163 (the ledger holds 11 rows). No clause changed",
+          "ref": "#25844"
         }
       ]
     },
@@ -1347,7 +1383,7 @@
       "title": "External-datasource schema introspection happy path: remote-tables lists live tables with columnCount (?schema= honoured since #7955), object-draft renders a reviewable *.object.ts, both route spellings answer as one operation behind the platform auth floor",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1397,13 +1433,13 @@
         {
           "clause": "the two route spellings stay one operation: GET /datasources/:name/remote-tables ≡ GET /datasources/:name/external/tables and POST /datasources/:name/object-draft {table} ≡ POST /datasources/:name/external/tables/:remote/draft — same service methods (IExternalDatasourceService.listRemoteTables / generateObjectDraft), same sets/drafts, same 400 EXTERNAL_DATASOURCE_ERROR refusal contract (#4249/#4264)",
           "oracle": "test",
-          "verify": "remote-tables-twin.equivalence.test.ts (named as the twin pin at external-datasource-routes.ts) — plus a live spot-check that both spellings return the same table set on showcase_external",
-          "evidence": "the test run output + the paired live reads"
+          "verify": "remote-tables-twin.equivalence.test.ts (named as the twin pin at external-datasource-routes.ts) pins the remote-tables ≡ external/tables twin only. The object-draft ≡ external/tables/:remote/draft twin and the shared 400 EXTERNAL_DATASOURCE_ERROR refusal across the two spellings have no pin (admin-routes.test.ts covers the admin spelling's 400 alone): read them live — the two drafts from step 4 compared field by field, and one refused call (e.g. an unknown table) on each spelling — beside a live spot-check that both spellings return the same table set on showcase_external",
+          "evidence": "the test run output + the paired live reads (table sets, drafts, and the two refusals)"
         },
         {
           "clause": "the auth floor holds and BOTH spellings answer it IDENTICALLY — the #9593 asymmetry this item recorded through rev 1 is CLOSED, so a federation 200 to an unentitled caller is a FAIL, not the documented behaviour: an anonymous caller is refused 401 UNAUTHENTICATED on BOTH spellings (admin: requireDatasourceAdmin/#9391; federation: refuseFederationRequest's shouldDenyAnonymous arm/#9686 — fail-closed, before any service lookup so an anonymous probe cannot learn what is wired), and an authenticated caller WITHOUT manage_platform_settings is refused 403 PERMISSION_DENIED naming the capability on BOTH spellings, keyed on that capability rather than on holding merely some grant. Federation READS (tables, draft) took FEDERATION_READ_CAPABILITY = manage_platform_settings in #9901 — maintainer ruling 2026-08-20, verbatim: 「其他接受你的建议。」— and validate joined them in #10255 (verbatim: 「同意你的意见。」); the family's WRITES (import, refresh-catalog — outside this item's probes) sit on FEDERATION_WRITE_CAPABILITY = manage_metadata above the same 401 floor",
           "oracle": "api",
-          "verify": "the four probes of step 8 against admin-routes.ts (401 floor then manage_platform_settings 403) and external-datasource-routes.ts refuseFederationRequest (the same two decisions out of ONE resolveExecutionContext call — anonymous first, then FEDERATION_READ_CAPABILITY); the agreement is pinned in the twin test's 'listRemoteTables twins agree on WHO may ask (#9686, #9593, #9901)' describe, whose two unentitled cases compare the two spellings' status AND code to each other rather than to a literal",
+          "verify": "the four probes of step 8 against admin-routes.ts (401 floor then manage_platform_settings 403) and external-datasource-routes.ts refuseFederationRequest (the same two decisions out of ONE resolveExecutionContext call — anonymous first, then FEDERATION_READ_CAPABILITY); the agreement is pinned in the twin test's 'listRemoteTables twins agree on WHO may ask (#9686, #9593, #9901)' describe, whose two unentitled cases compare the two spellings' status AND code to each other rather than to a literal. Those cases compare status and code only: that the 403 message names manage_platform_settings is read off the live responses",
           "evidence": "the 401/403/200 responses"
         }
       ],
@@ -1419,7 +1455,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/rest/src/remote-tables-twin.equivalence.test.ts (#7955 request-shape + #9686/#9593 admission, driven through the real HonoHttpServer over the real ExternalDatasourceService) + packages/services/service-datasource/src/__tests__/admin-routes.test.ts — the LIVE-mount half (real showcase fixture, real sqlite introspection) is not pinned, drive os dev for it"
+        "ref": "packages/rest/src/remote-tables-twin.equivalence.test.ts — the real HonoHttpServer over the real ExternalDatasourceService (a fake introspector), twinning listRemoteTables ONLY: acceptance[1] at that layer (its '#7955' describe), acceptance[3]'s remote-tables ≡ external/tables half, and acceptance[4]'s agreement (status and code compared across spellings; the 403 message is not asserted). + packages/services/service-datasource/src/__tests__/admin-routes.test.ts — a real HonoHttpServer over vi.fn services, route-level HTTP and not a booted stack: the admin spelling's 400 EXTERNAL_DATASOURCE_ERROR (#4249 cases, negative[0]) and object-draft's 400 without table by status (negative[2]), evidence beside the live answers. Not pinned: the LIVE mount (real showcase fixture, real sqlite introspection), the draft twin, the shared refusal across spellings and the 403 message — drive os dev for them"
       },
       "source": [
         "packages/services/service-datasource/src/admin-routes.ts#requireDatasourceAdmin (remote-tables + the #7955 coercion comment), (object-draft), + (requireDatasourceAdmin — 401 floor then manage_platform_settings 403, #9391/#9593)",
@@ -1459,6 +1495,12 @@
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
           "ref": "#25003"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-26",
+          "change": "acceptance[3] (verify, evidence), acceptance[4].verify and automated.ref scoped to what the pins assert — checklist-accuracy findings of QA run #25815 (18.2.0 sweep, release-18.2.0-tier1, 6679644a; wave anchor #25807; card #25844). a3: the twin test twins listRemoteTables only; the draft twin and the shared 400 EXTERNAL_DATASOURCE_ERROR refusal across spellings are not pinned (admin-routes covers the admin spelling's 400 only). a4: the twin admission cases compare status and code, never the 403 message naming manage_platform_settings. n0/n2: admin-routes.test.ts drives a real HonoHttpServer over vi.fn services, route-level HTTP and not a booted stack. Read on main 9753d163. No clause changed",
+          "ref": "#25844"
         }
       ]
     },
@@ -1467,7 +1509,7 @@
       "title": "Boot-time external-schema drift gate (ADR-0015 §5.2 Gate 2): onMismatch defaults to 'fail' and refuses boot naming the object and mismatched column; 'warn' proceeds logging the diff; 'ignore' is silent; checkOnBoot:false skips a datasource with a loud info line (boot step only — the interval sweep is unaffected); a partial metadata read withholds the all-clear instead of faking one",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "cli",
       "personas": [
@@ -1523,8 +1565,8 @@
         {
           "clause": "the checkOnBoot skip is BOOT-STEP-ONLY, by maintainer ruling (2026-08-29): a datasource declaring both checkOnBoot:false and checkIntervalMs still gets its background drift checker armed — the two keys answer different questions ('gate my startup on this' vs 'watch this while I run'), and arming a watcher is not an opt back in to the boot gate",
           "oracle": "test",
-          "verify": "external-validation-checkonboot.test.ts 'scope: the gate covers the BOOT STEP ONLY' ('checkOnBoot:false still arms the background drift checker it asked for'); the ruling pinned in source at external-validation-plugin.ts (⛔ do not add a checkOnBoot condition to scheduleDriftChecks) — live: the armed-timer log line on the combined-keys boot",
-          "evidence": "the pin output + the armed-timer log line from the checkOnBoot:false boot"
+          "verify": "external-validation-checkonboot.test.ts 'scope: the gate covers the BOOT STEP ONLY' ('checkOnBoot:false still arms the background drift checker it asked for') scores this clause; the ruling is pinned in source at external-validation-plugin.ts (⛔ do not add a checkOnBoot condition to scheduleDriftChecks). The live '[external-validation] armed background drift check' info line on a combined-keys boot is a separate boot leg: record it when that boot is driven, never as a condition of this clause's verdict",
+          "evidence": "the pin output (and, when the combined-keys boot is driven, the armed-timer log line beside it)"
         },
         {
           "clause": "partial-read honesty (#6504): when the federated-object listing was degraded, the gate WITHHOLDS the clean all-clear and warns that it 'swept an INCOMPLETE object set … the onMismatch gate could not have fired for them' (external-validation-plugin.ts) — silence and nothing-to-find are never conflated; a throwing verdict probe reports 'could not be determined', never a fabricated failure; a complete read still gets the plain all-clear info line",
@@ -1535,8 +1577,8 @@
         {
           "clause": "the periodic re-check is observational, never fatal: a datasource declaring external.validation.checkIntervalMs arms an unref'd background timer that emits one external.schema.drift kernel event per drifted object and never throws or aborts the process (external-validation-plugin.ts)",
           "oracle": "test",
-          "verify": "external-validation-plugin.test.ts 'background drift detection' describe (one event per drifted object, cross-datasource isolation); live: the 'armed background drift check' log line on a declaring boot",
-          "evidence": "the test run output + the armed-timer log line"
+          "verify": "external-validation-plugin.test.ts 'background drift detection' describe (one event per drifted object, cross-datasource isolation) scores this clause. The live 'armed background drift check' info line on a declaring boot is a separate boot leg: record it when that boot is driven, never as a condition of this clause's verdict",
+          "evidence": "the test run output (and, when a declaring boot is driven, the armed-timer log line beside it)"
         }
       ],
       "negative": [
@@ -1553,7 +1595,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/runtime/src/external-validation-plugin.test.ts — acceptance[6] and negative[4] (its 'ExternalValidationPlugin — background drift detection (ADR-0015 §5.2)' describe: one external.schema.drift event per drifted object, and 'runDriftCheck is a no-op (no throw) when the scoped validation rejects') + packages/runtime/src/external-validation-checkonboot.test.ts — acceptance[4] (its 'scope: the gate covers the BOOT STEP ONLY' describe) + packages/runtime/src/list-diagnosed-consumer-sweep.test.ts — acceptance[5] and negative[2] (the #6504 boot-gate describe). All three drive ExternalValidationPlugin over stubbed services. Their fail-default / warn / ignore / default-when-unreadable cases and the other checkOnBoot describes are evidence for acceptance[0]–[3] at that layer only, never their pass: those clauses score the boot log, and need an induced-drift boot"
+        "ref": "packages/runtime/src/external-validation-plugin.test.ts — acceptance[6] and negative[4] (its 'ExternalValidationPlugin — background drift detection (ADR-0015 §5.2)' describe: one external.schema.drift event per drifted object, and 'runDriftCheck is a no-op (no throw) when the scoped validation rejects') + packages/runtime/src/external-validation-checkonboot.test.ts — acceptance[4] (its 'scope: the gate covers the BOOT STEP ONLY' describe) + packages/runtime/src/list-diagnosed-consumer-sweep.test.ts — acceptance[5] and negative[2] (the #6504 boot-gate describe). All three drive ExternalValidationPlugin over stubbed services. Their fail-default / warn / ignore / default-when-unreadable cases and the other checkOnBoot describes are evidence for acceptance[0]–[3] at that layer only, never their pass: those clauses score the boot log, and need an induced-drift boot. negative[3]: renderDiffMessage's text (object, datasource, one line per diff) is pinned only as a pure function, in packages/spec/src/shared/external-errors.test.ts; the plugin's fail-default case asserts the error class (rejects.toBeInstanceOf), not the message a boot prints, so the negative is read off an induced-drift boot's abort. negative[5]: the plugin's 'is a no-op when the external-datasource service is absent' case asserts the call resolves undefined, not the absence of warn/error lines, so the negative is read off a federation-free boot's log"
       },
       "source": [
         "packages/runtime/src/external-validation-plugin.ts#runValidation (Gate 2 kernel:ready runValidation; the #13149 checkOnBoot gate + skip info line; the #11166 unreachable carve-out — warn and continue, only measured diffs reach onMismatch; the fail throw), (bootCheckEnabled — explicit false only, safe direction), (resolveOnMismatch — `?? 'fail'`), (memoized def loader; a failed read answers undefined → strict defaults), (announceAllClear #6504; the INCOMPLETE-sweep warn), (background drift checks + external.schema.drift events; the boot-step-only ruling ⛔)",
@@ -1587,6 +1629,12 @@
           "date": "2026-10-20",
           "change": "automated.ref narrowed per clause; acceptance[0] (verify, evidence), acceptance[3] (verify, evidence) and fixtures.knownGaps[0] rewritten — the sweep-wide rule-6 contradiction QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4) names at drift-gate acceptance[0] and [3], round 15 of wave anchor #24579. acceptance[0]–[3] score the boot log, and the item told the runner to score them from the plugin pins when the live arm is blocked ('Unit fallback', 'the unit pins are the fallback evidence'). The three pins drive ExternalValidationPlugin over stubbed services. By RUNNER rule 6 (a pin scores only the layer it drives) they score the test-oracle clauses acceptance[4]–[6] and negative[2] and [4], and are cited as plugin-layer evidence beside a blocked(fixture) verdict for the rest. Read at base b1676441ba. No clause changed",
           "ref": "#24891"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-26",
+          "change": "acceptance[4] and [6] (verify, evidence) score from their pins, and automated.ref scopes negative[3] and [5] — checklist-accuracy findings of QA run #25815 (18.2.0 sweep, release-18.2.0-tier1, 6679644a; wave anchor #25807; card #25844). a4/a6: the oracle is 'test' and the pins assert both, but each verify/evidence also asked for the live armed-timer log line; that line is now a separate boot leg. n3: the fail-default case asserts rejects.toBeInstanceOf only; renderDiffMessage's text is pinned, but only as a pure function in spec's external-errors.test.ts, outside the ref, so the boot abort message stays a live reading. n5: the no-op case asserts resolves undefined, not the absence of warn/error logs. Read on main 9753d163. No clause changed",
+          "ref": "#25844"
         }
       ]
     },
@@ -1704,7 +1752,7 @@
       "title": "A shipped driver's datasource credential can never be authored inline NOR read back: every inline-credential door refuses at publish, and BOTH read doors redact, including legacy alias spellings already sitting in stored rows. A plugin driver's config is its author's to keep credential-free; the platform redacts only its fixed credential spellings there and does not guess",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P0",
       "surface": "mixed",
       "personas": ["seeded admin", "authenticated non-admin", "anonymous"],
@@ -1725,7 +1773,7 @@
       "steps": [
         "enumerate the inline-credential refusal doors from packages/spec/src/migrations/entries/semantic/ — at minimum the config-key door, the URL userinfo door, the URL query-parameter door, the driver-options door (driver `mongodb`: an authored `mongo` is refused by name since 18, so a probe spelled with it meets that refusal instead of the credential one), the placeholder door, and the connector inline-authentication door",
         "for EACH door, author a datasource carrying the credential in that position and attempt to publish it (os build, then the runtime admin door)",
-        "author the same datasource with the credential bound through `external.credentialsRef` (or the connection form) and confirm it publishes AND connects",
+        "author the same datasource with the credential bound through `external.credentialsRef` (or the connection form) and confirm it publishes AND connects. A federated spelling (schemaMode other than 'managed', e.g. 'external') must also carry an `external` block, `external: {}` at minimum, or the parse answers 400 on the path `external` (\"schemaMode='external' requires 'external' settings.\", packages/spec/src/data/datasource.zod.ts#DatasourceSchema). That 400 is the shape refusal, not a credential refusal: read the issue path before scoring it",
         "read the published datasource back through the datasource-admin door (GET /api/v1/datasources)",
         "read the SAME datasource back through the metadata door (GET /api/v1/meta/datasource/<name>) — a different code path with its own redaction hook",
         "plant a stored row carrying a legacy alias spelling (passwd / pwd / token / jwt / auth_token / authtoken) and read it back through both doors",
@@ -1839,6 +1887,12 @@
           "date": "2026-10-20",
           "change": "checklist-accuracy findings of QA run #24575 (18.0 sweep, 5b14b7f3), the P0 run #24556's continuation and wave anchor #24579 §3. knownGaps[2] said no Postgres recipe is proven and the QA container has no database; the container has PostgreSQL 16 and #24575 proved a recipe that scored acceptance[1] and [6] pass, so the gap carries it. The driver id is `mongodb` since 18 (an authored `mongo` is refused by name, #24556), in knownGaps[2] and steps[0]. steps[8] names the admin-only third read door, /data/sys_metadata, which also redacts. knownGaps[4] (new) records that no datasource read door serves the mask (the admin door withholds the key, the metadata door serves the credentialsRef handle), so acceptance[6].clause says the echoed config carries none and source[2] no longer says both readers import it; the literal-mask PATCH #24575 measured is held for the maintainer on #24579 §7 and scored under no clause. Not loosened: every verify and every negative is unchanged",
           "ref": "#24717"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-26",
+          "change": "steps[2] names the `external` block a federated datasource needs — checklist-accuracy finding of QA run #25812 (18.2.0 sweep, P0 set, 6679644a; wave anchor #25807; card #25844): an `schemaMode: 'external'` datasource authored without `external` answers 400, which reads like a credential refusal. Read on main 9753d163: DatasourceSchema's superRefine adds the issue at path `external` whenever schemaMode is not 'managed' and the block is absent. No clause changed",
+          "ref": "#25844"
         }
       ]
     },
@@ -1847,7 +1901,7 @@
       "title": "Declarative connector static auth kinds (none/api-key/basic/bearer) resolve credentialRef at materialization and land on the wire in exactly their header/query shape; an unresolvable credentialRef is boot-fatal with the env-var prescription; oauth2 has NO authorable spelling (EE tier)",
       "since": "v15.1",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
@@ -1877,7 +1931,7 @@
         "read the authored rows back over GET /api/v1/meta and GET /api/v1/automation/connectors; grep both full bodies for every resolved secret value",
         "unset QA_BEARER_TOK and boot again; capture the boot failure verbatim",
         "author one instance with auth {type:'oauth2', ...} and one catalog/instance entry with inline authentication {type:'api-key', key:'x'}; build both; capture the two rejections",
-        "run the pins: packages/connectors/connector-rest/src/rest-connector.test.ts (wire shapes) and packages/services/service-automation/src/connector-materialization.test.ts (credentialRef resolution, env fallback, boot-fatal missing ref)"
+        "run the pins: packages/connectors/connector-rest/src/rest-connector.test.ts (wire shapes), packages/services/service-automation/src/connector-materialization.test.ts (credentialRef resolution, env fallback, and the missing ref failing an in-process boot by the ref name alone) and packages/spec/src/integration/connector-provider.test.ts (the #7990 inline-`authentication` refusal at schema level)"
       ],
       "acceptance": [
         {
@@ -1895,13 +1949,13 @@
         {
           "clause": "an unresolvable credentialRef is a HARD BOOT ERROR carrying the prescription — the message names the connector, the provider, the ref, and both remedies ('set the <ref> env var, or wire AutomationServicePluginOptions.credentialResolver to a secrets service (ADR-0097 §3)') — an app must not come up with a connector whose credentials never loaded",
           "oracle": "log",
-          "verify": "the unset-env boot aborts with the plugin.ts message; pinned by connector-materialization.test.ts ('fails boot loudly when credentialRef does not resolve')",
+          "verify": "the unset-env boot aborts with the plugin.ts#resolveInstanceAuth message; read the served boot's output and match the connector, the provider, the ref and both remedies. connector-materialization.test.ts ('fails boot loudly when credentialRef does not resolve') is lower-layer evidence only: it boots an in-process kernel and asserts /credentialRef 'MISSING' did not resolve/ alone, not the connector, the provider or the two remedies, so it never scores this clause (RUNNER rule 6)",
           "evidence": "the fatal boot output"
         },
         {
           "clause": "oauth2 is refused at AUTHORING, not degraded at runtime: auth {type:'oauth2'} fails parse (invalid discriminator — ConnectorInstanceAuthSchema has exactly the four static arms; the EE-tier boundary is documented on ResolvedConnectorAuth), and an inline `authentication` with a non-'none' type is refused with the located #7990 message steering to auth:{type,credentialRef} — there is no door through which an OAuth2 flow or an inline secret enters open-edition metadata",
           "oracle": "build",
-          "verify": "the two build rejections against connector-auth.zod.ts (union arms) and connector.zod.ts (the superRefine message, quoted fragments verbatim)",
+          "verify": "the two build rejections against connector-auth.zod.ts (union arms) and connector.zod.ts (the superRefine message, quoted fragments verbatim). The inline-`authentication` half is pinned at schema level by packages/spec/src/integration/connector-provider.test.ts ('rejects inline `authentication` secrets on a catalog descriptor' / '… on a provider-bound instance (§3)'), evidence beside the build. The oauth2 half has no pin: spec/src/integration/connector.test.ts parses oauth2 under AuthConfigSchema, the runtime shape, and no case feeds oauth2 to ConnectorInstanceAuthSchema, so drive that build by hand",
           "evidence": "the two error texts"
         },
         {
@@ -1921,7 +1975,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/connectors/connector-rest/src/rest-connector.test.ts (per-kind wire shapes through a stubbed fetch) + packages/services/service-automation/src/connector-materialization.test.ts (credentialRef resolution incl. env fallback and the boot-fatal missing ref) — the LIVE echo-upstream leg is not pinned"
+        "ref": "packages/connectors/connector-rest/src/rest-connector.test.ts (per-kind wire shapes through a stubbed fetch) + packages/services/service-automation/src/connector-materialization.test.ts (credentialRef resolution incl. env fallback; its missing-ref case asserts only that the ref did not resolve, on an in-process kernel, so it is evidence for acceptance[2], never its pass) + packages/spec/src/integration/connector-provider.test.ts (the #7990 inline-`authentication` refusal of acceptance[3] and negative[1], at schema level). No pin covers the oauth2 discriminator refusal, the LIVE echo-upstream leg, or the served boot's fatal message"
       },
       "source": [
         "packages/spec/src/shared/connector-auth.zod.ts#ConnectorAuthConfigSchema (ConnectorAuthConfigSchema — the runtime shape; ResolvedConnectorAuth = the static open tier, OAuth2 named as the enterprise tier), (ConnectorInstanceAuthSchema — the authored shape: credentialRef instead of inline secrets, four arms, no oauth2)",
@@ -1949,6 +2003,12 @@
           "date": "2026-10-20",
           "change": "acceptance[0].verify and fixtures.knownGaps[0] no longer fall back to the unit pin for the wire shapes. PR #24891's carried finding (round 15's acceptance notes: the 'score from the pin' spelling, wire-shape clauses), read under RUNNER rule 6. acceptance[0] is a network clause: what the echo upstream received. packages/connectors/connector-rest/src/rest-connector.test.ts drives applyAuth through a stubbed fetch (read at base feb09db14a), so without the echo upstream the clause is blocked(fixture), with the pin beside it. No clause changed",
           "ref": "#24963"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-26",
+          "change": "acceptance[2].verify, acceptance[3].verify, steps[5] and automated.ref re-scoped to what the pins assert — checklist-accuracy findings of QA run #25815 (18.2.0 sweep, release-18.2.0-tier1, 6679644a; wave anchor #25807; card #25844). a2: connector-materialization.test.ts's missing-ref case asserts /credentialRef 'MISSING' did not resolve/ on an in-process kernel boot, not the connector, the provider or the two remedies, so it no longer reads as pinning the clause. a3/n1: connector-provider.test.ts pins the #7990 half at schema level and was not in the ref; no pin refuses oauth2 on ConnectorInstanceAuthSchema (connector.test.ts parses oauth2 under AuthConfigSchema). Re-read on main 9753d163. No clause changed",
+          "ref": "#25844"
         }
       ]
     },
@@ -1957,7 +2017,7 @@
       "title": "Setup → Datasources federation UI (ADR-0015 §6.4): SchemaBrowser mirrors the remote-table listing, ImportObjectDialog lands a REAL object through the metadata channel, Refresh catalog and ValidationPanel drive the three previously-uncovered federation routes (import / refresh-catalog / validate) behind their capability floors",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2027,9 +2087,9 @@
           "evidence": "the 401/403 responses, keyed by route and persona"
         },
         {
-          "clause": "federation-unavailable honesty: the server's 503 names the external-datasource service in the envelope (SERVICE_UNAVAILABLE), and the UI maps it to its designed 'Federation is not enabled on this server.' / 'unavailable' state instead of the generic error path. It is scored from the objectui pin in `automated` (the detector against the real envelope). The live render needs a deliberately unwired boot, which a stock boot never is (fixtures.knownGaps)",
+          "clause": "federation-unavailable honesty: the server's 503 names the external-datasource service in the envelope (SERVICE_UNAVAILABLE), and the UI maps it to its designed 'Federation is not enabled on this server.' / 'unavailable' state instead of the generic error path. It is scored from the Console pin in `automated` (the detector against the real envelope). The live render needs a deliberately unwired boot, which a stock boot never is (fixtures.knownGaps)",
           "oracle": "test",
-          "verify": "run objectui packages/app-shell/src/views/metadata-admin/external/api.test.ts at the .objectui-sha revision and cite its 503 cases. On a deliberately unwired boot, also screenshot the Tables tab and read the rendered unavailable state against the 503 body (external-datasource-routes.ts). On a stock boot the live half is not-applicable",
+          "verify": "run ui/packages/app-shell/src/views/metadata-admin/external/api.test.ts on the run subject sha (`pnpm --filter @object-ui/app-shell test`) and cite its 503 cases. On a deliberately unwired boot, also screenshot the Tables tab and read the rendered unavailable state against the 503 body (external-datasource-routes.ts). On a stock boot the live half is not-applicable",
           "evidence": "the pin output (and, on an unwired boot, the 503 response + the rendered state)"
         }
       ],
@@ -2048,7 +2108,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "objectui, for acceptance[6] ONLY: packages/app-shell/src/views/metadata-admin/external/api.test.ts, the 503 SERVICE_UNAVAILABLE → ExternalServiceUnavailableError cases, present at 0abd4f9f8769. Run it in an objectui checkout at the .objectui-sha revision and cite the output; every other clause still needs the run"
+        "ref": "ui/packages/app-shell/src/views/metadata-admin/external/api.test.ts, for acceptance[6] ONLY: the 503 SERVICE_UNAVAILABLE → ExternalServiceUnavailableError cases. The Console builds from this repository's ui/ tree (`pnpm console:build`), so run it on the run subject sha (`pnpm --filter @object-ui/app-shell test`) and cite the output; every other clause still needs the run"
       },
       "source": [
         "objectui packages/app-shell/src/views/metadata-admin/external/api.ts (the five-route client; the 503 detector, which reads the envelope since objectui#11628; listRemoteTables/generateObjectDraft/refreshCatalog/validateDatasource/importObjectDraft — the import door is PUT /api/v1/meta/object/:name)",
@@ -2089,6 +2149,12 @@
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
           "ref": "#25003"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-26",
+          "change": "acceptance[6] (clause, verify) and automated.ref respelled for the in-workspace Console — the retired objectui pin wording #26035 left to the 18.2.0 ledger cards (card #25844). There is no .objectui-sha on main 9753d163: the Console builds from ui/ (`pnpm console:build`), and the pinned test lives at ui/packages/app-shell/src/views/metadata-admin/external/api.test.ts with its 503 cases present. Dated readings at earlier objectui pins (steps[1], acceptance[0]) are records of what was measured then and are unchanged. No clause changed",
+          "ref": "#25844"
         }
       ]
     },
@@ -2097,7 +2163,7 @@
       "title": "Inbound mail (new on v18): with requires:[\"mailbox\"] and an IMAP mailbox, a synced message is stored as sys_mail_message and associated with the record whose mailAssociation email field matches (inline forwards by an org member match on the original participants), attachments land as sys_file + sys_attachment, and an unmatched message is visible only to manage_mailboxes holders",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -2129,13 +2195,13 @@
         {
           "clause": "the contact message is associated with that contact; the inline forward matches the original participants",
           "oracle": "api",
-          "verify": "association rows",
+          "verify": "association rows, read over GET /api/v1/data/sys_mail_association. inline-forward.test.ts pins only the parser's participant extraction; that an inline-forwarded message is ASSOCIATED with the original participants' records is pinned on a real engine by mail-ingest-service.test.ts ('a forward quoted INLINE, read only for a user of the mailbox’s organization' describe) — engine-layer evidence, not this api clause's pass",
           "evidence": "the rows"
         },
         {
           "clause": "the attachment is a sys_file + sys_attachment on the message",
           "oracle": "api",
-          "verify": "attachment rows",
+          "verify": "attachment rows, read over GET /api/v1/data/sys_attachment and sys_file. mailbox-attachments-kernel.test.ts reads the same rows through the real engine after a real ingest: in-process evidence, not this api clause's pass (RUNNER rule 6). Without the IMAP fixture (knownGaps[0]) the clause is blocked(fixture) with that pin beside it",
           "evidence": "the rows"
         },
         {
@@ -2147,7 +2213,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/services/service-mailbox/src/mailbox-service-kernel.test.ts + packages/services/service-mailbox/src/mailbox-sync-kernel.test.ts + packages/services/service-mailbox/src/ingest/inline-forward.test.ts + packages/services/service-mailbox/src/mailbox-attachments-kernel.test.ts + packages/spec/src/data/field-mail-association.test.ts"
+        "ref": "packages/services/service-mailbox/src/mailbox-service-kernel.test.ts + packages/services/service-mailbox/src/mailbox-sync-kernel.test.ts + packages/services/service-mailbox/src/ingest/inline-forward.test.ts + packages/services/service-mailbox/src/ingest/mail-ingest-service.test.ts + packages/services/service-mailbox/src/mailbox-attachments-kernel.test.ts + packages/spec/src/data/field-mail-association.test.ts"
       },
       "source": [
         "packages/services/service-mailbox/src/mailbox-service-plugin.ts#MailboxServicePlugin",
@@ -2167,6 +2233,12 @@
           "date": "2026-10-20",
           "change": "checklist-accuracy findings of QA run #24558 (since:v18, 5b14b7f3; its first comment; wave anchor #24579). knownGaps[0] said no in-repo app composes the mailbox service; the showcase requires 'mailbox' and serves the sys_mail_* objects, and what is missing is the IMAP sync composition, a mailAssociation field and an IMAP double, so knownGaps[0] and fixtures.requires[1] now say that. No clause changed",
           "ref": "#24717"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-26",
+          "change": "acceptance[1].verify and acceptance[2].verify name the HTTP read their api oracle needs, and automated.ref adds the engine-layer association pin — checklist-accuracy findings of QA run #25815 (18.2.0 sweep, release-18.2.0-tier1, 6679644a; wave anchor #25807; card #25844). a2: the run scored the attachment clause at in-process — the pin reads the stored rows through the real engine after a real ingest, and no HTTP read was made. a1: inline-forward.test.ts pins the parser's participant extraction, not the association; mail-ingest-service.test.ts pins the association on a real engine for all three client formats and was not in the ref. Read on main 9753d163. No clause changed",
+          "ref": "#25844"
         }
       ]
     },
@@ -2175,7 +2247,7 @@
       "title": "Messaging and integration answers on v18: a notify from a system-context run stores the organization of the record it is about (never NULL), mark-read writes a receipt only for notifications delivered to the caller, redelivering for an inactive or deleted webhook subscription is 409 DELIVERY_NOT_ELIGIBLE, and a declarative MCP stdio connector with a relative command boots healthy from another directory",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -2206,19 +2278,19 @@
         {
           "clause": "the stored notification carries the record's organization_id and no \"[notify] no organization in scope\" warning is logged",
           "oracle": "api",
-          "verify": "organization_id + boot log grep",
+          "verify": "organization_id on the row over GET /api/v1/data/sys_notification + a grep of the served log. notification-organization-follows-event.integration.test.ts proves organization_id on every row at the engine (ObjectQL over SqlDriver) and asserts nothing about the log; the warning's text is gone from the source since the NULL row it predicted stopped being written, so a hit in the log is a regression, and only the live grep reads it",
           "evidence": "row + grep"
         },
         {
           "clause": "the foreign mark-read answers readCount 0 and writes no receipt",
           "oracle": "api",
-          "verify": "readCount + receipt rows",
+          "verify": "readCount + receipt rows, from the served POST /api/v1/notifications/read. The foreign mark-read is pinned only at unit level (messaging-service.test.ts › '[#22026] markRead writes a read receipt only for a notification delivered to that user' › its ⛔ non-recipient cases): evidence beside the live answer, never its pass",
           "evidence": "answer + rows"
         },
         {
           "clause": "redeliver for the inactive webhook → 409 DELIVERY_NOT_ELIGIBLE",
           "oracle": "api",
-          "verify": "status + code",
+          "verify": "status + code from the served POST /api/v1/webhooks/redeliver. webhook-redeliver-member.test.ts drives the door from a Request to a Response (the member handler and the Hono canonical app) on a LiteKernel, not a full served stack: evidence beside the live answer, never its pass",
           "evidence": "the answer"
         }
       ],
@@ -2244,6 +2316,12 @@
           "date": "2026-10-20",
           "change": "checklist-accuracy findings of QA run #24558 (since:v18, 5b14b7f3; its first comment; wave anchor #24579). fixtures.requires[2] asked for the shipped inactive webhook 'with one delivery', which cannot exist: an inactive webhook is never dispatched. It now carries #24558's recipe (an active webhook to a local sink, a terminal delivery, then switch it off), and steps[2] warns off a pending row, which answers the same code for another reason. steps[3] says its MCP leg is scored by acceptance[0]'s pin only. No clause changed",
           "ref": "#24717"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-26",
+          "change": "acceptance[1], [2] and [3] verify name the layer each pin drives — checklist-accuracy findings of QA run #25815 (18.2.0 sweep, release-18.2.0-tier1, 6679644a; wave anchor #25807; card #25844). a1: notification-organization-follows-event.integration.test.ts proves organization_id at the engine and asserts nothing about the '[notify] no organization in scope' line (whose source is gone on main 9753d163). a2: the foreign mark-read is pinned only at unit level (messaging-service.test.ts). a3: the redeliver pin drives Request→Response on a LiteKernel, not a served stack. No clause changed",
+          "ref": "#25844"
         }
       ]
     }

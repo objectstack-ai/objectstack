@@ -3,7 +3,6 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parse as parseYaml } from 'yaml';
 
 import {
   EXIT_BREACHED,
@@ -19,7 +18,6 @@ import { REQUIRED_CONTEXTS } from '../dependabot-merge-gate.mjs';
 
 const ROOT = path.resolve(fileURLToPath(import.meta.url), '../../..');
 const GATE = 'scripts/check-required-check-set.mjs';
-const WORKFLOW = '.github/workflows/required-check-set-patrol.yml';
 const FIXTURES = 'scripts/__tests__/fixtures/required-check-set';
 /**
  * The verbatim live answer of 2026-10-12, taken the day objectui#12240 was
@@ -73,6 +71,8 @@ const ABLATED_FIXTURE = `${FIXTURES}/type-check-removed.json`;
  *   4. the WIRING — the workflow exists, is scheduled, and runs this script.
  *      A patrol nobody runs is indistinguishable from a patrol that passes,
  *      and this is the half of the patrol's own liveness that a diff can see.
+ *      Its workflow half retired with objectstack#25712 (the wiring describe
+ *      names the cases); the `package.json` half stands.
  *
  * ⚠️ What this file deliberately does NOT assert: that the live ruleset is
  * intact. That reading needs the network and belongs to the scheduled run. A
@@ -315,56 +315,16 @@ describe('check-required-check-set — the wiring', () => {
     expect(pkg.scripts['check:required-check-set']).toContain(GATE);
   });
 
-  const workflow = (): Record<string, unknown> => parseYaml(fs.readFileSync(path.join(ROOT, WORKFLOW), 'utf8'));
-
-  /**
-   * YAML 1.1 reads a bare `on:` key as the BOOLEAN true, so `doc.on` is
-   * `undefined` and an assertion reaching for it would pass over an empty
-   * object — a wiring pin that asserts nothing. Both spellings are read, and
-   * the triggers assertion below fails loudly if neither resolves.
-   */
-  const triggers = (): Record<string, unknown> => {
-    const doc = workflow();
-    const on = doc[String(true)] ?? doc.on;
-    if (!on || typeof on !== 'object') {
-      throw new Error(`could not read the \`on:\` block of ${WORKFLOW} — keys were ${Object.keys(doc).join(', ')}`);
-    }
-    return on as Record<string, unknown>;
-  };
-
-  it('the patrol workflow exists and is SCHEDULED — the half of its liveness a diff can see', () => {
-    const on = triggers();
-    const schedule = on.schedule as Array<{ cron?: string }> | undefined;
-    expect(Array.isArray(schedule)).toBe(true);
-    expect(schedule).not.toHaveLength(0);
-    expect(schedule?.[0]?.cron).toMatch(/^\S+ \S+ \S+ \S+ \S+$/);
-    expect(on).toHaveProperty('workflow_dispatch');
-  });
-
-  it('the patrol has NO pull_request leg — it must never gate a pull request', () => {
-    const on = triggers();
-    expect(on).not.toHaveProperty('pull_request');
-    expect(on).not.toHaveProperty('pull_request_target');
-    expect(on).not.toHaveProperty('merge_group');
-  });
-
-  it('the workflow actually invokes this script', () => {
-    expect(fs.readFileSync(path.join(ROOT, WORKFLOW), 'utf8')).toContain(GATE);
-  });
-
-  it('the patrol asks for no write permission at all — it READS the ruleset', () => {
-    const perms = workflow().permissions;
-    expect(perms).toEqual({ contents: 'read' });
-  });
-
-  it('a run that could not read must fail the job, so a broken transport is never a silent green', () => {
-    const yml = fs.readFileSync(path.join(ROOT, WORKFLOW), 'utf8');
-    expect(yml).toContain(String(EXIT_CANNOT_RUN));
-    expect(yml).toContain(String(EXIT_BREACHED));
-    // Captured with no pipe in between — `node … | tail` reports the pipe's
-    // status and every verdict would collapse to 0.
-    expect(yml).toMatch(/exit_code=\$code/);
-  });
+  // Retired with objectstack#25712: `the patrol workflow exists and is
+  // SCHEDULED`, `the patrol has NO pull_request leg`, `the workflow actually
+  // invokes this script`, `the patrol asks for no write permission at all` and
+  // `a run that could not read must fail the job`. Each read objectui's
+  // `required-check-set-patrol.yml`, which runs nowhere under the monorepo:
+  // GitHub runs the root `.github/workflows/` alone, and the root
+  // `required-set-patrol.yml` patrols the monorepo's own ruleset. objectui's
+  // patrol is row 25 of the objectstack#25697 workflow roster (→ sub-issue 4); a
+  // port brings these pins back against the root workflow that runs this
+  // script, by path.
 });
 
 /**
@@ -381,7 +341,11 @@ describe('check-required-check-set — the wiring', () => {
  * block asserts the pointer rather than the answer: nothing it reads could go
  * stale the next time a maintainer edits the ruleset.
  *
- * ⚠️ The population is named in words: the three files objectui#9502 repaired.
+ * ⚠️ The population is named in words: the files objectui#9502 repaired that
+ * still say anything. The third, objectui's `dependabot-auto-merge.yml`, left it
+ * with objectstack#25712: that workflow runs nowhere under the monorepo (row 9
+ * of the objectstack#25697 workflow roster, → sub-issue 4), so its prose
+ * guides no one.
  * `AGENTS.md` carried a fourth instance and is deliberately NOT in that set.
  * objectui#9502 left it standing — it is governed surface, and its
  * parenthetical also covered who may bypass the ruleset, which the endpoint
@@ -395,12 +359,8 @@ describe('check-required-check-set — the wiring', () => {
  * decoration.
  */
 describe('check-required-check-set — the prose points here instead of answering (#9502)', () => {
-  /** The three files objectui#9502 repaired. */
-  const REPAIRED = [
-    'content/docs/guide/ci-cd-pipeline.md',
-    '.github/workflows/dependabot-auto-merge.yml',
-    'scripts/dependabot-merge-gate.mjs',
-  ];
+  /** The files objectui#9502 repaired, less the workflow the note above retires. */
+  const REPAIRED = ['content/docs/guide/ci-cd-pipeline.md', 'scripts/dependabot-merge-gate.mjs'];
 
   /**
    * The carrier objectui#9502 left standing and objectui#9520 split: the one

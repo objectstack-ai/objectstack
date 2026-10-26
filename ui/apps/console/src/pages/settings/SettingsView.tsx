@@ -565,6 +565,10 @@ export function SettingsView() {
       title={
         <span className="inline-flex items-center gap-2">
           <span className="truncate">{title}</span>
+          {/* The flex gap draws the space; this text node puts it in the
+              title's text, so it reads "Feature Flags Beta", not
+              "Feature FlagsBeta". */}
+          {manifest.beta ? ' ' : null}
           {manifest.beta ? (
             // `settingsHub.beta`, not a settingsView twin: it is the same
             // release-stage badge on the same feature, and zh deliberately

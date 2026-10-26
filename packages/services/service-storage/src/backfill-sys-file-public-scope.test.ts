@@ -125,9 +125,10 @@ describe('sys_file public-scope backfill (#22443 ruling B) — a real ObjectQL o
    * the source row's scope on the copy.
    */
   // The claiming write acts in an organization: `product` is created by this
-  // release, whose tenant column is NOT NULL (ADR-0131 D1).
+  // release, whose tenant column is NOT NULL (ADR-0131 D1). [#25694] Its
+  // caller is signed in: an anonymous write carries no file.
   const copyBySecondReference = (recordId: string, fileId: string) =>
-    engine.insert('product', { id: recordId, title: recordId, image: fileId }, { context: { tenantId: 'org_a' } } as any);
+    engine.insert('product', { id: recordId, title: recordId, image: fileId }, { context: { userId: 'u_writer', tenantId: 'org_a' } } as any);
 
   it('a deployment with no public rows runs clean: it counts zero and writes nothing', async () => {
     await engine.insert('sys_file', { ...legacyPublicRow('f_user'), scope: 'user' }, SYSTEM as any);

@@ -453,6 +453,10 @@ const zh = {
     selected_other: '已选择 {{count}} 项',
     edit: '编辑',
     delete: '删除',
+    // The inline-edit row buttons and the hover open affordance (#25916).
+    openRecord: '打开记录',
+    cancelChanges: '取消更改',
+    saveRow: '保存行',
   },
   grid: {
     actions: '操作',
@@ -804,6 +808,10 @@ const zh = {
     noMatches: '没有匹配的记录',
     noMatchesMessage: '没有符合当前筛选或搜索条件的记录，试试调整或清除它们。',
     viewFilterNoMatchesMessage: '没有符合该视图筛选条件的记录。',
+    ownedNoneTitle: '你还没有负责的记录',
+    ownedNoneMessage: '该视图只列出属于你的记录，你目前还没有。',
+    noneVisibleTitle: '没有你可查看的记录',
+    noneVisibleMessage: '这里没有你有权查看的记录。如果你认为应该能看到，请联系管理员开通权限。',
     loadErrorTitle: '无法加载记录',
     loadErrorMessage: '加载数据时出错。请检查网络连接后重试。',
     loadErrorForbiddenTitle: '无权访问',
@@ -2502,6 +2510,8 @@ const zh = {
         stepInput: '输入',
         stepOutput: '输出',
         stepError: '错误',
+        // A client that lacks the method a panel calls (#25916).
+        clientMethodUnavailable: '此客户端不支持 {{method}}',
       },
       // objectui#13460 — the Integrations page's "Connect an AI agent" card (`AgentConnectSection`).
       agentConnect: {
@@ -3256,6 +3266,8 @@ const zh = {
       detailLoadFailed: '无法加载变更详情：',
       detailNone: '未检测到差异 —— 草稿与已发布版本一致。',
       detailChangedKeys: '其他变更：',
+      detailNewKeys: '包含：',
+      generatedGroup: '平台生成（{{n}}）',
       confirmNote: '发布将一次性（原子地）发布此包全部 {{count}} 个待发布草稿。',
       confirmNote_one: '发布将一次性（原子地）发布此包全部 {{count}} 个待发布草稿。',
       confirmNote_other: '发布将一次性（原子地）发布此包全部 {{count}} 个待发布草稿。',
@@ -4778,6 +4790,14 @@ const zh = {
       unknownType: '未知的元数据视图类型。应为 {{a}}、{{b}} 或 {{c}}。',
       unknownTypeNamed: '未知的元数据视图类型“{{type}}”。应为 {{a}}、{{b}} 或 {{c}}。',
     },
+  },
+  reactPage: {
+    disabledTitle: 'React 页面在此部署中已禁用',
+    disabledBody: '{{kind}} 页面会在应用中直接执行作者编写的 JavaScript，因此除非部署将其开启，否则处于关闭状态。信任其页面作者的运维人员可在服务器上设置 {{flag}}（嵌入渲染器的宿主则调用 {{call}}）。',
+    loadFailed: '无法加载 React 运行时',
+    sourceRequired: '{{kind}} 页面需要非空的 {{source}}。',
+    loading: '正在加载 React 运行时…',
+    error: 'React 页面错误',
   },
 } as const;
 

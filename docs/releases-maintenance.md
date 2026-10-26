@@ -1,20 +1,20 @@
 # Maintaining the release history
 
-ObjectStack ships as a **single version-locked train**: every `@objectstack/*`
-package (and the bundled `@objectstack/console` frontend) is in the changesets
-`fixed` group, so one number describes the whole platform. That number is the
-`@objectstack/spec` **major** — the same value as `PROTOCOL_VERSION`.
+ObjectStack ships as a **single version-locked train**: every public `@objectstack/*`
+and `@object-ui/*` package (the bundled `@objectstack/console` frontend included) is
+in the one changesets `fixed` group, so one number describes the whole platform.
+That number is the `@objectstack/spec` **major** — the same value as `PROTOCOL_VERSION`.
 
-Because the release history spans ~70 backend packages *and* a separately-developed
-frontend, it is maintained in **three layers**. Each layer has exactly one owner
+Because the release history spans ~70 backend packages *and* the frontend under
+`ui/`, it is maintained in **three layers**. Each layer has exactly one owner
 (generated or curated) — never a hand-maintained aggregate, which is what drifts.
 
 ```
-write time:   backend PR      → .changeset/*.md
-              objectui bump    → .changeset/console-*.md   (auto, see below)
+write time:   backend or ui/ PR → .changeset/*.md
                        │ pnpm changeset version  (release pipeline)
                        ▼
-detail layer: packages/*/CHANGELOG.md          ← generated, never hand-edited
+detail layer: packages/*/CHANGELOG.md,
+              ui/**/CHANGELOG.md               ← generated, never hand-edited
                        │ curate per major (backend + frontend)
                        ▼
 platform layer: content/docs/releases/vN.mdx   ← the whole-platform big picture
@@ -24,8 +24,8 @@ platform layer: content/docs/releases/vN.mdx   ← the whole-platform big pictur
 
 Every behaviour-changing PR adds a `.changeset/*.md` describing the change and its
 migration **while the context is fresh**. This is the only place humans write
-release history for the backend. `pnpm changeset version` fans these out into the
-per-package changelogs and computes the next platform version.
+release history, for the backend and the frontend alike. `pnpm changeset version`
+fans these out into the per-package changelogs and computes the next platform version.
 
 ## 2. Detail layer — per-package `CHANGELOG.md` (generated)
 
@@ -34,125 +34,53 @@ exhaustive, per-package record for integrators and npm.
 
 ### The frontend is a package too
 
-The Console UI is developed in the sibling [`objectui`](https://github.com/objectstack-ai/objectui)
-repo and bundled into `@objectstack/console` at a pinned commit recorded in
-[`.objectui-sha`](../.objectui-sha). A SHA bump alone used to leave **no trace** in
-the history. `scripts/bump-objectui.sh` now closes that gap: on every bump it emits
-a `@objectstack/console` changeset summarising the objectui `OLD_SHA..NEW_SHA`
-commit range, graded `patch`: the platform's version line follows the metadata
-protocol, which the console never changes, so the file carries
-`Metadata-protocol: none` and `CONSOLE_BUMP` is the only thing that grades it
-otherwise. So frontend deltas flow through the *same* pipeline as the backend —
-they land in `@objectstack/console`'s changelog and roll up into the platform
-version.
+The Console UI lives in this repository under `ui/` (`ui/apps/console`, published as
+`@object-ui/console`), and the `@object-ui/*` packages are members of the same
+`fixed` group as `@objectstack/*` (#25711, landed by #25745; the earlier objectui pin,
+its bump script and its changeset digest were deleted there). A frontend change is
+an ordinary PR with an ordinary `.changeset/*.md` at the repository root, and
+`changeset version` writes it into the `@object-ui/*` changelogs and the one platform
+version like any backend change.
+
+`@objectstack/console` ships that Console's build. `pnpm console:build` runs the root
+turbo task `@objectstack/console#build:dist`, which depends on
+`@object-ui/console#build` and then runs `packages/console/build-dist.sh`: it copies
+`ui/apps/console/dist` into `packages/console/dist`, adds the tracked repo-root
+`sdui.manifest.json`, and runs the single-zod canary on the bytes it ships.
+`pnpm run release` and `cut-rc.yml` both run it after `pnpm run build`, so a release
+ships the Console from the same commit as the spec it builds against.
+
+> objectui's pending changesets from before the merge still sit under
+> `ui/.changeset/`, where the root config does not read them. Moving them into the
+> root `.changeset/` before the first joint Version PR is #25831. New frontend
+> changesets go in the root `.changeset/`.
+
+#### After a registry change: regenerate the committed manifest (#12924, #17735, #25712)
+
+The repo-root `sdui.manifest.json` (ADR-0080, the Console's public-tier component
+manifest) and its provenance record `scripts/sdui-manifest.record.json` are
+generated, and one command writes them:
 
 ```bash
-scripts/bump-objectui.sh              # bump to ../objectui HEAD, write the changeset, commit
-scripts/bump-objectui.sh <sha>        # bump to an explicit commit
-CONSOLE_BUMP=patch scripts/bump-objectui.sh   # force the bump type
-scripts/bump-objectui.sh --no-changeset       # opt out (rarely)
-```
-
-#### The pin must be a commit on objectui `main` (#10495)
-
-`bump-objectui.sh` pins `git rev-parse HEAD` of your objectui checkout, which
-answers *what is checked out* — never *is it on main*. Bump with a feature branch
-checked out and you pin a revision that is not on main. So the bump now asks the
-question and **warns** — it does not refuse:
-
-* **On `origin/main`** — the pin line says `(on origin/main)` and nothing else is
-  printed. "Checked, and fine" is stated, not inferred from silence.
-* **Not on `origin/main`** — a loud warning naming the branch(es) the commit *is*
-  on, and saying which situation it is: pushed onto a branch that never merged, or
-  never pushed at all. The pin is still written; deciding is yours.
-* **Cannot be answered** — no `origin/main` in the checkout — it says *that*, and
-  never borrows the wording of either verdict. (`git merge-base --is-ancestor`
-  exits **128** rather than returning a verdict when it cannot read an object: an
-  error, not a "no".)
-
-It is a warning rather than a gate on purpose: `origin/main` is only as fresh as
-your last fetch, so a hard failure here would reject a legitimately-just-merged
-commit, and this script stays usable offline. It never fetches for you — it prints
-the `git fetch origin main` you may want. The hard gate lives at the chokepoint
-that must fail closed: `.github/workflows/cut-rc.yml` re-asks the same question
-against a fresh full clone and **refuses to cut** (#9450). Until an RC is cut,
-though, a bad pin merges and the committed SDUI manifest below is regenerated
-against a tree that is not on main — which is why the producer half warns at all.
-
-#### A commit object it cannot read is refused, not warned about (#10797)
-
-The bullets above are about a pin that is not on `main` — a real commit you can
-still meaningfully pin. A pin whose commit **object cannot be read at all** is a
-different thing: there is nothing to pin, and no changeset entry or commit message
-can be derived from it. That refuses, and it refuses **before writing anything**:
-
-```
-✗ REFUSING to bump: the objectui commit object <short> cannot be read in <path>.
-  …
-  NOTHING WAS WRITTEN — .objectui-sha is untouched and still holds the old pin.
-```
-
-`.objectui-sha` is byte-identical to what it was before the run — a failed bump
-leaves no half-applied state. It used to: the pin file was written *before* the
-run read the commit subject, so `git log` failing killed the script under `set -e`
-with the file already rewritten, no changeset, no commit, and a bare
-`fatal: bad object` as the whole explanation. Re-running did not self-correct,
-because the pin file now held the bad SHA.
-
-You reach this with no argument at all — `git rev-parse HEAD` exits **0** and
-prints the sha even when that commit's object is missing from the store, since it
-resolves the ref without reading the object. A partial clone that has not fetched
-the object, or an interrupted object store, is enough. The remedy the message
-names is `git -C <objectui> fetch origin`, then re-run the bump.
-
-`pnpm check:objectui-bump` (`scripts/bump-objectui.selftest.sh`, run by the lint
-job) pins this: it asserts the file's **bytes** across a refused run, because the
-broken and the fixed script both exit non-zero here and only the file tells them
-apart.
-
-#### After the pin moves: regenerate the committed manifest (#5960, #12924, #17735)
-
-The bump has a second half, and it is not optional:
-
-```bash
-pnpm objectui:build                       # objectui BUILT at the new pin, in .cache/objectui-<SHA12>/
 node scripts/gen-sdui-manifest-node.mjs   # no arguments
 ```
 
-`pnpm objectui:refresh` (bump, then build) leaves exactly the tree the second command
-reads, so after a refresh only the generator is left to run. **That command writes the
-two tracked files, and nothing else writes them:** the repo-root `sdui.manifest.json`
-and its provenance record `scripts/sdui-manifest.record.json`. It derives its modules
-root from `.objectui-sha` (`.cache/objectui-<SHA12>/apps/console`), refuses a tree that
-is not checked out at the pin or is not built (`@object-ui/core/dist/index.js` absent)
-with "run `pnpm objectui:build` first", enumerates objectui's public-tier registry out
-of that built tree under plain Node, and serializes it through `@objectstack/sdui-parser`
-(it needs `packages/sdui-parser/dist` — `pnpm --filter @objectstack/sdui-parser build`).
-The record says so: `source: built-tree`, the `modulesRoot`, and the
-`objectuiWorkspaceVersion` read from that tree's `@object-ui/core/package.json`.
+It builds the registry packages under `ui/packages/`, enumerates them from
+`ui/apps/console` under plain Node, and serializes them through
+`@objectstack/sdui-parser` (it needs `packages/sdui-parser/dist`:
+`pnpm --filter @objectstack/sdui-parser build`). The record carries an `inTree`
+block with a digest of the registry packages' `src/`.
 
-⛔ **There is no version to look up and no npm install.** The version string a pinned
-commit declares names a tarball objectui published from an EARLIER commit — objectui
-bumps its version only at release — so installing "the version the pin ships" produced
-a manifest up to one release behind the pin. That route is deleted (ruling 丙 on #17735).
+A required lint step reads the tracked pair on **every PR**:
+`node scripts/check-sdui-manifest.mjs` checks the shape, the `sha256` against the
+record, and recomputes the source digest from the index. A PR that edits a registry
+package's source without regenerating goes red there, and the failure text prints
+the regeneration call. ⛔ There is no npm install route to the manifest; that was
+deleted by ruling 丙 on #17735.
 
-One required lint step reads the tracked pair on **every PR**, so skipping this step reds
-the bump PR rather than leaving it quietly uncovered: `node scripts/check-sdui-manifest.mjs`
-— shape, `sha256` against the record, the record's `objectuiSha` against the live
-`.objectui-sha`, and (with an objectui checkout in hand) the recorded version against
-what the pin declares. Moving the pin is what makes the pin leg fail, and its failure
-text prints the regeneration call.
-
-**One producer, one artefact.** `scripts/build-console.sh` copies the tracked
+**One producer, one artefact.** `packages/console/build-dist.sh` copies the tracked
 `sdui.manifest.json` into `packages/console/dist/`, so the published console carries the
-same bytes CI gates. The browser dump that used to write a gitignored copy there
-(`pnpm sdui:manifest`, a vite dev server plus Playwright chromium over the built console)
-was measured `cmp`-identical to the node output over one built tree before it retired,
-together with the ADR-0082 D4 declaration-parity ratchet it ran (see ADR-0082's decision 4
-status line).
-
-`scripts/bump-objectui.sh` and `scripts/build-console.sh` both print the reminder when
-they finish.
+same bytes CI gates.
 
 ## 3. Platform layer — `content/docs/releases/vN.mdx` (curated)
 
@@ -192,89 +120,20 @@ what a reader must do; the per-package `CHANGELOG.md` keeps changesets' own leve
 ### Sourcing the Console section for a release
 
 Backend content comes from the spec/package changesets. Frontend content comes from
-objectui's history for the SHA range bundled in that release. Because `.objectui-sha`
-is version-controlled, `scripts/objectui-range.mjs` computes that range from any two
-framework revisions and prints the frontend changes **objectui declared** over it —
-grouped by declared level (breaking / features / fixes), with the largest touched
-areas — ready to paste into a Console section:
+the same place: the changesets that ui/ PRs added, which `changeset version` writes
+into `ui/apps/console/CHANGELOG.md` and the other `@object-ui/*` changelogs for that
+version. Read those generated sections (and the release-notes grouping above) to
+write the Console section. Framework changesets also carry companion frontend notes
+inline, which help where a change spans both scopes.
 
-```bash
-# frontend delta bundled between two framework revisions (needs ../objectui)
-node scripts/objectui-range.mjs <old-rev> <new-rev>   # e.g. the two release commits
-node scripts/objectui-range.mjs --from <sha> --to <sha> --json   # explicit SHAs / tooling
-node scripts/objectui-range.mjs <old-rev> <new-rev> --all         # also name what ships nothing
-```
+### No objectui pin, so no pin currency to check
 
-**What "a frontend change" means here (#4843).** The list comes from the
-`.changeset/*.md` files objectui added over the range, via the same `classifyRange()`
-in `scripts/objectui-changeset-digest.mjs` that `bump-objectui.sh` uses to write the
-pin changeset (#4731) — one criterion, two consumers, so the platform release record
-and this page's Console section cannot disagree. A changeset with an empty frontmatter
-block is changesets' own "release-nothing" marker and is excluded; so is a commit that
-added no changeset. **Both exclusions are counted out loud in the printed markdown**,
-because the output *is* release-page body text and a reader cannot otherwise tell a
-filtered list from a complete one. Headings group by declared level; grouping is
-presentation and never a filter.
-
-This replaced a `feat|fix` guess on commit subjects. On the real range
-`7d9734d5e321..785b8a5d432c` that guess dropped 13 commits that actually released —
-6 of them breaking `refactor(...)!` — and listed 5 that release nothing.
-
-Without an objectui checkout it still prints the SHA range to inspect. The framework
-changesets also embed companion frontend notes inline ("Companion objectui PR
-ships…", renderer notes), which are enough to write an accurate Console section on
-their own.
-
-### Which objectui revision we pin is a decision, and nothing checks its currency
-
-Everything above reads the range `OLD_PIN..NEW_PIN`. That is exact, and the obvious
-next question — "but is `NEW_PIN` objectui's latest?" — is deliberately **not asked
-anywhere in this repo**. Maintainer ruling, 2026-08-20, verbatim and untranslated:
-
-> objectui 每次 pin 的时候，对应的 changeset 应该带过来，但是发版本的时候不需要去扫描
-> objectui 仓库的最新版
->
-> 更新到哪个版本是 objectstack 的 issue 自己决定的
-
-So the process is:
-
-1. **The target revision is chosen in an objectstack issue.** Someone decides which
-   objectui commit this platform should ship and records the decision there. It is
-   never derived from objectui's `main` HEAD, and never by a release lane.
-2. **The pin moves by hand, in its own PR**, with `scripts/bump-objectui.sh <sha>`.
-   That is the *only* way `.objectui-sha` ever changes.
-3. **The changeset is carried over in that same PR.** The bump emits the
-   `@objectstack/console` changeset for `OLD_PIN..NEW_PIN` from objectui's own
-   declared changesets (`scripts/objectui-changeset-digest.mjs`). This is the
-   mechanism that keeps the release record honest, and it is the whole of it.
-4. **Then the committed manifest is regenerated in that same PR.**
-   `pnpm objectui:build`, then `node scripts/gen-sdui-manifest-node.mjs`, which reads
-   objectui's built tree at the new pin and rewrites the tracked `sdui.manifest.json` and
-   `scripts/sdui-manifest.record.json`; `scripts/check-sdui-manifest.mjs` reds the bump
-   PR until it does, and the console build ships that same tracked file. See "After the
-   pin moves" above.
-5. **Releases build against the pin as committed.** Both `cut-rc.yml` and
-   `release.yml` read `.objectui-sha` and build the Console SPA at it. Neither
-   resolves objectui `main`; neither moves the pin.
-
-**Stated plainly, because it is the point rather than a caveat:** a release ships
-whatever console the committed pin names. If the pin is old, the release's frontend
-is old, and **nothing will warn you**. The pin lagging objectui `main` is not a
-defect — it is a decision that nobody has revisited yet. Revisit it by filing an
-issue and bumping, not by teaching a release lane to second-guess it.
-
-There *was* a gate that asked the currency question — `Console Pin Freshness`
-(`check:objectui-pin-fresh`, #3340), on the Version Packages PR and on the publish
-path. The 2026-08-20 ruling removed it (#10134): the workflow, the script and the
-`package.json` entry are all gone. Do not rebuild it. #3340's real invariant —
-*everything shipped is covered by the changeset record* — is delivered by step 3
-above, at bump time, which is where the decision is actually taken.
-
-**What used to check the pin.** `ci.yml`'s **Console Pin Gate** (#4290) cloned
-objectui at the pin and built the SPA, so it proved the pinned SHA still
-**built**; it never had an opinion about whether the pin was current. It retired
-with the objectui import (#25697): `Type Check UI` and `Build & E2E UI` in
-`ci.yml` build the Console from `ui/` in the pull request that changes it.
+A release ships the Console built from `ui/apps/console` at the commit it releases.
+There is no pinned objectui revision to choose, move or keep current: the pin, its
+bump PRs, the `Console Pin Freshness` gate (removed earlier by #10134) and `ci.yml`'s
+**Console Pin Gate** (retired with the objectui import, #25697) are all history. See
+#25711 and #25745 for the cutover. `Type Check UI` and `Build & E2E UI` in `ci.yml`
+build the Console from `ui/` in the pull request that changes it.
 
 ## Rehearsing the version pass (throwaway clone)
 
@@ -326,7 +185,7 @@ different things, so they get different lanes.
 |---|---|---|
 | Workflow | `.github/workflows/cut-rc.yml` | `.github/workflows/release.yml` |
 | Trigger | one `workflow_dispatch` | merge the Version Packages PR, then approve the `release` environment |
-| objectui pin | bumped **inside** the run, to a snapshot | must already be fresh on the PR |
+| Console | built from `ui/apps/console` at the snapshot | built from `ui/apps/console` at the version commit |
 | Changelog review | none (the record is generated) | human review on the PR |
 | Board-clearing / #7275-A precondition | not required | required |
 
@@ -354,14 +213,13 @@ run would push, so the first real dispatch is never this workflow's first execut
 
 What it does, in order:
 
-1. Checks out `main` and records that sha — the snapshot. Reads `.objectui-sha`
-   for the objectui revision; it does **not** resolve objectui `main`. Nothing
-   downstream re-reads either repo's `main`, so **both repositories may keep
-   moving for the whole run**.
-2. Clones objectui at the committed pin and builds the vendored Console there; the
-   dist carries the tracked `sdui.manifest.json`, whose freshness against the pin the
-   required lint job already held on the PR that moved it. ⛔ **No pin bump happens**
-   — the pin is committed input (#10134).
+1. Checks out `main` and records that sha — the snapshot. Nothing downstream
+   re-reads `main`, so **`main` may keep moving for the whole run**.
+2. Builds the workspace, both scopes, then the Console (`pnpm run build`, then
+   `pnpm run console:build`) from that snapshot. The dist carries the tracked
+   `sdui.manifest.json`, whose freshness the required lint job already held on the
+   PR that changed it. A Console that cannot build stops the cut before anything is
+   written.
 3. Runs the gates that read `.changeset/*`, before versioning consumes it.
 4. Runs `pnpm run version` — the repo script, never a bare `changeset version` —
    and **fails unless the computed version equals the one you typed**.
@@ -380,17 +238,9 @@ the race instead of asking people to hold still.
 `release.yml`'s `version-pr` job moved off `push` onto a 6-hourly `schedule` plus an
 on-demand `workflow_dispatch` (`refresh_version_pr`), so between refreshes
 `changeset-release/main` is static and its CI does converge. This section is left
-standing because the *snapshot* lane was never only about that — the moving objectui
-pin is untouched, and `cut-rc` is still the rc route. What it does mean is that "the
+standing because the *snapshot* lane was never only about that, and `cut-rc` is still
+the rc route. What it does mean is that "the
 version PR can never converge" is no longer a reason to reach for it.
-
-**On the pin.** `cut-rc` builds against `.objectui-sha` exactly as committed. It
-does not resolve objectui `main`, does not compare the pin to anything, and does not
-move it — which objectui revision we ship is a decision taken in an issue, not a
-release-time lookup (#10134; see "Which objectui revision we pin is a decision"
-above). What the lane still asserts about the pin is that the sha is well-formed and
-that it is a real commit reachable in a full clone of objectui `main`; a pin naming a
-revision nobody can resolve later fails the cut.
 
 **One-time admin prerequisite.** The lane pushes the version commit straight to
 `main`, so the pushing identity must be on main's ruleset **bypass** list —
@@ -447,10 +297,8 @@ pending a human" and exits green either way. For an image immediately, dispatch
 
 Unchanged, and everything that makes a GA release a *judgement* stays here: the
 board-clearing pass, the #7275-A cut precondition, and the human review of the
-generated changelogs on the PR. ⚠️ There is no longer a pin-freshness gate on this
-lane either (#10134) — a GA release ships the committed pin, same as an rc, and the
-judgement about which console revision that should be belongs in an issue and a bump
-PR *before* the cut. Merge the `chore: version
+generated changelogs on the PR. Like an rc, a GA release ships the Console built from
+`ui/apps/console` at the commit it releases. Merge the `chore: version
 packages` PR (#4935); that push is what starts the publish lane, and the run then
 waits at `environment: release` for a required reviewer to approve a job named
 `Publish <version> to npm (awaiting approval)` — the version read from the commit,
@@ -478,11 +326,11 @@ how many first-parent commits before the version commit that run's head sits. Th
 gate reads only *completed* runs and never waits (by design: `selectFullBatteryRun`
 in `scripts/ci/scheduled-full-run.mjs`), so a run still in progress is invisible to
 it. Now open **Actions → CI** on `main`: if a run on the version commit, or on any
-commit between it and the one the `CI` line names, is still in progress — normally
-the hourly `schedule` run (`cron: '0 * * * *'` in `ci.yml`), occasionally a `push`
-run — **wait for it to complete before approving**. That is about 25–30 minutes from
-the top of the hour (the 20 hourly runs up to 2026-10-23 00:20Z took 14–39 minutes,
-median 28.7, 14 of them 25–31). Green: approve. Red: do not approve. It is the reading the gate would
+commit between it and the one the `CI` line names, is still in progress — a `push`
+run (every merge to `main` gets its own since #25373, so the version commit's own push
+run is the usual one) or the `schedule` run — **wait for it to complete before
+approving**. A run takes about 25–30 minutes (the 20 hourly scheduled runs up to
+2026-10-23 00:20Z took 14–39 minutes, median 28.7, 14 of them 25–31). Green: approve. Red: do not approve. It is the reading the gate would
 have refused had it been complete, so treat it as that refusal (recovery: the
 `full-battery` job's header in `release.yml`). `CI` is the long battery, so it is the
 window that matters in practice; an in-flight `Lint & Type Check` or `Spec Shape
@@ -495,6 +343,19 @@ still running. That run concluded **failure** at 12:30Z, minutes after the gate 
 (#24879, a stale dogfood fixture), and a later `force: true` dispatch that could see
 it was refused. The gate was right about everything it could see; the gap is only
 the window in which a nearer run is in flight, and only a human can wait it out.
+
+**The scheduled run is every 4 hours** (`cron: '0 */4 * * *'` in `ci.yml` and
+`lint.yml`, hourly until #25771). Two consequences for the reading above. A version
+commit can wait **up to 4 hours** for the first *scheduled* full run on or after it;
+the gate does not wait for one, because a completed `push` run nearer the version
+commit decides first (`FULL_BATTERY_EVENTS` reads both), and no window in the gate
+is a clock — it reads the nearest completed run at or before the version commit,
+however old. And a `push` run's `Test Core` is affected-only (#16467), so when the
+nearest verdict is a push run it is the narrower one. If you want the whole-workspace
+verdict on the version commit itself and `main` has not moved past it, run **Actions →
+CI → Run workflow** on `main` (and the same for **Lint & Type Check**) and wait for it
+rather than for the next scheduled run; once `main` has moved, a dispatched run tests a
+later tree and the gate rightly ignores it.
 
 **This is a wait, not a merge freeze.** `main` keeps moving the whole time: the
 approval publishes the version commit's tree and nothing that landed after it, so

@@ -762,11 +762,12 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // written action's own `confirmText` / `successMessage` in the same pass.
     // #25680 makes each finding an `error`, so an action, object or page write
     // carrying one is refused (a narrowing no conversion carries, shipped in
-    // 18.x as its own BREAKING minor, as #25205 did for the bulk slot). One
-    // stays a `warning`: a `${…}` token the console's runner still fills, in a
-    // sentence with no `{{ }}` hole. MEASURED first over the shipped corpus at
-    // `6021b5e837`: 0 findings across examples/**, platform-objects and
-    // plugin-approvals, against one for a planted unbound hole.
+    // 18.x as its own BREAKING minor, as #25205 did for the bulk slot); since
+    // #25709 that includes a `${…}` token in a sentence with no `{{ }}` hole,
+    // which the console's runner now shows as written. MEASURED first over the
+    // shipped corpus at `6021b5e837`: 0 findings across examples/**,
+    // platform-objects and plugin-approvals, against one for a planted unbound
+    // hole; #25709 re-measured 0 sentences of the holeless `${…}` shape there.
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['flow', 'action', 'hook', 'object', 'view', 'page'],
     run: (stack, ctx) =>

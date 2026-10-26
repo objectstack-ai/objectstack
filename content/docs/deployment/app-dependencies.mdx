@@ -1,0 +1,185 @@
+---
+title: App dependencies — declare one, and what install checks
+navTitle: App Dependencies
+description: Declare that an app depends on another installed app in manifest.dependencies, the version-range grammar install reads, what the DEPENDENCY_MISSING refusal means, and what build-time validation cannot see.
+---
+
+An installable app may depend on another installed app and reference its
+objects ([ADR-0141](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0141-inter-app-dependency-declared-checked-before-install.md)).
+Nothing new is authored for it: the declaration is the `dependencies` key every
+manifest already has, and installing the app checks it once.
+
+## Declare a dependency
+
+`dependencies` maps the depended-on package's id to a version range:
+
+```ts
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
+  manifest: {
+    id: 'com.acme.psa',
+    name: 'PSA',
+    version: '1.0.0',
+    type: 'app',
+    namespace: 'psa',
+    dependencies: {
+      'com.acme.crm': '6.x', // "install CRM 6.x first"
+    },
+  },
+  // …
+});
+```
+
+The declaration does two things:
+
+- **It opens the reference.** The runtime save door judges a list view against
+  your package's own objects and those of the packages your manifest declares,
+  transitively; a view bound to an object outside that set is refused there,
+  `422`, and the fix it prints is this declaration. A dependency opens the
+  reference, not the data: users still see the other app's records under that
+  app's own permission sets and sharing rules.
+- **It is checked before install** — below.
+- **It lets your package share the depended-on app's namespace** — below.
+
+Every entry is required; there is no optional arm. Declare only the packages
+your app actually references. Two modules of one app need not declare each
+other: each declares the app, and that is enough for both to install, in either
+order, and to share the app's namespace.
+
+## The version-range grammar
+
+Install reads each range at exact-version granularity, npm-style:
+
+| You write | It admits |
+|:---|:---|
+| `6.x`, `6.*`, `6` | any `6.y.z` |
+| `6.1.x`, `6.1` | any `6.1.z` |
+| `^6.2.0` | `>=6.2.0 <7.0.0` (`^0.2.3` is `>=0.2.3 <0.3.0`) |
+| `~6.2.0` | `>=6.2.0 <6.3.0` |
+| `>=6.2.0`, `>6.2.0`, `<=6`, `<7` | the single bound (`<=6` is `<7.0.0`; `>6` is `>=7.0.0`) |
+| `6.2.0`, `=6.2.0` | exactly `6.2.0` |
+| `6.1.0 - 6.3` | `>=6.1.0 <6.4.0` |
+| `>=6.2.0 <7` (or `>=6.2.0, <7`) | both bounds — an intersection |
+| `^5.4.0 \|\| ^6.1.0` | either alternative |
+| `*`, `x` | any version |
+
+Anything else — `latest` or another dist-tag, a malformed version — is **not
+readable, and an unreadable range never satisfies**: the install is refused
+naming the range. The installed side is read as `MAJOR.MINOR.PATCH` (a leading
+`v` and `+build` metadata are accepted); a prerelease version such as
+`6.1.0-beta.1` is outside the grammar, and a range is never judged satisfied by
+one.
+
+## What install checks
+
+When you install a package — `POST /api/v1/packages`, `os package install`
+through `POST /api/v1/marketplace/install-local`, or an in-process call to the
+protocol's `installPackage` — every entry of **that package's own**
+`dependencies` must be one of:
+
+- **installed** in the target environment at a `manifest.version` inside the
+  declared range; or
+- **delivered by the same artifact.** The packages of one release artifact are
+  one tested unit, so a sibling package the artifact carries counts as present
+  whatever its version; an in-artifact range mismatch is a build-time concern,
+  not an install refusal.
+
+Otherwise the whole install is refused before anything is registered, written
+or synced:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "DEPENDENCY_MISSING",
+    "httpStatus": 422,
+    "message": "Install refused: a declared dependency is not satisfied in this environment, and nothing was installed. …",
+    "details": {
+      "compatible": false,
+      "issues": [
+        { "severity": "error", "category": "dependency_missing", "message": "Package 'com.acme.psa' depends on 'com.acme.crm' 6.x, which is not installed. …" }
+      ],
+      "unmet": [
+        { "packageId": "com.acme.psa", "dependency": "com.acme.crm", "range": "6.x", "found": "absent" }
+      ]
+    }
+  }
+}
+```
+
+Every unmet entry is reported in that one answer. `found` says what was wrong
+with each:
+
+| `found` | Meaning | Fix |
+|:---|:---|:---|
+| `absent` | The dependency is not installed | Install it, at a version inside the range, first |
+| `out-of-range` | Installed at `installedVersion`, outside the range | Install a version inside the range, or widen the range and republish |
+| `unreadable-range` | The declared range is outside the grammar above | Rewrite the range and republish |
+| `unreadable-version` | The installed version is not `MAJOR.MINOR.PATCH` | Install a release version of the dependency |
+| `unreadable-declaration` | `dependencies` is not a `{ "PACKAGE_ID": "RANGE" }` record | Rewrite the declaration and republish |
+
+Only the package's own entries are judged: a dependency's dependencies were
+judged when it was installed. Whether the dependency is enabled is not judged.
+
+## What install does not check
+
+The check runs at those install acts only. It does not run:
+
+- **at boot.** A restart re-registers what an install already admitted, while
+  the registry is still filling; it never refuses a package for a dependency it
+  has not seen yet. It does register them in dependency order: the stored
+  packages, and the apps installed through `os package install`, are each sorted
+  so a package registers after the packages it declares. Two packages that
+  declare each other are a cycle: they register in stored order for that boot,
+  and the server logs an error naming them.
+- **at `PATCH /api/v1/packages/:id`.** Editing an authored package's
+  `dependencies` after install is applied as given; an entry added there is
+  judged when the package is next installed.
+- **at uninstall or upgrade of the dependency.** Removing or upgrading the app
+  others depend on is not refused today; the refusal at install is the one gate.
+
+## Sharing a namespace with the app you depend on
+
+A namespace is otherwise one package's: a package using a namespace another
+installed package holds is refused at install with `NAMESPACE_CONFLICT`. Two
+relations make packages co-owners of one namespace instead:
+
+- **the same artifact** delivers them ([ADR-0130](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0130-release-artifact-as-co-ownership-boundary.md)); or
+- **a declared dependency**: your package declares an installed app that uses the
+  same namespace — or another installed package that declares that same app
+  uses it too (two modules of one app).
+
+So a module that ships as its own artifact, declares `app.objectstack.hotcrm`
+and uses `crm` installs beside HotCRM, and a second such module installs beside
+both. The relation is one-way — the app declares nothing — and it is read from
+either side, so upgrading or reinstalling the app beside its modules is
+admitted too. A package that shares the namespace without declaring the app is
+still refused, and the fix the error names is the declaration.
+
+Sharing a namespace never means sharing an object name. A package defining an
+object another co-owner already defines — your module redefining
+`crm_account`, two modules both defining `crm_invoice`, or an app upgrade newly
+defining a name one of its modules owns — is refused at install, before any
+table is touched, with `422 DUPLICATE_ARTIFACT_OBJECT_NAME` naming both
+packages and the object. Rename the object, or `extend` the other package's
+object instead of owning a second one.
+
+Every package of the depended-on app's own artifact that uses the namespace
+should declare the app too (inside the artifact it costs nothing: it is judged
+for presence only). The platform does not record which artifact an installed
+package came from, so an undeclared companion is a sitting owner your module
+cannot co-own with.
+
+## Build-time validation cannot see a dependency's objects
+
+`os validate`, `os build` and `os lint` judge one stack: they cannot see the
+objects of an app your manifest depends on, so a binding to one is neither
+admitted nor refused there. The runtime save door is where a cross-app
+reference is judged, against the declared dependencies.
+
+## Related
+
+- [Install modes](/docs/deployment/install-modes) — managed or an unmanaged copy
+- [Publish and preview](/docs/deployment/publish-and-preview) — how a package version reaches an environment
+- [Plugin manifest spec](/docs/protocol/kernel/plugin-spec) — the manifest's keys

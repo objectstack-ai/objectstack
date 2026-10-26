@@ -450,6 +450,10 @@ const fr = {
     selected_other: "{{count}} sélectionnés",
     edit: "Modifier",
     delete: "Supprimer",
+    // The inline-edit row buttons and the hover open affordance (#25916).
+    openRecord: "Ouvrir l'enregistrement",
+    cancelChanges: "Annuler les modifications",
+    saveRow: "Enregistrer la ligne",
   },
   grid: {
     bulkSelected: "{{count}} sélectionné(s)",
@@ -770,6 +774,10 @@ const fr = {
     noMatches: "Aucun enregistrement correspondant",
     noMatchesMessage: "Aucun enregistrement ne correspond à vos filtres ou à votre recherche. Essayez de les ajuster ou de les effacer.",
     viewFilterNoMatchesMessage: "Aucun enregistrement ne correspond au filtre de cette vue.",
+    ownedNoneTitle: "Rien à vous pour l'instant",
+    ownedNoneMessage: "Cette vue ne liste que vos propres enregistrements, et vous n'en avez encore aucun.",
+    noneVisibleTitle: "Aucun enregistrement visible",
+    noneVisibleMessage: "Il n'y a ici aucun enregistrement auquel vous avez accès. Si vous pensiez en voir, demandez l'accès à votre administrateur.",
     loadErrorTitle: "Impossible de charger les enregistrements",
     loadErrorMessage: "Une erreur s'est produite lors du chargement de ces données. Vérifiez votre connexion et réessayez.",
     loadErrorForbiddenTitle: "Accès refusé",
@@ -2457,6 +2465,8 @@ const fr = {
         stepInput: 'Entrée',
         stepOutput: 'Sortie',
         stepError: 'Erreur',
+        // A client that lacks the method a panel calls (#25916).
+        clientMethodUnavailable: "{{method}} n'est pas disponible sur ce client",
       },
       // objectui#13460 — the Integrations page's "Connect an AI agent" card (`AgentConnectSection`).
       agentConnect: {
@@ -4421,6 +4431,8 @@ const fr = {
       detailLoadFailed: 'Impossible de charger les détails de la modification :',
       detailNone: 'Aucune différence détectée — le brouillon correspond à la version publiée.',
       detailChangedKeys: 'Également modifié :',
+      detailNewKeys: 'Inclut :',
+      generatedGroup: 'Généré par la plateforme ({{n}})',
       confirmNote: 'La publication libère atomiquement les {{count}} brouillons en attente de ce paquet.',
       confirmNote_one: 'La publication libère atomiquement {{count}} brouillon en attente de ce paquet.',
       confirmNote_many: 'La publication libère atomiquement les {{count}} de brouillons en attente de ce paquet.',
@@ -4831,6 +4843,14 @@ const fr = {
       unknownType: "Type de vue de métadonnées inconnu. Attendu : {{a}}, {{b}} ou {{c}}.",
       unknownTypeNamed: "Type de vue de métadonnées inconnu « {{type}} ». Attendu : {{a}}, {{b}} ou {{c}}.",
     },
+  },
+  reactPage: {
+    disabledTitle: "Les pages React sont désactivées sur ce déploiement",
+    disabledBody: "Les pages {{kind}} exécutent le JavaScript de leur auteur directement dans l'application, elles sont donc désactivées sauf si le déploiement les active. Un opérateur qui fait confiance aux auteurs de ses pages définit {{flag}} sur le serveur (un hôte qui intègre le moteur de rendu appelle {{call}}).",
+    loadFailed: "Impossible de charger l'environnement d'exécution React",
+    sourceRequired: "Une page {{kind}} nécessite un {{source}} non vide.",
+    loading: "Chargement de l'environnement d'exécution React…",
+    error: "Erreur de la page React",
   },
 };
 

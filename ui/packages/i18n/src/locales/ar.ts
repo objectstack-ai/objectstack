@@ -474,6 +474,10 @@ const ar = {
     selected_other: "تم تحديد {{count}}",
     edit: "تعديل",
     delete: "حذف",
+    // The inline-edit row buttons and the hover open affordance (#25916).
+    openRecord: "فتح السجل",
+    cancelChanges: "إلغاء التغييرات",
+    saveRow: "حفظ الصف",
   },
   grid: {
     bulkSelected: "تم تحديد {{count}}",
@@ -839,6 +843,10 @@ const ar = {
     noMatches: "لا توجد سجلات مطابقة",
     noMatchesMessage: "لا توجد سجلات تطابق عوامل التصفية أو البحث الحالية. حاول تعديلها أو مسحها.",
     viewFilterNoMatchesMessage: "لا توجد سجلات تطابق عامل التصفية لطريقة العرض هذه.",
+    ownedNoneTitle: "لا يوجد شيء يخصك بعد",
+    ownedNoneMessage: "تعرض طريقة العرض هذه سجلاتك فقط، وليس لديك أي سجل بعد.",
+    noneVisibleTitle: "لا توجد سجلات يمكنك رؤيتها",
+    noneVisibleMessage: "لا توجد هنا سجلات لديك صلاحية الوصول إليها. إذا كنت تتوقع رؤية بعضها، فاطلب من المسؤول منحك الوصول.",
     loadErrorTitle: "تعذّر تحميل السجلات",
     loadErrorMessage: "حدث خطأ أثناء تحميل هذه البيانات. تحقق من اتصالك وحاول مرة أخرى.",
     loadErrorForbiddenTitle: "ليس لديك صلاحية الوصول",
@@ -2611,6 +2619,8 @@ const ar = {
         stepInput: 'الإدخال',
         stepOutput: 'الإخراج',
         stepError: 'خطأ',
+        // A client that lacks the method a panel calls (#25916).
+        clientMethodUnavailable: "{{method}} غير متاح في هذا العميل",
       },
       // objectui#13460 — the Integrations page's "Connect an AI agent" card (`AgentConnectSection`).
       agentConnect: {
@@ -4692,6 +4702,8 @@ const ar = {
       detailLoadFailed: 'تعذر تحميل تفاصيل التغيير:',
       detailNone: 'لم يتم اكتشاف اختلافات — المسودة مطابقة للنسخة المنشورة.',
       detailChangedKeys: 'تغييرات أخرى:',
+      detailNewKeys: 'يتضمن:',
+      generatedGroup: 'أنشأتها المنصة ({{n}})',
       confirmNote: 'النشر يُصدر كل المسودات المعلقة ({{count}}) لهذه الحزمة دفعة واحدة.',
       confirmNote_zero: 'النشر يُصدر كل المسودات المعلقة ({{count}}) لهذه الحزمة دفعة واحدة.',
       confirmNote_one: 'النشر يُصدر كل المسودات المعلقة ({{count}}) لهذه الحزمة دفعة واحدة.',
@@ -5176,6 +5188,14 @@ const ar = {
       unknownType: "نوع عرض بيانات وصفية غير معروف. المتوقع {{a}} أو {{b}} أو {{c}}.",
       unknownTypeNamed: "نوع عرض بيانات وصفية غير معروف «{{type}}». المتوقع {{a}} أو {{b}} أو {{c}}.",
     },
+  },
+  reactPage: {
+    disabledTitle: "صفحات React معطلة في هذا النشر",
+    disabledBody: "تنفذ صفحات {{kind}} شيفرة JavaScript الخاصة بالمؤلف مباشرة داخل التطبيق، لذا تكون معطلة ما لم يفعّلها النشر. يضبط المشغّل الذي يثق بمؤلفي صفحاته {{flag}} على الخادم (ويستدعي المضيف الذي يضمّن العارض {{call}}).",
+    loadFailed: "تعذّر تحميل بيئة تشغيل React",
+    sourceRequired: "تتطلب صفحة {{kind}} قيمة {{source}} غير فارغة.",
+    loading: "جارٍ تحميل بيئة تشغيل React…",
+    error: "خطأ في صفحة React",
   },
 };
 
