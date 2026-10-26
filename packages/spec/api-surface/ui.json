@@ -501,6 +501,7 @@
     "anonymousFormIntakeCandidates (function)",
     "anonymousFormIntakeSlug (function)",
     "anonymousFormIntakeSlugs (function)",
+    "anonymousFormObjectName (function)",
     "appForm (const)",
     "bulkConfirmTemplateRoots (function)",
     "chartAggregateCategoryKey (function)",

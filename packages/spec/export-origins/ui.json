@@ -486,6 +486,7 @@
     "anonymousFormIntakeCandidates": "src/ui/anonymous-form-intake.ts#anonymousFormIntakeCandidates (function)",
     "anonymousFormIntakeSlug": "src/ui/anonymous-form-intake.ts#anonymousFormIntakeSlug (function)",
     "anonymousFormIntakeSlugs": "src/ui/anonymous-form-intake.ts#anonymousFormIntakeSlugs (function)",
+    "anonymousFormObjectName": "src/ui/anonymous-form-intake.ts#anonymousFormObjectName (function)",
     "appForm": "src/ui/app.form.ts#appForm (const)",
     "bulkConfirmTemplateRoots": "src/ui/bulk-action.zod.ts#bulkConfirmTemplateRoots (function)",
     "chartAggregateCategoryKey": "src/ui/chart-aggregate.ts#chartAggregateCategoryKey (function)",
