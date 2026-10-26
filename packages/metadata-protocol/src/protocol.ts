@@ -60,7 +60,6 @@ import {
 } from './sys-metadata-repository.js';
 import { managedItemSealedSentence, packagedBaseRegimeRow, packagedBaseRegimeSentence } from './packaged-base-regime.js';
 import {
-    resolveArtifactLockLayer,
     resolveItemLock,
     resolveItemLockLazily,
     resolveOverlayLockLayer,
@@ -399,6 +398,8 @@ import { discardDraftInItsScope, listDrafts } from './protocol-drafts.js';
 import { originGatedRemovalRefusal, refusePackagedBaseOverride } from './protocol-packaged-base-refusal.js';
 // [#25467 cut 14] The publish batch's seed apply and its own pending declarations.
 import { applySeedBodies, collectBatchPendingDeclarations } from './protocol-publish-batch.js';
+// [#25467 cut 15] The artifact registry's lookups: an item's artifact, the packages that ship a type, and the lock's artifact layer.
+import { artifactLockLayerAt, lookupArtifactItem, shippedArtifactsOf, shippingPackagesOf } from './protocol-artifact-lookup.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -16491,28 +16492,12 @@ export class ObjectStackProtocolImplementation implements
      * ignores it, so a caller that needs the member checks the answer.
      */
     private lookupArtifactItem(type: string, name: string, currentPackageId?: string, member?: string): unknown {
-        const registry = (this.engine as any)?.registry;
-        if (!registry) return undefined;
-        const singular = PLURAL_TO_SINGULAR[type] ?? type;
-        // Prefer the artifact-only lookup: it scans composite
-        // (`<packageId>:<name>`) entries first, so an overlay row hydrated
-        // into the plain key (getMetaItems / loadMetaFromDb) can never
-        // shadow the packaged artifact's protection envelope (ADR-0010
-        // §3.3 — pre-fix, that shadow made a `_lock: full` app read back
-        // as unlocked after PUT+GET until restart). `currentPackageId`
-        // (ADR-0048) makes that scan package-scoped (prefer-local).
-        if (typeof registry.getArtifactItem === 'function') {
-            return registry.getArtifactItem(singular, name, currentPackageId, member)
-                ?? registry.getArtifactItem(type, name, currentPackageId, member);
-        }
-        // Partial registry mocks in tests — fall back to getItem and apply
-        // the same package-provenance filter inline.
-        if (typeof registry.getItem !== 'function') return undefined;
-        const item = registry.getItem(singular, name, currentPackageId) ?? registry.getItem(type, name, currentPackageId);
-        if (!item || !(item as any)._packageId || (item as any)._packageId === 'sys_metadata') {
-            return undefined;
-        }
-        return item;
+        // [#25467 cut 15] The body moved to `protocol-artifact-lookup.ts` (see `ArtifactLookupHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof lookupArtifactItem> = {
+            get engine() { return readEngine(); },
+        };
+        return lookupArtifactItem.call(host, type, name, currentPackageId, member);
     }
 
     /**
@@ -16531,7 +16516,11 @@ export class ObjectStackProtocolImplementation implements
      * caller that asks about many items of one type.
      */
     private artifactLockLayerAt(address: ItemAddress, shipping?: ShippingPackages): readonly unknown[] {
-        return resolveArtifactLockLayer(address, () => this.shippedArtifactsOf(address.type, address.name, shipping));
+        // [#25467 cut 15] The body moved to `protocol-artifact-lookup.ts` (see `ArtifactLookupHost`).
+        const host: ThisParameterType<typeof artifactLockLayerAt> = {
+            shippedArtifactsOf: (...a) => this.shippedArtifactsOf(...a),
+        };
+        return artifactLockLayerAt.call(host, address, shipping);
     }
 
     /**
@@ -16556,18 +16545,12 @@ export class ObjectStackProtocolImplementation implements
      * owner is the whole set.
      */
     private shippedArtifactsOf(type: string, name: string, shipping?: ShippingPackages): unknown[] {
-        const shipped: unknown[] = [];
-        const add = (artifact: unknown): void => {
-            if (artifact !== undefined && artifact !== null && !shipped.includes(artifact)) shipped.push(artifact);
+        // [#25467 cut 15] The body moved to `protocol-artifact-lookup.ts` (see `ArtifactLookupHost`).
+        const host: ThisParameterType<typeof shippedArtifactsOf> = {
+            lookupArtifactItem: (...a) => this.lookupArtifactItem(...a),
+            shippingPackagesOf: (...a) => this.shippingPackagesOf(...a),
         };
-        add(this.lookupArtifactItem(type, name));
-        if ((PLURAL_TO_SINGULAR[type] ?? type) === 'object') return shipped;
-        const packages = shipping ?? this.shippingPackagesOf(type);
-        for (const packageId of new Set([...(packages.byName.get(name) ?? []), ...packages.anyName])) {
-            const own = this.lookupArtifactItem(type, name, packageId) as { _packageId?: unknown } | undefined;
-            if (own?._packageId === packageId) add(own);
-        }
-        return shipped;
+        return shippedArtifactsOf.call(host, type, name, shipping);
     }
 
     /**
@@ -16592,43 +16575,12 @@ export class ObjectStackProtocolImplementation implements
      * #21803, which asked that lookup alone.
      */
     private shippingPackagesOf(type: string): ShippingPackages {
-        const registry = (this.engine as any)?.registry;
-        const byName = new Map<string, Set<string>>();
-        const anyName = new Set<string>();
-        if (!registry) return { byName, anyName };
-        const isPackage = (id: unknown): id is string => typeof id === 'string' && id !== '' && id !== 'sys_metadata';
-        const listing = (read: () => unknown): readonly unknown[] => {
-            try {
-                const listed = read();
-                return Array.isArray(listed) ? listed : [];
-            } catch {
-                return []; // See this method's header: the package-less lookup still answers.
-            }
+        // [#25467 cut 15] The body moved to `protocol-artifact-lookup.ts` (see `ArtifactLookupHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof shippingPackagesOf> = {
+            get engine() { return readEngine(); },
         };
-        if (typeof registry.listItems === 'function') {
-            for (const spelling of new Set([PLURAL_TO_SINGULAR[type] ?? type, type])) {
-                for (const entry of listing(() => registry.listItems(spelling))) {
-                    const { _packageId: id, name } = (entry ?? {}) as { _packageId?: unknown; name?: unknown };
-                    if (!isPackage(id)) continue;
-                    if (typeof name !== 'string') {
-                        anyName.add(id);
-                        continue;
-                    }
-                    const ids = byName.get(name);
-                    if (ids) ids.add(id);
-                    else byName.set(name, new Set([id]));
-                }
-            }
-        }
-        if (typeof registry.getAllPackages === 'function') {
-            const canTell = typeof registry.isPackageDisabled === 'function';
-            for (const record of listing(() => registry.getAllPackages())) {
-                const r = record as { manifest?: { id?: unknown }; id?: unknown } | null | undefined;
-                const id = r?.manifest?.id ?? r?.id;
-                if (isPackage(id) && (!canTell || registry.isPackageDisabled(id))) anyName.add(id);
-            }
-        }
-        return { byName, anyName };
+        return shippingPackagesOf.call(host, type);
     }
 
     /**
