@@ -453,6 +453,17 @@ export {
   withoutOperationPrivateKeys,
 } from './operation-private-keys.js';
 
+// #25653 — the provenance mark a hook's `runAs: 'system'` and an action body's
+// elevation carry, so the identity-assignment refusal tells them from platform
+// `sudo()` writes. Set by objectql and runtime, read by plugin-security.
+export {
+  APP_AUTOMATION_ELEVATION,
+  markAppAutomationElevation,
+  appAutomationElevationOf,
+  carryAppAutomationElevation,
+  type AppAutomationElevation,
+} from './app-automation-elevation.js';
+
 // Ruling of record 6355206139 — the EXTERNAL rung's OWD seam: plugin-security
 // stamps whether a held grant's RLS speaks, plugin-sharing floors the OWD.
 export {
