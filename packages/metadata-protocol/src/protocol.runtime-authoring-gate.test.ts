@@ -50,7 +50,12 @@ import { ObjectStackProtocolImplementation } from './protocol.js';
 import type { MetadataAuthoringChannel } from './protocol.js';
 import { SDUI_MANIFEST_SERVICE } from './index.js';
 import { RLS_MEMBERSHIP_RESOLVER_SERVICE } from '@objectstack/spec/contracts';
-import { PUBLIC_FORM_INTAKE_UNAVAILABLE, stampHtmlPageRequires } from './runtime-authoring-gate.js';
+import {
+    HIERARCHY_SCOPE_CAPABILITY_REQUIRED,
+    HIERARCHY_SCOPE_RESOLVER_SERVICE,
+    PUBLIC_FORM_INTAKE_UNAVAILABLE,
+    stampHtmlPageRequires,
+} from './runtime-authoring-gate.js';
 
 /** The issue's body. Zod-valid: `approvers[].value` is just a string to the schema. */
 const brokenApprovalFlow = () => ({
@@ -4718,5 +4723,90 @@ describe('runtime authoring gate on VIEW writes — a public form declaring a fi
         const { protocol, rows } = viewProtocol();
         await expect(saveView(protocol, withoutCertificate())).resolves.toMatchObject({ success: true });
         expect(activeViewRows(rows)).toHaveLength(1);
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #26188 — a HIERARCHY scope on a runtime with no hierarchy resolver. The door
+// reads resolver presence per write (`HIERARCHY_SCOPE_RESOLVER_SERVICE`): with
+// none, publishing the grant is refused and a draft save answers 200 carrying
+// the same finding as a `warning` advisory; with one, nothing changes. The pure
+// rows are `runtime-authoring-gate.hierarchy-scope.test.ts`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('runtime authoring gate on PERMISSION writes — hierarchy scope without a resolver (#26188)', () => {
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+
+    const managerSet = () => ({
+        name: 'sales_manager',
+        label: 'Sales Manager',
+        objects: { leave_request: { allowRead: true, readScope: 'unit_and_below' } },
+    });
+    const NO_RESOLVER = () => new Map<string, any>();
+    const RESOLVER = () => new Map<string, any>([[HIERARCHY_SCOPE_RESOLVER_SERVICE, { resolveOwnerIds: async () => [] }]]);
+
+    function permissionProtocol(services: () => Map<string, any>) {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine, services as any, 'env_test') as any;
+        return { protocol, rows };
+    }
+    const settle = (p: Promise<unknown>) =>
+        p.then((result) => ({ result: result as any, err: null as any }), (err) => ({ result: null as any, err }));
+    const rowsOf = (rows: Map<string, Row>, state: 'draft' | 'active') =>
+        Array.from(rows.values()).filter((r) => r.type === 'permission' && r.state === state);
+    const hierarchyFindings = (list: ReadonlyArray<{ rule: string }> | undefined) =>
+        (list ?? []).filter((i) => i.rule === HIERARCHY_SCOPE_CAPABILITY_REQUIRED);
+
+    it('no resolver, publish: refused 422 INVALID_METADATA naming the grant, and nothing is written', async () => {
+        const { protocol, rows } = permissionProtocol(NO_RESOLVER);
+        const { err } = await settle(protocol.saveMetaItem({ type: 'permission', name: 'sales_manager', item: managerSet() }));
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const findings = hierarchyFindings(err.issues);
+        expect(findings).toEqual([expect.objectContaining({
+            severity: 'error',
+            path: 'permissions.sales_manager.objects.leave_request.readScope',
+        })]);
+        expect((findings[0] as any).message).toContain('`hierarchy-security`');
+        expect(rowsOf(rows, 'active')).toHaveLength(0);
+    });
+
+    it('no resolver, draft: saved (200) with the same finding as a warning advisory; publishing it is refused', async () => {
+        const { protocol, rows } = permissionProtocol(NO_RESOLVER);
+        const refused = await settle(protocol.saveMetaItem({ type: 'permission', name: 'sales_manager', item: managerSet() }));
+        const { result, err } = await settle(
+            protocol.saveMetaItem({ type: 'permission', name: 'sales_manager', item: managerSet(), mode: 'draft' }),
+        );
+        expect(err).toBeNull();
+        expect(result).toMatchObject({ success: true, state: 'draft' });
+        const published = hierarchyFindings(refused.err.issues)[0] as Record<string, unknown>;
+        expect(result.advisories).toEqual([{ ...published, severity: 'warning' }]);
+        expect(rowsOf(rows, 'draft')).toHaveLength(1);
+
+        const promoted = await settle(protocol.publishMetaItem({ type: 'permission', name: 'sales_manager' }));
+        expect({ code: promoted.err?.code, status: promoted.err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(hierarchyFindings(promoted.err.issues)).toHaveLength(1);
+        expect(rowsOf(rows, 'active')).toHaveLength(0);
+    });
+
+    it('a resolver mounted: the same grant publishes, and neither door says anything about it', async () => {
+        const { protocol, rows } = permissionProtocol(RESOLVER);
+        const draft = await settle(
+            protocol.saveMetaItem({ type: 'permission', name: 'sales_manager', item: managerSet(), mode: 'draft' }),
+        );
+        expect(draft.err).toBeNull();
+        expect(hierarchyFindings(draft.result.advisories)).toEqual([]);
+        const live = await settle(protocol.saveMetaItem({ type: 'permission', name: 'sales_manager', item: managerSet() }));
+        expect(live.err).toBeNull();
+        expect(live.result).toMatchObject({ success: true, state: 'active' });
+        expect(hierarchyFindings(live.result.advisories)).toEqual([]);
+        expect(rowsOf(rows, 'active')).toHaveLength(1);
     });
 });

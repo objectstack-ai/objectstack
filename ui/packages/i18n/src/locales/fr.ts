@@ -219,6 +219,8 @@ const fr = {
     update: "Mettre à jour",
     createSuccess: "{{object}} créé",
     updateSuccess: "{{object}} mis à jour",
+    createdNamed: "{{object}} \"{{title}}\" créé",
+    updatedNamed: "{{object}} \"{{title}}\" mis à jour",
     created: "Créé",
     saved: "Enregistré",
     savedNamed: "{{title}} enregistré",
@@ -2721,6 +2723,7 @@ const fr = {
     },
     shell: {
       tenantHostHint: "Vous vous connectez à ce système",
+      poweredBy: "Propulsé par ObjectStack",
     },
     layout: {
       headline: "Créez des applications métier puissantes, plus vite.",
@@ -3865,7 +3868,7 @@ const fr = {
       cancel: "Annuler",
     },
     bound: {
-      title: "Connecté à ObjectStack Cloud",
+      title: "Connecté à ObjectOS Cloud",
       runtime: "Runtime",
       organization: "Organisation",
       approvedBy: "Approuvé par",
@@ -3986,17 +3989,26 @@ const fr = {
     install: {
       dialogTitle: "Installer {{name}}",
       dialogDescCurrent: "Installer dans cet environnement ({{host}}).",
-      dialogDescPicker: "Choisissez un environnement où installer cette application. Vous devez être connecté à ObjectStack Cloud.",
+      dialogDescPicker: "Choisissez un environnement où installer cette application. Vous devez être connecté à ObjectOS Cloud.",
       environment: "Environnement",
       environmentPlaceholder: "Sélectionner un environnement",
       includeSampleData: "Inclure des données d'exemple",
       noEnvs: "Aucun environnement trouvé dans votre organisation active.",
       noPermission: "Vous n'avez pas la permission d'installer des applications dans un environnement. Seuls les propriétaires et administrateurs de l'organisation peuvent installer — contactez l'administrateur de votre organisation.",
-      signInFirst: "Vous devez d'abord vous connecter à ObjectStack Cloud.",
+      signInFirst: "Vous devez d'abord vous connecter à ObjectOS Cloud.",
       success: "Installé avec succès. Ouvrez l'environnement pour voir la nouvelle application.",
       localSuccess: "v{{version}} installé dans ce runtime. \"{{name}}\" devrait maintenant apparaître dans le sélecteur d'applications.",
       localLoadsAtRestart: "v{{version}} installé dans ce runtime. \"{{name}}\" sera chargé au prochain redémarrage du runtime et n'apparaîtra pas dans le sélecteur d'applications d'ici là.",
       localManifestConflict: "{{message}}\nRemarque : Une application locale possède déjà ce manifest_id. Supprimez-la d'abord de objectstack.config.ts.",
+      // ADR-0141 D2 — the install refusal DEPENDENCY_MISSING, one line per unmet entry.
+      dependencyMissing: {
+        heading: "Installation refusée : une dépendance déclarée par ce paquet n’est pas satisfaite dans cet environnement, rien n’a donc été installé.",
+        absent: "Installez d’abord {{dependency}} {{range}}.",
+        outOfRange: "Installez d’abord {{dependency}} {{range}}. La version installée est {{installedVersion}}.",
+        unreadableRange: "{{packageId}} déclare {{dependency}} avec la plage de versions {{range}}, qui ne peut pas être lue. Corrigez la plage et republiez le paquet.",
+        unreadableVersion: "Installez une version publiée de {{dependency}} comprise dans {{range}}. La version installée {{installedVersion}} n’est pas au format MAJOR.MINOR.PATCH.",
+        unreadableDeclaration: "{{packageId}} déclare ses dépendances sous une forme que l’installation ne peut pas lire. Écrivez-les sous forme de correspondance entre ID de paquet et plage de versions, puis republiez le paquet.",
+      },
       localUnauthorized: "Connectez-vous d'abord à ce runtime.",
       localMarketplaceUnavailable: "Ce runtime n'a pas de OS_CLOUD_URL configuré.",
       updateTo: "Mettre à jour → v{{version}}",
@@ -4025,7 +4037,7 @@ const fr = {
     update: {
       dialogTitle: "Mettre à jour {{name}}",
       dialogDescCurrent: "Mettre à jour la copie installée dans cet environnement ({{host}}).",
-      dialogDescPicker: "Choisissez l'environnement dont la copie installée doit être mise à jour. Vous devez être connecté à ObjectStack Cloud.",
+      dialogDescPicker: "Choisissez l'environnement dont la copie installée doit être mise à jour. Vous devez être connecté à ObjectOS Cloud.",
       majorNotice: "Il s'agit d'une mise à jour de version majeure (v{{fromMajor}} → v{{toMajor}}), qui peut comporter des changements incompatibles.",
       releaseNotes: "Lire les notes de version de la v{{version}}",
       success: "Mis à jour vers la v{{version}}.",

@@ -800,7 +800,11 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // `data.type == 'text'`, a single-quoted literal comparison.
     // It is 65 today: #24735 removed the object form's `expression` gate,
     // `data.type == 'formula'`, one single-quoted literal comparison.
-    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(65);
+    // It is 63 today: #25800 opened the action form's `onSuccess` row to
+    // `flow`, the third type its parse accepts, and respelled the gate
+    // `data.type in ['api','script','flow']` — an `in`-list, outside this rule,
+    // so its two `==` literal comparisons left the census.
+    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(63);
 
     const rhsFindings = validatePredicatePathRefs(corrupted)
       .filter((f) => f.rule === PREDICATE_RHS_PATH_SHAPED);

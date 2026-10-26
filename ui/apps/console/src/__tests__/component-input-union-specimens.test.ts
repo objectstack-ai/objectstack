@@ -310,8 +310,10 @@ describe('objectui#4970 — element:text.content / element:button.label declare 
     // these arms honest rather than copied from the issue — #4970's own table
     // was measured at the 17.0.0-rc.6 pin, and the answer had to be re-taken
     // before the declarations moved.
-    expect(specAcceptedArms(ElementTextPropsSchema, 'content')).toEqual(['string', 'object']);
-    expect(specAcceptedArms(ElementButtonPropsSchema, 'label')).toEqual(['string', 'object']);
+    // Membership (#26238): the arms the declarations below must carry. An arm
+    // the spec adds is caught by the derived comparisons, not by a literal.
+    expect(specAcceptedArms(ElementTextPropsSchema, 'content')).toEqual(expect.arrayContaining(['string', 'object']));
+    expect(specAcceptedArms(ElementButtonPropsSchema, 'label')).toEqual(expect.arrayContaining(['string', 'object']));
   });
 
   it('`element:text.content` accepts the inline translation map', () => {
@@ -417,15 +419,10 @@ describe('objectui#5717 — element:text_input label / placeholder / description
     // Measured on the `@objectstack/spec` 17.1.0 pin — the same discipline the
     // #4970 block adopted, and the reason these arms are honest rather than
     // copied from the card that reported them.
-    expect(specAcceptedArms(ElementTextInputPropsSchema, 'label')).toEqual(['string', 'object']);
-    expect(specAcceptedArms(ElementTextInputPropsSchema, 'placeholder')).toEqual([
-      'string',
-      'object',
-    ]);
-    expect(specAcceptedArms(ElementTextInputPropsSchema, 'description')).toEqual([
-      'string',
-      'object',
-    ]);
+    // Membership (#26238), as in the #4970 block above.
+    for (const key of ['label', 'placeholder', 'description']) {
+      expect(specAcceptedArms(ElementTextInputPropsSchema, key), key).toEqual(expect.arrayContaining(['string', 'object']));
+    }
   });
 
   it('the sibling key whose contract has NO object arm is measured the same way', () => {
@@ -433,10 +430,9 @@ describe('objectui#5717 — element:text_input label / placeholder / description
     // declaration, so "why is defaultValue different" is answered by evidence
     // in the same vocabulary. Without this line the per-key control below reads
     // as a convention; with it, it reads as the contract.
-    expect(specAcceptedArms(ElementTextInputPropsSchema, 'defaultValue')).toEqual([
-      'string',
-      'number',
-    ]);
+    const defaultValueArms = specAcceptedArms(ElementTextInputPropsSchema, 'defaultValue');
+    expect(defaultValueArms).toEqual(expect.arrayContaining(['string', 'number']));
+    expect(defaultValueArms).not.toContain('object');
   });
 
   it('`element:text_input.label` accepts the inline translation map', () => {

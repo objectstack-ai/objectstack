@@ -271,6 +271,23 @@ export function isFieldReference(value: unknown): value is { $field: string } {
 }
 
 /**
+ * [#25808] A `{ $now, addDays }` now-anchored comparand (`NowAnchorSchema`;
+ * maintainer ruling 2026-10-26, letter A) — `$now` is `true` as authored, or
+ * the ISO instant the token resolver pinned it to before any strategy read the
+ * query. Routed exactly as a `{ $field }` reference is
+ * ({@link findCrossFieldComparand}): the native SQL compiler would bind the
+ * anchor object as the comparison's value, and the driver alone holds the
+ * target column's class and the offset column's declaration, which the
+ * anchor's compile rules read. Mirrors `driver-sql`'s `nowAnchorOf` on the
+ * shape — an object carrying `$now` as `true` or a string.
+ */
+export function isNowAnchor(value: unknown): value is { $now: true | string } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const raw = (value as Record<string, unknown>).$now;
+  return raw === true || typeof raw === 'string';
+}
+
+/**
  * [#7598] The comparison operators whose whole comparand `driver-sql` compiles
  * into a same-table column-to-column comparison since #5222 — and exactly the
  * positions where a `{ $field }` silently BOUND on this package's two doors.
@@ -354,6 +371,11 @@ function findIn(
   for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
     if (CROSS_FIELD_COMPARISON_OPERATORS.has(key) && isFieldReference(value)) {
       return { op: key, field, ref: value.$field };
+    }
+    // [#25808] A now-anchored comparand routes the same way; `ref` names the
+    // anchor rather than a column, and the message reads it so.
+    if (CROSS_FIELD_COMPARISON_OPERATORS.has(key) && isNowAnchor(value)) {
+      return { op: key, field, ref: '$now' };
     }
     // A `$`-prefixed key is an operator or a combinator, so the FIELD in scope
     // does not change; anything else names a field (or a nested relation

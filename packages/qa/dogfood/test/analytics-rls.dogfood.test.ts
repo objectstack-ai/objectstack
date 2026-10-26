@@ -135,7 +135,6 @@ describe('dogfood: analytics aggregates are RLS-scoped to the caller (#3597)', (
     // Ground truth straight from the engine under a system context: the table
     // really holds every note. Without this, "member counts 2" would also pass
     // on a broken setup that simply never persisted the admin's rows.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ql = await stack.kernel.getServiceAsync<any>('objectql');
     const all = (await ql.find('rls_note', { context: { isSystem: true } })) as unknown[];
     expect(all).toHaveLength(ADMIN_NOTES + MEMBER_NOTES);
@@ -209,7 +208,6 @@ describe('dogfood: engine-side RLS scopes analytics even with the analytics belt
   });
 
   it('the rows it cannot see DO exist — the belt is scoping, not an empty table', async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ql = await stack.kernel.getServiceAsync<any>('objectql');
     const all = (await ql.find('rls_note', { context: { isSystem: true } })) as unknown[];
 

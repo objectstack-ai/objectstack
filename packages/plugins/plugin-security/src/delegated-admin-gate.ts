@@ -26,7 +26,7 @@
  *   (manageAssignments), inside their BU subtree, handing out only
  *   allowlisted sets, with STRICT containment whenever the granted set itself
  *   carries an adminScope. A position assignment hands out every set it
- *   grants — the definition's list and the set of the position's own name. The rows it governs are the two assignment tables
+ *   grants — the sets its definition lists. The rows it governs are the two assignment tables
  *   (`sys_user_position`, `sys_user_permission_set`); the binding and set
  *   authoring rows retired with the catalog row objects (ADR-0131 D3), so a
  *   position's sets and a set's definition are written through the metadata
@@ -277,17 +277,6 @@ interface HeldScope {
 interface BoundSet {
   name: string;
   adminScope?: unknown;
-}
-
-/**
- * What a refusal adds when the set it names is the one of the position's own
- * name: the position's definition need not list it, so the reader is told why
- * it was judged at all.
- */
-function ownNameNote(positionName: string, setName: string): string {
-  return setName === positionName
-    ? " (the permission set of the position's own name, which an assignment of the position also grants)"
-    : '';
 }
 
 function rowsOf(opCtx: any): any[] {
@@ -638,7 +627,7 @@ export class DelegatedAdminGate {
     const placeableBusinessUnitIds = [...new Set(placing.flatMap((h) => [...h.subtree]))];
 
     // A position is assignable when at least ONE placing scope allowlists
-    // every set it distributes — the set of its own name included — exactly
+    // every set it distributes — exactly
     // `assertAssignmentWrite`'s test, containment check included.
     const assignablePositions: string[] = [];
     if (placing.length > 0) {
@@ -823,12 +812,12 @@ export class DelegatedAdminGate {
   }
 
   /**
-   * [ADR-0090 D12, amended 2026-10-17] Every permission set an assignment of
-   * `positionName` grants: the names its definition's `permissionSets` lists,
-   * and — while the resolver folds held position names into the requested set
-   * names (`security-plugin.ts`, `[...positions, ...explicitPermissionSets]`) —
-   * the set of the position's own name, when the catalog holds one. `null`
-   * when the catalog does not hold the position. An unreadable catalog throws
+   * [ADR-0090 D12, amended 2026-10-17; ADR-0131 D3/D4] Every permission set an
+   * assignment of `positionName` grants: exactly the names its definition's
+   * `permissionSets` lists. A set that merely shares the position's name is not
+   * among them — the resolver no longer folds held position names into the
+   * request (#24757) — so it is not walked. `null` when the catalog does not
+   * hold the position. An unreadable catalog throws
    * (`AuthzStoreUnavailableError`) and the write is refused with it.
    *
    * The one answer to "which sets does this position carry" for both branches:
@@ -842,8 +831,7 @@ export class DelegatedAdminGate {
     const listed = Array.isArray(position.definition.permissionSets)
       ? (position.definition.permissionSets as unknown[]).filter((n): n is string => typeof n === 'string' && n !== '')
       : [];
-    const ownName = (await catalog.resolve('permission', positionName)) ? [positionName] : [];
-    return [...new Set([...listed, ...ownName])];
+    return [...new Set(listed)];
   }
 
   /**
@@ -1048,11 +1036,11 @@ export class DelegatedAdminGate {
       }
 
       // 6. A delegatable position must not distribute administration — through
-      //    any set an assignment of it grants, the own-name set included.
+      //    any set an assignment of it grants.
       const boundSets = await this.setsBoundToPosition(positionName);
       for (const b of boundSets) {
         if (parseMaybeJson((b as any).admin_scope ?? (b as any).adminScope)) {
-          deny(`position '${positionName}' distributes the admin set '${b.name}'${ownNameNote(positionName, b.name)} — administration cannot be self-delegated (D12 containment)`, { position: positionName, permissionSet: b.name });
+          deny(`position '${positionName}' distributes the admin set '${b.name}' — administration cannot be self-delegated (D12 containment)`, { position: positionName, permissionSet: b.name });
         }
       }
     }
@@ -1142,11 +1130,11 @@ export class DelegatedAdminGate {
           if (!prevBu) return 'the existing assignment is unanchored (no business_unit_id) — only a tenant admin may modify it';
           if (!s.subtree.has(String(prevBu))) return `the existing assignment's business unit '${prevBu}' is outside the delegated subtree`;
         }
-        // Every set the position distributes must be allowlisted — the set of
-        // the position's own name included ({@link setsBoundToPosition}).
+        // Every set the position distributes must be allowlisted
+        // ({@link setsBoundToPosition}).
         for (const bound of boundSets) {
           if (!s.scope.assignablePermissionSets.includes(bound.name)) {
-            return `position '${positionName}' distributes permission set '${bound.name}'${ownNameNote(positionName, bound.name)}, which is not in the scope's allowlist`;
+            return `position '${positionName}' distributes permission set '${bound.name}', which is not in the scope's allowlist`;
           }
           const contained = this.assertScopeGrantContainment(bound, held, /*dryRun*/ true);
           if (contained) return contained;
@@ -1434,17 +1422,15 @@ export class DelegatedAdminGate {
    * position distributes, as the delegated walk judges them: every set an
    * assignment of it grants — {@link setsCarriedByPosition}, the one answer the
    * organization-level branch reads too: the names its DEFINITION carries
-   * (`PositionSchema.permissionSets`) and, while the resolver folds held
-   * position names into the requested set names, the permission set of the
-   * position's own name when the catalog holds one — each with the
-   * `adminScope` of the catalog's definition of that name. That is the binding
+   * (`PositionSchema.permissionSets`), each with the `adminScope` of the
+   * catalog's definition of that name. That is the binding
    * the authorization resolver grants through, read from the same security
    * catalog, never from a `sys_position_permission_set` junction row (which
    * grants nothing since the resolver stopped reading it). So the allowlist
    * check, the D12 strict containment, the self-delegation rule against
    * distributing administration and the assignable-positions listing all judge
-   * exactly what an assignment will grant — a set granted by the position's
-   * name alone included.
+   * exactly what an assignment will grant. A set that only shares the
+   * position's name is granted by nothing (#24757), so it is not judged.
    *
    * A name the definition carries that the catalog does not hold is still
    * returned, with no `adminScope`: it grants nothing today, but the binding is

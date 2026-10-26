@@ -78,9 +78,9 @@ describe("the props gate refuses `'navigation'` at a page action row's executor 
 });
 
 // `onSuccess` beside the row's effective executor: `ActionSchema`'s "only beside
-// `api` / `script`", carried to the rows on the runner's built-in vocabulary.
-// Refused beside `url`, `navigation`, `modal`, `flow` and `form` and beside a
-// row with no executor; a host-registered handler name stays open.
+// `api` / `script` / `flow`", carried to the rows on the runner's built-in
+// vocabulary. Refused beside `url`, `navigation`, `modal` and `form` and beside
+// a row with no executor; a host-registered handler name stays open.
 
 /** How a refusal on a row's own key opens, read off the row's `navigation` subject. */
 const ownerOf = (subject: string) => subject.slice(0, subject.lastIndexOf(' `'));

@@ -22,6 +22,7 @@ import {
   type DevelopmentUpgradeResult,
 } from '../utils/dev-organization-ownership-upgrade.js';
 import { childEnvWithResolvedArtifact } from '../utils/internal-artifact-channel.js';
+import { devCompilesAtBoot } from '../utils/dev-compile-at-boot.js';
 import { makeDirectorySync } from '../utils/make-directory.js';
 // THE artifact precedence, written once (#21501) — shared with `start`, and
 // with the `serve` child this command spawns. ⛔ No rung of it is restated here.
@@ -38,7 +39,7 @@ import { OBJECTSTACK_MCP_SERVER_NAME } from '@objectstack/mcp';
 // command spawns (#12673). ⛔ Nothing about ports is declared in this file —
 // no range, no reader, no wording; a second copy of the bound is exactly what
 // #12620 and #12662 protected against.
-import { describePortSource, parseRequestedPort, formatInvalidPortNotice } from '../utils/port-contract.js';
+import { describePortSource, parseRequestedPort, formatInvalidPortNotice, portFlagEnv } from '../utils/port-contract.js';
 // The ONE dev-TLS contract, shared with the `serve` child this command spawns
 // (#16804). ⛔ Nothing about certificates is declared in this file, and ⛔ no
 // certificate is ever generated — the developer brings their own.
@@ -332,9 +333,11 @@ export default class Dev extends Command {
     preset: Flags.string({
       description: 'Plugin tier preset forwarded to `serve`: minimal | default | full',
     }),
+    // Default ON (#26130): see `devCompilesAtBoot` for why a dev boot over an
+    // artifact it builds always rebuilds it first.
     compile: Flags.boolean({
-      description: 'Compile objectstack.config.ts to dist/objectstack.json before starting (auto if artifact missing). Ignored when --artifact is set.',
-      default: false,
+      description: 'Compile objectstack.config.ts to dist/objectstack.json before starting, under this boot\'s environment (default: on). --no-compile boots the existing artifact as built (still compiled when it is missing). Ignored when --artifact is set.',
+      default: true,
       allowNo: true,
     }),
     restart: Flags.boolean({
@@ -472,9 +475,71 @@ export default class Dev extends Command {
         printKV('Config', configPath, '📂');
       }
 
-      // Auto-compile only when we have a config AND the boot's artifact is one
-      // this command builds. A pinned artifact means "use this, don't rebuild".
-      const needsCompile = !pinnedArtifact && (flags.compile || !fs.existsSync(artifactPath));
+      const port = flags.port ?? readEnvWithDeprecation('OS_PORT', 'PORT', { silent: true });
+
+      // ── dev's own door on the ONE port contract (#12673) ──────────────
+      // Everything about the port — the range, the reader, the refusal prose —
+      // is imported from `utils/port-contract.ts`; this command declares none
+      // of it. That is the point of the card: `os dev` had no port validation
+      // at all, so an impossible value travelled to the `serve` child, which
+      // refused it under the name of the CHANNEL it arrived on. Measured on
+      // `origin/main` before this door existed: `PORT=abc os dev` and
+      // `OS_PORT=abc os dev` were both refused as `--port "abc"` — the one
+      // spelling the operator had not used, because the forwarding below
+      // renames every source to `--port`.
+      //
+      // ⭐ Placement: ahead of the compile below, which is the first child this
+      // command starts and the first process that evaluates the config, so a
+      // refused port starts nothing and a valid one is exported (below) before
+      // anything reads it. The refusal covers exactly the text this command
+      // FORWARDS: the `port ? …` guard in the spawn argv reads this same
+      // variable, so the two cannot drift.
+      //
+      // ⛔ The `if (port)` is load-bearing, and MEASURED rather than assumed:
+      // `os dev --port ""` boots today. An empty string is falsy, so the guard
+      // below drops it and the child resolves its own default — so a door that
+      // refused every non-parsing text would refuse a value that starts a
+      // server, narrowing a published command's accept set, which this card is
+      // forbidden to do. (`PORT=""` reaches the child by inheritance instead,
+      // and `serve` refuses it there naming `PORT` — correctly, since that IS
+      // the spelling the operator set.)
+      if (port) {
+        // `flags.port === undefined` answers the same question oclif's
+        // `setFromDefault` answers for `serve`: did this come from argv? This
+        // flag carries no `default`, so there is no oclif metadata to read —
+        // and none to trust either, since oclif runs neither a flag `parse`
+        // nor an integer `min`/`max` over a default (measured; see the
+        // `describePortSource` docblock).
+        const portSource = describePortSource(flags.port === undefined);
+        if (parseRequestedPort(port) === null) {
+          // stderr, like `serve`'s refusal and for the same #7915 reason: this
+          // command's stdout is the fd the child's stdio MCP transport writes
+          // JSON-RPC frames to.
+          process.stderr.write(`${formatInvalidPortNotice(port, portSource)}\n`);
+          process.exit(1);
+        }
+        // ── The flag's port is the port the config reads (#26243) ──────────
+        // A config reads `OS_PORT`/`PORT` at module evaluation (the showcase's
+        // self URL does), and it is evaluated in the compile below, the watch
+        // recompiles and the `serve` child, which all run in THIS process's
+        // environment. The flag reached none of them before: it travelled on
+        // argv alone, so `os dev -p 41302` served and dispatched
+        // `http://127.0.0.1:3000`. Exported here as `os start` hands it down
+        // (`portFlagEnv`), so the flag overrides an inherited `OS_PORT` for the
+        // config exactly as it does for the listener. With no flag, the
+        // operator's own variables stay as they are.
+        if (flags.port !== undefined) Object.assign(process.env, portFlagEnv(parseRequestedPort(port) ?? undefined));
+      }
+
+      // Compile only when the boot's artifact is one this command builds — a
+      // pinned artifact means "use this, don't rebuild" — and then by default
+      // (#26130, `devCompilesAtBoot`).
+      const needsCompile = devCompilesAtBoot({
+        compile: flags.compile,
+        pinned: Boolean(pinnedArtifact),
+        configExists,
+        artifactExists: fs.existsSync(artifactPath),
+      });
       if (needsCompile) {
         if (!configExists) {
           printError('No objectstack.config.ts and no --artifact given — nothing to start.');
@@ -531,8 +596,8 @@ export default class Dev extends Command {
       }
 
       // ── Startup staleness warning (#5148 startup variant) ───────────
-      // Without --compile, `os dev` boots whatever dist/objectstack.json
-      // holds. When the sources are NEWER than the artifact (edited while
+      // With --no-compile, `os dev` boots whatever dist/objectstack.json
+      // holds (#26130 made compiling the default). When the sources are NEWER than the artifact (edited while
       // the server was down, stale checkout), the boot silently serves the
       // old build — measured in #5148: the config had gained a capability
       // and dev still printed `Plugins: 38 loaded` until a manual build.
@@ -714,52 +779,6 @@ export default class Dev extends Command {
         printKV('Artifact', isRemoteArtifact(artifactPath) ? artifactPath : path.relative(process.cwd(), artifactPath), '📦');
       }
       printKV('Database', redactConnectionUrl(effectiveDb), '🗄️');
-
-      const port = flags.port ?? readEnvWithDeprecation('OS_PORT', 'PORT', { silent: true });
-
-      // ── dev's own door on the ONE port contract (#12673) ──────────────
-      // Everything about the port — the range, the reader, the refusal prose —
-      // is imported from `utils/port-contract.ts`; this command declares none
-      // of it. That is the point of the card: `os dev` had no port validation
-      // at all, so an impossible value travelled to the `serve` child, which
-      // refused it under the name of the CHANNEL it arrived on. Measured on
-      // `origin/main` before this door existed: `PORT=abc os dev` and
-      // `OS_PORT=abc os dev` were both refused as `--port "abc"` — the one
-      // spelling the operator had not used, because the forwarding below
-      // renames every source to `--port`.
-      //
-      // ⭐ Placement is adjacent to `port` ON PURPOSE, not merely convenient.
-      // The refusal has to cover exactly the text this command FORWARDS, and
-      // the `port ? …` guard in the spawn argv below is what decides that. A
-      // door hoisted to the top of `run()` would be a second copy of that
-      // decision, free to drift from it; four lines apart, the two read one
-      // variable. It is still ahead of every spawn, every socket and every
-      // child process, which is all "before spawning" has ever meant here.
-      //
-      // ⛔ The `if (port)` is load-bearing, and MEASURED rather than assumed:
-      // `os dev --port ""` boots today. An empty string is falsy, so the guard
-      // below drops it and the child resolves its own default — so a door that
-      // refused every non-parsing text would refuse a value that starts a
-      // server, narrowing a published command's accept set, which this card is
-      // forbidden to do. (`PORT=""` reaches the child by inheritance instead,
-      // and `serve` refuses it there naming `PORT` — correctly, since that IS
-      // the spelling the operator set.)
-      if (port) {
-        // `flags.port === undefined` answers the same question oclif's
-        // `setFromDefault` answers for `serve`: did this come from argv? This
-        // flag carries no `default`, so there is no oclif metadata to read —
-        // and none to trust either, since oclif runs neither a flag `parse`
-        // nor an integer `min`/`max` over a default (measured; see the
-        // `describePortSource` docblock).
-        const portSource = describePortSource(flags.port === undefined);
-        if (parseRequestedPort(port) === null) {
-          // stderr, like `serve`'s refusal and for the same #7915 reason: this
-          // command's stdout is the fd the child's stdio MCP transport writes
-          // JSON-RPC frames to.
-          process.stderr.write(`${formatInvalidPortNotice(port, portSource)}\n`);
-          process.exit(1);
-        }
-      }
 
       const binPath = process.argv[1];
       const requestedPort = port ?? '3000';

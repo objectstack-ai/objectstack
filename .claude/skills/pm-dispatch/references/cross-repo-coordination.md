@@ -1,18 +1,15 @@
 # 多仓协调
 
-分诊席每次 fire 路由与查重前读本文;执行席跨仓认领、派发或转移时读本文。
-
-- 产品依赖方向固定:`objectstack`(后端,`packages/spec` 是唯一契约)→ `objectui`(前端)与 `cloud`。
-- 多车道仓 `objectstack`、`objectui`:中央分诊是 `domain:*`/type/定级的唯一生产者。
+- 产品依赖方向固定:`objectstack`(后端与 `ui/` 前端,`packages/spec` 唯一契约)→ `cloud`、`hotcrm`。
+- 多车道仓 `objectstack`:中央分诊是 `domain:*`/type/定级的唯一生产者。
 - 单车道仓 `cloud`、`objectos`、`hotcrm`、`www.objectos.ai`;未来新仓默认此类。
 - 单车道仓 `repo:*` 席自理机械三务,⛔ 不产 `domain:*`;决策卡入本仓收件箱,不落 objectstack。
 - 机械三务 = 自扫 sweep、自打 `type`、自做首触(含 `finding`;业务理由归召唤的总监席)。
 - 新仓登记是一张清单:座位贴、标签、类别归属、门禁盘点、写身份锁移植(deny + hooks)。
 - 新仓三件:加入 `GOVERNED_REPOS`、安装车队 App、写 `lanes/<repo>.md` 宪章;应用仓无分诊席。
 - 新仓准入只问一句:真需要常设席位吗;hotcrm 宪章见 `references/lanes/hotcrm.md`。
-- objectui 卡按修复落点分两条车道:`domain:ui`(全部代码)与 `domain:skills`(仓根发布 `skills/**`)。
-- objectui 的 `domain:spec`、`domain:devx`、`domain:tooling` 已退役:⛔ 不贴、不认领、不再创建。
-- 协议恒归 objectstack `domain:spec`;跨层功能照规则 2,objectui 子单归 `domain:ui`。
+- objectui 仓已并入本仓 `ui/`:UI 卡住本仓,`ui/**` 代码归 `domain:ui`,受管面归 `domain:skills`。
+- 协议恒归 `domain:spec`;跨层功能照规则 2,`ui/` 子单归 `domain:ui`。
 - 车道可分席(席号 `· seat N`,或域×仓):忙时一车道开多席,闲时收归一席;每席独立座位贴。
 - 认领评论带 `Seat: domain:X#N` 行申报席号(缺省席 1);同席认领互斥,他席认领不触发自退。
 - 拆分触发预登记:单轮逼近 fire 周期,或某仓在全序下持续断粮 ⇒ 按仓拆回多席。
@@ -20,17 +17,14 @@
 - `scripts/pm/**` 等住 objectstack 的全板工具链单写手恒为 objectstack 侧席,他侧上游立卡回链。
 - 工装只答被告知的仓,缺 `--repo`/`PM_SWEEP_REPO` 即答 objectstack;⛔ 不答手上那张卡的仓。
 - 规则 1:issue 住在修复落地的仓,分诊时按判据严格执行。
-- 判据:正文抽掉 objectstack 还成立 ⇒ 当场转仓(console/UI 缺陷即转 objectui);不成立才是缝卡。
+- 判据:正文抽掉 objectstack 还成立 ⇒ 当场转仓(UI 缺陷不转,归 `domain:ui`);不成立才是缝卡。
 - 转仓走 `issue-transfer.mjs`;名册外或平台拒才重建:出处头 + 裸 `#N` 改全名 + 关源单为 moved。
 - 缝卡收窄为真协调卡:留 objectstack 带 `repo:*`,正文点名读者(哪个座位、哪一步)。
 - 决策卡留在立卡仓,总监席扫全部仓 `needs-user-decision` 呈批;在飞卡 ⛔ 不中途转仓。
-- 规则 2:跨层功能点或 objectui 消费的 `Seam:` 卡恒由分诊立父单 + 逐层子单,spec/后端先行。
+- 规则 2:跨层功能点或 `ui/` 消费的 `Seam:` 卡恒由分诊立父单 + 逐层子单,spec/后端先行。
 - `main` 有 `ui/` 起,新 spec 键不再先行、取代上句次序:与首个读者同 PR,hotcrm 读者同合并批。
 - 下游带 `Blocked-by: <owner/repo>#<n>`;`Blocked-by` 未关闭/未合并的不派发,对 GitHub 现验。
 - 被链接或同父的两单永不同批;`ui/` 起的新键与首个读者除外,⛔ `planned` 行不单独进 main。
-- pin 滞后是盲区:本仓 pin 是否已覆盖该 commit 是第二读数,派发前用 REST `compare` 核祖先。
-- 本地 `merge-base` 在浅检出上给假非祖先;未覆盖 ⇒ 派发令要求 PR 正文留档分叉窗口。
-- ⛔ pin bump 不做 rider:走专用 bump 脚本连带 override 与 lockfile。
 - 规则 3:联动杂事立单,不靠记忆。
 - 已验收 PR 的产物流向另一仓,接受该 PR 的执行席立即在消费仓立后续单,带 `Blocked-by:`。
 - 规则 4:纵向拆分,一个分诊 PM + N 个执行 PM;一人恰一车道,一车道可坐多席。
@@ -49,3 +43,5 @@
 - 该评论点名席位与步骤;无既有卡承载且请求自身即立卡门 ①②④ 时才立新卡。
 - 跨不可达仓的卡立卡或首触按仓拆:该仓部分由可达席立卡,或挂 `domain:cloud`+`status:parked`。
 - 本卡只留本仓活,不读他仓;拆不开先立该仓前置卡;依赖即 `pm:blocked`+`Blocked-by: owner/repo#N`。
+- 开发中涉 cloud 车道者由席位同拆:报告 `open_questions`/`out_of_scope_findings`、复核/落地所见。
+- ⛔ 不记而弃、不并入本仓 PR、不留 `carrier: none`;停放卡加 `repo:cloud`,出处行与一行判据。

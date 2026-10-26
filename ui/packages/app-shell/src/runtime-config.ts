@@ -528,6 +528,24 @@ export function getProductShortName(): string {
 }
 
 /**
+ * Whether the deployment still carries the open-source Console's default
+ * product name — i.e. no server-pushed `branding.productName` has rebranded
+ * it. The Community edition's sign-in page shows its "Powered by ObjectStack"
+ * mark on this reading and on nothing else: a Cloud or Enterprise runtime
+ * (and a cloud-connected runtime, which pushes its workspace name) sends its
+ * own name and gets no second brand line.
+ *
+ * The product name is the one branding key every runtime that brands itself
+ * sends, so its equality with the default is the signal; the server pushes no
+ * explicit "edition" key today, and a logo or colour alone does not count as
+ * a rebrand here. Before `initRuntimeConfig()` has run the default is in
+ * force, so this answers `true` — the same answer the wordmark gives.
+ */
+export function isDefaultProductName(): boolean {
+  return getProductName() === defaults.branding.productName;
+}
+
+/**
  * Product lifecycle stage — drives the top-bar preview/beta badge. Defaults to
  * `'preview'` until the server (or an operator override) says otherwise, so the
  * whole platform reads as preview out of the box; set `'ga'` to hide the badge.

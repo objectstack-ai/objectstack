@@ -70,14 +70,11 @@ const B_EMAIL = 'share-links.member-b.21328@verify.test';
 const C_EMAIL = 'share-links.member-c.21328@verify.test';
 
 /** The listed link ids, sorted — compared as a set, never as a count. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const idsOf = (rows: any[]): string[] => rows.map((r) => String(r?.id)).sort();
 
 describe('#21328: GET /share-links is self-scoped for a plain member', () => {
   let stack: VerifyStack;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let ql: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let shareLinks: any;
   let adminTok = '';
   let aTok = '';
@@ -103,10 +100,8 @@ describe('#21328: GET /share-links is self-scoped for a plain member', () => {
     const path = `/share-links${query}`;
     const res = token === null ? await stack.api(path) : await stack.apiAs(token, 'GET', path);
     const text = await res.text();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let body: any = null;
     try { body = JSON.parse(text); } catch { /* the status still reports */ }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const rows: any[] = Array.isArray(body?.data) ? body.data : [];
     return { status: res.status, text, body, rows };
   };
@@ -151,7 +146,6 @@ describe('#21328: GET /share-links is self-scoped for a plain member', () => {
     const res = await stack.apiAs(aTok, 'GET', '/security/explain?object=sys_share_link&operation=read');
     const text = await res.text();
     expect(res.status, text).toBe(200);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const layers: any[] = JSON.parse(text)?.layers ?? [];
     const setNames = layers.flatMap((l) => l.contributors ?? []).map((c: { name?: unknown }) => String(c?.name));
     expect(setNames, 'a showcase member resolves the platform `member_default`').toContain('member_default');

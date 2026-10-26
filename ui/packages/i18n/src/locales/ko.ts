@@ -217,6 +217,8 @@ const ko = {
     update: "업데이트",
     createSuccess: "{{object}} 생성됨",
     updateSuccess: "{{object}} 업데이트됨",
+    createdNamed: "{{object}} \"{{title}}\" 생성됨",
+    updatedNamed: "{{object}} \"{{title}}\" 업데이트됨",
     created: "생성됨",
     saved: "저장됨",
     savedNamed: "{{title}} 저장됨",
@@ -2673,6 +2675,7 @@ const ko = {
     },
     shell: {
       tenantHostHint: "이 시스템에 로그인하는 중입니다",
+      poweredBy: "ObjectStack 제공",
     },
     layout: {
       headline: "강력한 비즈니스 애플리케이션을 더 빠르게.",
@@ -3794,7 +3797,7 @@ const ko = {
       cancel: "취소",
     },
     bound: {
-      title: "ObjectStack Cloud에 연결됨",
+      title: "ObjectOS Cloud에 연결됨",
       runtime: "런타임",
       organization: "조직",
       approvedBy: "승인자",
@@ -3913,17 +3916,26 @@ const ko = {
     install: {
       dialogTitle: "{{name}} 설치",
       dialogDescCurrent: "이 환경에 설치 ({{host}}).",
-      dialogDescPicker: "이 앱을 설치할 환경을 선택하세요. ObjectStack Cloud에 로그인되어 있어야 합니다.",
+      dialogDescPicker: "이 앱을 설치할 환경을 선택하세요. ObjectOS Cloud에 로그인되어 있어야 합니다.",
       environment: "환경",
       environmentPlaceholder: "환경 선택",
       includeSampleData: "샘플 데이터 포함",
       noEnvs: "활성 조직에서 환경을 찾을 수 없습니다.",
       noPermission: "환경에 앱을 설치할 권한이 없습니다. 조직 소유자 및 관리자만 설치할 수 있습니다 — 조직 관리자에게 문의하세요.",
-      signInFirst: "먼저 ObjectStack Cloud에 로그인해야 합니다.",
+      signInFirst: "먼저 ObjectOS Cloud에 로그인해야 합니다.",
       success: "설치 성공. 환경을 열어 새 앱을 확인하세요.",
       localSuccess: "이 런타임에 v{{version}} 설치됨. \"{{name}}\"이(가) 이제 앱 전환기에 표시됩니다.",
       localLoadsAtRestart: "이 런타임에 v{{version}} 설치됨. \"{{name}}\"은(는) 런타임이 다음에 다시 시작될 때 로드되며, 그때까지는 앱 전환기에 표시되지 않습니다.",
       localManifestConflict: "{{message}}\n참고: 로컬 앱이 이미 이 manifest_id를 가지고 있습니다. 먼저 objectstack.config.ts에서 제거하세요.",
+      // ADR-0141 D2 — the install refusal DEPENDENCY_MISSING, one line per unmet entry.
+      dependencyMissing: {
+        heading: "설치가 거부되었습니다: 이 패키지가 선언한 종속성이 이 환경에서 충족되지 않아 아무것도 설치되지 않았습니다.",
+        absent: "먼저 {{dependency}} {{range}}을(를) 설치하세요.",
+        outOfRange: "먼저 {{dependency}} {{range}}을(를) 설치하세요. 현재 설치된 버전은 {{installedVersion}}입니다.",
+        unreadableRange: "{{packageId}}이(가) {{dependency}}에 선언한 버전 범위 {{range}}을(를) 읽을 수 없습니다. 범위를 수정한 뒤 패키지를 다시 게시하세요.",
+        unreadableVersion: "{{range}} 범위 안의 {{dependency}} 정식 버전을 설치하세요. 설치된 버전 {{installedVersion}}은(는) MAJOR.MINOR.PATCH 형식이 아닙니다.",
+        unreadableDeclaration: "{{packageId}}의 종속성 선언 형식을 읽을 수 없습니다. 패키지 ID에서 버전 범위로의 맵으로 작성한 뒤 패키지를 다시 게시하세요.",
+      },
       localUnauthorized: "먼저 이 런타임에 로그인하세요.",
       localMarketplaceUnavailable: "이 런타임에 OS_CLOUD_URL이 구성되지 않았습니다.",
       updateTo: "업데이트 → v{{version}}",
@@ -3952,7 +3964,7 @@ const ko = {
     update: {
       dialogTitle: "{{name}} 업데이트",
       dialogDescCurrent: "이 환경({{host}})에 설치된 앱을 업데이트합니다.",
-      dialogDescPicker: "설치된 앱을 업데이트할 환경을 선택하세요. ObjectStack Cloud에 로그인되어 있어야 합니다.",
+      dialogDescPicker: "설치된 앱을 업데이트할 환경을 선택하세요. ObjectOS Cloud에 로그인되어 있어야 합니다.",
       majorNotice: "메이저 버전 업데이트입니다(v{{fromMajor}} → v{{toMajor}}). 호환되지 않는 변경이 포함될 수 있습니다.",
       releaseNotes: "v{{version}} 릴리스 노트 읽기",
       success: "v{{version}}(으)로 업데이트했습니다.",

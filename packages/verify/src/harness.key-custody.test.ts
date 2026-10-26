@@ -105,12 +105,9 @@ const settingsManifest: SettingsManifest = {
   specifiers: [{ type: 'password', key: SETTINGS_KEY, label: 'API key', required: false }],
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Engine = any;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Settings = any;
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const rowsOf = (r: any): any[] => (Array.isArray(r) ? r : Array.isArray(r?.records) ? r.records : []);
 
 interface SealedRow {

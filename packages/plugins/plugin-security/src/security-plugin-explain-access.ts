@@ -67,7 +67,7 @@
  *
  * Nothing re-exports this module, so the published surface does not move.
  */
-import { vetOrganizationClaim } from '@objectstack/core';
+import { resolveUserAuthzGrants, vetOrganizationClaim } from '@objectstack/core';
 import type { AuthoredRowWriteOperation } from '@objectstack/spec/contracts';
 import type { ExplainDecision, ExplainOperation, PermissionSet } from '@objectstack/spec/security';
 import type { SecurityPlugin } from './security-plugin.js';
@@ -195,6 +195,25 @@ export async function explainAccessForCaller(
     // their organization authored.
     if (explainedTenantId !== undefined) explained.tenantId = explainedTenantId;
     targetContext = explained;
+  } else if (
+    callerContext?.principalKind === 'human'
+    && callerContext.isSystem !== true
+    && !callerContext.onBehalfOf?.userId
+    && typeof callerContext.userId === 'string' && callerContext.userId !== ''
+  ) {
+    // [#25799] A self-explanation runs on the request's own context, and the
+    // request envelope does not carry the resolver's split of a set's two
+    // channels (`directPermissions`): its field set is closed. So a HUMAN
+    // caller is resolved once more through the resolver itself, in the
+    // organization the request runs in, and only that split is attached; the
+    // context's grants stay the request's. An agent, a guest and a system
+    // caller keep the context as it arrived. A resolution that fails, or
+    // answers no split, is said as such (`directPermissionsUnread`), never
+    // guessed.
+    const tenantId = typeof callerContext.tenantId === 'string' && callerContext.tenantId !== '' ? callerContext.tenantId : undefined;
+    const split = await resolveUserAuthzGrants(this.ql, callerContext.userId, { tenantId, nowMs: Date.now(), bypassGrantsCache: true })
+      .then((g) => (Array.isArray(g?.directPermissions) ? g.directPermissions : undefined), () => undefined);
+    targetContext = split ? { ...callerContext, directPermissions: split } : { ...callerContext, directPermissionsUnread: true };
   }
 
   // [C2 / ADR-0095] The optional `sharing` service backs the record-grained
@@ -381,6 +400,13 @@ export async function explainAccessForCaller(
             sharingReadFilter: (o: string, c: any) =>
               actsOnBehalfOf(c) ? sharing.buildReadFilter(o, c) : readFilterWithReadScope(o, c),
           }
+        : {}),
+      // [#26188 · ADR-0057] Asked by the depth layer's record cell: with no
+      // resolver mounted a hierarchy read depth is evaluated as 'own', and the
+      // cell names that instead of the depth. The kernel's own answer, read
+      // per explain; no reader of the service, no answer.
+      ...(this.resolveKernelService
+        ? { hierarchyResolverMounted: () => this.resolveKernelService?.('hierarchy-scope-resolver') != null }
         : {}),
       ...(sharing && typeof sharing.listShares === 'function'
         // [ADR-0111 D5] listShares is now management-gated in the sharing

@@ -176,6 +176,9 @@ export {
   getRuntimeConfig,
   getProductName,
   getProductShortName,
+  // The Community-default reading behind the sign-in page's "Powered by
+  // ObjectStack" mark: true until a runtime pushes its own `productName`.
+  isDefaultProductName,
   getPlatformStage,
   getLogoUrl,
   getFaviconUrl,

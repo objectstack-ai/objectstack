@@ -1,49 +1,47 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#13419 执行要点 3; #24757 under 「甲」] The position-name fold, said out loud —
- * and, since 18.x, said as the loud half of its retirement.
+ * [#13419 ruling B, 执行要点 5; #24757] The position-name fold is retired, and
+ * its retirement is said out loud.
  *
  * ## What is pinned
  *
- * `resolvePermissionSetsForContextUnmemoized` requests
- * `[...positions, ...explicitPermissionSets]`, so a POSITION name resolves a
- * same-named PERMISSION SET that the position's definition does not name in
- * `permissionSets` (ADR-0131 D3/D4: the definition is the binding). The
- * maintainer ruling on #13419 (2026-08-31, 「同意」 to B) retires the fold; 要点 5
- * permits a warning and nothing else until the fold itself is deleted —
- * 「任何行为差异只能表现为拒绝/告警,永不静默改变解析结果」.
+ * `resolvePermissionSetsForContextUnmemoized` used to request
+ * `[...positions, ...explicitPermissionSets]`, so a POSITION name resolved a
+ * same-named PERMISSION SET that the position's definition did not name in
+ * `permissionSets`. The maintainer ruling on #13419 (2026-08-31, 「同意」 to B)
+ * retires that channel; ADR-0131 D3/D4 make the definition the one binding
+ * ("the binding is written, not inferred"); 「甲」 as amended (ruling record
+ * 6303865025 on #6015) ships the narrowing in 18.x. 要点 5 requires the
+ * difference to be loud — 「任何行为差异只能表现为拒绝/告警,永不静默改变解析结果」 —
+ * so the fold's warning now reports a namesake set that is NOT granted. This
+ * file pins it in four directions:
  *
- * The standing ruling 「甲」 (ruling record 6292005854 on #6015) places that
- * deletion in 19.0, because no ADR-0087 conversion can carry it, and ships its
- * loud half in 18.x. This file pins the loud half in four directions:
- *
- *   - the TEXT says the grant is in force only because the names match, that
- *     the name-based grant is removed in the next major version and what
- *     holders lose then, and the fix (`permissionSets: ['P']`, or a rename);
- *   - the PAYLOAD carries the consequence as `removedIn: 'next_major'` beside
- *     its unchanged `event` / `position` / `permissionSet`, and no other key;
- *   - the TRIGGER and CADENCE are unchanged: an undeclared pair warns, also
- *     for a position bound to some OTHER set; a declared pair, a baseline name
- *     and an inert position stay silent; once per position, not per request;
- *   - ⛔ the GRANT is unchanged: the holder still resolves set `P`.
+ *   - ⛔ the GRANT is gone: a holder of position `P` does not resolve set `P`
+ *     unless something declares it (the definition's `permissionSets`, a
+ *     direct grant or the baseline), whatever the names;
+ *   - the TEXT says the set shares the position's name, that holders are NOT
+ *     granted it and why, and the fix (`permissionSets: ['P']`, or a rename);
+ *   - the PAYLOAD carries `granted: false` beside its unchanged `event` /
+ *     `position` / `permissionSet`, and no other key;
+ *   - the TRIGGER and CADENCE: an undeclared pair warns, also for a position
+ *     bound to some OTHER set; a declared pair, a baseline name and an inert
+ *     position stay silent; once per position, not per request.
  *
  * ## Where the tuples come from
  *
- * `scripts/measure-position-name-fold-census.mjs` (slice 1, merged `2cd0821cf`)
- * classifies all 19 declared positions into three groups, and the constants
- * below are that classification transcribed. This file pins the runtime
- * PREDICATE against that classification in BOTH directions; the census pins the
- * classification against the repository. Neither substitutes for the other.
- * The census called the declared bindings "junction" rows; since ADR-0131 the
- * same pairs are the definitions' `permissionSets`, which reach this resolver
- * as set names in `context.permissions` — the shape every case below feeds.
+ * The #13419 census (slice 1, merged `2cd0821cf`; its instrument
+ * `scripts/measure-position-name-fold-census.mjs` retired with the fold)
+ * classified all 19 declared positions into three groups, and the constants
+ * below are that classification transcribed. The census called the declared
+ * bindings "junction" rows; since ADR-0131 the same pairs are the definitions'
+ * `permissionSets`, which reach this resolver as set names in
+ * `context.permissions` — the shape every case below feeds.
  *
- * ⚠️ `sales_rep` and `sales_manager` appear in BOTH the fold list and the
- * binding list, and that is the finding slice 1 exists for: each is bound to
- * `crm_sales_user`, and is folded onto its own same-name set anyway. A
- * predicate that asked "is this position bound to anything?" would report
- * neither of the repository's two real folds while looking complete.
+ * ⚠️ `sales_rep` and `sales_manager` appear in BOTH the namesake list and the
+ * binding list: each is bound to `crm_sales_user`, and a set of its own name
+ * exists too. A predicate that asked "is this position bound to anything?"
+ * would report neither while looking complete.
  *
  * ## The expensive failure mode, pinned first
  *
@@ -65,9 +63,10 @@ import type { ISecurityService } from '@objectstack/spec/contracts';
 const EVENT = 'position_name_fold_grant';
 
 /**
- * The census's `NAME-FOLD DEPENDENCIES` block — grants in force that no
- * position definition declares. Position half declared by `examples/app-crm/src/security/
- * sales-positions.ts`; permission-set half by the vendored HotCRM artifact.
+ * The census's `NAME-FOLD DEPENDENCIES` block — the pairs the fold granted with
+ * no position definition declaring them. Position half declared by
+ * `examples/app-crm/src/security/sales-positions.ts`; permission-set half by the
+ * vendored HotCRM artifact.
  */
 const CENSUS_NAME_FOLDS = ['sales_rep', 'sales_manager'] as const;
 
@@ -95,6 +94,7 @@ const CENSUS_JUNCTION_BINDINGS: ReadonlyArray<readonly [position: string, set: s
 /**
  * The census's `INERT POSITIONS` block, printed under a heading that states the
  * obligation in terms: "要点 3's collision warning must NOT fire on these."
+ * No set shares any of their names.
  */
 const CENSUS_INERT_POSITIONS = [
   'platform_admin',
@@ -159,61 +159,59 @@ async function resolveWith(context: Record<string, unknown>, universe: Permissio
 }
 
 /** Every key the structured report carries — the three it has always carried,
- *  which a log consumer may key on, plus the retirement (「甲」, 18.x). */
-const PAYLOAD_KEYS = ['event', 'permissionSet', 'position', 'removedIn'];
+ *  which a log consumer may key on, plus the consequence. */
+const PAYLOAD_KEYS = ['event', 'granted', 'permissionSet', 'position'];
 
-describe('[#13419] MUST FIRE — a position folded onto its own same-name set that its definition does not name', () => {
+describe('[#13419] MUST FIRE — a held position whose same-name set exists and is not declared', () => {
   for (const position of CENSUS_NAME_FOLDS) {
-    it(`warns for '${position}', the census's own cross_scope fold, and still grants the set`, async () => {
+    it(`warns for '${position}', the census's own cross_scope pair, and does NOT grant the set`, async () => {
       // The measured shape: the position IS bound — to `crm_sales_user`, not
-      // to itself — so `permissions` carries that other set. The grant on the
-      // same-name set has no declaration behind it at all.
+      // to itself — so `permissions` carries that other set. Nothing declares
+      // the same-name set.
       const { sets, events } = await resolveWith({
         userId: 'u1',
         positions: [position],
         permissions: ['crm_sales_user'],
       });
 
-      // Reported once, naming both halves of the pair and the retirement.
+      // Reported once, naming both halves of the pair and the consequence.
       expect(events).toHaveLength(1);
-      expect(events[0]).toEqual({ event: EVENT, position, permissionSet: position, removedIn: 'next_major' });
+      expect(events[0]).toEqual({ event: EVENT, position, permissionSet: position, granted: false });
 
-      // ⛔ Purely additive: the fold still grants exactly what it granted before.
-      // 「甲」 moves the removal to 19.0, so in 18.x the holder still resolves
-      // set `P`. A warning that also changed the answer would be the silent
-      // behaviour change 要点 5 forbids.
-      expect(sets.sort()).toEqual(['crm_sales_user', 'member_default', position].sort());
+      // ⛔ The retirement itself: the shared name grants nothing. The holder
+      // resolves what is declared — its bound set and the baseline — and the
+      // same-name set is absent.
+      expect(sets.sort()).toEqual(['crm_sales_user', 'member_default'].sort());
     });
   }
 
-  it('carries the consequence as data: the unchanged fields plus removedIn, and no other key', async () => {
+  it('carries the consequence as data: the unchanged fields plus granted: false, and no other key', async () => {
     const { events, sets } = await resolveWith({ userId: 'u1', positions: ['sales_rep'], permissions: [] });
     expect(events).toHaveLength(1);
     // Exact keys, so a renamed or dropped legacy field fails here as loudly as
-    // a missing retirement field does.
+    // a missing consequence field does.
     expect(Object.keys(events[0]).sort()).toEqual(PAYLOAD_KEYS);
-    expect(events[0].removedIn).toBe('next_major');
-    expect(sets.sort()).toEqual(['member_default', 'sales_rep'].sort());
+    expect(events[0].granted).toBe(false);
+    expect(sets).toEqual(['member_default']);
   });
 
-  it('says why the grant is in force, that it is removed in the next major and what holders lose, and the fix', async () => {
+  it('says the set shares the name, that holders are NOT granted it and why, and the fix', async () => {
     const { warn } = await resolveWith({ userId: 'u1', positions: ['sales_rep'], permissions: [] });
     const message = warn.mock.calls.map((c) => String(c[0])).find((m) => m.includes(EVENT))!;
-    // ① In force today only because the names match.
+    // ① The pair, and that the shared name grants nothing.
     expect(message).toContain(
-      "permission set 'sales_rep' is in force for holders of position 'sales_rep' only because the two share a name",
+      "permission set 'sales_rep' shares its name with position 'sales_rep', but holders of position 'sales_rep' are NOT granted it",
     );
-    // ② Deprecated, removed in the next major, and what holders lose then.
-    expect(message).toContain('This name-based grant is deprecated and is removed in the next major version');
-    expect(message).toContain(
-      "holders of position 'sales_rep' do not receive permission set 'sales_rep' unless the position's definition names it",
-    );
-    // ③ The fix. [ADR-0131 D3/D4] The governed way out is the position
-    // definition's `permissionSets` — a junction row no longer grants or
-    // governs anything.
+    // ② Why: the definition is the binding, and it does not name the set.
+    expect(message).toContain('A position grants only the permission sets its definition names in permissionSets');
+    expect(message).toContain("the definition of position 'sales_rep' does not name 'sales_rep'");
+    // ③ The fix. [ADR-0131 D3/D4] The governed way is the position
+    // definition's `permissionSets` — a junction row grants nothing.
     expect(message).toContain("permissionSets: ['sales_rep']");
     expect(message).toMatch(/rename one of the two/);
     expect(message).not.toContain('sys_position_permission_set');
+    // The 18.x deprecation wording is gone with the grant it described.
+    expect(message).not.toMatch(/next major|deprecated|in force/);
     // An operator reading the log has no tracker to resolve an issue id against.
     expect(message).not.toMatch(/#\d/);
   });
@@ -225,14 +223,14 @@ describe('[#13419] MUST FIRE — a position folded onto its own same-name set th
     const svc = ctx.registerService.mock.calls.find((c: any[]) => c[0] === 'security')?.[1] as Partial<ISecurityService>;
     // Distinct context OBJECTS, so the per-context memo cannot be what silences
     // the second call — the deduplication under test has to be the one in the
-    // reporter. Each request still resolves the same-name set.
+    // reporter. No request resolves the same-name set.
     for (let i = 0; i < 3; i++) {
       const sets = await svc.resolvePermissionSetsForContext?.({ userId: `u${i}`, positions: ['sales_rep'] } as any);
-      expect((sets ?? []).map((s) => s.name)).toContain('sales_rep');
+      expect((sets ?? []).map((s) => s.name)).not.toContain('sales_rep');
     }
     const reports = warn.mock.calls.filter((c) => String(c[0]).includes(EVENT));
     expect(reports).toHaveLength(1);
-    expect(reports[0][1]).toMatchObject({ position: 'sales_rep', removedIn: 'next_major' });
+    expect(reports[0][1]).toMatchObject({ position: 'sales_rep', granted: false });
   });
 });
 
@@ -242,9 +240,9 @@ describe('[#13419] ⛔ MUST NOT FIRE — the census groups the ruling protects',
     async (position) => {
       const { events, sets } = await resolveWith({ userId: 'u1', positions: [position] });
       expect(events).toEqual([]);
-      // Silent for the right reason: nothing resolved off the position name, so
-      // the caller fell back to the baseline. A pass produced by a broken
-      // resolution would show up here as an empty set list.
+      // Silent for the right reason: no set shares the name, and the caller
+      // resolves the baseline. A pass produced by a broken resolution would
+      // show up here as an empty set list.
       expect(sets).toEqual(['member_default']);
     },
   );
@@ -267,12 +265,11 @@ describe('[#13419] ⛔ MUST NOT FIRE — the census groups the ruling protects',
     },
   );
 
-  it('stays silent once the definition declares the pair (position N: permissionSets: [N])', async () => {
+  it('stays silent once the definition declares the pair (position N: permissionSets: [N]), and grants it', async () => {
     // The fix the warning prescribes, and what objectstack-ai/hotcrm#2200 does
     // for HotCRM's five: the definition's `permissionSets` names the same-name
-    // set, so it arrives in `permissions` (§6b) and the grant no longer depends
-    // on the fold. This is the forward pin: a declared pair is silent without a
-    // second edit here.
+    // set, so it arrives in `permissions` (§6b) and is granted through the
+    // declaration.
     const { events, sets } = await resolveWith({
       userId: 'u1',
       positions: ['sales_rep'],
@@ -282,7 +279,7 @@ describe('[#13419] ⛔ MUST NOT FIRE — the census groups the ruling protects',
     expect(sets.sort()).toEqual(['crm_sales_user', 'member_default', 'sales_rep'].sort());
   });
 
-  it('stays silent when the same-name set IS the baseline (in force with or without the fold)', async () => {
+  it('stays silent when the same-name set IS the baseline (granted to every authenticated caller)', async () => {
     const { events } = await resolveWith({ userId: 'u1', positions: ['member_default'] });
     expect(events).toEqual([]);
   });

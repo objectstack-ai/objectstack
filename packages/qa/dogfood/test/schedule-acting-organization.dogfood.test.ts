@@ -135,9 +135,7 @@ function recordingLogger(): { logger: TriggerLogger; errors: string[]; warns: st
   };
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Ql = any;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Engine = any;
 
 const SYS = { context: { isSystem: true } };

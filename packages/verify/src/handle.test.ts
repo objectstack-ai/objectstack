@@ -87,9 +87,7 @@ async function freshHandleFixtureStack(): Promise<typeof handleFixtureStack> {
 /** Unique per run, so list assertions never see another test's rows. */
 const uniq = (prefix: string): string => `${prefix}-${Math.random().toString(36).slice(2, 8)}`;
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const codeOf = (e: unknown): string | undefined => (e as any)?.code;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const statusOf = (e: unknown): number | undefined => (e as any)?.statusCode ?? (e as any)?.status;
 
 describe('contextFor — the dispatcher resolves the caller, the handle never assembles one', () => {
@@ -160,7 +158,6 @@ describe('parity pin — hooks.run is the REST write minus HTTP', () => {
     const viaHandle = await stack.hooks.run('hnd_deal', 'insert', { name: uniq('parity'), ...input }, { as: member });
     const viaRest = await stack.apiAs(member, 'POST', '/data/hnd_deal', { name: uniq('parity'), ...input });
     expect(viaRest.status).toBe(201);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const restBody = (await viaRest.json()) as any;
     const restId: string = restBody?.id ?? restBody?.record?.id;
     expect(typeof restId).toBe('string');
@@ -193,7 +190,6 @@ describe('parity pin — hooks.run is the REST write minus HTTP', () => {
 
     const viaRest = await stack.apiAs(member, 'POST', '/data/hnd_vault', { name: uniq('vault') });
     expect(viaRest.status).toBe(403);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const restBody = (await viaRest.json()) as any;
     expect(restBody?.code ?? restBody?.error?.code).toBe('PERMISSION_DENIED');
 
@@ -262,7 +258,6 @@ describe('actions.run — the declared action, through the route that carries it
   it('runs the sandboxed body against the loaded record and returns its value', async () => {
     const [deal] = await stack.seed('hnd_deal', [{ name: uniq('discount'), amount: 1_000, stage: 'proposal' }]);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = (await stack.actions.run('hnd_deal', 'apply_discount', {
       as: admin,
       recordId: deal.id,

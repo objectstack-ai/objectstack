@@ -136,6 +136,12 @@ import {
 // [#25522 cut 7] The raw-command and transaction-routing bodies; the methods of
 // the same names below hand each body the members it reads (`ExecuteTransactionsHost`).
 import { enforceTransactionOrigin, execute, warnTransactionUnsupported } from './engine-execute-transactions.js';
+// [#25522 cut 8] The compatibility-API bodies; the methods of the same names
+// below hand each body the members it reads (`CompatibilityApiHost`).
+import { getConfigs, introspectDatasource, registerObject, removePackage, syncObjectSchema, syncSchemas } from './engine-compatibility-api.js';
+// [#25522 cut 9] The hook-context caller-envelope builders; the methods of the
+// same names below call them, and none of the bodies reads a member.
+import { buildEvalUser, buildProvenance, buildSession, buildUser } from './engine-execution-plumbing.js';
 import { ExecutionContext, ExecutionContextSchema, type InstalledPackageSource } from '@objectstack/spec/kernel';
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
@@ -7074,49 +7080,8 @@ export class ObjectQL implements IObjectQLEngine {
    * session and stays gated.
    */
   private buildSession(execCtx?: ExecutionContext): HookContext['session'] {
-    if (!execCtx) return undefined;
-    const session = {
-      userId: execCtx.userId,
-      // `organizationId` is the blessed developer-facing name for the caller's
-      // active org (matches the `organization_id` column, `current_user`
-      // RLS shape, and seed rows). It comes from `execCtx.tenantId`, which the
-      // kernel resolves from `session.activeOrganizationId`. The deprecated
-      // `session.tenantId` alias (#3280) was removed here in v16 (#3290) — the
-      // driver-layer `execCtx.tenantId` knob is a separate axis and stays.
-      organizationId: execCtx.tenantId,
-      positions: execCtx.positions,
-      accessToken: execCtx.accessToken,
-      // Propagate system-elevated flag so hooks can distinguish engine
-      // self-writes (e.g. approval status mirror) from genuine user writes.
-      ...((execCtx as any).isSystem ? { isSystem: true } : {}),
-      // Propagate the service-principal label (`ExecutionContext.actor`,
-      // e.g. `svc:flow:<name>`) so a non-user write stays attributable in the
-      // audit log — the writer's `userId ?? session.actor` fallback is dead
-      // without this hop (the `ExecutionContext.actor` audit-attribution
-      // contract, `@objectstack/spec` kernel/execution-context.zod.ts; #4366).
-      ...(typeof (execCtx as any).actor === 'string' && (execCtx as any).actor
-        ? { actor: (execCtx as any).actor }
-        : {}),
-      // Propagate the automation-suppression flag so the record-change trigger
-      // can skip flow dispatch for seed/bulk writes (ADR: seed loads end-state
-      // data, not user events). `skipAutomations` implies `skipTriggers` —
-      // suppressing metadata hooks while still dispatching flows would leave
-      // the "run automations & triggers" opt-out half-working (#2922).
-      ...((execCtx as any).skipTriggers || (execCtx as any).skipAutomations ? { skipTriggers: true } : {}),
-      // Propagate the full automation opt-out so `triggerHooks` can skip
-      // metadata-bound hooks (import with "run automations" unchecked, undo).
-      ...((execCtx as any).skipAutomations ? { skipAutomations: true } : {}),
-      // Propagate the historical-import audit-preservation flag so the built-in
-      // audit hook keeps a client-supplied updated_at/updated_by instead of
-      // stamping now (#3493). Opt-in, server-set only.
-      ...((execCtx as any).preserveAudit ? { preserveAudit: true } : {}),
-    } as HookContext['session'];
-    // Nothing to say about the caller → say nothing. An object whose every
-    // property is `undefined` conveys no more than no session at all, and
-    // returning it would turn "no caller" into "an anonymous caller".
-    return Object.values(session as Record<string, unknown>).some((v) => v !== undefined)
-      ? session
-      : undefined;
+    // [#25522 cut 9] The body moved to `engine-execution-plumbing.ts`; it reads no member.
+    return buildSession(execCtx);
   }
 
   /**
@@ -7146,15 +7111,8 @@ export class ObjectQL implements IObjectQLEngine {
    * populated (ADR-0049).
    */
   private buildProvenance(execCtx?: ExecutionContext): HookContext['provenance'] {
-    const flowRunId = (execCtx as any)?.flowRunId;
-    const attributedUserId = (execCtx as any)?.attributedUserId;
-    const performedByClientId = (execCtx as any)?.performedBy?.clientId;
-    if (!flowRunId && !attributedUserId && !performedByClientId) return undefined;
-    return {
-      ...(flowRunId ? { flowRunId: String(flowRunId) } : {}),
-      ...(attributedUserId ? { attributedUserId: String(attributedUserId) } : {}),
-      ...(performedByClientId ? { performedByClientId: String(performedByClientId) } : {}),
-    };
+    // [#25522 cut 9] The body moved to `engine-execution-plumbing.ts`; it reads no member.
+    return buildProvenance(execCtx);
   }
 
   /**
@@ -7214,12 +7172,8 @@ export class ObjectQL implements IObjectQLEngine {
   private buildEvalUser(
     execCtx?: ExecutionContext,
   ): { id: string; positions: string[]; organizationId: string | null } | undefined {
-    if (!execCtx || execCtx.userId == null) return undefined;
-    return {
-      id: String(execCtx.userId),
-      positions: execCtx.positions ?? [],
-      organizationId: execCtx.tenantId != null ? String(execCtx.tenantId) : null,
-    };
+    // [#25522 cut 9] The body moved to `engine-execution-plumbing.ts`; it reads no member.
+    return buildEvalUser(execCtx);
   }
 
   /**
@@ -7234,14 +7188,8 @@ export class ObjectQL implements IObjectQLEngine {
    * `ctx.session.organizationId`, which is populated whenever a session is.
    */
   private buildUser(execCtx?: ExecutionContext): HookContext['user'] {
-    if (!execCtx || execCtx.userId == null) return undefined;
-    return {
-      id: String(execCtx.userId),
-      ...(execCtx.email ? { email: execCtx.email } : {}),
-      // Always equals `session.organizationId` (both from `execCtx.tenantId`).
-      // Undefined on unscoped (platform/community) calls.
-      ...(execCtx.tenantId != null ? { organizationId: String(execCtx.tenantId) } : {}),
-    };
+    // [#25522 cut 9] The body moved to `engine-execution-plumbing.ts`; it reads no member.
+    return buildUser(execCtx);
   }
 
   /**
@@ -22096,15 +22044,12 @@ export class ObjectQL implements IObjectQLEngine {
     packageId: string = '__runtime__',
     namespace?: string
   ): string {
-    // Auto-assign field names from keys
-    if (schema.fields) {
-      for (const [key, field] of Object.entries(schema.fields)) {
-        if (field && typeof field === 'object' && !('name' in field)) {
-          (field as any).name = key;
-        }
-      }
-    }
-    return this._registry.registerObject(schema, packageId, namespace);
+    // [#25522 cut 8] The body moved to `engine-compatibility-api.ts` (see `CompatibilityApiHost`).
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof registerObject> = {
+      get _registry() { return readRegistry(); },
+    };
+    return registerObject.call(host, schema, packageId, namespace);
   }
 
   /**
@@ -22132,14 +22077,12 @@ export class ObjectQL implements IObjectQLEngine {
    * Matches @objectql/core getConfigs() API.
    */
   getConfigs(): Record<string, ServiceObject> {
-    const result: Record<string, ServiceObject> = {};
-    const objects = this._registry.getAllObjects();
-    for (const obj of objects) {
-      if (obj.name) {
-        result[obj.name] = obj;
-      }
-    }
-    return result;
+    // [#25522 cut 8] The body moved to `engine-compatibility-api.ts` (see `CompatibilityApiHost`).
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof getConfigs> = {
+      get _registry() { return readRegistry(); },
+    };
+    return getConfigs.call(host);
   }
 
   /**
@@ -22172,14 +22115,12 @@ export class ObjectQL implements IObjectQLEngine {
    * unchanged.
    */
   async introspectDatasource(datasource: string): Promise<SpecIntrospectedSchema> {
-    const driver = this.drivers.get(datasource);
-    if (!driver) {
-      throw new Error(`[ObjectQL] Datasource '${datasource}' has no registered driver to introspect.`);
-    }
-    if (typeof driver.introspectSchema !== 'function') {
-      throw new Error(`[ObjectQL] Driver for datasource '${datasource}' does not support introspectSchema().`);
-    }
-    return driver.introspectSchema();
+    // [#25522 cut 8] The body moved to `engine-compatibility-api.ts` (see `CompatibilityApiHost`).
+    const readDrivers = () => this.drivers;
+    const host: ThisParameterType<typeof introspectDatasource> = {
+      get drivers() { return readDrivers(); },
+    };
+    return introspectDatasource.call(host, datasource);
   }
 
   /**
@@ -22211,69 +22152,15 @@ export class ObjectQL implements IObjectQLEngine {
    * (`ObjectQLPlugin.syncRegisteredSchemas`) binds it.
    */
   async syncSchemas(): Promise<void> {
-    const allObjects = this._registry.getAllObjects();
-    for (const obj of allObjects) {
-      const driver = this.getDriverForObject(obj.name);
-      if (!driver) continue;
-      // [#21777] Same predicate and same treatment as the boot sync. The remote
-      // owns this object's schema, so `syncSchema` would be refused
-      // (`ExternalSchemaModeViolationError` on an external-schema datasource).
-      // Logging that refusal at the #4632 ERROR below was a false durability
-      // alarm, because nothing was meant to be created. The DDL-free binding
-      // still runs, because an object registered at runtime has no other way
-      // to its remote table: without it every read resolves to a table named
-      // after the object.
-      if (isFederatedObject(obj)) {
-        if (typeof (driver as any).registerExternalObject !== 'function') {
-          this.logger.debug('Driver does not support registerExternalObject, skipping external object', {
-            object: obj.name,
-            driver: (driver as any).name,
-          });
-          continue;
-        }
-        try {
-          await (driver as any).registerExternalObject(obj);
-          this.logger.debug('Federated object is not a DDL target — bound to its remote table without DDL', {
-            object: obj.name,
-            driver: (driver as any).name,
-          });
-        } catch (e: unknown) {
-          this.logger.warn('Failed to register external object metadata', {
-            object: obj.name,
-            driver: (driver as any).name,
-            error: e instanceof Error ? e.message : String(e),
-          });
-        }
-        continue;
-      }
-      const tableName = StorageNameMapping.resolveTableName(obj);
-      if (typeof (driver as any).syncSchemasBatch === 'function' && (driver as any).supports?.batchSchemaSync) {
-        // Already handled per-driver below; skip individual call
-      }
-      if (typeof (driver as any).syncSchema === 'function') {
-        try {
-          await (driver as any).syncSchema(tableName, obj);
-        } catch (e: unknown) {
-          // #4632 — this catch used to be empty, with the comment "log
-          // suppressed to avoid noise on already-synced tables". Suppressing an
-          // already-synced no-op is not what it did: `syncSchema` is required to
-          // be idempotent (see this method's doc comment), so a driver that
-          // reaches this catch did NOT sync. The only callers are runtime
-          // installs — marketplace plugin install, template seeding — which go
-          // on to INSERT into a table this failure means does not exist, and
-          // then report the install as successful. Nothing that claims to be
-          // persisted afterwards is.
-          this.logger.error(
-            `Schema sync FAILED for object '${obj.name}' — its table/collection was NOT created or altered, yet the object is ` +
-              `registered and will be written to: those writes will fail, or drop the columns that were never created. ` +
-              `Any seeding or install step that continues past this point is not durable. ` +
-              `Fix the driver error below, then re-run the install/sync.`,
-            e as Error,
-            { object: obj.name, tableName, driver: (driver as any)?.name },
-          );
-        }
-      }
-    }
+    // [#25522 cut 8] The body moved to `engine-compatibility-api.ts` (see `CompatibilityApiHost`).
+    const readRegistry = () => this._registry;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof syncSchemas> = {
+      getDriverForObject: (...a) => this.getDriverForObject(...a),
+      get _registry() { return readRegistry(); },
+      get logger() { return readLogger(); },
+    };
+    return syncSchemas.call(host);
   }
 
   /**
@@ -22286,23 +22173,13 @@ export class ObjectQL implements IObjectQLEngine {
    * table when absent (and alters to add new columns).
    */
   async syncObjectSchema(objectName: string): Promise<void> {
-    const obj = this._registry.getObject(objectName) as any;
-    if (!obj) return;
-    const driver = this.getDriverForObject(objectName);
-    if (!driver) return;
-    // Federated (external) object (ADR-0015): register read metadata WITHOUT DDL
-    // (its remote schema is owned externally). This is what an app's onEnable
-    // calls after registering a late external driver so coercion maps + the
-    // physical-table mapping exist for queries. See SqlDriver.registerExternalObject.
-    if (isFederatedObject(obj)) {
-      if (typeof (driver as any).registerExternalObject === 'function') {
-        await (driver as any).registerExternalObject(obj);
-      }
-      return;
-    }
-    if (typeof (driver as any).syncSchema !== 'function') return;
-    const tableName = StorageNameMapping.resolveTableName(obj);
-    await (driver as any).syncSchema(tableName, obj);
+    // [#25522 cut 8] The body moved to `engine-compatibility-api.ts` (see `CompatibilityApiHost`).
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof syncObjectSchema> = {
+      getDriverForObject: (...a) => this.getDriverForObject(...a),
+      get _registry() { return readRegistry(); },
+    };
+    return syncObjectSchema.call(host, objectName);
   }
 
   /**
@@ -22356,17 +22233,15 @@ export class ObjectQL implements IObjectQLEngine {
    * Remove all hooks, actions, and objects contributed by a package.
    */
   removePackage(packageId: string): void {
-    // Remove hooks
-    for (const [key, handlers] of this.hooks.entries()) {
-      const filtered = handlers.filter(h => h.packageId !== packageId);
-      if (filtered.length !== handlers.length) {
-        this.hooks.set(key, filtered);
-      }
-    }
-    // Remove actions
-    this.removeActionsByPackage(packageId);
-    // Remove objects
-    this._registry.unregisterObjectsByPackage(packageId, true);
+    // [#25522 cut 8] The body moved to `engine-compatibility-api.ts` (see `CompatibilityApiHost`).
+    const readHooks = () => this.hooks;
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof removePackage> = {
+      removeActionsByPackage: (...a) => this.removeActionsByPackage(...a),
+      get hooks() { return readHooks(); },
+      get _registry() { return readRegistry(); },
+    };
+    return removePackage.call(host, packageId);
   }
 
   /**
