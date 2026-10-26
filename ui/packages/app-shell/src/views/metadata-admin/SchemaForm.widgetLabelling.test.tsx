@@ -63,6 +63,10 @@ vi.mock('@monaco-editor/react', () => {
   const Editor = () => null;
   return { Editor, default: Editor, loader: { init: () => Promise.reject(new Error('offline')) } };
 });
+
+// The bundled Monaco loads: the page's probe awaits plugin-editor's
+// `configureBundledMonaco` before `loader.init()` (its own suite drives it).
+vi.mock('@object-ui/plugin-editor', () => ({ configureBundledMonaco: () => Promise.resolve() }));
 import { SchemaForm, type FormFieldSpec } from './SchemaForm';
 import {
   WIDGETS,

@@ -94,6 +94,7 @@ import { PageComponentSchema, PageSchema } from '../ui/page.zod';
 import { AddRecordConfigSchema, FormFieldSchema, FormSectionSchema, ListViewSchema, ObjectListViewSchema } from '../ui/view.zod';
 import { FlowSchema } from '../automation/flow.zod';
 import { JobSchema } from '../system/job.zod';
+import { TranslationItemSchema } from '../system/translation.zod';
 import { PROTOCOL_MAJOR } from '../kernel/protocol-version';
 import { EmailTemplateDefinitionSchema } from '../system/email-template.zod';
 import {
@@ -258,6 +259,13 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
         objects: { srm_material: { allowEdit: true, allowDelete: false, modifyAllRecords: true } },
       }),
       'objects',
+    ),
+  ],
+  'translation-locale-tag-canonicalized': [
+    refusal(
+      "a translation item's locale written with '_'",
+      () => TranslationItemSchema.safeParse({ name: 'zh_cn', locale: 'zh_CN', messages: { commonSave: '保存' } }),
+      'locale',
     ),
   ],
   'manifest-permissions-string-list-removed': [

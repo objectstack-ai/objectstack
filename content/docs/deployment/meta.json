@@ -9,6 +9,7 @@
     "single-project-mode",
     "publish-and-preview",
     "install-modes",
+    "app-dependencies",
     "cloud-connection",
     "validating-metadata",
     "cli",

@@ -8,7 +8,8 @@ Control visibility and editability of specific fields.
 
 ## Field Permissions in Permission Sets
 
-Field permissions are keyed `<object>.<field>` and use `readable` / `editable`:
+Field permissions are keyed `<object>.<field>` and use `readable` / `editable`,
+plus an optional `when` — a row condition on the edit vote (below):
 
 ```typescript
 fields: {
@@ -21,6 +22,48 @@ fields: {
   'opportunity.probability': { readable: true, editable: false },
 }
 ```
+
+## Row-conditioned edit locks (`when`)
+
+An entry may carry `when`: a row condition in the same canonical CEL as an
+RLS `using` predicate (a field of the object compared with a literal or a
+`current_user.*` value; `==`, `!=`, `<`, `<=`, `>`, `>=`, `in`, combined with
+`&&` / `||`). The entry then votes **only on the rows the condition matches**
+and is absent on every other row, as if the set had not declared the field:
+
+```typescript
+fields: {
+  // Locked from approval onward; a draft is still editable.
+  'opportunity.amount': { readable: true, editable: false, when: "status in ['approved', 'closed']" },
+  // Editable on the caller's own rows only.
+  'task.estimate': { readable: true, editable: true, when: 'assigned_to == current_user.id' },
+}
+```
+
+- **Edit vote only.** Reads are judged row-blind, so `readable: false`
+  beside a `when` is refused at parse time; keep `readable: true` (the
+  default) on a row-conditioned entry.
+- **Which row.** The write gate judges the **stored** row before an update
+  (a lock on `status in [...]` holds on an approved row even when the same
+  write moves `status` back), and each **incoming** row of an insert, as the
+  caller sent it. The condition is evaluated in process against the row —
+  never rewritten into the query.
+- **When no row can be judged** — a predicate (bulk) update with no row
+  address, a stored row the caller cannot read, a condition that does not
+  resolve for the request — the entry is applied as its **lock**: no edit
+  grant on that write, and a WARN line says why.
+- **Readers that hold no row** (`/auth/me/permissions`, the writable-field
+  projections, `os explain`) report a row-conditioned entry as its lock, so
+  a client never advertises an edit the gate refuses. `os explain` names
+  each such entry as a row-conditioned lock in its `fls` layer.
+- **Union without deny is unchanged.** A matched conditioned lock is still
+  out-voted by another set's unconditioned `editable: true`; an entry
+  without `when` votes on every row, as before (ADR-0066 ⑧, note of
+  2026-10-26).
+- **Validated at authoring.** `objectstack validate` judges `when` like an
+  RLS predicate (`rls-predicate-*` findings on `permissions[].fields[].when`):
+  the fields it names must exist on the entry's object, no cross-object
+  reach, no unresolvable `current_user.*` variable.
 
 ## Hidden vs. Read-Only
 

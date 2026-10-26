@@ -34,6 +34,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { appAutomationElevationOf } from '@objectstack/core';
 import { ObjectQL, ScopedContext } from './engine.js';
 import { bindHooksToEngine } from './hook-binder.js';
 import { wrapDeclarativeHook } from './hook-wrappers.js';
@@ -389,7 +390,9 @@ describe('#14010 Hook.runAs — the identity a hook\'s ctx.api presents', () => 
       const entry = await import('./index.js');
       expect('SEED_USER_GRANTS' in entry).toBe(false);
       expect(Object.getOwnPropertyNames(ScopedContext.prototype)).not.toContain('withUserGrantsSeeded');
-      expect(Object.getOwnPropertySymbols(ScopedContext.prototype)).toHaveLength(1);
+      // [#25653] The app-authored hook api's derivation is the other symbol-keyed member, unexported too.
+      expect('APP_AUTHORED_HOOK_API' in entry).toBe(false);
+      expect(Object.getOwnPropertySymbols(ScopedContext.prototype)).toHaveLength(2);
     });
 
     it('a resolver failure keeps the UNSEEDED pin — narrower, never elevated — and says so once at warn', async () => {
@@ -585,5 +588,61 @@ describe('#14010 Hook.runAs — through a real ObjectQL dispatch', () => {
     // Nothing ran unscoped: no account write reached the chain at all.
     expect(contexts.runas_account).toEqual([]);
     expect(contexts.runas_rating[0]?.isSystem).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#25653] An app-authored hook (bound through the binder) carries its
+// provenance: an inherited system context and its `sudo()` get the
+// app-automation mark. A platform wrap (no `appAuthored`) is unchanged.
+// ---------------------------------------------------------------------------
+
+describe('#25653 an app-authored hook\'s elevation carries the app-automation mark', () => {
+  const SYSTEM_TRIGGER = { isSystem: true, tenantId: 'org_1' } as ExecutionContext;
+
+  /** The context of the hook's insert, made through `pick(api)`. */
+  async function hookInsert(execCtx: ExecutionContext, opts: { appAuthored?: boolean; runAs?: unknown }, pick: (api: any) => any = (a) => a) {
+    const engine = recordingEngine();
+    const wrapped = wrapDeclarativeHook(hookOf(opts.runAs), async (c) => {
+      await pick(c.api).object('sys_member').insert({ id: 'm1' });
+    }, { logger: silentLogger, appAuthored: opts.appAuthored });
+    await wrapped(makeCtx(execCtx, engine));
+    return engine.seen.find((e: { method: string }) => e.method === 'insert')!.context;
+  }
+
+  it('an inherited system context is marked; a run\'s context and a user\'s are not', async () => {
+    expect(appAutomationElevationOf(await hookInsert(SYSTEM_TRIGGER, { appAuthored: true }))).toBe('hook');
+    expect(appAutomationElevationOf(await hookInsert({ ...SYSTEM_TRIGGER, flowRunId: 'run_1' } as ExecutionContext, { appAuthored: true }))).toBeUndefined();
+    expect(appAutomationElevationOf(await hookInsert(OPERATOR, { appAuthored: true }))).toBeUndefined();
+  });
+
+  it('its sudo() is marked, under every runAs', async () => {
+    for (const runAs of [undefined, 'user', 'system']) {
+      const context = await hookInsert(OPERATOR, { appAuthored: true, runAs }, (a) => a.sudo());
+      expect(context.isSystem).toBe(true);
+      expect(appAutomationElevationOf(context)).toBe('hook');
+    }
+  });
+
+  it('a platform wrap (no appAuthored) keeps the api by reference, and neither its inherited context nor its sudo() is marked', async () => {
+    const engine = recordingEngine();
+    const ctx = makeCtx(OPERATOR, engine);
+    const original = ctx.api;
+    let seenApi: unknown;
+    await wrapDeclarativeHook(hookOf(undefined), async (c) => { seenApi = c.api; }, { logger: silentLogger })(ctx);
+    expect(seenApi).toBe(original);
+    expect(appAutomationElevationOf(await hookInsert(SYSTEM_TRIGGER, {}))).toBeUndefined();
+    expect(appAutomationElevationOf(await hookInsert(OPERATOR, {}, (a) => a.sudo()))).toBeUndefined();
+  });
+
+  it('the binder binds every hook as app-authored', async () => {
+    const engine = new ObjectQL();
+    const seen: unknown[] = [];
+    bindHooksToEngine(engine, [{ ...hookOf(undefined), handler: async (c: HookContext) => { seen.push(c.api); } } as any], { packageId: 'qa' });
+    const hook = (engine as any).hooks.get('afterInsert')?.[0];
+    const ctx = makeCtx(SYSTEM_TRIGGER, recordingEngine());
+    await hook.handler(ctx);
+    expect(seen[0]).not.toBe(ctx.api);
+    expect(appAutomationElevationOf((seen[0] as any).executionContext)).toBe('hook');
   });
 });
