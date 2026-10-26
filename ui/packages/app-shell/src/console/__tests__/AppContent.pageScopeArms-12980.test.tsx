@@ -256,13 +256,14 @@ afterEach(() => {
 
 describe('a page bound through the missed object arms reads them in the route scope (objectui#12980)', () => {
   it('(a) every arm object is known on the page\'s first render, read by name beside the package list, never the whole registry', async () => {
-    boot('/apps/crm/page/service_board');
+    boot(`/apps/${CRM}/page/service_board`);
     await waitFor(() => expect(screen.getByTestId('page-blocks')).toBeInTheDocument());
 
     // Known on the first render: the route held the page until they answered,
     // so no block's ask had to start an on-demand read.
     expect(probe.first).toEqual(
-      // On the app's package id, its one address (objectstack-ai/objectstack#26183).
+      // Booted on the package id, the app's one address: a name-alias route
+      // moves there after its first render (objectstack-ai/objectstack#26183).
       Object.fromEntries(probe.armObjects.map((name) => [name, `/apps/app.crm/${name}/record/r1`])),
     );
     expect(objectCalls()).not.toContain('object');

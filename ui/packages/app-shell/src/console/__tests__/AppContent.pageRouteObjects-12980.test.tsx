@@ -255,7 +255,7 @@ afterEach(() => {
 
 describe('a page route reads the objects its page binds, never the whole registry (objectui#12980)', () => {
   it('(a) asks the app package and, by name, only the bound object outside it', async () => {
-    boot('/apps/crm/page/case_board');
+    boot(`/apps/${CRM}/page/case_board`);
     await waitFor(() => expect(screen.getByTestId('page-blocks')).toBeInTheDocument());
     await waitFor(() => expect(screen.getByTestId('cloud-only-entry')).toHaveTextContent('false'));
 
@@ -271,7 +271,7 @@ describe('a page route reads the objects its page binds, never the whole registr
 
   it('(a) a page that binds no object reads none, in an app whose package holds no objects of its own', async () => {
     server.apps = [{ name: 'crm', label: 'Control plane', _packageId: 'app.platform', navigation: [] }];
-    boot('/apps/crm/page/pricing');
+    boot('/apps/app.platform/page/pricing');
     await waitFor(() => expect(screen.getByTestId('page-blocks')).toBeInTheDocument());
     await waitFor(() => expect(objectCalls()).toContain('object/sys_user'));
 
@@ -280,7 +280,7 @@ describe('a page route reads the objects its page binds, never the whole registr
   });
 
   it('(b) CONTROL: an app route keeps its scoped read (objectui#12811)', async () => {
-    boot('/apps/crm/crm_account');
+    boot(`/apps/${CRM}/crm_account`);
     await waitFor(() => expect(screen.getByTestId('object-view')).toHaveTextContent('sys_user'));
     await waitFor(() => expect(screen.getByTestId('cloud-only-entry')).toHaveTextContent('false'));
 
@@ -289,7 +289,7 @@ describe('a page route reads the objects its page binds, never the whole registr
 
   it('(c) an object a block asks about outside the read set is read by name, and its link appears when it lands', async () => {
     server.holdByName = true;
-    boot('/apps/crm/page/case_board');
+    boot(`/apps/${CRM}/page/case_board`);
     await waitFor(() => expect(server.calls).toContain('object/crm_case'));
     act(() => server.release());
     await waitFor(() => expect(screen.getByTestId('page-blocks')).toBeInTheDocument());
@@ -298,7 +298,7 @@ describe('a page route reads the objects its page binds, never the whole registr
 
     act(() => server.release());
     await waitFor(() =>
-      // On the app's package id, its one address (objectstack-ai/objectstack#26183).
+      // Booted on the package id, the app's one address (objectstack-ai/objectstack#26183).
       expect(screen.getByTestId('page-blocks').getAttribute('data-lookup-href')).toBe('/apps/app.crm/sys_user/record/u1'),
     );
     expect(objectCalls()).not.toContain('object');
