@@ -303,7 +303,11 @@ export const ImportRequestSchema = lazySchema(() => z.object({
       'is matched by the first set whose fields are all non-blank on that row, and only by that ' +
       'set. A row blank on every set fails with `BLANK_MATCH_KEY` instead of being created or ' +
       'skipped, so `skipBlankMatchKey` cannot be combined with key sets. A set that matches more ' +
-      'than one record fails the row with `AMBIGUOUS_MATCH`, as one key set does.',
+      'than one record fails the row with `AMBIGUOUS_MATCH`, as one key set does. Rows of one ' +
+      'import that carry the same key (the key set each row is matched by, with its cell values ' +
+      'as coerced, so an option label and its value are one key) all fail with ' +
+      '`DUPLICATE_MATCH_KEY`, naming every row that carries it, and none of them is written, on a ' +
+      'dry run as on the import: keep one row per key.',
     ),
   runAutomations: z.boolean().default(true)
     .describe(

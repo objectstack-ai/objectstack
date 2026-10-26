@@ -236,9 +236,16 @@ describe('[#26133] an object with a unique index over the key', () => {
     indexes: [{ name: 'uk_cert_26133', fields: KEY, unique: 'global' }],
   });
 
-  it('answers the same refusal: the key is a property of the file, not of the index', async () => {
+  // At the base this object answered `created` then `UNIQUE_VIOLATION` on the
+  // write, and `created`, `created` on the dry run. The seat ruled the check
+  // applies here too: the runner keeps no copy of the engine's uniqueness
+  // rules, and the dry run answers what the write answers.
+  it('answers the same refusal on the write and on the dry run: the key is a property of the file, not of the index', async () => {
     const { engine, importInto } = await boot([SUPPLIER, UNIQUE_CERT]);
-    const summary = await importInto(UNIQUE_CERT.name, upsert(csvOf('Acme,ISO 9001,A-1,first', 'Acme,ISO9001,A-1,second')));
+    const csv = csvOf('Acme,ISO 9001,A-1,first', 'Acme,ISO9001,A-1,second');
+    const dry = await importInto(UNIQUE_CERT.name, upsert(csv, { dryRun: true }));
+    expect(dry.results).toEqual([duplicate(1, [1, 2]), duplicate(2, [1, 2])]);
+    const summary = await importInto(UNIQUE_CERT.name, upsert(csv));
     expect(summary.results).toEqual([duplicate(1, [1, 2]), duplicate(2, [1, 2])]);
     expect(await engine.find(UNIQUE_CERT.name, {})).toEqual([]);
   });
