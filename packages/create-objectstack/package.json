@@ -10,8 +10,10 @@
   ],
   "exports": {
     "./created-summary": {
-      "types": "./dist/created-summary.d.ts",
-      "import": "./dist/created-summary.js"
+      "import": {
+        "types": "./dist/created-summary.d.ts",
+        "default": "./dist/created-summary.js"
+      }
     }
   },
   "scripts": {

@@ -58,6 +58,62 @@ export function matchAppBySegment<T extends AppRouteLike>(
 }
 
 /**
+ * The ONE segment that addresses `app` among `apps` — the address every
+ * `/apps/…` link to it should carry.
+ *
+ * That is its canonical {@link appRouteSegment} (the package id) whenever the
+ * segment resolves back to this very app. It does not when a package ships
+ * more than one app: they share the package id, `matchAppBySegment` answers the
+ * first, and the name stays the only address that reaches the others — so the
+ * name is the answer there, never a package id that opens a different app.
+ */
+export function appAddressSegment<T extends AppRouteLike>(
+  apps: readonly T[] | null | undefined,
+  app: T | null | undefined,
+): string | undefined {
+  const canonical = appRouteSegment(app);
+  if (canonical === undefined || matchAppBySegment(apps, canonical) === app) return canonical;
+  return typeof app?.name === 'string' ? app.name : canonical;
+}
+
+/**
+ * Where a route that reached its app through the name ALIAS belongs: the same
+ * pathname with the app segment swapped for {@link appAddressSegment}, or
+ * `null` when the route already carries it (or names no app here).
+ *
+ * The name alias keeps every older name-based URL and bookmark resolving, but
+ * a page rendered on it kept the alias in every link it built while the
+ * sidebar built on the package id, so one app answered under two address
+ * families (objectstack-ai/objectstack#26183). Rewriting the alias to the one
+ * address is what keeps both: an old URL still opens, and it opens on the
+ * address every link inside the app agrees on.
+ *
+ * Only the app segment changes; the caller carries search and hash across. The
+ * answer can never loop — it is a segment that resolves back to the same app,
+ * so the rewritten route answers `null`.
+ */
+export function canonicalAppPathname(
+  apps: readonly AppRouteLike[] | null | undefined,
+  segment: string | null | undefined,
+  pathname: string,
+): string | null {
+  const app = matchAppBySegment(apps, segment);
+  const address = appAddressSegment(apps, app);
+  if (!address || address === segment) return null;
+  const parts = pathname.split('/');
+  if (parts[1] !== 'apps' || parts[2] === undefined) return null;
+  let current: string;
+  try {
+    current = decodeURIComponent(parts[2]);
+  } catch {
+    return null;
+  }
+  if (current !== segment) return null;
+  parts[2] = encodeURIComponent(address);
+  return parts.join('/');
+}
+
+/**
  * The console's own administration app. Only ever a LAST RESORT for the
  * resolution below — historically it was hardcoded as the FIRST choice, which
  * is the defect objectstack#7231 / objectui#4074 removed.

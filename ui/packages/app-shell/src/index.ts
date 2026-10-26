@@ -8,6 +8,10 @@
 // Components
 export { AppShell } from './components/AppShell.js';
 
+// The adapter this shell installs into `AdapterCtx`, declared for every
+// reader of `useAdapter` (see the module).
+import './adapter-context-register.js';
+
 // Providers
 export { AdapterProvider, useAdapter } from './providers/AdapterProvider.js';
 export { MetadataProvider, useMetadata, useMetadataItem } from './providers/MetadataProvider.js';
@@ -196,6 +200,9 @@ export {
   getCloudBase,
   getProductName,
   getProductShortName,
+  // The Community-default reading behind the sign-in page's "Powered by
+  // ObjectStack" mark: true until a runtime pushes its own `productName`.
+  isDefaultProductName,
   getPlatformStage,
   getBrandColor,
   getLogoUrl,

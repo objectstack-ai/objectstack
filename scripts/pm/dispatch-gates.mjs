@@ -2223,7 +2223,10 @@ export function extractCheckInvocations(workflowText, workflowFile, { via = null
     // this card is about: a value that reaches the program only through
     // `process.env`, which no reader of the command line can see.
     const carriedEnv = envNamesNotSpelledInCommand(cmd, stepEnv);
-    for (const m of cmd.matchAll(/pnpm\s+(?:--filter\s+(\S+)\s+)?(?:run\s+)?(check:[\w:-]+)/g)) {
+    // `typecheck:root` is the one non-`check:` script read here: it is the ROOT
+    // program's only type check, and the root-program change kind names it, so it
+    // has to resolve to a family or that row renders STALE.
+    for (const m of cmd.matchAll(/pnpm\s+(?:--filter\s+(\S+)\s+)?(?:run\s+)?(check:[\w:-]+|typecheck:root(?![\w:-]))/g)) {
       out.push(withVia({ check: m[2], filter: m[1] ?? null, workflow: workflowFile, envVariables: carriedEnv }));
     }
     for (const m of cmd.matchAll(DIRECT_CHECK_INVOCATION)) {
@@ -10779,8 +10782,9 @@ export function guardsADurabilityCriticalCall(path, readSource = readTrackedSour
 }
 
 /**
- * Is this path inside the ROOT package's tsc program — the population behind
- * the `@objectstack/spec-monorepo` entry of `check:type-check-debt`?
+ * Is this path inside the ROOT package's tsc program — the population the
+ * root's `typecheck:root` script checks (until the root graduated, the
+ * `@objectstack/spec-monorepo` entry of `check:type-check-debt`)?
  *
  * This is the one gate population in the tree that no path literal can ever
  * describe, in principle rather than by omission. The root program is declared

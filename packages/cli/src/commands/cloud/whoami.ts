@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `objectstack cloud whoami` — display the active ObjectStack Cloud
+ * `objectstack cloud whoami` — display the active ObjectOS Cloud
  * identity (read from ~/.objectstack/cloud.json) and verify the token
  * with a /get-session call against the cloud control plane.
  */
@@ -11,7 +11,7 @@ import { printHeader, printKV, printSuccess, printError, emitJson, isExitSignal,
 import { tryReadCloudConfig } from '../../utils/cloud-config.js';
 
 export default class CloudWhoami extends Command {
-  static override description = 'Show the active ObjectStack Cloud identity';
+  static override description = 'Show the active ObjectOS Cloud identity';
 
   static override examples = ['$ os cloud whoami'];
 
@@ -28,7 +28,7 @@ export default class CloudWhoami extends Command {
         if (flags.json) {
           await emitJson({ logged_in: false });
         } else {
-          printError('Not logged in to ObjectStack Cloud. Run `os cloud login` first.');
+          printError('Not logged in to ObjectOS Cloud. Run `os cloud login` first.');
         }
         this.exit(1);
         return;
@@ -56,7 +56,7 @@ export default class CloudWhoami extends Command {
       if (flags.json) {
         await emitJson({ logged_in: true, valid, url: config.url, email, userId });
       } else {
-        printHeader('ObjectStack Cloud Identity');
+        printHeader('ObjectOS Cloud Identity');
         printKV('Server', config.url);
         if (email) printKV('Email', email);
         if (userId) printKV('User ID', userId);
