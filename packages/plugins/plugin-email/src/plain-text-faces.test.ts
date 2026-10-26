@@ -172,7 +172,7 @@ describe('control: a value carrying markup characters, per face', () => {
     const sent = transport.sent[0];
     expect(sent.html).toContain('<strong>R&amp;D &lt;Lab&gt;</strong>');
     expect(sent.html).toContain('<strong>O&#39;Brien</strong>');
-    const [body, expiry] = sent.text.split('\n\nThis invitation expires on ');
+    const [body, expiry] = (sent.text ?? '').split('\n\nThis invitation expires on ');
     expect(body).toBe(
       "O'Brien (ob@acme.test) invited you to join R&D <Lab> on Acme as Member.\n\n" + `Accept: ${LINK}`,
     );
