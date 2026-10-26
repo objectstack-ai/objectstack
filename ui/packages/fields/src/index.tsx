@@ -3142,17 +3142,19 @@ export function UnresolvedReferenceMark({
  * the viewer may read it (objectui#10535): with a loaded policy, the fields it
  * denies on the person's object are removed first ({@link withoutDeniedFields},
  * `id` kept), and everything below reads that row — exactly as it reads the
- * row a stripping backend serves. The person's object is the field's
- * `reference`, and `sys_user` when it names none: the object `UserField`
- * points the picker at.
+ * row a stripping backend serves. The person's object is always `sys_user`,
+ * a constant of the `user` type (objectstack#24952): the spec refuses a `user`
+ * field whose `reference` names any other object, and `referenceTargetOf`
+ * resolves every `user` field to `sys_user` whatever its carrier says — so a
+ * stored body that still carries a foreign `reference` is gated by the
+ * `sys_user` policy, the object the runtime expands it into and the object
+ * `UserField` points the picker at. The field's `reference` is not read.
  */
-export function UserCellRenderer({ value, field }: CellRendererProps): React.ReactElement {
+export function UserCellRenderer({ value }: CellRendererProps): React.ReactElement {
   // Called before any early return (rules of hooks). A policy that loads or
   // changes re-renders this cell through the context, and the drawing follows.
   const perms = usePermissions();
-  const personObject =
-    (field as { reference?: string } | undefined)?.reference ||
-    'sys_user';
+  const personObject = 'sys_user';
 
   // THE FLOOR by name (objectui#8496) plus ONE extension: every falsy scalar.
   // `!value` alone never saw `[]` — a truthy empty array reached the

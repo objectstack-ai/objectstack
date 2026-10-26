@@ -55,6 +55,22 @@ export interface FileRecord {
 }
 
 /**
+ * [#26046] The record that let this file go, when one did and none has
+ * claimed the file since, or `null`. Such a file is governed by that record's
+ * read rule: the download verdict judges it so, and its signed link gets the
+ * record-governed lifetime. Read by both, so they cannot disagree about which
+ * files a record still governs.
+ */
+export function releasingRecordOf(
+  file: Pick<FileRecord, 'released_ref_object' | 'released_ref_id'>,
+): { object: string; id: string } | null {
+  const object = file.released_ref_object;
+  const id = file.released_ref_id;
+  if (!object || id == null || id === '') return null;
+  return { object: String(object), id: String(id) };
+}
+
+/**
  * The acting session's organization, threaded into a `sys_file` write (#12745)
  * or a `sys_upload_session` write (#12928).
  *

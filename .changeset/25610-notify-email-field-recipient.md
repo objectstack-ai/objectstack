@@ -22,7 +22,7 @@ A `notify` node's `recipients` takes a fourth form, as the whole value: `{ email
 - The form is the whole `recipients` value, never a list entry.
 - `@objectstack/lint` refuses, at `os validate`, `os lint`, `os build` and the runtime publish door for a flow, an email-field recipient whose field the trigger object does not declare (`notify-email-field-unknown`), one whose field is not `email`-typed (`notify-email-field-not-email`), and one in a flow that hands its run no record of a known object — a schedule, an inbound api call, a record trigger that names no object (`notify-email-field-no-trigger-record`). A trigger object another package declares is not judged.
 
-This change is the protocol half. Delivery — resolving the field to an address, the outbound mail configuration, the per-address rate limit and the messaging-log entry — is the messaging service's half and lands separately; until it does, a run that reaches such a node fails at the node.
+This change is the protocol half. Delivery — resolving the field to an address, the outbound mail configuration, the per-address rate limit and the messaging-log entry — ships in the same release in `@objectstack/service-automation`.
 
 Clause-②: yes (widening)
 

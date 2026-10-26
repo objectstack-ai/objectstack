@@ -735,22 +735,6 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
       + 'narrowings — and would rewrite the per-signature keys underneath with it.',
   },
   {
-    path: 'packages/sdui-parser/objectui-lockstep.json',
-    gen: 'gen:sdui-lockstep',
-    owner: ROOT_OWNER,
-    why:
-      'a VENDORED RECORD OF ANOTHER REPOSITORY, and the only entry here that a merge could not '
-      + "regenerate even if regenerating were right. `--update` re-records objectui's side of the "
-      + 'sdui-parser lockstep and needs an objectui CHECKOUT to do it; a merge driver has no '
-      + 'network, no build and no sibling checkout, so "recompute from the merged sources" names '
-      + 'sources that are not in this tree at all. And the file is a human decision twice over — '
-      + 'the pinned `.objectui-sha` records WHICH objectui revision someone ported to, which is an '
-      + 'act of porting and not a projection of this repo. Regenerating it during a merge would '
-      + 'either fail or silently re-point the lockstep at whatever checkout happened to be on disk, '
-      + 'and a wrong answer here means the save gate and the renderer accept different grammars '
-      + 'while every gate stays green.',
-  },
-  {
     path: 'skills/README.md',
     gen: 'gen:skill-docs',
     why:

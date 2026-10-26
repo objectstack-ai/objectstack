@@ -354,9 +354,24 @@ export function timingModeNote(event) {
 //   n = 2    869.44s   1.52x                  still the floor
 //   n = 3    579.63s   1.01x                  meets -- spec's task is the floor
 //
-// So n = 3, and pin 3c holds it there. Slices are placed at their PLAIN weight
+// So n = 3, and pin 3c held it there. Slices are placed at their PLAIN weight
 // (partition() is unchanged), so every bin keeps the density the whole-package
 // split had -- see densityCap() for the hard limit on that and its pin.
+//
+// RE-DERIVED AT 4 (#25870), on the 14-run refresh of 2026-10-26 (newest run
+// 40272142430): the CLI at 2697.45s. `@objectstack/spec` (1168.98s) and
+// `@objectstack/runtime` (793.70s) each run as two tasks, so the heaviest
+// other serial task is `@objectstack/metadata-protocol`'s 670.12s, and a slice
+// must sit within 1.3 x 670.12 = 871.16s.
+//
+//   n = 3    899.15s   1.34x                  still the floor -- pin 3c refused 3
+//   n = 4    674.36s   1.01x                  meets -- metadata-protocol is the floor
+//
+// Placement stays the plain-sum LPT above. #25968 placed slices by a wall model
+// instead, emptied the slice shards of whole packages, piled ~2141s of four-wide
+// work onto each of four shards (with objectql and plugin-security sharing one)
+// and turned load-sensitive tests red in the merge queue until #26077 reverted
+// it. Pin 3d (WHOLE_LEG_CAP_SECONDS, LOAD_SENSITIVE_APART) holds that line.
 //
 // ⛔ THE COUNT IS CONFIGURED; WHETHER A RUN SLICES IS DECIDED BY THAT RUN. A
 // pull_request or merge_group run splits its own affected set, so planShards()
@@ -378,7 +393,7 @@ export function timingModeNote(event) {
 // a change to what that generator can DECODE, which is why the map it replaced
 // is kept below.
 export const FILE_SHARDED_PACKAGES = Object.freeze({
-  '@objectstack/cli': 3,
+  '@objectstack/cli': 4,
 });
 
 // THE MAP AS IT STOOD BEFORE ITS LAST CHANGE, read only by the generator's
@@ -406,8 +421,10 @@ export const FILE_SHARDED_PACKAGES = Object.freeze({
 // `test-core-run-summary-*`, #25771), so four days after that PR lands no
 // retained summary predates the change and this map decodes nothing.
 // The outgoing map of #22075's third round was empty -- the runs before it
-// carried no slice -- so this one is empty too.
-export const PREVIOUS_FILE_SHARDED_PACKAGES = Object.freeze({});
+// carried no slice. #25870 raised the CLI from 3 slices to 4, so this holds 3.
+export const PREVIOUS_FILE_SHARDED_PACKAGES = Object.freeze({
+  '@objectstack/cli': 3,
+});
 
 // The item grammar. A shard item is a package (`@objectstack/cli`) or a SLICE
 // of one (`@objectstack/cli 1/2`), and this pair of functions is the only place
@@ -899,6 +916,71 @@ export function partition(items, shardCount) {
     bins[best].total += it.weight;
   }
   return bins;
+}
+
+// ── THE WHOLE-PACKAGE LEG IS CAPPED, AND TWO SUITES NEVER SHARE IT (#25870) ──
+//
+// A shard runs its whole packages four at a time, so a heavy whole leg is not
+// only a long step: every test in it runs beside three other suites, and the
+// tests with a per-test wall budget feel that. #25968 placed bins by a wall
+// model, moved the whole packages off the slice shards, and left four shards
+// at ~2141s of whole-package seconds each, with `@objectstack/objectql` and
+// `@objectstack/plugin-security` on one of them. Full merge_group Test Core
+// builds then went red 5 times in 27 (0 in 19 before), every red a
+// load-sensitive test: objectql hook-run-as on cold import, plugin-security
+// shipped-sets past its 5s budget, and the cli hook-timeout CONTROL. #26077
+// reverted it; the 10 full queue builds after the revert were green. Pins 2-3c
+// grade bin SUMS and slice counts, and 2141s passed every one of them.
+//
+// So two facts are held on the committed dataset's full list, as CI splits it:
+//
+//   WHOLE_LEG_CAP_SECONDS  no shard's whole-package sum (its slices excluded)
+//                          exceeds 1868s -- the heaviest whole leg the queue
+//                          has run green: shard 7/8 of the plain-sum layout on
+//                          the 2026-10-23 dataset (8 shards at a 1866s mean),
+//                          0 red in 19 full builds before #25968 and 10 after
+//                          #26077. 2141s is what went red. ⛔ Raising this
+//                          number needs a merge-queue red-rate reading at the
+//                          new figure, not a balance figure: the shard wall
+//                          model cannot see co-run contention.
+//   LOAD_SENSITIVE_APART   these packages are never whole on the same shard.
+//                          They are the two whose tests went red under load in
+//                          #26074; the third red was a CLI slice, which runs
+//                          alone after its shard's whole leg.
+//
+// When a refresh grows the whole legs past the cap, the remedy is a wider
+// matrix or a finer slice, never a denser shard.
+export const WHOLE_LEG_CAP_SECONDS = 1868;
+export const LOAD_SENSITIVE_APART = Object.freeze(['@objectstack/objectql', '@objectstack/plugin-security']);
+
+// `items` carry the weights the bins were filled from (planShards()' items).
+// A member of `apart` that is in no bin is a problem too: a pin on a pair the
+// split no longer carries would hold by testing nothing.
+export function wholeLegProblems(bins, items, { cap = WHOLE_LEG_CAP_SECONDS, apart = LOAD_SENSITIVE_APART } = {}) {
+  const weight = new Map(items.map((i) => [i.name, i.weight]));
+  const wholes = bins.map((b) => b.names.filter((n) => !parseShardItem(n).slice));
+  const sums = wholes.map((names) => names.reduce((sum, n) => sum + (weight.get(n) ?? 0), 0));
+  const problems = [];
+  sums.forEach((sum, i) => {
+    if (sum > cap) {
+      problems.push(
+        `shard ${i + 1}/${bins.length} carries ${sum.toFixed(0)}s of whole packages, past the ${cap}s cap ` +
+          `(${wholes[i].length} packages run four at a time beside each other)`
+      );
+    }
+  });
+  const shardOf = new Map();
+  for (const name of apart) {
+    const at = wholes.findIndex((names) => names.includes(name));
+    if (at === -1) {
+      problems.push(`${name} is not a whole package in this split, so the pair it belongs to is not graded -- re-derive LOAD_SENSITIVE_APART`);
+      continue;
+    }
+    const other = shardOf.get(at);
+    if (other) problems.push(`${other} and ${name} share shard ${at + 1}/${bins.length}`);
+    else shardOf.set(at, name);
+  }
+  return { sums, problems };
 }
 
 // The one summary statistic #10472's acceptance criterion is written in.
@@ -1485,6 +1567,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // every one of them runs unconditionally: 3c's fixtures and 3b's cut of the
   // heaviest package do not depend on what the live map slices.
   'the balancing pins (#10472)': 25,
+  // 1 grades the committed dataset's split; 4 are fixtures, both directions.
+  'the whole-package leg cap and the load-sensitive pair (#25870)': 5,
   'predicted-vs-measured drift (#16173)': 9,
   'drift warning tier under the red (#16465)': 12,
   'file-level slice items (#16173)': 20,
@@ -1501,7 +1585,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 15;
+const SELF_TEST_BATTERY_FLOOR = 16;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1980,6 +2064,52 @@ function selfTest() {
       }
     });
   }
+
+  // 3d. THE WHOLE-PACKAGE LEG IS CAPPED AND THE LOAD-SENSITIVE PAIR IS APART
+  //     (#25870) -- see WHOLE_LEG_CAP_SECONDS. The first case grades the
+  //     committed dataset as CI splits it, and first proves the split carries
+  //     whole-package seconds to grade; the fixtures hold each refusal.
+  battery('the whole-package leg cap and the load-sensitive pair (#25870)');
+  const wholeLeg = wholeLegProblems(real, datasetItems);
+  check(() => {
+    const wholeSeconds = datasetItems.filter((i) => !i.slice).reduce((sum, i) => sum + i.weight, 0);
+    if (wholeSeconds === 0 || Math.abs(wholeLeg.sums.reduce((a, b) => a + b, 0) - wholeSeconds) > 1e-6) {
+      throw new Error(`whole leg: the split's whole-package sums do not add up to the dataset's ${wholeSeconds}s`);
+    }
+    if (wholeLeg.problems.length > 0) {
+      throw new Error(
+        `whole leg, committed dataset at ${SHARD_COUNT} shards (sums ` +
+          wholeLeg.sums.map((t) => t.toFixed(0)).join('/') + 's):\n' +
+          wholeLeg.problems.map((p) => `  - ${p}`).join('\n')
+      );
+    }
+  });
+  // Two shards; `p` and `q` are the pair, 60s each. Split apart under a 100s cap
+  // it holds; a slice is not whole-leg weight, so 50s of slice beside 60s holds.
+  const legItems = [mk('p', 60), mk('q', 60), mk('r', 30), { ...mk('big 1/2', 50), slice: { index: 1, count: 2 } }];
+  const leg = (names, opts) => wholeLegProblems(names.map((n) => ({ names: n, total: 0 })), legItems, { cap: 100, apart: ['p', 'q'], ...opts });
+  check(() => {
+    const r = leg([['p', 'r', 'big 1/2'], ['q']]);
+    if (r.problems.length > 0) throw new Error(`whole leg: a split within the cap with the pair apart was refused: ${r.problems.join(' | ')}`);
+  });
+  check(() => {
+    const r = leg([['p', 'q'], ['r']]);
+    if (!r.problems.some((m) => m.includes('p and q share shard 1/2'))) {
+      throw new Error(`whole leg: the load-sensitive pair on one shard was accepted (${r.problems.join(' | ') || 'no problem named'})`);
+    }
+  });
+  check(() => {
+    const r = leg([['p', 'r', 'big 1/2'], ['q']], { cap: 80 });
+    if (!r.problems.some((m) => m.includes('shard 1/2 carries 90s of whole packages, past the 80s cap'))) {
+      throw new Error(`whole leg: a shard past the cap was accepted (${r.problems.join(' | ') || 'no problem named'})`);
+    }
+  });
+  check(() => {
+    const r = leg([['p', 'r'], ['big 1/2']], { apart: ['p', 'gone'] });
+    if (!r.problems.some((m) => m.includes('gone is not a whole package'))) {
+      throw new Error('whole leg: a pair member missing from the split was graded as apart');
+    }
+  });
 
   // -- PREDICTED VS MEASURED (#16173) -------------------------------------
   //
@@ -3016,6 +3146,7 @@ function selfTest() {
       `-> ${datasetItems.length} shard items, ${SHARD_COUNT} shards, ` +
       `max/mean ${balance.ratio.toFixed(2)}x <= ${MAX_SHARD_OVER_MEAN}x, floor ${balance.floor.toFixed(0)}s, ` +
       `bins ${balance.totals.map((t) => t.toFixed(2)).join('/')}s within the ${datasetCap.toFixed(2)}s density cap, ` +
+      `whole legs ${wholeLeg.sums.map((t) => t.toFixed(0)).join('/')}s within ${WHOLE_LEG_CAP_SECONDS}s, ` +
       `file-level slices: ` +
       `${datasetPlan.decisions.filter((d) => d.count > 1).map((d) => `${d.name} x${d.count}`).join(', ') || 'none'})`
   );
