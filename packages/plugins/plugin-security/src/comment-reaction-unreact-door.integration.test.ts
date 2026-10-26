@@ -264,7 +264,7 @@ describe('the unreact door — a member with no position removes their own react
 
   it('the member reads the open comment and not the secret one (the fixture is armed)', async () => {
     const asAlice = { userId: ALICE, tenantId: ORG, positions: ['org_member', 'everyone'], permissions: [] };
-    const readable = (await ql.find(COMMENT, { context: asAlice } as any)).map((r: any) => String(r.id));
+    const readable = (await ql.find(COMMENT, { context: asAlice })).map((r) => String(r.id));
     expect(readable).toContain(openComment);
     expect(readable).not.toContain(secretComment);
   });
@@ -329,7 +329,7 @@ describe('the unreact door — a member with no position removes their own react
     const asAlice = { userId: ALICE, tenantId: ORG, positions: ['org_member', 'everyone'], permissions: [] };
     let thrown: unknown;
     try {
-      await ql.delete(REACTION, { where: { id }, context: asAlice } as any);
+      await ql.delete(REACTION, { where: { id }, context: asAlice });
     } catch (e) {
       thrown = e;
     }
