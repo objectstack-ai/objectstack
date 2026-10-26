@@ -238,10 +238,11 @@ const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
 
 // ── Temporary password generation ────────────────────────────────────────
 //
-// Must satisfy the ADR-0069 class-mix policy (lower + upper + digit + symbol)
-// and the better-auth min length regardless of deployment config, so one
-// guaranteed character per class + random fill. Ambiguous glyphs (O/0, l/1)
-// are excluded — these passwords are read off a dialog and typed once.
+// Must satisfy the ADR-0069 class-mix policy (lower + upper + digit + symbol),
+// so one guaranteed character per class + random fill. Never shorter than 12;
+// a caller holding the deployment's length range sizes it to that range (see
+// `temporaryPasswordLength`). Ambiguous glyphs (O/0, l/1) are excluded — these
+// passwords are read off a dialog and typed once.
 const LOWER = 'abcdefghijkmnopqrstuvwxyz';
 const UPPER = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 const DIGIT = '23456789';
@@ -318,41 +319,70 @@ export function isLikelyEmail(value: string): boolean {
 }
 
 /**
+ * [#25824] The deployment's password length range, as better-auth resolved it:
+ * `emailAndPassword.minPasswordLength` / `maxPasswordLength`, which ADR-0069
+ * maps the `auth.password_min_length` / `password_max_length` settings onto.
+ */
+type PasswordLengthPolicy = AuthContextLike['password']['config'];
+
+/** A generated password's length: 16, raised to the range's minimum and capped at its maximum. */
+function temporaryPasswordLength({ minPasswordLength, maxPasswordLength }: PasswordLengthPolicy): number {
+  return Math.min(Math.max(16, minPasswordLength), maxPasswordLength);
+}
+
+/**
  * Resolve the password for a create/set request: an explicit `password` /
  * `newPassword`, or a generated temporary one when `generatePassword` is true.
  * An explicit non-empty password always wins over `generatePassword` — the
  * console action dialog defaults `generatePassword: true` and labels the
  * password input "leave empty to generate", so typing a password is an
  * unambiguous override, not a conflict.
+ *
+ * [#25824] Every admin door that sets a credential resolves it here, so this
+ * is where the length range is held, for an explicit and a generated password
+ * alike: better-auth's own `createUser` checks only the maximum, and
+ * create-user used to save a 1-character password that set-user-password and
+ * change-password refuse.
  * Returns an EndpointResult on validation failure.
  */
 async function resolvePassword(
   deps: Pick<AdminUserEndpointDeps, 'assertPasswordComplexity'>,
   body: Record<string, unknown>,
   explicitKey: 'password' | 'newPassword',
+  lengthPolicy: PasswordLengthPolicy,
 ): Promise<{ password: string; generated: boolean } | EndpointResult> {
   const explicit = body[explicitKey];
   const generate = body.generatePassword === true;
+  let resolved: { password: string; generated: boolean };
   if (typeof explicit !== 'string' || explicit.length === 0) {
-    if (generate) return { password: generateTemporaryPassword(), generated: true };
-    return badRequest(`${explicitKey} is required (or set generatePassword: true)`);
-  }
-  try {
-    await deps.assertPasswordComplexity(explicit);
-  } catch (error) {
-    const e = error as { code?: string; message?: string } | null;
-    return {
-      status: 400,
-      body: {
-        success: false,
-        error: {
-          code: e?.code ?? 'PASSWORD_POLICY_VIOLATION',
-          message: e?.message ?? 'Password does not meet the complexity policy',
+    if (!generate) return badRequest(`${explicitKey} is required (or set generatePassword: true)`);
+    resolved = { password: generateTemporaryPassword(temporaryPasswordLength(lengthPolicy)), generated: true };
+  } else {
+    try {
+      await deps.assertPasswordComplexity(explicit);
+    } catch (error) {
+      const e = error as { code?: string; message?: string } | null;
+      return {
+        status: 400,
+        body: {
+          success: false,
+          error: {
+            code: e?.code ?? 'PASSWORD_POLICY_VIOLATION',
+            message: e?.message ?? 'Password does not meet the complexity policy',
+          },
         },
-      },
-    };
+      };
+    }
+    resolved = { password: explicit, generated: false };
   }
-  return { password: explicit, generated: false };
+  const { minPasswordLength, maxPasswordLength } = lengthPolicy;
+  if (resolved.password.length < minPasswordLength) {
+    return badRequest(`Password must be at least ${minPasswordLength} characters`);
+  }
+  if (resolved.password.length > maxPasswordLength) {
+    return badRequest(`Password must be at most ${maxPasswordLength} characters`);
+  }
+  return resolved;
 }
 
 /**
@@ -688,7 +718,14 @@ export async function runAdminCreateUser(
   const permissionSet =
     typeof rawPermissionSet === 'string' && rawPermissionSet.trim().length > 0 ? rawPermissionSet.trim() : undefined;
 
-  const resolved = await resolvePassword(deps, body, 'password');
+  // [#25824] The length range is judged here, before any account exists.
+  let lengthPolicy: PasswordLengthPolicy;
+  try {
+    lengthPolicy = (await deps.getAuthContext()).password.config;
+  } catch (error) {
+    return mapAuthApiError(error, 'create-user failed');
+  }
+  const resolved = await resolvePassword(deps, body, 'password', lengthPolicy);
   if ('status' in resolved) return resolved;
 
   // ADR-0093 D3 amendment — in multi-org mode the new user joins the
@@ -1026,20 +1063,16 @@ export async function runAdminSetUserPassword(
   // malformed value keeps the safe default.
   const revokeSessionsAndKeys = body.revokeSessionsAndKeys !== false;
 
-  const resolved = await resolvePassword(deps, body, 'newPassword');
+  let authCtx: AuthContextLike;
+  try {
+    authCtx = await deps.getAuthContext();
+  } catch (error) {
+    return mapAuthApiError(error, 'set-user-password failed');
+  }
+  const resolved = await resolvePassword(deps, body, 'newPassword', authCtx.password.config);
   if ('status' in resolved) return resolved;
 
   try {
-    const authCtx = await deps.getAuthContext();
-
-    const { minPasswordLength, maxPasswordLength } = authCtx.password.config;
-    if (resolved.password.length < minPasswordLength) {
-      return badRequest(`Password must be at least ${minPasswordLength} characters`);
-    }
-    if (resolved.password.length > maxPasswordLength) {
-      return badRequest(`Password must be at most ${maxPasswordLength} characters`);
-    }
-
     if (!(await authCtx.internalAdapter.findUserById(userId))) {
       return { status: 404, body: { success: false, error: { code: 'RESOURCE_NOT_FOUND', message: 'User not found' } } };
     }

@@ -208,7 +208,8 @@ for (const cell of CELLS) {
         expect(tuples(objectql.res.rows, ['note', 'amount_sum']), 'ObjectQL face').toEqual(AFTER_FIRST);
 
         const echo = objectql.res.sql!;
-        expect(echo.endsWith(`ORDER BY "note" ASC${cell.noLimit} OFFSET 1`), echo).toBe(true);
+        // [#25907] The echo states the NULL placement the face applies, on this dialect.
+        expect(echo.endsWith(`ORDER BY "note" ASC NULLS LAST${cell.noLimit} OFFSET 1`), echo).toBe(true);
         // `generateSql` is the body `POST /analytics/sql` answers with.
         const dryRun = await services.objectql!.generateSql!(OFFSET_ONLY as any);
         expect(dryRun.sql).toBe(echo);
@@ -237,7 +238,7 @@ for (const cell of CELLS) {
       it('CONTROL: an integer window keeps its bytes — `LIMIT 2 OFFSET 1` — and the echo runs', async () => {
         const query = { ...OFFSET_ONLY, limit: 2 };
         const { res } = await ask('objectql', query);
-        expect(res.sql!.endsWith('ORDER BY "note" ASC LIMIT 2 OFFSET 1'), res.sql).toBe(true);
+        expect(res.sql!.endsWith('ORDER BY "note" ASC NULLS LAST LIMIT 2 OFFSET 1'), res.sql).toBe(true);
         expect(tuples(res.rows, ['note', 'amount_sum'])).toEqual([['x', 15], ['y', 20]]);
         expect(tuples(await run(res.sql!), ['note', 'amount_sum'])).toEqual([['x', 15], ['y', 20]]);
       });
