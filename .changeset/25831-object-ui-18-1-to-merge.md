@@ -13,7 +13,6 @@
 "@object-ui/layout": minor
 "@object-ui/mobile": minor
 "@object-ui/permissions": minor
-"@object-ui/plugin-ai": minor
 "@object-ui/plugin-calendar": minor
 "@object-ui/plugin-charts": minor
 "@object-ui/plugin-chatbot": minor

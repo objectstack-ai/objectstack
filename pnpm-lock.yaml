@@ -4823,55 +4823,6 @@ importers:
         specifier: ^4.1.10
         version: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@26.6.3)(@vitest/coverage-v8@4.1.12)(@vitest/ui@4.1.10)(happy-dom@21.0.4)(jsdom@30.1.1(@noble/hashes@2.4.0))(msw@2.15.0(@types/node@26.6.3)(typescript@6.0.3))(vite@8.3.5(@types/node@26.6.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(yaml@2.9.1))
 
-  ui/packages/plugin-ai:
-    dependencies:
-      '@object-ui/components':
-        specifier: workspace:*
-        version: link:../components
-      '@object-ui/core':
-        specifier: workspace:*
-        version: link:../core
-      '@object-ui/i18n':
-        specifier: workspace:*
-        version: link:../i18n
-      '@object-ui/types':
-        specifier: workspace:*
-        version: link:../types
-      lucide-react:
-        specifier: ^1.43.0
-        version: 1.43.0(react@19.3.0)
-      react:
-        specifier: 19.3.0
-        version: 19.3.0
-      react-dom:
-        specifier: 19.3.0
-        version: 19.3.0(react@19.3.0)
-    devDependencies:
-      '@object-ui/test-support':
-        specifier: workspace:*
-        version: link:../test-support
-      '@types/node':
-        specifier: ^26.2.0
-        version: 26.6.3
-      '@types/react':
-        specifier: 19.3.0
-        version: 19.3.0
-      '@types/react-dom':
-        specifier: 19.3.0
-        version: 19.3.0(@types/react@19.3.0)
-      '@vitejs/plugin-react':
-        specifier: ^6.0.5
-        version: 6.0.5(vite@8.3.5(@types/node@26.6.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(yaml@2.9.1))
-      vite:
-        specifier: ^8.2.1
-        version: 8.3.5(@types/node@26.6.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(yaml@2.9.1)
-      vite-plugin-dts:
-        specifier: ^5.0.3
-        version: 5.0.3(@microsoft/api-extractor@7.58.2(@types/node@26.6.3))(esbuild@0.28.2)(rolldown@1.2.15)(rollup@4.62.2)(typescript@6.0.3)(vite@8.3.5(@types/node@26.6.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(yaml@2.9.1))
-      vitest:
-        specifier: ^4.1.10
-        version: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@26.6.3)(@vitest/coverage-v8@4.1.12)(@vitest/ui@4.1.10)(happy-dom@21.0.4)(jsdom@30.1.1(@noble/hashes@2.4.0))(msw@2.15.0(@types/node@26.6.3)(typescript@6.0.3))(vite@8.3.5(@types/node@26.6.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(yaml@2.9.1))
-
   ui/packages/plugin-calendar:
     dependencies:
       '@object-ui/components':
