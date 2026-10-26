@@ -83,7 +83,6 @@ const boot = (extra: { multiTenant?: 'posture-only' } = {}): Promise<VerifyStack
 describe('showcase: the authored public form path redirects to the console form page', () => {
   let stack: VerifyStack;
   let admin: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let ql: any;
   let published: Record<string, any>;
   /** What an unrouted path answers on this boot: "today's 404". */

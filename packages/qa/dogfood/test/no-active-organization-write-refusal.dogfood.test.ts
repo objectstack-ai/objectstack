@@ -60,7 +60,6 @@ const LOCAL = 'showcase_private_note';
 const SYS = { isSystem: true } as ExecutionContext;
 const ORG = 'org_8208_pin';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const rowsOf = (r: any): any[] => (Array.isArray(r) ? r : Array.isArray(r?.records) ? r.records : []);
 
 describe('[ADR-0123 D2 / #8208] a tenant-scoped write with no active organization is refused over HTTP', () => {

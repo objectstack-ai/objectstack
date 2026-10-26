@@ -95,14 +95,12 @@ const DELEGATE_EMAIL = 'delegate.8240@acme-test.example';
 /** The one invitation the DELEGATE issues — the only row it is entitled to. */
 const DELEGATE_INVITEE_EMAIL = 'invitee.8240@acme-test.example';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function findRows(ql: any, object: string, where: any, limit = 50): Promise<any[]> {
   const rows = await ql.find(object, { where, limit }, { context: SYSTEM_CTX });
   return Array.isArray(rows) ? rows : (rows?.records ?? []);
 }
 
 /** The membership row the sign-up reconciler writes lands asynchronously. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function waitForMembership(ql: any, userId: string): Promise<any> {
   for (let i = 0; i < 40; i++) {
     const rows = await findRows(ql, 'sys_member', { user_id: userId }, 5);
@@ -112,7 +110,6 @@ async function waitForMembership(ql: any, userId: string): Promise<any> {
   throw new Error(`no sys_member row appeared for ${userId}`);
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function userIdOf(ql: any, email: string): Promise<string> {
   const [user] = await findRows(ql, 'sys_user', { email }, 1);
   if (!user) throw new Error(`no sys_user row for ${email}`);
@@ -124,7 +121,6 @@ async function userIdOf(ql: any, email: string): Promise<string> {
  * wire field a real org switch sets, and what `resolveAuthzContext` reads into
  * `ExecutionContext.tenantId`.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function setActiveOrg(ql: any, userId: string, orgId: string): Promise<void> {
   for (const s of await findRows(ql, 'sys_session', { user_id: userId }, 20)) {
     await ql.update(
@@ -135,7 +131,6 @@ async function setActiveOrg(ql: any, userId: string, orgId: string): Promise<voi
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function rowsOf(body: any): any[] {
   return Array.isArray(body) ? body : (body?.records ?? []);
 }
@@ -173,7 +168,6 @@ async function readLedger(stack: VerifyStack, token: string) {
 
 describe('#8095/#8240: the sys_invitation ledger, read by four personas', () => {
   let stack: VerifyStack;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let ql: any;
   let orgId: string;
   let ownerToken: string;

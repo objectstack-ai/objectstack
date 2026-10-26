@@ -237,7 +237,8 @@ describe('objectui#9964 — the mirror declares the contract’s rule array', ()
     // Read off the artifact in the same run: an empty or moved population would
     // make every assertion below vacuous.
     const picker = RecordRelatedListProps.shape.add.unwrap().shape.picker;
-    expect(Object.keys(picker.shape).sort()).toEqual(['filter', 'labelField', 'object', 'valueField']);
+    // By name (#26238): `filter` is this pin's subject.
+    expect(Object.keys(picker.shape)).toEqual(expect.arrayContaining(['filter', 'object']));
     expect(picker.shape.filter.safeParse([{ field: 'active', operator: 'equals', value: true }]).success).toBe(true);
     // …and it is not an everything-set, which would make the refusals unfalsifiable.
     expect(picker.shape.filter.safeParse({ active: true }).success).toBe(false);

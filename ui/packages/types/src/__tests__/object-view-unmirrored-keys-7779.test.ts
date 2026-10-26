@@ -1796,12 +1796,13 @@ function foldFlagMap(): Record<string, string> {
 }
 
 describe('objectui#7924 — the unread members, in the FOUR buckets the ruling was written in plus the server-enforced fifth (objectui#12341) and the retired-ahead-of-the-pin sixth (objectui#13118), derived against the installed protocol (bucket ① empty since objectui#10758)', () => {
-  it('the protocol declares 46 keys for a named list view, and the instrument that reads them fires', () => {
+  it('the protocol declares every pinned key for a named list view, and the instrument that reads them fires', () => {
     const keys = protocolListViewKeys();
-    expect(keys).toEqual([...PROTOCOL_LIST_VIEW_KEYS]);
-    // 46 since spec 18.2 aged the five objectstack#7176 tombstones out
-    // (objectstack#25767); 51 through 18.1.
-    expect(keys).toHaveLength(46);
+    // Membership, not equality or a count (#26238): a key the protocol adds is
+    // judged by the narrower-than-protocol zero below, derived on both sides.
+    for (const key of PROTOCOL_LIST_VIEW_KEYS) expect(keys).toContain(key);
+    // …and the five objectstack#7176 tombstones spec 18.2 aged out
+    // (objectstack#25767) are declared under no name any more.
     for (const aged of PROTOCOL_AGED_OUT_KEYS) expect(keys, `${aged} is declared again`).not.toContain(aged);
     // Firing control + its negative twin, on the same query that produces every
     // "the protocol declares this nowhere" zero below.
@@ -1809,8 +1810,10 @@ describe('objectui#7924 — the unread members, in the FOUR buckets the ruling w
     expect(keys).not.toContain(NAMED_VIEW_ABSENT_CONTROL);
   });
 
-  it('three of the 46 are RETIREMENT TOMBSTONES, refused BY NAME — so objectui not declaring them LIVE is agreement, not narrowness', () => {
-    expect(protocolRetiredKeys()).toEqual([...PROTOCOL_RETIRED_KEYS]);
+  it('the three pinned RETIREMENT TOMBSTONES are refused BY NAME — so objectui not declaring them LIVE is agreement, not narrowness', () => {
+    // Membership (#26238): a retirement the protocol adds later is judged by
+    // the derived narrower-than-protocol zero below.
+    for (const key of PROTOCOL_RETIRED_KEYS) expect(protocolRetiredKeys()).toContain(key);
     const base = { label: 'Directory', columns: ['name', 'email'] };
     // The accept leg first: without it every refusal below is a schema that
     // refuses everything rather than a reading of these keys.
@@ -1854,8 +1857,8 @@ describe('objectui#7924 — the unread members, in the FOUR buckets the ruling w
   it('objectui declares every LIVE protocol key on this surface — the narrower-than-protocol direction is EMPTY (inverted from "but the one pending its ruling" at objectui#12341)', () => {
     const declared = new Set(namedListViewMembers().names);
     const live = protocolListViewKeys().filter((k) => !protocolRetiredKeys().includes(k));
-    // 43 since objectui#13261 took the retirement of `filterableFields`.
-    expect(live).toHaveLength(43);
+    // Non-vacuity floor; the live count is the protocol's, not this file's (#26238).
+    expect(live.length).toBeGreaterThan(0);
     const missing = live.filter((k) => !declared.has(k));
     // ⭐ objectui#8979 measured SEVENTEEN live protocol keys missing here; the
     // objectui#8980 ruling declared them (PR #9534) and this is the zero that

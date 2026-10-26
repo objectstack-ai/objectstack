@@ -908,3 +908,262 @@ export const CROSS_FIELD_OFFSET_OPERAND_NAMES: readonly string[] = [
   'duty.grace_days',
   'no_such_offset',
 ];
+
+// ═══════════════════════════════════════════════════════════════════════════
+// [#25808] `{ $now: true, addDays }` — the current instant, shifted by whole days
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The ruling (2026-10-26, letter A): a now-anchored comparand whose whole-day
+// offset is an integer literal or a NUMERIC column of the SAME record, so a
+// dataset filter or measure can say "opened more than `review_sla_days` ago"
+// where the SLA is a column of the row — `opened_at < now + sla_offset_days`
+// (the column holds NEGATIVE days: the sign rules are `addDays`', and there is
+// no `subDays`). Same fixture as the offset arm: the target is `completed`,
+// the offset is `grace_days`, and `now` is PINNED to a fixed instant so the
+// expectations are a table rather than a function of the wall clock. The
+// engine's token resolver pins `$now` the same way (to the tree's instant, as
+// an ISO string), so a pinned anchor is exactly what a driver sees in
+// production; the one `$now: true` case below drives the own-clock arm with an
+// offset no clock will reach.
+//
+// Two temporal pairs, as the offset arm has them, and `NOW` at the fixture's
+// own time of day (12:00:00.000Z), so every generated case expects the SAME id
+// set on the `date` pair and the `datetime` pair. The cases that pin WHICH form
+// each class shifts in — a `date` column meets the instant's UTC calendar day,
+// a `datetime` column keeps the time of day — are written out per pair with a
+// NOW off the fixture's time of day, after the generated table.
+
+/** The pinned instant: the fixture's own time of day on 2026-03-03. */
+export const CROSS_FIELD_NOW = '2026-03-03T12:00:00.000Z';
+
+/** `{ $now: NOW, addDays: offset }` — the resolved shape, as the engine hands it to a driver. */
+const anchored = (offset: unknown, at: string = CROSS_FIELD_NOW) => ({ $now: at, addDays: offset });
+
+/**
+ * The anchor expectations, per operator and offset spelling, generated for
+ * BOTH temporal pairs. `NOW` is 03-03; `now + grace_days` per row:
+ *
+ * | id | completed | grace | now + grace | reading                                   |
+ * |----|-----------|-------|-------------|-------------------------------------------|
+ * | 1  | 03-05     | 2     | 03-05       | on the last day of grace (equality)       |
+ * | 2  | 03-03     | 2     | 03-05       | inside grace; completed today             |
+ * | 3  | 03-01     | 0     | 03-03       | before today; zero grace                  |
+ * | 4  | 03-05     | NULL  | 03-03       | NULL grace = zero days: after today       |
+ * | 5  | NULL      | 2     | 03-05       | never completed                           |
+ * | 6  | 03-05     | 2     | 03-05       | on the last day of grace (equality)       |
+ * | 7  | NULL      | NULL  | 03-03       | nothing at all                            |
+ * | 8  | 03-10     | -3    | 02-28       | negative grace pulls the anchor back      |
+ * | 9  | 02-27     | -3    | 02-28       | before the pulled-back anchor             |
+ *
+ * The anchor is never NULL, so the only NULL on the table is the TARGET's:
+ * an ordering and `$eq` are false for rows 5 and 7, `$ne` is true for them
+ * (`$ne` against a value a row lacks holds, as it does against a literal),
+ * and `$not` of each takes exactly the complement. A NULL offset is zero days
+ * (row 4) — the `addDays` ruling, inherited.
+ */
+const NOW_EXPECTATIONS: ReadonlyArray<{
+  name: string;
+  build: (target: string) => unknown;
+  expected: string[];
+  note?: string;
+}> = [
+  {
+    name: '$lte with a COLUMN offset — completed <= now + grace_days',
+    build: (target) => ({ [target]: { $lte: anchored(GRACE) } }),
+    expected: ['1', '2', '3', '6', '9'],
+    note: 'Rows 1 and 6 land exactly on now + 2 (equality inside `<=`); row 4 has NULL grace and reads as zero days, so its 03-05 completion is after 03-03; rows 5 and 7 have no value; row 8 (03-10) is after 02-28.',
+  },
+  {
+    name: '$gt with a COLUMN offset — the complement of the orderings, minus the NULL targets',
+    build: (target) => ({ [target]: { $gt: anchored(GRACE) } }),
+    expected: ['4', '8'],
+  },
+  {
+    name: '$lt with a COLUMN offset — equality rows drop, NULL grace still reads as zero',
+    build: (target) => ({ [target]: { $lt: anchored(GRACE) } }),
+    expected: ['2', '3', '9'],
+  },
+  {
+    name: '$lt with a NEGATIVE literal offset (-3) — the ruling\'s SLA shape, "more than three days ago"',
+    build: (target) => ({ [target]: { $lt: anchored(-3) } }),
+    expected: ['9'],
+    note: 'No `subDays`: a negative integer subtracts. 02-28 is the bound; only row 9 (02-27) is before it. The SLA held in a column is the same test with `{ $field }` naming a column that holds the negative days.',
+  },
+  {
+    name: '$lte with a NEGATIVE literal offset (-1)',
+    build: (target) => ({ [target]: { $lte: anchored(-1) } }),
+    expected: ['3', '9'],
+  },
+  {
+    name: '$gte with a literal offset of 0 — on or after now',
+    build: (target) => ({ [target]: { $gte: anchored(0) } }),
+    expected: ['1', '2', '4', '6', '8'],
+    note: 'Row 2 is completed at the pinned instant itself (equality inside `>=`).',
+  },
+  {
+    name: '$eq with a literal offset of 0 — completed at the pinned instant',
+    build: (target) => ({ [target]: { $eq: anchored(0) } }),
+    expected: ['2'],
+    note: 'On the datetime pair this is instant equality (NOW is at the fixture\'s own 12:00:00.000Z); on the date pair it is calendar-day equality. Both pick row 2.',
+  },
+  {
+    name: '$ne with a literal offset of 0 — every other row, the NULL targets included',
+    build: (target) => ({ [target]: { $ne: anchored(0) } }),
+    expected: ['1', '3', '4', '5', '6', '7', '8', '9'],
+    note: 'A row with no value is NOT equal to the anchor, as it is not equal to a literal (`!looseEq(null, v)` in memory; `(A is null or A <> Bx)` in SQL).',
+  },
+  {
+    name: '$not of $lte with a COLUMN offset — exactly the complement, NULL targets re-admitted',
+    build: (target) => ({ $not: { [target]: { $lte: anchored(GRACE) } } }),
+    expected: ['4', '5', '7', '8'],
+    note: 'The predicate is total: `$not` re-admits the rows the ordering was false for, the NULL targets among them. If this set and the `$lte` set do not partition the fixture, one path left a NULL as UNKNOWN.',
+  },
+  {
+    name: '$now: true — the own-clock arm, with an offset no clock reaches',
+    build: (target) => ({ [target]: { $lte: { $now: true, addDays: 36500 } } }),
+    expected: ['1', '2', '3', '4', '6', '8', '9'],
+    note: 'A caller that reaches the driver without the engine\'s resolver (a direct `find`, the RLS evaluator) carries `true`, and each path reads its own clock. A hundred years of offset makes the answer every non-NULL row until 2126; the NULL targets stay out.',
+  },
+  {
+    name: 'an anchored comparison ANDs with a literal predicate on the offset column',
+    build: (target) => ({ [target]: { $lte: anchored(GRACE) }, grace_days: { $gt: 0 } }),
+    expected: ['1', '2', '6'],
+  },
+  {
+    name: 'an anchored comparison two combinators deep, beside a reference comparison',
+    build: (target) => ({
+      $and: [
+        { $or: [{ [target]: { $gt: anchored(GRACE) } }, { [target]: null }] },
+        { $not: { grace_days: null } },
+      ],
+    }),
+    expected: ['5', '8'],
+    note: 'After now + grace (4, 8) or never completed (5, 7), minus the NULL-grace rows (4, 7).',
+  },
+];
+
+/**
+ * The generated table, on both pairs — plus the per-class cells: a `NOW`
+ * at 18:30:00.000Z, OFF the fixture's time of day, so the two classes answer
+ * DIFFERENT sets, each pinned: the `date` column meets the instant's UTC
+ * calendar day (03-03), the `datetime` column the instant itself (row 2's
+ * 12:00:00.000Z is BEFORE it).
+ */
+export const CROSS_FIELD_NOW_CASES: readonly CrossFieldCase[] = [
+  ...OFFSET_PAIRS.flatMap(({ label, target }) =>
+    NOW_EXPECTATIONS.map(({ name, build, expected, note }) => ({
+      name: `[$now] ${name} — on the ${label} pair (${target})`,
+      filter: build(target),
+      expected,
+      note,
+    })),
+  ),
+  {
+    name: '[$now] a `date` column meets the instant\'s UTC CALENDAR DAY — $gte now (18:30Z) + 0 reads as >= 03-03',
+    filter: { completed_on: { $gte: anchored(0, '2026-03-03T18:30:00.000Z') } },
+    expected: ['1', '2', '4', '6', '8'],
+    note: 'Row 2 (03-03) is on the day, so it is in: the time of day is dropped, never rounded — the reading `{now}` takes on a `date` column.',
+  },
+  {
+    name: '[$now] a `datetime` column keeps the TIME OF DAY — $gte now (18:30Z) + 0 leaves the 12:00Z row out',
+    filter: { completed_at: { $gte: anchored(0, '2026-03-03T18:30:00.000Z') } },
+    expected: ['1', '4', '6', '8'],
+    note: 'Row 2 (03-03T12:00:00.000Z) is before 18:30Z, so it is out. The date-pair twin above has it in — that one-row difference IS the class rule.',
+  },
+  {
+    name: '[$now] a `datetime` column, $lte now (18:30Z) + 0 — the 12:00Z row is in',
+    filter: { completed_at: { $lte: anchored(0, '2026-03-03T18:30:00.000Z') } },
+    expected: ['2', '3', '9'],
+  },
+  {
+    name: '[$now] a `date` column, $lte now (18:30Z) - 1 — a day arithmetic on the calendar day',
+    filter: { completed_on: { $lte: anchored(-1, '2026-03-03T18:30:00.000Z') } },
+    expected: ['3', '9'],
+  },
+];
+
+/**
+ * The anchor refusal arm, {@link CROSS_FIELD_OFFSET_REFUSALS}' contract: every
+ * entry throws `INVALID_FILTER` / 400 on both SQL drivers, operands withheld
+ * from the caller, the naming half in the server log. The anchor's own rule —
+ * the TARGET is a `date` or `datetime` column, because the anchor is an
+ * instant — and the offset column's, which are the `addDays` arm's (declared,
+ * numeric, same-table, never the tenant-isolation column), plus the shape's
+ * own declaration (`$now` is `true` or the pinned instant; `addDays` is
+ * required and an integer or a `{ $field }`), and the positions outside the
+ * six scalar comparisons.
+ */
+export const CROSS_FIELD_NOW_REFUSALS: readonly CrossFieldRefusalCase[] = [
+  {
+    name: '[$now] a NUMERIC target is refused — the anchor is an instant',
+    filter: { amount: { $gt: anchored(1) } },
+    diagnosticIncludes: ['now-anchored', 'date or datetime'],
+  },
+  {
+    name: '[$now] a TIME target is refused — a wall clock is no instant',
+    filter: { start_time: { $lte: anchored(1) } },
+    diagnosticIncludes: ['now-anchored', 'date or datetime'],
+  },
+  {
+    name: '[$now] a TEXT target is refused',
+    filter: { title: { $lte: anchored(1) } },
+    diagnosticIncludes: ['now-anchored', 'date or datetime'],
+  },
+  {
+    name: '[$now] a TEXT offset column is refused',
+    filter: { completed_on: { $lte: anchored({ $field: 'title' }) } },
+    diagnosticIncludes: ['addDays', 'not a numeric column'],
+  },
+  {
+    name: '[$now] a DOTTED offset path is refused — same-table columns only, on the offset too',
+    filter: { completed_on: { $lte: anchored({ $field: 'duty.grace_days' }) } },
+    diagnosticIncludes: ['addDays', 'dotted path'],
+    note: 'The 2026-08-06 same-table ruling, inherited by the anchor\'s offset as the `addDays` pair\'s inherits it. The ruling\'s title said "held on a related record"; the shape that compiles is the SLA propagated onto the row.',
+  },
+  {
+    name: '[$now] an undeclared offset column is refused at compile time',
+    filter: { completed_on: { $lte: anchored({ $field: 'no_such_offset' }) } },
+    diagnosticIncludes: ['addDays', 'not a declared field'],
+  },
+  {
+    name: '[$now] the tenant-isolation column is refused as the offset',
+    filter: { completed_on: { $lte: anchored({ $field: 'organization_id' }) } },
+    diagnosticIncludes: ['tenant-isolation column'],
+  },
+  {
+    name: '[$now] a fractional literal is refused — whole days only',
+    filter: { completed_on: { $lte: anchored(1.5) } },
+    diagnosticIncludes: ['addDays', 'not an integer'],
+  },
+  {
+    name: '[$now] a string literal is refused — a number is a number',
+    filter: { completed_on: { $lte: anchored('5') } },
+    diagnosticIncludes: ['addDays', 'neither an integer'],
+  },
+  {
+    name: '[$now] a MISSING addDays is refused — `{now}` is the spelling for the unshifted instant',
+    filter: { completed_on: { $lte: { $now: CROSS_FIELD_NOW } } },
+    diagnosticIncludes: ['addDays offset', '{now}'],
+  },
+  {
+    name: '[$now] a $now that is neither true nor an instant is refused',
+    filter: { completed_on: { $lte: { $now: 'soon', addDays: 1 } } },
+    diagnosticIncludes: ['not an instant'],
+  },
+  {
+    name: '[$now] a $now of false is refused — the flag is the literal true',
+    filter: { completed_on: { $lte: { $now: false, addDays: 1 } } },
+    diagnosticIncludes: ['literal true'],
+  },
+  {
+    name: '[$now] an anchor as an $in MEMBER is refused by position',
+    filter: { completed_on: { $in: [anchored(1)] } },
+    diagnosticIncludes: ['now-anchored', 'position SQL push-down does not compile'],
+  },
+  {
+    name: '[$now] the bare `{ field: { $now, addDays } }` spelling is refused by position',
+    filter: { completed_on: anchored(1) },
+    diagnosticIncludes: ['now-anchored', 'position SQL push-down does not compile'],
+    note: 'The bare form reaches the operator loop as an operator named `$now`, as the bare `{ $field }` does; the spelling that compiles is `{ "$eq": { "$now": … } }`.',
+  },
+];

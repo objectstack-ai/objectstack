@@ -12,6 +12,7 @@ import { installAuditWriters } from './audit-writers.js';
 // Do not make these lazy again.
 import { createMemoryI18n } from '@objectstack/core';
 import { AuditTranslations } from './translations/index.js';
+import { summaryAsRead } from './__tests__/summary-as-read.js';
 
 /**
  * Regression coverage for #1532 — on single-tenant stacks the
@@ -1141,7 +1142,7 @@ describe('audit writers — localized activity summaries (framework#3039)', () =
         return locale;
       },
     });
-    return { fire, created, localeCalls: () => localeCalls };
+    return { engine, fire, created, localeCalls: () => localeCalls };
   }
 
   const insertCtx = (object = 'person_qualification') => ({
@@ -1151,27 +1152,44 @@ describe('audit writers — localized activity summaries (framework#3039)', () =
     session: { organizationId: 'org-1', userId: 'user-1' },
   });
 
-  it('localizes verb + object label to the workspace locale (zh-CN)', async () => {
-    const { fire, created } = setup('zh-CN', makeI18n());
+  // [#26167] A summary is STORED in English (the authored labels in the English
+  // catalog) beside its code, and composed in each READER's language on the
+  // read side; `summaryIn` applies that read side's overlay to a written row.
+  const activityRows = (created: CapturedRow[]) => created.filter((c) => c.object === 'sys_activity').map((c) => c.row);
+  const summaryIn = (row: Record<string, any> | undefined, locale: string, i18n: unknown, engine: unknown) =>
+    summaryAsRead(row, i18n, locale, engine as any);
+
+  it('stores the English sentence; a zh-CN reader is served verb + object label in zh-CN', async () => {
+    const i18n = makeI18n();
+    const { engine, fire, created } = setup('zh-CN', i18n);
 
     await fire('afterInsert', insertCtx());
     await fire('afterDelete', { ...insertCtx(), result: null, previous: { id: 'q-1', name: 'OC-00001' } });
 
-    const summaries = created.filter((c) => c.object === 'sys_activity').map((c) => c.row.summary);
-    expect(summaries).toEqual(['创建了 人员资质 "OC-00001"', '删除了 人员资质 "OC-00001"']);
+    const rows = activityRows(created);
+    expect(rows.map((r) => r.summary)).toEqual([
+      'Created person_qualification "OC-00001"',
+      'Deleted person_qualification "OC-00001"',
+    ]);
+    expect(rows.map((r) => summaryIn(r, 'zh-CN', i18n, engine))).toEqual([
+      '创建了 人员资质 "OC-00001"',
+      '删除了 人员资质 "OC-00001"',
+    ]);
   });
 
-  it('localizes the generic update fallback', async () => {
-    const { fire, created } = setup('zh-CN', makeI18n());
+  it('localizes the generic update fallback for the reader', async () => {
+    const i18n = makeI18n();
+    const { engine, fire, created } = setup('zh-CN', i18n);
     await fire('afterUpdate', {
       ...insertCtx(),
       previous: { id: 'q-1', name: 'OC-00001', status: 'draft' },
       result: { id: 'q-1', name: 'OC-00001', status: 'active' },
     });
-    const activity = created.find((c) => c.object === 'sys_activity');
+    const [activity] = activityRows(created);
     // [#25787] `status` is undeclared here, so it is named by its key; the
-    // list and its frame are both the zh-CN bundle's.
-    expect(activity!.row.summary).toBe('更新了 人员资质 "OC-00001"：status');
+    // list and its frame are both the reader's bundle's.
+    expect(activity.summary).toBe('Updated person_qualification "OC-00001": status');
+    expect(summaryIn(activity, 'zh-CN', i18n, engine)).toBe('更新了 人员资质 "OC-00001"：status');
   });
 
   it('keeps a locale\'s field-less frame when its bundle has no named-field frame', async () => {
@@ -1182,17 +1200,17 @@ describe('audit writers — localized activity summaries (framework#3039)', () =
       objects: { person_qualification: { label: 'Qualification' } },
       messages: { activityUpdated: 'A mis à jour {{object}} « {{label}} »' },
     });
-    const { fire, created } = setup('fr-FR', i18n);
+    const { engine, fire, created } = setup('fr-FR', i18n);
     await fire('afterUpdate', {
       ...insertCtx(),
       previous: { id: 'q-1', name: 'OC-00001', status: 'draft' },
       result: { id: 'q-1', name: 'OC-00001', status: 'active' },
     });
-    const activity = created.find((c) => c.object === 'sys_activity');
-    expect(activity!.row.summary).toBe('A mis à jour Qualification « OC-00001 »');
+    const [activity] = activityRows(created);
+    expect(summaryIn(activity, 'fr-FR', i18n, engine)).toBe('A mis à jour Qualification « OC-00001 »');
   });
 
-  it('localizes the named-field list and its "more" item (zh-CN)', async () => {
+  it('localizes the named-field list and its "more" item for the reader (zh-CN)', async () => {
     const fields: Record<string, any> = { id: { type: 'text' }, name: { type: 'text' } };
     const previous: Record<string, any> = { id: 'q-1', name: 'OC-00001' };
     const result: Record<string, any> = { id: 'q-1', name: 'OC-00001' };
@@ -1201,23 +1219,30 @@ describe('audit writers — localized activity summaries (framework#3039)', () =
       previous[`f${i}`] = 0;
       result[`f${i}`] = 1;
     }
-    const { fire, created } = setup('zh-CN', makeI18n(), {}, { ...SINGLE_TENANT, person_qualification: fields });
+    const i18n = makeI18n();
+    const { engine, fire, created } = setup('zh-CN', i18n, {}, { ...SINGLE_TENANT, person_qualification: fields });
     await fire('afterUpdate', { ...insertCtx(), previous, result });
-    const activity = created.find((c) => c.object === 'sys_activity');
-    expect(activity!.row.summary).toBe('更新了 人员资质 "OC-00001"：F1、F2、F3、F4、F5和另外 2 个字段');
+    const [activity] = activityRows(created);
+    expect(activity.summary).toBe('Updated person_qualification "OC-00001": F1, F2, F3, F4, F5, and 2 more');
+    expect(summaryIn(activity, 'zh-CN', i18n, engine)).toBe(
+      '更新了 人员资质 "OC-00001"：F1、F2、F3、F4、F5和另外 2 个字段',
+    );
   });
 
   it('falls back to the object def label, then English, when a translation misses', async () => {
-    // Locale resolves but the object has no zh-CN label entry → verb is
-    // localized, label falls back to the authored def label.
-    const { fire, created } = setup(
+    // The reader's locale resolves but the object has no zh-CN label entry →
+    // the verb is localized, the label falls back to the authored def label.
+    const i18n = makeI18n();
+    const { engine, fire, created } = setup(
       'zh-CN',
-      makeI18n(),
+      i18n,
       { crm_lead: { label: 'Lead' } },
       { ...SINGLE_TENANT, crm_lead: ['id', 'name'] },
     );
     await fire('afterInsert', { ...insertCtx('crm_lead'), result: { id: 'q-1', name: 'Acme' } });
-    expect(created.find((c) => c.object === 'sys_activity')!.row.summary).toBe('创建了 Lead "Acme"');
+    const [activity] = activityRows(created);
+    expect(activity.summary).toBe('Created Lead "Acme"');
+    expect(summaryIn(activity, 'zh-CN', i18n, engine)).toBe('创建了 Lead "Acme"');
   });
 
   it('keeps English summaries when no i18n service is resolvable', async () => {
@@ -1237,11 +1262,56 @@ describe('audit writers — localized activity summaries (framework#3039)', () =
     );
   });
 
-  it('memoizes the locale lookup per tenant/user scope (hot-path guard)', async () => {
+  it('[#26167] an audited write asks for no locale at all (hot-path guard)', async () => {
     const { fire, localeCalls } = setup('zh-CN', makeI18n());
     await fire('afterInsert', insertCtx());
     await fire('afterInsert', { ...insertCtx(), result: { id: 'q-2', name: 'OC-00002' } });
-    expect(localeCalls()).toBe(1);
+    expect(localeCalls()).toBe(0);
+  });
+
+  // The held write locale now localizes only the @mention notification title
+  // ([#26167]: a summary asks for none), so its memo and its #24235 retirement
+  // are pinned on that title.
+  const mentionCtx = (id: string, organizationId = 'org-1') => ({
+    object: 'sys_comment',
+    input: {},
+    result: {
+      id,
+      thread_id: 'crm_lead:l-1',
+      author_id: 'user-1',
+      author_name: 'Alice',
+      body: 'hello',
+      mentions: '["user-2"]',
+    },
+    session: { organizationId, userId: 'user-1' },
+  });
+  function setupMentions(getLocale: () => Promise<string | undefined>) {
+    const { engine, fire } = makeEngine(WITH_QUALIFICATION);
+    const titles: string[] = [];
+    installAuditWriters(engine as any, 'test.audit', {
+      getI18n: () => makeI18n() as any,
+      getLocale,
+      getMessaging: () => ({
+        emit: async (e: any) => {
+          if (e.topic === 'collab.mention') titles.push(e.payload.title);
+          return {};
+        },
+      }),
+      admitMentionRecipients: async ({ mentions }) => [...mentions],
+    });
+    return { fire, titles };
+  }
+
+  it('memoizes the locale lookup per tenant/user scope (hot-path guard)', async () => {
+    let calls = 0;
+    const { fire, titles } = setupMentions(async () => {
+      calls += 1;
+      return 'zh-CN';
+    });
+    await fire('afterInsert', mentionCtx('c-1'));
+    await fire('afterInsert', mentionCtx('c-2'));
+    expect(titles).toEqual(['Alice 提到了你', 'Alice 提到了你']);
+    expect(calls).toBe(1);
   });
 
   // [#24235] The held locale is retired by a write to either settings store;
@@ -1255,28 +1325,22 @@ describe('audit writers — localized activity summaries (framework#3039)', () =
     previous: { id: 's-1', namespace: 'localization', key: 'locale' },
     session: {},
   });
-  const summaryOf = (created: CapturedRow[], name: string) =>
-    created.find((c) => c.object === 'sys_activity' && c.row.record_label === name)?.row.summary;
 
   it('[#24235] a write to either settings store retires the held locale; without one it is held', async () => {
     for (const store of [undefined, 'sys_setting', 'sys_platform_setting']) {
-      const { engine, fire, created } = makeEngine(WITH_QUALIFICATION);
       let locale: string | undefined;
-      installAuditWriters(engine as any, 'test.audit', { getI18n: () => makeI18n() as any, getLocale: async () => locale });
-      await fire('afterInsert', insertCtx());
+      const { fire, titles } = setupMentions(async () => locale);
+      await fire('afterInsert', mentionCtx('c-1'));
       locale = 'zh-CN';
       if (store) await fire('afterUpdate', settingsWrite(store));
-      await fire('afterInsert', { ...insertCtx(), result: { id: 'q-2', name: 'OC-00002' } });
-      expect(summaryOf(created, 'OC-00001'), String(store)).toBe('Created person_qualification "OC-00001"');
+      await fire('afterInsert', mentionCtx('c-2'));
+      expect(titles[0], String(store)).toBe('Alice mentioned you');
       // The control (`undefined`: no settings write) still answers from the held locale.
-      expect(summaryOf(created, 'OC-00002'), String(store)).toBe(
-        store ? '创建了 人员资质 "OC-00002"' : 'Created person_qualification "OC-00002"',
-      );
+      expect(titles[1], String(store)).toBe(store ? 'Alice 提到了你' : 'Alice mentioned you');
     }
   });
 
   it('[#24235] a settings write landing while the lookup is in flight leaves the pre-write answer unheld', async () => {
-    const { engine, fire, created } = makeEngine(WITH_QUALIFICATION);
     let entered!: () => void;
     const lookupStarted = new Promise<void>((resolve) => {
       entered = resolve;
@@ -1286,26 +1350,22 @@ describe('audit writers — localized activity summaries (framework#3039)', () =
       release = resolve;
     });
     let calls = 0;
-    installAuditWriters(engine as any, 'test.audit', {
-      getI18n: () => makeI18n() as any,
-      getLocale: async () => {
-        calls += 1;
-        if (calls === 1) {
-          entered();
-          await inFlight; // read before the write below, answered after it
-          return undefined;
-        }
-        return 'zh-CN';
-      },
+    const { fire, titles } = setupMentions(async () => {
+      calls += 1;
+      if (calls === 1) {
+        entered();
+        await inFlight; // read before the write below, answered after it
+        return undefined;
+      }
+      return 'zh-CN';
     });
-    const first = fire('afterInsert', insertCtx());
+    const first = fire('afterInsert', mentionCtx('c-1'));
     await lookupStarted;
     await fire('afterUpdate', settingsWrite('sys_setting'));
     release();
     await first;
-    await fire('afterInsert', { ...insertCtx(), result: { id: 'q-2', name: 'OC-00002' } });
-    expect(summaryOf(created, 'OC-00001')).toBe('Created person_qualification "OC-00001"');
-    expect(summaryOf(created, 'OC-00002')).toBe('创建了 人员资质 "OC-00002"');
+    await fire('afterInsert', mentionCtx('c-2'));
+    expect(titles).toEqual(['Alice mentioned you', 'Alice 提到了你']);
   });
 
   // Collaboration notification titles (assignment / @mention) are localized to

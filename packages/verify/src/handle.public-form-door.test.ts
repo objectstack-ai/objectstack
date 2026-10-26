@@ -77,7 +77,6 @@ function snapshot<T>(value: T): T {
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type HookCtx ={ event: string; input: Record<string, any>; session?: Record<string, any>; user?: { id?: string } };
 
 /**

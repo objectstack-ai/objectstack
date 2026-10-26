@@ -243,7 +243,7 @@ describe('objectui#12037 — record-page flow clicks on a declared action use th
 
     expect(url).toBe(`/api/v1/actions/${PARENT}/qualify_lead`);
     expect(body).toEqual({ recordId: RECORD_ID, params: {} });
-    expect(result).toEqual({ success: true, silent: true });
+    expect(result).toEqual({ success: true, silent: true, handedOff: true });
     const dialog = await screen.findByRole('dialog');
     authFetchSpy.mockResolvedValueOnce(answered({ success: true, status: 'completed' }));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Submit' }));

@@ -38,6 +38,8 @@
  */
 
 import React, { createContext, useContext } from 'react';
+import type { FilterNode } from '@object-ui/core';
+import type { ViewFilterRule } from '@objectstack/spec/ui';
 
 /** A child-object action surfaced in a related list's row menu. */
 export interface RelatedRowActionDef {
@@ -110,15 +112,19 @@ export interface RelatedRecordHandlers {
   onToolbarAction?: (action: RelatedRowActionDef) => void | Promise<void>;
   /**
    * Open the child object's full list page, scoped to THIS parent on the
-   * relationship `resolve` was handed (objectui#12741). The related list's
-   * "View all" link calls it, unless the block declares `showViewAll: false`.
+   * relationship `resolve` was handed (objectui#12741) AND by the list's own
+   * `filter` (objectstack#25888): the rows the list showed, every one of them
+   * and no others. The related list's "View all" link calls it, unless the
+   * block declares `showViewAll: false`.
    *
    * The host builds the destination because only the host knows the console's
    * routes, as it does for {@link onView}. It omits the handler when no route
    * it has can show that scoped list, and the link is then not drawn. One case
    * is a multi-value relationship: the list route's URL filter has no
-   * membership operator. Another is a relationship field the viewer cannot
-   * read: the list route drops that condition and would show every row.
+   * membership operator. Another is a field the viewer cannot read, the
+   * relationship or one the filter names: the list route drops that condition
+   * and would show more rows. A third is a filter condition the route cannot
+   * spell (an `or`, a set or text operator): the route would drop it too.
    */
   onViewAll?: () => void;
 }
@@ -150,6 +156,19 @@ export interface ResolveRelatedRecordActionsInput {
   relationshipField?: string;
   /** Primary-key value of the parent record (used to pre-link new children). */
   parentId?: string | number | null;
+  /**
+   * The list's OWN scope filter (`record:related_list.filter`), which the list
+   * ANDs with the parent relationship for the rows it shows (objectstack#25888).
+   * Handed with its placeholders (`{current_user_id}`, `{record_id}`, the date
+   * macros) already resolved against the list's own filter scope, so it is
+   * the value the list queried with.
+   *
+   * Read by a host that builds a destination for "these rows"
+   * ({@link RelatedRecordHandlers.onViewAll}): it scopes that destination by
+   * this filter too, or offers none. Absent means the list has no filter of
+   * its own; it does not mean "unknown".
+   */
+  filter?: ViewFilterRule[] | FilterNode;
 }
 
 export interface RelatedRecordActionsValue {

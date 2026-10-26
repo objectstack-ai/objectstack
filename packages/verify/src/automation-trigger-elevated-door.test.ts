@@ -169,9 +169,7 @@ afterAll(async () => {
   await stack?.stop().catch(() => undefined);
 });
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const codeOf = (e: unknown): string | undefined => (e as any)?.code;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const statusOf = (e: unknown): number | undefined => (e as any)?.statusCode ?? (e as any)?.status;
 
 /** Ledger rows a writer flow named `flow` has created so far. */

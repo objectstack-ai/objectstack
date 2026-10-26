@@ -294,6 +294,9 @@ function classifyFilterKey(key: string, value: unknown, here: string): FilterVer
   // refusal whichever operator carries it. ⛔ Not implemented as a `$expr`
   // column comparison: the ruling on this driver is refuse, not lower.
   if (carriesFieldReference(value)) throw fieldReferenceUnsupportedError();
+  // [#25808] …and a now-anchored comparand, for the same reason: translated,
+  // the anchor object would be a literal sub-document.
+  if (carriesNowAnchor(value)) throw nowAnchorUnsupportedError();
 
   // [#5347] `$null`'s comparand is a boolean by declaration. Checked on THIS
   // walk rather than in the emitter's `$null` arm because the emitter is
@@ -517,6 +520,33 @@ function holdsFieldReference(comparand: unknown): boolean {
 }
 
 /**
+ * [#25808] A `{ $now: true, addDays }` now-anchored comparand (`NowAnchorSchema`,
+ * maintainer ruling 2026-10-26) — by SHAPE, an object carrying a `$now` key,
+ * as {@link isFieldReferenceShape} reads a reference; in every position
+ * {@link carriesFieldReference} reads, for the same reason. The engine's token
+ * resolver may already have pinned `$now` to an ISO string; the shape is the
+ * same either way, and this translator has no lowering for "the current
+ * instant plus a column's worth of days" in any spelling.
+ */
+function isNowAnchorShape(value: unknown): boolean {
+  return !!value && typeof value === 'object' && !Array.isArray(value) && '$now' in value;
+}
+
+function carriesNowAnchor(spec: unknown): boolean {
+  if (holdsNowAnchor(spec)) return true;
+  if (!isFilterNode(spec)) return false;
+  for (const [op, comparand] of Object.entries(spec)) {
+    if (op.startsWith('$') && holdsNowAnchor(comparand)) return true;
+  }
+  return false;
+}
+
+function holdsNowAnchor(comparand: unknown): boolean {
+  if (isNowAnchorShape(comparand)) return true;
+  return Array.isArray(comparand) && comparand.some(isNowAnchorShape);
+}
+
+/**
  * [#19949] A `{ $field }` cross-field reference reached this translator.
  *
  * The field, the referenced field, the operator and the position are withheld
@@ -533,6 +563,25 @@ function fieldReferenceUnsupportedError(): Error {
       'for a column-to-column comparison. It is refused rather than translated because MongoDB ' +
       'would read the reference as a literal sub-document, so "$ne" would match every row and ' +
       '"$eq" none. Compare against a literal value instead. The fields and the operator are ' +
+      'withheld from this message because the filter may be an access policy the caller did not write.',
+  );
+}
+
+/**
+ * [#25808] A `{ $now, addDays }` now-anchored comparand reached this
+ * translator. Withheld as {@link fieldReferenceUnsupportedError} withholds,
+ * for its reason; the message names the feature and the remedy. The offset
+ * may be a column of the record (the ruled shape), which is exactly the
+ * column-to-value arithmetic this driver has no lowering for.
+ */
+function nowAnchorUnsupportedError(): Error {
+  return unsupportedFilterError(
+    'The MongoDB driver does not support a now-anchored comparand ({ "$now": true, "addDays": … }): ' +
+      'this filter compares a field against the current instant shifted by a number of days that may ' +
+      'be held in another field of the same record, and the driver has no lowering for that ' +
+      'arithmetic. It is refused rather than translated because MongoDB would read the anchor as a ' +
+      'literal sub-document, so "$ne" would match every row and the orderings none. Compare against ' +
+      'a literal instant, or the "{N_days_ago}" placeholder, instead. The field and the operator are ' +
       'withheld from this message because the filter may be an access policy the caller did not write.',
   );
 }

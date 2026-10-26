@@ -1952,7 +1952,15 @@ export class ActionRunner {
     // declares `onSuccess` as a CLOSED STRICT object
     // `{ navigate: string, openIn: 'self' | 'newTab' }`, refine-scoped to
     // `type: 'api'` and `type: 'script'` — the two types whose success event
-    // carries a server response for `${result.*}` to read.
+    // carries a server response for `${result.*}` to read — and to
+    // `type: 'flow'`, whose COMPLETED run answers with its `AutomationResult`
+    // (`${result.output.VAR}` reads one of the flow's `isOutput` variables).
+    //
+    // A `handedOff` success performs no hop: a flow run paused at a screen or
+    // ended refused opened a follow-up surface instead of completing
+    // (`judgeFlowLaunch`, app-shell `utils/flowResponse.ts`), so there is no
+    // result for the hop to follow, and navigating away would leave that
+    // screen or notice behind.
     //
     // That declared meaning is the key's ONLY meaning. The runner's older
     // chained-callback channel (`onSuccess?: ActionDef | ActionDef[]`,
@@ -1965,7 +1973,7 @@ export class ActionRunner {
     // discriminator: stored rows are rehydrated UNPARSED (objectstack-ai/objectstack#3903), so the value
     // is still read as data, and a shape the spec refuses gets no reading —
     // no navigation, no callback dispatch, no lenient fallback.
-    if (result.success && action.onSuccess) {
+    if (result.success && !result.handedOff && action.onSuccess) {
       const navigation = readOnSuccessNavigation(action.onSuccess);
       if (navigation) {
         this.navigateOnSuccess(navigation, action, result);

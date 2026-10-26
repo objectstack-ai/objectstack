@@ -62,7 +62,13 @@ describe('KIND_TO_RECORD_LOOKUP is derived from APPROVER_VALUE_SOURCES (objectui
     // the boundary to be re-drawn deliberately.
     for (const kind of EXPECTED_KINDS) {
       const source = APPROVER_VALUE_SOURCES[kind as keyof typeof APPROVER_VALUE_SOURCES] as Record<string, unknown>;
-      expect(Object.keys(source).sort()).toEqual(['object', 'source', 'valueField']);
+      const specKeys = Object.keys(source);
+      for (const key of ['object', 'source', 'valueField']) expect(specKeys).toContain(key);
+      // By name, not as the spec's whole key list (#26238): none of the keys
+      // this package owns for presentation is published by the spec.
+      const presentation = Object.keys(KIND_TO_RECORD_LOOKUP[kind]!).filter((k) => k !== 'object' && k !== 'valueField');
+      expect(presentation).toContain('displayField');
+      for (const key of presentation) expect(specKeys, `the spec now publishes \`${key}\``).not.toContain(key);
       expect(KIND_TO_RECORD_LOOKUP[kind]!.displayField).toBeTruthy();
     }
   });
