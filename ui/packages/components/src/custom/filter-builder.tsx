@@ -1123,7 +1123,7 @@ export function isFilterValueComplete(
 /** The two bounds a `pair` row edits, with the gaps filled in for rendering. */
 function toPairBounds(
   value: FilterBuilderRow["value"],
-): [string | number | boolean, string | number | boolean] {
+): [FilterListEntry, FilterListEntry] {
   const [min = "", max = ""] = normalizeToArray(value)
   return [min, max]
 }
@@ -1854,7 +1854,7 @@ function FilterBuilder({
       // refusal. `|| undefined` so a complete pair carries NO attribute at all.
       const boundInvalid = (index: 0 | 1) => (missingBound === index ? true : undefined)
       const setBound = (index: 0 | 1, raw: string) => {
-        const next: [string | number | boolean, string | number | boolean] = [bounds[0], bounds[1]]
+        const next: [FilterListEntry, FilterListEntry] = [bounds[0], bounds[1]]
         // The same one reading as the field-switch path (objectui#4875), in
         // place of `parseFloat(raw) || 0`: a bound is a clean number or it is
         // not filled in (`""`). A half-read bound (`"42abc"` → 42) or an
@@ -1862,7 +1862,7 @@ function FilterBuilder({
         // silently narrows a RANGE, and `0` is a plausible-looking bound.
         // `convertScalarToFamily("", "number")` is `""`, so the old
         // `raw !== ""` guard is subsumed rather than dropped.
-        next[index] = numeric ? (convertScalarToFamily(raw, "number") ?? "") : raw
+        next[index] = numeric ? toFilterListEntry(convertScalarToFamily(raw, "number") ?? "") : raw
         // Both bounds cleared → back to the "nothing filled in yet" shape the
         // write path drops, rather than persisting an empty range.
         updateCondition(condition.id, {
