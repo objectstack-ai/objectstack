@@ -328,6 +328,10 @@ const TABLE_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'table.rowActions': 'Row actions',
   'table.edit': 'Edit',
   'table.delete': 'Delete',
+  // #25916 — the hover open affordance and the inline-edit row buttons.
+  'table.openRecord': 'Open record',
+  'table.cancelChanges': 'Cancel changes',
+  'table.saveRow': 'Save row',
   'common.actions': 'Actions',
   // objectui#10625 — the inline date editors' notice for a stored value
   // written on a day that does not exist. The SAME keys `DateField` /
@@ -3575,7 +3579,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                 // plain one.
                                 schema.onRowClick?.(row, e);
                               }}
-                              title="Open record"
+                              title={t('table.openRecord')}
                             >
                               <span>{t('table.open')}</span>
                               <ChevronRight className="h-3 w-3" />
@@ -3947,7 +3951,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                   size="icon"
                                   onClick={() => cancelRowChanges(rowKey)}
                                   disabled={isSaving}
-                                  title="Cancel changes"
+                                  title={t('table.cancelChanges')}
                                 >
                                   <X className="h-4 w-4" />
                                 </Button>
@@ -3956,7 +3960,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                   size="icon"
                                   onClick={() => saveRow(rowKey)}
                                   disabled={isSaving}
-                                  title="Save row"
+                                  title={t('table.saveRow')}
                                 >
                                   <Save className="h-4 w-4 text-green-600" />
                                 </Button>
