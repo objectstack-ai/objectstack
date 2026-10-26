@@ -130,13 +130,12 @@ describe('@objectstack/types — node-only code stays behind the ./node subpath 
 
   it('package.json publishes the ./node subpath', () => {
     const pkg = JSON.parse(readFileSync(join(PKG, 'package.json'), 'utf8')) as {
-      exports: Record<string, Record<string, string>>;
+      exports: Record<string, unknown>;
     };
     expect(Object.keys(pkg.exports)).toContain('./node');
     expect(pkg.exports['./node']).toEqual({
-      types: './dist/node.d.ts',
-      import: './dist/node.mjs',
-      require: './dist/node.js',
+      import: { types: './dist/node.d.mts', default: './dist/node.mjs' },
+      require: { types: './dist/node.d.ts', default: './dist/node.js' },
     });
   });
 });

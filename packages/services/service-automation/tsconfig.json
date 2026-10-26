@@ -1,5 +1,5 @@
 {
-  "extends": "../../../tsconfig.json",
+  "extends": "../../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "dist",
     // [#20919] Widened from `src` to `packages/` as a CONSEQUENCE, the way
