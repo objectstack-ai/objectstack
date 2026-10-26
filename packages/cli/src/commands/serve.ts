@@ -4,6 +4,7 @@ import { Args, Command, Flags } from '@oclif/core';
 import path from 'path';
 import fs from 'fs';
 import net from 'net';
+import { spawnSync } from 'child_process';
 import chalk, { chalkStderr } from 'chalk';
 import { bundleRequire } from 'bundle-require';
 import { loadConfig, BUNDLE_REQUIRE_EXTERNALS } from '../utils/config.js';
@@ -11,6 +12,7 @@ import { mergeBootConfig } from '../utils/merge-boot-config.js';
 import { provisionTelemetryDatasource, standaloneTelemetryPrimary } from '../utils/telemetry-datasource.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
 import { readInternalArtifactPath, readInternalConfigOutputPath } from '../utils/internal-artifact-channel.js';
+import { devCompilesAtBoot } from '../utils/dev-compile-at-boot.js';
 import { makeDirectorySync } from '../utils/make-directory.js';
 // The precedence's last rung — whether the cwd config takes part — decided by
 // the SAME predicate the supervisors print their `Config:` row by (#21501).
@@ -3503,6 +3505,45 @@ export default class Serve extends Command {
                 + '\n    boot without a door.',
               ));
             } else {
+              // #26242 — the door is about to serve THIS file's copy of the
+              // stack while the wrap below serves the config module's, so a
+              // config that reads the environment at module evaluation (the
+              // showcase's `OS_PORT` self URL) gives `/meta` the value of
+              // whichever environment last compiled the file. `os dev` closed
+              // that by compiling before it boots (#26130); a direct dev boot
+              // reads the same decision, `devCompilesAtBoot`. Under a
+              // supervising `os dev` (its channel answered) the parent already
+              // made it, `--no-compile` included, so the child never compiles
+              // again. Only an artifact on disk reaches this branch: with none,
+              // no door composes and the wrap is the one copy.
+              //
+              // The compile runs in THIS process's environment, the one the
+              // module above was evaluated in (`NODE_ENV` included, which
+              // `--dev` set; the built entry ignores it for loading, #12271),
+              // so both copies are one evaluation's answer. A failed compile
+              // refuses the boot, as it does under `os dev`.
+              if (!supervisorArtifact && devCompilesAtBoot({
+                compile: true,
+                pinned: Boolean(pinnedArtifact),
+                configExists,
+                artifactExists: true,
+              })) {
+                printDiagnostic(chalk.dim(`  Compiling ${relativeConfig} → ${path.relative(process.cwd(), hmrArtifactPath) || hmrArtifactPath}...`));
+                const compiled = spawnSync(
+                  process.execPath,
+                  [process.argv[1], 'compile', absolutePath, '--output', hmrArtifactPath],
+                  { env: process.env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+                );
+                if (compiled.status !== 0) {
+                  console.error(
+                    `${compiled.stdout ?? ''}${compiled.stderr ?? ''}\n`
+                    + chalk.red(`  ✗ Compile failed — fix errors above before starting the dev server.\n`)
+                    + chalk.dim(`    A dev boot over ${hmrArtifactPath} compiles ${relativeConfig} into it first, so the`)
+                    + chalk.dim('\n    metadata it serves is the config this boot evaluates (#26242).'),
+                  );
+                  process.exit(1);
+                }
+              }
               const { MetadataPlugin } = await import('@objectstack/metadata');
               // Mirror the standalone stack's dev config exactly
               // (packages/runtime/src/standalone-stack.ts): declarative
