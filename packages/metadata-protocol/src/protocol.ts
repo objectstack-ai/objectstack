@@ -404,6 +404,8 @@ import { classifyObjectContribution, releaseAdoptedObjectOwner } from './protoco
 import { flowSaveReplaysRetired } from './protocol-flow-save-replay.js';
 // [#25467 cut 19] A package write's validation scope: the written package and its declared dependency closure, from the registry.
 import { resolveWritePackageScope } from './protocol-write-package-scope.js';
+// [#25467 cut 20] The code-layer read through the `metadata` service: package-scoped, singular/plural fallback, a stored object row's copy not counted as code.
+import { readItemFromMetadataService } from './protocol-metadata-service-read.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -9330,44 +9332,12 @@ export class ObjectStackProtocolImplementation implements
         name: string,
         packageId?: string,
     ): Promise<{ data: unknown; degraded: boolean; errors: string[] }> {
-        const services = this.getServicesRegistry?.();
-        const metadataService: any = services?.get('metadata');
-        if (!metadataService || typeof metadataService.get !== 'function') {
-            return { data: undefined, degraded: false, errors: [] };
-        }
-        // ADR-0048 — thread the caller's package id so a single-item fetch is
-        // package-scoped. Passed positionally to BOTH reads, so whatever the
-        // occupant of the `metadata` slot makes of a third argument today is
-        // unchanged by which of the two methods answers.
-        const read = async (t: string): Promise<{ data: unknown; degraded: boolean; errors: string[] }> => {
-            let answer: { data: unknown; degraded: boolean; errors: string[] };
-            if (typeof metadataService.getDiagnosed === 'function') {
-                const diagnosed = await metadataService.getDiagnosed(t, name, packageId);
-                answer = {
-                    data: diagnosed?.data,
-                    degraded: diagnosed?.degraded === true,
-                    errors: Array.isArray(diagnosed?.errors) ? diagnosed.errors : [],
-                };
-            } else {
-                answer = { data: await metadataService.get(t, name, packageId), degraded: false, errors: [] };
-            }
-            // [#23645] A stored object row's copy is not a code layer. See the header.
-            return canonicalMetaType(t) === 'object' && isTenantAuthored(answer.data)
-                ? { ...answer, data: undefined }
-                : answer;
+        // [#25467 cut 20] The body moved to `protocol-metadata-service-read.ts` (see `MetadataServiceReadHost`).
+        const readGetServicesRegistry = () => this.getServicesRegistry;
+        const host: ThisParameterType<typeof readItemFromMetadataService> = {
+            get getServicesRegistry() { return readGetServicesRegistry(); },
         };
-
-        const primary = await read(type);
-        if (primary.data !== undefined && primary.data !== null) return primary;
-        const alt = PLURAL_TO_SINGULAR[type] ?? SINGULAR_TO_PLURAL[type];
-        if (!alt) return { data: undefined, degraded: primary.degraded, errors: primary.errors };
-        const secondary = await read(alt);
-        if (secondary.data !== undefined && secondary.data !== null) return secondary;
-        return {
-            data: undefined,
-            degraded: primary.degraded || secondary.degraded,
-            errors: [...primary.errors, ...secondary.errors],
-        };
+        return readItemFromMetadataService.call(host, type, name, packageId);
     }
 
     /**
