@@ -528,9 +528,15 @@
         "data.nodes.element.in.waitEventConfig"
       ]
     },
+    "automation/ApprovalEscalation": {
+      "sites": [
+        "escalateTo"
+      ]
+    },
     "automation/ApprovalNodeConfig": {
       "sites": [
-        ""
+        "",
+        "escalation.escalateTo"
       ]
     },
     "automation/AssignmentConfig": {
