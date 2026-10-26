@@ -4801,6 +4801,14 @@ const es = {
     },
     map: {
       sourceUnresolved: "No se pudo resolver el origen de datos de este mapa",
+      invalidCoordinatesExcluded: "Registros excluidos del mapa por coordenadas ausentes o no válidas: {{excluded}}",
+      styleFailedConfigured: "No se pudo cargar el mapa ({{reason}}). Los registros aparecen a continuación; revise la URL del estilo de mapa configurada en esta vista.",
+      styleFailedDefault: "No se pudo cargar el mapa ({{reason}}). Los registros aparecen a continuación; aquí no se pudieron cargar los mosaicos de mapa públicos predeterminados, así que pida a su administrador que configure un estilo de mapa para esta vista.",
+      styleFailedUnknownReason: "no se pudieron cargar el estilo o los mosaicos del mapa",
+      webgl2Unavailable: "No se pudo cargar el mapa (este navegador no admite WebGL2, que el mapa necesita). Los registros aparecen a continuación; active la aceleración por hardware o use un navegador con WebGL2 para ver el mapa.",
+      retry: "Reintentar el mapa",
+      listLabel: "Ubicaciones",
+      listEmpty: "No hay ubicaciones para mostrar.",
     },
     timeline: {
       sourceUnresolved: "No se pudo resolver el origen de datos de esta línea de tiempo",

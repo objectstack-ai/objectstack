@@ -4797,6 +4797,14 @@ const fr = {
     },
     map: {
       sourceUnresolved: "La source de données de cette carte n’a pas pu être résolue",
+      invalidCoordinatesExcluded: "Enregistrements exclus de la carte (coordonnées manquantes ou invalides) : {{excluded}}",
+      styleFailedConfigured: "Échec du chargement de la carte ({{reason}}). Les enregistrements sont listés ci-dessous ; vérifiez l’URL du style de carte défini sur cette vue.",
+      styleFailedDefault: "Échec du chargement de la carte ({{reason}}). Les enregistrements sont listés ci-dessous ; les tuiles de carte publiques par défaut n’ont pas pu être chargées ici, demandez à votre administrateur de définir un style de carte pour cette vue.",
+      styleFailedUnknownReason: "le style ou les tuiles de la carte n’ont pas pu être chargés",
+      webgl2Unavailable: "Échec du chargement de la carte (ce navigateur ne prend pas en charge WebGL2, nécessaire à la carte). Les enregistrements sont listés ci-dessous ; activez l’accélération matérielle ou utilisez un navigateur compatible WebGL2 pour afficher la carte.",
+      retry: "Réessayer la carte",
+      listLabel: "Lieux",
+      listEmpty: "Aucun lieu à afficher.",
     },
     timeline: {
       sourceUnresolved: "La source de données de cette chronologie n’a pas pu être résolue",
