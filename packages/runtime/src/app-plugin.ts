@@ -1924,6 +1924,7 @@ export class AppPlugin implements Plugin {
                  seedSource.suppress('multi-tenant-replay');
                  ctx.logger.info('[Seeder] multi-tenant mode — skipping inline seed; per-org replay will run on sys_organization insert');
              } else {
+             const runInlineSeed = async (): Promise<void> => {
              // Inline seed budget: large bundles (e.g. CRM Starter's 10
              // datasets) can easily exceed the kernel's plugin-start
              // timeout. We MUST NOT let seed work tear the kernel down —
@@ -2105,6 +2106,22 @@ export class AppPlugin implements Plugin {
              } else {
                  emitSeedSettled(false);
              }
+             };
+             // The stack's `demoStaff` (`@objectstack/plugin-auth`): when this
+             // development boot will create demo accounts, they are created at
+             // `kernel:ready`, after the development admin — so a seed row
+             // naming one (`owner_id: 'Legal Counsel 1'`) would not resolve if
+             // the seed ran now. `kernel:bootstrapped` is the anchor for work
+             // that consumes what a `kernel:ready` handler produced, and the
+             // seed source is already declared, so every consumer of the
+             // settlement tally waits for `app:seeded` exactly as it does for a
+             // seed that overran its budget.
+             if (this.demoStaffingArmed(ctx)) {
+                 ctx.logger.info('[Seeder] inline seed deferred to kernel:bootstrapped — the demo accounts this stack declares (demoStaff) are created at kernel:ready');
+                 ctx.hook('kernel:bootstrapped', runInlineSeed);
+             } else {
+                 await runInlineSeed();
+             }
              }
         }
 
@@ -2216,6 +2233,21 @@ export class AppPlugin implements Plugin {
      * requested posture is the best fact available. Read live per call — never
      * cached — so nothing freezes a verdict a later boot phase can still change.
      */
+    /**
+     * Will this boot provision the stack's `demoStaff` at `kernel:ready`? The
+     * `demo-staff` service `@objectstack/plugin-auth` registers in `init()`
+     * answers (`DemoStaffingService`); no service, or one that is not armed,
+     * keeps the seed where it always ran.
+     */
+    private demoStaffingArmed(ctx: PluginContext): boolean {
+        try {
+            const staffing = ctx.getService?.('demo-staff') as { armed?: unknown } | undefined;
+            return staffing?.armed === true;
+        } catch {
+            return false;
+        }
+    }
+
     private organizationWallActive(ctx: PluginContext): boolean {
         try {
             const tenancy = ctx.getService?.('tenancy') as

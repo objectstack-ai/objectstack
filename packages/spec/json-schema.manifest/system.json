@@ -63,6 +63,7 @@
     "system/DatabaseLevelIsolationStrategy",
     "system/DatabaseProvider",
     "system/DeleteObjectOperation",
+    "system/DemoStaff",
     "system/DeployBundle",
     "system/DeployDiff",
     "system/DeployManifest",

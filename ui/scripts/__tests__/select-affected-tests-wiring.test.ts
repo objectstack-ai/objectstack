@@ -5,13 +5,17 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { workspaceRoot } from '../workspace-root.mjs';
+
 /**
- * objectui#13350 — the two steps of the `test` job that make the affected
- * speed, held together by RUNNING them.
+ * objectui#13350 — the two steps of the `Test UI` job that make the affected
+ * speed, held together by RUNNING them. Since objectstack#25868 the job is
+ * `test-ui` in the objectstack monorepo's root `ci.yml`, the workflow that
+ * runs this tree's suite; the objectui copy under `ui/.github/` runs nowhere.
  *
  * `Select the tests this change affects` (id `select`) appends the selector's
- * verdict line to `$GITHUB_OUTPUT`; `Run tests (shard N/16)` reads one output of
- * that step into an env var and branches on it. The runner splits each appended
+ * verdict line to `$GITHUB_OUTPUT`; `Run the ui tests (shard N/16)` reads one
+ * output of that step into an env var and branches on it. The runner splits each appended
  * line at its first `=`, so the line `mode=affected` is the output `mode` with
  * the value `affected`. From objectui#12214 until this card the run step
  * compared its env var with the whole line -- never true -- and every pull
@@ -22,27 +26,32 @@ import { fileURLToPath } from 'node:url';
  * compares with.
  *
  * So this file restates neither end. It extracts both steps' `env:` and `run:`
- * from `ci.yml`, runs the select step with bash against this checkout -- the
- * real selector, based on HEAD -- parses what it appended the way the runner
- * does, hands the run step whatever output its `env:` names, and reads which
- * command the run step chose off a `pnpm` stand-in that records its argv.
+ * from `ci.yml`, runs the select step with bash at the workflow's working
+ * directory (the monorepo root) against this checkout -- the real selector,
+ * with the merge base a `git` stand-in answers as HEAD -- parses what it
+ * appended the way the runner does, hands the run step whatever output its
+ * `env:` names, and reads which command the run step chose off a `pnpm`
+ * stand-in that records its argv.
  * Textual rather than YAML-parsed, for the reason `markdown-test-inputs.test.ts`
  * gives: what is under test is the bytes CI runs.
  *
  *   affected  a `pull_request` and a `merge_group` event hand vitest exactly the
  *             filters the selector wrote.
- *   full      a `push` event, and a pull request with no base sha (the
- *             fail-open path), run the whole suite.
+ *   full      a `push` event, a pull request with no base ref and one whose
+ *             merge base cannot be computed (the fail-open paths), run the
+ *             whole suite.
  *   controls  the run step's comparison reverted to the whole line, and the
  *             select step's output written under another key or value, each
  *             ALONE, put a pull request on the full suite -- so this file
  *             cannot pass while the two ends disagree.
  */
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const CI_YML = path.join(repoRoot, '.github', 'workflows', 'ci.yml');
+/** Where the workflow runs: its steps' working directory, and the home of `.github/`. */
+const workflowRoot = workspaceRoot(repoRoot);
+const CI_YML = path.join(workflowRoot, '.github', 'workflows', 'ci.yml');
 
 const SELECT_HEADER = '      - name: Select the tests this change affects\n';
-const RUN_HEADER = '      - name: Run tests (shard ${{ matrix.shard }}/16)\n';
+const RUN_HEADER = '      - name: Run the ui tests (shard ${{ matrix.shard }}/16)\n';
 /** The output reference a run step's `env:` value is, when it reads the select step. */
 const SELECT_OUTPUT = /^\$\{\{ steps\.select\.outputs\.([A-Za-z0-9_-]+) \}\}$/;
 
@@ -98,6 +107,7 @@ function modeBinding(): { variable: string; key: string } {
 
 /* ── the runner, as far as these two steps need it ──────────────────────── */
 
+/** `base` is the pull request's base REF, or the merge group's base sha. */
 type Event = { name: 'pull_request' | 'merge_group' | 'push'; base: string };
 
 /** `${{ … }}` resolved the way the runner would for this event, shard 1. */
@@ -108,7 +118,7 @@ function expand(text: string, event: Event, temp: string, outputs: Record<string
     switch (expr) {
       case 'github.event_name':
         return event.name;
-      case 'github.event.pull_request.base.sha':
+      case 'github.event.pull_request.base.ref':
         return event.name === 'pull_request' ? event.base : '';
       case 'github.event.merge_group.base_sha':
         return event.name === 'merge_group' ? event.base : '';
@@ -147,21 +157,22 @@ function standIn(name: string, body: string): string {
 type Selected = { outputs: Record<string, string>; log: string };
 
 /** Run the select step, with `bash -e` as the runner does, in a fresh `RUNNER_TEMP`. */
-function runSelect(event: Event, temp: string, bin?: string): Selected {
+function runSelect(event: Event, temp: string, bin?: string, extraEnv: Record<string, string> = {}): Selected {
   const env = Object.fromEntries(SELECT.env.map(([name, value]) => [name, expand(value, event, temp)]));
   const script = path.join(temp, 'select.sh');
   fs.writeFileSync(script, expand(SELECT.run, event, temp));
   const githubOutput = path.join(temp, 'github-output-select');
   fs.writeFileSync(githubOutput, '');
   const run = spawnSync('bash', ['-e', script], {
-    cwd: repoRoot,
+    cwd: workflowRoot,
     encoding: 'utf8',
     env: {
       ...process.env,
       ...env,
+      ...extraEnv,
       RUNNER_TEMP: temp,
       GITHUB_OUTPUT: githubOutput,
-      PATH: [bin, nodeDir, process.env.PATH].filter(Boolean).join(path.delimiter),
+      PATH: [bin, gitBin, nodeDir, process.env.PATH].filter(Boolean).join(path.delimiter),
     },
   });
   if (run.status !== 0) throw new Error(`the select step exited ${run.status}:\n${run.stdout}${run.stderr}`);
@@ -169,6 +180,10 @@ function runSelect(event: Event, temp: string, bin?: string): Selected {
 }
 
 type Shard = { argv: string[]; log: string };
+
+/** How the run step's `pnpm` argv starts on each speed: the suite runs from ui/, the vitest root. */
+const FULL_ARGV = ['--dir', 'ui', 'run', 'test'];
+const AFFECTED_ARGV = ['--dir', 'ui', 'exec', 'vitest', 'run'];
 
 /** Run the shard step with the outputs the select step left, `pnpm` recording its argv. */
 function runShard(event: Event, temp: string, outputs: Record<string, string>, run = RUN.run): Shard {
@@ -178,7 +193,7 @@ function runShard(event: Event, temp: string, outputs: Record<string, string>, r
   const argvFile = path.join(temp, 'pnpm-argv');
   const bin = standIn('pnpm', `printf '%s\\n' "$@" > ${JSON.stringify(argvFile)}\n`);
   const result = spawnSync('bash', ['-e', script], {
-    cwd: repoRoot,
+    cwd: workflowRoot,
     encoding: 'utf8',
     env: { ...process.env, ...env, RUNNER_TEMP: temp, PATH: `${bin}${path.delimiter}${process.env.PATH}` },
   });
@@ -189,6 +204,11 @@ function runShard(event: Event, temp: string, outputs: Record<string, string>, r
 /* ── one real selector run, replayed where only the wiring is in question ── */
 
 let head = '';
+/** The base ref every pull_request leg names; the `git` stand-in answers its merge base as HEAD. */
+const BASE_REF = 'main';
+/** A `git` that answers `merge-base` with HEAD and records what it was asked; every other call is the real git. */
+let gitBin = '';
+let mergeBaseArgv = '';
 /** The real selector's answer on this checkout, taken through the real select step. */
 let real: Selected & { filters: string[]; temp: string } = { outputs: {}, log: '', filters: [], temp: '' };
 /** A `node` that replays `real` for the select step, so each leg does not re-walk the tree. */
@@ -201,11 +221,25 @@ function freshTemp(leg: string): string {
 beforeAll(() => {
   scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'select-affected-wiring-13350-'));
   head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' }).trim();
+  const realGit = execFileSync('bash', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+  mergeBaseArgv = path.join(scratch, 'merge-base-argv');
+  gitBin = standIn(
+    'git',
+    [
+      'if [ "$1" = merge-base ]; then',
+      `  printf '%s\\n' "$@" > ${JSON.stringify(mergeBaseArgv)}`,
+      '  if [ -n "$OS_TEST_MERGE_BASE_FAILS" ]; then exit 1; fi',
+      `  exec ${JSON.stringify(realGit)} rev-parse HEAD`,
+      'fi',
+      `exec ${JSON.stringify(realGit)} "$@"`,
+      '',
+    ].join('\n'),
+  );
   const temp = freshTemp('real');
   // The select step itself names these two files under `$RUNNER_TEMP`.
   const filters = path.join(temp, 'affected-tests.txt');
   const stdout = path.join(temp, 'select.out');
-  real = { ...runSelect({ name: 'pull_request', base: head }, temp), filters: [], temp };
+  real = { ...runSelect({ name: 'pull_request', base: BASE_REF }, temp), filters: [], temp };
   real.filters = fs.readFileSync(filters, 'utf8').split('\n').filter(Boolean);
   replay = standIn(
     'node',
@@ -238,10 +272,21 @@ describe('the affected speed, both steps run as ci.yml writes them (objectui#133
     expect(modeBinding().key).not.toBe('');
   });
 
+  it('a pull_request diffs from the merge base of origin/<base ref> and HEAD, never the frozen payload sha', () => {
+    expect(fs.readFileSync(mergeBaseArgv, 'utf8').split('\n').filter(Boolean)).toEqual([
+      'merge-base',
+      `refs/remotes/origin/${BASE_REF}`,
+      'HEAD',
+    ]);
+    expect(real.log).toContain(`Diff base: ${head}`);
+    expect(SELECT.env.map(([name]) => name)).not.toContain('PR_BASE');
+  });
+
   it('a pull_request hands vitest exactly the filters the real selector wrote', () => {
     expect(real.filters.length).toBeGreaterThan(0);
     // The same `RUNNER_TEMP` the select step wrote its filters into, as one job's steps share it.
-    const shard = runShard({ name: 'pull_request', base: head }, real.temp, real.outputs);
+    const shard = runShard({ name: 'pull_request', base: BASE_REF }, real.temp, real.outputs);
+    expect(shard.argv.slice(0, AFFECTED_ARGV.length)).toEqual(AFFECTED_ARGV);
     expect(shard.argv.slice(-real.filters.length)).toEqual(real.filters);
     expect(shard.argv).toContain('--shard=1/16');
     expect(shard.log).toContain(`Affected speed: ${real.filters.length} vitest filter(s), shard 1 of 16.`);
@@ -260,18 +305,28 @@ describe('the affected speed, both steps run as ci.yml writes them (objectui#133
     const temp = freshTemp('push');
     const event: Event = { name: 'push', base: '' };
     const shard = runShard(event, temp, runSelect(event, temp, replay).outputs);
-    expect(shard.argv[0]).toBe('test');
+    expect(shard.argv.slice(0, FULL_ARGV.length)).toEqual(FULL_ARGV);
     expect(shard.argv).toContain('--shard=1/16');
     expect(shard.argv.filter((arg) => real.filters.includes(arg))).toEqual([]);
   });
 
-  it('a pull request with no base sha runs the whole suite (the step fails open)', () => {
+  it('a pull request with no base ref runs the whole suite (the step fails open)', () => {
     const temp = freshTemp('no-base');
     const event: Event = { name: 'pull_request', base: '' };
     const selected = runSelect(event, temp, replay);
     expect(selected.log).toContain('running the full suite rather than guessing');
     const shard = runShard(event, temp, selected.outputs);
-    expect(shard.argv[0]).toBe('test');
+    expect(shard.argv.slice(0, FULL_ARGV.length)).toEqual(FULL_ARGV);
+  });
+
+  it('a pull request whose merge base cannot be computed runs the whole suite (the step fails open)', () => {
+    const temp = freshTemp('no-merge-base');
+    const event: Event = { name: 'pull_request', base: BASE_REF };
+    const selected = runSelect(event, temp, replay, { OS_TEST_MERGE_BASE_FAILS: '1' });
+    expect(selected.log).toContain('running the full suite rather than guessing');
+    expect(selected.outputs[modeBinding().key]).toBe('full');
+    const shard = runShard(event, temp, selected.outputs);
+    expect(shard.argv.slice(0, FULL_ARGV.length)).toEqual(FULL_ARGV);
   });
 });
 
@@ -283,21 +338,21 @@ describe('controls: either end edited alone is a full run, so the legs above can
     expect(found, `the run step no longer compares $${variable} with a quoted literal; rewrite this control`).not.toBeNull();
     const reverted = RUN.run.replace(comparison, `[ "$${variable}" = '${key}=${found![1]}' ]`);
     expect(reverted).not.toBe(RUN.run);
-    const shard = runShard({ name: 'pull_request', base: head }, freshTemp('reverted'), real.outputs, reverted);
-    expect(shard.argv[0]).toBe('test');
+    const shard = runShard({ name: 'pull_request', base: BASE_REF }, freshTemp('reverted'), real.outputs, reverted);
+    expect(shard.argv.slice(0, FULL_ARGV.length)).toEqual(FULL_ARGV);
   });
 
   it('the select step writing its verdict under another key runs the whole suite', () => {
     const renamed = Object.fromEntries(Object.entries(real.outputs).map(([key, value]) => [`${key}_renamed`, value]));
-    const shard = runShard({ name: 'pull_request', base: head }, freshTemp('renamed-key'), renamed);
-    expect(shard.argv[0]).toBe('test');
+    const shard = runShard({ name: 'pull_request', base: BASE_REF }, freshTemp('renamed-key'), renamed);
+    expect(shard.argv.slice(0, FULL_ARGV.length)).toEqual(FULL_ARGV);
   });
 
   it('the select step writing another value under the same key runs the whole suite', () => {
     const { key } = modeBinding();
     expect(real.outputs[key], `the select step wrote no \`${key}\` output`).toBeDefined();
     const changed = { ...real.outputs, [key]: `${real.outputs[key]}-renamed` };
-    const shard = runShard({ name: 'pull_request', base: head }, freshTemp('renamed-value'), changed);
-    expect(shard.argv[0]).toBe('test');
+    const shard = runShard({ name: 'pull_request', base: BASE_REF }, freshTemp('renamed-value'), changed);
+    expect(shard.argv.slice(0, FULL_ARGV.length)).toEqual(FULL_ARGV);
   });
 });

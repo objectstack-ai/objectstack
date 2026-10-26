@@ -49,7 +49,7 @@ are `manifest`, `packages`, `objects`, `objectExtensions`, `picklists`,
 `agents`, `tools`, `skills`, `hooks`, `functions`, `mappings`,
 `analyticsCubes`, `connectors`, `data` (seed), `datasources`,
 `datasourceMapping`, `translations`, `i18n`, `plugins`, `devPlugins`,
-`devHint`, `devLogins`, `requires`, `tiers`, `onEnable`, `appName`, `email`, `sms`.
+`devHint`, `devLogins`, `demoStaff`, `requires`, `tiers`, `onEnable`, `appName`, `email`, `sms`.
 
 There is deliberately **no** top-level `workflows` or `approvals` collection:
 an approval is authored as a flow with Approval nodes (ADR-0019), and record

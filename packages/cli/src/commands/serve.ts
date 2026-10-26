@@ -4271,6 +4271,13 @@ export default class Serve extends Command {
               // X-Forwarded-For / X-Real-IP when establishing a client address.
               // Undeclared, both judge the transport's peer address.
               trustProxy: (config as any).server?.trustProxy === true,
+              // The stack's `demoStaff`, read off the definition this process
+              // loaded — the authored config, since `os build` writes the key
+              // into no artifact. Handed over whatever the boot: plugin-auth
+              // owns the decision to provision (a local development boot only)
+              // and says why when it refuses, so a production boot of a config
+              // that declares demo accounts is told, not silently skipped.
+              demoStaff: Array.isArray((config as any).demoStaff) ? (config as any).demoStaff : undefined,
               // Enable the admin plugin by default so the Setup app's
               // ban/unban/set-password/impersonate/set-role row actions
               // resolve to real endpoints. The plugin self-gates by role
