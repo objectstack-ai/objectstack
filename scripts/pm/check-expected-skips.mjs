@@ -45,7 +45,8 @@
  * family the merge-queue build answers it: on `merge_group` the `docs`, `core`
  * and `crosspkg` outputs widen to `'true'` and those jobs run on the merged
  * tree before anything reaches `main` (the `|| 'true'` half of ci.yml's filter
- * contract, pinned by `--self-test`). Two exceptions. The four ui jobs: on
+ * contract, pinned by `--self-test`). Two exceptions. The ui jobs (the four
+ * `* UI` jobs and `Build UI Deps`): on
  * `merge_group` their outputs are the same paths filter read against the
  * queue's `base_sha`, so a queue build skips them exactly when the merged diff
  * touches no ui path, and main's hourly run widens them. And the
@@ -252,6 +253,9 @@ const FULL_BATTERY_REASON =
  * The four `* UI` rows were added with their jobs (objectstack#25697), not
  * measured off landed heads: until objectui is imported under `ui/`, the
  * `ui_tree` output skips them on EVERY head, so the skip is by construction.
+ * `Build UI Deps` joined them the same way (objectstack#25963): it builds the
+ * closure the four replay, so its `if:` is their union, the `UI_CONSUMERS_GATE`
+ * shape.
  *
  * These are the LISTED rows. The judge reads them beside the DERIVED ones —
  * `deriveNonPrEventSkips` below, one exact `if:` shape read off the tree — and
@@ -337,6 +341,13 @@ export const EXPECTED_SKIPS = Object.freeze([
     job: 'build-docs',
     gate: { kind: 'filter-output', outputs: ['docs'] },
     reason: "gated on ci.yml's `filter` job `docs` output (apps/docs, content, the lockfile, ci.yml itself); a diff outside it skips the docs build on the PR head",
+  },
+  {
+    name: 'Build UI Deps',
+    workflow: 'ci.yml',
+    job: 'ui-deps',
+    gate: UI_CONSUMERS_GATE,
+    reason: `${UI_TREE_REASON}; with ui/ present it runs on a ui/ path or one of the seven packages objectui consumes (the \`ui_consumers\` output) — the union of the four ui jobs' conditions, since it builds the closure they replay; ${UI_QUEUE_REASON}`,
   },
   {
     name: 'Type Check UI',
@@ -1419,6 +1430,11 @@ export function selfTest() {
   t('audit: an unknown gate kind is a finding', auditRoster([{ ...coreRow, gate: { kind: 'vibes' } }], readLive).some((f) => f.includes('is not one of')), true);
   t('audit: a label row whose literal is not in the if: reds', auditRoster([{ ...EXPECTED_SKIPS.find((r) => r.name === 'Check Changeset'), gate: { kind: 'label', label: 'skip-tests' } }], readLive).some((f) => f.includes('does not spell')), true);
   t('audit: a clean roster over the live tree yields zero findings for the label rows too', auditRoster(EXPECTED_SKIPS.filter((r) => r.gate.kind === 'label'), readLive).length, 0);
+  const uiDepsRow = EXPECTED_SKIPS.find((r) => r.name === 'Build UI Deps');
+  t('roster: Build UI Deps is rostered on the ui_consumers gate, the Type Check UI shape', uiDepsRow?.job === 'ui-deps' && uiDepsRow.gate === EXPECTED_SKIPS.find((r) => r.name === 'Type Check UI')?.gate, true);
+  t('audit: …and a deleted ui-deps job still reds its row', auditRoster([uiDepsRow], withJob((d) => delete d.jobs['ui-deps'])).some((f) => f.includes('has no job')), true);
+  t('audit: …as does a ui-deps if: that dropped the ui_consumers half', auditRoster([uiDepsRow], withJob((d) => (d.jobs['ui-deps'].if = "${{ !cancelled() && needs.filter.outputs.ui_tree != 'false' && needs.filter.outputs.ui != 'false' }}"))).some((f) => f.includes('does not spell')), true);
+  t('fixture: a skipped Build UI Deps on a head with no ui scope → exit 0', verdictExit(judgeCheckRuns({ total_count: 2, check_runs: [fixtureRun('Lint & Repo Gates', 'success'), fixtureRun('Build UI Deps', 'skipped')] })), 0);
 
   // ---- the judge -------------------------------------------------------------
   const measured = judgeCheckRuns(measuredPayload());
