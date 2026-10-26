@@ -252,11 +252,12 @@ describe('objectui#7546 — what did NOT change', () => {
     expect(refusalPaths({ color: '#fff' })).toContain('name');
   });
 
-  it('a truly undeclared key is still stripped — the object is still non-strict', () => {
+  it('a truly undeclared key is still accepted — the object is still non-strict', () => {
     // Deliberate: this change declares the keys the renderer reads; it does not
     // close the object. `chart-inline-data-retired.test.ts` pins the same fact.
+    // Kept rather than stripped since objectstack#25923 (`.passthrough()`).
     const r = ChartDataSeriesSchema.safeParse({ name: 'r', notAKeyAtAll: 'x' });
     expect(r.success).toBe(true);
-    if (r.success) expect(r.data).not.toHaveProperty('notAKeyAtAll');
+    if (r.success) expect(r.data).toHaveProperty('notAKeyAtAll', 'x');
   });
 });

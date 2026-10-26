@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://objectstack.ai/docs
+    about: The published documentation site. Check it before you file an issue.

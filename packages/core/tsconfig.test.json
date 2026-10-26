@@ -34,7 +34,7 @@
 //     `lib`: nothing in this layer touches a browser global.
 //   - ⛔ STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`,
 //     `noUnusedParameters`, `noImplicitReturns`, `noFallthroughCasesInSwitch`
-//     are inherited from the root config and `types: ["node"]` from
+//     are inherited from the base config and `types: ["node"]` from
 //     `tsconfig.json`. Nothing here may loosen a type rule; if a test does not
 //     compile, that is the finding.
 //
@@ -53,13 +53,7 @@
 //     retired on 2026-09-18 (#18373). This file declares no `paths` at all, so
 //     the rule stands.
 {
-  "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "noEmit": true,
-    "module": "esnext",
-    "moduleResolution": "bundler",
-    "lib": ["ES2022"]
-  },
+  "extends": ["./tsconfig.json", "../../tsconfig.test.base.json"],
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
 }

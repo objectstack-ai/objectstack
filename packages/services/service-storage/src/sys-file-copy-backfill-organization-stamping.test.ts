@@ -123,6 +123,7 @@ function lifecycleEngine(files: Array<Record<string, unknown>>) {
  * Drive an insert of `product` whose `image` already names a file owned by a
  * DIFFERENT slot — the one condition that reaches `copyOwnedFile` — with the
  * session the engine's `buildSession()` would have built for the caller.
+ * [#25694] Every caller here is signed in: an anonymous write carries no file.
  */
 async function driveCopyingInsert(engine: any, session: unknown) {
   const data: Record<string, unknown> = { image: 'file_owned' };
@@ -170,7 +171,7 @@ describe('#13547 door 5 — copyOwnedFile threads the triggering write’s organ
     const engine = lifecycleEngine([ownedFile()]);
     installFileReferenceHooks(engine, () => fakeStorage(), silentLogger());
 
-    await driveCopyingInsert(engine, { organizationId: 'org_A' });
+    await driveCopyingInsert(engine, { userId: 'u1', organizationId: 'org_A' });
 
     expect(sysFileInsertOf(engine.inserts).data).not.toHaveProperty('organization_id');
   });
@@ -205,7 +206,7 @@ describe('#13547 door 5 — copyOwnedFile threads the triggering write’s organ
     const engine = lifecycleEngine([{ ...ownedFile(), organization_id: 'org_SOURCE' }]);
     installFileReferenceHooks(engine, () => fakeStorage(), silentLogger());
 
-    await driveCopyingInsert(engine, { organizationId: 'org_A' });
+    await driveCopyingInsert(engine, { userId: 'u1', organizationId: 'org_A' });
 
     expect(sysFileInsertOf(engine.inserts).options?.context?.tenantId).toBe('org_A');
   });
@@ -218,7 +219,7 @@ describe('#13547 door 5 — copyOwnedFile threads the triggering write’s organ
     const engine = lifecycleEngine([ownedFile()]);
     installFileReferenceHooks(engine, () => fakeStorage(), silentLogger());
 
-    await driveCopyingInsert(engine, { organizationId: 'org_A' });
+    await driveCopyingInsert(engine, { userId: 'u1', organizationId: 'org_A' });
 
     expect(engine.updates.length).toBeGreaterThan(0);
     for (const { data } of engine.updates) {

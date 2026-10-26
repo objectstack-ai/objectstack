@@ -1914,7 +1914,7 @@ function classifyDataError(error: any, object?: string): { status: number; body:
         };
     }
 
-    const notNull = notNullViolationSite(raw);
+    const notNull = notNullSiteInText(raw);
     if (notNull) {
         const field = notNull.column;
         // The metadata required-check (`record-validator`) runs BEFORE the
@@ -1936,22 +1936,22 @@ function classifyDataError(error: any, object?: string): { status: number; body:
         // are the same for both.
         //
         // [#24715] …and the sentence names the COLUMN, because the column is
-        // all the driver's text carries. The caller that holds the object's
-        // field map names the field by its label instead, and gives a field
-        // declared `storage: { notNull: true }` its own hint
-        // ({@link relabelNotNullRefusal}). The hint here therefore prescribes
-        // nothing that is wrong for either case: it used to add "or declare the
-        // field `required`", which for a column an engine hook populates is the
-        // move ADR-0113 D1 / D2 rule out (it puts the demand back on the form).
-        const body: Record<string, unknown> = {
-            error: `${field} is required`,
-            code: 'VALIDATION_FAILED',
-            fields: [{ field, code: 'required', message: `${field} is required` }],
-            hint: notNullRefusalHint(field),
-            ...(object ? { object } : {}),
-        };
-        NOT_NULL_REFUSAL_SITES.set(body, notNull);
-        return { status: 400, body };
+        // all the driver's text carries. The hint therefore prescribes nothing
+        // that is wrong for either case: it used to add "or declare the field
+        // `required`", which for a column an engine hook populates is the move
+        // ADR-0113 D1 / D2 rule out (it puts the demand back on the form).
+        //
+        // [#24768] A refusal on a field the object DECLARES no longer reaches
+        // this branch: the engine holds the field map at its write doors, and
+        // refuses that write as its own `ValidationError`, named by the field's
+        // label (`notNullViolationSite` below is what it asks). What is left
+        // here is the column no field declares, where the column is all there
+        // is to name, and any driver error a non-engine write lets out.
+        //
+        // [#26031] The dispatcher's doors answer this arm too, by asking for it
+        // ({@link driverNotNullRefusalAnswer}), so the answer is built where
+        // that question can recognise it.
+        return notNullArmAnswer(field, object);
     }
 
     // [#5462] A driver saying "that relation is missing" is an unknown-OBJECT
@@ -2065,7 +2065,7 @@ function classifyDataError(error: any, object?: string): { status: number; body:
     return UNCLASSIFIED_FAULT();
 }
 
-// ── The NOT NULL refusal, and the caller that names its field ([#24715]) ─────
+// ── The NOT NULL refusal, and the engine that names its field ([#24768]) ─────
 
 /**
  * [#24715] Where a driver's NOT NULL refusal points: the column, and the table
@@ -2088,7 +2088,7 @@ export interface NotNullRefusalSite {
     readonly table?: string;
 }
 
-function notNullViolationSite(raw: string): NotNullRefusalSite | undefined {
+function notNullSiteInText(raw: string): NotNullRefusalSite | undefined {
     const sqlite = /not null constraint failed:\s*(\S*?)\.([a-z0-9_]+)/i.exec(raw);
     if (sqlite) return sqlite[1] ? { column: sqlite[2], table: sqlite[1] } : { column: sqlite[2] };
     const postgres = /null value in column\s+["'`]([a-z0-9_]+)["'`](?:\s+of\s+relation\s+["'`]([^"'`]+)["'`])?/i.exec(raw);
@@ -2098,19 +2098,90 @@ function notNullViolationSite(raw: string): NotNullRefusalSite | undefined {
 }
 
 /**
- * [#24715] The bodies the NOT NULL branch of {@link classifyDataError} built,
- * keyed to the site the driver named.
- *
- * Why a brand and not a key on the body: the body IS the wire answer, and the
- * caller that relabels it ({@link relabelNotNullRefusal}) must recognise THIS
- * branch's answer exactly — never a lookalike with the same `code` and
- * `fields[0].code` built by another branch (a record validator's own
- * `required` refusal is one) — without the wire growing a key to say so. A
- * body copied on the way out (the declared-`userMessage` wrapper builds a new
- * one, and a driver error carries no such mark) is simply not recognised, and
- * keeps the column's sentence: the safe way to be wrong.
+ * [#24768] The codes a driver error states a NOT NULL refusal by, per dialect,
+ * as measured: better-sqlite3 `code: 'SQLITE_CONSTRAINT_NOTNULL'`; libsql
+ * `code: 'SQLITE_CONSTRAINT'` with `extendedCode: 'SQLITE_CONSTRAINT_NOTNULL'`
+ * (`rawCode: 1299`), and the same code again on its `cause`; node-postgres
+ * SQLSTATE `23502`; mysql2 `code: 'ER_BAD_NULL_ERROR'`, `errno: 1048`. sql.js
+ * (`driver-sqlite-wasm`) states no code at all, only the text.
  */
-const NOT_NULL_REFUSAL_SITES = new WeakMap<object, NotNullRefusalSite>();
+const NOT_NULL_CODES = new Set(['SQLITE_CONSTRAINT_NOTNULL', '23502', 'ER_BAD_NULL_ERROR']);
+const NOT_NULL_ERRNOS = new Set([1048]);
+/** SQLite's extended result code for `SQLITE_CONSTRAINT_NOTNULL`, as libsql states it on `rawCode`. */
+const SQLITE_CONSTRAINT_NOTNULL_RAW = 1299;
+/** The PRIMARY code libsql states beside the extended one: a constraint, not WHICH constraint. */
+const SQLITE_CONSTRAINT_PRIMARY = 'SQLITE_CONSTRAINT';
+
+/** How far to follow an `error.cause` chain — drivers wrap, but not deeply. */
+const NOT_NULL_MAX_CAUSE_DEPTH = 4;
+
+/**
+ * [#24768] The site of a driver's NOT NULL refusal — the column it names, and
+ * the table when its dialect names one — or `undefined` when `error` is not one.
+ *
+ * The engine asks this at its write doors' driver exits, where it holds the
+ * object's field map, and refuses the write as its own `ValidationError` for the
+ * field that column is, named by its label (`@objectstack/objectql`,
+ * `not-null-refusal-error.ts`). {@link mapDataError} reads the same text below,
+ * for a refusal nothing translated: a column no field declares.
+ *
+ * Reads, in turn: the error's codes (table above), then its text, then one step
+ * down the `cause` chain, bounded. A code that names NOT NULL vouches for the
+ * text, and Postgres' own `column` / `table` fields answer when the text does
+ * not carry them. An error that states a code naming ANOTHER refusal (a CHECK or
+ * a foreign key) is not read for NOT NULL text at all: its message may quote the
+ * statement, and a bound value can spell anything. An error with no code is read
+ * by its text alone, which is all sql.js gives. A plain string is read as text.
+ *
+ * **Unrecognised is `undefined`**, and so is a refusal whose column cannot be
+ * determined: the caller then has no field to name and keeps the answer it had.
+ */
+export function notNullViolationSite(error: unknown): NotNullRefusalSite | undefined {
+    return findNotNullViolationSite(error, 0);
+}
+
+function findNotNullViolationSite(error: unknown, depth: number): NotNullRefusalSite | undefined {
+    if (error === null || error === undefined || depth > NOT_NULL_MAX_CAUSE_DEPTH) return undefined;
+    if (typeof error === 'string') return notNullSiteInText(error);
+    if (typeof error !== 'object') return undefined;
+
+    const err = error as {
+        code?: unknown; extendedCode?: unknown; rawCode?: unknown; errno?: unknown;
+        message?: unknown; column?: unknown; table?: unknown; cause?: unknown;
+    };
+    const stated = statedNotNull(err);
+    if (stated !== false) {
+        const fromText = typeof err.message === 'string' ? notNullSiteInText(err.message) : undefined;
+        if (fromText) return fromText;
+        // node-postgres keeps the column and the table on fields of their own.
+        if (stated === true && typeof err.column === 'string' && err.column !== '') {
+            return typeof err.table === 'string' && err.table !== ''
+                ? { column: err.column, table: err.table }
+                : { column: err.column };
+        }
+    }
+    return findNotNullViolationSite(err.cause, depth + 1);
+}
+
+/**
+ * Whether `err`'s codes state a NOT NULL refusal (`true`), state some other
+ * refusal (`false`), or state none that decides it (`undefined`: no code, or
+ * libsql's bare `SQLITE_CONSTRAINT` without its extended code).
+ */
+function statedNotNull(err: {
+    code?: unknown; extendedCode?: unknown; rawCode?: unknown; errno?: unknown;
+}): boolean | undefined {
+    if (typeof err.extendedCode === 'string') return NOT_NULL_CODES.has(err.extendedCode);
+    if (typeof err.rawCode === 'number') return err.rawCode === SQLITE_CONSTRAINT_NOTNULL_RAW;
+    if (typeof err.code === 'string' && err.code !== '') {
+        if (NOT_NULL_CODES.has(err.code)) return true;
+        return err.code === SQLITE_CONSTRAINT_PRIMARY ? undefined : false;
+    }
+    // A numeric `code` is MySQL's errno wearing the other field's name.
+    if (typeof err.code === 'number') return NOT_NULL_ERRNOS.has(err.code);
+    if (typeof err.errno === 'number') return NOT_NULL_ERRNOS.has(err.errno);
+    return undefined;
+}
 
 /**
  * The NOT NULL branch's hint, for a column whose field map this branch never
@@ -2128,72 +2199,56 @@ function notNullRefusalHint(field: string): string {
 }
 
 /**
- * The hint for a field the object declares `storage: { notNull: true }` — set
- * by the caller that holds the field map, the one that can tell this case from
- * drift. Nothing has drifted and nothing is missing from the metadata, so it
- * names neither `os migrate` nor `required`: per ADR-0113 D1 / D2 the column
- * constraint is deliberately not the write contract, and a field a hook or a
- * default populates is not one the form should demand.
+ * [#26031] The answers {@link classifyDataError}'s NOT NULL arm built, held by
+ * identity so {@link driverNotNullRefusalAnswer} can tell that arm's answer
+ * from every other arm's without reading its shape.
  */
-function declaredNotNullHint(field: string): string {
-    return `The field '${field}' is declared \`storage: { notNull: true }\`, so its database column requires a value: `
-        + `send one, or omit the field when a default value or a hook populates it `
-        + `(an update that omits it keeps the stored value).`;
-}
+const NOT_NULL_ARM_ANSWERS = new WeakSet<object>();
 
-/**
- * [#24715] The site of the NOT NULL refusal `answer` is — when, and only when,
- * `answer` is the one {@link mapDataError} built for a driver's NOT NULL text.
- * `undefined` for every other answer.
- *
- * Asked by the caller that holds the object's field map before it relabels the
- * refusal ({@link relabelNotNullRefusal}). The `table` lets that caller decline
- * a refusal the driver attributes to a table other than the object it holds:
- * a hook's write to another object fails inside the request, and its column is
- * not the requested object's field.
- */
-export function notNullRefusalSite(answer: { body: Record<string, unknown> }): NotNullRefusalSite | undefined {
-    return NOT_NULL_REFUSAL_SITES.get(answer.body);
-}
-
-/**
- * [#24715] Name the field of a NOT NULL refusal the way the caller's field map
- * names it.
- *
- * The classification above sees the driver's text and the object's name, never
- * the field map, so its sentence names the column (`unit_price is required`)
- * and its hint must hold for every field. The caller that holds the field map
- * hands in what only it can know:
- *
- *  - `message` — the field's `required` sentence, rendered the way the record
- *    validator renders its own (the shared catalog, the caller's locale, the
- *    field's label). It replaces `error` and `fields[0].message`.
- *  - `declaresNotNull` — whether the field declares `storage: { notNull: true }`.
- *    When it does, the hint is the declared column's, which prescribes neither
- *    `required` nor `os migrate`. When it does not, the classification's hint
- *    stands, drift remedy included.
- *
- * Everything else is byte-for-byte the classification's: `status`, `code`,
- * `fields[0].field` (the column key a client maps to its input), `fields[0].code`,
- * `object`, and the key set. An answer that is not the NOT NULL branch's is
- * handed back untouched.
- */
-export function relabelNotNullRefusal(
-    answer: { status: number; body: Record<string, unknown> },
-    field: { message: string; declaresNotNull: boolean },
-): { status: number; body: Record<string, unknown> } {
-    const site = notNullRefusalSite(answer);
-    if (!site) return answer;
-    const [first] = answer.body.fields as Array<Record<string, unknown>>;
-    return {
-        status: answer.status,
+/** The NOT NULL arm's answer: the column's sentence, its `required` field entry and the hint. */
+function notNullArmAnswer(field: string, object: string | undefined): { status: number; body: Record<string, unknown> } {
+    const answer = {
+        status: 400,
         body: {
-            ...answer.body,
-            error: field.message,
-            fields: [{ ...first, message: field.message }],
-            ...(field.declaresNotNull ? { hint: declaredNotNullHint(site.column) } : {}),
+            error: `${field} is required`,
+            code: 'VALIDATION_FAILED',
+            fields: [{ field, code: 'required', message: `${field} is required` }],
+            hint: notNullRefusalHint(field),
+            ...(object ? { object } : {}),
         },
     };
+    NOT_NULL_ARM_ANSWERS.add(answer);
+    return answer;
+}
+
+/**
+ * [#26031] `RestServer`'s answer to a driver's NOT NULL refusal that nothing
+ * translated, for a door that does not classify the rest of what it catches:
+ * the NOT NULL arm's `{ status, body }` when classification answers `error`
+ * with that arm, `undefined` for anything else.
+ *
+ * #24768 (ruling A) has the engine refuse a NOT NULL violation on a field the
+ * object declares as its own `ValidationError`, which every door already
+ * answers alike. What still leaves the engine as the driver threw it is a
+ * column no field declares (drift: the field left the metadata and its column
+ * stayed NOT NULL), and `RestServer` answered that with this arm while the
+ * dispatcher's `/data` exit answered `500` and its actions door relayed the
+ * driver's text as a `400 VALIDATION_ERROR`. Those doors ask this, and answer
+ * the body it returns in their own envelope.
+ *
+ * The question is classification's whole answer, not a second reading of the
+ * driver's text: everything ahead of the arm (a declared status, a sandbox
+ * wrapper, a unique violation, an unknown column, …) still decides first, so
+ * this answers exactly where {@link mapDataError} would. The producer's
+ * `userMessage` (the wrapper's half) is not part of it: no driver error carries
+ * one.
+ */
+export function driverNotNullRefusalAnswer(
+    error: unknown,
+    object?: string,
+): { status: number; body: Record<string, unknown> } | undefined {
+    const answer = classifyDataError(error, object);
+    return NOT_NULL_ARM_ANSWERS.has(answer) ? answer : undefined;
 }
 
 // The members above that are not `export`ed where they are declared, but that

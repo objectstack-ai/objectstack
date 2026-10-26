@@ -380,26 +380,27 @@ describe.each(SHAPES)('the shipped sets serve the identity objects as before —
     restored = await boot(shape, withCopiesRestored(await registeredObjects()));
   });
 
-  it('every persona is served exactly the listed ids on every touched object', async () => {
+  // One case per object, not one sweep over all of them: the restored-copies
+  // sweep was about 400 real-stack reads in a single case, which a loaded
+  // runner pushed past the 5000ms default on `main` as on any branch (#26065).
+  // Per object it is one persona column: the same reads and the same verdicts,
+  // each case a few dozen of them, and a failure names its object.
+  it.each(TOUCHED)('every persona is served exactly the listed ids on %s', async (object) => {
     const wrong: string[] = [];
     for (const persona of shape.personas) {
-      for (const object of TOUCHED) {
-        const now = await shipped.served(object, PERSONAS[persona]);
-        const want = expectedServed(shape, persona, object);
-        if (JSON.stringify(now) !== JSON.stringify(want)) wrong.push(`${persona} on ${object}: ${JSON.stringify(now)} (expected ${JSON.stringify(want)})`);
-      }
+      const now = await shipped.served(object, PERSONAS[persona]);
+      const want = expectedServed(shape, persona, object);
+      if (JSON.stringify(now) !== JSON.stringify(want)) wrong.push(`${persona} on ${object}: ${JSON.stringify(now)} (expected ${JSON.stringify(want)})`);
     }
     expect(wrong).toEqual([]);
   });
 
-  it('…and exactly what the same deployment serves with the dropped copies spread back into the sets', async () => {
+  it.each([...TOUCHED, ...KEPT_ALL, 'sys_user'])('…and exactly what the same deployment serves on %s with the dropped copies spread back into the sets', async (object) => {
     const moved: string[] = [];
     for (const persona of shape.personas) {
-      for (const object of [...TOUCHED, ...KEPT_ALL, 'sys_user']) {
-        const was = await restored.served(object, PERSONAS[persona]);
-        const now = await shipped.served(object, PERSONAS[persona]);
-        if (JSON.stringify(now) !== JSON.stringify(was)) moved.push(`${persona} on ${object}: ${JSON.stringify(was)} -> ${JSON.stringify(now)}`);
-      }
+      const was = await restored.served(object, PERSONAS[persona]);
+      const now = await shipped.served(object, PERSONAS[persona]);
+      if (JSON.stringify(now) !== JSON.stringify(was)) moved.push(`${persona} on ${object}: ${JSON.stringify(was)} -> ${JSON.stringify(now)}`);
     }
     expect(moved).toEqual([]);
   });

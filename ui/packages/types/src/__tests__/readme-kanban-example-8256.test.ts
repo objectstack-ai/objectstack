@@ -36,11 +36,13 @@
  * everything, so the HISTORICAL lane shape is parsed alongside and must be
  * refused. ⚠️ And the third leg is the reason a TEXT assertion is needed at
  * all: on this face `color` is NOT a named refusal. `ObjectKanbanLaneSchema` is
- * a plain strip-postured `z.object`, so a lane carrying `color` PARSES and the
- * key is dropped from the parsed document. (The named refusal for `color` lives
+ * a non-strict object that does not declare `color`, so a lane carrying `color`
+ * PARSES and no renderer reads the key (it was dropped from the parsed document
+ * while the lane mirror was strip mode, and is kept since objectstack#25923 made
+ * every mirror object `.passthrough()`). (The named refusal for `color` lives
  * on `complex.zod.ts#KanbanColumnSchema`, which judges nothing authored today:
  * the bare `kanban` arm it served retired in objectui#8802.) An
- * accepted-and-dropped key cannot be caught by validity alone.
+ * accepted-and-unread key cannot be caught by validity alone.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -116,16 +118,18 @@ describe("root README: the 'Kanban Board' example", () => {
     ).not.toEqual([]);
   });
 
-  it('carries no `color` on a lane — ACCEPTED AND DROPPED here, so validity alone cannot see it', () => {
+  it('carries no `color` on a lane — ACCEPTED AND UNREAD here, so validity alone cannot see it', () => {
     const withColour = { ...EXAMPLE, columns: [{ id: 'todo', title: 'To Do', color: '#6366f1' }] };
     const parsed = safeValidateSchema(withColour);
-    // First half: the measurement. A lane `color` parses and is stripped.
+    // First half: the measurement. A lane `color` parses with no issue. It was
+    // stripped while the lane mirror was strip mode; since objectstack#25923 it is
+    // `.passthrough()` and keeps the key — undeclared, so no renderer reads it.
     expect(parsed.success).toBe(true);
     expect(
       parsed.success ? Object.keys((parsed.data as { columns: object[] }).columns[0]) : [],
-      '`ObjectKanbanLaneSchema` strips what it does not declare, so an authored lane `color` ' +
+      '`ObjectKanbanLaneSchema` does not declare `color`, so an authored lane `color` ' +
         'reaches no renderer and raises no issue. Style a lane through its `className`.',
-    ).not.toContain('color');
+    ).toContain('color');
     // Second half: therefore the page is checked as TEXT, not only as a parse.
     expect(JSON.stringify(EXAMPLE)).not.toContain('"color"');
   });

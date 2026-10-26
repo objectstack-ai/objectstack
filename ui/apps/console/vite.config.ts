@@ -19,7 +19,12 @@ import { viteCryptoStub } from '../../scripts/vite-crypto-stub.ts';
 import { viteMaplibreWorker } from '../../scripts/vite-maplibre-worker.ts';
 import { assertSingleZodInstance } from '../../scripts/vite-single-zod.ts';
 import { viteIneffectiveDynamicImports } from '../../scripts/vite-ineffective-dynamic-imports.ts';
-import { frameworkPackagesDir, workspaceChunkTests } from '../../scripts/vite-objectstack-workspace.ts';
+import {
+  frameworkPackagesDir,
+  objectuiPackagesDir,
+  workspaceChunkTests,
+  workspaceModuleMatcher,
+} from '../../scripts/vite-objectstack-workspace.ts';
 import { viteDeclaredLazyViews } from '../../scripts/vite-declared-lazy-views.ts';
 import { viteTypesZodLazy } from '../../scripts/vite-types-zod-lazy.ts';
 import { compression } from 'vite-plugin-compression2';
@@ -400,8 +405,9 @@ function emitEagerClosureReport(reportFileName = 'eager-closure.json'): Plugin {
  *
  * ## What it counts, said in words
  *
- * The population is every module in every emitted chunk whose id contains a
- * `packages/<name>/` segment — workspace source, not `node_modules`, and not
+ * The population is every module in every emitted chunk whose id lies under
+ * objectui's own `packages/<name>/` — workspace source, not `node_modules`, not
+ * the objectstack framework's `packages/` beside it in the monorepo, and not
  * limited to the eager closure: a budgeted package's module hiding in a LAZY
  * chunk is exactly as much a membership breach as one hiding in an eager
  * neighbour, and the eager-closure walk cannot see it.
@@ -429,10 +435,15 @@ function emitChunkMembershipReport(reportFileName = 'chunk-membership.json'): Pl
   // The module ids rolldown records are realpaths, so a workspace module reads
   // as `<repo>/packages/<name>/src/...` no matter which symlink resolved it —
   // the same assumption the `advancedChunks` group tests above are written on.
+  // Anchored on objectui's OWN `packages/` directory: inside the objectstack
+  // monorepo the framework's packages resolve to a second `packages/`
+  // directory whose names overlap objectui's (`core`, `types`, ...), and an
+  // unanchored segment attributed `@objectstack/core` to objectui's
+  // `packages/core`. `workspaceModuleMatcher` says why in full.
   // The second capture is the rest of the id — the package-relative path the
   // `directories` table is keyed by (its directory, `/`-separated, any query
   // suffix dropped: `?inline` and friends are the same file).
-  const WORKSPACE_MODULE = /[\\/]packages[\\/]([^\\/]+)[\\/](.*)$/;
+  const WORKSPACE_MODULE = workspaceModuleMatcher(objectuiPackagesDir(import.meta.dirname));
   const directoryOf = (rest: string) => {
     const file = rest.split('?')[0].replace(/\\/g, '/');
     const slash = file.lastIndexOf('/');

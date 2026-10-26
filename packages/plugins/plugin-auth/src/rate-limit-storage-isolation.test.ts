@@ -257,17 +257,17 @@ describe('@objectstack/plugin-auth — ./rate-limit-storage stays free of better
 
   it('package.json publishes the ./rate-limit-storage subpath', () => {
     const pkg = JSON.parse(readFileSync(join(PKG, 'package.json'), 'utf8')) as {
-      exports: Record<string, Record<string, string>>;
+      exports: Record<string, unknown>;
       files?: string[];
     };
     expect(Object.keys(pkg.exports)).toContain('./rate-limit-storage');
     expect(pkg.exports['./rate-limit-storage']).toEqual({
-      // `types` first: conditions are first-match-wins, so a `types` key behind
-      // `import`/`require` is only ever read by accident. 84 of the 85 exports
-      // conditions on main are written this way.
-      types: './dist/rate-limit-storage.d.ts',
-      import: './dist/rate-limit-storage.mjs',
-      require: './dist/rate-limit-storage.js',
+      // One `types` per module format: the ESM entry gets tsup's `.d.mts`, the
+      // CJS entry its `.d.ts`, so neither format is typed by the other's
+      // declarations (attw `FalseCJS`). Inside each condition `types` still
+      // comes first — conditions are first-match-wins.
+      import: { types: './dist/rate-limit-storage.d.mts', default: './dist/rate-limit-storage.mjs' },
+      require: { types: './dist/rate-limit-storage.d.ts', default: './dist/rate-limit-storage.js' },
     });
     // `check:published-files` SUFFICIENT covers this too; pinned here so the
     // entry cannot be declared and then left out of the published whitelist.

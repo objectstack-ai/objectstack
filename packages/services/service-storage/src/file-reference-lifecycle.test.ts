@@ -9,6 +9,7 @@ import {
   type FileReferenceEngine,
 } from './file-reference-lifecycle.js';
 import { assertEngineFindOnePredicate } from '@objectstack/objectql';
+import { resolveThrownHttpError } from '@objectstack/types';
 
 const silentLogger = () => ({ info: vi.fn(), warn: vi.fn(), debug: vi.fn() });
 
@@ -1080,6 +1081,9 @@ describe('File Reference Ownership (ADR-0104 D3 wave 2)', () => {
  * file ids; `file-reference-read-verdict.integration.test.ts` pins the real
  * binding against the door. Each refusal pin below is ablated in the PR that
  * introduced it.
+ *
+ * [#26043] A file the verdict refuses refuses the write at the field, before
+ * the driver runs; an id that names no file gets the same answer.
  */
 describe('a write references only a file its caller may read', () => {
   const CALLER = { userId: 'u_writer', tenantId: 'org_1' };
@@ -1145,16 +1149,26 @@ describe('a write references only a file its caller may read', () => {
   const ownedByP1 = () => file({ ref_object: 'product', ref_id: 'p1', ref_field: 'image' });
   const sysFileWrites = (engine: Engine) =>
     engine.calls.filter((c) => (c.op === 'update' || c.op === 'insert') && c.object === 'sys_file');
+  const refusedBy = (p: Promise<unknown>) => p.then(() => null, (e) => e);
+
+  /** [#26043] The field refusal, as the HTTP boundary answers it: one `invalid_value` entry per refused field. */
+  const expectFieldRefused = (err: unknown, fields: string[]) => {
+    const answered = resolveThrownHttpError(err);
+    expect({ status: answered.status, code: answered.code }).toEqual({ status: 400, code: 'VALIDATION_FAILED' });
+    expect((answered.details?.fields as any[]).map((f) => [f.field, f.code]))
+      .toEqual(fields.map((f) => [f, 'invalid_value']));
+  };
 
   describe('a file another record owns', () => {
-    it('is not copied for a caller the verdict refuses: the value is kept as written', async () => {
+    it('is refused at the field for a caller the verdict refuses, and not copied', async () => {
       const engine = fakeEngine({ files: [ownedByP1()], records: { product: [{ id: 'p1', image: 'file_a' }] } });
       const { authorizeRead } = verdict([]);
       const { storage } = installWith(engine, authorizeRead);
 
-      const row = await insertAs(engine, 'product', { image: 'file_a' }, 'p2');
+      const err = await refusedBy(insertAs(engine, 'product', { image: 'file_a' }, 'p2'));
 
-      expect(row.image).toBe('file_a');
+      expectFieldRefused(err, ['image']);
+      expect((engine.tables.product ?? []).map((r) => r.id)).toEqual(['p1']);
       expect(storage.download).not.toHaveBeenCalled();
       expect(storage.upload).not.toHaveBeenCalled();
       expect(engine.tables.sys_file).toHaveLength(1);
@@ -1162,7 +1176,7 @@ describe('a write references only a file its caller may read', () => {
       expect(sysFileWrites(engine)).toEqual([]);
     });
 
-    it('is not copied by an update for a caller the verdict refuses', async () => {
+    it('is refused at the field by an update for a caller the verdict refuses, and not copied', async () => {
       const engine = fakeEngine({
         files: [ownedByP1()],
         records: { product: [{ id: 'p1', image: 'file_a' }, { id: 'p2', image: null }] },
@@ -1170,9 +1184,10 @@ describe('a write references only a file its caller may read', () => {
       const { authorizeRead } = verdict([]);
       const { storage } = installWith(engine, authorizeRead);
 
-      const row = await updateAs(engine, 'product', 'p2', { image: 'file_a' });
+      const err = await refusedBy(updateAs(engine, 'product', 'p2', { image: 'file_a' }));
 
-      expect(row?.image).toBe('file_a');
+      expectFieldRefused(err, ['image']);
+      expect(engine.tables.product.find((r) => r.id === 'p2')?.image).toBeNull();
       expect(storage.download).not.toHaveBeenCalled();
       expect(engine.tables.sys_file).toHaveLength(1);
       expect(engine.tables.sys_file[0]).toMatchObject({ ref_id: 'p1' });
@@ -1198,25 +1213,28 @@ describe('a write references only a file its caller may read', () => {
   });
 
   describe('a file no record owns', () => {
-    it('is not claimed for a caller the verdict refuses', async () => {
+    it('is refused at the field for a caller the verdict refuses, and not claimed', async () => {
       const engine = fakeEngine({ files: [file()] });
       const { authorizeRead } = verdict([]);
       installWith(engine, authorizeRead);
 
-      const row = await insertAs(engine, 'product', { image: 'file_a' }, 'p1');
+      const err = await refusedBy(insertAs(engine, 'product', { image: 'file_a' }, 'p1'));
 
-      expect(row.image).toBe('file_a');
+      expectFieldRefused(err, ['image']);
+      expect(engine.tables.product ?? []).toEqual([]);
       expect(engine.tables.sys_file[0].ref_id ?? null).toBeNull();
       expect(sysFileWrites(engine)).toEqual([]);
     });
 
-    it('is not claimed by an update for a caller the verdict refuses', async () => {
+    it('is refused at the field by an update for a caller the verdict refuses, and not claimed', async () => {
       const engine = fakeEngine({ files: [file()], records: { product: [{ id: 'p1', image: null }] } });
       const { authorizeRead } = verdict([]);
       installWith(engine, authorizeRead);
 
-      await updateAs(engine, 'product', 'p1', { image: 'file_a' });
+      const err = await refusedBy(updateAs(engine, 'product', 'p1', { image: 'file_a' }));
 
+      expectFieldRefused(err, ['image']);
+      expect(engine.tables.product[0].image).toBeNull();
       expect(engine.tables.sys_file[0].ref_id ?? null).toBeNull();
       expect(sysFileWrites(engine)).toEqual([]);
     });
@@ -1226,7 +1244,7 @@ describe('a write references only a file its caller may read', () => {
       const { authorizeRead } = verdict([]);
       installWith(engine, authorizeRead);
 
-      await insertAs(engine, 'product', { image: 'file_a' }, 'p1');
+      expectFieldRefused(await refusedBy(insertAs(engine, 'product', { image: 'file_a' }, 'p1')), ['image']);
 
       expect(engine.tables.sys_file[0]).toMatchObject({ status: 'deleted', deleted_at: '2026-01-01T00:00:00.000Z' });
       expect(engine.tables.sys_file[0].ref_id ?? null).toBeNull();
@@ -1242,19 +1260,53 @@ describe('a write references only a file its caller may read', () => {
       expect(engine.tables.sys_file[0]).toMatchObject({ ref_object: 'product', ref_id: 'p1', ref_field: 'image' });
     });
 
-    it('each id of a multiple:true field is judged on its own', async () => {
+    it('one id of a multiple:true field the caller may not read refuses the field, and none of its ids is taken', async () => {
       const engine = fakeEngine({ files: [file(), file({ id: 'file_b', key: 'user/file_b.png' })] });
       const { authorizeRead } = verdict(['file_b']);
       installWith(engine, authorizeRead);
 
-      const row = await insertAs(engine, 'product', { gallery: ['file_a', 'file_b'] }, 'p1');
+      expectFieldRefused(await refusedBy(insertAs(engine, 'product', { gallery: ['file_b', 'file_a'] }, 'p1')), ['gallery']);
 
-      expect(row.gallery).toEqual(['file_a', 'file_b']);
       expect(engine.tables.sys_file.map((f) => [f.id, f.ref_id ?? null])).toEqual([
         ['file_a', null],
-        ['file_b', 'p1'],
+        ['file_b', null],
       ]);
     });
+  });
+
+  it('[#26043] an id that names no file gets the answer a file the caller may not read gets', async () => {
+    const engine = fakeEngine({ files: [file()] });
+    const { authorizeRead } = verdict([]);
+    installWith(engine, authorizeRead);
+
+    const unreadable = await refusedBy(insertAs(engine, 'product', { image: 'file_a' }, 'p1'));
+    const nowhere = await refusedBy(insertAs(engine, 'product', { image: 'file_nowhere' }, 'p2'));
+
+    expectFieldRefused(nowhere, ['image']);
+    expect(resolveThrownHttpError(nowhere)).toEqual(resolveThrownHttpError(unreadable));
+    expect(engine.tables.product ?? []).toEqual([]);
+  });
+
+  it('[#26043] every refused field is named, in one answer', async () => {
+    const engine = fakeEngine({ files: [file()] });
+    const { authorizeRead } = verdict([]);
+    installWith(engine, authorizeRead);
+
+    const err = await refusedBy(insertAs(engine, 'product', { image: 'file_a', gallery: ['file_nowhere'] }, 'p1'));
+
+    expectFieldRefused(err, ['image', 'gallery']);
+  });
+
+  it('[#26043] a refused field fails the write before another field\'s file is copied', async () => {
+    const engine = fakeEngine({ files: [ownedByP1()], records: { product: [{ id: 'p1', image: 'file_a' }] } });
+    const { authorizeRead } = verdict(['file_a']);
+    const { storage } = installWith(engine, authorizeRead);
+
+    const err = await refusedBy(insertAs(engine, 'product', { image: 'file_a', gallery: ['file_nowhere'] }, 'p2'));
+
+    expectFieldRefused(err, ['gallery']);
+    expect(storage.download).not.toHaveBeenCalled();
+    expect(engine.tables.sys_file).toHaveLength(1);
   });
 
   it('constraint verdicts do not run ahead of the read check', async () => {
@@ -1268,9 +1320,10 @@ describe('a write references only a file its caller may read', () => {
     const { authorizeRead } = verdict([]);
     installWith(engine, authorizeRead);
 
-    const row = await insertAs(engine, 'product', { image: 'file_a' }, 'p1');
+    const err = await refusedBy(insertAs(engine, 'product', { image: 'file_a' }, 'p1'));
 
-    expect(row.image).toBe('file_a');
+    // The read refusal, not the constraint's `ERR_FILE_CONSTRAINT`.
+    expectFieldRefused(err, ['image']);
     expect(engine.tables.sys_file[0].ref_id ?? null).toBeNull();
   });
 
@@ -1297,7 +1350,7 @@ describe('a write references only a file its caller may read', () => {
     installWith(engine, authorizeRead);
     const context = { ...CALLER, permissions: ['member_default'], __operationPrivate: 'dropped' };
 
-    await insertAs(engine, 'product', { image: 'file_a' }, 'p2', { session, context });
+    await refusedBy(insertAs(engine, 'product', { image: 'file_a' }, 'p2', { session, context }));
 
     expect(asked.length).toBeGreaterThan(0);
     for (const q of asked) {
@@ -1354,6 +1407,194 @@ describe('a write references only a file its caller may read', () => {
       await insertAs(engine, 'product', { image: 'file_a' }, 'p1');
 
       expect(engine.tables.sys_file[0]).toMatchObject({ ref_id: 'p1' });
+    });
+  });
+});
+
+describe('an anonymous write carries no file (#25694, ruling C at every anonymous write door)', () => {
+  /** The guest principal an `authRequired: false` endpoint's write executes as (ADR-0138 D9). */
+  const GUEST = { principalKind: 'guest', positions: ['guest'], isSystem: false, tenantId: 'org_1' };
+  const guestSession = { organizationId: 'org_1', positions: ['guest'] };
+  const SIGNED_IN = { userId: 'u_writer', tenantId: 'org_1' };
+
+  const LABELLED: Record<string, any> = {
+    sys_file: REGISTRY.sys_file,
+    product: {
+      name: 'product',
+      fields: {
+        id: { type: 'text' },
+        name: { type: 'text' },
+        image: { type: 'image', label: 'Photo' },
+        gallery: { type: 'image', multiple: true },
+        manual: { type: 'file' },
+      },
+    },
+  };
+
+  function installAdmitting(engine: Engine, storage: any = fakeStorage()) {
+    // A verdict that admits every file: the refusal must not lean on it.
+    const authorizeRead = vi.fn(async () => true);
+    installFileReferenceHooks(engine, () => storage, silentLogger(), authorizeRead);
+    return { storage, authorizeRead };
+  }
+
+  async function write(
+    engine: Engine,
+    phase: 'insert' | 'update',
+    data: Record<string, unknown>,
+    id: string,
+    caller: { session?: any; context?: any },
+  ) {
+    const ctx: any = {
+      object: 'product',
+      event: phase === 'insert' ? 'beforeInsert' : 'beforeUpdate',
+      input: { ...(phase === 'update' ? { id } : {}), data, options: caller.context ? { context: caller.context } : {} },
+      session: caller.session,
+      dispatch: recordDispatch(),
+    };
+    await engine.trigger(ctx.event, ctx);
+    let row: Record<string, unknown> & { id: string };
+    if (phase === 'insert') {
+      row = { ...(ctx.input.data as Record<string, unknown>), id };
+      (engine.tables.product ??= []).push(row);
+    } else {
+      row = (engine.tables.product ?? []).find((r) => String(r.id) === id) as any;
+      Object.assign(row, ctx.input.data);
+    }
+    ctx.event = phase === 'insert' ? 'afterInsert' : 'afterUpdate';
+    ctx.result = row;
+    await engine.trigger(ctx.event, ctx);
+    return row;
+  }
+
+  const asGuest = { session: guestSession, context: GUEST };
+  const refusedBy = (p: Promise<unknown>) => p.then(() => null, (e) => e);
+  const sysFileWrites = (engine: Engine) =>
+    engine.calls.filter((c) => (c.op === 'update' || c.op === 'insert') && c.object === 'sys_file');
+
+  describe('a value in a file field is refused before anything is written', () => {
+    const VALUES: Array<[string, unknown]> = [
+      ['an unclaimed file id', 'file_a'],
+      ['a file id another record owns', 'file_b'],
+      ['an external URL', 'https://example.test/x.png'],
+      ['an inline file value', { url: 'https://example.test/y.png', name: 'y.png' }],
+    ];
+    for (const [what, value] of VALUES) {
+      it(`on insert: ${what}`, async () => {
+        const engine = fakeEngine({
+          registry: LABELLED,
+          files: [file(), file({ id: 'file_b', key: 'user/file_b.png', ref_object: 'product', ref_id: 'p0', ref_field: 'image' })],
+          records: { product: [{ id: 'p0', image: 'file_b' }] },
+        });
+        const { storage, authorizeRead } = installAdmitting(engine);
+
+        const err = await refusedBy(write(engine, 'insert', { name: 'n', image: value }, 'p1', asGuest));
+
+        const answered = resolveThrownHttpError(err);
+        expect({ status: answered.status, code: answered.code }).toEqual({ status: 400, code: 'VALIDATION_FAILED' });
+        expect(err?.fields).toEqual([expect.objectContaining({ field: 'image', code: 'invalid_value', label: 'Photo' })]);
+        expect(err?.fields[0].message).toContain('Photo');
+        // Nothing was written: no row, no claim, no copy, and no file was looked up for it.
+        expect((engine.tables.product ?? []).map((r) => r.id)).toEqual(['p0']);
+        expect(sysFileWrites(engine)).toEqual([]);
+        expect(storage.download).not.toHaveBeenCalled();
+        expect(authorizeRead).not.toHaveBeenCalled();
+      });
+    }
+
+    it('on update', async () => {
+      const engine = fakeEngine({ registry: LABELLED, files: [file()], records: { product: [{ id: 'p1', image: null }] } });
+      installAdmitting(engine);
+
+      const err = await refusedBy(write(engine, 'update', { image: 'file_a' }, 'p1', asGuest));
+
+      expect(err?.code).toBe('VALIDATION_FAILED');
+      expect(err?.fields).toEqual([expect.objectContaining({ field: 'image', code: 'invalid_value' })]);
+      expect(engine.tables.product[0].image).toBeNull();
+      expect(engine.tables.sys_file[0].ref_id ?? null).toBeNull();
+    });
+
+    it('every file field carrying a value is named in one envelope, by its label or else its name', async () => {
+      const engine = fakeEngine({ registry: LABELLED, files: [file()] });
+      installAdmitting(engine);
+
+      const err = await refusedBy(
+        write(engine, 'insert', { image: 'file_a', gallery: ['file_a'], manual: 'https://example.test/m.pdf' }, 'p1', asGuest),
+      );
+
+      expect(err?.code).toBe('VALIDATION_FAILED');
+      expect(err?.fields.map((f: any) => [f.field, f.code, f.label])).toEqual([
+        ['image', 'invalid_value', 'Photo'],
+        ['gallery', 'invalid_value', 'gallery'],
+        ['manual', 'invalid_value', 'manual'],
+      ]);
+    });
+  });
+
+  describe('CONTROL — what the rule leaves as it was', () => {
+    it('an anonymous write with every file field empty or absent is written', async () => {
+      const engine = fakeEngine({ registry: LABELLED, files: [file()] });
+      installAdmitting(engine);
+
+      for (const [id, data] of [
+        ['p1', { name: 'absent' }],
+        ['p2', { name: 'null', image: null }],
+        ['p3', { name: 'blank', image: '' }],
+        ['p4', { name: 'empty set', gallery: [] }],
+      ] as const) {
+        await write(engine, 'insert', { ...data }, id, asGuest);
+      }
+
+      expect(engine.tables.product.map((r) => r.id)).toEqual(['p1', 'p2', 'p3', 'p4']);
+      expect(engine.tables.sys_file[0].ref_id ?? null).toBeNull();
+    });
+
+    it('an anonymous update that clears a file field, or leaves it out, is written', async () => {
+      const engine = fakeEngine({ registry: LABELLED, records: { product: [{ id: 'p1', name: 'a', image: null }] } });
+      installAdmitting(engine);
+
+      await write(engine, 'update', { name: 'b' }, 'p1', asGuest);
+      await write(engine, 'update', { image: null }, 'p1', asGuest);
+
+      expect(engine.tables.product[0]).toMatchObject({ name: 'b', image: null });
+    });
+
+    it('a signed-in caller\'s write still claims the file', async () => {
+      const engine = fakeEngine({ registry: LABELLED, files: [file()] });
+      installAdmitting(engine);
+
+      await write(engine, 'insert', { image: 'file_a' }, 'p1', {
+        session: { userId: SIGNED_IN.userId, organizationId: 'org_1' },
+        context: SIGNED_IN,
+      });
+
+      expect(engine.tables.sys_file[0]).toMatchObject({ ref_object: 'product', ref_id: 'p1', ref_field: 'image' });
+    });
+
+    it('a system write and a context-less write still claim the file', async () => {
+      const engine = fakeEngine({ registry: LABELLED, files: [file(), file({ id: 'file_c', key: 'user/file_c.png' })] });
+      installAdmitting(engine);
+
+      await write(engine, 'insert', { image: 'file_a' }, 'p1', { session: { isSystem: true }, context: { isSystem: true } });
+      await write(engine, 'insert', { image: 'file_c' }, 'p2', {});
+
+      expect(engine.tables.sys_file.map((f) => [f.id, f.ref_id ?? null])).toEqual([
+        ['file_a', 'p1'],
+        ['file_c', 'p2'],
+      ]);
+    });
+
+    it('an object with no file field is not judged', async () => {
+      const engine = fakeEngine({ files: [file()] });
+      installAdmitting(engine);
+      const ctx: any = {
+        object: 'tag', event: 'beforeInsert', input: { data: { label: 'file_a' }, options: { context: GUEST } },
+        session: guestSession, dispatch: recordDispatch(),
+      };
+
+      await engine.trigger('beforeInsert', ctx);
+
+      expect(engine.calls).toEqual([]);
     });
   });
 });

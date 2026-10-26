@@ -67,6 +67,11 @@ async function invite(opts: {
   getI18n?: () => unknown;
   /** The INVITER's browser language — better-auth hands this callback its request. */
   header?: string;
+  /**
+   * better-auth's `invitation.expiresAt`; omitted = a real expiry (the row
+   * always carries one), passed as `undefined` = the row carries none.
+   */
+  expiresAt?: unknown;
 }) {
   const { betterAuth } = await import('better-auth');
   let captured: any;
@@ -100,7 +105,16 @@ async function invite(opts: {
   await org._opts.sendInvitationEmail(
     {
       email: 'invitee@example.com',
-      invitation: { id: 'inv1', organizationId: 'o1', role: opts.role },
+      invitation: {
+        id: 'inv1',
+        organizationId: 'o1',
+        role: opts.role,
+        ...('expiresAt' in opts
+          ? opts.expiresAt !== undefined
+            ? { expiresAt: opts.expiresAt }
+            : {}
+          : { expiresAt: new Date('2031-03-04T05:06:07.000Z') }),
+      },
       organization: { name: 'Northwind' },
       inviter: { user: { email: 'dana@example.com', name: 'Dana' } },
     },
@@ -198,7 +212,9 @@ describe('#24154 — a value with no label, or no i18n service, falls back as st
   it('no i18n service names the authored label, never the stored value', async () => {
     const { input, warns } = await invite({ role: 'member', deployment: 'zh-CN' });
     expect(input.data.role).toBe('Member');
-    expect(warns.filter((w) => w.msg.includes('invitation mail'))).toHaveLength(0);
+    // #25802 — and says once that the zh-CN mail carries an English label.
+    expect(warns.filter((w) => w.msg.includes('invitation mail'))).toHaveLength(1);
+    expect(untranslatedWarns(warns)).toHaveLength(1);
   });
 
   it('a throwing i18n service still delivers the mail, with the authored label and one warn', async () => {
@@ -212,10 +228,115 @@ describe('#24154 — a value with no label, or no i18n service, falls back as st
     expect(input.data.role).toBe('Member');
     const degraded = warns.filter((w) => w.msg.includes('could not be read from the i18n service'));
     expect(degraded).toHaveLength(1);
+    // One warn for one degradation: the thrown read already said why the
+    // label is English, so the untranslated-label warn does not repeat it.
+    expect(warns.filter((w) => w.msg.includes('invitation mail'))).toHaveLength(1);
   });
 
   it('an empty value stays empty — there is no role to name', async () => {
     await expect(invitationRoleLabel('', 'zh-CN', { getI18n: platformI18n })).resolves.toBe('');
+  });
+});
+
+// ── #25802 — a label with no translation in the mail locale is said once ──
+
+/** The warns that name an untranslated role label. */
+function untranslatedWarns(warns: Array<{ msg: string; meta?: unknown }>) {
+  return warns.filter((w) => w.msg.includes('label was found for the membership role'));
+}
+
+/**
+ * The platform bundles loaded, and the deployment's declared
+ * `i18n.supportedLocales` set on the service — the read
+ * `translateMetaList` takes its bundle from (`getLocales()`).
+ */
+function declaringI18n(supportedLocales: string[]) {
+  const i18n = platformI18n();
+  i18n.setSupportedLocales(supportedLocales);
+  return i18n;
+}
+
+describe('#25802 — a zh-CN mail whose role label stayed English says so, once', () => {
+  it('the platform bundles reach the zh-CN mail: 成员, and no warn', async () => {
+    const { input, warns } = await invite({ role: 'member', deployment: 'zh-CN', getI18n: platformI18n });
+    expect(input.data.role).toBe('成员');
+    expect(warns.filter((w) => w.msg.includes('invitation mail'))).toHaveLength(0);
+  });
+
+  it('a service whose locales omit zh-CN names Member, with one warn naming the role and the locale', async () => {
+    // The reported shape: the label read answers without throwing, holds no
+    // zh-CN entry, and the authored English label lands in a Chinese sentence.
+    const i18n = declaringI18n(['en']);
+    const { input, warns } = await invite({ role: 'member', deployment: 'zh-CN', getI18n: () => i18n });
+    expect(input.data.role).toBe('Member');
+    const named = untranslatedWarns(warns);
+    expect(named).toHaveLength(1);
+    expect(named[0]!.msg).toContain("no 'zh-CN' label");
+    expect(named[0]!.msg).toContain("'member'");
+    expect(named[0]!.meta).toMatchObject({ role: 'member', locale: 'zh-CN', i18nService: true });
+  });
+
+  it('a list warns once, naming every token that stayed English', async () => {
+    const i18n = declaringI18n(['en']);
+    const { input, warns } = await invite({ role: 'admin,member', deployment: 'ja-JP', getI18n: () => i18n });
+    expect(input.data.role).toContain('Admin');
+    expect(input.data.role).toContain('Member');
+    const named = untranslatedWarns(warns);
+    expect(named).toHaveLength(1);
+    expect(named[0]!.msg).toContain("'admin', 'member'");
+  });
+
+  it('a value outside the option list is not counted twice', async () => {
+    const i18n = declaringI18n(['en']);
+    const { warns } = await invite({ role: 'auditor', deployment: 'zh-CN', getI18n: () => i18n });
+    expect(warns.filter((w) => w.msg.includes("'auditor'"))).toHaveLength(1);
+    expect(untranslatedWarns(warns)).toHaveLength(0);
+  });
+
+  it.each(['en-US', 'en-GB'])('an %s mail reads the authored label as its own text: no warn', async (locale) => {
+    const { input, warns } = await invite({ role: 'member', deployment: locale });
+    expect(input.data.role).toBe('Member');
+    expect(warns.filter((w) => w.msg.includes('invitation mail'))).toHaveLength(0);
+  });
+});
+
+// ── #25802 — the mail states when the invitation expires ───────────────────
+
+describe('#25802 — the sender hands the template the invitation expiry', () => {
+  it('a Date expiry reaches the template as its ISO-8601 instant', async () => {
+    const { input } = await invite({
+      role: 'member',
+      deployment: 'zh-CN',
+      getI18n: platformI18n,
+      expiresAt: new Date('2031-03-04T05:06:07.000Z'),
+    });
+    expect(input.data.expiresAt).toBe('2031-03-04T05:06:07.000Z');
+  });
+
+  it('a string expiry is read the same way', async () => {
+    const { input } = await invite({ role: 'member', deployment: 'en-US', expiresAt: '2031-03-04T05:06:07Z' });
+    expect(input.data.expiresAt).toBe('2031-03-04T05:06:07.000Z');
+  });
+
+  it.each([
+    ['no expiry', undefined],
+    ['an unreadable one', 'not-a-date'],
+  ])('%s is left out rather than invented, with one warn naming the invitation and the refusal', async (_label, expiresAt) => {
+    // The template declares `expiresAt` required, so the real email service
+    // refuses this send (`MISSING_VARIABLES`, pinned in plugin-email's
+    // `auth-templates-locales.test.ts`); the warn makes the lost mail visible.
+    const { input, warns } = await invite({ role: 'member', deployment: 'en-US', expiresAt });
+    expect(Object.prototype.hasOwnProperty.call(input.data, 'expiresAt')).toBe(false);
+    const named = warns.filter((w) => w.msg.includes('carries no readable expiry'));
+    expect(named).toHaveLength(1);
+    expect(named[0]!.msg).toContain("invitation 'inv1'");
+    expect(named[0]!.msg).toContain('will be refused and not sent');
+    expect(named[0]!.meta).toMatchObject({ invitationId: 'inv1' });
+  });
+
+  it('a readable expiry logs no expiry warn', async () => {
+    const { warns } = await invite({ role: 'member', deployment: 'en-US' });
+    expect(warns.filter((w) => w.msg.includes('carries no readable expiry'))).toHaveLength(0);
   });
 });
 

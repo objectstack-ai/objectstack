@@ -3532,6 +3532,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/explain-self-direct-grant.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/explain-write-verdict-inputs.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -4473,6 +4478,11 @@
     },
     {
       "file": "packages/services/service-automation/src/builtin/crud-runas.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/builtin/notify-both-channels-unheld-address.integration.test.ts",
       "verb": "findOne",
       "pinned": 1
     },

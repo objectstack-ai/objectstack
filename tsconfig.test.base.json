@@ -1,0 +1,22 @@
+// The module semantics a package's test-layer program (`tsconfig.test.json`)
+// shares. A test config extends its package's own build config FIRST and this
+// file SECOND — `"extends": ["./tsconfig.json", "../../tsconfig.test.base.json"]`
+// — so it inherits everything the build config decides (strictness, `types`,
+// `paths`, `rootDir`) and this file overrides module semantics only.
+//
+// Why these values: vitest runs the tests as ESM through esbuild/vite, which
+// does not require the explicit `.js` extensions NodeNext demands on relative
+// imports. Matching vitest's resolver is fidelity, not laxity. `lib` is ES2022
+// for the same reason (`Array.prototype.at` and friends). A test config that
+// also needs `DOM` or `types` re-declares that one key itself.
+//
+// ⛔ No strictness option belongs here. If a test does not compile, that is
+// the finding.
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"]
+  }
+}

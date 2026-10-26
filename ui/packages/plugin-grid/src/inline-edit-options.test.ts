@@ -70,6 +70,16 @@ describe('stateMachineNextValues', () => {
     expect(stateMachineNextValues({ validations: [] }, 'status', 'done')).toBeNull();
   });
 
+  // #25933: the helper moved to @object-ui/core and now narrows only where the
+  // server refuses — a warning machine never blocks the write, so the inline
+  // editor keeps every option for it (it used to narrow on any machine).
+  it('returns null (unconstrained) for a warning-severity machine', () => {
+    const advisory = {
+      validations: [{ ...taskSchema.validations[0], severity: 'warning' }],
+    };
+    expect(stateMachineNextValues(advisory, 'status', 'done')).toBeNull();
+  });
+
   it('coerces non-string transition values to strings', () => {
     const numeric = {
       validations: [{ type: 'state_machine', field: 'level', transitions: { 1: [2, 3] } }],

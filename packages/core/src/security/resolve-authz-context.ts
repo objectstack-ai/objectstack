@@ -105,6 +105,16 @@ export interface ResolvedAuthzContext {
   accessToken?: string;
   positions: string[];
   permissions: string[];
+  /**
+   * [#25799] The names in {@link permissions} this principal holds through its OWN
+   * permission-set grant rows (`sys_user_permission_set`, §6): each row applying in
+   * this tenant, inside its validity window, naming a set the catalog holds that the
+   * activation ledger has not switched off. A set a held position's definition also
+   * names (§6a) is listed too; a set ONLY a definition names is not. It grants
+   * nothing of its own: it is the resolver's own split of the two channels, read by
+   * the explainer to tell an assignment row from a position definition.
+   */
+  directPermissions: string[];
   systemPermissions: string[];
   tabPermissions?: Record<string, 'visible' | 'hidden' | 'default_on' | 'default_off'>;
   /** Fellow-org user IDs for RLS scoping of identity tables (`id IN (...)`). */
@@ -498,6 +508,7 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
   const ctx: ResolvedAuthzContext = {
     positions: [],
     permissions: [],
+    directPermissions: [],
     systemPermissions: [],
     org_user_ids: [],
     accessible_org_ids: [],
@@ -669,6 +680,7 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
       return {
         positions: [],
         permissions: [],
+        directPermissions: [],
         systemPermissions: [],
         org_user_ids: [],
         accessible_org_ids: [],
@@ -760,6 +772,7 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
 
   ctx.positions = grants.positions;
   ctx.permissions = grants.permissions;
+  ctx.directPermissions = grants.directPermissions;
   ctx.systemPermissions = grants.systemPermissions;
   ctx.org_user_ids = grants.org_user_ids;
   ctx.accessible_org_ids = grants.accessible_org_ids;
@@ -807,6 +820,8 @@ export function vetOrganizationClaim(
 export interface UserAuthzGrants {
   positions: string[];
   permissions: string[];
+  /** [#25799] {@link ResolvedAuthzContext.directPermissions}: the names held through the user's own grant rows. */
+  directPermissions: string[];
   systemPermissions: string[];
   /** Fellow-org user IDs for RLS scoping of identity tables (`id IN (...)`). */
   org_user_ids: string[];
@@ -1121,7 +1136,7 @@ function ledgerUnregistered(ql: any): boolean {
  * and the read is not issued. An engine with no registry to ask is read.
  *
  * Exported so every other reader of "is this switched off" — the permission
- * explainer's dropped-grant report, the security plugin's position-name fold —
+ * explainer's dropped-grant report among them —
  * asks this one read instead of a second copy, and explain and enforce cannot
  * disagree about deactivation.
  */
@@ -1304,9 +1319,9 @@ function setsInForceByPosition(
  *    nothing, {@link catalogSetBody}), in declared order;
  *  - `disabledPositions` — the positions switched off, which grant nothing.
  *
- * Only the definition's half. The position-name fold — a set that shares a held
- * position's NAME, requested one layer down in `plugin-security` — is that
- * layer's to report, from its own request. A read that fails throws
+ * The definition is the whole answer (ADR-0131 D3/D4): a set that merely
+ * shares a held position's NAME is granted by nothing, since the security
+ * plugin's position-name fold retired (#24757). A read that fails throws
  * (`AuthzStoreUnavailableError`), exactly as the resolver's does.
  */
 export async function readPositionGrantsInForce(
@@ -1540,9 +1555,9 @@ interface GuestAnchorGrants {
  * ⛔ Nothing else reaches the guest (D3 item 3). The `everyone` anchor and the
  * platform-admin derivations live in {@link resolveUserAuthzGrants}, which a
  * request with no user never reaches; the authenticated baseline is applied by
- * the security plugin's set resolution to a caller with a user id only; and
- * the position-name fold is closed for the guest there too
- * (`SecurityPlugin.resolvePermissionSetsForContextUnmemoized`).
+ * the security plugin's set resolution to a caller with a user id only; and a
+ * held position's name requests no set for anyone, the guest included, since
+ * the position-name fold retired (#24757).
  */
 async function resolveGuestAnchorGrants(
   ql: any,
@@ -1635,6 +1650,7 @@ export async function resolveUserAuthzGrants(
   const grants: UserAuthzGrants = {
     positions: [],
     permissions: Array.isArray(opts.seedPermissions) ? [...opts.seedPermissions] : [],
+    directPermissions: [],
     systemPermissions: [],
     org_user_ids: [userId],
     accessible_org_ids: [],
@@ -1869,9 +1885,9 @@ export async function resolveUserAuthzGrants(
   //     directly and filtering there would over-revoke.
   //
   //     The name is dropped from `positions` too, not merely from the junction
-  //     read: `resolvePermissionSetsForContext` requests `positions` as
-  //     permission-set NAMES (position names are commonly reused as set names),
-  //     so a name left standing would resolve the same grant one layer down.
+  //     read, so no reader downstream sees a switched-off position as held. (A
+  //     held name no longer requests a same-named set one layer down: the
+  //     security plugin's position-name fold retired, #24757.)
   //     Only a name the activation ledger switched off is dropped
   //     ({@link readDisabledCatalogNames}); a name with no ledger row is in
   //     effect, a membership-derived role (`org_owner`) included.
@@ -1937,6 +1953,9 @@ export async function resolveUserAuthzGrants(
     if (!body) continue;
     const active = !disabled.permissions.has(name);
     take(body, active);
+    // [#25799] The direct channel, as the explainer reads it: a name this
+    // resolution confers through the user's own grant row.
+    if (active && !grants.directPermissions.includes(name)) grants.directPermissions.push(name);
     // platform_admin (ADR-0068 D2) is DERIVED from the anchoring admin_full_access
     // USER grant — the single source of truth (no trusted stored boolean). The
     // set is the catalog's one `admin_full_access` (ADR-0131 D4); a grant the
@@ -2178,7 +2197,17 @@ export interface ResolveLocalizationInput {
    * and `rest-server.ts` widens the provider's return to a bare promise.
    */
   settings?: any;
-  tenantId?: string;
+  /**
+   * The caller's ORGANIZATION id — the tenant rung the settings service stores
+   * and reads `localization` under (ADR-0131 D8), and the organization the
+   * direct `sys_setting` fallback may draw on. Never an environment id: an
+   * environment is not a settings scope, so one passed here matches no
+   * organization's row and every non-UTC organization silently resolves `UTC`.
+   * The key used to be spelled `tenantId`, which said none of this and let
+   * exactly that mistake type-check; it was renamed, with no alias, so the old
+   * spelling is now an excess-property error at every object-literal call.
+   */
+  organizationId?: string;
   userId?: string;
 }
 
@@ -2249,7 +2278,7 @@ type LocalizationResult = { timezone: string; locale: string; currency?: string 
  *
  * Keyed on the `ql` instance (one entry-set per environment engine, so two
  * environments/tenants sharing a process never see each other's cached
- * outcome) and then `tenantId|userId` beneath it, matching the audit writer's
+ * outcome) and then `organizationId|userId` beneath it, matching the audit writer's
  * key shape. A `ql` that isn't cacheable (missing/non-object) skips the cache
  * entirely — there is no query to dedupe in that case.
  */
@@ -2539,7 +2568,7 @@ function localizationSettingsState(settings: unknown): LocalizationSettingsState
 }
 
 /**
- * One entry per `ql` → `tenantId|userId`. ONE table, two lifecycles — the two
+ * One entry per `ql` → `organizationId|userId`. ONE table, two lifecycles — the two
  * docblocks above are why they must not collapse into a single rule:
  *
  *   `failure` — #10221/#11877. TTL only; no invalidation ever retires it.
@@ -2598,7 +2627,7 @@ function putLocalizationEntry(ql: object, key: string, entry: LocalizationCacheE
  *
  * The DIRECT `sys_setting` read failing outright (backend fault — table
  * missing, connection refused, etc.) is memoized for
- * {@link LOCALIZATION_FAILURE_CACHE_TTL_MS} per `(ql, tenantId, userId)` so
+ * {@link LOCALIZATION_FAILURE_CACHE_TTL_MS} per `(ql, organizationId, userId)` so
  * the failing query — and the driver's log line for it — does not repeat
  * every request (#10221). A settings-service refusal is not a backend fault
  * and never populates that memo (#11877).
@@ -2615,8 +2644,8 @@ function putLocalizationEntry(ql: object, key: string, entry: LocalizationCacheE
  * a `ql` with no seam declines to cache rather than falling back to the TTL.
  */
 export async function resolveLocalizationContext(input: ResolveLocalizationInput): Promise<LocalizationResult> {
-  const { ql, settings, tenantId, userId } = input;
-  const cacheKey = `${tenantId ?? ''}|${userId ?? ''}`;
+  const { ql, settings, organizationId, userId } = input;
+  const cacheKey = `${organizationId ?? ''}|${userId ?? ''}`;
   const cacheable = Boolean(ql) && typeof ql === 'object';
 
   // ⭐ Both invalidation readings are taken BEFORE the resolve, and it is these
@@ -2693,10 +2722,10 @@ export async function resolveLocalizationContext(input: ResolveLocalizationInput
  * the one in force, and a failed derivation degraded where the service
  * propagates it — both make this fallback the stricter reader.
  */
-async function localizationFallbackReach(ql: any, tenantId: string | undefined): Promise<OrganizationReach> {
+async function localizationFallbackReach(ql: any, organizationId: string | undefined): Promise<OrganizationReach> {
   try {
     return await resolveOrganizationReach({
-      callerOrganizationId: tenantId,
+      callerOrganizationId: organizationId,
       wallStands: () => postureEnforcesWall(resolveTenancyPosture()),
       deriveOrganization: () => resolveGuestOrganization(ql, resolveTenancyPosture()),
     });
@@ -2711,13 +2740,15 @@ async function localizationFallbackReach(ql: any, tenantId: string | undefined):
 async function resolveLocalizationContextUncached(
   input: ResolveLocalizationInput,
 ): Promise<{ value: LocalizationResult; backendFailed: boolean }> {
-  const { ql, settings, tenantId, userId } = input;
+  const { ql, settings, organizationId, userId } = input;
   // ONLY the direct `sys_setting` read below sets this. The settings-service
   // legs deliberately do not — see the cache doc above (#11877).
   let backendFailed = false;
   try {
     if (settings && typeof settings.get === 'function') {
-      const sctx = { tenantId, userId } as any;
+      // The settings service's own scope still spells the organization
+      // `tenantId`; that rename is its own surface, not this input's.
+      const sctx = { tenantId: organizationId, userId } as any;
       // [#10826] ONE grouped namespace read instead of three: `getMany`
       // resolves all three keys over at most two `loadRows` calls (queries
       // 16–18 of 24 on the measured rig collapse to one). Same per-key
@@ -2775,7 +2806,7 @@ async function resolveLocalizationContextUncached(
   // [ADR-0131 D8] The organization this read may draw on — the reach the
   // settings service itself reads with (#25226): never another organization's
   // row, and a row with no organization only where no organization can exist.
-  const reach = await localizationFallbackReach(ql, tenantId);
+  const reach = await localizationFallbackReach(ql, organizationId);
   // One read for all three keys instead of a query per key (`$in` on `key`).
   // Inlined (rather than the shared `tryFind`) so a genuine backend fault —
   // as opposed to a legitimate empty result — is visible to the caller above,

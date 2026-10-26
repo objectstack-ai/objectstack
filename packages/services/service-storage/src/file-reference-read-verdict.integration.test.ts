@@ -18,25 +18,29 @@
  * booted and wired exactly as it ships, asked about ONE fixture through both
  * doors: the download door (`GET /files/:fileId/url`, as the writer) and a
  * record write (as the same writer). For every file the write takes it exactly
- * when the door serves it:
+ * when the door serves it, and [#26043] a write naming a file the door refuses
+ * is refused at the field, with nothing written:
  *
- *   - a file owned by a record the writer cannot read: door 403, and the write
- *     neither copies nor claims it — the value is kept as written;
+ *   - a file owned by a record the writer cannot read: door 403, write refused;
  *   - an attachments-scope file whose only parent the writer cannot read: door
- *     403, and the write does not claim it;
+ *     403, write refused;
  *   - an owner object that declares a `fileAccessDelegate`: the DELEGATE
  *     decides on both doors, refusal and admission alike;
+ *   - a file id that names no file of the organization: the write is refused
+ *     with the same answer, so the write door cannot tell "may not read" from
+ *     "does not exist";
  *   - controls, served by the door and taken by the write: a file owned by a
  *     record the writer can read (copied), the writer's own upload (copied —
  *     the uploader arm), a `public_read` file (copied), and an unclaimed file
  *     of the organization (claimed).
  *
  * And the writes with no caller to judge: a system write takes a file the
- * door refuses the writer, as it did before.
+ * door refuses the writer, and a context-less write keeps an id that names no
+ * file, as they did before.
  *
  * A throw from the judgement is not a verdict: an authorization-store outage
  * fails the write with its declared envelope, and any other fault fails
- * closed — the file is kept as written, never taken.
+ * closed — the write is refused, and the file is never taken.
  *
  * ## The stand-ins, and only these
  *
@@ -60,6 +64,7 @@ import type { IStorageService, RouteHandler } from '@objectstack/spec/contracts'
 import { RAW_FILE_VALUES_CONTEXT_KEY, type EngineQueryOptions } from '@objectstack/spec/data';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
+import { resolveThrownHttpError } from '@objectstack/types';
 import { StorageServicePlugin } from './storage-service-plugin.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 
@@ -86,6 +91,14 @@ const F_FREE = 'f_free_ff';
 const F_DEC_ALLOW = 'f_decallow_gg';
 /** Owned by `decision/dec_deny.proof` — the delegate refuses the writer. */
 const F_DEC_DENY = 'f_decdeny_hh';
+/** No owner at all, `acl: 'public_read'`: anyone's to download. */
+const F_PUBLIC_FREE = 'f_publicfree_ii';
+/** [#26043] Another unclaimed file of the organization, for the update pin. */
+const F_FREE_SECOND = 'f_freesecond_kk';
+/** [#26043] Token-shaped, and names no `sys_file` row at all. */
+const F_NOWHERE = 'f_nowhere_jj';
+/** [#25694] The guest principal an `authRequired: false` endpoint's write executes as (ADR-0138 D9). */
+const GUEST_CTX = { principalKind: 'guest' as const, positions: ['guest'], isSystem: false };
 
 const silentLogger = () => ({
   info: vi.fn(), warn: vi.fn(), debug: vi.fn(), error: vi.fn(),
@@ -123,6 +136,8 @@ const FILES = [
   fileRow(F_FREE),
   fileRow(F_DEC_ALLOW, owned('decision', 'dec_allow', 'proof')),
   fileRow(F_DEC_DENY, owned('decision', 'dec_deny', 'proof')),
+  fileRow(F_PUBLIC_FREE, { acl: 'public_read' }),
+  fileRow(F_FREE_SECOND),
 ];
 
 function makeCtx() {
@@ -226,7 +241,7 @@ describe('#25692 — a record write claims or copies only a file the download do
           label: 'Contract',
           fields: {
             title: { name: 'title', type: 'text' },
-            doc: { name: 'doc', type: 'file' },
+            doc: { name: 'doc', label: 'Document', type: 'file' },
             annexes: { name: 'annexes', type: 'file', multiple: true },
           },
         },
@@ -323,29 +338,92 @@ describe('#25692 — a record write claims or copies only a file the download do
     return { recordId, held, outcome };
   };
 
-  describe('a file the door refuses the writer is neither copied nor claimed by the writer\'s write', () => {
+  /**
+   * [#26043] The refusal of a write naming a file its caller may not read, as
+   * the HTTP boundary answers it (ADR-0112: status and code, through the one
+   * mapping both dispatcher exits and the REST door share): one ADR-0114
+   * `invalid_value` entry per refused field, naming the field and nothing
+   * about the file. The body is the same whatever the file is, so it is
+   * pinned whole.
+   */
+  const refusedBody = (field: string, label: string) => {
+    const message = `${label} cannot reference this file: it is not a file you can open. `
+      + 'Choose a file you can open, or upload it again.';
+    return {
+      status: 400,
+      code: 'VALIDATION_FAILED',
+      declaredStatus: 400,
+      declaredCode: 'VALIDATION_FAILED',
+      message,
+      details: { fields: [{ field, code: 'invalid_value', message, label }] },
+    };
+  };
+  const refusedDocBody = refusedBody('doc', 'Document');
+
+  /** Write `fileId` into a new contract's `doc` as `context`, expecting the refusal: nothing is written. */
+  const expectFieldRefused = async (fileId: string, context: Record<string, unknown>) => {
+    const recordId = `c_new_${++seq}`;
+    const before = await fileRows();
+    const err = await engine
+      .insert('contract', { id: recordId, title: recordId, doc: fileId } as any, { context })
+      .then(() => null, (e: any) => e);
+    expect(resolveThrownHttpError(err)).toEqual(refusedDocBody);
+    expect(await storedDoc(recordId)).toBeUndefined();
+    expect(await fileRows()).toEqual(before);
+  };
+
+  describe('[#26043] a write naming a file the door refuses the writer is refused at the field', () => {
     it('a file owned by a record the writer cannot read', async () => {
       expect(await door(F_CLOSED)).toEqual({ status: 403, code: 'FILE_DOWNLOAD_DENIED' });
 
-      const { outcome } = await writeAs(F_CLOSED, WRITER_CTX);
+      await expectFieldRefused(F_CLOSED, WRITER_CTX);
 
-      expect(outcome).toBe('kept');
       expect(await fileById(F_CLOSED)).toMatchObject(owned('vault', 'v_closed', 'doc'));
     });
 
     it('an attachments-scope file whose only parent the writer cannot read', async () => {
       expect(await door(F_ATTACHED)).toEqual({ status: 403, code: 'ATTACHMENT_DOWNLOAD_DENIED' });
 
-      const { outcome } = await writeAs(F_ATTACHED, WRITER_CTX);
+      await expectFieldRefused(F_ATTACHED, WRITER_CTX);
 
-      expect(outcome).toBe('kept');
       expect((await fileById(F_ATTACHED))?.ref_id ?? null).toBeNull();
     });
 
     it('a file whose owner object\'s delegate refuses the writer', async () => {
       expect(await door(F_DEC_DENY)).toEqual({ status: 403, code: 'FILE_DOWNLOAD_DENIED' });
 
-      expect((await writeAs(F_DEC_DENY, WRITER_CTX)).outcome).toBe('kept');
+      await expectFieldRefused(F_DEC_DENY, WRITER_CTX);
+    });
+
+    it('a file id that names no file of the organization gets the same answer', async () => {
+      expect(await fileById(F_NOWHERE)).toBeUndefined();
+
+      await expectFieldRefused(F_NOWHERE, WRITER_CTX);
+    });
+
+    it('an update naming such a file is refused, and the record keeps what it held', async () => {
+      const { recordId, held } = await writeAs(F_FREE_SECOND, WRITER_CTX);
+      const err = await engine
+        .update('contract', { id: recordId, doc: F_CLOSED } as any, { context: WRITER_CTX })
+        .then(() => null, (e: any) => e);
+
+      expect(resolveThrownHttpError(err)).toEqual(refusedDocBody);
+      expect(await storedDoc(recordId)).toBe(held);
+      expect(await fileById(String(held))).toMatchObject(owned('contract', recordId, 'doc'));
+      expect(await fileById(F_CLOSED)).toMatchObject(owned('vault', 'v_closed', 'doc'));
+    });
+
+    it('a refused file in one field fails the whole write, before any other field\'s file is copied', async () => {
+      const recordId = `c_new_${++seq}`;
+      const before = await fileRows();
+      const err = await engine
+        .insert('contract', { id: recordId, title: recordId, doc: F_OPEN, annexes: [F_NOWHERE] } as any, { context: WRITER_CTX })
+        .then(() => null, (e: any) => e);
+
+      // `doc` is declared first, so its copy would run first; the field
+      // without a label is named by its name.
+      expect(resolveThrownHttpError(err)).toEqual(refusedBody('annexes', 'annexes'));
+      expect(await fileRows()).toEqual(before);
     });
   });
 
@@ -405,13 +483,14 @@ describe('#25692 — a record write claims or copies only a file the download do
       expect((await fileById(F_ATTACHED))?.ref_id ?? null).toBeNull();
     });
 
-    it('any other fault fails closed: the file is kept as written, never taken', async () => {
+    it('any other fault fails closed: the write is refused, and the file is never taken', async () => {
       attachmentReadFault = new Error('driver fault');
       try {
-        expect((await writeAs(F_ATTACHED, WRITER_CTX)).outcome).toBe('kept');
+        await expectFieldRefused(F_ATTACHED, WRITER_CTX);
       } finally {
         attachmentReadFault = null;
       }
+      expect((await fileById(F_ATTACHED))?.ref_id ?? null).toBeNull();
     });
   });
 
@@ -419,5 +498,76 @@ describe('#25692 — a record write claims or copies only a file the download do
     const { outcome } = await writeAs(F_CLOSED, { ...SYS, userId: WRITER });
 
     expect(outcome).toBe('copied');
+  });
+
+  it('[#26043] a context-less write has no caller to judge, and keeps an id that names no file, as before', async () => {
+    const recordId = `c_new_${++seq}`;
+    await engine.insert('contract', { id: recordId, title: recordId, doc: F_NOWHERE } as any);
+
+    expect(await storedDoc(recordId)).toBe(F_NOWHERE);
+  });
+
+  describe('[#25694] an anonymous write carries no file, whatever the door would serve it', () => {
+    /**
+     * The refusal as the HTTP boundary answers it (ADR-0112: code and status),
+     * through the one mapping both dispatcher exits and the REST door share.
+     */
+    const expectAnswered400 = (err: unknown) => {
+      const answered = resolveThrownHttpError(err);
+      expect({ status: answered.status, code: answered.code }).toEqual({ status: 400, code: 'VALIDATION_FAILED' });
+      expect(answered.details?.fields).toEqual([expect.objectContaining({ field: 'doc', code: 'invalid_value' })]);
+    };
+
+    /** The write's refusal, and proof that nothing was written: no record, no new file, no owner moved. */
+    const expectRefused = async (data: Record<string, unknown>, context: Record<string, unknown>) => {
+      const recordId = `c_new_${++seq}`;
+      const before = await fileRows();
+      const err = await engine
+        .insert('contract', { id: recordId, title: recordId, ...data } as any, { context })
+        .then(() => null, (e: any) => e);
+      expectAnswered400(err);
+      expect(err?.fields).toEqual([expect.objectContaining({ field: 'doc', code: 'invalid_value' })]);
+      expect(await storedDoc(recordId)).toBeUndefined();
+      expect(await fileRows()).toEqual(before);
+    };
+
+    it('a public_read file another record owns is not copied for the guest', async () => {
+      await expectRefused({ doc: F_PUBLIC }, GUEST_CTX);
+      expect(await fileById(F_PUBLIC)).toMatchObject(owned('vault', 'v_mine', 'annex'));
+    });
+
+    it('an unclaimed public_read file is not claimed for the guest', async () => {
+      await expectRefused({ doc: F_PUBLIC_FREE }, GUEST_CTX);
+      expect((await fileById(F_PUBLIC_FREE))?.ref_id ?? null).toBeNull();
+    });
+
+    it('a file id the guest may not read is not stored either', async () => {
+      await expectRefused({ doc: F_FREE }, GUEST_CTX);
+    });
+
+    it('a value that names no platform file is not stored either', async () => {
+      await expectRefused({ doc: 'https://example.test/report.pdf' }, GUEST_CTX);
+    });
+
+    it('an update carrying a file is refused, and the record keeps what it held', async () => {
+      const recordId = `c_new_${++seq}`;
+      await engine.insert('contract', { id: recordId, title: recordId } as any, { context: GUEST_CTX });
+      const err = await engine
+        .update('contract', { id: recordId, doc: F_PUBLIC_FREE } as any, { context: GUEST_CTX })
+        .then(() => null, (e: any) => e);
+      expectAnswered400(err);
+      expect(await storedDoc(recordId)).toBeNull();
+      expect((await fileById(F_PUBLIC_FREE))?.ref_id ?? null).toBeNull();
+    });
+
+    it('CONTROL — a guest write that carries no file is written', async () => {
+      const recordId = `c_new_${++seq}`;
+      await engine.insert('contract', { id: recordId, title: recordId, doc: null } as any, { context: GUEST_CTX });
+      expect(await storedDoc(recordId)).toBeNull();
+    });
+
+    it('CONTROL — a signed-in writer still takes the same public_read file', async () => {
+      expect((await writeAs(F_PUBLIC_FREE, WRITER_CTX)).outcome).toBe('claimed');
+    });
   });
 });

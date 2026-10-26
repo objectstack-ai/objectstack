@@ -7,9 +7,11 @@
  *
  * The pin is the AGREEMENT with enforcement: a position's described sets are
  * exactly the sets `resolvePermissionSetsForContext` grants a holder of that
- * position alone (no baseline), the same-named set the position-name fold grants
- * included (`via: 'name'`) — the set #24757 found in force and invisible. And
- * the holder count is served only to a caller who may read the assignment rows.
+ * position alone (no baseline): the sets its definition names, each `via:
+ * 'definition'`. A set that merely shares the position's name is granted by
+ * nothing since #24757 retired the position-name fold, so it is not listed, and
+ * `via: 'name'` is never served. And the holder count is served only to a
+ * caller who may read the assignment rows.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -28,13 +30,13 @@ const SETS: PermissionSet[] = [
   set('member_default'),
   set('crm_sales_user'),
   set('forecasting'),
-  // Same name as the position: granted by the fold, declared by no definition.
+  // Same name as the position, declared by no definition: granted by nothing.
   set('sales_manager'),
-  // Same name as a position that DECLARES it: no fold, a declared binding.
+  // Same name as a position that DECLARES it: a declared binding.
   set('service_agent'),
-  // Same name as a position, switched off in the ledger: the fold drops it.
+  // Same name as a position, switched off in the ledger, declared by none.
   set('marketing_user'),
-  // Same name as the guest anchor: never folded onto the anonymous principal.
+  // Same name as the guest anchor, declared by none.
   set('guest'),
 ];
 
@@ -116,26 +118,27 @@ const byPosition = (summaries: PositionGrantSummary[]) =>
 const NAMES = POSITIONS.map((p) => p.name);
 
 describe('[ADR-0131 D3/D4] describePositionGrants — what a position grants, as enforced', () => {
-  it('names each set in force and how it arrives, the same-named fold grant included', async () => {
+  it('names each set its definition grants, in force, and no set that only shares its name', async () => {
     const { svc } = await boot();
     const out = byPosition(await svc.describePositionGrants!(NAMES, { isSystem: true, tenantId: ORG } as any));
     expect(out.sales_rep.permissionSets).toEqual([{ name: 'crm_sales_user', via: 'definition' }]);
-    // The #24757 case: the set named after the position is in force though the
-    // definition does not list it — so the list says so, as `via: 'name'`.
+    // The #24757 case: a set named after the position exists, and the
+    // definition does not list it — so it is granted by nothing, and not listed.
     // (In the evaluator's resolution order, which is the catalog's.)
     expect(out.sales_manager.permissionSets).toEqual([
       { name: 'crm_sales_user', via: 'definition' },
       { name: 'forecasting', via: 'definition' },
-      { name: 'sales_manager', via: 'name' },
     ]);
-    // Declared under its own name: a declaration, not a fold.
+    // Declared under its own name: a declaration, granted through it.
     expect(out.service_agent.permissionSets).toEqual([{ name: 'service_agent', via: 'definition' }]);
-    // The fold's set is switched off: the fold grants nothing.
+    // Shares its name with a set, declares none: nothing.
     expect(out.marketing_user.permissionSets).toEqual([]);
     // A switched-off position grants nothing at all.
     expect(out.switched_off.permissionSets).toEqual([]);
-    // The anonymous principal requests no position name.
+    // The anonymous principal's anchor declares nothing here.
     expect(out.guest.permissionSets).toEqual([]);
+    // `via: 'name'` is never served.
+    expect(Object.values(out).flatMap((s) => s.permissionSets).filter((p) => p.via !== 'definition')).toEqual([]);
   });
 
   it('agrees, position by position, with the sets the resolver grants a holder of that position alone', async () => {

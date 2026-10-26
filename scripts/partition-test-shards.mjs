@@ -157,14 +157,6 @@ const TIMINGS_PATH = path.join(REPO_ROOT, 'scripts', 'test-shard-timings.json');
 // beside them. That last figure is the floor this count cannot move: a CLI
 // slice (~960-1010s measured) is serial, so past eight the slowest shard is
 // the slice and more shards only add runners.
-//
-// ⚠ The bins above were placed by their SUM. Since #25870 partition() places
-// them by that same wall model (WHOLE_LEG_PARALLELISM), so a slice shard no
-// longer carries a whole-package leg ahead of its slice; on the committed
-// dataset's full list the predicted steps move from 1277s on the three slice
-// shards (643s elsewhere) to 966s on the slice shards and 830s elsewhere. On
-// the 2026-10-26 refresh, with the CLI cut into 4 slices (pin 3c, below), all
-// eight read ~738s.
 export const SHARD_COUNT = 8;
 
 // The acceptance bound #10472 set: the slowest shard within ~1.3x the mean.
@@ -362,8 +354,8 @@ export function timingModeNote(event) {
 //   n = 2    869.44s   1.52x                  still the floor
 //   n = 3    579.63s   1.01x                  meets -- spec's task is the floor
 //
-// So n = 3, and pin 3c held it there. Slices were placed at their PLAIN weight
-// (partition() unchanged), so every bin kept the density the whole-package
+// So n = 3, and pin 3c held it there. Slices are placed at their PLAIN weight
+// (partition() is unchanged), so every bin keeps the density the whole-package
 // split had -- see densityCap() for the hard limit on that and its pin.
 //
 // RE-DERIVED AT 4 (#25870), on the 14-run refresh of 2026-10-26 (newest run
@@ -375,9 +367,11 @@ export function timingModeNote(event) {
 //   n = 3    899.15s   1.34x                  still the floor -- pin 3c refused 3
 //   n = 4    674.36s   1.01x                  meets -- metadata-protocol is the floor
 //
-// Since #25870 partition() places a slice at its wall share rather than its
-// plain weight (WHOLE_LEG_PARALLELISM); `total`, and so the density cap, still
-// reads plain sums.
+// Placement stays the plain-sum LPT above. #25968 placed slices by a wall model
+// instead, emptied the slice shards of whole packages, piled ~2141s of four-wide
+// work onto each of four shards (with objectql and plugin-security sharing one)
+// and turned load-sensitive tests red in the merge queue until #26077 reverted
+// it. Pin 3d (WHOLE_LEG_CAP_SECONDS, LOAD_SENSITIVE_APART) holds that line.
 //
 // ⛔ THE COUNT IS CONFIGURED; WHETHER A RUN SLICES IS DECIDED BY THAT RUN. A
 // pull_request or merge_group run splits its own affected set, so planShards()
@@ -905,94 +899,101 @@ function readManifest(dir) {
   }
 }
 
-// ── A SLICE IS A SERIAL LEG: BINS ARE PLACED BY WALL, NOT BY SUM (#25870) ────
-//
-// A shard's "Run this shard's tests" step runs its whole packages four at a
-// time (`--concurrency=4`) and THEN each file-level slice as a turbo run of its
-// own, alone on the runner (ci.yml). So a slice's seconds reach the wall one for
-// one while a whole package's are shared about 2.9 ways -- the wall model the
-// SHARD_COUNT header calibrated (#25376): step ~ wholeSum / 2.9 + slice. This
-// constant is that 2.9, not a new measurement.
-//
-// Placing bins by their SUM of seconds treated a slice second like a whole
-// second, so every slice shard was filled up to the mean with whole packages and
-// then ran its slice after them. On the committed dataset's full list that put
-// ~900s of whole packages in front of each 966s CLI slice: predicted step 1277s
-// on the three slice shards against 643s on the other five, and measured the
-// same way on the pull_request runs #25870 tabulates -- 3/8-5/8 at 25-29 min,
-// the rest at 7-17, the gap being each slice shard's whole-package leg
-// (`Run this shard's tests` minus the slice leg's own turbo `Time:`).
-//
-// So partition() places by LOAD -- a bin's predicted wall, kept in whole-package
-// seconds (a slice counts WHOLE_LEG_PARALLELISM times its weight) so that a list
-// with no slice is placed by exactly the same additions and comparisons as the
-// plain-sum LPT it replaced, byte for byte. `total` stays the plain sum of
-// predicted test windows: the density cap and the drift report are statements
-// about that quantity, and neither changes meaning here.
-export const WHOLE_LEG_PARALLELISM = 2.9;
-
-// One item's share of a bin's load, in whole-package seconds.
-export function loadOf(item) {
-  return item.slice ? item.weight * WHOLE_LEG_PARALLELISM : item.weight;
-}
-
-// A bin's predicted `Run this shard's tests` step under the wall model.
-export function wallOf(bin) {
-  return bin.load / WHOLE_LEG_PARALLELISM;
-}
-
-// LPT greedy on load (above): heaviest item into the currently lightest bin.
-// Deterministic: input order never matters because both the item sort and the
-// bin choice break ties explicitly (by name / by lowest bin index).
+// LPT greedy: heaviest package into the currently lightest bin. Deterministic:
+// input order never matters because both the package sort and the bin choice
+// break ties explicitly (by name / by lowest bin index).
 export function partition(items, shardCount) {
   const sorted = [...items].sort(
-    (a, b) => loadOf(b) - loadOf(a) || a.name.localeCompare(b.name, 'en')
+    (a, b) => b.weight - a.weight || a.name.localeCompare(b.name, 'en')
   );
-  const bins = Array.from({ length: shardCount }, () => ({ total: 0, load: 0, names: [] }));
+  const bins = Array.from({ length: shardCount }, () => ({ total: 0, names: [] }));
   for (const it of sorted) {
     let best = 0;
     for (let i = 1; i < bins.length; i++) {
-      if (bins[i].load < bins[best].load) best = i;
+      if (bins[i].total < bins[best].total) best = i;
     }
     bins[best].names.push(it.name);
     bins[best].total += it.weight;
-    bins[best].load += loadOf(it);
   }
   return bins;
+}
+
+// ── THE WHOLE-PACKAGE LEG IS CAPPED, AND TWO SUITES NEVER SHARE IT (#25870) ──
+//
+// A shard runs its whole packages four at a time, so a heavy whole leg is not
+// only a long step: every test in it runs beside three other suites, and the
+// tests with a per-test wall budget feel that. #25968 placed bins by a wall
+// model, moved the whole packages off the slice shards, and left four shards
+// at ~2141s of whole-package seconds each, with `@objectstack/objectql` and
+// `@objectstack/plugin-security` on one of them. Full merge_group Test Core
+// builds then went red 5 times in 27 (0 in 19 before), every red a
+// load-sensitive test: objectql hook-run-as on cold import, plugin-security
+// shipped-sets past its 5s budget, and the cli hook-timeout CONTROL. #26077
+// reverted it; the 10 full queue builds after the revert were green. Pins 2-3c
+// grade bin SUMS and slice counts, and 2141s passed every one of them.
+//
+// So two facts are held on the committed dataset's full list, as CI splits it:
+//
+//   WHOLE_LEG_CAP_SECONDS  no shard's whole-package sum (its slices excluded)
+//                          exceeds 1868s -- the heaviest whole leg the queue
+//                          has run green: shard 7/8 of the plain-sum layout on
+//                          the 2026-10-23 dataset (8 shards at a 1866s mean),
+//                          0 red in 19 full builds before #25968 and 10 after
+//                          #26077. 2141s is what went red. ⛔ Raising this
+//                          number needs a merge-queue red-rate reading at the
+//                          new figure, not a balance figure: the shard wall
+//                          model cannot see co-run contention.
+//   LOAD_SENSITIVE_APART   these packages are never whole on the same shard.
+//                          They are the two whose tests went red under load in
+//                          #26074; the third red was a CLI slice, which runs
+//                          alone after its shard's whole leg.
+//
+// When a refresh grows the whole legs past the cap, the remedy is a wider
+// matrix or a finer slice, never a denser shard.
+export const WHOLE_LEG_CAP_SECONDS = 1868;
+export const LOAD_SENSITIVE_APART = Object.freeze(['@objectstack/objectql', '@objectstack/plugin-security']);
+
+// `items` carry the weights the bins were filled from (planShards()' items).
+// A member of `apart` that is in no bin is a problem too: a pin on a pair the
+// split no longer carries would hold by testing nothing.
+export function wholeLegProblems(bins, items, { cap = WHOLE_LEG_CAP_SECONDS, apart = LOAD_SENSITIVE_APART } = {}) {
+  const weight = new Map(items.map((i) => [i.name, i.weight]));
+  const wholes = bins.map((b) => b.names.filter((n) => !parseShardItem(n).slice));
+  const sums = wholes.map((names) => names.reduce((sum, n) => sum + (weight.get(n) ?? 0), 0));
+  const problems = [];
+  sums.forEach((sum, i) => {
+    if (sum > cap) {
+      problems.push(
+        `shard ${i + 1}/${bins.length} carries ${sum.toFixed(0)}s of whole packages, past the ${cap}s cap ` +
+          `(${wholes[i].length} packages run four at a time beside each other)`
+      );
+    }
+  });
+  const shardOf = new Map();
+  for (const name of apart) {
+    const at = wholes.findIndex((names) => names.includes(name));
+    if (at === -1) {
+      problems.push(`${name} is not a whole package in this split, so the pair it belongs to is not graded -- re-derive LOAD_SENSITIVE_APART`);
+      continue;
+    }
+    const other = shardOf.get(at);
+    if (other) problems.push(`${other} and ${name} share shard ${at + 1}/${bins.length}`);
+    else shardOf.set(at, name);
+  }
+  return { sums, problems };
 }
 
 // The one summary statistic #10472's acceptance criterion is written in.
 // `floor` is the heaviest single package: sharding is BY PACKAGE, so no split
 // at any shard count can put max below it, and comparing it to the mean says
 // whether the bound is even reachable before anyone tries to reach it.
-//
-// `walls` / `wallRatio` are the same statistic on what the bins were placed by
-// (wallOf, #25870). With no slice in the split they are the totals scaled by
-// one constant, so the two ratios agree; with a slice, only the wall ratio says
-// whether the shards finish together. A bin built by hand (no `load`) is read
-// as all whole packages.
 export function balanceOf(bins, items = null) {
   const totals = bins.map((b) => b.total);
   const sum = totals.reduce((a, b) => a + b, 0);
   const mean = sum / bins.length;
   const max = Math.max(...totals);
   const floor = items ? Math.max(0, ...items.map((i) => i.weight)) : null;
-  const walls = bins.map((b) => wallOf({ load: b.load ?? b.total }));
-  const wallMean = walls.reduce((a, b) => a + b, 0) / bins.length;
-  const wallMax = Math.max(...walls);
-  return {
-    totals,
-    sum,
-    mean,
-    max,
-    min: Math.min(...totals),
-    ratio: mean === 0 ? 1 : max / mean,
-    floor,
-    walls,
-    wallMean,
-    wallMax,
-    wallRatio: wallMean === 0 ? 1 : wallMax / wallMean,
-  };
+  return { totals, sum, mean, max, min: Math.min(...totals), ratio: mean === 0 ? 1 : max / mean, floor };
 }
 
 // ── THE DENSITY CAP: NO SHARD CARRIES MORE THAN THE SPLIT PROVEN GREEN (#22075) ─
@@ -1052,7 +1053,7 @@ export function refineToCap(bins, items, cap) {
   const weightOf = new Map(items.map((i) => [i.name, i.weight]));
   const slices = new Set(items.filter((i) => i.slice).map((i) => i.name));
   const movable = (name) => !slices.has(name);
-  const out = bins.map((b) => ({ total: b.total, load: b.load, names: [...b.names] }));
+  const out = bins.map((b) => ({ total: b.total, names: [...b.names] }));
   const EPSILON = 1e-9;
   for (let step = 0; step < 10_000; step++) {
     let h = 0;
@@ -1079,21 +1080,15 @@ export function refineToCap(bins, items, cap) {
     }
     if (best === null) break;
     const { to, give, take } = best;
-    // Only whole packages move, and a whole package's load is its weight, so
-    // `load` follows `total` move for move.
     out[h].names.splice(out[h].names.indexOf(give), 1);
     out[h].total -= weightOf.get(give);
-    out[h].load -= weightOf.get(give);
     out[to].names.push(give);
     out[to].total += weightOf.get(give);
-    out[to].load += weightOf.get(give);
     if (take !== null) {
       out[to].names.splice(out[to].names.indexOf(take), 1);
       out[to].total -= weightOf.get(take);
-      out[to].load -= weightOf.get(take);
       out[h].names.push(take);
       out[h].total += weightOf.get(take);
-      out[h].load += weightOf.get(take);
     }
   }
   return out;
@@ -1571,9 +1566,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // 8 of these 25 are pins 3b and 3c, the file-level slicing's (#16173), and
   // every one of them runs unconditionally: 3c's fixtures and 3b's cut of the
   // heaviest package do not depend on what the live map slices.
-  // 2 of these 27 are pin 2b, the wall placement's (#25870): a fixture, so it
-  // runs whatever the dataset holds.
-  'the balancing pins (#10472)': 27,
+  'the balancing pins (#10472)': 25,
+  // 1 grades the committed dataset's split; 4 are fixtures, both directions.
+  'the whole-package leg cap and the load-sensitive pair (#25870)': 5,
   'predicted-vs-measured drift (#16173)': 9,
   'drift warning tier under the red (#16465)': 12,
   'file-level slice items (#16173)': 20,
@@ -1590,7 +1585,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 15;
+const SELF_TEST_BATTERY_FLOOR = 16;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1820,52 +1815,13 @@ function selfTest() {
   });
   const real = datasetPlan.bins;
   const balance = balanceOf(real, datasetItems);
-  // Graded on predicted WALL, the quantity the bins are placed by (#25870): with
-  // a slice in the split, the bin SUMS are deliberately unequal -- a slice shard
-  // carries its serial slice and little else -- and only the walls say whether
-  // the shards finish together. With no slice the two ratios are the same number.
   check(() => {
-    if (balance.wallRatio > MAX_SHARD_OVER_MEAN) {
+    if (balance.ratio > MAX_SHARD_OVER_MEAN) {
       throw new Error(
-        `balance: at ${SHARD_COUNT} shards the slowest predicted test step is ${balance.wallRatio.toFixed(2)}x the mean ` +
-          `(${balance.wallMax.toFixed(0)}s vs ${balance.wallMean.toFixed(0)}s), past the ${MAX_SHARD_OVER_MEAN}x bound. ` +
-          'Walls: ' + balance.walls.map((t) => t.toFixed(0)).join('/') + 's; bins: ' +
-          balance.totals.map((t) => t.toFixed(0)).join('/') + 's.'
+        `balance: at ${SHARD_COUNT} shards the heaviest bin is ${balance.ratio.toFixed(2)}x the mean ` +
+          `(${balance.max.toFixed(0)}s vs ${balance.mean.toFixed(0)}s), past the ${MAX_SHARD_OVER_MEAN}x bound. ` +
+          'Bins: ' + balance.totals.map((t) => t.toFixed(0)).join('/') + 's.'
       );
-    }
-  });
-
-  // 2b. A SLICE IS PLACED AS THE SERIAL LEG IT IS (#25870). Three shards, a
-  //     package cut in two (100s a slice) and three whole packages (100s, 50s,
-  //     50s). Placed by SUM -- the LPT this replaced -- each slice shard also
-  //     takes a 50s whole package, which runs four-wide BEFORE the slice and
-  //     lengthens that shard's step to ~117s. Placed by wall, the slices run
-  //     alone and the three whole packages share the third shard (~69s). The
-  //     two placements differ, so a revert to the sum reds here.
-  const serial = partition(
-    [
-      { name: 's 1/2', weight: 100, slice: { index: 1, count: 2 } },
-      { name: 's 2/2', weight: 100, slice: { index: 2, count: 2 } },
-      mk('x', 100),
-      mk('y', 50),
-      mk('z', 50),
-    ],
-    3
-  );
-  check(() => {
-    const crowded = serial.filter((bin) => bin.names.some((n) => n.startsWith('s ')) && bin.names.length > 1);
-    if (crowded.length > 0) {
-      throw new Error(
-        `slice placement: a slice shard also carries whole packages (${crowded.map((b) => b.names.join('+')).join('; ')}) ` +
-          'that run before its serial slice -- are the bins placed by their plain SUM again?'
-      );
-    }
-  });
-  check(() => {
-    const walls = serial.map(wallOf);
-    const expected = [100, 100, 200 / WHOLE_LEG_PARALLELISM];
-    if (walls.some((w, i) => Math.abs(w - expected[i]) > 1e-9)) {
-      throw new Error(`slice placement: predicted walls ${walls.map((w) => w.toFixed(2)).join('/')}s, expected ${expected.map((w) => w.toFixed(2)).join('/')}s`);
     }
   });
 
@@ -2108,6 +2064,52 @@ function selfTest() {
       }
     });
   }
+
+  // 3d. THE WHOLE-PACKAGE LEG IS CAPPED AND THE LOAD-SENSITIVE PAIR IS APART
+  //     (#25870) -- see WHOLE_LEG_CAP_SECONDS. The first case grades the
+  //     committed dataset as CI splits it, and first proves the split carries
+  //     whole-package seconds to grade; the fixtures hold each refusal.
+  battery('the whole-package leg cap and the load-sensitive pair (#25870)');
+  const wholeLeg = wholeLegProblems(real, datasetItems);
+  check(() => {
+    const wholeSeconds = datasetItems.filter((i) => !i.slice).reduce((sum, i) => sum + i.weight, 0);
+    if (wholeSeconds === 0 || Math.abs(wholeLeg.sums.reduce((a, b) => a + b, 0) - wholeSeconds) > 1e-6) {
+      throw new Error(`whole leg: the split's whole-package sums do not add up to the dataset's ${wholeSeconds}s`);
+    }
+    if (wholeLeg.problems.length > 0) {
+      throw new Error(
+        `whole leg, committed dataset at ${SHARD_COUNT} shards (sums ` +
+          wholeLeg.sums.map((t) => t.toFixed(0)).join('/') + 's):\n' +
+          wholeLeg.problems.map((p) => `  - ${p}`).join('\n')
+      );
+    }
+  });
+  // Two shards; `p` and `q` are the pair, 60s each. Split apart under a 100s cap
+  // it holds; a slice is not whole-leg weight, so 50s of slice beside 60s holds.
+  const legItems = [mk('p', 60), mk('q', 60), mk('r', 30), { ...mk('big 1/2', 50), slice: { index: 1, count: 2 } }];
+  const leg = (names, opts) => wholeLegProblems(names.map((n) => ({ names: n, total: 0 })), legItems, { cap: 100, apart: ['p', 'q'], ...opts });
+  check(() => {
+    const r = leg([['p', 'r', 'big 1/2'], ['q']]);
+    if (r.problems.length > 0) throw new Error(`whole leg: a split within the cap with the pair apart was refused: ${r.problems.join(' | ')}`);
+  });
+  check(() => {
+    const r = leg([['p', 'q'], ['r']]);
+    if (!r.problems.some((m) => m.includes('p and q share shard 1/2'))) {
+      throw new Error(`whole leg: the load-sensitive pair on one shard was accepted (${r.problems.join(' | ') || 'no problem named'})`);
+    }
+  });
+  check(() => {
+    const r = leg([['p', 'r', 'big 1/2'], ['q']], { cap: 80 });
+    if (!r.problems.some((m) => m.includes('shard 1/2 carries 90s of whole packages, past the 80s cap'))) {
+      throw new Error(`whole leg: a shard past the cap was accepted (${r.problems.join(' | ') || 'no problem named'})`);
+    }
+  });
+  check(() => {
+    const r = leg([['p', 'r'], ['big 1/2']], { apart: ['p', 'gone'] });
+    if (!r.problems.some((m) => m.includes('gone is not a whole package'))) {
+      throw new Error('whole leg: a pair member missing from the split was graded as apart');
+    }
+  });
 
   // -- PREDICTED VS MEASURED (#16173) -------------------------------------
   //
@@ -3142,9 +3144,9 @@ function selfTest() {
   console.log(
     `partition-test-shards: self-test OK (${datasetPackages.length} measured packages ` +
       `-> ${datasetItems.length} shard items, ${SHARD_COUNT} shards, ` +
-      `predicted test-step walls ${balance.walls.map((t) => t.toFixed(0)).join('/')}s, ` +
-      `max/mean ${balance.wallRatio.toFixed(2)}x <= ${MAX_SHARD_OVER_MEAN}x, floor ${balance.floor.toFixed(0)}s, ` +
+      `max/mean ${balance.ratio.toFixed(2)}x <= ${MAX_SHARD_OVER_MEAN}x, floor ${balance.floor.toFixed(0)}s, ` +
       `bins ${balance.totals.map((t) => t.toFixed(2)).join('/')}s within the ${datasetCap.toFixed(2)}s density cap, ` +
+      `whole legs ${wholeLeg.sums.map((t) => t.toFixed(0)).join('/')}s within ${WHOLE_LEG_CAP_SECONDS}s, ` +
       `file-level slices: ` +
       `${datasetPlan.decisions.filter((d) => d.count > 1).map((d) => `${d.name} x${d.count}`).join(', ') || 'none'})`
   );
@@ -3266,7 +3268,7 @@ function main() {
     { excluded }
   );
   const mine = bins[shardIndex - 1];
-  const { max, mean, ratio, walls, wallRatio } = balanceOf(bins);
+  const { max, mean, ratio } = balanceOf(bins);
   // Printed on every shard, not just the imbalanced one, and printed as the
   // RATIO the acceptance bound is written in: the per-shard numbers alone never
   // said whether the split was balanced, which is why #10472's imbalance had to
@@ -3279,13 +3281,6 @@ function main() {
       `max/mean ${ratio.toFixed(2)}x of the ${MAX_SHARD_OVER_MEAN}x bound, max ${max.toFixed(0)}s, mean ${mean.toFixed(0)}s; ` +
       `density cap ${cap.toFixed(2)}s; ` +
       `${packages - estimated} measured, ${estimated} estimated from test-file count)`
-  );
-  // What the bins were placed by (wallOf, #25870): the test step each shard is
-  // predicted to take, a slice counted as the serial leg it runs as.
-  console.error(
-    `  predicted test-step walls (whole / ${WHOLE_LEG_PARALLELISM} + slice): ` +
-      `${walls.map((w) => w.toFixed(0)).join('/')}s, this shard ${wallOf(mine).toFixed(0)}s; ` +
-      `max/mean ${wallRatio.toFixed(2)}x`
   );
   // Only a document that states its own slicing prints this, so a Test Core
   // shard's log is unchanged; the nightly's says where its slice count came from.

@@ -40,9 +40,8 @@
  *   3. STALENESS — the record's `objectuiSha` equals the live `.objectui-sha`.
  *      A pin bump changes which registry the shipped console runs, so the bump
  *      PR goes red HERE until the manifest is regenerated against the new pin
- *      — the same moment `check-sdui-lockstep` already forces a parser parity
- *      re-verification, and the moment an objectui checkout is guaranteed to
- *      exist (the bump required one).
+ *      — the moment an objectui checkout is guaranteed to exist (the bump
+ *      required one).
  *   4. VERSION ↔ PIN CORRESPONDENCE — the record's `objectuiWorkspaceVersion`
  *      is the version `packages/core/package.json` DECLARES at the pinned
  *      commit. Checks 1-3 reach both fields and relate neither: the version is
@@ -65,13 +64,31 @@
  *   1–2. unchanged — the same shape and tamper checks, against a record keyed
  *        to the in-tree producer (`IN_TREE_RECORD_FIELDS`: the pin-keyed
  *        fields are not required, the `inTree` block is).
- *   3.   STALENESS is a SOURCE DIGEST — `registrySourceDigest` over the
- *        registry packages' `src/` as the index holds them must equal the
- *        record's `inTree` reading. A registry source edit without
- *        regeneration reds HERE, and the red prints the one command that
- *        clears it: the generator, which builds the registry from this tree
- *        and regenerates. Nothing is built in this gate — the digest is a
+ *   3.   STALENESS is a SOURCE DIGEST PER PACKAGE (#26051) —
+ *        `registrySourceDigests` reads each registry package's `src/` as the
+ *        index holds them, and each package's digest must equal its own
+ *        one-line record under `scripts/sdui-manifest.sources/`, which also
+ *        names the artefact sha256 it was verified against. A registry source
+ *        edit without regeneration reds HERE naming the package, and so does a
+ *        package the registry reaches with no record (a new package or a new
+ *        dependency edge), a record the registry no longer reaches (a removed
+ *        package or edge), and a record verified against another artefact.
+ *        Each red prints the one command that clears it: the generator, which
+ *        builds the registry from this tree, regenerates, and re-records only
+ *        what moved. Nothing is built in this gate — the digest is a
  *        `git ls-files` over the index, with no dist and no node_modules read.
+ *
+ *        Why one file per package, one line per file: with one digest over
+ *        the whole registry, any two ui PRs that touched registry packages
+ *        conflicted on that line in the merge queue. Now two PRs on different
+ *        packages touch different files. Two PRs on one package touch the same
+ *        line, and so does a PR that moves the artefact (it re-records every
+ *        package against the new sha256): those still conflict, on purpose,
+ *        because only a regeneration on the merged tree can say what the
+ *        manifest of the combination is. What is NOT forced is the case where
+ *        two PRs on different packages each leave the artefact unchanged and
+ *        their combination would not; the next regeneration of any registry
+ *        package sees the combination.
  *   4.   none. The in-tree `@object-ui/core` version moves with every release
  *        of the one fixed version group while the registry does not, so the
  *        record carries it as provenance and the success line prints it.
@@ -82,12 +99,11 @@
  * ## What this deliberately does NOT do, and where that risk is held
  *
  * No per-PR regeneration: that would put an objectui clone and build (network,
- * minutes) inside a required lint job — the shape `check-sdui-lockstep`'s
- * header declines, for the same reasons. Under an unchanged pin the pinned
+ * minutes) inside a required lint job, a network dependency this repo
+ * declines in a lint job. Under an unchanged pin the pinned
  * commit's registry is immutable, so content drift per-PR is not a live axis.
  * The residual axis — this repo's OWN adapter (`manifestFromConfigs`) changing
- * while the pin stands still — is held by `packages/sdui-parser`'s lockstep
- * gate and unit suite, and by regeneration being byte-deterministic (two runs
+ * while the pin stands still — is held by `packages/sdui-parser`'s unit suite, and by regeneration being byte-deterministic (two runs
  * over one built tree, identical bytes), so the remedy this gate prints always
  * converges.
  *
@@ -159,9 +175,16 @@ const UI_CONSOLE = 'ui/apps/console';
 const UI_PACKAGES = 'ui/packages';
 
 /**
+ * Where the in-tree producer writes one record per registry package (#26051),
+ * repo-relative and POSIX-separated: this string is also what the record's
+ * `inTree.registryRecords` says.
+ */
+export const REGISTRY_RECORDS = 'scripts/sdui-manifest.sources';
+
+/**
  * What `checkTree` reads, repo-relative: three files with a pin; without one,
- * the same artefact and record plus the in-tree console's manifest (presence)
- * and the registry packages (the digest).
+ * the same artefact and record plus the in-tree console's manifest (presence),
+ * the registry packages (the digests) and their per-package records.
  */
 const READ_PATHS = {
   artefact: 'sdui.manifest.json',
@@ -169,6 +192,7 @@ const READ_PATHS = {
   pin: '.objectui-sha',
   console: join(UI_CONSOLE, 'package.json'),
   packages: UI_PACKAGES,
+  sources: join(...REGISTRY_RECORDS.split('/')),
 };
 
 /**
@@ -203,7 +227,14 @@ const RECORD_SOURCE = 'built-tree';
  * is byte-identical — see the generator.
  */
 const IN_TREE_RECORD_FIELDS = ['source', 'sha256', 'components', 'inTree'];
-const IN_TREE_FIELDS = ['modulesRoot', 'objectuiWorkspaceVersion', 'registryPackages', 'registrySources', 'registrySourcesSha256'];
+const IN_TREE_FIELDS = ['modulesRoot', 'objectuiWorkspaceVersion', 'registryRecords'];
+
+/**
+ * The single-digest layout's `inTree` fields, retired by #26051: one digest
+ * over every registry package, which every ui PR that touched one re-recorded.
+ * A record still carrying them is RED, never read as the same claim.
+ */
+const RETIRED_IN_TREE_FIELDS = ['registryPackages', 'registrySources', 'registrySourcesSha256'];
 
 /** The one command that clears each mode's freshness reds. */
 const PIN_REGENERATE = 'pnpm objectui:build && node scripts/gen-sdui-manifest-node.mjs';
@@ -264,7 +295,8 @@ const PRODUCER_IMPORTS = ['scripts/git-env.mjs', 'scripts/invoked-as.mjs'];
  * Without a pin it also reads the in-tree console's manifest and the registry
  * packages under `ui/packages/` (#25712) — the subtree the digest walks, so a
  * UI package edit derives this gate; on a tree with no `ui/` both hints match
- * nothing and only display.
+ * nothing and only display. The per-package records (#26051) are a directory,
+ * declared with the subtree suffix.
  *
  * The self-test derives the coupling from `READ_PATHS` — the same object
  * `checkTree` reads — so a moved or added read reds here rather than leaving the
@@ -276,6 +308,7 @@ const ROOT_WATCH_HINTS = [
   '.objectui-sha/**',
   'ui/apps/console/package.json',
   'ui/packages/**',
+  'scripts/sdui-manifest.sources/**',
 ];
 
 /**
@@ -481,12 +514,12 @@ function checkArtefactAndRecord(root, problems, { fields, producerReads, regener
 
 /**
  * Gate a tree that has no pin (the merged layout, #25712). Checks 1–2 as
- * above, keyed to the in-tree producer's record; check 3 becomes the registry
- * sources' digest against `inTree.registrySourcesSha256`. There is no check 4
- * here: the in-tree `@object-ui/core` version moves with every release of the
- * fixed group while the registry does not, so the record carries it as
- * provenance and the success line prints both. No pin and no in-tree console
- * is RED, naming both.
+ * above, keyed to the in-tree producer's record; check 3 becomes each registry
+ * package's source digest against its own record under `REGISTRY_RECORDS`
+ * (#26051). There is no check 4 here: the in-tree `@object-ui/core` version
+ * moves with every release of the fixed group while the registry does not, so
+ * the record carries it as provenance and the success line prints both. No pin
+ * and no in-tree console is RED, naming both.
  */
 function checkTreeWithoutPin(root) {
   const problems = [];
@@ -506,33 +539,88 @@ function checkTreeWithoutPin(root) {
   if (read === null) return problems;
   const { record } = read;
 
-  const missing = IN_TREE_FIELDS.filter((field) => record.inTree?.[field] === undefined);
-  if (missing.length > 0 || record.inTree?.modulesRoot !== UI_CONSOLE) {
-    for (const field of missing) problems.push(`record \`inTree\` is missing \`${field}\`.`);
-    if (!missing.includes('modulesRoot') && record.inTree?.modulesRoot !== UI_CONSOLE) {
-      problems.push(`record \`inTree.modulesRoot\` is ${JSON.stringify(record.inTree?.modulesRoot)}, not ${JSON.stringify(UI_CONSOLE)} — the in-tree producer reads only that.`);
-    }
-    problems.push(`  Regenerate in-tree — one command builds what the generator reads and re-records:\n    ${IN_TREE_REGENERATE}`);
+  const inTree = record.inTree ?? {};
+  const missing = IN_TREE_FIELDS.filter((field) => inTree[field] === undefined);
+  const retired = RETIRED_IN_TREE_FIELDS.filter((field) => inTree[field] !== undefined);
+  const shape = [];
+  for (const field of missing) shape.push(`record \`inTree\` is missing \`${field}\`.`);
+  if (retired.length > 0) {
+    shape.push(
+      `record \`inTree\` still carries ${retired.map((field) => `\`${field}\``).join(', ')} — the retired single-digest layout. Each\n` +
+        `  registry package now has its own record under ${REGISTRY_RECORDS}/, so ui PRs that touch different packages\n` +
+        '  do not conflict on one shared line.',
+    );
+  }
+  if (!missing.includes('modulesRoot') && inTree.modulesRoot !== UI_CONSOLE) {
+    shape.push(`record \`inTree.modulesRoot\` is ${JSON.stringify(inTree.modulesRoot)}, not ${JSON.stringify(UI_CONSOLE)} — the in-tree producer reads only that.`);
+  }
+  if (!missing.includes('registryRecords') && inTree.registryRecords !== REGISTRY_RECORDS) {
+    shape.push(`record \`inTree.registryRecords\` is ${JSON.stringify(inTree.registryRecords)}, not ${JSON.stringify(REGISTRY_RECORDS)} — the in-tree producer writes only there.`);
+  }
+  if (shape.length > 0) {
+    problems.push(...shape, `  Regenerate in-tree — one command builds what the generator reads and re-records:\n    ${IN_TREE_REGENERATE}`);
     return problems;
   }
 
-  const now = registrySourceDigest(root);
+  const now = registrySourceDigests(root);
   if (now.problem) {
     problems.push(`cannot digest the registry sources under ${UI_TREE}/: ${now.problem}`);
     return problems;
   }
-  const was = record.inTree;
-  if (
-    now.sha256 !== was.registrySourcesSha256
-    || now.files !== was.registrySources
-    || JSON.stringify(now.packages) !== JSON.stringify(was.registryPackages)
-  ) {
+  const recorded = readRegistryRecords(root);
+  if (recorded.problem) {
+    problems.push(`${recorded.problem}\n  Regenerate in-tree — one command builds what the generator reads and re-records:\n    ${IN_TREE_REGENERATE}`);
+    return problems;
+  }
+  problems.push(...recorded.malformed);
+
+  const stale = [];
+  const unrecorded = [];
+  const otherArtefact = [];
+  for (const pkg of now.packages) {
+    const was = recorded.records.get(pkg.dir);
+    if (!was) unrecorded.push(pkg);
+    else if (was.sha256 !== pkg.sha256 || was.sources !== pkg.files) stale.push({ pkg, was });
+    else if (was.manifestSha256 !== record.sha256) otherArtefact.push({ pkg, was });
+  }
+  const reached = new Set(now.packages.map(({ dir }) => dir));
+  const unreached = [...recorded.records.keys()].filter((dir) => !reached.has(dir));
+
+  if (stale.length > 0) {
     problems.push(
-      `the console registry sources under ${UI_TREE}/ have changed since sdui.manifest.json was generated:\n` +
-        `    now      ${now.packages.length} package(s), ${now.files} file(s), sha256 ${now.sha256.slice(0, 12)}…\n` +
-        `    recorded ${Array.isArray(was.registryPackages) ? was.registryPackages.length : '?'} package(s), ${was.registrySources} file(s), sha256 ${String(was.registrySourcesSha256).slice(0, 12)}…\n` +
-        '  A registry change can change which components and inputs the shipped console declares, so the manifest\n' +
-        '  must follow it (同步一次就烂). One command builds what the generator reads and regenerates:\n' +
+      `registry sources under ${UI_TREE}/ have changed since sdui.manifest.json was generated, in ${stale.length} package(s):\n` +
+        stale
+          .map(({ pkg, was }) => `    ${pkg.dir}: now ${pkg.files} file(s) sha256 ${pkg.sha256.slice(0, 12)}…, recorded ${was.sources} file(s) sha256 ${String(was.sha256).slice(0, 12)}…`)
+          .join('\n') +
+        '\n  A registry change can change which components and inputs the shipped console declares, so the manifest\n' +
+        '  must follow it (同步一次就烂).',
+    );
+  }
+  if (unrecorded.length > 0) {
+    problems.push(
+      `the registry reaches ${unrecorded.length} package(s) with no record under ${REGISTRY_RECORDS}/ — a new package, a new\n` +
+        '  dependency edge into the registry, or a deleted record:\n' +
+        unrecorded.map((pkg) => `    ${pkg.dir} (${pkg.files} source file(s))`).join('\n'),
+    );
+  }
+  if (unreached.length > 0) {
+    problems.push(
+      `${unreached.length} record(s) under ${REGISTRY_RECORDS}/ name a package the registry no longer reaches — a removed\n` +
+        '  package or a dropped dependency edge:\n' +
+        unreached.map((dir) => `    ${registryRecordPath(dir)} (${dir})`).join('\n'),
+    );
+  }
+  if (otherArtefact.length > 0) {
+    problems.push(
+      `${otherArtefact.length} package record(s) were verified against a different sdui.manifest.json than the committed one\n` +
+        `  (sha256 ${String(record.sha256).slice(0, 12)}…):\n` +
+        otherArtefact.map(({ pkg, was }) => `    ${pkg.dir}: verified against ${String(was.manifestSha256).slice(0, 12)}…`).join('\n') +
+        '\n  Two branches regenerated on different bases, and no run has seen their combination.',
+    );
+  }
+  if (stale.length + unrecorded.length + unreached.length + otherArtefact.length + recorded.malformed.length > 0) {
+    problems.push(
+      '  One command builds what the generator reads, regenerates, and re-records only the packages that moved:\n' +
         `    ${IN_TREE_REGENERATE}`,
     );
   }
@@ -543,21 +631,26 @@ function checkTreeWithoutPin(root) {
 const TEST_SOURCE = /(^|\/)(__tests__|__mocks__)\/|\.(test|spec)\.[cm]?[jt]sx?$/;
 
 /**
- * The in-tree freshness oracle: one sha256 over the registry's SOURCES as git
- * has them. Which packages: every `@object-ui/*` workspace package under
- * `ui/packages/` that `@object-ui/core` and the generator's `REGISTRY_MODULES`
- * reach through `dependencies`, `peerDependencies` or `optionalDependencies`
- * naming another member. Which files: each one's `src/`, tests excluded
- * (`TEST_SOURCE`). Which bytes: the INDEX — `git ls-files -s` gives the
- * path-sorted list and each file's blob id, so the reading is the committed
- * content, never a working-tree edit, an untracked file or a build output.
+ * The in-tree freshness oracle: one sha256 PER REGISTRY PACKAGE over its
+ * sources as git has them (#26051). Which packages: every `@object-ui/*`
+ * workspace package under `ui/packages/` that `@object-ui/core` and the
+ * generator's `REGISTRY_MODULES` reach through `dependencies`,
+ * `peerDependencies` or `optionalDependencies` naming another member. Which
+ * files: each one's own `src/`, tests excluded (`TEST_SOURCE`) — never its
+ * dependencies': an edit anywhere in the reached set still moves exactly one
+ * package's digest, so detection is the same as one digest over the whole set,
+ * and an edit to a low-level package (`core`, `types`, `react`) moves one
+ * record rather than every dependent's. Which bytes: the INDEX — `git ls-files
+ * -s` gives the path-sorted list and each file's blob id, so the reading is the
+ * committed content, never a working-tree edit, an untracked file or a build
+ * output.
  *
- * `{ packages, files, sha256 }`, or `{ problem }` naming what could not be
- * read — a registry module that is not a package here, an unreadable manifest,
- * a failed listing, or an empty one (zero sources is a broken read, not a
- * fresh one).
+ * `{ packages: [{ dir, files, sha256 }] }` in `dir` order, or `{ problem }`
+ * naming what could not be read — a registry module that is not a package
+ * here, an unreadable manifest, a failed listing, or a reached package with no
+ * source (zero sources is a broken read, not a fresh one).
  */
-export function registrySourceDigest(root) {
+export function registrySourceDigests(root) {
   const base = join(root, UI_PACKAGES);
   if (!existsSync(base)) return { problem: `${UI_PACKAGES}/ does not exist` };
   const byName = new Map();
@@ -587,11 +680,11 @@ export function registrySourceDigest(root) {
       for (const dep of Object.keys(manifest[field] ?? {})) if (byName.has(dep)) queue.push(dep);
     }
   }
-  const packages = [...reached].map((name) => byName.get(name).dir).sort();
+  const dirs = [...reached].map((name) => byName.get(name).dir).sort();
 
   let listing;
   try {
-    listing = execFileSync('git', ['-C', root, 'ls-files', '-s', '-z', '--', ...packages.map((dir) => `${dir}/src`)], {
+    listing = execFileSync('git', ['-C', root, 'ls-files', '-s', '-z', '--', ...dirs.map((dir) => `${dir}/src`)], {
       // #16644: `-C root` alone names the index read — the self-test hands this
       // mkdtemp fixtures, and an inherited GIT_DIR / GIT_INDEX_FILE outranks it.
       env: gitFreeEnv(),
@@ -600,7 +693,7 @@ export function registrySourceDigest(root) {
       maxBuffer: 64 * 1024 * 1024,
     });
   } catch (e) {
-    return { problem: `git ls-files over ${packages.length} package src/ trees failed: ${String(e?.stderr || e?.message || e).trim().split('\n')[0]}` };
+    return { problem: `git ls-files over ${dirs.length} package src/ trees failed: ${String(e?.stderr || e?.message || e).trim().split('\n')[0]}` };
   }
   const entries = listing
     .split('\0')
@@ -610,12 +703,79 @@ export function registrySourceDigest(root) {
       return { path: line.slice(tab + 1), blob: line.slice(0, tab).split(' ')[1] };
     })
     .filter(({ path }) => !TEST_SOURCE.test(path));
-  if (entries.length === 0) {
-    return { problem: `git lists no registry source under the ${packages.length} package src/ trees — zero sources is a broken read, not a fresh one` };
+  const packages = [];
+  for (const dir of dirs) {
+    const own = entries.filter(({ path }) => path.startsWith(`${dir}/src/`));
+    if (own.length === 0) {
+      return { problem: `git lists no source under ${dir}/src — zero sources is a broken read, not a fresh one` };
+    }
+    const hash = createHash('sha256');
+    for (const { path, blob } of own) hash.update(`${blob} ${path}\n`);
+    packages.push({ dir, files: own.length, sha256: hash.digest('hex') });
   }
-  const hash = createHash('sha256');
-  for (const { path, blob } of entries) hash.update(`${blob} ${path}\n`);
-  return { packages, files: entries.length, sha256: hash.digest('hex') };
+  return { packages };
+}
+
+/** A package's record file, repo-relative: its directory's basename under `REGISTRY_RECORDS`. */
+export function registryRecordPath(dir) {
+  return `${REGISTRY_RECORDS}/${dir.slice(dir.lastIndexOf('/') + 1)}.json`;
+}
+
+/**
+ * The one form a package record takes: ONE line of JSON, keys in this order,
+ * plus a newline. One line is the point — two branches that re-record the same
+ * package differently always touch the same line, so git reports a conflict
+ * instead of merging a digest from one side with an artefact sha256 from the
+ * other.
+ */
+export function registryRecordLine({ dir, files, sha256 }, manifestSha256) {
+  return `${JSON.stringify({ package: dir, sources: files, sha256, manifestSha256 })}\n`;
+}
+
+/**
+ * Read every record under `REGISTRY_RECORDS`. `{ problem }` when the directory
+ * is absent; otherwise `{ records, malformed }` — `records` maps a package dir
+ * to its parsed record, `malformed` lists each entry that is not one package
+ * record in the producer's one-line form (it is left out of `records`, so its
+ * package also reads as unrecorded).
+ */
+export function readRegistryRecords(root) {
+  const dir = join(root, ...REGISTRY_RECORDS.split('/'));
+  if (!existsSync(dir)) {
+    return { problem: `${REGISTRY_RECORDS}/ is MISSING — no registry package has a record, so no source can be judged fresh.` };
+  }
+  const records = new Map();
+  const malformed = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+    const where = `${REGISTRY_RECORDS}/${entry.name}`;
+    if (!entry.isFile() || !entry.name.endsWith('.json')) {
+      malformed.push(`${where} is not a package record (only one .json file per registry package lives there).`);
+      continue;
+    }
+    const raw = readFileSync(join(dir, entry.name), 'utf8');
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (e) {
+      malformed.push(`${where} does not parse: ${e.message}`);
+      continue;
+    }
+    const pkgDir = `${UI_PACKAGES}/${entry.name.slice(0, -'.json'.length)}`;
+    if (
+      parsed?.package !== pkgDir
+      || !Number.isInteger(parsed.sources)
+      || typeof parsed.sha256 !== 'string'
+      || typeof parsed.manifestSha256 !== 'string'
+      || raw !== registryRecordLine({ dir: pkgDir, files: parsed.sources, sha256: parsed.sha256 }, parsed.manifestSha256)
+    ) {
+      malformed.push(
+        `${where} is not ${pkgDir}'s record in the producer's one-line form ({"package","sources","sha256","manifestSha256"}).`,
+      );
+      continue;
+    }
+    records.set(pkgDir, parsed);
+  }
+  return { records, malformed };
 }
 
 // Returned by `selfTest()` only after its verdict is printed. The dispatch
@@ -667,12 +827,19 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'no pin: an in-tree record over unchanged registry sources passes': 1,
   'no pin and no in-tree console is RED, naming both': 1,
   'no pin: a pin-mode record (no inTree block) is RED with the in-tree command': 1,
-  'no pin: a staged registry source edit is RED with the in-tree command': 1,
+  'no pin: a staged edit to one registry package is RED naming that package alone': 1,
   'no pin: an edit the index does not hold is not a registry change': 1,
   'no pin: a test file or a package the registry does not reach is not a registry change': 1,
   'no pin: a new workspace edge into the registry is RED': 1,
+  'no pin: a new package the registry reaches is RED naming it': 1,
+  'no pin: a removed registry package is RED naming its record': 1,
+  'no pin: a deleted package record is RED naming the package': 1,
+  'no pin: a package record verified against another artefact is RED': 1,
+  'no pin: a package record out of its one-line form is RED': 1,
+  'no pin: a record from the single-digest layout is RED with the in-tree command': 1,
   'no pin: a hand-edited artefact is RED': 1,
   'no pin: the in-tree producer builds, then writes a tree this gate passes': 1,
+  'no pin: the producer re-records only the package whose sources moved': 1,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -681,7 +848,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // the literal above, so the roster falls below this number; the table
 // cross-check in the floor block is the other half, and names WHICH label
 // collided.
-const SELF_TEST_BATTERY_FLOOR = 22;
+const SELF_TEST_BATTERY_FLOOR = 29;
 
 function selfTest() {
   const mk = (mutate, { pin = 'a'.repeat(40), version = '0.0.0-selftest' } = {}) => {
@@ -858,23 +1025,20 @@ function selfTest() {
     const { root, git } = mkUiSources('sdui-manifest-in-tree-');
     const manifest = { components: { flex: { type: 'flex', inputs: [] } } };
     const raw = JSON.stringify(manifest, null, 2);
-    mkdirSync(join(root, 'scripts'), { recursive: true });
+    mkdirSync(join(root, READ_PATHS.sources), { recursive: true });
     writeFileSync(join(root, READ_PATHS.artefact), raw);
-    const digest = registrySourceDigest(root);
+    const sha256 = createHash('sha256').update(raw).digest('hex');
+    for (const pkg of registrySourceDigests(root).packages) {
+      writeFileSync(join(root, registryRecordPath(pkg.dir)), registryRecordLine(pkg, sha256));
+    }
     writeFileSync(
       join(root, READ_PATHS.record),
       JSON.stringify(
         {
           source: RECORD_SOURCE,
-          sha256: createHash('sha256').update(raw).digest('hex'),
+          sha256,
           components: 1,
-          inTree: {
-            modulesRoot: UI_CONSOLE,
-            objectuiWorkspaceVersion: '0.0.0-selftest',
-            registryPackages: digest.packages,
-            registrySources: digest.files,
-            registrySourcesSha256: digest.sha256,
-          },
+          inTree: { modulesRoot: UI_CONSOLE, objectuiWorkspaceVersion: '0.0.0-selftest', registryRecords: REGISTRY_RECORDS },
         },
         null,
         2,
@@ -887,6 +1051,7 @@ function selfTest() {
     const p = join(root, READ_PATHS.record);
     writeFileSync(p, JSON.stringify(edit(JSON.parse(readFileSync(p, 'utf8'))), null, 2));
   };
+  const packageRecord = (root, name) => join(root, registryRecordPath(pkgDir(name).split(sep).join('/')));
 
   /**
    * The PRODUCER's in-tree run (no pin): the real generator, this gate and the
@@ -895,9 +1060,13 @@ function selfTest() {
    * `@object-ui/core`'s dist into the console, so a producer that skipped its
    * build exits 1 on the missing dist and the row reads RED (missing artefact)
    * with the producer's stderr above it.
+   *
+   * With `rerunAfter`, the producer runs a second time after that edit, and
+   * the returned `moved` lists every path the producer writes whose bytes the
+   * second run changed — the re-record row's reading.
    */
-  const mkProducedInTree = () => {
-    const { root } = mkUiSources('sdui-manifest-in-tree-producer-');
+  const mkProducedInTree = ({ rerunAfter } = {}) => {
+    const { root, git } = mkUiSources('sdui-manifest-in-tree-producer-');
     mkdirSync(join(root, 'scripts'), { recursive: true });
     for (const file of [PRODUCER, 'scripts/check-sdui-manifest.mjs', ...PRODUCER_IMPORTS]) {
       copyFileSync(join(DEFAULT_ROOT, file), join(root, file));
@@ -925,14 +1094,50 @@ function selfTest() {
         `mkdir -p '${coreDist}' && printf '%s\\n' "export const ComponentRegistry = { getPublicConfigs: () => [{ type: 'selftest_flex' }] };" > '${coreDist}/index.js'\n`,
       { mode: 0o755 },
     );
-    const run = spawnSync(process.execPath, [join(root, PRODUCER)], { encoding: 'utf8', env: gitFreeEnv() });
-    if (run.status !== 0) {
-      console.error(`  the in-tree producer exited ${run.status ?? run.signal}:`);
-      for (const line of String(run.stderr ?? run.error ?? '').trim().split('\n')) console.error(`    ${line}`);
-    }
-    return root;
+    const produce = () => {
+      const run = spawnSync(process.execPath, [join(root, PRODUCER)], { encoding: 'utf8', env: gitFreeEnv() });
+      if (run.status !== 0) {
+        console.error(`  the in-tree producer exited ${run.status ?? run.signal}:`);
+        for (const line of String(run.stderr ?? run.error ?? '').trim().split('\n')) console.error(`    ${line}`);
+      }
+    };
+    produce();
+    if (!rerunAfter) return { root };
+    const written = () => {
+      const files = [READ_PATHS.artefact, READ_PATHS.record];
+      if (existsSync(join(root, READ_PATHS.sources))) {
+        for (const name of readdirSync(join(root, READ_PATHS.sources)).sort()) files.push(join(READ_PATHS.sources, name));
+      }
+      return new Map(files.map((file) => [file.split(sep).join('/'), existsSync(join(root, file)) ? readFileSync(join(root, file), 'utf8') : null]));
+    };
+    rerunAfter(root, git);
+    const first = written();
+    produce();
+    const second = written();
+    const moved = [...new Set([...first.keys(), ...second.keys()])].filter((file) => first.get(file) !== second.get(file)).sort();
+    return { root, moved };
   };
   const producedInTree = mkProducedInTree();
+
+  // The re-record row (#26051): one registry package's source moves and the
+  // artefact does not, so the second run must rewrite that package's record
+  // and nothing else — no other package record, not the shared header, not the
+  // artefact. The header is back-dated first, as a run on an earlier day left
+  // it: `generatedAt` is carried while the artefact is byte-identical, so a
+  // producer that stamps today's date names the header here, one that moves
+  // another record names it, and one that skips the moved package names that.
+  const rerecorded = mkProducedInTree({
+    rerunAfter: (r, git) => {
+      writeFileSync(join(r, pkgDir('@object-ui/plugin-grid'), 'src', 'index.ts'), 'export const id = "moved";\n');
+      git('add', '-A');
+      const p = join(r, READ_PATHS.record);
+      writeFileSync(p, JSON.stringify({ ...JSON.parse(readFileSync(p, 'utf8')), generatedAt: '2000-01-01' }, null, 2) + '\n');
+    },
+  });
+  const rerecordedWant = [`${REGISTRY_RECORDS}/plugin-grid.json`];
+  const rerecordedProblems = JSON.stringify(rerecorded.moved) === JSON.stringify(rerecordedWant)
+    ? []
+    : [`the second producer run changed ${JSON.stringify(rerecorded.moved)}, not exactly ${JSON.stringify(rerecordedWant)}.`];
 
   const cases = [
     ['green fixture passes', mk(), 0, blind],
@@ -994,10 +1199,12 @@ function selfTest() {
       modulesRoot: `.cache/objectui-${'a'.repeat(12)}/apps/console`,
       objectuiWorkspaceVersion: '0.0.0-selftest',
     }))), 1, blind, ['`inTree`', IN_TREE_REGENERATE]],
-    ['no pin: a staged registry source edit is RED with the in-tree command', mkInTree((r, git) => {
+    // The sixth column is text NO problem may carry: the red names the package
+    // that moved and no other, which is what lets a reader re-record only it.
+    ['no pin: a staged edit to one registry package is RED naming that package alone', mkInTree((r, git) => {
       writeFileSync(join(r, pkgDir('@object-ui/plugin-grid'), 'src', 'index.ts'), 'export const id = "moved";\n');
       git('add', '-A');
-    }), 1, blind, [IN_TREE_REGENERATE]],
+    }), 1, blind, ['ui/packages/plugin-grid:', IN_TREE_REGENERATE], ['ui/packages/plugin-form', 'ui/packages/core']],
     ['no pin: an edit the index does not hold is not a registry change', mkInTree((r) => {
       writeFileSync(join(r, pkgDir('@object-ui/plugin-grid'), 'src', 'index.ts'), 'export const id = "unstaged";\n');
       writeFileSync(join(r, pkgDir('@object-ui/plugin-grid'), 'src', 'untracked.ts'), 'export {};\n');
@@ -1013,9 +1220,46 @@ function selfTest() {
       const p = join(r, pkgDir('@object-ui/plugin-grid'), 'package.json');
       const manifest = JSON.parse(readFileSync(p, 'utf8'));
       writeFileSync(p, JSON.stringify({ ...manifest, peerDependencies: { '@object-ui/unrelated': 'workspace:*' } }, null, 2));
-    }), 1, blind, [IN_TREE_REGENERATE]],
+    }), 1, blind, ['ui/packages/unrelated', IN_TREE_REGENERATE]],
+    ['no pin: a new package the registry reaches is RED naming it', mkInTree((r, git) => {
+      const dir = join(r, UI_PACKAGES, 'plugin-new');
+      mkdirSync(join(dir, 'src'), { recursive: true });
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: '@object-ui/plugin-new', version: '0.0.0-selftest' }, null, 2));
+      writeFileSync(join(dir, 'src', 'index.ts'), 'export {};\n');
+      const p = join(r, pkgDir('@object-ui/plugin-grid'), 'package.json');
+      writeFileSync(p, JSON.stringify({ ...JSON.parse(readFileSync(p, 'utf8')), dependencies: { '@object-ui/plugin-new': 'workspace:*' } }, null, 2));
+      git('add', '-A');
+    }), 1, blind, ['ui/packages/plugin-new', IN_TREE_REGENERATE]],
+    ['no pin: a removed registry package is RED naming its record', mkInTree((r, git) => {
+      rmSync(join(r, pkgDir('@object-ui/types')), { recursive: true });
+      const p = join(r, pkgDir(REGISTRY_CORE), 'package.json');
+      writeFileSync(p, JSON.stringify({ ...JSON.parse(readFileSync(p, 'utf8')), dependencies: {} }, null, 2));
+      git('add', '-A');
+    }), 1, blind, [`${REGISTRY_RECORDS}/types.json`, IN_TREE_REGENERATE]],
+    ['no pin: a deleted package record is RED naming the package', mkInTree((r) => rmSync(packageRecord(r, '@object-ui/plugin-map'))), 1, blind, [
+      'ui/packages/plugin-map',
+      IN_TREE_REGENERATE,
+    ]],
+    // Two branches regenerated on different bases: this package's digest is
+    // current, but the artefact it was verified against is not the one committed.
+    ['no pin: a package record verified against another artefact is RED', mkInTree((r) => {
+      const p = packageRecord(r, '@object-ui/plugin-form');
+      const was = JSON.parse(readFileSync(p, 'utf8'));
+      writeFileSync(p, registryRecordLine({ dir: was.package, files: was.sources, sha256: was.sha256 }, 'f'.repeat(64)));
+    }), 1, blind, ['ui/packages/plugin-form: verified against ffffffffffff', IN_TREE_REGENERATE]],
+    // Pretty-printed, one record spans lines, and two branches can merge a
+    // digest from one with an artefact sha256 from the other without a conflict.
+    ['no pin: a package record out of its one-line form is RED', mkInTree((r) => {
+      const p = packageRecord(r, '@object-ui/plugin-grid');
+      writeFileSync(p, `${JSON.stringify(JSON.parse(readFileSync(p, 'utf8')), null, 2)}\n`);
+    }), 1, blind, [`${REGISTRY_RECORDS}/plugin-grid.json`, IN_TREE_REGENERATE]],
+    ['no pin: a record from the single-digest layout is RED with the in-tree command', mkInTree((r) => editRecord(r, (rec) => ({
+      ...rec,
+      inTree: { ...rec.inTree, registryPackages: [], registrySources: 1, registrySourcesSha256: '0'.repeat(64) },
+    }))), 1, blind, ['`registrySourcesSha256`', IN_TREE_REGENERATE]],
     ['no pin: a hand-edited artefact is RED', mkInTree((r) => writeFileSync(join(r, READ_PATHS.artefact), '{"components":{"flex":{"type":"flex"}}}')), 1, blind, [IN_TREE_REGENERATE]],
-    ['no pin: the in-tree producer builds, then writes a tree this gate passes', producedInTree, 0, blind],
+    ['no pin: the in-tree producer builds, then writes a tree this gate passes', producedInTree.root, 0, blind],
+    ['no pin: the producer re-records only the package whose sources moved', rerecorded.root, 0, { ...blind, extra: rerecordedProblems }],
   ];
 
   // The ledger this self-test's floor is evaluated against (#13489).
@@ -1025,17 +1269,20 @@ function selfTest() {
   };
 
   let failures = 0;
-  for (const [name, root, want, options, mustName = []] of cases) {
+  for (const [name, root, want, { extra = [], ...options } = {}, mustName = [], mustNotName = []] of cases) {
     registerCase(name);
-    const problems = checkTree(root, options);
+    const problems = [...checkTree(root, options), ...extra];
     const got = problems.length ? 1 : 0;
     const unnamed = got ? mustName.filter((text) => !problems.join('\n').includes(text)) : [];
-    if (got !== want || unnamed.length > 0) {
+    const misnamed = got ? mustNotName.filter((text) => problems.join('\n').includes(text)) : [];
+    if (got !== want || unnamed.length > 0 || misnamed.length > 0) {
       failures++;
       console.error(
         got !== want
           ? `✗ self-test: ${name} — expected ${want ? 'RED' : 'GREEN'}, got ${got ? 'RED' : 'GREEN'}`
-          : `✗ self-test: ${name} — RED, but no problem names ${unnamed.map((text) => JSON.stringify(text)).join(', ')}`,
+          : unnamed.length > 0
+            ? `✗ self-test: ${name} — RED, but no problem names ${unnamed.map((text) => JSON.stringify(text)).join(', ')}`
+            : `✗ self-test: ${name} — RED, but a problem also names ${misnamed.map((text) => JSON.stringify(text)).join(', ')}`,
       );
       for (const p of problems) console.error(`    ${p}`);
     }
@@ -1132,9 +1379,11 @@ function selfTest() {
   console.log(
     `✓ check-sdui-manifest self-test: ${cases.length} cases behave (green passes; absence, tamper, moved pin, emptiness, a retired-route record, ` +
       'a version the pin does not declare, and an oracle that cannot answer are RED; an absent oracle is reported, not scored; ' +
-      'the producer, run under a symlinked TMPDIR, writes a tree that passes; with no pin, the in-tree registry digest reds a staged ' +
-      'source edit or a new workspace edge and ignores tests, unreached packages and unstaged bytes, no pin and no console is RED ' +
-      'naming both, and the in-tree producer builds, then writes a tree that passes).',
+      'the producer, run under a symlinked TMPDIR, writes a tree that passes; with no pin, the per-package registry digests red a ' +
+      'staged edit naming only its package, a new package, a new workspace edge, a removed package, a deleted, malformed or ' +
+      'other-artefact record and the retired single-digest record, and ignore tests, unreached packages and unstaged bytes, no pin ' +
+      'and no console is RED naming both, and the in-tree producer builds, writes a tree that passes, and re-records only the ' +
+      'package that moved).',
   );
 
   return SELF_TEST_VERDICT;
@@ -1171,11 +1420,14 @@ if (isEntrypoint(import.meta.url)) {
       } catch {
         // display only — the verdict above did not read it
       }
+      // display only — checkTree has already held every record to its package
+      const { records } = readRegistryRecords(DEFAULT_ROOT);
+      const sources = [...records.values()].reduce((sum, rec) => sum + rec.sources, 0);
       console.log(
         `✓ check-sdui-manifest: sdui.manifest.json is present, intact (sha256 ${String(record.sha256).slice(0, 12)}…, ` +
-          `${record.components} components) and generated from the in-tree registry as it stands: ${inTree.registrySources} ` +
-          `source(s) in ${inTree.registryPackages.length} package(s) under ${UI_PACKAGES}/, sha256 ${String(inTree.registrySourcesSha256).slice(0, 12)}… ` +
-          '(no .objectui-sha in this tree).',
+          `${record.components} components) and generated from the in-tree registry as it stands: ${sources} ` +
+          `source(s) in ${records.size} package(s) under ${UI_PACKAGES}/, each package's digest current in its record under ` +
+          `${REGISTRY_RECORDS}/ (no .objectui-sha in this tree).`,
       );
       console.log(
         `  Provenance, not a verdict: the generator read @object-ui/core ${JSON.stringify(inTree.objectuiWorkspaceVersion)}; ` +

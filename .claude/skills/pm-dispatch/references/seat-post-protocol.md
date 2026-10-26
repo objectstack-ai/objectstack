@@ -55,15 +55,15 @@
 
 ## 座位 Routine 创建
 
-- 由维护者在 claude.ai 的 Routines UI 创建,凭据随 Routine 所挂 repo sources 走。
+- Routine 席由维护者在 claude.ai 的 Routines UI 创建,凭据随所挂 repo sources 走;项目席自建自绑。
 - Routines UI 并无 GitHub 连接器入口。
-- 会话内 `create_trigger` 的 Routine 拿不到 GitHub 工具、零产出;⛔ 不把它当座位 Routine 在跑。
+- `create_trigger` 开新会话的 Routine 拿不到 GitHub 工具、零产出;⛔ 不把它当座位 Routine 在跑。
 - 模型不能经 API 钉住,同样在 UI 钉;Routine 继承环境默认模型,环境默认变了它跟着变。
 - 创建后先手动 fire 一轮烟测,判据取 GitHub 上的产出:标签写入、审计评论、座位贴编辑。
 - ⛔ 不取会话看起来起来了;零产出即技术性失败。
 - 回滚 = `delete_trigger` + 清空座位登记 + 失败注记。
-- 档位按职责挑,⛔ 不按重要性挑;档位与 cron 是维护者在 UI 上的可调项。
-- 协议文本 ⛔ 不复制其当前值,座位贴才是现状。
+- 档位按职责挑,⛔ 不按重要性挑;Routine 席的档位与 cron 是维护者在 UI 上的可调项。
+- 项目席巡查默认每小时,放宽须有理由并写座位贴;协议 ⛔ 不复制当前值,座位贴即现状。
 
 ## Epic 车道收尾与僵尸回收
 

@@ -568,6 +568,11 @@ describe('auth-gate (ADR-0069 session gate)', () => {
     // (path, method) answers that moved must be EXACTLY the hook route — POST,
     // in either case — unscoped or under one `/environments/:id` scope, every
     // move a newly exempt answer, none newly gated.
+    // 30 s, not vitest's 5 s default: this boundary walks about 133k paths × 6
+    // methods through the predicate. It takes about 1.3 s on an idle box and
+    // 5.4 s on a Test Core runner that carries core beside spec's two test tasks
+    // (PR #26005, shard 5, three runs in a row), where the default refused a
+    // healthy enumeration. The timeout is a ceiling on load, not a budget.
     it('BOUNDARY — newly exempt is exactly POST on the four-segment hook route, unscoped or scoped, nothing else', () => {
       const PRE_MOUNT_BASES: readonly (readonly string[])[] = [['api', 'v1'], ['api'], []];
       const PRE_SCOPE_SEGMENTS: readonly string[] = ['environments', 'projects'];
@@ -652,7 +657,7 @@ describe('auth-gate (ADR-0069 session gate)', () => {
         expect(inCorpus.has(p), p).toBe(true);
         expect(isAuthGateAllowlisted(p, 'POST'), p).toBe(false);
       }
-    });
+    }, 30_000);
   });
 
   describe('evaluateAuthGate', () => {

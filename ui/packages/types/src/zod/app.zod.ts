@@ -252,7 +252,7 @@ function codeList(keys: readonly string[]): string {
   return quoted.length > 1 ? `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}` : quoted.join('');
 }
 
-const NavigationItemObject = z.object({
+const NavigationItemObject = z.looseObject({
   // Declared optional so a bare `{ type: 'separator' }` — which the spec
   // accepts, and which carries no identity or text by definition — validates
   // here too (objectstack#4115). Every OTHER type still requires `id`; that is
@@ -297,7 +297,7 @@ const NavigationItemObject = z.object({
   // Action payload (type: 'action'). Undeclared until objectstack#4115: the
   // schema strips unknown keys, so an action item validated clean while its
   // entire payload was thrown away.
-  actionDef: z.object({
+  actionDef: z.looseObject({
     actionName: z.string(),
     params: z.record(z.string(), z.unknown()).optional(),
   }).optional().describe('Action payload (type: action)'),
@@ -552,7 +552,7 @@ export const NavigationAreaSchema = specFieldsExcept(stripImportedDefaults(SpecN
  * declaration unchanged. The reasoning lives once, on `SchemaNodeSchema` in
  * `base.zod.ts` — read it there before changing this line.
  */
-export const MenuItemSchema: z.ZodType<AppMenuItem, AppMenuItem> = z.lazy(() => z.object({
+export const MenuItemSchema: z.ZodType<AppMenuItem, AppMenuItem> = z.lazy(() => z.looseObject({
   type: z.enum(['item', 'group', 'separator']).optional().describe('Item type'),
   label: z.string().optional().describe('Display label'),
   icon: z.string().optional().describe('Icon name (Lucide)'),

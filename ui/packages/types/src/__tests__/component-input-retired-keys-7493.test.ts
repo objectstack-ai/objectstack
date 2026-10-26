@@ -240,10 +240,12 @@ describe('the forwarded keys keep their own enforcement (control)', () => {
 /* ── the contrast a deletion would have produced ─────────────────────────── */
 
 describe('a tombstone is not a deletion — the route measurement, restated in one run', () => {
-  it('an UNDECLARED key is silently stripped, which is what deleting these three would have bought', () => {
+  it('an UNDECLARED key is silently accepted, which is what deleting these three would have bought', () => {
+    // Stripped while the mirror was strip mode; kept since objectstack#25923
+    // (`.passthrough()`). Either way it is not refused — the contrast stands.
     const result = ComponentInputSchema.safeParse({ ...LIVE_INPUT, notAKeyAtAll: 'anything' });
     expect(result.success).toBe(true);
-    if (result.success) expect(result.data).not.toHaveProperty('notAKeyAtAll');
+    if (result.success) expect(result.data).toHaveProperty('notAKeyAtAll', 'anything');
   });
 
   it('the three stay in the mirror\'s shape — DECLARED, just unwritable', () => {

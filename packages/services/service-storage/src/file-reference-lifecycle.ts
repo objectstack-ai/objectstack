@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { FILE_REFERENCE_TYPES, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY } from '@objectstack/spec/data';
 import type { IStorageService } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import { isEmptyForRequired } from '@objectstack/core';
+import { validationFailure } from '@objectstack/types';
 import { callerContext } from './attachment-access-hooks.js';
 
 /**
@@ -44,12 +46,43 @@ import { callerContext } from './attachment-access-hooks.js';
  * a file's id would be holding its bytes, which is exactly what ADR-0104 D3's
  * governed download ended. The question is the download door's own, asked of
  * the write's caller: {@link FileReferenceReadAuthorizer}, which the storage
- * plugin binds to the door's verdict rather than restating it here. A file the
- * writer may not read is answered exactly as one the organization-scoped
- * lookup cannot see ({@link systemReadContext}): the value is kept as written,
- * nothing is claimed or copied, and constraint verdicts do not run ahead of
- * the read check. System writes and context-less programmatic calls carry no
- * caller to ask, and reference files as before.
+ * plugin binds to the door's verdict rather than restating it here. System
+ * writes and context-less programmatic calls carry no caller to ask, and
+ * reference files as before.
+ *
+ * [#26043] A write naming a file its caller may not read is refused at the
+ * field, before the driver runs and before any file is copied: one
+ * `400 VALIDATION_FAILED` with an ADR-0114 `invalid_value` entry per field,
+ * naming the field and nothing about the file ({@link refuseUnreadableFile}).
+ * An id the organization-scoped lookup cannot see ({@link systemReadContext})
+ * gets the same answer, so the write door cannot tell "may not read" from
+ * "does not exist". It replaces #25951's quiet answer, which kept the id as
+ * written: that left a slot holding a file it does not own, the state
+ * ADR-0104's `verify-references` counts as blocking. Constraint verdicts still
+ * never run ahead of the read check.
+ *
+ * ### An anonymous write carries no file
+ *
+ * [#25694] Ruling C (record 6384525042), held at every anonymous write door
+ * rather than at the public form door alone: a write whose caller has no user
+ * (ADR-0138 D2's anonymous write doors: the guest envelope of an
+ * `authRequired: false` endpoint, under whatever grants a deployment binds to
+ * the guest) may not put a value in a file field. It is refused before the driver runs, naming each
+ * field, with the form door's envelope ({@link assertAnonymousWriteCarriesNoFile}).
+ * The read verdict above would admit a `public_read` file to such a caller,
+ * and keep any other id as written; neither is a file the anonymous caller
+ * may provide. An empty or absent file field is written as before.
+ *
+ * ### A released file keeps its record's rule
+ *
+ * [#26046] Releasing a file clears its ownership columns, and the download
+ * door reads a file no record owns by the organization's rule. That rule is
+ * for a file no record ever held; a file a record let go is still the one that
+ * record held. So release keeps the record ({@link releaseOwnership}), the
+ * door's verdict judges the file by that record's read access until it is
+ * claimed again or collected, and a claim, which asks the same verdict, is
+ * open only to a writer who may read that record. A deleted record is read by
+ * nobody, so its released files are left to their uploader.
  *
  * ### The one write that cannot honour it, and is refused
  *
@@ -158,8 +191,10 @@ function systemWriteContext(organizationId?: string | null): Record<string, unkn
  * whether the posture walls at all (`single` does not) are the platform's
  * answers, for the same reason the copy is never stamped on the payload.
  *
- * A file the lookup cannot see is answered exactly as an id the platform does
- * not manage: the value is kept as written and nothing is claimed or copied.
+ * A file the lookup cannot see is, for a write with no caller to judge, an id
+ * the platform does not manage: the value is kept as written and nothing is
+ * claimed or copied. [#26043] For a write with a caller, it is refused exactly
+ * as a file the caller may not read ({@link findReferenceableFile}).
  * No organization ⇒ the key is absent and the lookup reads as it did before.
  */
 function systemReadContext(organizationId?: string | null): Record<string, unknown> {
@@ -254,15 +289,19 @@ function claimingCallerOf(ctx: any, fileId: string, caller: ExecutionContext | n
 }
 
 /**
- * The `sys_file` row a field's id token names, as THIS write may reference it,
- * or `null`. Both halves of the claim path — copy-on-claim before the write,
- * the claim after it — ask through here, so they cannot disagree about which
- * file a write may take.
+ * The `sys_file` row a field's id token names, as THIS write may reference it.
+ * Both halves of the claim path — copy-on-claim before the write, the claim
+ * after it — ask through here, so they cannot disagree about which file a
+ * write may take.
  *
  *  1. The row as the acting organization reaches it ({@link systemReadContext}).
  *  2. [#25692] Then, when the plugin bound a read verdict and the write has a
- *     caller, whether that caller may read it. A file it may not read is
- *     answered as the lookup answers a file it cannot see.
+ *     caller, whether that caller may read it.
+ *
+ * [#26043] When a caller is asked about, a file it may not read and an id the
+ * lookup cannot see are one answer, `'refused'`, which copy-on-claim refuses
+ * at the field. With no caller to ask, an id the lookup cannot see is `null`:
+ * an id the platform does not manage, kept as written.
  */
 async function findReferenceableFile(
   engine: FileReferenceEngine,
@@ -270,11 +309,92 @@ async function findReferenceableFile(
   organizationId: string | null,
   caller: ExecutionContext | null,
   authorizeRead: FileReferenceReadAuthorizer | undefined,
-): Promise<Record<string, unknown> | null> {
+): Promise<Record<string, unknown> | 'refused' | null> {
   const row = await engine.findOne('sys_file', { where: { id: fileId }, context: systemReadContext(organizationId) });
-  if (!row) return null;
-  if (!caller || !authorizeRead) return row;
-  return (await authorizeRead(row, caller)) ? row : null;
+  if (!caller || !authorizeRead) return row ?? null;
+  if (!row) return 'refused';
+  return (await authorizeRead(row, caller)) ? row : 'refused';
+}
+
+/** One field a file-field judgement refuses: the ADR-0114 entry the form door's envelope carries. */
+interface FileFieldRefusal {
+  field: string;
+  code: 'invalid_value';
+  message: string;
+  label: string;
+}
+
+/** A field's declared label, or its name when it declares none. */
+function fieldLabelOf(engine: FileReferenceEngine, object: string, field: string): string {
+  const def = fieldDefOf(engine, object, field);
+  const declared = typeof def?.label === 'string' ? def.label.trim() : '';
+  return declared.length > 0 ? declared : field;
+}
+
+/**
+ * The form door's envelope (`form-routes.ts`, #25572) for a write's refused
+ * file fields: one `400 VALIDATION_FAILED` naming every refused field, with
+ * the closed ADR-0114 field code `invalid_value`. Throws nothing when none is.
+ */
+function assertNoFileFieldRefused(refused: FileFieldRefusal[]): void {
+  if (refused.length > 0) throw validationFailure(refused.map((f) => f.message).join('; '), refused);
+}
+
+/**
+ * [#26043] The refusal of a field naming a file its write's caller may not
+ * read, or one the acting organization cannot see. It names the field only:
+ * the same words for both, and nothing about the file or who holds it.
+ */
+function refuseUnreadableFile(engine: FileReferenceEngine, object: string, field: string): FileFieldRefusal {
+  const label = fieldLabelOf(engine, object, field);
+  return {
+    field,
+    code: 'invalid_value',
+    message: `${label} cannot reference this file: it is not a file you can open. `
+      + 'Choose a file you can open, or upload it again.',
+    label,
+  };
+}
+
+/**
+ * [#25694] Ruling C at every anonymous write door: an anonymous write carries
+ * no file. A file is provided by a signed-in caller, through the authenticated
+ * upload doors; a caller with no user has none to provide, so a value in a
+ * file field of its write is refused, whether it names a platform file (one it
+ * may download or not) or anything else. Judged before the driver runs and
+ * before any file is looked up, so a refused write leaves nothing behind.
+ *
+ * The form door's own judgement (`form-routes.ts`, #25572), held at the
+ * engine: the same emptiness rule (`isEmptyForRequired`), and the same
+ * envelope ({@link assertNoFileFieldRefused}). The form door keeps its own
+ * judgement, which answers before anything reaches the engine.
+ *
+ * `caller` is {@link referencingCallerOf}'s answer, the caller the read
+ * verdict is asked about: a system write and a context-less programmatic
+ * write have none, and are not judged; a caller with no user is anonymous.
+ */
+function assertAnonymousWriteCarriesNoFile(
+  engine: FileReferenceEngine,
+  object: string,
+  data: Record<string, unknown>,
+  fileFields: string[],
+  caller: ExecutionContext | null,
+): void {
+  if (!caller || caller.userId) return;
+  const refused: FileFieldRefusal[] = [];
+  for (const field of fileFields) {
+    if (!Object.prototype.hasOwnProperty.call(data, field)) continue;
+    if (isEmptyForRequired(fieldDefOf(engine, object, field), data[field])) continue;
+    const label = fieldLabelOf(engine, object, field);
+    refused.push({
+      field,
+      code: 'invalid_value',
+      message: `${label} cannot take a file here: an anonymous write carries no file. `
+        + 'Leave it empty, or sign in and provide the file from your account.',
+      label,
+    });
+  }
+  assertNoFileFieldRefused(refused);
 }
 
 /** Bound on owned files released per record delete. */
@@ -622,8 +742,9 @@ async function copyOwnedFile(
  *
  * `recordId` is null on insert: a new record can never be the current owner,
  * so every already-owned id is copied. [#25692] `caller` is the write's caller
- * ({@link referencingCallerOf}): a file it may not read is neither copied nor
- * judged against the field's declaration.
+ * ({@link referencingCallerOf}). [#26043] Every file the write names is judged
+ * for that caller before any is copied or held to its field's declaration,
+ * and a field naming one it may not read refuses the whole write.
  */
 async function applyCopyOnClaim(
   engine: FileReferenceEngine,
@@ -638,21 +759,40 @@ async function applyCopyOnClaim(
   authorizeRead: FileReferenceReadAuthorizer | undefined,
   minted: Set<string> | null,
 ): Promise<void> {
+  // [#26043] Judge every file the write names first, so a refused field fails
+  // the write before any bytes are copied for another one.
+  const named: Array<{ field: string; value: unknown; rows: Array<[string, Record<string, unknown>]> }> = [];
+  const refused: FileFieldRefusal[] = [];
   for (const field of fileFields) {
     if (!(field in data)) continue;
     const value = data[field];
     const tokens = idTokensIn(value);
     if (tokens.length === 0) continue;
 
-    const replacements = new Map<string, string>();
+    const rows: Array<[string, Record<string, unknown>]> = [];
+    let fieldRefused = false;
     for (const token of [...new Set(tokens)]) {
-      const row = await findReferenceableFile(engine, token, organizationId, caller, authorizeRead);
-      // Unknown id: not a file this platform manages (external/legacy value),
-      // not one the acting organization can reach (`systemReadContext`), or
-      // [#25692] not one this write's caller may read. Left verbatim — the
-      // read resolver ignores it for the same reason.
-      if (!row) continue;
+      const found = await findReferenceableFile(engine, token, organizationId, caller, authorizeRead);
+      // [#26043] A file this write's caller may not read, or one the acting
+      // organization cannot see: the field is refused.
+      if (found === 'refused') {
+        fieldRefused = true;
+        break;
+      }
+      // Unknown id, and no caller to judge: not a file this platform manages
+      // (external/legacy value), or not one the acting organization can reach
+      // (`systemReadContext`). Left verbatim — the read resolver ignores it
+      // for the same reason.
+      if (found) rows.push([token, found]);
+    }
+    if (fieldRefused) refused.push(refuseUnreadableFile(engine, object, field));
+    else if (rows.length > 0) named.push({ field, value, rows });
+  }
+  assertNoFileFieldRefused(refused);
 
+  for (const { field, value, rows } of named) {
+    const replacements = new Map<string, string>();
+    for (const [token, row] of rows) {
       // The file is real, this caller may read it, and it is about to be
       // referenced by this field, so its declared constraints bind now —
       // before ownership, before any copy, and [#25692] never ahead of the
@@ -724,7 +864,10 @@ async function claimFile(
   authorizeRead: FileReferenceReadAuthorizer | undefined,
 ): Promise<void> {
   const row = await findReferenceableFile(engine, fileId, organizationId, caller, authorizeRead);
-  if (!row) return; // not a platform-managed file this write may reference — nothing to own
+  // Not a platform-managed file this write may reference — nothing to own.
+  // [#26043] Copy-on-claim refused such a write before it ran; a claim that
+  // finds one now still takes nothing.
+  if (!row || row === 'refused') return;
   if (row.ref_id != null && !isSameSlot(row, object, recordId, field)) {
     logger.warn(
       `[storage] file reference: ${fileId} is already owned by ` +
@@ -744,6 +887,12 @@ async function claimFile(
   if (row.status === 'deleted') {
     patch.status = 'committed';
     patch.deleted_at = null;
+  }
+  // [#26046] The claiming record's rule replaces the one the file kept from
+  // the record that let it go.
+  if (row.released_ref_object != null || row.released_ref_id != null) {
+    patch.released_ref_object = null;
+    patch.released_ref_id = null;
   }
   await engine.update('sys_file', patch, { context: { ...SYSTEM_CTX } });
 }
@@ -790,6 +939,13 @@ async function collectionOpen(engine: FileReferenceEngine): Promise<boolean> {
  * Only a `committed` file is tombstoned: `pending` rows already carry their
  * own never-completed reap policy, and re-tombstoning a `deleted` row would
  * reset its grace clock.
+ *
+ * [#26046] Every release keeps the record that let the file go
+ * (`released_ref_object` / `released_ref_id`), whether or not it tombstones:
+ * the file is read by that record's rule until a writer who may read it
+ * claims it again ({@link claimFile} clears them), or it is collected. Without
+ * them a released file would read as one no record ever held, whose rule is
+ * the organization's, which is weaker than the record's was.
  */
 async function releaseOwnership(
   engine: FileReferenceEngine,
@@ -803,7 +959,14 @@ async function releaseOwnership(
     if (id == null) continue;
     const tombstone = collect && row.status === 'committed';
     try {
-      const patch: Record<string, unknown> = { id, ref_object: null, ref_id: null, ref_field: null };
+      const patch: Record<string, unknown> = {
+        id,
+        ref_object: null,
+        ref_id: null,
+        ref_field: null,
+        released_ref_object: row.ref_object ?? null,
+        released_ref_id: row.ref_id ?? null,
+      };
       if (tombstone) {
         patch.status = 'deleted';
         patch.deleted_at = new Date().toISOString();
@@ -869,9 +1032,11 @@ export function installFileReferenceHooks(
       if (!object || !data || typeof data !== 'object') return;
       const fileFields = activeFileFields(engine, object);
       if (fileFields.length === 0) return;
+      const caller = referencingCallerOf(ctx);
+      assertAnonymousWriteCarriesNoFile(engine, object, data, fileFields, caller);
       await applyCopyOnClaim(
         engine, getStorage, logger, object, null, data, fileFields,
-        actingOrganizationOf(ctx), referencingCallerOf(ctx), authorizeRead, mintedCopiesFor(ctx),
+        actingOrganizationOf(ctx), caller, authorizeRead, mintedCopiesFor(ctx),
       );
     },
     { packageId: PACKAGE_ID },
@@ -885,6 +1050,10 @@ export function installFileReferenceHooks(
       if (!object || !data || typeof data !== 'object') return;
       const fileFields = activeFileFields(engine, object);
       if (fileFields.length === 0) return;
+      // [#25694] Before the predicate refusal below: an anonymous write is
+      // refused for what it carries, whichever shape the write takes.
+      const caller = referencingCallerOf(ctx);
+      assertAnonymousWriteCarriesNoFile(engine, object, data, fileFields, caller);
       // [#6966] "Is this a multi-update?" is the engine's marker, not the shape
       // of `input.id`. A per-row context names ITS row, so the old
       // `ids.length === 1` test answered "single update" on every row of a
@@ -928,7 +1097,7 @@ export function installFileReferenceHooks(
       // analysis a later edit has to re-derive.
       await applyCopyOnClaim(
         engine, getStorage, logger, object, recordId, data, fileFields,
-        actingOrganizationOf(ctx), referencingCallerOf(ctx), authorizeRead, mintedCopiesFor(ctx),
+        actingOrganizationOf(ctx), caller, authorizeRead, mintedCopiesFor(ctx),
       );
     },
     { packageId: PACKAGE_ID },

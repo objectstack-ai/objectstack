@@ -71,6 +71,9 @@ import {
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 import { readDispatchedBody } from '../deferred-request-body.js';
+// [#9416, #25821, #25976] The one value-shape check every door that starts or
+// resumes a run asks — shared with the action door, so it lives beside both.
+import { objectValueFailure } from '../object-value-shape.js';
 // [#20552] The per-type credential redaction every metadata read exit applies,
 // and its write-path inverse — reused, never restated, for the definitions this
 // domain serves and overwrites.
@@ -78,38 +81,6 @@ import { carryForwardRedactedValues, redactMetadataItem } from '@objectstack/met
 // [#20679] Only the verdict's SIGNATURE — the locked-base refusal is asked of
 // the `protocol` service at request time, never re-derived here.
 import type { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
-
-/**
- * [#9416, #25821] The value-shape check for a body key whose value must be a
- * JSON object (a map of names to values): the resume door's `inputs`,
- * `variables` and `output`, and the trigger door's `params`. ONE function, so
- * the two doors of one engine ask the same question and answer it in the same
- * words — a second spelling of it is how they disagreed.
- *
- * Returns the located `fields[]` entry (ADR-0114 `invalid_type`) for a value
- * that is not an object, `undefined` otherwise. `undefined` counts as ABSENT,
- * never mis-shaped: `JSON.stringify` drops such a key, so no HTTP caller can
- * send one, and the in-process spelling `{ key: maybeUndefined }` means "not
- * sent". An explicit `null` IS refused — JSON can express it, and it is the
- * value that used to be dropped most quietly of all.
- *
- * The received-type wording is spelled here rather than borrowed from the
- * resume arm's `jsonTypeOf`, whose note keeps that namer local to the arm: what
- * is shared is this one refusal, not a formatter.
- */
-function objectValueFailure(
-    field: string,
-    value: unknown,
-): { field: string; code: 'invalid_type'; message: string } | undefined {
-    if (value === undefined) return undefined;
-    if (value !== null && typeof value === 'object' && !Array.isArray(value)) return undefined;
-    const received = value === null ? 'null' : Array.isArray(value) ? 'an array' : `a ${typeof value}`;
-    return {
-        field,
-        code: 'invalid_type',
-        message: `expected an object (a map of names to values), received ${received}`,
-    };
-}
 
 /**
  * Translate a trigger request body into the canonical `AutomationContext` the
@@ -147,14 +118,25 @@ function objectValueFailure(
  * caller supplied, as opposed to the row id this builder seeds — so every route
  * sharing it carries the same caller-provenance signal.
  *
- * [#25821] A `params` that is not a JSON object is refused here, thrown as the
- * validation failure both dispatcher exits and the endpoint executor answer as
- * `400 VALIDATION_FAILED` + `fields[]`. Every door that builds its context here
- * calls this before `execute()`, so a refused trigger dispatches nothing and
- * leaves no run row. See {@link objectValueFailure}.
+ * [#25821, #25976] A body, or a `params`, that is not a JSON object is refused
+ * here, thrown as the validation failure both dispatcher exits and the endpoint
+ * executor answer as `400 VALIDATION_FAILED` + `fields[]`. Every door that
+ * builds its context here calls this before `execute()`, so a refused trigger
+ * dispatches nothing and leaves no run row. See {@link objectValueFailure}.
  */
 export function buildAutomationContext(body: any, context: HttpProtocolContext): Record<string, unknown> {
-    const ctxBody = body && typeof body === 'object' ? body : {};
+    // [#25976] The BODY must be an object before its keys mean anything. This
+    // read used to be `body && typeof body === 'object' ? body : {}`, so a JSON
+    // string body dispatched the flow with an EMPTY bag, and an array passed the
+    // `typeof` guard and reached the flat-body branch below, which forwarded its
+    // indices as params. The resume door refuses the same body (#9416); this
+    // asks the same function. `undefined` / `null` stay the legal bodyless
+    // trigger, so `?? {}` survives for exactly those two.
+    const bodyFailure = objectValueFailure('(body)', body ?? {});
+    if (bodyFailure) {
+        throw validationFailure(`Invalid trigger body — ${bodyFailure.message}`, [bodyFailure]);
+    }
+    const ctxBody = (body ?? {}) as Record<string, any>;
     // [#25821] The params bag must be an object before anything is read from
     // it. The read below used to be `params && typeof params === 'object'`, so
     // a string became an EMPTY bag and the flow ran with no inputs, an array
@@ -3319,11 +3301,13 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                  */
                 const jsonTypeOf = (v: unknown): string =>
                     v === null ? 'null' : Array.isArray(v) ? 'an array' : `a ${typeof v}`;
-                if (typeof rawBody !== 'object' || Array.isArray(rawBody)) {
-                    throw validationFailure(
-                        `Invalid resume body — expected an object with ${accepted}, received ${jsonTypeOf(rawBody)}`,
-                        [{ field: '(body)', code: 'invalid_type', message: `expected an object with ${accepted}` }],
-                    );
+                // [#25976] Asked through `objectValueFailure`, the check the
+                // trigger and action doors ask of their input too, so the three
+                // doors refuse one shape in one way; only the wording names this
+                // body's closed key set.
+                const bodyFailure = objectValueFailure('(body)', rawBody, `an object with ${accepted}`);
+                if (bodyFailure) {
+                    throw validationFailure(`Invalid resume body — ${bodyFailure.message}`, [bodyFailure]);
                 }
                 const b = rawBody as Record<string, unknown>;
                 // [commit a4331227b] The outer envelope is a CLOSED SET (maintainer ruling

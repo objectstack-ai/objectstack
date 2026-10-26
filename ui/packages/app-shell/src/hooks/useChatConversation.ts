@@ -498,7 +498,15 @@ export function sanitizeChatMessagesForCache(
           //     has taken `output`. Local mode keeps it, because
           //     `normalizeMessages` passes `toolInvocations` through verbatim,
           //     and `hydratedMessagesToChatMessages` lifts it on the way back.
-          const cachedOutput = tool.replayOutcome
+          //
+          // objectstack#25887 — a replay that still carries a `draftReview` is
+          // a drafted whole-app build (the live mapper keeps the review for
+          // that replay alone). Its draft envelope is cached, not the bare
+          // replay verdict: the verdict has no `drafted[]`, and without them a
+          // cache-fallback reload draws no result card. Re-detected under the
+          // same `replay_` id, the draft envelope still reads as a drafted
+          // replay, so the verdict survives too.
+          const cachedOutput = tool.replayOutcome && !tool.draftReview
             ? replayOutcomeToCachedResult(tool.replayOutcome)
             : tool.draftReview
               ? draftReviewToCachedResult(tool.draftReview)

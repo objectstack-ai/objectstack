@@ -56,7 +56,7 @@ import { LocalStorageAdapter } from './local-storage-adapter.js';
 import type { LocalStorageAdapterOptions } from './local-storage-adapter.js';
 import { S3StorageAdapter } from './s3-storage-adapter.js';
 import type { S3StorageAdapterOptions } from './s3-storage-adapter.js';
-import { StorageMetadataStore } from './metadata-store.js';
+import { StorageMetadataStore, releasingRecordOf } from './metadata-store.js';
 import type { FileRecord } from './metadata-store.js';
 import type { TenancyPosture } from '@objectstack/spec/security';
 import { registerStorageFamily } from './storage-routes.js';
@@ -1589,6 +1589,16 @@ async function judgeFileRead(
     const ownerId = String(file.ref_id);
     const readable = await readableFieldOwners(registry, engine, String(file.ref_object), [ownerId], context);
     return readable.has(ownerId) ? 'allow' : 'deny';
+  }
+
+  // [#26046] Released: a record let this file go, and no record has claimed
+  // it since. It is still the file that record held, so it keeps that
+  // record's read rule, asked exactly as the arm above asks it. A record that
+  // no longer exists is read by nobody, so only the uploader reads the file.
+  const releasing = releasingRecordOf(file);
+  if (releasing) {
+    const readable = await readableFieldOwners(registry, engine, releasing.object, [releasing.id], context);
+    return readable.has(releasing.id) ? 'allow' : 'deny';
   }
 
   // [#25693] Unclaimed (neither an attachments scope nor a field owner):

@@ -202,7 +202,7 @@ export const PaginationConfigSchema = stripImportedDefaults(SpecPaginationConfig
 /**
  * Sort Config Schema
  */
-export const SortConfigSchema = z.object({
+export const SortConfigSchema = z.looseObject({
   field: z.string().describe('Field to sort by'),
   order: z.enum(['asc', 'desc']).describe('Sort order'),
 });
@@ -586,7 +586,7 @@ const ObjectGridBulkActionDefSchema = z.strictObject({
   params: z.array(ObjectGridBulkActionParamSchema).optional(),
   // The twin's two arms (objectui#13183): a string, or the `template` envelope a
   // parsed def carries once the spec makes the slot a template slot (objectstack#24947).
-  confirmText: z.union([z.string(), z.object({ dialect: z.literal('template').optional(), source: z.string().optional() })]).optional(),
+  confirmText: z.union([z.string(), z.looseObject({ dialect: z.literal('template').optional(), source: z.string().optional() })]).optional(),
   confirmLabel: z.string().optional(),
   visible: z.union([ExpressionWireSchema, stripImportedDefaults(SpecBulkActionDefSchema).shape.visible]).optional(),
   requiredPermissions: z.array(z.string()).optional(),
@@ -895,7 +895,7 @@ const OBJECT_FORM_NEITHER_CHANNEL = neitherContentChannelGuidance(
  * entry is not judged on this key at all — stated here rather than implied by a
  * string arm that an `any` arm beside it would make decorative.
  */
-const ObjectFormSectionEntrySchema = z.object({
+const ObjectFormSectionEntrySchema = z.looseObject({
   name: z.string().optional().describe('Section identifier'),
   label: z.string().optional().describe('Section label'),
   description: z.string().optional().describe('Section description'),
@@ -906,13 +906,13 @@ const ObjectFormSectionEntrySchema = z.object({
   fields: z.array(z.any()).optional().describe('Field names or inline field configurations; the other way to declare members is `group`'),
   group: z.string().optional().describe('Key of a declared object field group whose members and presentation this section inherits'),
   visibleWhen: z
-    .union([z.string(), z.object({ dialect: z.string().optional(), source: z.string() })])
+    .union([z.string(), z.looseObject({ dialect: z.string().optional(), source: z.string() })])
     .optional()
     .describe('Predicate gating the whole section: a bare string or the { dialect?, source } envelope'),
 });
 
 /** objectui#6152 round 1 — one flat button toggle inside `ObjectFormSchema.buttons`. */
-const ObjectFormButtonToggleSchema = z.object({
+const ObjectFormButtonToggleSchema = z.looseObject({
   show: z.boolean().optional().describe('Show this button'),
   label: z.string().optional().describe('Button label'),
 });
@@ -961,7 +961,7 @@ export const ObjectFormSchema = BaseSchema.extend({
   fields: z.array(z.string()).optional().describe('Included fields'),
   customFields: z.array(z.any()).optional().describe('Custom field configs'),
   initialData: z.record(z.string(), z.any()).optional().describe('Initial data'),
-  groups: z.array(z.object({
+  groups: z.array(z.looseObject({
     title: z.string().optional(),
     description: z.string().optional(),
     fields: z.array(z.string()),
@@ -983,10 +983,10 @@ export const ObjectFormSchema = BaseSchema.extend({
   navigateOnSuccess: z.string().optional().describe('DEPRECATED, write submitBehavior instead: navigate here after success (relative path only; {id}/{recordId} interpolated and URL-escaped); precedes the toast'),
   resetOnSuccess: z.boolean().optional().describe('Reset the form after a successful create for another entry'),
   submitBehavior: z.union([
-    z.object({ kind: z.literal('thank-you'), title: z.string().optional(), message: z.string().optional() }),
-    z.object({ kind: z.literal('redirect'), url: z.string(), delayMs: z.number().optional() }),
-    z.object({ kind: z.literal('continue') }),
-    z.object({ kind: z.literal('next-record') }),
+    z.looseObject({ kind: z.literal('thank-you'), title: z.string().optional(), message: z.string().optional() }),
+    z.looseObject({ kind: z.literal('redirect'), url: z.string(), delayMs: z.number().optional() }),
+    z.looseObject({ kind: z.literal('continue') }),
+    z.looseObject({ kind: z.literal('next-record') }),
   ]).optional().describe('Declarative post-submit behavior; takes precedence over successMessage/navigateOnSuccess/resetOnSuccess'),
   showCancel: z.boolean().optional().describe('Show cancel button'),
   cancelText: stripImportedDefaults(SpecI18nLabelSchema).optional()
@@ -1033,21 +1033,21 @@ export const ObjectFormSchema = BaseSchema.extend({
   drawerWidth: z.string().optional().describe('Drawer width as a CSS value; drawer forms only'),
   modalSize: z.enum(['sm', 'default', 'lg', 'xl', 'full']).optional().describe('Modal dialog size; modal forms only'),
   modalCloseButton: z.boolean().optional().describe('Show the modal header close button; modal forms only'),
-  mobile: z.object({
+  mobile: z.looseObject({
     stickyActions: z.boolean().optional().describe('Pin Submit/Cancel to the bottom of the viewport on mobile'),
     stepper: z.union([z.boolean(), z.literal('auto')]).optional().describe('One-field-at-a-time stepper on small screens: true, false or auto'),
     stepperMinFields: z.number().optional().describe('Field-count threshold for stepper auto'),
     stepperFieldsPerStep: z.number().optional().describe('Fields shown per stepper step'),
     fullscreenLongText: z.boolean().optional().describe('Offer a fullscreen editor for textarea and rich-text fields'),
   }).optional().describe('Mobile-only form behaviour; every option is opt-in'),
-  buttons: z.object({
+  buttons: z.looseObject({
     submit: ObjectFormButtonToggleSchema.optional(),
     cancel: ObjectFormButtonToggleSchema.optional(),
     reset: ObjectFormButtonToggleSchema.optional(),
   }).optional().describe('Structured submit/cancel/reset visibility and labels; folded onto the flat keys, which win when set'),
   defaults: z.record(z.string(), z.any()).optional()
     .describe('Create-mode initial values keyed by field name; folded into initialValues, which wins when set'),
-  subforms: z.array(z.object({
+  subforms: z.array(z.looseObject({
     childObject: z.string().describe('Child object name'),
     relationshipField: z.string().optional().describe('Foreign-key field on the child (derived from metadata when omitted)'),
     // objectui#11266 — each column is the spec's `InlineGridColumnSchema`, by
@@ -1313,7 +1313,7 @@ export const ObjectViewSchema = BaseSchema.extend({
   showCreate: z.boolean().optional().describe('Show create button'),
   showRefresh: z.boolean().optional().describe('Show refresh button'),
   showViewSwitcher: z.boolean().optional().describe('Show the view-type switcher toggle (hidden unless true)'),
-  operations: z.object({
+  operations: z.looseObject({
     create: z.boolean().optional(),
     read: z.boolean().optional(),
     update: z.boolean().optional(),
@@ -1360,7 +1360,7 @@ export const ObjectViewSchema = BaseSchema.extend({
 /**
  * User Filters — field-level filter option
  */
-const UserFilterOptionSchema = z.object({
+const UserFilterOptionSchema = z.looseObject({
   label: z.string().describe('Option display label'),
   value: z.union([z.string(), z.number(), z.boolean()]).describe('Option value'),
   color: z.string().optional().describe('Option badge color'),
@@ -1414,7 +1414,7 @@ const UserFilterFieldSchema = stripImportedDefaults(SpecUserFilterFieldSchema)
  * User Filters — tab preset rule: `{ field, operator, value }`, the same
  * predicate shape used by every other filter in the protocol.
  */
-const UserFilterTabRuleSchema = z.object({
+const UserFilterTabRuleSchema = z.looseObject({
   field: z.string().describe('Field name to filter on'),
   operator: z.string().describe('Filter operator (equals, not_equals, contains, in, greater_than, less_than, …)'),
   value: z.any().optional().describe('Filter value'),
@@ -1429,7 +1429,7 @@ const UserFilterTabRuleSchema = z.object({
  * — by AI or the Studio tabs editor — emits the canonical form.
  */
 const UserFilterTabSchema = z
-  .object({
+  .looseObject({
     name: z.string().optional().describe('Unique tab identifier (snake_case)'),
     label: z.string().describe('Tab display label'),
     filter: z.array(UserFilterTabRuleSchema).optional().describe('Filter rules applied when this tab is active'),
@@ -1474,7 +1474,7 @@ const UserFilterTabSchema = z
  * divergence in BOTH directions, so the waiver goes red rather than quiet on
  * the day the spec (or this package) closes the gap.
  */
-const UserFiltersSchema = z.object({
+const UserFiltersSchema = z.looseObject({
   // AUTHORING contract (ADR-0053): `toggle` is deliberately not authorable —
   // new configs can only write dropdown/tabs. The RENDERER still honors
   // stored `toggle` metadata (spec ADR-0047 §3.4a keeps it in ITS enum "so
@@ -2337,7 +2337,7 @@ export const ListViewSchema = BaseSchema
     // (objectui#8365 `kanban.groupBy`, objectui#8355 `calendar.dateField` /
     // `endField` among them). See {@link ListViewOptionsBag}.
     options: ListViewOptionsBag.optional().describe('Component overrides (legacy)'),
-    operations: z.object({
+    operations: z.looseObject({
       create: z.boolean().optional(),
       read: z.boolean().optional(),
       update: z.boolean().optional(),
@@ -2924,7 +2924,7 @@ export const ObjectGanttSchema = BaseSchema.extend({
   navigation: stripImportedDefaults(SpecNavigationConfigSchema).optional().describe('Record navigation behaviour on task click (drawer/dialog/page)'),
   markers: z
     .array(
-      z.object({
+      z.looseObject({
         date: z.string().describe('Marker position, ISO date or datetime string'),
         label: z.string().optional().describe('Text drawn against the line'),
         color: z.string().optional().describe('Line colour — any CSS colour'),
@@ -3396,7 +3396,7 @@ export const KanbanConditionalFormattingRuleSchema = SpecListViewRuleSchema.exte
  * it: the card vocabulary has one authority, and reaching it is what restores
  * the judging `240b80f31` established — a lane card with no `title` is refused again.
  */
-const ObjectKanbanLaneSchema = z.object({
+const ObjectKanbanLaneSchema = z.looseObject({
   id: z.string().describe('Lane id — matched against the groupBy value. STRING only, and the narrowing stands on its own: until objectui#8993 the bucketer built knownIds from the raw col.id and compared it with Object.keys(groups), which are strings, so a numeric id bucketed every card TWICE; the sweep now keys membership the way the injection always did'),
   title: z.string().describe('Lane heading, localized against the groupBy picklist option labels'),
   cards: z.array(KanbanCardSchema).optional().describe('Cards this lane carries — a STATIC board only; an object-bound board buckets records into the lane by groupBy'),
@@ -3884,7 +3884,7 @@ export const ObjectChartSchema = BaseSchema.extend({
   // author arm first. The TS twin in `../objectql.ts` carries the ground.
   series: z.array(z.union([
     stripImportedDefaults(SpecChartSeriesSchema),
-    z.object({
+    z.looseObject({
       dataKey: z.string().describe('Result column this series plots'),
       label: z.string().optional().describe('Series display label'),
       variant: z.enum(['current', 'comparison']).optional().describe('Comparison overlays render muted'),
