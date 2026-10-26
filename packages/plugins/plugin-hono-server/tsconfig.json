@@ -7,9 +7,10 @@
     "strict": true,
     "esModuleInterop": true,
     // Type-check this package's own code, not its dependencies' .d.ts. Without
-    // it tsc re-checks all of @objectstack/spec's built declarations, which is
-    // what took this program to ~4.4 GB peak RSS, against a 4136 MB CI heap.
-    // tsconfig.base.json and every package extending it set the same flag.
+    // it tsc re-checks every declaration file it loads (~31 MB, 23 MB of it
+    // @objectstack/spec's dist), which took this program to ~4.4 GB peak RSS
+    // against a 4136 MB CI heap. tsconfig.base.json sets the same flag for
+    // every package that extends it.
     "skipLibCheck": true,
     "declaration": true,
     "outDir": "./dist",
