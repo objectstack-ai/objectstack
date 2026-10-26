@@ -467,7 +467,8 @@ export const contractVersionsSeed = defineSeed(ContractVersion, {
 - **`os build`** reads each referenced file and bundles its bytes into the
   compiled artifact, so the seed carries them wherever the artifact goes
   (`os dev`, `os serve`, a published package). A path that names no file fails
-  the build.
+  the build, and `os validate` refuses it too. `os serve` booting the config
+  itself reads the files the same way.
 - **The seed load** stores each file and writes its id into the field; the
   record owns the file exactly as if it had been uploaded into that field. Every
   row gets a file of its own, even when two rows name the same path. A replay
