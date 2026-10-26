@@ -160,8 +160,15 @@ describe('NavigationRenderer — a collapsed group shows its reachable child cou
 
     const label = disclosure('Marketing');
     const tokens = (el: Element) => el.className.split(/\s+/).filter(Boolean);
-    // The label's own icon-mode hiding tokens (pointer, focus / a11y tree, transition), read off it.
-    const hiding = tokens(label).filter((t) => t.startsWith('group-data-[state=collapsed]:group-data-[collapsible=icon]:'));
+    // The tokens this file adds to the label to hide it in icon mode (pointer,
+    // focus / accessibility tree, visibility transition), read off the label.
+    // The primitive's own `-mt-8` / `opacity-0` move and fade the label's box,
+    // which already carries the count; they are the primitive's, not the file's.
+    const prefix = 'group-data-[state=collapsed]:group-data-[collapsible=icon]:';
+    const hiding = tokens(label).filter(
+      (t) => t.startsWith(prefix) && t !== `${prefix}-mt-8` && t !== `${prefix}opacity-0`,
+    );
+    expect(hiding).toHaveLength(3);
     expect(hiding).toEqual(expect.arrayContaining([
       expect.stringMatching(/:invisible$/),
       expect.stringMatching(/:pointer-events-none$/),
