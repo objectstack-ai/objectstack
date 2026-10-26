@@ -6,9 +6,11 @@ import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
 
 import { selfTestCases, stripAnsi } from './helpers/child-verdict';
+import { rootCi, uiRun, UI_JOBS } from './helpers/root-ci';
 
 const ROOT = path.resolve(fileURLToPath(import.meta.url), '../../..');
 const GATE = 'scripts/check-bash32-floor.mjs';
+const ALIAS = 'check:bash32-floor';
 
 /**
  * objectui#7692: this repository held its own shell to nothing.
@@ -36,10 +38,12 @@ const GATE = 'scripts/check-bash32-floor.mjs';
  * passes:
  *
  *   1. the script exists and `package.json`'s alias points at it;
- *   2. `lint.yml` really runs it, in a step that executes, on pull requests;
- *   3. the workflow spelling and the alias spelling name the SAME script, so
- *      `pnpm check:bash32-floor` and the pre-install `node` invocation cannot
- *      drift into checking different things;
+ *   2. the root `Lint UI` job (`lint-ui` in the repository root's `ci.yml`,
+ *      where objectstack#25697 ported `lint.yml`) really runs it, in a step
+ *      that executes, on pull requests;
+ *   3. that step runs the alias, and the alias names the script, so
+ *      `pnpm check:bash32-floor` and the pre-install CI step cannot drift into
+ *      checking different things;
  *   4. it runs BEFORE `pnpm install` — placed after, an install failure takes
  *      the gate with it and the tree goes unjudged with the job red for an
  *      unrelated reason;
@@ -50,9 +54,13 @@ const GATE = 'scripts/check-bash32-floor.mjs';
  *      whose loss would put the card straight back.
  */
 describe('check-bash32-floor is wired, not merely present', () => {
-  const workflow = parseYaml(fs.readFileSync(path.join(ROOT, '.github/workflows/lint.yml'), 'utf8'));
-  const steps: Array<Record<string, unknown>> = workflow.jobs.lint.steps;
-  const gateSteps = steps.filter((s) => typeof s.run === 'string' && (s.run as string).includes(GATE));
+  // objectstack#25712: the job that runs it is the root `ci.yml`'s `lint-ui`,
+  // where objectstack#25697 ported objectui's `lint.yml` (roster row 16), read
+  // by path. It spells the gate through its alias, so `ALIAS` is what a step
+  // runs and the alias case below is what ties that to the file.
+  const workflow = parseYaml(rootCi());
+  const steps: Array<Record<string, unknown>> = workflow.jobs[UI_JOBS.lint].steps;
+  const gateSteps = steps.filter((s) => typeof s.run === 'string' && (s.run as string).includes(uiRun(ALIAS)));
 
   it('the gate script exists', () => {
     expect(fs.existsSync(path.join(ROOT, GATE))).toBe(true);
@@ -60,16 +68,16 @@ describe('check-bash32-floor is wired, not merely present', () => {
 
   it('package.json aliases it, and the alias points at the script that exists', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
-    const alias = pkg.scripts['check:bash32-floor'];
+    const alias = pkg.scripts[ALIAS];
     expect(alias).toBeTruthy();
     expect(alias).toContain(GATE);
   });
 
-  it('lint.yml runs it — exactly one step, both legs', () => {
+  it('the root Lint UI job runs it — exactly one step, both legs', () => {
     expect(gateSteps).toHaveLength(1);
     const run = gateSteps[0].run as string;
-    expect(run).toContain(`node ${GATE} --self-test`);
-    expect(run.split('\n').some((l) => l.trim() === `node ${GATE}`)).toBe(true);
+    expect(run).toContain(`${uiRun(ALIAS)} --self-test`);
+    expect(run.split('\n').some((l) => l.trim() === uiRun(ALIAS))).toBe(true);
   });
 
   it('that step is not disabled — it runs whenever the job runs its other steps', () => {
@@ -82,7 +90,7 @@ describe('check-bash32-floor is wired, not merely present', () => {
     expect(others).toContain(condition);
   });
 
-  it('lint.yml still gates pull requests, or the step above is inert', () => {
+  it('the root ci.yml still gates pull requests, or the step above is inert', () => {
     // `on` parses as the boolean `true` in YAML 1.1; `yaml` gives back `on`.
     const on = workflow.on ?? workflow[true as unknown as string];
     expect(Object.keys(on)).toContain('pull_request');

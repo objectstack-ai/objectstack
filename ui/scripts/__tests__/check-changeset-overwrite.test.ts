@@ -20,12 +20,13 @@ import { declaredEntries } from '../check-changeset-overwrite.mjs';
  *
  * What this file pins, in the order the gate can fail:
  *
- *  1. **The workflow can start on the pull request that needs it.** A path
- *     filter is normally a false-negative surface; here it cannot be, because a
- *     change that modifies a `.changeset/*.md` touches `.changeset/**` by
- *     definition. The filter must still carry the gate's OWN closure — its YAML
- *     and the script it runs (objectui#6321) — or the pull request that changes
- *     the gate is not the one that runs it.
+ *  1. **The workflow can start on the pull request that needs it.** Retired
+ *     with objectstack#25712. These pins read objectui's `changeset-guard.yml`
+ *     (the gate's run step, `fetch-depth: 0`, its own closure in both `paths:`
+ *     filters, the `.changeset/**` entry), and that workflow runs nowhere under
+ *     the monorepo: GitHub runs the root `.github/workflows/` alone. It is row 3
+ *     of the objectstack#25697 workflow roster (→ sub-issue 4), and a port
+ *     brings these pins back against its root workflow, by path.
  *  2. **The verdicts**, against throwaway repositories rather than this one's
  *     history, so they stay decidable when the history moves. Both directions:
  *     a modification of a pre-existing changeset is REPORTED, and a change that
@@ -45,7 +46,6 @@ import { declaredEntries } from '../check-changeset-overwrite.mjs';
  */
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const GATE = 'scripts/check-changeset-overwrite.mjs';
-const WORKFLOW = '.github/workflows/changeset-guard.yml';
 
 /**
  * The peer release declaration every fixture repository starts with — the file
@@ -66,23 +66,6 @@ const WORKFLOW = '.github/workflows/changeset-guard.yml';
  * hazard wears.
  */
 const PEER_CHANGESET = '.changeset/fixture-olive-donkeys-smile.md';
-
-/**
- * A workflow's YAML with whole-line comments removed.
- *
- * Required, not cosmetic: this workflow's header discusses `paths` and its own
- * self-coverage at length, so a scan that counted the prose would report filter
- * entries the file does not have. Same helper, same reason, as in
- * `check-changeset-presence.test.ts` and `merge-queue-reporting.test.ts`.
- */
-function withoutComments(yaml: string): string {
-  return yaml
-    .split('\n')
-    .filter((line) => !/^\s*#/.test(line))
-    .join('\n');
-}
-
-const workflowYaml = withoutComments(fs.readFileSync(path.join(repoRoot, WORKFLOW), 'utf8'));
 
 // ── fixture repositories ─────────────────────────────────────────────────────
 
@@ -177,40 +160,15 @@ function lastCommitRange(fixture: Fixture): string[] {
 }
 
 // ── 1. the workflow is reachable, and covers itself ──────────────────────────
-
-describe('changeset-guard.yml — the gate can start on the pull request that needs it', () => {
-  it('exists, and runs the gate script', () => {
-    expect(fs.existsSync(path.join(repoRoot, GATE)), `${GATE} must exist for the workflow to run it`).toBe(true);
-    expect(workflowYaml).toMatch(new RegExp(`run:\\s*node\\s+${GATE.replace(/[.]/g, '\\.')}`));
-  });
-
-  it('gives the job the history its diff needs', () => {
-    // The gate compares this change against its MERGE BASE with the target
-    // branch. checkout's default is a depth-1 clone where `git merge-base` has
-    // nothing to find, and an unresolvable base is a hard failure in the script
-    // — so getting this wrong is a red build rather than a silent pass. Pinned
-    // so it stays that way.
-    expect(workflowYaml).toMatch(/fetch-depth:\s*0/);
-  });
-
-  it("carries the gate's own closure in the paths filter (objectui#6321)", () => {
-    // Without this, the pull request that edits the gate is not the pull request
-    // that runs it, and the first real execution lands on somebody else's
-    // unrelated `.changeset/**` change. `paths:` appears twice — `pull_request`
-    // and `push` — and both must carry it.
-    const occurrences = workflowYaml.split(GATE).length - 1;
-    expect(occurrences, `${GATE} must appear in BOTH paths: filters and the run: step`).toBeGreaterThanOrEqual(3);
-    expect(workflowYaml.split(WORKFLOW).length - 1, 'the workflow must list its own YAML').toBeGreaterThanOrEqual(2);
-  });
-
-  it('still triggers on .changeset/** — the filter this gate depends on', () => {
-    // A path filter is normally a false-negative surface. It is not here, and
-    // only because of this entry: a change that modifies or deletes a
-    // `.changeset/*.md` touches `.changeset/**` BY DEFINITION, so the filter
-    // cannot skip the case the gate exists for.
-    expect(workflowYaml).toMatch(/- '\.changeset\/\*\*'/);
-  });
-});
+//
+// Retired with objectstack#25712: `exists, and runs the gate script`, `gives the
+// job the history its diff needs`, `carries the gate's own closure in the paths
+// filter (objectui#6321)` and `still triggers on .changeset/**`. Each read
+// objectui's `changeset-guard.yml`, which runs nowhere under the monorepo:
+// GitHub runs the root `.github/workflows/` alone, and no root workflow runs
+// this gate. That workflow is row 3 of the objectstack#25697 workflow roster
+// (→ sub-issue 4); a port brings these pins back against its root workflow, by
+// path. The verdicts below never read a workflow and stand as they were.
 
 // ── 2. the verdicts ──────────────────────────────────────────────────────────
 
