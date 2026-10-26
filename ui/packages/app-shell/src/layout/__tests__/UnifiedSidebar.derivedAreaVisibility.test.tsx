@@ -73,6 +73,7 @@ vi.mock('../../providers/ExpressionProvider', () => ({
   // fixtures gating with `visible: false`.
   evaluateVisibility: (expr: unknown) => expr !== false && expr !== 'false',
   evaluateNavigationVisibility: (expr: unknown) => expr !== false && expr !== 'false',
+  useHasExpressionScope: () => true,
 }));
 
 vi.mock('../../utils', () => ({

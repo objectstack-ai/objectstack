@@ -13,7 +13,7 @@ value must clear before it reaches the screen.
 | Field | Evaluation Type | Return Type | Example |
 |---|---|---|---|
 | `content` | Template (`${}`) | string | `"content": "Total: ${data.total}"` |
-| `hidden` | Condition | boolean | `"hidden": "${data.role !== 'admin'}"` |
+| `hidden` | Condition | boolean | `"hidden": "${data.status !== 'active'}"` |
 | `hiddenOn` | Condition | boolean | `"hiddenOn": "data.status === 'draft'"` |
 | `visible` | Condition | boolean | `"visible": "${data.isActive}"` |
 | `visibleOn` | Condition | boolean | `"visibleOn": "data.permissions.canView"` |

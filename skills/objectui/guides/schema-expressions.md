@@ -7,7 +7,7 @@ Writing and debugging dynamic expressions in ObjectUI schemas. The expression sy
 ObjectUI uses a two-tier expression evaluator:
 
 1. **Template expressions** — strings containing `${...}` placeholders: `"Hello ${user.name}"`
-2. **Condition expressions** — raw boolean expressions without wrappers: `data.role === 'admin'`
+2. **Condition expressions** — raw boolean expressions without wrappers: `data.status === 'active'`
 
 Both are parsed by a **recursive-descent parser** (no `eval()`, no `new Function()`). This means expressions are CSP-safe and work under strict Content Security Policy headers.
 
@@ -101,8 +101,8 @@ When the entire string is a single `${expression}`, the result preserves its typ
 
 ### Multiple interpolations
 ```
-"${user.firstName} ${user.lastName} (${user.role})"
-→ "Alice Smith (admin)"
+"${user.firstName} ${user.lastName} (${user.email})"
+→ "Alice Smith (alice@example.com)"
 ```
 
 ## Available scope variables
@@ -245,22 +245,22 @@ Each condition field has two forms — a shorthand and an `On` suffix:
 
 <!-- os:check -->
 ```jsonc
-{ "hidden": "${data.role !== 'admin'}" } // template expression
+{ "hidden": "${data.status !== 'active'}" } // template expression
 ```
 
 <!-- os:check -->
 ```jsonc
-{ "hiddenOn": "data.role !== 'admin'" } // raw expression (no ${} needed)
+{ "hiddenOn": "data.status !== 'active'" } // raw expression (no ${} needed)
 ```
 
 The `On` variants accept raw expressions without `${}` wrapping — the entire string is the expression.
 
 ### Visibility patterns
 
-**Role-based:**
+**Position-based:**
 <!-- os:check -->
 ```json
-{ "hidden": "${data.userRole !== 'admin'}" }
+{ "hidden": "${data.userPosition !== 'admin'}" }
 ```
 
 **Status-based:**
@@ -278,7 +278,7 @@ The `On` variants accept raw expressions without `${}` wrapping — the entire s
 **Combined conditions:**
 <!-- os:check -->
 ```json
-{ "visibleOn": "data.isAuthenticated && data.permissions.canEdit" }
+{ "visibleWhen": "data.isAuthenticated && data.permissions.canEdit" }
 ```
 
 ### Disabled patterns

@@ -22,16 +22,26 @@
  *                      'os migrate' …", "object": "OBJECT" }
  *
  * Read through the public doors, over a REAL `ObjectQL` +
- * `ObjectStackProtocolImplementation` + SQLite `:memory:`, with the stored
- * metadata family registered so the protocol's by-name object read answers
- * (the door reads the field's label and `storage` there).
+ * `ObjectStackProtocolImplementation` + SQLite `:memory:`.
+ *
+ * [#24768] The label now comes from the ENGINE, not from this door: a NOT NULL
+ * refusal on a field the object declares leaves `engine.insert` /
+ * `engine.update` as the record validator's own `ValidationError`, built by the
+ * validator's builder with the validator's message context, and this door
+ * answers it as it answers every `ValidationError` (the classification's
+ * validation arm). So the answer is the validator's envelope, byte for byte the
+ * shape of its own `required` refusal: `fields[0]` carries `label`, there is no
+ * `hint` (the validator's `required` has none), and a `PATCH` writing null reads
+ * the validator's clear-out sentence (`required_cleared`), as a `PATCH` clearing
+ * a `required` field does. The door's second object read and its relabel
+ * (`not-null-refusal-label.ts`) retired.
  *
  * The controls: a field the metadata declares with neither `required` nor
- * `storage.notNull` on a NOT NULL column (drift) keeps the drift hint; a column
- * the metadata does not declare at all keeps the column's sentence. Pinned by
- * kind: the sentence is the catalog's `required` sentence for the label (asked
- * of `renderValidationMessage`, the record validator's own renderer), and the
- * hint is judged by what it prescribes.
+ * `storage.notNull` over a NOT NULL column (drift) is declared, so it is named
+ * by its label the same way; a column the metadata does not declare at all
+ * keeps the classification's column sentence and its drift hint. Pinned by
+ * kind: the sentence is the catalog's sentence for the label (asked of
+ * `renderValidationMessage`, the record validator's own renderer).
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -144,35 +154,34 @@ async function boot(opts: { locale?: string; i18n?: boolean } = {}) {
     call('PATCH', '/api/v1/data/:object/:id', data, { object: OBJECT, id: 'e1' });
   const create = (data: Record<string, unknown>) => call('POST', '/api/v1/data/:object', data);
   const stored = async () => (await engine.find(OBJECT, { where: { id: 'e1' } }) as any[])[0];
-  return { engine, patch, create, stored };
+  return { engine, patch, create, stored, call };
 }
 
-/** The catalog's `required` sentence for `label`, in `locale` — what the record validator renders. */
-const requiredSentence = (label: string, field: string, locale?: string) =>
-  renderValidationMessage({ messageKey: 'required', label, field, params: {} }, { locale });
+/** The catalog's sentence for `label`, in `locale` — what the record validator renders. */
+const requiredSentence = (label: string, field: string, locale?: string, messageKey: 'required' | 'required_cleared' = 'required') =>
+  renderValidationMessage({ messageKey, label, field, params: {} }, { locale });
 
-/** The envelope the classification answers, with the field's sentence `message`. */
-function expectRefusal(door: { status: number; body: any }, field: string, message: string) {
+/** The record validator's envelope for one field, named by `label` with `message`. */
+function expectRefusal(door: { status: number; body: any }, field: string, label: string, message: string) {
+  expect(door.status, JSON.stringify(door.body)).toBe(400);
+  expect(door.body).toEqual({
+    code: 'VALIDATION_FAILED',
+    error: message,
+    fields: [{ field, code: 'required', message, label }],
+    object: OBJECT,
+  });
+}
+
+/** The classification's answer for a column no field declares: the column's sentence, and its hint. */
+function expectColumnRefusal(door: { status: number; body: any }, field: string) {
   expect(door.status, JSON.stringify(door.body)).toBe(400);
   expect(door.body).toMatchObject({
     code: 'VALIDATION_FAILED',
-    error: message,
-    fields: [{ field, code: 'required', message }],
+    error: `${field} is required`,
+    fields: [{ field, code: 'required', message: `${field} is required` }],
     object: OBJECT,
   });
-  // No key is added or dropped, on the body or on the field.
   expect(Object.keys(door.body).sort()).toEqual(['code', 'error', 'fields', 'hint', 'object']);
-  expect(Object.keys(door.body.fields[0]).sort()).toEqual(['code', 'field', 'message']);
-}
-
-/** The declared column's hint: the value, or the default / hook that supplies it — never `required`, never drift. */
-function expectDeclaredNotNullHint(hint: unknown, field: string) {
-  const text = String(hint);
-  expect(text).toContain(`'${field}'`);
-  expect(text).toContain('`storage: { notNull: true }`');
-  expect(text).toMatch(/requires a value/);
-  expect(text).not.toContain('`required`');
-  expect(text).not.toMatch(/drift|os migrate/);
 }
 
 describe('[#24715] a declared `storage.notNull` field\'s refusal names its label', () => {
@@ -180,24 +189,46 @@ describe('[#24715] a declared `storage.notNull` field\'s refusal names its label
     const { engine } = await boot();
     expect(AS_SYNCED.fields.unit_price).toMatchObject({ label: 'Sales Price', storage: { notNull: true } });
     expect('required' in AS_SYNCED.fields.unit_price).toBe(false);
-    await expect(engine.update(OBJECT, { unit_price: null } as any, { where: { id: 'e1' } } as any)).rejects.toThrow(/not null/i);
+    // [#24768] …and the engine names it: the validator's class, not the driver's error.
+    const refused = await engine.update(OBJECT, { unit_price: null } as any, { where: { id: 'e1' } } as any).then(
+      () => undefined,
+      (e: any) => e,
+    );
+    expect(refused?.name).toBe('ValidationError');
+    expect(refused?.code).toBe('VALIDATION_FAILED');
   });
 
-  it('PATCH writing null: the label in `error` and `fields[0].message`, the declared column\'s hint', async () => {
+  it('PATCH writing null: the label, in the validator\'s clear-out sentence', async () => {
     const { patch, stored } = await boot();
     const door = await patch({ unit_price: null });
-    expectRefusal(door, 'unit_price', requiredSentence('Sales Price', 'unit_price'));
+    expectRefusal(door, 'unit_price', 'Sales Price', requiredSentence('Sales Price', 'unit_price', undefined, 'required_cleared'));
     expect(door.body.error).not.toContain('unit_price');
-    expectDeclaredNotNullHint(door.body.hint, 'unit_price');
     expect((await stored()).unit_price).toBe(5);
   });
 
-  it('POST with no value: the same answer', async () => {
+  it('POST with no value: the label, in the validator\'s `required` sentence', async () => {
     const { create, engine } = await boot();
     const door = await create({ id: 'n1', name: 'new', list_price: 1, drift_col: 'd' });
-    expectRefusal(door, 'unit_price', requiredSentence('Sales Price', 'unit_price'));
-    expectDeclaredNotNullHint(door.body.hint, 'unit_price');
+    expectRefusal(door, 'unit_price', 'Sales Price', requiredSentence('Sales Price', 'unit_price'));
     expect(await engine.find(OBJECT, { where: { id: 'n1' } })).toHaveLength(0);
+  });
+});
+
+describe('[#24768] the batch rows answer the same refusal by the same label', () => {
+  it('`POST /data/:object/batch`, a create row with no value: the row\'s error is the validator\'s code and sentence', async () => {
+    const { call, engine } = await boot();
+    const door = await call('POST', '/api/v1/data/:object/batch', {
+      operation: 'create',
+      records: [{ data: { id: 'b1', name: 'new', list_price: 1, drift_col: 'd' } }],
+      options: { atomic: false },
+    });
+    expect(door.status, JSON.stringify(door.body)).toBe(200);
+    expect(door.body).toMatchObject({ succeeded: 0, failed: 1 });
+    expect(door.body.results[0].errors).toEqual([
+      expect.objectContaining({ code: 'VALIDATION_FAILED', message: requiredSentence('Sales Price', 'unit_price') }),
+    ]);
+    expect(JSON.stringify(door.body)).not.toMatch(/constraint failed|unit_price is required/);
+    expect(await engine.find(OBJECT, { where: { id: 'b1' } })).toHaveLength(0);
   });
 });
 
@@ -206,37 +237,37 @@ describe('[#24715] localized the way the record validator localizes its own `req
     const { patch, create } = await boot({ locale: 'zh-CN', i18n: true });
 
     const door = await patch({ unit_price: null });
-    expectRefusal(door, 'unit_price', requiredSentence('销售价格', 'unit_price', 'zh-CN'));
-    expectDeclaredNotNullHint(door.body.hint, 'unit_price');
+    expectRefusal(door, 'unit_price', '销售价格', requiredSentence('销售价格', 'unit_price', 'zh-CN', 'required_cleared'));
+
+    const missing = await create({ id: 'n2', name: 'new', list_price: 1, drift_col: 'd' });
+    expectRefusal(missing, 'unit_price', '销售价格', requiredSentence('销售价格', 'unit_price', 'zh-CN'));
 
     // The validator, on the same request shape, for the field it refuses itself.
     const own = await create({ id: 'n1', name: 'new', unit_price: 1, drift_col: 'd' });
     expect(own.status, JSON.stringify(own.body)).toBe(400);
     const validatorMessage = own.body.fields.find((f: any) => f.field === 'list_price')?.message;
     expect(validatorMessage).toBe(requiredSentence('标价', 'list_price', 'zh-CN'));
-    expect(door.body.error.replace('销售价格', 'LABEL')).toBe(validatorMessage.replace('标价', 'LABEL'));
+    expect(missing.body.error.replace('销售价格', 'LABEL')).toBe(validatorMessage.replace('标价', 'LABEL'));
   });
 
   it('a bare `zh` reaches the zh-CN bundle, as the validator\'s locale negotiation does', async () => {
     const { patch } = await boot({ locale: 'zh', i18n: true });
     const door = await patch({ unit_price: null });
-    expectRefusal(door, 'unit_price', requiredSentence('销售价格', 'unit_price', 'zh-CN'));
+    expectRefusal(door, 'unit_price', '销售价格', requiredSentence('销售价格', 'unit_price', 'zh-CN', 'required_cleared'));
   });
 });
 
-describe('[#24715] the controls: what the field map cannot name keeps today\'s answer', () => {
-  it('drift — declared with neither `required` nor `storage.notNull` over a NOT NULL column: the label, and the drift hint', async () => {
+describe('[#24715] the controls', () => {
+  it('drift — declared with neither `required` nor `storage.notNull` over a NOT NULL column: still a declared field, so its label', async () => {
     const { patch } = await boot();
     const door = await patch({ drift_col: null });
-    expectRefusal(door, 'drift_col', requiredSentence('Drift Column', 'drift_col'));
-    expect(String(door.body.hint)).toMatch(/drifted from metadata/);
-    expect(String(door.body.hint)).toMatch(/os migrate/);
+    expectRefusal(door, 'drift_col', 'Drift Column', requiredSentence('Drift Column', 'drift_col', undefined, 'required_cleared'));
   });
 
   it('a column the metadata does not declare: the column\'s sentence and the drift hint', async () => {
     const { create } = await boot();
     const door = await create({ id: 'n1', name: 'new', unit_price: 1, list_price: 1, drift_col: 'd' });
-    expectRefusal(door, 'gone_col', 'gone_col is required');
+    expectColumnRefusal(door, 'gone_col');
     expect(String(door.body.hint)).toMatch(/os migrate/);
   });
 });

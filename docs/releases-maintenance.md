@@ -55,11 +55,12 @@ ships the Console from the same commit as the spec it builds against.
 > root `.changeset/` before the first joint Version PR is #25831. New frontend
 > changesets go in the root `.changeset/`.
 
-#### After a registry change: regenerate the committed manifest (#12924, #17735, #25712)
+#### After a registry change: regenerate the committed manifest (#12924, #17735, #25712, #26051)
 
 The repo-root `sdui.manifest.json` (ADR-0080, the Console's public-tier component
-manifest) and its provenance record `scripts/sdui-manifest.record.json` are
-generated, and one command writes them:
+manifest), its provenance record `scripts/sdui-manifest.record.json` and one record
+per registry package under `scripts/sdui-manifest.sources/` are generated, and one
+command writes them:
 
 ```bash
 node scripts/gen-sdui-manifest-node.mjs   # no arguments
@@ -68,14 +69,20 @@ node scripts/gen-sdui-manifest-node.mjs   # no arguments
 It builds the registry packages under `ui/packages/`, enumerates them from
 `ui/apps/console` under plain Node, and serializes them through
 `@objectstack/sdui-parser` (it needs `packages/sdui-parser/dist`:
-`pnpm --filter @objectstack/sdui-parser build`). The record carries an `inTree`
-block with a digest of the registry packages' `src/`.
+`pnpm --filter @objectstack/sdui-parser build`). Each package record is one line:
+a digest of that package's own `src/` and the `sha256` of the artefact it was
+verified against. A run rewrites only the records whose line changed, so a PR that
+edits one registry package re-records that package alone; the shared record moves
+only when the artefact does, and then every package record names the new `sha256`.
 
-A required lint step reads the tracked pair on **every PR**:
+A required lint step reads the tracked files on **every PR**:
 `node scripts/check-sdui-manifest.mjs` checks the shape, the `sha256` against the
-record, and recomputes the source digest from the index. A PR that edits a registry
-package's source without regenerating goes red there, and the failure text prints
-the regeneration call. ⛔ There is no npm install route to the manifest; that was
+record, and recomputes each package's source digest from the index. A PR that edits
+a registry package's source without regenerating goes red there, naming the package,
+and the failure text prints the regeneration call. Two PRs that edit different
+registry packages touch different record files and do not conflict; two that edit
+the same package, or a PR that changes the artefact, still conflict once, and the
+later one merges `main` and re-runs the command. ⛔ There is no npm install route to the manifest; that was
 deleted by ruling 丙 on #17735.
 
 **One producer, one artefact.** `packages/console/build-dist.sh` copies the tracked

@@ -46,6 +46,10 @@
  * so a predicate the evaluator cannot answer — `current_user.can(...)` where no
  * permissions payload is bound, as on a frame with no permission provider —
  * withholds its entry and reports once, instead of drawing it for everyone.
+ * On a frame that mounts no `ExpressionProvider` at all (the Studio, whose bell
+ * still walks every app's navigation) the entry is withheld the same way, but
+ * no warning is printed per predicate: nothing there binds `current_user`, so
+ * the fault says nothing about the predicate (objectstack#25892).
  *
  * ## An entry's API binding (objectui#13029)
  *
@@ -86,7 +90,11 @@ import {
 } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { useMetadata } from '../providers/MetadataProvider.js';
-import { useExpressionContext, evaluateNavigationVisibility } from '../providers/ExpressionProvider.js';
+import {
+  useExpressionContext,
+  useHasExpressionScope,
+  evaluateNavigationVisibility,
+} from '../providers/ExpressionProvider.js';
 import { withoutUnreadableObjectEntries, type ObjectReadCheck } from '../utils/navObjectReadGate.js';
 import { filterActiveApps } from '../utils/appRoute.js';
 import { navigationNames } from '../console/appObjectScope.js';
@@ -224,19 +232,23 @@ function useNavEntryData(app: unknown): (entry: NavigationItem) => NavEntryDataR
  * entry that declares an API `dataSource` is hidden until its read is `ready`,
  * and then its `visible` is evaluated with the selected value bound as `data`;
  * any other entry is `evaluateNavigationVisibility`'s answer, as before.
+ * `scopeBound` is whether the frame mounts an `ExpressionProvider`
+ * (objectstack#25892): without one, a predicate it cannot answer is withheld
+ * without a warning of its own.
  */
 export function navEntryVisible(
   expression: NavigationItem['visible'],
   entry: NavigationItem | undefined,
   evaluator: ExpressionEvaluator,
   readEntry: (entry: NavigationItem) => NavEntryDataRead,
+  scopeBound: boolean = true,
 ): boolean {
   if (entry && isElementApiDataSourceShape(entry.dataSource)) {
     const read = readEntry(entry);
     if (read.status !== 'ready') return false;
-    return evaluateNavigationVisibility(expression, evaluator.withContext({ data: read.data }));
+    return evaluateNavigationVisibility(expression, evaluator.withContext({ data: read.data }), scopeBound);
   }
-  return evaluateNavigationVisibility(expression, evaluator);
+  return evaluateNavigationVisibility(expression, evaluator, scopeBound);
 }
 
 /**
@@ -261,11 +273,12 @@ function useNavVisibilityAndReads(app: unknown): {
   readEntry: (entry: NavigationItem) => NavEntryDataRead;
 } {
   const { evaluator } = useExpressionContext();
+  const scopeBound = useHasExpressionScope();
   const readEntry = useNavEntryData(app);
   const evaluate = useCallback(
     (expression: NavigationItem['visible'], entry?: NavigationItem) =>
-      navEntryVisible(expression, entry, evaluator, readEntry),
-    [evaluator, readEntry],
+      navEntryVisible(expression, entry, evaluator, readEntry, scopeBound),
+    [evaluator, readEntry, scopeBound],
   );
   return { evaluate, readEntry };
 }

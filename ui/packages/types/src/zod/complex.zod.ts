@@ -113,14 +113,14 @@ export const KanbanCardSchema = z.object({
   id: z.string().describe('Card ID'),
   title: z.string().describe('Card title'),
   description: z.string().optional().describe('Card description'),
-  badges: z.array(z.object({
+  badges: z.array(z.looseObject({
     label: z.string().describe('Badge label'),
     variant: z.enum(['default', 'secondary', 'destructive', 'outline']).optional().describe('Badge variant'),
     colorClass: z.string().optional().describe('Tailwind class string applied to the badge; overrides `variant`'),
     colorStyle: z.any().optional().describe('Inline style accompanying `colorClass` — the `getBadgeHexAppearance` style object, passed through verbatim'),
   })).optional().describe('Card badges'),
   cardSubtitle: z.string().optional().describe('Synthesized card subtitle, rendered in preference to `description`'),
-  cardFieldCells: z.array(z.object({
+  cardFieldCells: z.array(z.looseObject({
     field: z.string().describe('Field name the cell renders'),
     label: z.string().optional().describe('Cell label'),
     node: z.any().describe('Rendered cell node — written by `ObjectKanban` from `cardFields`, passed through verbatim'),
@@ -131,7 +131,7 @@ export const KanbanCardSchema = z.object({
 /**
  * Kanban Column Schema — mirrors {@link KanbanColumn} in `../complex.ts`.
  */
-export const KanbanColumnSchema = z.object({
+export const KanbanColumnSchema = z.looseObject({
   id: z.string().describe('Column ID'),
   title: z.string().describe('Column title'),
   cards: z.array(KanbanCardSchema).describe('Column cards'),
@@ -144,7 +144,7 @@ export const KanbanColumnSchema = z.object({
 /**
  * Card Template Schema — mirrors {@link CardTemplate} in `../complex.ts`.
  */
-export const CardTemplateSchema = z.object({
+export const CardTemplateSchema = z.looseObject({
   id: z.string().describe('Unique template identifier'),
   name: z.string().describe('Human-readable template name'),
   icon: z.string().optional().describe('Optional Lucide icon name'),
@@ -194,7 +194,7 @@ export const CalendarViewModeSchema = z.enum(['month', 'week', 'day']);
 /**
  * Calendar Event Schema
  */
-export const CalendarEventSchema = z.object({
+export const CalendarEventSchema = z.looseObject({
   id: z.string().describe('Event ID'),
   title: z.string().describe('Event title'),
   description: z.string().optional().describe('Event description'),
@@ -382,7 +382,7 @@ function conditionValueFollowsTheProtocolRule(
  * `FilterGroupSchema` below was one of them until objectui#9306 made its body
  * flat; it now takes this shape too.
  */
-const FilterBuilderConditionObject = z.object({
+const FilterBuilderConditionObject = z.looseObject({
   // REQUIRED, and the asymmetry with `FilterGroupSchema.id` below is the whole
   // point of declaring it here (objectui#8415). The group's `id` has ZERO read
   // sites and is optional for that reason; a CONDITION's `id` is the identity
@@ -502,7 +502,7 @@ const FilterGroupEntrySchema = z
   })
   .pipe(FilterBuilderConditionSchema);
 
-const FilterGroupObject = z.object({
+const FilterGroupObject = z.looseObject({
   id: z.string().optional().describe('Group id — round-tripped through `onChange`; no read site'),
   logic: z.enum(['and', 'or']).describe('How the conditions combine — read by `isValidGroup`'),
   conditions: z.array(FilterGroupEntrySchema).describe(`Flat condition rows. ${NESTED_FILTER_GROUP_RETIRED}`),
@@ -579,7 +579,7 @@ export const FilterGroupSchema: z.ZodType<any> = z.lazy(() => FilterGroupObject)
  * the fallthrough. A phantom, removed by `d4493fdbc` and not restored here;
  * the published doc does not offer it either, so the two faces agree.
  */
-export const FilterFieldSchema = z.object({
+export const FilterFieldSchema = z.looseObject({
   value: z.string().describe('Field key — the identity every read site matches on'),
   label: z.string().describe('Field label'),
   type: z.enum([
@@ -614,7 +614,7 @@ export const FilterFieldSchema = z.object({
     'is_null', 'is_not_null',
     'before', 'after', 'between',
   ])).optional().describe('Available operators'),
-  options: z.array(z.object({
+  options: z.array(z.looseObject({
     label: z.string(),
     value: z.any(),
   })).optional().describe('Options for select type'),
@@ -723,7 +723,7 @@ export const FilterBuilderSchema = BaseSchema.extend({
 /**
  * Carousel Item Schema
  */
-export const CarouselItemSchema = z.object({
+export const CarouselItemSchema = z.looseObject({
   id: z.string().optional().describe('Item ID'),
   content: z.union([SchemaNodeSchema, z.array(SchemaNodeSchema)]).describe('Item content'),
 });
@@ -767,7 +767,7 @@ export const CarouselSchema = BaseSchema.extend({
 /**
  * Chat Message Schema
  */
-export const ChatToolInvocationSchema = z.object({
+export const ChatToolInvocationSchema = z.looseObject({
   toolCallId: z.string().describe('Unique tool call identifier'),
   toolName: z.string().describe('Name of the tool'),
   args: z.unknown().optional().describe('Tool arguments'),
@@ -796,7 +796,7 @@ export const ChatToolInvocationSchema = z.object({
   // the states it does admit the envelope is never required, so this arm
   // stays independently optional (objectui#8442).
   approval: z
-    .object({
+    .looseObject({
       id: z.string().describe('Approval request id — the key a decision is replied on'),
       approved: z.boolean().optional().describe('The decision, once made'),
       reason: z.string().optional().describe('Free-text reason supplied with the decision'),
@@ -807,13 +807,13 @@ export const ChatToolInvocationSchema = z.object({
     .describe('AI SDK approval envelope for a tool call awaiting or carrying a human decision'),
 });
 
-export const ChatMessageSourceSchema = z.object({
+export const ChatMessageSourceSchema = z.looseObject({
   id: z.string().optional(),
   title: z.string().optional(),
   url: z.string().describe('Source URL'),
 });
 
-export const ChatMessageSchema = z.object({
+export const ChatMessageSchema = z.looseObject({
   id: z.string().describe('Message ID'),
   role: z.enum(['user', 'assistant', 'system', 'tool']).describe('Message role'),
   content: z.string().describe('Message content'),
@@ -1072,7 +1072,7 @@ export const ChatbotEnhancedSchema = BaseSchema.extend({
  * (`../__tests__/floating-chatbot-trigger-icon-retired.test.ts`) asked whoever
  * minted the mirror to add it here, at the same time.
  */
-const FloatingChatbotConfigSchema = z.object({
+const FloatingChatbotConfigSchema = z.looseObject({
   position: z.enum(['bottom-right', 'bottom-left']).optional()
     .describe('Corner the trigger button sits in (default bottom-right)'),
   defaultOpen: z.boolean().optional().describe('Open the panel on mount (default false)'),
@@ -1160,7 +1160,7 @@ export const ChatbotFloatingSchema = BaseSchema.extend({
 /**
  * Dashboard Widget Layout Schema
  */
-export const DashboardWidgetLayoutSchema = z.object({
+export const DashboardWidgetLayoutSchema = z.looseObject({
   x: z.number().describe('Grid x position'),
   y: z.number().describe('Grid y position'),
   w: z.number().describe('Grid width'),
@@ -1731,7 +1731,7 @@ export const DashboardComponentSchema = BaseSchema.extend(SpecDashboardFields.sh
 /**
  * Dashboard Widget Config Schema (for DashboardConfigPanel)
  */
-export const DashboardWidgetConfigSchema = z.object({
+export const DashboardWidgetConfigSchema = z.looseObject({
   id: z.string().describe('Widget ID'),
   title: z.string().optional().describe('Widget title'),
   description: z.string().optional().describe('Widget description'),
@@ -1764,7 +1764,7 @@ export const DashboardWidgetConfigSchema = z.object({
  * declares it at all; both halves are pinned by
  * `__tests__/dashboard-config.test.ts`.
  */
-export const DashboardConfigSchema = z.object({
+export const DashboardConfigSchema = z.looseObject({
   id: z.string().optional().describe('Dashboard identifier'),
   title: z.string().optional().describe('Dashboard title'),
   description: z.string().optional().describe('Dashboard description'),
@@ -1773,12 +1773,12 @@ export const DashboardConfigSchema = z.object({
   refreshIntervalSeconds: z.number().min(0).optional().describe('Auto-refresh interval in seconds'),
   widgets: z.array(DashboardWidgetConfigSchema).optional().describe('Dashboard widgets'),
   globalFilters: z.array(z.any()).optional().describe('Global filter conditions'),
-  dateRange: z.object({
+  dateRange: z.looseObject({
     enabled: z.boolean().optional(),
     field: z.string().optional(),
     presets: z.array(z.string()).optional(),
   }).optional().describe('Date range filter'),
-  userFilters: z.array(z.object({
+  userFilters: z.array(z.looseObject({
     field: z.string(),
     label: z.string().optional(),
     type: z.string().optional(),
@@ -1786,7 +1786,7 @@ export const DashboardConfigSchema = z.object({
   showHeader: z.boolean().optional().describe('Show dashboard header'),
   showFilters: z.boolean().optional().describe('Show global filter bar'),
   showDateRange: z.boolean().optional().describe('Show date range picker'),
-  headerActions: z.array(z.object({
+  headerActions: z.array(z.looseObject({
     label: z.string(),
     action: z.string().optional(),
     icon: z.string().optional(),
