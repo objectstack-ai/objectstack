@@ -10,6 +10,22 @@ feat(spec,cli)!: retirement kits retired at or below protocol 16.x leave the tre
 Clause-②: no (narrowing: a key retired at or below protocol 16.x is refused as a strict unknown key without its own prescription in the error, and `os migrate meta --from 16` refuses at the support floor instead of replaying step 17)
 Metadata-protocol: narrowed
 
+**Upgrading from protocol 16 or earlier.** One major at a time, each major's CLI in turn — a major's CLI carries the steps for itself and the major before it, so the same sequence holds at 19:
+
+```bash
+npx @objectstack/cli@17.7.0 migrate meta --from 16 --apply   # 16 → 17, on the last 17.x release (its floor is 16)
+npx @objectstack/cli@17.7.0 migrate meta --stored --apply    # the sys_metadata rows, BEFORE the runtime moves
+# move the dependencies / the deployment's image to 18.2, then
+os migrate meta --from 17 --apply                             # 17 → 18
+os validate && os build
+```
+
+**Alternative, one shot:** `@objectstack/cli@18.1.0` is the last release whose floor is 16, so `npx @objectstack/cli@18.1.0 migrate meta --from 16` (then `--apply`) runs both hops in one command — work the to-do list it prints, then move the dependencies to 18.2 and run `os migrate meta --from 17`, `os validate` and `os build`; its `migrate meta --stored --apply` canonicalizes the stored rows the same way.
+
+**Stored metadata (`sys_metadata`, Studio-authored) is migrated BEFORE the deployment's image or dependencies move to 18.2.** 18.2 no longer rewrites a ≤16.x row at read: a row left behind is refused by the strict parse until it is migrated.
+
+**If the first hop is skipped:** on 18.2, `os migrate meta --from 16` refuses with `MigrationFloorError` and rewrites nothing, and a key retired at or below 16.x meets the strict unknown-key refusal with the guide link, `https://objectstack.ai/docs/protocol-upgrade`.
+
 **BREAKING** for a source still carrying a key retired at or below protocol 16.x, and for an operator who runs `os migrate meta --from 16`.
 
 - **The rule (ADR-0087, amended 2026-10-26, #25767 ruling D2 = A).** A retirement kit — the `retiredKey()` tombstone, its `RETIRED_KEYS_BY_MAJOR` / `RETIRED_DEFS_BY_MAJOR` rows, its semantic entry and its D2 conversion — lives through the protocol major after the one it retired in and is removed when the next major is cut. At 18 that keeps the 17.x and 18.x kits and removes everything retired at or below 16.x; 19 repeats the move one major on. "Never deleted", "permanent" and "forever" in ADR-0087 are amended in place.
