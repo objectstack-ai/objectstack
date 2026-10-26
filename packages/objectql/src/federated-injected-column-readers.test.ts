@@ -317,7 +317,7 @@ const READERS: Record<string, Row> = {
     disposition: 'writer',
     why: 'stamps the acting user onto a record the caller writes; it reads nothing',
   },
-  'engine.ts#encryptSecretFields :: created_at': { disposition: 'not-a-read', why: PLATFORM_ROW },
+  'engine-secret-internal-fields.ts#encryptSecretFields :: created_at': { disposition: 'not-a-read', why: PLATFORM_ROW },
   'engine.ts#recordObservedDeviation :: updated_at': { disposition: 'not-a-read', why: PLATFORM_ROW },
   'engine.ts#retractCreationAttestation :: updated_at': { disposition: 'not-a-read', why: PLATFORM_ROW },
   'engine.ts#syncObjectSchema :: isFederatedObject()': { disposition: 'not-a-read', why: SYNC_ROUTE },

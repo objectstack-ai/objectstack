@@ -41,6 +41,9 @@ import {
   type TemporalComparandKind,
 } from '@objectstack/core';
 import { explicitDateRangeWindow } from './date-range-array-arm.js';
+import { DATASET_DURATION_UNIT_SECONDS } from '@objectstack/spec/ui';
+import { durationMeasureIn } from './duration-measure-sql.js';
+import type { DurationMeasureSpec } from './strategies/types.js';
 // [#19810] The `where` door's refusal envelope — `INVALID_FILTER` / 400,
 // EXPORTED by `filter-normalizer` precisely so a sibling in this package cannot
 // invent a second spelling of it. A draft-preview filter is a `where`-door
@@ -729,6 +732,24 @@ function previewStorageRow(row: Row, kindOf: PreviewTemporalKind): Row {
   return out ?? row;
 }
 
+/** [#25778] The key a row's duration is carried under to {@link aggregate}. */
+const DURATION_OPERAND = 'duration';
+
+/**
+ * [#25778] One row's duration measure: the time from `duration.from` to
+ * `duration.to` in `duration.unit`, as the native-SQL face computes it
+ * (`duration-measure-sql.ts`), rounded to the millisecond — or `null` when
+ * either column holds no instant, which {@link aggregate} skips as SQL skips a
+ * NULL. Each column reads through `utcInstantMs`, the primitive this face
+ * orders instants by.
+ */
+function durationOf(row: Row, duration: DurationMeasureSpec): number | null {
+  const from = utcInstantMs(row[duration.from]);
+  const to = utcInstantMs(row[duration.to]);
+  if (from === null || to === null) return null;
+  return Math.round(to - from) / 1000 / DATASET_DURATION_UNIT_SECONDS[duration.unit];
+}
+
 /**
  * Evaluate `query` over `rows` using the cube's measure/dimension specs.
  * Mirrors the engine strategies' output contract: rows keyed by bare
@@ -745,6 +766,7 @@ export function evaluateAnalyticsQueryOverRows(
   cube: Cube,
   rows: Row[],
   declaredType?: (field: string) => string | undefined,
+  durations?: Readonly<Record<string, DurationMeasureSpec>>,
 ): AnalyticsResult {
   const lowering = declaredPreviewLowering(declaredType);
   // 1. Row-level filters: `where`, then timeDimension dateRanges.
@@ -842,6 +864,13 @@ export function evaluateAnalyticsQueryOverRows(
   for (const g of groups.values()) {
     const row: Row = { ...g.values };
     for (const m of query.measures) {
+      // [#25778] A dataset duration measure, absent from the cube: its
+      // aggregate over each row's duration, through the same arms.
+      const duration = durationMeasureIn(durations, m, cube.name);
+      if (duration) {
+        row[m] = aggregate(g.rows.map((r) => ({ [DURATION_OPERAND]: durationOf(r, duration) })), duration.aggregate, DURATION_OPERAND);
+        continue;
+      }
       const metric = cube.measures?.[m];
       row[m] = aggregate(g.rows, String(metric?.type ?? 'count'), String(metric?.sql ?? '*'));
     }

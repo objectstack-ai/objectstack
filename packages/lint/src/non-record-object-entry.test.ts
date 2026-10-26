@@ -87,10 +87,50 @@ const NON_RECORD_ENTRIES: readonly (readonly [string, unknown])[] = [
 ];
 
 const stackWith = (junk: unknown): AnyRec => ({ objects: [junk, VALID_OBJECT] });
-const validOnly: AnyRec = { objects: [VALID_OBJECT] };
+const validOnly = (): AnyRec => ({ objects: [VALID_OBJECT] });
 
-const findingCount = (stack: AnyRec): number =>
-  AUTHORING_RULES.reduce((n, rule) => n + rule.run(stack, {}).length, 0);
+/** What one rule did with one stack: the message it threw, or how many findings it returned. */
+type RuleOutcome = { readonly rule: string } & ({ readonly threw: string } | { readonly findings: number });
+
+/**
+ * One sweep per distinct stack. Every rule is pure, `(stack) => Finding[]`, so
+ * running the table once over a stack and recording what each rule did answers
+ * both questions a case asks of that stack — did any rule throw, and how many
+ * findings did the rest return. The "throws" case and the "count" case of one
+ * stack read the same sweep, and a control stack shared by every junk shape is
+ * swept once. Each rule still gets a stack of its own, built fresh.
+ */
+const sweeps = new Map<string, readonly RuleOutcome[]>();
+const sweep = (key: string, build: () => AnyRec): readonly RuleOutcome[] => {
+  let outcomes = sweeps.get(key);
+  if (!outcomes) {
+    outcomes = AUTHORING_RULES.map((rule): RuleOutcome => {
+      try {
+        return { rule: rule.name, findings: rule.run(build(), {}).length };
+      } catch (e) {
+        return { rule: rule.name, threw: (e as Error).message };
+      }
+    });
+    sweeps.set(key, outcomes);
+  }
+  return outcomes;
+};
+
+/** `rule: message` for every rule that threw. */
+const throwsOf = (outcomes: readonly RuleOutcome[]): string[] =>
+  outcomes.flatMap((o) => ('threw' in o ? [`${o.rule}: ${o.threw}`] : []));
+
+/**
+ * The finding count over every rule not in `skip`. A rule outside `skip` that
+ * threw fails the count with its own message rather than counting as zero, as
+ * the count did when it ran the rules itself.
+ */
+const countOf = (outcomes: readonly RuleOutcome[], skip: readonly string[] = []): number =>
+  outcomes.reduce((n, o) => {
+    if (skip.includes(o.rule)) return n;
+    if ('threw' in o) throw new Error(`${o.rule}: ${o.threw}`);
+    return n + o.findings;
+  }, 0);
 
 describe('a non-record entry in `stack.objects` (#15552)', () => {
   /**
@@ -103,23 +143,17 @@ describe('a non-record entry in `stack.objects` (#15552)', () => {
     expect(AUTHORING_RULES.length).toBeGreaterThanOrEqual(42);
   });
 
-  describe.each(NON_RECORD_ENTRIES)('with %s beside a valid object', (_label, junk) => {
+  describe.each(NON_RECORD_ENTRIES)('with %s beside a valid object', (label, junk) => {
+    const withJunk = (): readonly RuleOutcome[] => sweep(`objects · ${label}`, () => stackWith(junk));
+
     it('no authoring rule throws', () => {
-      const threw: string[] = [];
-      for (const rule of AUTHORING_RULES) {
-        try {
-          rule.run(stackWith(junk), {});
-        } catch (e) {
-          threw.push(`${rule.name}: ${(e as Error).message}`);
-        }
-      }
-      expect(threw).toEqual([]);
+      expect(throwsOf(withJunk())).toEqual([]);
     });
 
     it('still judges the valid object standing beside it', () => {
-      const baseline = findingCount(validOnly);
+      const baseline = countOf(sweep('objects · valid only', validOnly));
       expect(baseline).toBeGreaterThan(0);
-      expect(findingCount(stackWith(junk))).toBe(baseline);
+      expect(countOf(withJunk())).toBe(baseline);
     });
   });
 
@@ -575,19 +609,12 @@ describe('a non-record entry in any other stack collection (#15636)', () => {
 
     describe.each(NON_RECORD_ENTRIES)('with %s', (shape, junk) => {
       const key = `${collection.label} · ${shape}`;
+      const withJunk = (): readonly RuleOutcome[] => sweep(key, () => collection.stack(members(junk)));
 
       it('throws out of no rule but the ones still filed as broken', () => {
-        const threw: string[] = [];
-        const detail: string[] = [];
-        for (const rule of AUTHORING_RULES) {
-          try {
-            rule.run(collection.stack(members(junk)), {});
-          } catch (e) {
-            threw.push(rule.name);
-            detail.push(`${rule.name}: ${(e as Error).message}`);
-          }
-        }
-        expect(threw.sort(), detail.join(' | ')).toEqual([...(RESIDUAL_THROWS[key] ?? [])].sort());
+        const outcomes = withJunk();
+        const threw = outcomes.flatMap((o) => ('threw' in o ? [o.rule] : []));
+        expect(threw.sort(), throwsOf(outcomes).join(' | ')).toEqual([...(RESIDUAL_THROWS[key] ?? [])].sort());
       });
 
       it('invents no finding about the entry no author wrote', () => {
@@ -596,9 +623,8 @@ describe('a non-record entry in any other stack collection (#15636)', () => {
         // folding that into the population count would let a crash read as
         // "reported nothing", which is the confusion this file exists to end.
         const skip = RESIDUAL_THROWS[key] ?? [];
-        const count = (stack: AnyRec): number =>
-          AUTHORING_RULES.reduce((n, rule) => (skip.includes(rule.name) ? n : n + rule.run(stack, {}).length), 0);
-        expect(count(collection.stack(members(junk))) - count(control())).toBe(RESIDUAL_INVENTED[key] ?? 0);
+        const controlOutcomes = sweep(`${collection.label} · control`, control);
+        expect(countOf(withJunk(), skip) - countOf(controlOutcomes, skip)).toBe(RESIDUAL_INVENTED[key] ?? 0);
       });
     });
   });

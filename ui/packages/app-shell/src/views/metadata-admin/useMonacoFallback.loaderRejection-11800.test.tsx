@@ -7,24 +7,23 @@
  */
 
 /**
- * objectui#11800 — when Monaco's CDN loader script cannot be fetched (offline,
- * no egress, a strict CSP), nothing escapes as an uncaught error and the
- * failure is reported once per page, as one console line naming the URL.
+ * objectui#11800 — when Monaco cannot be loaded, nothing escapes as an
+ * uncaught error and the failure is reported once per page, as one console
+ * line naming what could not be fetched.
  *
- * Nothing about Monaco is mocked here: this drives the REAL
- * `@monaco-editor/loader` and the real `<Editor>`, because the leak lives in
- * the loader (its `makeCancelable` subscribes without a rejection handler, so
- * every `loader.init()` made while it fails leaves one rejection no caller can
- * reach). A stubbed `loader.init` would hand back a promise the caller CAN
- * catch, and would pass on the defect.
+ * Monaco is the host's own bundled chunk (plugin-editor's
+ * `configureBundledMonaco` hands it to the loader before the page's one
+ * `loader.init()`), so what can fail is fetching that chunk, and the loader's
+ * CDN default is never reached: no loader `<script>` is appended at all.
  *
- * Two pieces of browser behaviour are modelled, and only these two:
+ * This drives the REAL `@monaco-editor/loader` and the real `<Editor>`; the
+ * chunk's own import is plugin-editor's `configureBundledMonaco`, whose suite
+ * drives it against the real loader. Two pieces of browser behaviour are
+ * modelled, and only these two:
  *
- *  - **The network.** The loader appends a `vs/loader.js` script and waits for
- *    its `error` event. The script is held back from the DOM and its `error`
- *    event fired by the test, AFTER the lazy editor module has loaded — the
- *    order the Studio QA pass hit through a proxy without egress, where the
- *    editor mounts before the failure arrives. No network is reached.
+ *  - **The network.** `configureBundledMonaco` waits until the test lets the
+ *    chunk fail, AFTER the lazy editor module has loaded — the order a slow
+ *    network gives, where the editor module is in before the chunk's answer.
  *  - **Unhandled rejections.** Node reports a rejection nobody handled on
  *    `process`; a browser dispatches a cancelable `unhandledrejection` event on
  *    `window` and reports an uncaught error only if no listener cancelled it.
@@ -40,6 +39,25 @@ import { SourcePageEditor } from './previews/SourcePageEditor';
 import { JsonSourceEditor } from './JsonSourceEditor';
 
 const LOADER_SCRIPT = /\/vs\/loader\.js$/;
+const CHUNK_URL = 'http://localhost/_console/assets/editor.api2-hash.js';
+
+const chunk = vi.hoisted(() => {
+  let fail!: () => void;
+  const answered = new Promise<void>((resolve) => {
+    fail = resolve;
+  });
+  return { answered, fail: () => fail() };
+});
+
+// The bundled Monaco chunk cannot be fetched: plugin-editor's
+// `configureBundledMonaco` rejects, as its import of the chunk does, once the
+// test says the network answered.
+vi.mock('@object-ui/plugin-editor', () => ({
+  configureBundledMonaco: async () => {
+    await chunk.answered;
+    throw new TypeError(`Failed to fetch dynamically imported module: ${CHUNK_URL}`);
+  },
+}));
 
 let uncaught: unknown[] = [];
 let vitestListeners: NodeJS.UnhandledRejectionListener[] = [];
@@ -90,8 +108,8 @@ afterEach(() => {
 
 const draft = { name: 'probe_page', type: 'home', kind: 'html', source: '' };
 
-describe('useMonacoFallback — a failing Monaco loader (objectui#11800)', () => {
-  it('leaks no uncaught rejection and reports the loader URL once per page, across the Studio shape and a reopen', async () => {
+describe('useMonacoFallback — a Monaco chunk that cannot be fetched (objectui#11800)', () => {
+  it('leaks no uncaught rejection, reaches no CDN, and reports the chunk URL once per page, across the Studio shape and a reopen', async () => {
     const consoleError = vi.spyOn(console, 'error');
     const consoleWarn = vi.spyOn(console, 'warn');
 
@@ -106,18 +124,15 @@ describe('useMonacoFallback — a failing Monaco loader (objectui#11800)', () =>
     );
 
     // Let the lazy editor module load, so an editor that mounts before the
-    // loader answers has had every chance to.
+    // chunk answers has had every chance to.
     await act(async () => {
       await import('@monaco-editor/react');
     });
     await settle();
 
-    expect(heldLoaderScripts, 'the loader appends its script once per page').toHaveLength(1);
-    const [loaderScript] = heldLoaderScripts;
-
-    // The network answers: the loader script failed to load.
-    act(() => {
-      loaderScript.dispatchEvent(new Event('error'));
+    // The network answers: the chunk could not be fetched.
+    await act(async () => {
+      chunk.fail();
     });
 
     const fallback = await screen.findByLabelText('Page source', {}, { timeout: 2000 });
@@ -125,14 +140,15 @@ describe('useMonacoFallback — a failing Monaco loader (objectui#11800)', () =>
     await settle();
 
     // Soft, so a regression reports every reading at once, not just the first.
-    expect.soft(uncaught, 'uncaught rejections after the loader failed').toHaveLength(0);
+    expect.soft(uncaught, 'uncaught rejections after the chunk failed').toHaveLength(0);
     const editorInitErrors = consoleError.mock.calls.filter(
       ([first]) => typeof first === 'string' && first.startsWith('Monaco initialization'),
     );
     expect.soft(editorInitErrors, "<Editor>'s own init error lines").toHaveLength(0);
     const reports = monacoReports(consoleWarn.mock.calls);
     expect.soft(reports, 'console lines reporting the Monaco failure').toHaveLength(1);
-    expect.soft(reports.join('\n'), 'the report names the loader script URL').toContain(loaderScript.src);
+    expect.soft(reports.join('\n'), 'the report names the chunk URL').toContain(CHUNK_URL);
+    expect.soft(heldLoaderScripts, "loader scripts appended (the loader's CDN default)").toHaveLength(0);
 
     // Reopen: a source editor mounted after the failure is known. Same page,
     // so no second report, no second script, and nothing uncaught.
@@ -142,10 +158,10 @@ describe('useMonacoFallback — a failing Monaco loader (objectui#11800)', () =>
     await settle();
 
     expect.soft(uncaught, 'uncaught rejections after a reopen').toHaveLength(0);
-    expect.soft(heldLoaderScripts, 'loader scripts after a reopen').toHaveLength(1);
+    expect.soft(heldLoaderScripts, 'loader scripts after a reopen').toHaveLength(0);
     expect.soft(monacoReports(consoleWarn.mock.calls), 'reports after a reopen').toHaveLength(1);
 
-    // Only the loader's own rejection is cancelled: any other one on the page
+    // Only the failure's own rejection is cancelled: any other one on the page
     // is still reported.
     const unrelated = new Error('an unrelated rejection');
     const before = uncaught.length;

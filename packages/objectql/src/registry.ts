@@ -53,7 +53,7 @@ import { applyProtection } from '@objectstack/spec/shared';
 // (`id || name`). The install gate's co-ownership set must name packages by the
 // same string the artifact loader ordered them by, or a co-owner would be
 // admitted — or refused — under a key nothing else in the path uses.
-import { artifactPackageId, type SecurityCatalogType } from '@objectstack/core';
+import { artifactPackageId, declaredDependencyIds, type SecurityCatalogType } from '@objectstack/core';
 // One name, one holder for positions, permission sets and capabilities — the
 // rule, the holders and the one place a declaration is read from (module doc).
 import {
@@ -194,17 +194,35 @@ interface PackageActionSchemaError extends Error {
  * Refused rather than stored unparsed: an action that fails the parse would be
  * served with whatever gates it declares never taking effect, and `defineStack`
  * and `os validate` refuse the same declaration at authoring time.
+ *
+ * [#25744] The one parse for both places a code package declares an action:
+ * a standalone `action` item ({@link SchemaRegistry.registerItem}) and an
+ * object's own `actions` ({@link parsePackageObjectActions}, called by
+ * {@link SchemaRegistry.registerObject}). `owner` names the object an own
+ * action is declared on, so the refusal says which object and `issues[]`
+ * locates each failure inside its body.
  */
-function parsePackageAction(item: unknown, name: string, packageId: string): unknown {
+function parsePackageAction(
+  item: unknown,
+  name: string,
+  packageId: string,
+  owner?: { object: string; index: number },
+): unknown {
   const parsed = ActionSchema.safeParse(item);
   if (parsed.success) return parsed.data;
+  // [#25744] An object's own action is located inside the object body it was
+  // declared in (`actions.<index>.<key>`), the path `ObjectSchema` reports.
+  const prefix = owner ? ['actions', String(owner.index)] : [];
   const issues = parsed.error.issues.map((issue) => ({
-    path: issue.path.map(String).join('.'),
+    path: [...prefix, ...issue.path.map(String)].join('.'),
     message: issue.message,
     code: issue.code,
   }));
+  const subject = owner
+    ? `Action '${name}' of object '${owner.object}' in package '${packageId}'`
+    : `Action '${name}' of package '${packageId}'`;
   const err = new Error(
-    `Action '${name}' of package '${packageId}' does not satisfy the action contract (ActionSchema): `
+    `${subject} does not satisfy the action contract (ActionSchema): `
     + issues.map((issue) => (issue.path ? `${issue.path}: ${issue.message}` : issue.message)).join('; ')
     + '. Every action a package ships is stored as its schema parse — the parse that lowers '
     + '`requiresFeature` and `requiresMembershipReach` into `visible` — so an action that does not parse '
@@ -216,6 +234,35 @@ function parsePackageAction(item: unknown, name: string, packageId: string): unk
   err.httpStatus = 422;
   err.issues = issues;
   throw err;
+}
+
+/**
+ * [#25744] A code package's object, its own `actions` stored as their
+ * `ActionSchema` parse ({@link parsePackageAction}) — or the loud refusal of
+ * the first one that does not parse.
+ *
+ * The object-path twin of {@link SchemaRegistry.registerItem}'s action parse.
+ * `ObjectSchema`'s `actions` is `ActionSchema[]`, so a platform object
+ * (`ObjectSchema.create`) and a strict `defineStack` already hand this method
+ * parsed actions, and the parse being idempotent over its own output stores
+ * them deep-equal to what arrived. A raw manifest, a `strict: false` stack or a
+ * programmatic `registerApp` reached the store with its objects' actions as
+ * written, so a declared `requiresFeature` / `requiresMembershipReach` was
+ * served raw, never lowered into `visible`.
+ *
+ * Returns `schema` by reference when it declares no `actions` array, and a
+ * shallow copy carrying the parsed array otherwise: the caller's body is
+ * never mutated.
+ */
+function parsePackageObjectActions(schema: ServiceObject, packageId: string): ServiceObject {
+  const actions = (schema as { actions?: unknown }).actions;
+  if (!Array.isArray(actions) || actions.length === 0) return schema;
+  const parsed = actions.map((action, index) => {
+    const declared = (action as { name?: unknown } | null | undefined)?.name;
+    const name = typeof declared === 'string' && declared !== '' ? declared : `#${index}`;
+    return parsePackageAction(action, name, packageId, { object: schema.name, index });
+  });
+  return { ...schema, actions: parsed } as ServiceObject;
 }
 
 /**
@@ -1968,7 +2015,10 @@ export class NamespaceConflictError extends Error {
         `of every object name (e.g. "${namespace}_account") and the container ` +
         `that scopes a package's UI metadata, so it must be unique per ` +
         `installation. Choose a different namespace for "${incomingPackageId}", ` +
-        `or uninstall "${existingPackageId}" first. If this is a deliberate ` +
+        `or uninstall "${existingPackageId}" first. If "${incomingPackageId}" ` +
+        `extends the app that holds this namespace, declare that app in its ` +
+        `manifest.dependencies: a declared dependency co-owns the namespace ` +
+        `(ADR-0141 D5). If this is a deliberate ` +
         `migration, set OS_METADATA_COLLISION=warn to downgrade to a warning. ` +
         `See ADR-0048.`,
     );
@@ -2274,6 +2324,15 @@ export interface ArtifactInstallScope {
 }
 
 /**
+ * Why two packages co-own one namespace at the install gate:
+ *
+ * - `artifact` — the same release artifact delivers both (ADR-0130 D1);
+ * - `dependency` — one declares the other in `manifest.dependencies` (ADR-0141 D5);
+ * - `sibling` — both declare one installed package that holds the namespace (ADR-0141 D5).
+ */
+export type CoOwnershipSource = 'artifact' | 'dependency' | 'sibling';
+
+/**
  * The object names one manifest CLAIMS OWNERSHIP of at install time — the names
  * `registerApp` is about to hand `registerObject` with `ownership: 'own'`.
  *
@@ -2325,6 +2384,29 @@ function declaredOwnedObjectNames(manifest: ObjectStackManifest): string[] {
  * Carries the ADR-0112 envelope (`code` + `status`) — the shape this
  * repository's rejection tests assert against, never a bare throw.
  */
+/**
+ * The words {@link ArtifactObjectNameConflictError} uses per co-ownership
+ * source, so a refusal between packages of different artifacts never claims
+ * they arrived in one (ADR-0141 D5).
+ */
+const CO_OWNERSHIP_WORDING: Record<CoOwnershipSource, { conflict: string; relation: string; allowed: string }> = {
+  artifact: {
+    conflict: 'inside one release artifact',
+    relation: 'delivered by the same artifact',
+    allowed: 'Sharing a namespace across packages in one artifact is allowed (ADR-0130 D1)',
+  },
+  dependency: {
+    conflict: 'between packages that share a namespace through a declared dependency',
+    relation: 'which shares the namespace because one of the two declares the other in `manifest.dependencies`',
+    allowed: 'Sharing a namespace through a declared dependency is allowed (ADR-0141 D5)',
+  },
+  sibling: {
+    conflict: 'between sibling packages that share a namespace under one declared parent',
+    relation: 'which shares the namespace because both declare the same installed package in `manifest.dependencies`',
+    allowed: 'Sharing a namespace between modules of one declared parent is allowed (ADR-0141 D5)',
+  },
+};
+
 export class ArtifactObjectNameConflictError extends Error {
   readonly code = DUPLICATE_ARTIFACT_OBJECT_NAME_CODE;
   readonly status = 422;
@@ -2336,24 +2418,32 @@ export class ArtifactObjectNameConflictError extends Error {
   readonly existingPackageId: string;
   /** The package whose install this refusal stopped. */
   readonly incomingPackageId: string;
+  /** Why the two packages co-own the namespace — the message is worded for it (ADR-0141 D5). */
+  readonly coOwnership: CoOwnershipSource;
 
-  constructor(objectName: string, existingPackageId: string, incomingPackageId: string) {
+  constructor(
+    objectName: string,
+    existingPackageId: string,
+    incomingPackageId: string,
+    coOwnership: CoOwnershipSource = 'artifact',
+  ) {
+    const { conflict, relation, allowed } = CO_OWNERSHIP_WORDING[coOwnership];
     super(
-      `Object name conflict inside one release artifact: object "${objectName}" is ` +
+      `Object name conflict ${conflict}: object "${objectName}" is ` +
         `already owned by package "${existingPackageId}", so package ` +
-        `"${incomingPackageId}" — delivered by the same artifact — cannot define it ` +
+        `"${incomingPackageId}" — ${relation} — cannot define it ` +
         `too. Two packages defining one object name map to one physical table: the ` +
         `install would either fail at the DB with a duplicate CREATE TABLE or, ` +
         `driver-dependent, let one definition silently overwrite the other. Rename ` +
         `the object in "${incomingPackageId}", or have it \`extend\` ` +
-        `"${existingPackageId}"'s object instead of owning a second one. Sharing a ` +
-        `namespace across packages in one artifact is allowed (ADR-0130 D1); ` +
+        `"${existingPackageId}"'s object instead of owning a second one. ${allowed}; ` +
         `sharing an object NAME is not (ADR-0130 D3).`,
     );
     this.name = 'ArtifactObjectNameConflictError';
     this.objectName = objectName;
     this.existingPackageId = existingPackageId;
     this.incomingPackageId = incomingPackageId;
+    this.coOwnership = coOwnership;
   }
 }
 
@@ -3440,6 +3530,25 @@ export class SchemaRegistry {
     // reason, so a refused contribution leaves nothing behind.
     if (ownership === 'extend' && (schema as { membershipKeys?: unknown }).membershipKeys !== undefined) {
       throw new ExtensionMembershipKeysRefusedError(schema.name, packageId);
+    }
+
+    // [#25744] A code package's object keeps its own actions as their
+    // `ActionSchema` parse — `requiresFeature` / `requiresMembershipReach`
+    // lowered into `visible` — or is refused here, beside the doors above and
+    // for their reason: before any materialization and before the contributor
+    // list is opened, so a refused object leaves nothing behind and a refused
+    // re-registration leaves the registered one in place
+    // ({@link parsePackageObjectActions}). The test is `registerItem`'s action
+    // parse's, asked of the body as `applyProtection` below will stamp it (a
+    // package id it does not already carry, `'package'` provenance): ⛔ a
+    // registration with no `packageId`, the `sys_metadata` sentinel, or a
+    // tenant-authored body (`_provenance: 'org'` — the save door's write-through
+    // and the boot rehydration) is never judged here.
+    if (packageId && isCodeArtifactBody({
+      _packageId: (schema as { _packageId?: unknown })._packageId ?? packageId,
+      _provenance: (schema as { _provenance?: unknown })._provenance ?? 'package',
+    })) {
+      schema = parsePackageObjectActions(schema, packageId);
     }
 
     // [#23065] A `tree` field that names no `reference` references the object
@@ -6047,8 +6156,11 @@ export class SchemaRegistry {
     // ({@link artifactPackageId}), not by `manifest.id` alone: a manifest
     // carrying only `name` is installed under that name, and a co-owner set
     // that still contained it would let the package "co-own" with itself.
+    //
+    // [ADR-0141 D5] …and, beside the artifact, the packages a declared
+    // dependency makes co-owners of the namespace — see {@link coOwnersOf}.
     const selfId = artifactPackageId(manifest);
-    const coOwners = new Set((scope?.packageIds ?? []).filter((id) => id !== selfId));
+    const coOwners = this.coOwnersOf(manifest, selfId, scope);
 
     // ADR-0048 Phase 1 — install-time namespace gate. Refuse a package whose
     // namespace is already owned by an installed package that is not a co-owner
@@ -6190,6 +6302,60 @@ export class SchemaRegistry {
   }
 
   /**
+   * The co-owners of the incoming package's namespace, each with the source
+   * that makes it one. Both halves of the install-time pair read this one map,
+   * so the namespace relaxation and the object-name refusal cannot disagree
+   * about who counts.
+   *
+   * Two sources:
+   *
+   * - **`artifact`** (ADR-0130 D1) — the other packages the same release
+   *   artifact is delivering, as the load path's scope names them.
+   * - **a declared dependency** (ADR-0141 D5) — for a non-shareable namespace
+   *   N the incoming package P uses:
+   *   - `dependency`: P declares an installed X whose namespace is N; or a
+   *     sitting owner of N declares P. The relation is declared by the
+   *     dependent alone and read from either end, so the parent registering
+   *     second — an upgrade, or a boot that hydrated the module first — meets
+   *     its module as a co-owner instead of `NAMESPACE_CONFLICT`.
+   *   - `sibling`: a sitting owner S of N and P each directly declare one
+   *     installed package Q whose namespace is N — two modules under one
+   *     declared parent, neither declaring the other.
+   *
+   * Direct declarations only, never the closure the save door walks. Q's
+   * namespace is read from Q's installed record: ⛔ two packages that merely
+   * declare one common package co-own nothing unless that package is installed
+   * and holds N, or any two packages sharing a utility dependency could share a
+   * namespace. Nothing is persisted: the relation is the declarations of the
+   * packages the registry holds now.
+   */
+  private coOwnersOf(
+    manifest: ObjectStackManifest,
+    selfId: string | undefined,
+    scope: ArtifactInstallScope | undefined,
+  ): Map<string, CoOwnershipSource> {
+    const coOwners = new Map<string, CoOwnershipSource>();
+    for (const id of scope?.packageIds ?? []) if (id !== selfId) coOwners.set(id, 'artifact');
+
+    const namespace = manifest.namespace;
+    if (!namespace || isShareableNamespace(namespace) || selfId === undefined) return coOwners;
+
+    const holdsNamespace = (id: string) => this.getPackage(id)?.manifest?.namespace === namespace;
+    // P's declared parents that hold N — the parent arm from P's side, and the
+    // Q set the sibling arm matches against.
+    const parents = new Set(declaredDependencyIds(manifest).filter((id) => id !== selfId && holdsNamespace(id)));
+    for (const id of parents) if (!coOwners.has(id)) coOwners.set(id, 'dependency');
+
+    for (const owner of this.getNamespaceOwners(namespace)) {
+      if (owner === selfId || coOwners.has(owner)) continue;
+      const declaredByOwner = declaredDependencyIds(this.getPackage(owner)?.manifest);
+      if (declaredByOwner.includes(selfId)) coOwners.set(owner, 'dependency');
+      else if (declaredByOwner.some((id) => parents.has(id))) coOwners.set(owner, 'sibling');
+    }
+    return coOwners;
+  }
+
+  /**
    * [ADR-0130 D3] Refuse an install in which a CO-OWNER of the incoming package
    * — a package delivered by the same release artifact — already owns an object
    * name the incoming package claims.
@@ -6227,7 +6393,7 @@ export class SchemaRegistry {
   private refuseCoOwnedObjectNameCollision(
     manifest: ObjectStackManifest,
     selfId: string | undefined,
-    coOwners: ReadonlySet<string>,
+    coOwners: ReadonlyMap<string, CoOwnershipSource>,
   ): void {
     // No artifact scope, or an artifact carrying one package: nothing this
     // method can refuse. Stated as an early return rather than left to fall out
@@ -6245,7 +6411,7 @@ export class SchemaRegistry {
       // configurations D1 never admitted, outside this card and outside D3.
       if (!coOwners.has(ownerId)) continue;
       if (isTenantAuthored(owner.definition)) continue;
-      throw new ArtifactObjectNameConflictError(fqn, ownerId, selfId ?? manifest.id);
+      throw new ArtifactObjectNameConflictError(fqn, ownerId, selfId ?? manifest.id, coOwners.get(ownerId));
     }
   }
 

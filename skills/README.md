@@ -123,8 +123,8 @@ A few common decision points where the right skill isn't obvious:
   **objectstack-data**.
 - **Labels vs. bundles** — a `label` you want translated is **objectstack-i18n**.
 - **Upgrade vs. platform** — a protocol-major move is **objectstack-upgrade**.
-- **Rendering this metadata** — the consuming UI is
-  [objectui `skills/objectui/`](https://github.com/objectstack-ai/objectui).
+- **Rendering this metadata** — the consuming UI is the `@object-ui/*`
+  packages, and their own skill is [`objectui`](./objectui/SKILL.md) in this catalog.
 
 ---
 

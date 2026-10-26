@@ -90,6 +90,7 @@
     "content/docs/data-modeling/seed-data.mdx",
     "content/docs/data-modeling/validation-rules.mdx",
     "content/docs/data-modeling/validation.mdx",
+    "content/docs/deployment/app-dependencies.mdx",
     "content/docs/deployment/backup-restore.mdx",
     "content/docs/deployment/cli.mdx",
     "content/docs/deployment/cloud-connection.mdx",

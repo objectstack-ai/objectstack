@@ -110,20 +110,21 @@ describe('views.zod.ts#DetailViewFieldSchema — `dueLike`, retired by objectui#
    * view entry altogether: the deadline is the object FIELD's declaration
    * (`DateFieldMetadata.dueLike` / `settledWhen`, by reference to the spec),
    * read through `enrichDetailField`. So the mirror no longer judges the key —
-   * it strips it exactly as it strips an unknown one, which the lit control
-   * beside it shows is the same instrument answering.
+   * it treats it exactly as it treats an unknown one (stripped while the mirror
+   * was strip mode, kept since objectstack#25923 made it `.passthrough()`), which
+   * the lit control beside it shows is the same instrument answering.
    */
-  it('the mirror no longer states the key, and strips it like an unknown one', () => {
+  it('the mirror no longer states the key, and treats it like an unknown one', () => {
     expect(Object.keys(DetailViewFieldSchema.shape)).not.toContain('dueLike');
     const retired = DetailViewFieldSchema.safeParse({ name: 'end_date', dueLike: true });
     expect(retired.success).toBe(true);
-    expect(retired.success && Object.keys(retired.data)).not.toContain('dueLike');
+    expect(retired.success && Object.keys(retired.data)).toContain('dueLike');
 
     // LIT CONTROL, same schema: a key the mirror DOES state survives the parse.
     const control = DetailViewFieldSchema.safeParse({ name: 'end_date', currency: 'USD' });
     expect(control.success && control.data).toMatchObject({ currency: 'USD' });
     const unknown = DetailViewFieldSchema.safeParse({ name: 'end_date', [UNKNOWN_KEY]: true });
-    expect(unknown.success && Object.keys(unknown.data)).not.toContain(UNKNOWN_KEY);
+    expect(unknown.success && Object.keys(unknown.data)).toContain(UNKNOWN_KEY);
   });
 });
 

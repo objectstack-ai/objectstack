@@ -327,14 +327,13 @@ export const ADJUDICATED = new Map([
     'packages/components/src/__tests__/readme-shadcn-sync-categories.test.ts',
     { reads: ['packages/components/README_SHADCN_SYNC.md'] },
   ],
+  // The three guides it reads moved with the published bundle into the objectstack
+  // monorepo's `skills/` catalog at the cutover (decision C, objectstack#25803), outside
+  // this tree, so this ledger can no longer name them; their trigger is the monorepo's.
   [
     'packages/components/src/__tests__/skill-guide-data-table-binding.test.tsx',
     {
-      reads: [
-        'skills/objectui/guides/data-integration.md',
-        'skills/objectui/guides/schema-expressions.md',
-        'skills/objectui/rules/protocol.md',
-      ],
+      reads: [],
       walker: 'not-markdown: concatenates plugin package `.tsx` sources',
     },
   ],
@@ -411,10 +410,6 @@ export const ADJUDICATED = new Map([
   [
     'packages/layout/src/__tests__/readme-sidebar-nav-example.test.ts',
     { reads: ['packages/layout/README.md'], notRead: ['README.md'] },
-  ],
-  [
-    'packages/permissions/src/__tests__/skill-guide-permission-config.test.tsx',
-    { reads: ['skills/objectui/guides/auth-permissions.md'] },
   ],
   [
     'packages/plugin-calendar/src/readme-calendar-view-schema.test.ts',
@@ -566,19 +561,6 @@ export const ADJUDICATED = new Map([
     'packages/types/src/__tests__/held-public-block-arms-10872.test.ts',
     { reads: ['content/docs/guide/quick-start.md'] },
   ],
-  // objectui#11405. Reads every marked fence in the two guides that authors a
-  // bind-only `list`, with the marker gate's own `scanSkillFences`, and judges it
-  // through `safeValidateSchema` and the strict face -- so an edit to either guide
-  // is an edit to this test's input.
-  [
-    'packages/types/src/__tests__/list-bind-only-11405.test.ts',
-    {
-      reads: [
-        'skills/objectui/guides/data-integration.md',
-        'skills/objectui/guides/schema-expressions.md',
-      ],
-    },
-  ],
   // objectui#6152 round 9 -- the corpus census of `object-calendar` containers.
   // It walks the authored trees, reads every markdown document in them that
   // names `object-calendar`, and parses each fenced element's `calendar`
@@ -722,16 +704,6 @@ export const ADJUDICATED = new Map([
   // opened were recorded, which is also how the three tests that ENUMERATE a
   // markdown population without opening it were caught.
   // ---------------------------------------------------------------------------
-  // objectui#9727 -- the rebuilt polarity census. It walks TWO markdown trees:
-  // the real pending corpus (through the script, for the controls and the
-  // corpus-boundary pin) and its own fixture corpus (for every instrument pin).
-  [
-    'scripts/__tests__/changeset-polarity-census.test.ts',
-    {
-      reads: ['scripts/__tests__/fixtures/changeset-polarity/corpus/**'],
-      walker: 'markdown-tree',
-    },
-  ],
   // Reads no markdown: drives the gate against a fixture repository it writes in a temp directory.
   [
     'scripts/__tests__/check-changeset-claims.test.ts',
@@ -762,7 +734,16 @@ export const ADJUDICATED = new Map([
     {
       reads: [],
       notRead: ['.changeset/README.md', 'CHANGELOG.md', 'README.md', 'apps/console/README.md'],
-      walker: 'not-markdown: `.github/workflows/*.yml`',
+    },
+  ],
+  // Reads no markdown: its three markdown literals are probes of the root `ci.yml`
+  // `ui` filter's globs, asserting a markdown-only change still starts Lint UI
+  // (objectstack#25712). The gate's own corpus is reached through the script.
+  [
+    'scripts/__tests__/check-control-bytes.test.ts',
+    {
+      reads: [],
+      notRead: ['README.md', 'content/docs/guide/ci-cd-pipeline.md', 'packages/core/README.md'],
     },
   ],
   [
@@ -812,9 +793,11 @@ export const ADJUDICATED = new Map([
   [
     'scripts/__tests__/check-doc-fence-languages.test.ts',
     {
+      // `packages/core/README.md` is a probe of the root `ci.yml` `ui` filter's
+      // globs, not a read (objectstack#25712). The test's only directory walk was
+      // of objectui's own `.github/workflows`, which it no longer reads.
       reads: ['apps/console/docs/**', 'content/docs/**', 'docs/**'],
-      notRead: ['README.md'],
-      walker: 'markdown-tree',
+      notRead: ['README.md', 'packages/core/README.md'],
     },
   ],
   [
@@ -844,20 +827,30 @@ export const ADJUDICATED = new Map([
   [
     'scripts/__tests__/check-doc-links.test.ts',
     {
-      reads: ['./*', 'apps/**', 'content/docs/**', 'docs/ARCHITECTURE.md', 'docs/CONSOLE-STREAMLINING-SUMMARY.md', 'docs/adr/**', 'docs/audits/**', 'examples/**', 'packages/**'],
+      reads: ['./*', 'apps/**', 'content/docs/**', 'docs/app-shell-extraction-guide.md', 'docs/adr/**', 'docs/audits/**', 'examples/**', 'packages/**'],
     },
   ],
   [
     'scripts/__tests__/check-doc-snippet-emitted-census.test.ts',
     {
-      reads: ['README.md', 'apps/console/docs/UI_IMPROVEMENT_PROPOSAL.md', 'apps/console/docs/deployment.md', 'apps/console/docs/error-tracking.md', 'content/docs/**', 'docs/ARCHITECTURE.md', 'docs/CONSOLE-STREAMLINING-SUMMARY.md', 'docs/adr/**', 'docs/audits/**', 'packages/**'],
+      reads: ['README.md', 'apps/console/docs/UI_IMPROVEMENT_PROPOSAL.md', 'apps/console/docs/deployment.md', 'apps/console/docs/error-tracking.md', 'content/docs/**', 'docs/app-shell-extraction-guide.md', 'docs/adr/**', 'docs/audits/**', 'packages/**'],
     },
   ],
   [
     'scripts/__tests__/check-doc-snippet-types.test.ts',
     {
-      reads: ['README.md', 'apps/console/docs/UI_IMPROVEMENT_PROPOSAL.md', 'apps/console/docs/deployment.md', 'apps/console/docs/error-tracking.md', 'content/docs/**', 'docs/ARCHITECTURE.md', 'docs/CONSOLE-STREAMLINING-SUMMARY.md', 'docs/adr/**', 'docs/audits/**', 'packages/**'],
+      reads: ['README.md', 'apps/console/docs/UI_IMPROVEMENT_PROPOSAL.md', 'apps/console/docs/deployment.md', 'apps/console/docs/error-tracking.md', 'content/docs/**', 'docs/app-shell-extraction-guide.md', 'docs/adr/**', 'docs/audits/**', 'packages/**'],
       walker: 'markdown-tree',
+    },
+  ],
+  // Reads no markdown: its one markdown literal is a probe of the root `ci.yml`
+  // `ui` filter's globs, asserting a docs-only change still starts Lint UI
+  // (objectstack#25712).
+  [
+    'scripts/__tests__/check-docs-route-eager-closure.test.ts',
+    {
+      reads: [],
+      notRead: ['content/docs/guide/ci-cd-pipeline.md'],
     },
   ],
   // Reads no markdown: the root-document literals are fixture INPUTS to a pure path classifier.
@@ -872,14 +865,6 @@ export const ADJUDICATED = new Map([
     'scripts/__tests__/check-handler-key-read-sites.test.ts',
     {
       reads: ['content/docs/guide/ci-cd-pipeline.md'],
-    },
-  ],
-  [
-    'scripts/__tests__/check-links-workflow.test.ts',
-    {
-      reads: ['content/docs/**', 'docs/**'],
-      notRead: ['README.md'],
-      walker: 'markdown-tree',
     },
   ],
   [
@@ -960,26 +945,10 @@ export const ADJUDICATED = new Map([
     },
   ],
   [
-    'scripts/__tests__/ci-cd-pipeline-doc.test.ts',
-    {
-      reads: ['CONTRIBUTING.md', 'content/docs/guide/ci-cd-pipeline.md'],
-      walker: 'not-markdown: `.github/workflows/*.yml`',
-    },
-  ],
-  [
     'scripts/__tests__/component-node-vocabulary-7434.test.ts',
     {
       reads: ['content/docs/**', 'packages/**'],
       walker: 'markdown-tree',
-    },
-  ],
-  // Reads no markdown: its `README.md` literal is sample input to a pure path-matcher
-  // assertion -- the suite is a census OF corpus walkers and keeps its own inputs literal.
-  [
-    'scripts/__tests__/coverage-red-cause-census.test.ts',
-    {
-      reads: [],
-      notRead: ['README.md'],
     },
   ],
   // Reads no markdown: every document literal is fixture text handed to pure functions.
@@ -1004,14 +973,7 @@ export const ADJUDICATED = new Map([
   [
     'scripts/__tests__/dollar-dialect-alias-census.test.ts',
     {
-      reads: ['./*', '.changeset/**', '.claude/skills/**', 'apps/**', 'content/docs/**', 'docs/ARCHITECTURE.md', 'docs/CONSOLE-STREAMLINING-SUMMARY.md', 'docs/adr/**', 'docs/audits/**', 'examples/**', 'packages/**', 'patches/README.md', 'skills/objectui/**'],
-    },
-  ],
-  [
-    'scripts/__tests__/extract-mdx-demos.test.ts',
-    {
-      reads: ['content/docs/**'],
-      walker: 'markdown-tree',
+      reads: ['./*', '.changeset/**', '.claude/skills/**', 'apps/**', 'content/docs/**', 'docs/app-shell-extraction-guide.md', 'docs/adr/**', 'docs/audits/**', 'examples/**', 'packages/**', 'patches/README.md', 'skills/objectui/**'],
     },
   ],
   [

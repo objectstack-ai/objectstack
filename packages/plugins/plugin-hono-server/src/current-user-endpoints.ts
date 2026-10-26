@@ -39,6 +39,7 @@
  */
 
 import {
+    buildEffectiveFieldPermissions,
     buildEffectiveObjectPermissions,
     IDataEngine,
     resolveLocalizationContext,
@@ -739,7 +740,7 @@ async function resolveCurrentUserLocalization(
     })();
     const [stored, deployment] = await Promise.all([
         storedSignedInUserLocale(ql, userId, ctx.logger),
-        resolveLocalizationContext({ ql, settings, tenantId, userId }),
+        resolveLocalizationContext({ ql, settings, organizationId: tenantId, userId }),
     ]);
     return {
         currency: deployment.currency,
@@ -898,22 +899,18 @@ export function registerCurrentUserEndpoints(
             // Most-permissive merge of `fields` across all resolved
             // permission sets — same semantics as
             // PermissionEvaluator.getFieldPermissions but for ALL
-            // objects in a single pass. (`objects` is merged below, by the
-            // one function the security service answers from.)
-            const fields: Record<string, { readable: boolean; editable: boolean }> = {};
+            // objects in a single pass, from the one function that reads a
+            // field entry's vote (`fieldPermissionVote`, `@objectstack/core`).
+            // [Ruling of record 6408558941] This endpoint holds no row, so a
+            // row-conditioned entry (`when`) is reported as its lock: the
+            // console never advertises an edit the write gate refuses.
+            // (`objects` is merged below, by the one function the security
+            // service answers from.)
+            const fields = buildEffectiveFieldPermissions(resolved);
             const systemPermissions = new Set<string>();
             const tabRank: Record<string, number> = { hidden: 0, default_off: 1, default_on: 2, visible: 3 };
             const tabPermissions: Record<string, MePermissionsTabVisibility> = {};
             for (const ps of resolved) {
-                if (ps?.fields) {
-                    for (const [key, perm] of Object.entries(ps.fields)) {
-                        const acc = fields[key] ?? { readable: false, editable: false };
-                        const p = perm as any;
-                        if (p.readable) acc.readable = true;
-                        if (p.editable) acc.editable = true;
-                        fields[key] = acc;
-                    }
-                }
                 if (Array.isArray(ps?.systemPermissions)) {
                     for (const sp of ps.systemPermissions) {
                         if (typeof sp === 'string') systemPermissions.add(sp);

@@ -401,9 +401,10 @@ export const FILE_SHARDED_PACKAGES = Object.freeze({
 // matching neither map is refused as before.
 //
 // Set it to the OUTGOING map in the same PR that changes FILE_SHARDED_PACKAGES.
-// Its only readers are run summaries, which ci.yml keeps for one day
-// (`retention-days: 1` on `test-core-run-summary-*`), so a day after that PR
-// lands no retained summary predates the change and this map decodes nothing.
+// Its only readers are run summaries, which ci.yml keeps for four days on a
+// scheduled run and one day otherwise (`retention-days` on
+// `test-core-run-summary-*`, #25771), so four days after that PR lands no
+// retained summary predates the change and this map decodes nothing.
 // The outgoing map of #22075's third round was empty -- the runs before it
 // carried no slice -- so this one is empty too.
 export const PREVIOUS_FILE_SHARDED_PACKAGES = Object.freeze({});

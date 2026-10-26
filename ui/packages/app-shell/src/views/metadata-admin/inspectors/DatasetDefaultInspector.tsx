@@ -129,6 +129,7 @@ const CURRENCY_OPTIONS = [
 
 type Dimension = { name?: string; label?: string; field?: string; type?: string; dateGranularity?: string };
 type DerivedSpec = { op?: string; of?: string[] };
+type DurationSpec = { from?: string; to?: string; unit?: string };
 type Measure = {
   name?: string;
   label?: string;
@@ -137,6 +138,8 @@ type Measure = {
   format?: string;
   currency?: string;
   derived?: DerivedSpec;
+  /** Time between two `datetime` fields of a record (`DatasetMeasureSchema.duration`, objectstack#25778). */
+  duration?: DurationSpec;
   filter?: FilterCondition;
 };
 
@@ -361,11 +364,18 @@ function DatasetFilterField({ label, help, value, onCommit, fields, disabled, lo
 /**
  * Whether a measure names none of its object's fields: a plain row count — no
  * `field` (or the row wildcard `'*'`), no measure-scoped `filter` (its keys are
- * fields), and not `derived` (a derived measure combines other measures, which
- * may name fields, and one left pointing at a cleared measure is refused).
+ * fields), not `derived` (a derived measure combines other measures, which
+ * may name fields, and one left pointing at a cleared measure is refused), and
+ * not a `duration` (its `from` / `to` are two fields, with no `field` beside
+ * them — objectstack#25778).
  */
 function measureNamesNoField(m: Measure): boolean {
-  return (isBlankField(m.field) || m.field === '*') && m.filter === undefined && m.derived === undefined;
+  return (
+    (isBlankField(m.field) || m.field === '*') &&
+    m.filter === undefined &&
+    m.derived === undefined &&
+    m.duration === undefined
+  );
 }
 
 /**

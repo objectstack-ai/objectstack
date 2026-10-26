@@ -209,17 +209,20 @@ type Resolved<T> = { readonly ok: true; readonly value: T } | { readonly ok: fal
  * refused it. `empty` names each envelope that evaluated to no recipient, for
  * the guard that fails a node left with none. `computed` names each recipient
  * an envelope evaluated to that reads as an email address, for the check that
- * a user holds it ({@link screenComputedAddresses}).
+ * a user holds it ({@link screenComputedAddresses}). `addressed` names each
+ * recipient, written out or computed, that reads as one, for the check that a
+ * node which does not mail can deliver it ({@link refuseUndeliverableAddresses}).
  */
 function resolveRecipients(
     engine: AutomationEngine,
     value: unknown,
     variables: VariableMap,
     context: AutomationContext,
-): Resolved<{ recipients: string[]; empty: string[]; computed: ComputedAddress[] }> {
+): Resolved<{ recipients: string[]; empty: string[]; computed: ComputedAddress[]; addressed: AddressedRecipient[] }> {
     const recipients: string[] = [];
     const empty: string[] = [];
     const computed: ComputedAddress[] = [];
+    const addressed: AddressedRecipient[] = [];
     const entries: Array<[string, unknown]> = Array.isArray(value)
         ? value.map((entry, index) => [`recipients[${index}]`, entry])
         : value === undefined ? [] : [['recipients', value]];
@@ -242,15 +245,20 @@ function resolveRecipients(
             }
             const recipient = toStr(item);
             if (recipient === undefined) continue;
-            const address = isExpressionEnvelopeShaped(raw) ? mailedAddressOf(recipient) : undefined;
+            const address = mailedAddressOf(recipient);
             if (address !== undefined) {
-                computed.push({ index: recipients.length, what, source: sourceOf(raw), address });
+                if (isExpressionEnvelopeShaped(raw)) {
+                    computed.push({ index: recipients.length, what, source: sourceOf(raw), address });
+                    addressed.push({ recipient, address, computed: { what, source: sourceOf(raw) } });
+                } else {
+                    addressed.push({ recipient, address });
+                }
             }
             recipients.push(recipient);
         }
         if (isExpressionEnvelopeShaped(raw) && recipients.length === before) empty.push(sourceOf(raw));
     }
-    return { ok: true, value: { recipients, empty, computed } };
+    return { ok: true, value: { recipients, empty, computed, addressed } };
 }
 
 /** The user identity object an address is checked against — the messaging resolver's `USER_OBJECT`. */
@@ -264,6 +272,26 @@ const USER_OBJECT = 'sys_user';
  */
 const RECIPIENT_READ = { context: { isSystem: true } } as const;
 
+/**
+ * The id of the user who holds `address`, or `undefined` when no user does —
+ * the lookup the messaging resolver makes (`sys_user` by `email`, the id
+ * projected), so "a user holds it" means here what it means there. Throws when
+ * the lookup fails. The one test every address check below makes.
+ */
+async function holderOf(data: IDataEngine, address: string): Promise<string | undefined> {
+    const user = await data.findOne(USER_OBJECT, { where: { email: address }, fields: ['id'] }, RECIPIENT_READ);
+    return toStr(user?.id);
+}
+
+/**
+ * True when `entry` hands its address on as the recipient id, as `user:a@b.c`
+ * does: the messaging resolver passes the remainder of a `user:` value on
+ * with no lookup, so it never reaches the user who holds the address.
+ */
+function namesAddressAsUserId(entry: AddressedRecipient): boolean {
+    return entry.recipient !== entry.address;
+}
+
 /** A recipient a value envelope evaluated to that reads as an email address. */
 interface ComputedAddress {
     /** Its position in the resolved recipient list. */
@@ -274,6 +302,16 @@ interface ComputedAddress {
     readonly source: string;
     /** The address the email channel would send to (`a@b.c`, also for `user:a@b.c`). */
     readonly address: string;
+}
+
+/** A recipient, written out or computed, that reads as an email address. */
+interface AddressedRecipient {
+    /** The recipient (`a@b.c`, or `user:a@b.c`). */
+    readonly recipient: string;
+    /** The address in it. */
+    readonly address: string;
+    /** Where a value envelope computed it; absent for one written out as a string. */
+    readonly computed?: { readonly what: string; readonly source: string };
 }
 
 /**
@@ -328,7 +366,9 @@ function readsAsAddress(recipient: string): boolean {
  * So the screen runs only for a node whose `channels` name `email`, the one
  * channel that sends to the address itself. Any other node (`inbox` alone,
  * the messaging default) mails nobody, and its recipients go to the messaging
- * resolver as before, which maps an address a user holds to that user.
+ * resolver as before, which maps an address a user holds to that user; an
+ * address no user holds fails such a node for another reason, that nobody can
+ * receive it ({@link refuseUndeliverableAddresses}, #25758).
  *
  * The lookup is the one the messaging resolver makes (`sys_user` by `email`,
  * the id projected), so "a user holds it" means here what it means there. No
@@ -352,16 +392,15 @@ async function screenComputedAddresses(
                     + 'whether a user holds that address, so nothing was sent.',
             };
         }
-        let user: Record<string, unknown> | null | undefined;
+        let id: string | undefined;
         try {
-            user = await data.findOne(USER_OBJECT, { where: { email: address }, fields: ['id'] }, RECIPIENT_READ);
+            id = await holderOf(data, address);
         } catch (err) {
             return {
                 ok: false,
                 error: `${located}. Looking up the user who holds it failed (${(err as Error).message}), so nothing was sent.`,
             };
         }
-        const id = toStr(user?.id);
         if (id === undefined) {
             return {
                 ok: false,
@@ -376,6 +415,129 @@ async function screenComputedAddresses(
         screened[entry.index] = id;
     }
     return { ok: true, value: screened };
+}
+
+/**
+ * [#25758] An address in `recipients`, written out or computed, on a node
+ * whose `channels` do not include `email`, must reach a user, or the node
+ * fails: the message names the node, each such recipient and the fix.
+ * `undefined` when every such address reaches one.
+ *
+ * Only the email channel sends to an address itself. The other channels
+ * deliver to a user: the inbox keys its row by the recipient as a user id, and
+ * the sms channel texts a user's number (or a literal phone number). So on any
+ * other node an address reaches someone only when the messaging resolver maps
+ * it to the user who holds it, and it maps only a bare address (the remainder
+ * of `user:a@b.c` is handed on as the id with no lookup). Before, an address no
+ * user held went on as it stood: the inbox wrote a row whose `user_id` was the
+ * address, which no inbox reads, and the node reported success.
+ *
+ * Both provenances are judged alike, because where the address came from does
+ * not change who can receive it. A written-out address is the author's
+ * constant (ruling B on #25647), so it is named; a computed one may be record
+ * text a visitor typed, so it is named by the envelope's `source` and never by
+ * its value, as {@link screenComputedAddresses} names it.
+ *
+ * ⛔ Never re-routed: the node does not add the `email` channel its author did
+ * not declare, and never writes the row. The lookup is the resolver's own
+ * (`sys_user` by `email`, the id projected), as in
+ * {@link screenComputedAddresses}; no data engine, or a lookup that fails,
+ * fails the node, because an address that could not be checked would reach
+ * nobody either.
+ */
+async function refuseUndeliverableAddresses(
+    data: IDataEngine | undefined,
+    nodeId: string,
+    channels: readonly string[],
+    addressed: readonly AddressedRecipient[],
+): Promise<string | undefined> {
+    if (addressed.length === 0) return undefined;
+    const where = channels.length === 0
+        ? 'names no `channels`, so it delivers to the inbox, the default'
+        : `names \`channels\` ${channels.map((c) => `\`${c}\``).join(', ')} and not \`email\``;
+    const fixFor = (computed: boolean): string => 'To mail the address as written, add `email` to the node\'s '
+        + '`channels`. To reach a user, name the user: a user id, an audience selector such as `role:NAME`, or the '
+        + 'address that user holds, written bare.'
+        + (computed
+            ? ' A value expression names a user the same way; to mail a person who is not a user, give that address '
+                + 'its own `notify` node with `recipients: { emailField: \'FIELD\' }` and `channels: \'email\'`.'
+            : '');
+    const nameOf = (entry: AddressedRecipient): string => (entry.computed
+        ? `${entry.computed.what} an email address — source: \`${entry.computed.source}\``
+        : `\`${entry.recipient}\``);
+    const undeliverable: string[] = [];
+    for (const entry of addressed) {
+        if (namesAddressAsUserId(entry)) {
+            undeliverable.push(`${nameOf(entry)} (\`user:\` takes a user id, not an email address)`);
+            continue;
+        }
+        const which = entry.computed ? nameOf(entry) : `its recipient ${nameOf(entry)} is an email address`;
+        const lead = `notify: node \`${nodeId}\` ${where}, and ${which}. `
+            + 'Only the email channel sends to an address; the others deliver to a user';
+        if (!data) {
+            return `${lead}, and there is no data engine to look up whether a user holds it, so nothing was sent. `
+                + fixFor(entry.computed !== undefined);
+        }
+        let holder: string | undefined;
+        try {
+            holder = await holderOf(data, entry.address);
+        } catch (err) {
+            return `${lead}, and looking up the user who holds it failed (${(err as Error).message}), so nothing was `
+                + `sent. ${fixFor(entry.computed !== undefined)}`;
+        }
+        if (holder === undefined) undeliverable.push(`${nameOf(entry)} (no user holds that address)`);
+    }
+    if (undeliverable.length === 0) return undefined;
+    const one = undeliverable.length === 1;
+    return `notify: node \`${nodeId}\` ${where}, and has ${one ? 'a recipient' : 'recipients'} no user receives: `
+        + `${undeliverable.join(', ')}. Only the email channel sends to an address; the others deliver to a user, `
+        + `so nobody would receive ${one ? 'it' : 'them'}, and nothing was sent. `
+        + fixFor(addressed.some((entry) => entry.computed !== undefined));
+}
+
+/**
+ * [#25990] On a node whose `channels` name `email` AND another channel, the
+ * recipients written out as an address that only the email channel can
+ * deliver: each one the email channel sends to as written (ruling B on
+ * #25647), and no other channel is handed it.
+ *
+ * The other channels deliver to a user, so an address reaches them only
+ * through the user who holds it, by the test {@link refuseUndeliverableAddresses}
+ * makes: `user:a@b.c` never does (the resolver hands the remainder on as the
+ * id), and a bare address does when a user holds it. Before, an address that
+ * did not went on to every channel as it stood: the email channel mailed it,
+ * and the inbox wrote a row whose `user_id` was the address, which no inbox
+ * reads. An address whose holder could not be looked up (no data engine, a
+ * lookup that fails) goes to the email channel alone too: the email channel
+ * mails it as written either way, and an inbox row keyed by it would reach
+ * nobody, so only the mail is sure to reach anyone.
+ *
+ * A computed address is not here: {@link screenComputedAddresses} already
+ * turned one a user holds into that user's id, and failed the node on any
+ * other. The skip lives in the node, not in a channel, because the node is
+ * the one place that knows a recipient was written out as an address; every
+ * channel keeps reading a recipient as it does today.
+ */
+async function mailOnlyAddresses(
+    data: IDataEngine | undefined,
+    addressed: readonly AddressedRecipient[],
+): Promise<ReadonlySet<string>> {
+    const mailOnly = new Set<string>();
+    for (const entry of addressed) {
+        if (entry.computed !== undefined) continue;
+        if (namesAddressAsUserId(entry) || !data) {
+            mailOnly.add(entry.recipient);
+            continue;
+        }
+        let holder: string | undefined;
+        try {
+            holder = await holderOf(data, entry.address);
+        } catch {
+            holder = undefined;
+        }
+        if (holder === undefined) mailOnly.add(entry.recipient);
+    }
+    return mailOnly;
 }
 
 /**
@@ -635,7 +797,7 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                     // Studio form keeps its recipients picker, and the marker
                     // rides `NotifyConfigSchema` (`LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`).
                     recipients: {
-                        description: 'Who the notification goes to: a user id or an audience selector (such as team:ID) as a string, or a list of them — each entry a string or a CEL value envelope { dialect: \'cel\', source } evaluated per run; an entry that evaluates to a list adds each of its recipients, and with channels: email an address it evaluates to must be a user\'s. A single-brace {token} is refused. To mail a person who is not a user, use { emailField: \'FIELD\' } as the whole value, naming an email field of the record that triggered the flow, with channels: email; at most 5 such emails go to one address per hour.',
+                        description: 'Who the notification goes to: a user id or an audience selector (such as team:ID) as a string, or a list of them — each entry a string or a CEL value envelope { dialect: \'cel\', source } evaluated per run; an entry that evaluates to a list adds each of its recipients, and with channels: email an address it evaluates to must be a user\'s. An email address written out is sent as written: with channels: email to the address itself, and otherwise to the user who holds it, the node failing when no user does — as it does for an address an entry evaluates to. When channels name email and another channel, an address no user holds is mailed alone: the other channels deliver to a user, so they are not handed it. A single-brace {token} is refused. To mail a person who is not a user, use { emailField: \'FIELD\' } as the whole value, naming an email field of the record that triggered the flow, with channels: email; at most 5 such emails go to one address per hour.',
                     },
                     // The form edits the bare-string spelling of these two
                     // template slots; the contract (`NotifyConfigSchema`) also
@@ -741,9 +903,14 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
             // value: the address in that field of the trigger record. [#25647]
             // Any other recipient an envelope computed that reads as an address
             // must be a user's when the node mails (`screenComputedAddresses`).
+            // [#25758] Any address, written out or computed, must reach a
+            // user when it does not (`refuseUndeliverableAddresses`). [#25990]
+            // When it mails AND names another channel, a written-out address
+            // no user holds goes to the email channel alone (`mailOnlyAddresses`).
             const emailField = isEmailFieldRecipient(cfg.recipients) ? cfg.recipients.emailField : undefined;
             let recipients: string[];
             let emptyRecipients: string[] = [];
+            let mailOnly: ReadonlySet<string> = new Set();
             if (emailField !== undefined) {
                 const address = await resolveEmailFieldAddress(getData(), context, emailField);
                 if (!address.ok) return { success: false, error: address.error };
@@ -756,6 +923,17 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                     ? await screenComputedAddresses(getData(), audience.value.recipients, audience.value.computed)
                     : { ok: true as const, value: audience.value.recipients };
                 if (!screened.ok) return { success: false, error: screened.error };
+                // [#25758] A node that does not mail delivers only to users,
+                // so an address among its recipients must be one a user holds.
+                if (!mails) {
+                    const refused = await refuseUndeliverableAddresses(
+                        getData(), node.id, toStringList(cfg.channels), audience.value.addressed,
+                    );
+                    if (refused !== undefined) return { success: false, error: refused };
+                }
+                if (mails && toStringList(cfg.channels).some((channel) => channel !== 'email')) {
+                    mailOnly = await mailOnlyAddresses(getData(), audience.value.addressed);
+                }
                 recipients = screened.value;
                 emptyRecipients = audience.value.empty;
             }
@@ -926,9 +1104,8 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                 // audience + payload; it writes the L2 event and materializes
                 // per channel. title/body/url ride in the payload (templates in
                 // a later phase fall back to these).
-                const result = await messaging.emit({
+                const notification = {
                     topic: topic ?? 'notify',
-                    audience: recipients,
                     // Content rides in the payload per path (#9205): the inline
                     // strings, or the template reference + its render context —
                     // which the outbox snapshots onto each delivery row, so the
@@ -956,21 +1133,38 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                     // `EmitInput.organizationId` is optional, and the engine
                     // decides the owner of an emit that carries none (above).
                     ...(organizationId ? { organizationId } : {}),
-                    channels: channels.length ? channels : undefined,
-                });
-                const delivered = Number(result.delivered) || 0;
-                const enqueued = Number(result.enqueued) || 0;
+                };
+                // [#25990] A written-out address only the email channel can
+                // deliver is emitted apart, on that channel alone, so no other
+                // channel is handed it (`mailOnlyAddresses`). Every other
+                // recipient is emitted as before, on the node's `channels`; its
+                // notification is the one `notificationId` names. The counts
+                // add up both emits.
+                const everyChannel = recipients.filter((recipient) => !mailOnly.has(recipient));
+                const mailedOnly = recipients.filter((recipient) => mailOnly.has(recipient));
+                const results: Array<Awaited<ReturnType<MessagingServiceSurface['emit']>>> = [];
+                if (everyChannel.length > 0) {
+                    results.push(await messaging.emit({
+                        ...notification, audience: everyChannel, channels: channels.length ? channels : undefined,
+                    }));
+                }
+                if (mailedOnly.length > 0) {
+                    results.push(await messaging.emit({ ...notification, audience: mailedOnly, channels: ['email'] }));
+                }
+                const delivered = results.reduce((sum, result) => sum + (Number(result.delivered) || 0), 0);
+                const enqueued = results.reduce((sum, result) => sum + (Number(result.enqueued) || 0), 0);
+                const failed = results.reduce((sum, result) => sum + (Number(result.failed) || 0), 0);
                 return {
                     success: true,
                     output: {
-                        notificationId: result.notificationId,
+                        notificationId: results[0]?.notificationId,
                         delivered,
                         // Surfaced so a flow author templating the outcome can
                         // tell "sent" from "handed to the outbox", and so the
                         // notification id above has a stated reason to be
                         // followed into `sys_notification_delivery`.
                         enqueued,
-                        failed: result.failed,
+                        failed,
                     },
                     // A notification IS the action for a nudge/alert sweep, so it
                     // counts toward `acted` (#4354) — otherwise the flow whose

@@ -334,10 +334,15 @@ export async function canWriteObject(
     //    [#21063] it IS the middleware's verdict (computeForbiddenFieldWrites);
     //    a second spelling of "which fields may this caller write" is the
     //    drift this whole method exists to avoid.
+    //    [#25866] This reader holds no stored row: an insert is judged on the
+    //    payload rows as the middleware judges them; an update applies each
+    //    row-conditioned entry as its lock (no `preImage`), so the answer here
+    //    is never wider than the gate's.
     if (data) {
-      const forbidden = this.computeForbiddenFieldWrites(
+      const forbidden = await this.computeForbiddenFieldWrites(
         objectName, data as Record<string, any> | Record<string, any>[],
         { fieldRequiredPermissions }, permissionSets, delegatorSets,
+        { operation, context },
       );
       if (forbidden.length > 0) return false;
     }

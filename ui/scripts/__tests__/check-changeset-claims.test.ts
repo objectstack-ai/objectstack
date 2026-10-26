@@ -35,11 +35,14 @@ import {
  * What this file pins, in the order the gate can fail:
  *
  *  1. **It can start on the pull request that needs it.** The falsifying change
- *     is an ordinary source change, so the gate lives in the workflow with NO
- *     path filter. That absence is the load-bearing property and is pinned here:
- *     adding a `paths:` filter to that workflow would blind this gate silently,
- *     which is the exact failure mode `changeset-guard.yml` can afford and this
- *     one cannot.
+ *     is an ordinary source change, so the gate lived in the workflow with NO
+ *     path filter, and that absence was pinned here. Retired with
+ *     objectstack#25712, with the delivery pins of section 1b and the comment
+ *     step's count pins in the corpus section: they read objectui's
+ *     `changeset-presence.yml`, which runs nowhere under the monorepo (GitHub
+ *     runs the root `.github/workflows/` alone). It is row 4 of the
+ *     objectstack#25697 workflow roster (→ sub-issue 4), and a port brings them
+ *     back against its root workflow, by path.
  *  2. **Both directions of the verdict**, against throwaway repositories rather
  *     than this one's history, so they stay decidable when the history moves. A
  *     report that fires, and a FIRING CONTROL — the same fixture with the named
@@ -61,24 +64,6 @@ import {
  */
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const GATE = 'scripts/check-changeset-claims.mjs';
-const WORKFLOW = '.github/workflows/changeset-presence.yml';
-
-/**
- * A workflow's YAML with whole-line comments removed.
- *
- * Required, not cosmetic: this workflow's header discusses its own trigger set
- * at length, so a scan that counted the prose would report filter entries the
- * file does not have. Same helper, same reason, as in the sibling changeset
- * gate tests.
- */
-function withoutComments(yaml: string): string {
-  return yaml
-    .split('\n')
-    .filter((line) => !/^\s*#/.test(line))
-    .join('\n');
-}
-
-const workflowYaml = withoutComments(fs.readFileSync(path.join(repoRoot, WORKFLOW), 'utf8'));
 
 // ── fixture repositories ─────────────────────────────────────────────────────
 
@@ -200,88 +185,27 @@ function lastCommitRange(fixture: Fixture): string[] {
 }
 
 // ── 1. the gate can start on the pull request that needs it ──────────────────
-
-describe('changeset-presence.yml — where this gate has to live', () => {
-  it('exists, and the workflow runs it', () => {
-    expect(fs.existsSync(path.join(repoRoot, GATE)), `${GATE} must exist for the workflow to run it`).toBe(true);
-    expect(workflowYaml).toMatch(new RegExp(`run:\\s*node\\s+${GATE.replace(/[.]/g, '\\.')}`));
-  });
-
-  it('gives the job the history its diff needs', () => {
-    // The gate compares this change against its MERGE BASE. checkout's default
-    // is a depth-1 clone where `git merge-base` has nothing to find, and an
-    // unresolvable base is exit 1 in the script rather than a skip — so getting
-    // this wrong is a red build, not a silent pass. Pinned so it stays that way.
-    expect(workflowYaml).toMatch(/fetch-depth:\s*0/);
-  });
-
-  it('carries NO paths filter — the property this gate depends on', () => {
-    // `changeset-guard.yml` can afford a `paths: ['.changeset/**']` filter
-    // because a change that modifies a changeset touches `.changeset/**` BY
-    // DEFINITION. This gate's subject is the opposite: an ordinary source change
-    // that falsifies somebody else's pending claim, which is under no obligation
-    // to touch `.changeset/**` at all. A path filter added here would blind the
-    // gate with no red anywhere, so its ABSENCE is pinned.
-    expect(workflowYaml).not.toMatch(/^\s*paths(-ignore)?:/m);
-  });
-});
-
+//
+// Retired with objectstack#25712: `exists, and the workflow runs it`, `gives the
+// job the history its diff needs` and `carries NO paths filter — the property
+// this gate depends on`.
+//
 // ── 1b. the finding is DELIVERED, not archived (objectui#9140) ───────────────
-
-describe('delivery — the ruling that the finding reaches the pull request', () => {
-  // objectui#9140 measured the "REQUEST TO READ" at zero answers out of four
-  // live instances, because it was addressed to a job log nobody opens on a
-  // green check. The director's ruling (maintainer 「同意」) moves WHERE the
-  // finding is read and ⛔ nothing else: exit 0, not a required context,
-  // nothing blocks.
-  it('hands this run\'s finding set to the renderer instead of re-measuring it', () => {
-    // One measurement, two consumers. A report that re-derives its own subject
-    // can disagree with the log it claims to report, and the disagreement is
-    // invisible to both sides.
-    expect(workflowYaml).toMatch(/node\s+scripts\/check-changeset-claims\.mjs\s+--json\s+claims\.json/);
-    expect(workflowYaml).toMatch(
-      /node\s+scripts\/render-changeset-claims-comment\.mjs\s+--from\s+claims\.json/,
-    );
-  });
-
-  it('posts through the channel the Console Performance Budget report uses', () => {
-    expect(workflowYaml).toMatch(/uses:\s*actions\/github-script@/);
-    const budget = withoutComments(
-      fs.readFileSync(path.join(repoRoot, '.github/workflows/performance-budget.yml'), 'utf8'),
-    );
-    expect(budget).toMatch(/uses:\s*actions\/github-script@/);
-  });
-
-  it('holds `pull-requests: write` on the JOB, leaving the declaration gate with a read-only token', () => {
-    // A job-level block REPLACES the workflow-level one, so `contents: read`
-    // has to be named again or checkout loses it. The workflow-level block must
-    // stay read-only: the declaration gate above needs nothing but a checkout,
-    // and a grant it does not use is a grant nobody is auditing.
-    expect(workflowYaml).toMatch(/permissions:\n\s+contents: read\n\s+pull-requests: write/);
-    expect(workflowYaml).toMatch(/^permissions:\n\s+contents: read\n/m);
-    expect(workflowYaml).not.toMatch(/^permissions:\n\s+contents: read\n\s+pull-requests/m);
-  });
-
-  it('⛔ never subscribes `pull_request_target`, which would run this on a fork\'s branch with a write token', () => {
-    expect(workflowYaml).not.toMatch(/pull_request_target/);
-  });
-
-  it('comments only on a pull request', () => {
-    // A `merge_group` build has no pull request to comment on, and the gate
-    // still has to REPORT there — so the delivery steps are conditioned and the
-    // measuring step is not.
-    const conditions = workflowYaml.match(/if: \$\{\{ github\.event_name == 'pull_request' \}\}/g) ?? [];
-    expect(conditions.length).toBe(2);
-  });
-
-  it('cannot paint this job red by failing to post', () => {
-    // A fork's pull request gets a read-only token and the API call fails for a
-    // reason that says nothing about changesets. Report-only means the gate
-    // declines to fail on its FINDINGS; it must not start failing on its
-    // PLUMBING either.
-    expect(workflowYaml).toMatch(/continue-on-error: true/);
-  });
-});
+//
+// Retired with objectstack#25712: the six delivery cases (the run hands its
+// `--json` finding set to `render-changeset-claims-comment.mjs`, posts through
+// `actions/github-script` as `performance-budget.yml` does, holds
+// `pull-requests: write` on the job alone, never subscribes
+// `pull_request_target`, comments only on a pull request, and cannot paint the
+// job red by failing to post). The ruling they pinned stands: the finding
+// reaches the pull request, exit 0, not a required context, nothing blocks.
+//
+// Every one of them read objectui's `changeset-presence.yml` (one also read its
+// `performance-budget.yml`, roster row 22). Both run nowhere under the
+// monorepo: GitHub runs the root `.github/workflows/` alone, and no root
+// workflow runs this gate. `changeset-presence.yml` is row 4 of the
+// objectstack#25697 workflow roster (→ sub-issue 4); a port brings these pins
+// back against its root workflow, by path.
 
 // ── 2. both directions of the verdict ────────────────────────────────────────
 
@@ -953,35 +877,16 @@ describe('the corpus is the prose this change publishes about itself', () => {
     expect(gate).toContain('check-new-cross-file-line-citations.mjs');
   });
 
-  it('delivers a born-false-only finding instead of leaving it in the job log', () => {
-    // objectui#9140 measured the job-log channel at zero answers out of four.
-    // The comment step decides whether to post from the finding COUNT, so a run
-    // whose only finding is born-false has to be counted there too.
-    expect(workflowYaml).toContain('(measured.bornFalse ?? []).length');
-  });
-
-  it('⭐ delivers a self-contradiction-only finding too (objectui#9841)', () => {
-    // ⚠️ ASSERTED AS ITS OWN TERM, ⛔ never as the whole sum. A pin that matched
-    // the sum verbatim would redden on a harmless rewording and — worse — would
-    // be repaired by pasting whatever the file now says, which is how a dropped
-    // term gets blessed. This one goes red for exactly one reason: this reading
-    // stopped being counted, and its findings stopped creating the comment.
-    expect(workflowYaml).toContain('(measured.selfContradiction ?? []).length');
-  });
-
-  it('counts EVERY reading the gate carries — one term per reading, none left out', () => {
-    // The standing obligation, stated where the next reading's author will read
-    // it: a reading that is measured, rendered and then not counted here is
-    // delivered to a job log nobody opens. That is objectui#9842's shape, and it
-    // is the reason this surface was extended rather than left for later.
-    for (const term of [
-      'measured.findings.length',
-      '(measured.bornFalse ?? []).length',
-      '(measured.selfContradiction ?? []).length',
-    ]) {
-      expect(workflowYaml).toContain(term);
-    }
-  });
+  // Retired with objectstack#25712: `delivers a born-false-only finding instead
+  // of leaving it in the job log`, `⭐ delivers a self-contradiction-only finding
+  // too (objectui#9841)` and `counts EVERY reading the gate carries — one term
+  // per reading, none left out`. Each read the comment step's finding count in
+  // objectui's `changeset-presence.yml` (`measured.findings.length`,
+  // `(measured.bornFalse ?? []).length`,
+  // `(measured.selfContradiction ?? []).length`), which runs nowhere under the
+  // monorepo. The obligation is the port's: the root workflow that delivers
+  // this gate's findings counts every reading it carries, and these pins come
+  // back against it, by path (roster row 4, → sub-issue 4).
 });
 
 describe('the boundary control the first ablation of this change exposed', () => {

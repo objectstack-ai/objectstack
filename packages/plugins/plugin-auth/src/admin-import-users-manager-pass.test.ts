@@ -163,6 +163,7 @@ function makeHarness(opts: {
 
   const deps: IdentityImportDeps = {
     getAuthApi: async () => ({ createUser, requestPasswordReset }),
+    getAuthContext: async () => ({ password: { config: { minPasswordLength: 8, maxPasswordLength: 128 } } }),
     getDataEngine: () => ({ find, update, insert }),
     phoneNumberEnabled: () => opts.phoneEnabled ?? false,
     emailServiceAvailable: () => opts.emailAvailable ?? true,

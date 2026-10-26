@@ -27,7 +27,6 @@ import { stripUnauthorableProperties } from './unauthorable-nodes.js';
 // admits anything. See the module header for the predicate and its controls.
 import { markErasedAuthoringInput } from './erased-authoring-mark.js';
 import {
-    CLOSURE_CONTEXT_KEY_BY_TYPE,
     SDUI_MANIFEST_SERVICE,
     isUsableSduiManifest,
     stampHtmlPageRequires,
@@ -59,9 +58,8 @@ import {
     unboundItemDraftAddress,
     type SysMetadataEngine,
 } from './sys-metadata-repository.js';
-import { isOriginGatedType, managedItemSealedSentence, packagedBaseRegimeRow, packagedBaseRegimeSentence } from './packaged-base-regime.js';
+import { managedItemSealedSentence, packagedBaseRegimeRow, packagedBaseRegimeSentence } from './packaged-base-regime.js';
 import {
-    resolveArtifactLockLayer,
     resolveItemLock,
     resolveItemLockLazily,
     resolveOverlayLockLayer,
@@ -396,6 +394,12 @@ import {
 import { applyPublishBackfill, planPublishBackfill } from './protocol-publish-backfill.js';
 // [#25467 cut 12] The `_drafts` list read and the one-draft discard.
 import { discardDraftInItsScope, listDrafts } from './protocol-drafts.js';
+// [#25467 cut 13] The package door's save refusal and the origin-gated removal verdict.
+import { originGatedRemovalRefusal, refusePackagedBaseOverride } from './protocol-packaged-base-refusal.js';
+// [#25467 cut 14] The publish batch's seed apply and its own pending declarations.
+import { applySeedBodies, collectBatchPendingDeclarations } from './protocol-publish-batch.js';
+// [#25467 cut 15] The artifact registry's lookups: an item's artifact, the packages that ship a type, and the lock's artifact layer.
+import { artifactLockLayerAt, lookupArtifactItem, shippedArtifactsOf, shippingPackagesOf } from './protocol-artifact-lookup.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -2729,7 +2733,7 @@ function commitPlanKey(item: { type: string; name: string; member?: string }): s
  * member was named, so a call addressing the canonical member — and every call
  * for a type with no members — passes exactly the options it always did.
  */
-function memberOption(member: string | undefined): { member?: string } {
+export function memberOption(member: string | undefined): { member?: string } {
     return member !== undefined ? { member } : {};
 }
 
@@ -3631,7 +3635,7 @@ function carryCatalogedErrorCode(target: Error, source: unknown): void {
  * error on `cause`, which `handleRouteError` / `logWithheldServerFault` print
  * whole — the same posture {@link metadataStoreUnavailableError} already takes.
  */
-function declaresClientRefusal(err: unknown): boolean {
+export function declaresClientRefusal(err: unknown): boolean {
     const status = (err as { status?: unknown } | null | undefined)?.status;
     return typeof status === 'number' && status >= 400 && status < 500;
 }
@@ -16370,78 +16374,12 @@ export class ObjectStackProtocolImplementation implements
     private refusePackagedBaseOverride(
         request: { type: string; name: string; packageId?: string | null },
     ): void {
-        if (this.isSealedManagedItem(request.type, request.name)) {
-            // [#8184] THE PACKAGE DOOR — the SECOND refusal point for one
-            // condition, and the reason this card exists.
-            //
-            // `SysMetadataRepository.assertAllowed` reads the base the
-            // caller NAMED and answers `ITEM_LOCKED` (`lockSource:
-            // 'package'`) when it is read-only (#7682, then #8146's
-            // hatch ruling). That door is topology-INDEPENDENT — and it
-            // was unreachable here, because this branch throws first on
-            // every kernel with an `environmentId`. So one request
-            // answered `ITEM_LOCKED` on a host-config / CLI-assembled
-            // kernel and the undiscriminated `NOT_OVERRIDABLE` on a
-            // project/cloud per-env one: the refusal VOCABULARY keyed off
-            // a row-scoping key, which is the #5086 / #6710 finding
-            // (see the block comment above) arriving on the error codes.
-            // A client that learns to handle `ITEM_LOCKED` on one
-            // deployment never saw it on the other.
-            //
-            // ⚠️ MIRRORED, NOT RE-INVENTED. Same predicate
-            // ({@link isWritablePackage}, the ADR-0070 rule in one
-            // place), same emitter — `readOnlyBaseOverrideError` is
-            // called, not copied — so the code, the status, the
-            // `lockSource`, the `packageId` and the sentence cannot drift
-            // between the two doors. Two independently-authored refusals
-            // for one condition is how `NOT_OVERRIDABLE`-everywhere
-            // started.
-            //
-            // THE LIMB ORDERING IS THE RULE, and it is the same ordering
-            // the repository states: BELOW every registry limb, and the
-            // hatch is not a limb at all.
-            //   • Below the registry limb — this whole branch is guarded
-            //     by {@link isSealedManagedItem}, whose type half is the
-            //     registry's `allowEnvironmentOverlay` alone, so a regime-O type
-            //     never reaches the door. That is ADR-0005: an overlay of
-            //     a code-shipped item ALWAYS names the read-only package
-            //     it customizes, and a door one limb higher would close
-            //     the overlay model outright. Pinned.
-            //   • [ADR-0131 D6] No hatch limb. `OS_METADATA_WRITABLE` used
-            //     to take an artifact-backed write past this branch, down
-            //     to the repository door, where a package-less write landed
-            //     an overlay of the managed item (#8146 had narrowed that to
-            //     "never a NAMED read-only base"). Managed content is sealed
-            //     now — the broad reading that comment reserved for a
-            //     maintainer decision is the decision ADR-0131 D6 records —
-            //     so the hatch is not consulted here, and the repository
-            //     refuses the same write without it.
-            //
-            // The named-base limb below keeps its own code: a write that
-            // NAMES the read-only base answers `ITEM_LOCKED`, and a
-            // package-less one `NOT_OVERRIDABLE`, with or without the hatch.
-            //
-            // `runtime-only` needs no limb here: this branch is guarded by
-            // `artifactBacked`, so the intent is always
-            // `override-artifact`. The create side of the door is the
-            // ADR-0070 D1 gate further down this method, which is already
-            // topology-independent and already answers
-            // `WRITABLE_PACKAGE_REQUIRED` / 422 on every kernel.
-            const namedBase = typeof request.packageId === 'string' && request.packageId.length > 0;
-            if (namedBase && !this.isWritablePackage(request.packageId)) {
-                throw SysMetadataRepository.readOnlyBaseOverrideError(
-                    request.type, request.packageId as string,
-                );
-            }
-            // [#20819, ADR-0131 D6] The SENTENCE is chosen per ADR-0126 regime,
-            // and names the managed package for every other type; the code and
-            // the status are unchanged. [#23577] Every write reads it, whatever
-            // the write meant to do: the door cannot tell a create from an edit.
-            const err = new Error(managedItemSealedSentence(request.type, request.name, 'save'));
-            (err as any).code = 'NOT_OVERRIDABLE';
-            (err as any).status = 403;
-            throw err;
-        }
+        // [#25467 cut 13] The body moved to `protocol-packaged-base-refusal.ts` (see `PackagedBaseRefusalHost`).
+        const host: ThisParameterType<typeof refusePackagedBaseOverride> = {
+            isSealedManagedItem: (...a) => this.isSealedManagedItem(...a),
+            isWritablePackage: (...a) => this.isWritablePackage(...a),
+        };
+        return refusePackagedBaseOverride.call(host, request);
     }
 
     /**
@@ -16532,8 +16470,11 @@ export class ObjectStackProtocolImplementation implements
      * found a stored row for the delete to remove.
      */
     private originGatedRemovalRefusal(type: string, name: string): Error | null {
-        if (!isOriginGatedType(type)) return null;
-        return this.packagedBaseRefusal({ type, name, operation: 'delete' });
+        // [#25467 cut 13] The body moved to `protocol-packaged-base-refusal.ts` (see `PackagedBaseRefusalHost`).
+        const host: ThisParameterType<typeof originGatedRemovalRefusal> = {
+            packagedBaseRefusal: (...a) => this.packagedBaseRefusal(...a),
+        };
+        return originGatedRemovalRefusal.call(host, type, name);
     }
 
     // ───────────────────────────────────────────────────────────────────
@@ -16551,28 +16492,12 @@ export class ObjectStackProtocolImplementation implements
      * ignores it, so a caller that needs the member checks the answer.
      */
     private lookupArtifactItem(type: string, name: string, currentPackageId?: string, member?: string): unknown {
-        const registry = (this.engine as any)?.registry;
-        if (!registry) return undefined;
-        const singular = PLURAL_TO_SINGULAR[type] ?? type;
-        // Prefer the artifact-only lookup: it scans composite
-        // (`<packageId>:<name>`) entries first, so an overlay row hydrated
-        // into the plain key (getMetaItems / loadMetaFromDb) can never
-        // shadow the packaged artifact's protection envelope (ADR-0010
-        // §3.3 — pre-fix, that shadow made a `_lock: full` app read back
-        // as unlocked after PUT+GET until restart). `currentPackageId`
-        // (ADR-0048) makes that scan package-scoped (prefer-local).
-        if (typeof registry.getArtifactItem === 'function') {
-            return registry.getArtifactItem(singular, name, currentPackageId, member)
-                ?? registry.getArtifactItem(type, name, currentPackageId, member);
-        }
-        // Partial registry mocks in tests — fall back to getItem and apply
-        // the same package-provenance filter inline.
-        if (typeof registry.getItem !== 'function') return undefined;
-        const item = registry.getItem(singular, name, currentPackageId) ?? registry.getItem(type, name, currentPackageId);
-        if (!item || !(item as any)._packageId || (item as any)._packageId === 'sys_metadata') {
-            return undefined;
-        }
-        return item;
+        // [#25467 cut 15] The body moved to `protocol-artifact-lookup.ts` (see `ArtifactLookupHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof lookupArtifactItem> = {
+            get engine() { return readEngine(); },
+        };
+        return lookupArtifactItem.call(host, type, name, currentPackageId, member);
     }
 
     /**
@@ -16591,7 +16516,11 @@ export class ObjectStackProtocolImplementation implements
      * caller that asks about many items of one type.
      */
     private artifactLockLayerAt(address: ItemAddress, shipping?: ShippingPackages): readonly unknown[] {
-        return resolveArtifactLockLayer(address, () => this.shippedArtifactsOf(address.type, address.name, shipping));
+        // [#25467 cut 15] The body moved to `protocol-artifact-lookup.ts` (see `ArtifactLookupHost`).
+        const host: ThisParameterType<typeof artifactLockLayerAt> = {
+            shippedArtifactsOf: (...a) => this.shippedArtifactsOf(...a),
+        };
+        return artifactLockLayerAt.call(host, address, shipping);
     }
 
     /**
@@ -16616,18 +16545,12 @@ export class ObjectStackProtocolImplementation implements
      * owner is the whole set.
      */
     private shippedArtifactsOf(type: string, name: string, shipping?: ShippingPackages): unknown[] {
-        const shipped: unknown[] = [];
-        const add = (artifact: unknown): void => {
-            if (artifact !== undefined && artifact !== null && !shipped.includes(artifact)) shipped.push(artifact);
+        // [#25467 cut 15] The body moved to `protocol-artifact-lookup.ts` (see `ArtifactLookupHost`).
+        const host: ThisParameterType<typeof shippedArtifactsOf> = {
+            lookupArtifactItem: (...a) => this.lookupArtifactItem(...a),
+            shippingPackagesOf: (...a) => this.shippingPackagesOf(...a),
         };
-        add(this.lookupArtifactItem(type, name));
-        if ((PLURAL_TO_SINGULAR[type] ?? type) === 'object') return shipped;
-        const packages = shipping ?? this.shippingPackagesOf(type);
-        for (const packageId of new Set([...(packages.byName.get(name) ?? []), ...packages.anyName])) {
-            const own = this.lookupArtifactItem(type, name, packageId) as { _packageId?: unknown } | undefined;
-            if (own?._packageId === packageId) add(own);
-        }
-        return shipped;
+        return shippedArtifactsOf.call(host, type, name, shipping);
     }
 
     /**
@@ -16652,43 +16575,12 @@ export class ObjectStackProtocolImplementation implements
      * #21803, which asked that lookup alone.
      */
     private shippingPackagesOf(type: string): ShippingPackages {
-        const registry = (this.engine as any)?.registry;
-        const byName = new Map<string, Set<string>>();
-        const anyName = new Set<string>();
-        if (!registry) return { byName, anyName };
-        const isPackage = (id: unknown): id is string => typeof id === 'string' && id !== '' && id !== 'sys_metadata';
-        const listing = (read: () => unknown): readonly unknown[] => {
-            try {
-                const listed = read();
-                return Array.isArray(listed) ? listed : [];
-            } catch {
-                return []; // See this method's header: the package-less lookup still answers.
-            }
+        // [#25467 cut 15] The body moved to `protocol-artifact-lookup.ts` (see `ArtifactLookupHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof shippingPackagesOf> = {
+            get engine() { return readEngine(); },
         };
-        if (typeof registry.listItems === 'function') {
-            for (const spelling of new Set([PLURAL_TO_SINGULAR[type] ?? type, type])) {
-                for (const entry of listing(() => registry.listItems(spelling))) {
-                    const { _packageId: id, name } = (entry ?? {}) as { _packageId?: unknown; name?: unknown };
-                    if (!isPackage(id)) continue;
-                    if (typeof name !== 'string') {
-                        anyName.add(id);
-                        continue;
-                    }
-                    const ids = byName.get(name);
-                    if (ids) ids.add(id);
-                    else byName.set(name, new Set([id]));
-                }
-            }
-        }
-        if (typeof registry.getAllPackages === 'function') {
-            const canTell = typeof registry.isPackageDisabled === 'function';
-            for (const record of listing(() => registry.getAllPackages())) {
-                const r = record as { manifest?: { id?: unknown }; id?: unknown } | null | undefined;
-                const id = r?.manifest?.id ?? r?.id;
-                if (isPackage(id) && (!canTell || registry.isPackageDisabled(id))) anyName.add(id);
-            }
-        }
-        return { byName, anyName };
+        return shippingPackagesOf.call(host, type);
     }
 
     /**
@@ -23394,83 +23286,13 @@ export class ObjectStackProtocolImplementation implements
         success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[];
         issues?: Array<{ path: string; message: string; code?: string | undefined }>;
     }> {
-        try {
-            const seeds = bodies.filter(
-                (b: any) => b && typeof b.object === 'string' && Array.isArray(b.records),
-            );
-            if (seeds.length === 0) {
-                return { success: false, inserted: 0, updated: 0, error: 'seed apply: no readable seed bodies' };
-            }
-            const { SeedLoaderService } = await import('./seed-loader.js');
-            const { SeedLoaderRequestSchema } = await import('@objectstack/spec/data');
-            // The loader only needs `getObject` from IMetadataService (dependency
-            // graph + field introspection); satisfy it from the protocol's own
-            // metadata reads so no kernel service lookup is required.
-            const metadataAdapter = {
-                getObject: async (name: string) => {
-                    const wrapper: any = await (this as any).getMetaItem({ type: 'object', name });
-                    return wrapper?.item ?? wrapper ?? null;
-                },
-            };
-            const loader = new SeedLoaderService(
-                this.engine as any,
-                metadataAdapter as any,
-                console as any,
-            );
-            // [#8333 · P9] `safeParse`, not `parse` — see {@link
-            // seedRequestValidationError}. A malformed seed body used to reach
-            // the catch below as a raw `ZodError`, which declares no `status`
-            // and would therefore have been withheld along with the driver text
-            // this card is about. Declaring the refusal at its own producer is
-            // what keeps the author's feedback AND the positive list intact.
-            const parsedRequest = SeedLoaderRequestSchema.safeParse({
-                seeds,
-                config: {
-                    defaultMode: 'upsert',
-                    multiPass: true,
-                    // [ADR-0131 D6, §12] No caller organization: a seed dataset
-                    // names the organization it populates itself, and the
-                    // loader derives the owner only under `single` (D9).
-                },
-            });
-            if (!parsedRequest.success) throw seedRequestValidationError(parsedRequest.error.issues);
-            const r = await loader.load(parsedRequest.data);
-            return {
-                success: r.success,
-                inserted: r.summary.totalInserted,
-                updated: r.summary.totalUpdated,
-                ...(r.errors?.length ? { errors: r.errors } : {}),
-            };
-        } catch (e: any) {
-            // [#8333 · P9] `seedApplied.error` rides on a **200** publish
-            // response, so this is a data-path disclosure no HTTP boundary can
-            // reach. Measured on `origin/main`: a driver failure under the
-            // loader's dependency-graph read (`getMetaItem` → `sys_metadata`)
-            // escaped the loader and arrived here, putting `SQLITE_ERROR: no
-            // such table: sys_metadata` on the field.
-            //
-            // The other population this catch receives — the seed bodies' own
-            // schema rejection — now DECLARES itself 422 at the parse above, so
-            // it is quoted in full and the author still learns which seed and
-            // which key. That declaration is the whole reason this site could
-            // be converted rather than escalated.
-            console.warn(`[protocol.applySeedBodies] seed apply failed: ${e?.message ?? e}`);
-            return {
-                success: false, inserted: 0, updated: 0,
-                error: clientFacingFailureText(e, 'seed apply failed'),
-                // [#10524] A DECLARED refusal's structured findings ride the
-                // receipt beside the headline `error` — the message is a
-                // one-sentence headline now, so this is where the per-key
-                // prose reaches the author. Guarded by the same declaration
-                // test as the text above: only the declared 422
-                // (`seedRequestValidationError`) attaches `issues`; no driver
-                // error carries them (the #8441 measurement), so nothing
-                // undeclared is routed around the withhold.
-                ...(declaresClientRefusal(e) && Array.isArray(e?.issues)
-                    ? { issues: e.issues }
-                    : {}),
-            };
-        }
+        // [#25467 cut 14] The body moved to `protocol-publish-batch.ts` (see `PublishBatchHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof applySeedBodies> = {
+            get engine() { return readEngine(); },
+            getMetaItem: (...a) => this.getMetaItem(...a),
+        };
+        return applySeedBodies.call(host, bodies);
     }
 
     /**
@@ -23587,75 +23409,12 @@ export class ObjectStackProtocolImplementation implements
     private async collectBatchPendingDeclarations(
         drafts: ReadonlyArray<{ type: string; name: string; member?: string }>,
     ): Promise<RuntimePendingDeclarations | undefined> {
-        // [#13216] Typed as a mapped type over `RuntimePendingDeclarations`
-        // with `-?`, not as a hand-listed literal. The literal it replaces was
-        // the third place the collection set is written down, and the only one
-        // that could fall behind SILENTLY: a key added to `RuntimeStackContext`
-        // and routed by `CLOSURE_CONTEXT_KEY_BY_TYPE` would simply never be
-        // accumulated here, so a package publishing a dataset beside the
-        // dashboard that binds it would keep being refused for the sibling in
-        // its own batch — the `shyx_customer_ds` shape #10377 was filed for.
-        // `-?` makes every key REQUIRED, so the next widening is a compile error
-        // at this line instead — and [#17063]'s NARROWING was one too, which is
-        // how `pages` left this literal in the same edit it left
-        // `RuntimeStackContext`.
-        const pending: { [K in keyof RuntimePendingDeclarations]-?: unknown[] } = {
-            objects: [], permissions: [], books: [], datasets: [],
+        // [#25467 cut 14] The body moved to `protocol-publish-batch.ts` (see `PublishBatchHost`).
+        const host: ThisParameterType<typeof collectBatchPendingDeclarations> = {
+            getOverlayRepo: (...a) => this.getOverlayRepo(...a),
+            warnClosureReadUnavailable: (...a) => this.warnClosureReadUnavailable(...a),
         };
-        let any = false;
-        for (const d of drafts) {
-            // The canonical fold, same boundary the promote applies: a stored
-            // manifest-plural spelling must route to the same collection its
-            // singular does, or one row's shape would decide whether the
-            // package is judged against itself.
-            const singular = canonicalMetaType(d.type);
-            const key = (CLOSURE_CONTEXT_KEY_BY_TYPE as Record<string, keyof RuntimePendingDeclarations>)[singular];
-            if (!key) continue;
-            const repo = this.getOverlayRepo();
-            // ── The repository-shape guard, and why it degrades ALL-OR-NOTHING
-            //
-            // This method introduced the batch door's first dependency on
-            // `repo.get`. `SysMetadataRepository` has always had it, but the
-            // seam is overridable (`getOverlayRepo` is the injection point every
-            // publish double replaces), and the door's only previous body read —
-            // the `seed` capture — fires solely when a seed draft is in the
-            // batch, so a repository shape without `get` had never been asked
-            // for one. Measured: nine `publishPackageDrafts` cases in
-            // `@objectstack/objectql` drive a double declaring `listDrafts`
-            // alone, and this call turned every one of them into
-            // `TypeError: repo.get is not a function` — thrown BEFORE any
-            // promotion, so the batch door died on a shape it used to accept.
-            //
-            // The answer is a declared capability check, not a wider `try`: a
-            // missing member is a fact about the repository, knowable up front,
-            // and it must not read like a failed read. Degrading returns the
-            // closure to its pre-#10377 state (the live universe alone), which
-            // is the safe direction — the gate keeps judging and can only be
-            // MORE strict, never fail open.
-            //
-            // ⛔ All-or-nothing on purpose. Bailing out of the whole collection
-            // rather than skipping this one draft is what keeps the verdict from
-            // depending on WHICH org a draft happens to live in: a partial
-            // closure would resolve some of a package's own names and not
-            // others, which is a third behaviour nobody declared and nobody
-            // could reproduce.
-            if (typeof repo.get !== 'function') {
-                this.warnClosureReadUnavailable(singular, d.name);
-                return undefined;
-            }
-            const ref = {
-                type: singular, name: d.name, org: 'env',
-            } as unknown as Parameters<typeof repo.get>[0];
-            // [#22877] The draft's own bundle member, as listed.
-            const draft = await repo.get(ref, { state: 'draft', ...memberOption(d.member) });
-            if (draft?.body === undefined || draft.body === null) continue;
-            pending[key].push(draft.body);
-            any = true;
-        }
-        // Absent, not empty: `undefined` is what keeps a batch with no
-        // closure-relevant drafts byte-identical to the pre-#10377 gate call,
-        // rather than routing it through a merge that would be a no-op.
-        return any ? pending : undefined;
+        return collectBatchPendingDeclarations.call(host, drafts);
     }
 
     /**
