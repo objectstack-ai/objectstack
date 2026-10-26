@@ -33,9 +33,8 @@ const LAYERED = {
   resettable: true,
 };
 
-const referencesImpl = {
-  current: vi.fn(async () => [{ fromType: 'view', fromName: 'all_accounts', path: 'data.object' }]),
-};
+/** One reference, so the sheet draws its table. */
+const REFERENCE = { fromType: 'view', fromName: 'all_accounts', path: 'data.object' };
 
 const mockClient = {
   list: vi.fn(async () => []),
@@ -44,7 +43,7 @@ const mockClient = {
   getDraft: vi.fn(async () => null),
   layered: vi.fn(async () => LAYERED),
   reset: vi.fn(async () => ({ success: true })),
-  references: vi.fn(async (...args: unknown[]) => referencesImpl.current(...args)),
+  references: vi.fn(async () => [REFERENCE]),
 };
 
 vi.mock('./useMetadata', async (importOriginal) => {
