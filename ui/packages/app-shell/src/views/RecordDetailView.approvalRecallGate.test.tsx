@@ -91,6 +91,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
         data-testid="inline-probe"
         data-approval-is-submitter={String(inline?.approvalIsSubmitter)}
         data-approval-pending={String(inline?.approvalPending)}
+        data-approval-recall-drawn-by-host={String(inline?.approvalRecallDrawnByHost)}
       />
     );
   };
@@ -158,15 +159,37 @@ function stubApprovalsApi(row: Record<string, unknown> | null, listStatus = 200)
   vi.stubGlobal('fetch', approvalsFetch);
 }
 
+/**
+ * The request object's declared recall, so the page's decision bar can draw it
+ * (objectstack#25877). The gate is the shipped one in the reduced spelling the
+ * sibling approval suites use: the submitter arm OR the override arm.
+ */
+const SYS_APPROVAL_REQUEST_DEF = {
+  name: 'sys_approval_request',
+  label: 'Approval Request',
+  fields: { id: { type: 'text', label: 'Id' }, status: { type: 'text', label: 'Status' } },
+  actions: [
+    {
+      name: 'approval_recall', label: 'Recall', type: 'api', method: 'POST',
+      target: '/api/v1/approvals/requests/{id}/recall',
+      params: [{ name: 'comment', label: 'Comment', type: 'textarea', required: false }],
+      visible: '(record.status == "pending" || record.status == "returned") && record.viewer.is_submitter'
+        + ' || record.viewer.can_override',
+      locations: ['record_section'],
+    },
+  ],
+};
+
 const METADATA = {
-  objects: OBJECTS,
+  objects: [...OBJECTS, SYS_APPROVAL_REQUEST_DEF],
   pages: [],
   loading: false,
   error: null,
   refresh: async () => {},
   invalidate: () => {},
   ensureType: async () => [],
-  getItem: async () => null,
+  getItem: async (type: string, name: string) =>
+    (type === 'object' && name === SYS_APPROVAL_REQUEST_DEF.name ? SYS_APPROVAL_REQUEST_DEF : null),
   getItemsByType: () => [],
 } as any;
 
@@ -284,5 +307,46 @@ describe('record page → band: who may see recall (objectui#6464)', () => {
     // that keeps the band up with no approvals row behind it.
     const probe = await settledProbe(true);
     expect(probe.getAttribute('data-approval-is-submitter')).toBe('undefined');
+  });
+});
+
+/**
+ * Recall is drawn ONCE per page (objectstack#25877). The page's declared
+ * decision bar carries `approval_recall`, so whenever the page mounts that bar
+ * it must tell the band below to keep its lock badge only, and whenever it
+ * does not, the band stays the recall lever. `DetailView.approvalRecallHostDrawn`
+ * measures the band; this measures the seam.
+ */
+describe('record page → band: who draws recall (objectstack#25877)', () => {
+  it('tells the band the page draws recall while the decision bar draws it', async () => {
+    stubApprovalsApi(pendingRequest({ viewer: { can_act: false, is_submitter: true, can_override: false } }));
+    renderRecordPage();
+
+    const probe = await settledProbe(true);
+    await waitFor(() =>
+      expect(probe.getAttribute('data-approval-recall-drawn-by-host')).toBe('true'),
+    );
+    expect(screen.getByTestId('declared-action-approval_recall')).toBeInTheDocument();
+  });
+
+  it('leaves the band its recall when the bar is up but draws none', async () => {
+    // A server too old to send a `viewer` block: every declared gate fails
+    // closed, so the bar draws no Recall, and the band, which falls back to
+    // comparing `submitter_id`, must stay the submitter's lever.
+    stubApprovalsApi(pendingRequest({ submitter_id: SIGNED_IN_USER }));
+    renderRecordPage();
+
+    const probe = await settledProbe(true);
+    await waitFor(() => expect(probe.getAttribute('data-approval-is-submitter')).toBe('true'));
+    expect(screen.queryByTestId('declared-action-approval_recall')).toBeNull();
+    expect(probe.getAttribute('data-approval-recall-drawn-by-host')).toBe('false');
+  });
+
+  it('leaves the band as the recall lever when there is no approvals API', async () => {
+    stubApprovalsApi(null, 404);
+    renderRecordPage();
+
+    const probe = await settledProbe(true);
+    expect(probe.getAttribute('data-approval-recall-drawn-by-host')).toBe('false');
   });
 });

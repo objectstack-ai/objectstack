@@ -81,6 +81,7 @@ import {
   resolveFieldAffordance,
   type SchemaLike,
 } from '@object-ui/core';
+import { narrowStateMachineOptions } from './stateMachineOptions';
 
 /**
  * The permission surface this module consumes — structurally the subset of
@@ -210,6 +211,14 @@ export interface GateFormFieldsOptions extends ApplyFieldPermissionsOptions {
    * has no metadata source, reads as the default bucket.
    */
   objectSchema: SchemaLike | null | undefined;
+  /**
+   * The persisted record an edit form holds — the row as the server last
+   * stored it, the same value the arm hands its renderer as `previousValues`.
+   * With it, a select governed by a blocking `state_machine` offers only the
+   * moves the server accepts from that stored value (#25933). Absent while
+   * the record has not loaded, and always absent on a create form.
+   */
+  previousValues?: Record<string, unknown> | null;
 }
 
 /**
@@ -298,6 +307,13 @@ export function closedFormAffordance({
  *     `disabled`, not `readOnly`: the default arm's lock always drew a
  *     disabled input, and the submit button is left as it is.
  *
+ * Between the two, on an edit form handed its persisted record
+ * (`previousValues`), a select governed by a blocking `state_machine` keeps
+ * only the moves the server accepts from the stored value
+ * ({@link narrowStateMachineOptions}, #25933). It lives in this step for the
+ * same reason the lock does: every layout draws through here, so no arm can
+ * offer a move another arm withholds.
+ *
  * Before this step the lock was stamped by the default arm's field generator
  * alone, so the drawer, modal, tabbed, split and wizard layouts drew live
  * inputs on a managed object whose write the server refuses (objectui#10613,
@@ -310,14 +326,19 @@ export function closedFormAffordance({
  */
 export function gateFormFields<T extends Record<string, any>>(
   fields: T[] | undefined,
-  { objectSchema, ...options }: GateFormFieldsOptions,
+  { objectSchema, previousValues, ...options }: GateFormFieldsOptions,
 ): T[] | undefined {
   const permitted = applyFieldPermissions(fields, options);
   if (!Array.isArray(permitted)) return permitted;
+  const narrowed = narrowStateMachineOptions(permitted, {
+    objectSchema,
+    mode: options.mode,
+    previousValues,
+  });
   if (!managedModeLocked(objectSchema, options.perms, options.objectName, options.mode)) {
-    return permitted;
+    return narrowed;
   }
-  return permitted.map((f) => (f?.name ? { ...f, disabled: true } : f));
+  return narrowed.map((f) => (f?.name ? { ...f, disabled: true } : f));
 }
 
 /**
