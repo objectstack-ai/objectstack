@@ -26,7 +26,8 @@
  * The translation bundle is the one face a browser revalidates: it carries an
  * `ETag` and `Cache-Control: private, no-cache`, and a matching
  * `If-None-Match` is answered `304` with no body (#25785, see
- * {@link translationsAnswer}).
+ * {@link translationsAnswer}). It is served without the groups the server
+ * resolves itself, Studio's `metadataForms` (see {@link servedTranslations}).
  */
 
 import { createHash } from 'node:crypto';
@@ -34,7 +35,9 @@ import {
     resolveLocale,
     shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
 } from '@objectstack/core';
-import { CoreServiceName, resolveObjectFieldLabels, toLocaleDescriptors } from '@objectstack/spec/system';
+import {
+    CoreServiceName, SERVER_RESOLVED_TRANSLATION_GROUPS, resolveObjectFieldLabels, toLocaleDescriptors,
+} from '@objectstack/spec/system';
 import { isServiceServeable } from '../service-serveable.js';
 import type { TranslationData } from '@objectstack/spec/system';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
@@ -106,6 +109,28 @@ function ifNoneMatchHits(header: string | undefined, etag: string): boolean {
         const tag = member.trim();
         return tag === '*' || tag.replace(/^W\//, '') === opaque;
     });
+}
+
+/**
+ * [#25785] The document a translations read serves: the locale tree the i18n
+ * service holds, without `SERVER_RESOLVED_TRANSLATION_GROUPS`, the groups the
+ * server resolves before it serves what they translate. `metadataForms` is the
+ * one today: `/meta/types` answers Studio's authoring forms already translated
+ * from it, and no browser reads it here. `GetTranslationsResponseSchema`
+ * declares the served face without it.
+ *
+ * ⛔ A COPY, never an edit of `translations`. `getTranslations` hands back the
+ * service's own tree (the core fallback and service-i18n both return the stored
+ * object), and that tree is the one `/meta/types` translates from: deleting the
+ * group in place would leave every later Studio form in English.
+ */
+function servedTranslations(translations: Record<string, unknown>): Record<string, unknown> {
+    const resolvedOnServer: readonly string[] = SERVER_RESOLVED_TRANSLATION_GROUPS;
+    const served: Record<string, unknown> = {};
+    for (const [group, value] of Object.entries(translations)) {
+        if (!resolvedOnServer.includes(group)) served[group] = value;
+    }
+    return served;
 }
 
 /**
@@ -239,11 +264,15 @@ export async function handleI18nRequest(
             const resolved = resolveLocale(locale, availableLocales);
             if (resolved && resolved !== locale) {
                 translations = i18nService.getTranslations(resolved);
-                return translationsAnswer(deps, { locale: resolved, requestedLocale: locale, translations }, context);
+                return translationsAnswer(
+                    deps,
+                    { locale: resolved, requestedLocale: locale, translations: servedTranslations(translations) },
+                    context,
+                );
             }
         }
 
-        return translationsAnswer(deps, { locale, translations }, context);
+        return translationsAnswer(deps, { locale, translations: servedTranslations(translations) }, context);
     }
 
     // GET /i18n/labels/:object/:locale  OR  /i18n/labels/:object?locale=xx

@@ -2009,6 +2009,58 @@ export const PlatformTranslationDataSchema = lazySchema(() => strictObject({
 
 export type PlatformTranslationData = z.input<typeof PlatformTranslationDataSchema>;
 
+/**
+ * The platform groups the SERVED document leaves out —
+ * `GET /i18n/translations/:locale` answers {@link ServedTranslationDataSchema},
+ * the platform face without these (#25785).
+ *
+ * A group belongs here when the server resolves it before it serves the
+ * surface the group translates, so no browser reads it from the served
+ * document. `metadataForms` is the one member: it translates Studio's
+ * metadata-type authoring forms, and those reach Studio already translated —
+ * the `/meta/types` handler applies `resolveMetadataTypeLabel`,
+ * `resolveMetadataFormLabels` and `resolveMetadataFormSchemaTitles` to each
+ * entry over the i18n service's in-process bundle before it answers. Carried in
+ * the served document as well, it was the second-largest group of every console
+ * open (75 KB of 221 KB raw on `examples/app-crm` zh-CN) and nothing read it.
+ *
+ * ⛔ Only the served document leaves these out. Every bundle face still
+ * declares the group, and the i18n service still holds it: the serving door
+ * copies the document without them and never edits the service's own tree,
+ * which is the tree `/meta/types` translates from.
+ */
+export const SERVER_RESOLVED_TRANSLATION_GROUPS = ['metadataForms'] as const;
+
+/**
+ * One locale of the SERVED translation document — what
+ * `GET /i18n/translations/:locale` answers: {@link PlatformTranslationDataSchema}
+ * without {@link SERVER_RESOLVED_TRANSLATION_GROUPS}.
+ *
+ * Its own `strictObject` rather than `.omit()` on the platform face, for the
+ * reason {@link appTranslationDataShape} gives against `.extend()`: the derived
+ * schema would keep the error map that closed over the base's keys, so a body
+ * still carrying `metadataForms` would be told the key it should not carry is
+ * a declared one. Closed, a served body that carries a server-resolved group
+ * fails this schema, which is what the response conformance suites parse with.
+ */
+export const ServedTranslationDataSchema = lazySchema(() => {
+  const { metadataForms: _serverResolved, ...appGroups } = appTranslationDataShape();
+  return strictObject({
+    surface: 'this locale of the served translation document',
+    history: TRANSLATION_HISTORY,
+    guidance: {
+      metadataForms:
+        "the served document leaves 'metadataForms' out: Studio's authoring forms are translated "
+        + 'on the server, and /meta/types serves each form already in the requested locale.',
+    },
+  }, {
+    ...appGroups,
+    ...platformSettingsShape(),
+  }).describe('Served translation data — the platform groups the browser reads, without the server-resolved `metadataForms`');
+});
+
+export type ServedTranslationData = z.input<typeof ServedTranslationDataSchema>;
+
 // ────────────────────────────────────────────────────────────────────────────
 // Translation Bundle (all locales)
 // ────────────────────────────────────────────────────────────────────────────

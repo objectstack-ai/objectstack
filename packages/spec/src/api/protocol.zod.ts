@@ -28,7 +28,7 @@ import {
 import { RealtimePresenceSchema, TransportProtocol } from './realtime.zod';
 import { ObjectPermissionSchema, EffectiveObjectPermissionSchema, FieldPermissionSchema } from '../security/permission.zod';
 import { ActionDescriptorSchema } from '../automation/node-executor.zod';
-import { PlatformTranslationDataSchema } from '../system/translation.zod';
+import { ServedTranslationDataSchema } from '../system/translation.zod';
 // #5950 / #5882 — the ADR-0010 read-side protection envelope both metadata-item
 // responses publish. Same three vocabularies the resolver filters against, so a
 // value this spec cannot name is a value the resolver would have dropped.
@@ -3705,10 +3705,16 @@ export const GetTranslationsRequestSchema = lazySchema(() => z.object({
  * `stack.translations` — so it carries the platform-only `settings` group and
  * is typed against the platform face, not the per-app one
  * (`system/translation.zod.ts`).
+ *
+ * Less the groups the server resolves itself (`SERVER_RESOLVED_TRANSLATION_GROUPS`,
+ * #25785): `metadataForms` stays in the i18n service, where `/meta/types`
+ * translates Studio's authoring forms from it, and is not part of this answer.
+ * `translations` is therefore {@link ServedTranslationDataSchema}, the platform
+ * face without those groups, closed so a body that still carries one fails it.
  */
 export const GetTranslationsResponseSchema = lazySchema(() => z.object({
   locale: z.string().describe('Locale code'),
-  translations: PlatformTranslationDataSchema.describe('Translation data'),
+  translations: ServedTranslationDataSchema.describe('Translation data'),
 }));
 
 export const GetFieldLabelsRequestSchema = lazySchema(() => z.object({
