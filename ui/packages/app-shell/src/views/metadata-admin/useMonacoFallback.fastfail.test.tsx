@@ -1,8 +1,7 @@
 /**
- * When Monaco's CDN loader script fails outright (offline / air-gapped / CSP —
- * the console embeds in servers that ship a strict CSP), `loader.init()`
- * rejects. The editor must fall back to the textarea IMMEDIATELY rather than
- * making the user wait out the DOM-poll grace period. We prove the fast path by
+ * When Monaco's loader fails outright, `loader.init()` rejects. The editor must
+ * fall back to the textarea IMMEDIATELY rather than making the user wait out
+ * the DOM-poll grace period. We prove the fast path by
  * setting a very long `fallbackDelayMs`: if the textarea appears, it can only be
  * because the rejected `loader.init()` tripped it, not the poll.
  */
@@ -17,14 +16,18 @@ vi.mock('@monaco-editor/react', () => {
   return {
     Editor,
     default: Editor,
-    // Simulate the CDN loader script failing to load.
-    loader: { init: () => Promise.reject(new Error('CDN blocked')) },
+    // Simulate the loader failing.
+    loader: { init: () => Promise.reject(new Error('loader failed')) },
   };
 });
 
+// The bundled Monaco loads: the page's probe awaits plugin-editor's
+// `configureBundledMonaco` before `loader.init()` (its own suite drives it).
+vi.mock('@object-ui/plugin-editor', () => ({ configureBundledMonaco: () => Promise.resolve() }));
+
 import { JsonSourceEditor } from './JsonSourceEditor';
 
-describe('useMonacoFallback — fast-fail on CDN/loader rejection', () => {
+describe('useMonacoFallback — fast-fail on loader rejection', () => {
   it('shows the textarea immediately when loader.init() rejects, without waiting out fallbackDelayMs', async () => {
     const draft = { name: 'work_order', fields: { title: { type: 'text' } } };
     // Long grace period: only the fast path can satisfy this within the timeout.

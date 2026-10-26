@@ -300,7 +300,6 @@
     "defineFlow (function)",
     "defineWebhook (function)",
     "describeMissingScheduleOrganization (function)",
-    "dollarOnlyTokenRoots (function)",
     "exportConstructsToBpmn (function)",
     "findRegionEntry (function)",
     "flowFilterOperands (function)",

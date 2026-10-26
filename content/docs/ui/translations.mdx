@@ -18,7 +18,11 @@ labels either way.
 
 ## Your first bundle
 
-A bundle is a **map of locale → translations**, registered on your stack:
+A bundle is a **map of locale → translations**, registered on your stack. Every
+locale (a bundle key, an item's `locale`, the `i18n` locales) must be a BCP-47
+language tag with `-` between subtags (`en`, `zh-CN`, `zh-Hans-CN`); `zh_CN`, a
+padded value or a language name is refused at parse, and the 18.x conversion
+rewrites the `_` and padded spellings in stored rows and older builds:
 
 ```typescript title="src/translations/crm.translation.ts"
 import { defineTranslationBundle } from '@objectstack/spec';

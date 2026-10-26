@@ -3486,10 +3486,10 @@ export function CodeWidget({
     : typeof value === 'string' ? value : (value == null ? '' : String(value));
   const commit = (next: string | undefined): void =>
     onChange(isExpression ? writeExpressionSource(value, next ?? '') : (next ?? ''));
-  // Monaco's core comes from a public CDN. Where it cannot be fetched (no
-  // egress, a strict CSP) the editor never paints, so this widget reads the
-  // page's one loader probe that the source editors read (objectui#11800) and
-  // renders a plain textarea instead (objectui#11858). The editor is mounted
+  // Monaco's core is a lazy chunk of the host's own build. Where it cannot be
+  // fetched the editor never paints, so this widget reads the page's one
+  // loader probe that the source editors read (objectui#11800) and renders a
+  // plain textarea instead (objectui#11858). The editor is mounted
   // only once the probe has resolved: mounted earlier, its own `loader.init()`
   // on a failing install logs a second report and leaks an uncaught rejection.
   const [monacoStatus, containerRef] = useMonacoFallback();

@@ -15,7 +15,11 @@
 
 import { describe, it, expect } from 'vitest';
 import { objectPermissionGrants } from '@objectstack/spec/security';
-import { buildEffectiveObjectPermissions } from './effective-object-permissions.js';
+import {
+  buildEffectiveFieldPermissions,
+  buildEffectiveObjectPermissions,
+  fieldPermissionVote,
+} from './effective-object-permissions.js';
 
 describe('buildEffectiveObjectPermissions', () => {
   it('merges most-permissively: `true` wins, otherwise the first defined value stands', () => {
@@ -465,5 +469,68 @@ describe('[#20135] apiOperations says what the REST door serves', () => {
       source,
     );
     expect(map.crm_lead.apiOperations).toEqual(['get', 'list', 'aggregate', 'search', 'export']);
+  });
+});
+
+// ── [#25866 / ruling of record 6408558941] A field permission entry's row
+// condition (`when`): the ONE vote per verdict, and the row-blind merge behind
+// `/auth/me/permissions`' `fields` slot.
+
+describe('fieldPermissionVote (#25866)', () => {
+  it('an entry without a `when` votes as declared under every verdict, `=== true` as the merges always read it', () => {
+    for (const verdict of ['matched', 'unmatched', 'unjudged'] as const) {
+      expect(fieldPermissionVote({ readable: true, editable: true }, verdict)).toEqual({ readable: true, editable: true });
+      expect(fieldPermissionVote({ readable: false, editable: false }, verdict)).toEqual({ readable: false, editable: false });
+      expect(fieldPermissionVote({}, verdict)).toEqual({ readable: false, editable: false });
+    }
+  });
+
+  it('a conditioned entry votes as declared when matched, is ABSENT when unmatched, and is its lock when unjudged', () => {
+    const grant = { readable: true, editable: true, when: "status == 'draft'" };
+    expect(fieldPermissionVote(grant, 'matched')).toEqual({ readable: true, editable: true });
+    expect(fieldPermissionVote(grant, 'unmatched')).toBeNull();
+    expect(fieldPermissionVote(grant, 'unjudged')).toEqual({ readable: true, editable: false });
+    const lock = { readable: true, editable: false, when: "status == 'approved'" };
+    expect(fieldPermissionVote(lock, 'matched')).toEqual({ readable: true, editable: false });
+    expect(fieldPermissionVote(lock, 'unmatched')).toBeNull();
+    expect(fieldPermissionVote(lock, 'unjudged')).toEqual({ readable: true, editable: false });
+  });
+});
+
+describe('buildEffectiveFieldPermissions (#25866)', () => {
+  it('merges most-permissively across sets, keyed as authored, and skips what is not a set or an entry', () => {
+    const map = buildEffectiveFieldPermissions([
+      { fields: { 'deal.amount': { readable: true, editable: false }, 'deal.secret': { readable: false, editable: false } } },
+      { fields: { 'deal.amount': { editable: true }, 'deal.note': null, 'deal.other': 'nope' } },
+      { fields: null },
+      {},
+      null,
+      undefined,
+    ]);
+    expect(map).toEqual({
+      'deal.amount': { readable: true, editable: true },
+      'deal.secret': { readable: false, editable: false },
+    });
+  });
+
+  it('is row-blind: a conditioned entry is reported as its lock, so the map never advertises an edit the gate refuses', () => {
+    const map = buildEffectiveFieldPermissions([
+      { fields: { 'deal.amount': { readable: true, editable: true, when: "status == 'draft'" } } },
+    ]);
+    expect(map).toEqual({ 'deal.amount': { readable: true, editable: false } });
+    // A sibling without a condition still grants: union without deny.
+    const widened = buildEffectiveFieldPermissions([
+      { fields: { 'deal.amount': { readable: true, editable: false, when: "status == 'approved'" } } },
+      { fields: { 'deal.amount': { readable: true, editable: true } } },
+    ]);
+    expect(widened).toEqual({ 'deal.amount': { readable: true, editable: true } });
+  });
+
+  it('aliases nothing: every entry is a fresh object', () => {
+    const entry = { readable: true, editable: true };
+    const map = buildEffectiveFieldPermissions([{ fields: { 'deal.amount': entry } }]);
+    expect(map['deal.amount']).not.toBe(entry);
+    map['deal.amount'].editable = false;
+    expect(entry.editable).toBe(true);
   });
 });

@@ -38,7 +38,6 @@ import { judge } from '../cross-file-line-citation-census.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const gatePath = path.join(repoRoot, 'scripts/check-new-cross-file-line-citations.mjs');
-const workflowPath = path.join(repoRoot, '.github/workflows/line-citation-gate.yml');
 const docPath = path.join(repoRoot, 'content/docs/guide/ci-cd-pipeline.md');
 
 /** Judges a hit against the real tree, the way the gate's own run does. */
@@ -420,27 +419,18 @@ describe('the instrument does not count itself', () => {
   });
 });
 
+/**
+ * The workflow half of this describe retired with objectstack#25712: `runs the
+ * gate in its own workflow`, `checks out deep enough to have a merge base`,
+ * `filters no pull request at the trigger` and `the workflow job name matches
+ * the classified context name`. Each read objectui's `line-citation-gate.yml`,
+ * which runs nowhere under the monorepo: GitHub runs the root
+ * `.github/workflows/` alone, and no root workflow runs this gate. It is row 15
+ * of the objectstack#25697 workflow roster (→ sub-issue 4); a port brings these
+ * pins back against its root workflow, by path. The page and the classifier
+ * pins below read no workflow and stand.
+ */
 describe('wiring — a gate nothing runs is not a gate', () => {
-  const workflow = fs.readFileSync(workflowPath, 'utf8');
-
-  it('runs the gate in its own workflow', () => {
-    expect(workflow).toContain('node scripts/check-new-cross-file-line-citations.mjs');
-  });
-
-  it('checks out deep enough to have a merge base', () => {
-    expect(workflow).toContain('fetch-depth: 0');
-  });
-
-  it('filters no pull request at the trigger', () => {
-    // The population is comments, message strings, documentation and changesets.
-    // A path filter on any of those is the hole the gate exists to close, and
-    // `lint.yml`'s in-job short-circuit excludes exactly them, which is why this
-    // is its own workflow.
-    const trigger = workflow.slice(workflow.indexOf('\non:'), workflow.indexOf('\nconcurrency:'));
-    expect(trigger).toContain('pull_request');
-    expect(trigger).not.toMatch(/^\s*paths(-ignore)?:/m);
-  });
-
   it('is written up on the page objectui#3653 pins, and declared report-only there', () => {
     const doc = fs.readFileSync(docPath, 'utf8');
     expect(doc).toContain('node scripts/check-new-cross-file-line-citations.mjs');
@@ -472,10 +462,6 @@ describe('wiring — a gate nothing runs is not a gate', () => {
     // noticed.
     const gate = fs.readFileSync(path.join(repoRoot, 'scripts/dependabot-merge-gate.mjs'), 'utf8');
     expect(gate).toContain("'Line Citation Gate':");
-  });
-
-  it('the workflow job name matches the classified context name', () => {
-    expect(workflow).toMatch(/^\s*name: Line Citation Gate$/m);
   });
 });
 

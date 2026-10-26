@@ -99,11 +99,12 @@ export function JsonSourceEditor({
   const editorRef = React.useRef<any>(null);
   const monacoRef = React.useRef<any>(null);
 
-  // Monaco's core is fetched lazily and, by default, from a public CDN, and it
-  // also spins up web workers. When any of that is blocked — offline /
-  // air-gapped / CSP-restricted installs — the editor mounts an empty shell
-  // with no error and the Source tab looks blank. `useMonacoFallback` fast-fails
-  // to a plain textarea the moment the CDN loader rejects, and also backstops
+  // Monaco's core is a lazy chunk of the host's own build (plugin-editor's
+  // `configureBundledMonaco`, never a CDN), and it also spins up web workers.
+  // When either is blocked — a chunk that cannot be fetched, a worker refused —
+  // the editor mounts an empty shell with no error and the Source tab looks
+  // blank. `useMonacoFallback` fast-fails to a plain textarea the moment the
+  // chunk or the loader rejects, and also backstops
   // the "resolved but painted nothing" case via a `.view-line` DOM poll, so the
   // source is always readable and editable. The editor mounts only once the
   // loader has resolved: mounted earlier, its own `loader.init()` on a failing

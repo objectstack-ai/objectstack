@@ -626,3 +626,95 @@ export function buildEffectiveObjectPermissions(
   }
   return objects as Record<string, EffectiveObjectPermission>;
 }
+
+// ---------------------------------------------------------------------------
+// [Ruling of record 6408558941, letter A — ADR-0066 ⑧ note of 2026-10-26]
+// The `fields` slot, and the ONE reading of how a field-permission entry votes.
+// ---------------------------------------------------------------------------
+
+/**
+ * One field-permission entry as every merge reads it — the parsed
+ * `FieldPermission` of `@objectstack/spec/security`, or the stored shape a
+ * resolver hands back, which may carry the keys unparsed.
+ */
+export interface FieldPermissionEntryLike {
+  readable?: boolean;
+  editable?: boolean;
+  /** The row condition (`FieldPermissionSchema.when`); absent, the entry votes on every row. */
+  when?: string;
+}
+
+/**
+ * What a reader knows about an entry's row condition on the row it is judging:
+ *
+ *  - `matched` — the row satisfies the condition, or the entry carries none:
+ *    the entry votes as declared;
+ *  - `unmatched` — the row does not satisfy it: the entry is ABSENT, as if
+ *    the set had not declared the field;
+ *  - `unjudged` — no row can be judged (a reader that holds no row, a predicate
+ *    update with no row address, a stored row the caller cannot read, a
+ *    condition that does not resolve for the request): the entry is judged as
+ *    its LOCK — it votes its read bit as declared and contributes NO edit
+ *    grant, so a reading made without the row is never wider than the gate's.
+ */
+export type FieldConditionVerdict = 'matched' | 'unmatched' | 'unjudged';
+
+/**
+ * How one field-permission entry votes under `verdict` — the ONE reading of
+ * `FieldPermissionSchema.when` shared by `PermissionEvaluator.getFieldPermissions`
+ * (per object, with the write gate's row judge) and
+ * {@link buildEffectiveFieldPermissions} (every object, row-blind). `null` is
+ * "no vote": the entry is absent from the merge, which keeps the rule that only
+ * DECLARING sets vote exactly as it was for an entry without a condition.
+ *
+ * The read bit is row-blind by contract — the spec refuses `readable: false`
+ * beside a `when` — so it is taken as declared under every verdict; only the
+ * edit bit is withheld when the row is `unmatched` (absent) or `unjudged`
+ * (locked). Each bit is read as the merges always read it (`=== true`: a
+ * parsed entry carries the schema defaults, an unparsed one votes only what
+ * it spells), so an entry without a `when` votes byte-identically to before.
+ */
+export function fieldPermissionVote(
+  entry: FieldPermissionEntryLike,
+  verdict: FieldConditionVerdict,
+): { readable: boolean; editable: boolean } | null {
+  if (entry.when === undefined) return { readable: entry.readable === true, editable: entry.editable === true };
+  if (verdict === 'unmatched') return null;
+  return { readable: entry.readable === true, editable: verdict === 'matched' && entry.editable === true };
+}
+
+/** A resolved permission set, as far as the field merge reads it. */
+export interface EffectiveFieldPermissionsInputSet {
+  fields?: Record<string, unknown> | null;
+}
+
+/**
+ * The `fields` slot of `/auth/me/permissions`: the most-permissive merge of
+ * every set's `fields` entries, keyed `<object>.<field>` as authored, for ALL
+ * objects in one pass — the same vote per entry as
+ * `PermissionEvaluator.getFieldPermissions` takes per object, read through
+ * {@link fieldPermissionVote}. Row-blind by construction (the endpoint holds
+ * no row), so a row-conditioned entry is reported as its lock: a client reading
+ * this map never advertises an edit the write gate refuses, and may hide one it
+ * admits on the rows the condition does not name.
+ *
+ * Every entry is a FRESH object, as {@link buildEffectiveObjectPermissions}'s are.
+ */
+export function buildEffectiveFieldPermissions(
+  sets: ReadonlyArray<EffectiveFieldPermissionsInputSet | null | undefined>,
+): Record<string, { readable: boolean; editable: boolean }> {
+  const fields: Record<string, { readable: boolean; editable: boolean }> = {};
+  for (const ps of sets) {
+    if (!ps?.fields || typeof ps.fields !== 'object') continue;
+    for (const [key, entry] of Object.entries(ps.fields)) {
+      if (!entry || typeof entry !== 'object') continue;
+      const vote = fieldPermissionVote(entry as FieldPermissionEntryLike, 'unjudged');
+      if (!vote) continue;
+      const acc = fields[key] ?? { readable: false, editable: false };
+      if (vote.readable) acc.readable = true;
+      if (vote.editable) acc.editable = true;
+      fields[key] = acc;
+    }
+  }
+  return fields;
+}
