@@ -130,8 +130,8 @@ const boot = async () => {
 const requestContext = () => ({
   userId: 'u1',
   tenantId: 'org-1',
-  positions: ['custom_role'],
-  permissions: [] as string[],
+  positions: [] as string[],
+  permissions: ['custom_role'],
 });
 
 const readOp = (context: unknown, operation: 'find' | 'count') => ({
@@ -206,7 +206,7 @@ describe('[#10757] permission-set resolution is memoized per execution context',
       const context = requestContext();
 
       await harness.run(readOp(context, 'find'));
-      context.positions = ['some_other_role'];
+      context.permissions = ['some_other_role'];
       await harness.run(readOp(context, 'find'));
 
       expect(harness.permissionSetReads()).toBe(2);

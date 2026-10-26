@@ -3998,6 +3998,15 @@ const fr = {
       localSuccess: "v{{version}} installé dans ce runtime. \"{{name}}\" devrait maintenant apparaître dans le sélecteur d'applications.",
       localLoadsAtRestart: "v{{version}} installé dans ce runtime. \"{{name}}\" sera chargé au prochain redémarrage du runtime et n'apparaîtra pas dans le sélecteur d'applications d'ici là.",
       localManifestConflict: "{{message}}\nRemarque : Une application locale possède déjà ce manifest_id. Supprimez-la d'abord de objectstack.config.ts.",
+      // ADR-0141 D2 — the install refusal DEPENDENCY_MISSING, one line per unmet entry.
+      dependencyMissing: {
+        heading: "Installation refusée : une dépendance déclarée par ce paquet n’est pas satisfaite dans cet environnement, rien n’a donc été installé.",
+        absent: "Installez d’abord {{dependency}} {{range}}.",
+        outOfRange: "Installez d’abord {{dependency}} {{range}}. La version installée est {{installedVersion}}.",
+        unreadableRange: "{{packageId}} déclare {{dependency}} avec la plage de versions {{range}}, qui ne peut pas être lue. Corrigez la plage et republiez le paquet.",
+        unreadableVersion: "Installez une version publiée de {{dependency}} comprise dans {{range}}. La version installée {{installedVersion}} n’est pas au format MAJOR.MINOR.PATCH.",
+        unreadableDeclaration: "{{packageId}} déclare ses dépendances sous une forme que l’installation ne peut pas lire. Écrivez-les sous forme de correspondance entre ID de paquet et plage de versions, puis republiez le paquet.",
+      },
       localUnauthorized: "Connectez-vous d'abord à ce runtime.",
       localMarketplaceUnavailable: "Ce runtime n'a pas de OS_CLOUD_URL configuré.",
       updateTo: "Mettre à jour → v{{version}}",
