@@ -24,10 +24,13 @@
  *
  * ## Reverse verification (direction predicted before running)
  *
- * Restoring a `visibleOn` leg to `VISIBILITY_SHOW_KEYS` turns the first case
- * RED (the node vanishes); restoring `hiddenOn` to `VISIBILITY_HIDE_KEYS`
- * turns the second RED; restoring `disabledOn` to `ENABLEMENT_NODE_GATE_KEYS`
- * turns the third RED. The leak cases go RED if the keys leave the strip list
+ * The legs are hand-written `if` blocks in `SchemaRenderer`'s `shouldHide` /
+ * `isDisabled` memos (the `VISIBILITY_*_KEYS` lists only drive the
+ * diagnostics). Restoring a `visibleOn` leg after the `visible` one — one
+ * line, `if (schema.visibleOn !== undefined) return !evaluate(schema.visibleOn)`
+ * — turns the first case RED (the node vanishes); a `hiddenOn` leg after
+ * `hidden` turns the second and third RED; a `disabledOn` leg after `disabled`
+ * turns the fourth RED. The leak cases go RED if the keys leave the strip list
  * in the props destructure. The controls stay GREEN in every direction.
  */
 
