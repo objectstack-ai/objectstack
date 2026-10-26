@@ -2,7 +2,7 @@
  * The two type names this package published before #25712 made the two copies
  * of this parser one stay importable, as deprecated aliases of the names the
  * renderer's copy had already moved to (objectui#6349, objectui#3161). The
- * rename therefore removes nothing exported, which keeps it a `minor`: the
+ * rename therefore removes nothing exported, which keeps it out of `major`: the
  * launch-window guard (`scripts/check-changeset-no-major.mjs`) refuses a major.
  *
  * Type-level pins: `pnpm typecheck` compiles this file, and a dropped or
