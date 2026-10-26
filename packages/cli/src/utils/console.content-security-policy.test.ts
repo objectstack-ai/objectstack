@@ -42,6 +42,7 @@ const ENV = [
   'OS_PAGE_REACT_ENABLED',
   'OS_PAGE_REACT',
   'OS_CONSOLE_CSP_CONNECT_SRC',
+  'OS_CONSOLE_MAP_STYLE_URL',
   'OS_CLOUD_URL',
   'OS_TELEMETRY_CLIENT_ERROR_REPORTING_DSN',
 ];
@@ -304,5 +305,60 @@ describe('connect-src', () => {
   ])('refuses the boot when OS_CONSOLE_CSP_CONNECT_SRC names %j', async (value) => {
     process.env.OS_CONSOLE_CSP_CONNECT_SRC = `https://ok.example.com ${value}`;
     await expect(mount()).rejects.toThrow(/OS_CONSOLE_CSP_CONNECT_SRC names .*not a connect-src source/);
+  });
+
+  it('adds the origin of the deployment\'s default map style, named in OS_CONSOLE_MAP_STYLE_URL', async () => {
+    process.env.OS_CONSOLE_MAP_STYLE_URL = 'https://tiles.example.com:8443/styles/basic/style.json?key=public';
+    const request = await mount();
+    const res = await request('/_console/');
+    expect(directives(res.headers.get('content-security-policy')).get('connect-src')).toEqual([
+      "'self'",
+      'https://demotiles.maplibre.org',
+      'https://tiles.example.com:8443',
+    ]);
+  });
+
+  it('names no map style origin of its own when OS_CONSOLE_MAP_STYLE_URL is unset or empty', async () => {
+    process.env.OS_CONSOLE_MAP_STYLE_URL = '  ';
+    const request = await mount();
+    const res = await request('/_console/');
+    expect(directives(res.headers.get('content-security-policy')).get('connect-src')).toEqual([
+      "'self'",
+      'https://demotiles.maplibre.org',
+    ]);
+  });
+
+  it('keeps OS_CONSOLE_CSP_CONNECT_SRC working beside it, after the map style origin', async () => {
+    process.env.OS_CONSOLE_MAP_STYLE_URL = 'https://tiles.example.com/style.json';
+    process.env.OS_CONSOLE_CSP_CONNECT_SRC = 'https://glyphs.example.com https://tiles.example.com';
+    const request = await mount();
+    const res = await request('/_console/');
+    expect(directives(res.headers.get('content-security-policy')).get('connect-src')).toEqual([
+      "'self'",
+      'https://demotiles.maplibre.org',
+      'https://tiles.example.com',
+      'https://glyphs.example.com',
+    ]);
+  });
+
+  it('allows the very origin RuntimeConfigPlugin serves as the default map style, from one env var', async () => {
+    process.env.OS_CONSOLE_MAP_STYLE_URL = 'https://tiles.example.com/styles/basic/style.json';
+    const request = await mount({ runtimeConfig: {} });
+    const served = await (await request('/api/v1/runtime/config')).json();
+    expect(served.mapStyleUrl).toBe('https://tiles.example.com/styles/basic/style.json');
+    const res = await request('/_console/');
+    expect(directives(res.headers.get('content-security-policy')).get('connect-src')).toContain(
+      new URL(served.mapStyleUrl).origin,
+    );
+  });
+
+  it.each([
+    ['http://tiles.example.com/style.json'],
+    ['/styles/basic/style.json'],
+    ['tiles.example.com'],
+    ["https://tiles.example.com/style.json 'unsafe-inline'"],
+  ])('refuses the boot when OS_CONSOLE_MAP_STYLE_URL is %j', async (value) => {
+    process.env.OS_CONSOLE_MAP_STYLE_URL = value;
+    await expect(mount()).rejects.toThrow(/^OS_CONSOLE_MAP_STYLE_URL is .*absolute https: URL/s);
   });
 });
