@@ -53,6 +53,9 @@
     "url": "https://github.com/objectstack-ai/objectstack.git",
     "directory": "packages/plugins/plugin-approvals"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "dist",
     "README.md",

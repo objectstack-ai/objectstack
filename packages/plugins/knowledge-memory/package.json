@@ -42,6 +42,9 @@
     "url": "https://github.com/objectstack-ai/objectstack.git",
     "directory": "packages/plugins/knowledge-memory"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "dist",
     "README.md",

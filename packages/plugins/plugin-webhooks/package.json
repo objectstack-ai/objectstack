@@ -64,6 +64,9 @@
     "url": "https://github.com/objectstack-ai/objectstack.git",
     "directory": "packages/plugins/plugin-webhooks"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "dist",
     "README.md",

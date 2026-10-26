@@ -52,6 +52,9 @@
     "url": "https://github.com/objectstack-ai/objectstack.git",
     "directory": "packages/services/service-cluster"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "dist",
     "README.md",

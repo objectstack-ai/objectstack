@@ -44,6 +44,9 @@
     "url": "https://github.com/objectstack-ai/objectstack.git",
     "directory": "packages/connectors/connector-mcp"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "dist",
     "README.md",

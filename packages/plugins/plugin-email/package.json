@@ -45,6 +45,9 @@
     "url": "https://github.com/objectstack-ai/objectstack.git",
     "directory": "packages/plugins/plugin-email"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "dist",
     "README.md",

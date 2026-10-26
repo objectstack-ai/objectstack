@@ -38,6 +38,9 @@
     "url": "https://github.com/objectstack-ai/objectstack.git",
     "directory": "packages/triggers/trigger-api"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "dist",
     "README.md",
