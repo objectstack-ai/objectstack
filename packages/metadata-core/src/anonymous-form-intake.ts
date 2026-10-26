@@ -14,7 +14,9 @@
  * `allowAnonymous === true` and a non-empty `publicLink` naming the slug) and
  * the three shapes a view carries a form in — is declared in
  * `@objectstack/spec/ui` (`anonymous-form-intake.ts`, beside the
- * `SharingConfigSchema` it reads), whose docblock is the authority on it. This
+ * `SharingConfigSchema` it reads), whose docblock is the authority on it. So is
+ * the object-name half, `anonymousFormObjectName` (the object a candidate
+ * submits into), which the authoring lint reads as well. This
  * module re-exports those bindings unchanged, so a console that imports them
  * from the spec reads the same rule the doors serve. Clearing either switch
  * withdraws the form from every anonymous door.
@@ -44,7 +46,8 @@ import { applyInjectedSystemColumns } from './injected-system-columns.js';
 import { resolveRecordWallOrganizationField } from './record-organization.js';
 
 // The candidates half of the rule — which form candidates a `view` body opens
-// to anonymous intake — lives in `@objectstack/spec/ui` beside the
+// to anonymous intake — and the object-name half (`anonymousFormObjectName`,
+// the object a candidate submits into) live in `@objectstack/spec/ui` beside the
 // `SharingConfigSchema` it reads, so a console can import the same rule the
 // doors serve. Re-exported here as the SAME bindings (never a wrapper or a
 // copy), so every server caller keeps importing it from this package and the
