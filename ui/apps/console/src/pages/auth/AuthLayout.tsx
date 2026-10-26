@@ -33,7 +33,14 @@
 import { useEffect, type ReactNode } from 'react';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { cn } from '@object-ui/components';
-import { getProductName, getLogoUrl } from '@object-ui/app-shell';
+import { getProductName, getLogoUrl, isDefaultProductName } from '@object-ui/app-shell';
+
+/**
+ * The developer site the Community Console's "Powered by ObjectStack" mark
+ * links to. ObjectStack is the protocol, SDK and framework the product is built
+ * on; the product itself is ObjectOS, in its three editions.
+ */
+const OBJECTSTACK_SITE_URL = 'https://objectstack.ai';
 
 export interface AuthLayoutProps {
   children: ReactNode;
@@ -119,6 +126,10 @@ export function AuthLayout({ children, formWidth = 'sm' }: AuthLayoutProps) {
 
   const host = currentHost();
   const showHostPill = !!host && !isCanonicalCloudHost(host) && !isLocalHost(host);
+  // The Community edition carries the default wordmark and says what it is
+  // built on; a runtime that pushed its own `branding.productName` (Cloud,
+  // Enterprise, a cloud-connected workspace) keeps its single brand line.
+  const showPoweredBy = isDefaultProductName();
 
   useEffect(() => {
     if (typeof document === 'undefined' || !host) return;
@@ -162,6 +173,19 @@ export function AuthLayout({ children, formWidth = 'sm' }: AuthLayoutProps) {
           </div>
         ) : null}
         {children}
+        {showPoweredBy ? (
+          <p className="text-center text-[11px] text-muted-foreground">
+            <a
+              data-testid="auth-powered-by"
+              href={OBJECTSTACK_SITE_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline-offset-4 hover:text-foreground hover:underline"
+            >
+              {t('auth.shell.poweredBy', { defaultValue: 'Powered by ObjectStack' })}
+            </a>
+          </p>
+        ) : null}
       </div>
     </div>
   );
