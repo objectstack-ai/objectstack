@@ -361,4 +361,30 @@ describe('connect-src', () => {
     process.env.OS_CONSOLE_MAP_STYLE_URL = value;
     await expect(mount()).rejects.toThrow(/^OS_CONSOLE_MAP_STYLE_URL is .*absolute https: URL/s);
   });
+
+  // The Console mount restates RuntimeConfigPlugin's reader rather than
+  // importing it (this module imports Node built-ins only), so the two are held
+  // here to one verdict, refusal text included, on every value named.
+  it.each([
+    ['https://tiles.example.com/styles/basic/style.json'],
+    ['https://Tiles.Example.com:8443/style.json?key=public'],
+    ['https://192.0.2.10/style.json'],
+    ['   '],
+    ['http://tiles.example.com/style.json'],
+    ['/styles/basic/style.json'],
+    ['tiles.example.com'],
+    ['javascript:alert(1)'],
+    ['https://user:secret@tiles.example.com/style.json'],
+    ['https://[::1]/style.json'],
+    ['https://a.example.com/style.json https://b.example.com/style.json'],
+  ])('gives the same verdict as RuntimeConfigPlugin on OS_CONSOLE_MAP_STYLE_URL=%j', async (value) => {
+    process.env.OS_CONSOLE_MAP_STYLE_URL = value;
+    const verdict = (start: () => Promise<unknown>) => start().then(() => 'accepted', (e: Error) => e.message);
+    const runtimeConfig = await verdict(() => new RuntimeConfigPlugin({}).start({
+      hook: () => {},
+      getService: (name: string) => { throw new Error(`no service ${name}`); },
+      logger: { warn: () => {}, info: () => {}, debug: () => {}, error: () => {} },
+    } as any));
+    expect(await verdict(() => mount())).toBe(runtimeConfig);
+  });
 });

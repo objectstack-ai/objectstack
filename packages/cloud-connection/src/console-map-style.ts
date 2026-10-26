@@ -13,13 +13,18 @@
  *
  *   OS_CONSOLE_MAP_STYLE_URL=https://tiles.example.com/styles/basic/style.json
  *
- * Two readers act on that one value, and both read it through
- * {@link readConsoleMapStyleUrl} so they cannot believe it on different terms:
+ * Two readers act on that one value, on one contract:
  *
- *   - `RuntimeConfigPlugin` serves it as `mapStyleUrl` on
- *     `GET /api/v1/runtime/config`, the deployment's default map style;
+ *   - `RuntimeConfigPlugin` serves it, through {@link readConsoleMapStyleUrl},
+ *     as `mapStyleUrl` on `GET /api/v1/runtime/config`, the deployment's
+ *     default map style;
  *   - the CLI's Console mount adds its origin to the Console document's
- *     `connect-src`, computed once at boot.
+ *     `connect-src`, computed once at boot (`readMapStyleOrigin` in
+ *     `packages/cli/src/utils/console.ts`). That module is published as
+ *     `@objectstack/cli/console` and imports Node built-ins only, so it
+ *     restates this contract instead of importing it; the CLI's
+ *     `console.content-security-policy.test.ts` holds the two readers to the
+ *     same verdict on every value it names.
  *
  * It is an operator posture and nothing else: no Setup setting, no settings
  * key, no spec key, and no per-request policy. Widening the Console's
@@ -84,12 +89,4 @@ export function readConsoleMapStyleUrl(env: Readonly<Record<string, string | und
     }
     if (!DNS_HOST.test(parsed.hostname)) return refuse('names a host that a content-security-policy cannot allow');
     return value;
-}
-
-/**
- * The origin of a map style URL {@link readConsoleMapStyleUrl} accepted: the
- * one host the Console fetches the style document from, for its `connect-src`.
- */
-export function consoleMapStyleOrigin(mapStyleUrl: string): string {
-    return new URL(mapStyleUrl).origin;
 }

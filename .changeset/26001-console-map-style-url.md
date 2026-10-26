@@ -23,4 +23,4 @@ The value must be an absolute `https:` URL on a host name, with no user name, pa
 
 It is an operator setting only: there is no Setup setting and no metadata key for it, so only the person who runs the deployment can widen the Console's content-security-policy. A style whose tiles, sprites or glyphs live on other hosts still needs those hosts in `OS_CONSOLE_CSP_CONNECT_SRC`.
 
-`@objectstack/cloud-connection` also exports `CONSOLE_MAP_STYLE_URL_ENV`, `readConsoleMapStyleUrl` and `consoleMapStyleOrigin`, the one reader both sides use. The Console's map renderer reads `mapStyleUrl` in a separate change.
+The Console's map renderer reads `mapStyleUrl` in a separate change; until then the served value and the policy are in place, and map views keep the built-in style.

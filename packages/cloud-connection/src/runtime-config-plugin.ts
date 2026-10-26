@@ -55,8 +55,8 @@
  * only (ruling A on #26001): no host option, no Setup setting, no spec key,
  * because the CLI's Console mount allows the same URL's origin in the Console
  * document's `connect-src`, and widening that policy is the operator's act
- * alone. Both read the value through `readConsoleMapStyleUrl`
- * (`console-map-style.ts`), so they cannot disagree on what was set.
+ * alone. Both hold the value to one contract (`console-map-style.ts` says
+ * how, and where the two readers are pinned to the same verdict).
  *
  * Default-absent, the same shape as `branding.stage`: unset or empty serves no
  * key. A value that is not an absolute `https:` URL on a host name refuses the

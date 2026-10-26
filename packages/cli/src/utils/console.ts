@@ -48,7 +48,6 @@ import fs from 'fs';
 import { createHash, randomBytes } from 'crypto';
 import { createRequire } from 'module';
 import { pathToFileURL, fileURLToPath } from 'url';
-import { consoleMapStyleOrigin, readConsoleMapStyleUrl } from '@objectstack/cloud-connection';
 
 // ─── Constants ──────────────────────────────────────────────────────
 
@@ -722,6 +721,66 @@ function readExtraConnectSources(env: NodeJS.ProcessEnv): string[] {
 }
 
 /**
+ * The env var an operator names the deployment's default map style document
+ * in: an absolute `https:` URL, such as
+ * `https://tiles.example.com/styles/basic/style.json`. `RuntimeConfigPlugin`
+ * serves the same value as `mapStyleUrl` on `GET /api/v1/runtime/config`, and
+ * the Console document's `connect-src` names its origin, so the map view can
+ * fetch the style the door hands it.
+ */
+const CONSOLE_MAP_STYLE_URL_ENV = 'OS_CONSOLE_MAP_STYLE_URL';
+
+/**
+ * A DNS host name as the WHATWG parser leaves it. An IP literal in brackets is
+ * left out: a content-security-policy host source cannot name one.
+ */
+const MAP_STYLE_HOST = /^[a-z0-9-]+(?:\.[a-z0-9-]+)*$/;
+
+/**
+ * The origin of the map style named in {@link CONSOLE_MAP_STYLE_URL_ENV}, or
+ * `undefined` when it is unset or empty; anything that is not an absolute
+ * `https:` URL on a host name, without credentials or whitespace, refuses the
+ * boot.
+ *
+ * The same contract, and the same refusal, as the reader `RuntimeConfigPlugin`
+ * serves the value through (`@objectstack/cloud-connection`,
+ * `readConsoleMapStyleUrl`). It is restated here rather than imported because
+ * this module, published as `@objectstack/cli/console`, imports Node built-ins
+ * only (`test/published-subpath-console.pin.test.ts`).
+ * `console.content-security-policy.test.ts` holds the two to the same verdict
+ * on every value it names, so the policy allows exactly the URL the door
+ * serves, and a value one side refuses cannot boot past the other.
+ */
+function readMapStyleOrigin(env: NodeJS.ProcessEnv): string | undefined {
+  const value = String(env[CONSOLE_MAP_STYLE_URL_ENV] ?? '').trim();
+  if (value === '') return undefined;
+  const refuse = (why: string, shown: string = value): never => {
+    throw new Error(
+      `${CONSOLE_MAP_STYLE_URL_ENV} is ${JSON.stringify(shown)}, which ${why}. Name the map style document `
+      + 'as an absolute https: URL on a host name, for example '
+      + 'https://tiles.example.com/styles/basic/style.json, or unset it to keep the built-in default style.',
+    );
+  };
+  if (/\s/.test(value)) return refuse('contains whitespace');
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return refuse('is not an absolute URL');
+  }
+  if (parsed.protocol !== 'https:') return refuse(`uses ${parsed.protocol} rather than https:`);
+  if (parsed.username !== '' || parsed.password !== '') {
+    // Named without the credentials: this message lands in the boot log.
+    return refuse(
+      'carries a user name or password, which the anonymous runtime-config door would publish',
+      `${parsed.protocol}//${parsed.host}${parsed.pathname}`,
+    );
+  }
+  if (!MAP_STYLE_HOST.test(parsed.hostname)) return refuse('names a host that a content-security-policy cannot allow');
+  return parsed.origin;
+}
+
+/**
  * The default map style the Console's map view loads when the view names none
  * (objectui `plugin-map`, `DEFAULT_MAP_STYLE`). Its style, tiles and glyphs are
  * all on this host. It stays allowed when the operator names the deployment's
@@ -765,11 +824,10 @@ const DEFAULT_MAP_STYLE_ORIGIN = 'https://demotiles.maplibre.org';
  *   same-origin realtime WebSocket and the metadata event stream), the default
  *   map style's host, the origin of the deployment's own default map style
  *   when the operator names one in `OS_CONSOLE_MAP_STYLE_URL` (the URL
- *   `GET /api/v1/runtime/config` serves as `mapStyleUrl`, read through the
- *   same `readConsoleMapStyleUrl`), the error-reporting endpoint when the
- *   runtime serves a DSN (`telemetry.errorReporting.dsn` from
- *   `GET /api/v1/runtime/config`), and the hosts an operator names in
- *   `OS_CONSOLE_CSP_CONNECT_SRC`.
+ *   `GET /api/v1/runtime/config` serves as `mapStyleUrl`), the
+ *   error-reporting endpoint when the runtime serves a DSN
+ *   (`telemetry.errorReporting.dsn` from the same door), and the hosts an
+ *   operator names in `OS_CONSOLE_CSP_CONNECT_SRC`.
  * - `default-src 'self'` covers the rest the Console uses: the module workers
  *   maplibre starts from its own file, the PWA manifest, and the same-origin
  *   frames (the Studio's live canvas). The build ships no web fonts.
@@ -921,10 +979,9 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
       // Read once, at boot: a malformed value refuses here, loudly, rather
       // than reaching the header of every document.
       const extraConnectSources = readExtraConnectSources(process.env);
-      // The deployment's default map style (#26001), by the reader the
-      // runtime-config door uses, so the policy allows the very URL served.
-      const mapStyleUrl = readConsoleMapStyleUrl(process.env);
-      const mapStyleOrigin = mapStyleUrl === undefined ? undefined : consoleMapStyleOrigin(mapStyleUrl);
+      // The deployment's default map style (#26001), on the contract the
+      // runtime-config door serves it under, so the policy allows that URL.
+      const mapStyleOrigin = readMapStyleOrigin(process.env);
 
       const indexPath = path.join(absoluteDist, 'index.html');
       if (!fs.existsSync(indexPath)) {
