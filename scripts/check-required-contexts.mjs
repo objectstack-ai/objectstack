@@ -334,6 +334,11 @@ const UNATTRIBUTED_BATTERY = '(no battery open)';
  * is right. Budgeting around it would only arm the trap for the next author
  * who legitimately names the live job.
  *
+ * `Console Pin Gate` IS dead since #25697 deleted its job with the objectui pin
+ * gates. It still takes no RETIRED_CONTEXT_NAMES row: it never sat in any
+ * reading of the required set, and the instruction files no longer name it as
+ * a live check (`docs/releases-maintenance.md` keeps it in the past tense).
+ *
  * ⚠️ The cost of the drop, stated rather than discovered later: these two
  * `name:` literals are now pinned by NOTHING, while prose elsewhere still refers
  * to the jobs by name — `docs/releases-maintenance.md`,

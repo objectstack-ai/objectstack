@@ -57,10 +57,9 @@ on:
     # snapshot owns :07 of 02, 08, 14 and 20. Of the six six-hour sets, only
     # 0/6/12/18 and 1/7/13/19 have hours with nothing scheduled after :00; the
     # first is taken because its :00 neighbours are short (release.yml's
-    # version-pr refresh, prerelease-pin-watch at 06:00, the hourly ci/lint
-    # runs), while 07:00 starts the showcase smoke. The MINUTE is off the top of
-    # the hour for the reason every patrol here gives: scheduled runs queue
-    # behind everyone else's :00 cron.
+    # version-pr refresh, the hourly ci/lint runs), while 07:00 starts the
+    # showcase smoke. The MINUTE is off the top of the hour for the reason every
+    # patrol here gives: scheduled runs queue behind everyone else's :00 cron.
     #
     # This job spends almost nothing of the per-repository GITHUB_TOKEN budget
     # (the checkout, and no API reads), so unlike the board readers it is not

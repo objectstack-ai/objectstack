@@ -255,7 +255,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-store-v3-
 
-      # Restore-only, like ci.yml's Console Pin Gate: this workflow runs a handful
+      # Restore-only, as ci.yml's retired Console Pin Gate was: this workflow runs a handful
       # of times a month so its own namespace is almost always cold, and the
       # build-core fallbacks seeded from main are the ones that actually hit.
       # Saving is lint.yml's job.

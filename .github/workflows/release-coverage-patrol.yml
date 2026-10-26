@@ -63,7 +63,7 @@ name: Release-Coverage Patrol
 # grepping prose, while the JOB stays green whenever findings exist. A `--strict`
 # run stays red for as long as the prose is unwritten — 25 days, in the 16.1.0
 # case — and a chronically red scheduled job is how people learn to skim red,
-# which `prerelease-pin-watch.yml`'s header warns about directly. Findings land
+# which the retired `prerelease-pin-watch.yml`'s header warned about directly. Findings land
 # in the anchor issue; they never colour this job.
 #
 # ## What lands where
