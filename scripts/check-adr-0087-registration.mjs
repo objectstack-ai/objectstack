@@ -461,6 +461,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'REX-N: the predicate set is pinned BY NAME, never by count': 3,
   'REX-U: unit pins on the operand grammar and the FROM-side reader': 24,
   'REX-L: the compiler is loaded only when a marker names the category': 6,
+  'WS (#26220): ui workspace packages, `.tsx` modules, aliases and shims': 11,
   'G6: a changeset that was ALREADY breaking at base is inherited': 1,
   'R15: a changeset RENAMED AND turned breaking in the same commit': 5,
   'G10: a PURE rename of an ALREADY-breaking stock changeset': 3,
@@ -493,7 +494,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 55;
+const SELF_TEST_BATTERY_FLOOR = 56;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -7605,6 +7606,108 @@ function selfTest() {
     assert(unloaded.needsExportReader === true, 'REX-L4: ...and sets `needsExportReader`, which is what makes the entry point load and re-scan');
     assert(rexR1.needsExportReader === false && run(mk({ files: {} })).needsExportReader === false,
       'REX-L5: a scan with the reader loaded, or with no such marker, never asks for it');
+  }
+
+  // ---- WS (#26220): a ui workspace package, read through the workspace file --
+  //
+  // The gate's package globs are the rev's own `pnpm-workspace.yaml`, so an
+  // `@object-ui/*` package under `ui/packages/*` has a manifest here like any
+  // other. And its export reader compiles `.tsx`: the ui entries re-export from
+  // `.tsx` modules -- directly, through an alias, and through a `.ts` shim -- and
+  // without the `jsx` option every such module failed to resolve (TS6142), so
+  // predicate 2 could not locate a single declaration behind one.
+  battery('WS (#26220): ui workspace packages, `.tsx` modules, aliases and shims');
+  {
+    const UI_PKG = '@object-ui/app-shell';
+    const UI_DIR = 'ui/packages/app-shell';
+    const uiPath = (rel) => `${UI_DIR}/${rel}`;
+    const UI_PKGS = {
+      '@objectstack/spec': { dir: 'packages/spec', private: false },
+      '@objectstack/platform-objects': { dir: 'packages/platform-objects', private: false },
+      '@object-ui/console': { dir: 'ui/apps/console', private: true },
+    };
+    const UI_INDEX_HEAD = "export { AppShell } from './AppShell.js';\n";
+    const UI_BASE_FILES = {
+      [uiPath('package.json')]: JSON.stringify({
+        name: UI_PKG, version: '1.0.0', types: 'dist/index.d.ts',
+        exports: { '.': { types: './dist/index.d.ts', import: './dist/index.mjs' } },
+      }),
+      [uiPath('src/index.ts')]:
+        `${UI_INDEX_HEAD}` +
+        "export { useExpressionContext } from './providers/ExpressionProvider.js';\n" +
+        "export { PageShell as MetadataPageShell } from './views/PageShell.js';\n" +
+        "export type { RecentItemInput } from './hooks/useRecentItems.js';\n",
+      [uiPath('src/AppShell.tsx')]: 'export const AppShell = () => <div className="shell" />;\n',
+      [uiPath('src/providers/ExpressionProvider.tsx')]:
+        'export function useExpressionContext() {\n  return <span>{1}</span>;\n}\n',
+      [uiPath('src/views/PageShell.tsx')]: 'export function PageShell() {\n  return <main />;\n}\n',
+      [uiPath('src/hooks/useRecentItems.ts')]:
+        "export { useRecentItems, type RecentItemInput } from '../context/RecentItemsProvider.js';\n",
+      [uiPath('src/context/RecentItemsProvider.tsx')]:
+        'export interface RecentItemInput { id: string }\nexport function useRecentItems() {\n  return <ul />;\n}\n',
+      'packages/platform-objects/src/audit/sys-email-template.object.ts':
+        "export const SysEmailTemplate = { name: 'sys_email_template' };\n",
+    };
+    const UI_OPERANDS = ['useExpressionContext', 'MetadataPageShell', 'RecentItemInput'];
+    const UI_CS = CS({
+      bumps: [[UI_PKG, 'patch']],
+      body:
+        'refactor(app-shell)!: retire three root-entry exports\n\n**BREAKING**: retired exports.\n\n' +
+        UI_OPERANDS.map((o) => `- FROM \`${o}\` TO nothing: delete the import.`).join('\n') +
+        `\n\n<!-- adr-0087: not-required (runtime-export-retired${UI_OPERANDS.map((o) => ` ${UI_PKG}#${o}`).join(',')}) ` +
+        'the retired names are runtime exports; the compiler reports each at its importer, and no stored shape moves -->\n',
+    });
+    const UI_FIXTURE = (over = {}) => ({
+      pkgs: UI_PKGS,
+      baseFiles: UI_BASE_FILES,
+      files: { [uiPath('src/index.ts')]: UI_INDEX_HEAD, '.changeset/x.md': UI_CS },
+      ...over,
+    });
+
+    const wsG1 = run(mk(UI_FIXTURE()));
+    green('WS-G1 a `ui/packages/*` package retires a `.tsx` export, an alias of one and a type behind a `.ts` shim', wsG1);
+    const detail = wsG1.judged[0]?.detail ?? '';
+    assert(
+      /useExpressionContext \(export, ui\/packages\/app-shell\/src\/providers\/ExpressionProvider\.tsx\)/.test(detail) &&
+        /MetadataPageShell \(export, ui\/packages\/app-shell\/src\/views\/PageShell\.tsx\)/.test(detail) &&
+        /RecentItemInput \(export, ui\/packages\/app-shell\/src\/context\/RecentItemsProvider\.tsx\)/.test(detail),
+      'WS-G1b: predicate 2 must locate each declaration where the compiler resolves it -- the `.tsx` module, ' +
+      `the ALIASED declaration, and the module BEHIND the shim. Got: ${detail}`,
+    );
+
+    // The membership comes from the workspace file and nowhere else: the same tree
+    // with the `ui/packages/*` glob dropped has no manifest named the package.
+    red('WS-R1 a package whose directory no workspace glob names has no workspace manifest', run(mk(UI_FIXTURE({
+      workspace: WORKSPACE_YAML.replace('  - ui/packages/*\n', ''),
+    }))), [/no workspace manifest at [0-9a-f]{12} is named `@object-ui\/app-shell`/]);
+
+    let thrown = null;
+    try { run(mk(UI_FIXTURE({ workspace: null }))); } catch (e) { thrown = e; }
+    assert(thrown instanceof WorkspaceEnumerationError && /pnpm-workspace\.yaml at [0-9a-f]{12} is missing/.test(thrown.message),
+      `WS-R2: a rev with no workspace file is REFUSED, never read as an empty workspace (got ${thrown?.message ?? 'no throw'})`);
+
+    green('WS-G2 `unpublished` on a private `ui/apps/*` package', run(mk({
+      pkgs: UI_PKGS,
+      files: {
+        '.changeset/x.md': CS({
+          bumps: [['@object-ui/console', 'major']],
+          body: '**BREAKING** x\n\n<!-- adr-0087: not-required (unpublished) the console app is private and publishes to no registry -->\n',
+        }),
+      },
+    })));
+
+    const GLOBS = ['packages/*', 'ui', 'ui/packages/*'];
+    assert(isWorkspaceManifest('ui/packages/app-shell/package.json', GLOBS), 'WS-U1: `<dir>/*` names a directory directly under `<dir>`');
+    assert(isWorkspaceManifest('ui/package.json', GLOBS), 'WS-U2: a bare `<dir>` glob names that directory itself');
+    assert(!isWorkspaceManifest('ui/packages/app-shell/test/fixture/package.json', GLOBS),
+      'WS-U3: a manifest nested below a member is not a member -- a fixture package.json cannot shadow a real one');
+    assert(!isWorkspaceManifest('ui/node_modules/x/package.json', ['ui/*']) && !isWorkspaceManifest('ui/.cache/package.json', ['ui/*']),
+      'WS-U4: `node_modules` and dot-directories are never members (the enumerator\'s rule)');
+    let rich = null;
+    const richDir = mk({ files: {}, workspace: 'packages:\n  - packages/**\n' }).dir;
+    try { workspaceGlobsAt('HEAD', richDir); } catch (e) { rich = e; }
+    assert(rich instanceof WorkspaceEnumerationError && /richer than/.test(rich.message),
+      `WS-U5: a glob richer than \`<dir>\` / \`<dir>/*\` is refused, never matched against nothing (got ${rich?.message ?? 'no throw'})`);
   }
 
   // ---- G6: a changeset that was ALREADY breaking at base is inherited -------
