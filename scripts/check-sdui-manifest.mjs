@@ -40,9 +40,8 @@
  *   3. STALENESS — the record's `objectuiSha` equals the live `.objectui-sha`.
  *      A pin bump changes which registry the shipped console runs, so the bump
  *      PR goes red HERE until the manifest is regenerated against the new pin
- *      — the same moment `check-sdui-lockstep` already forces a parser parity
- *      re-verification, and the moment an objectui checkout is guaranteed to
- *      exist (the bump required one).
+ *      — the moment an objectui checkout is guaranteed to exist (the bump
+ *      required one).
  *   4. VERSION ↔ PIN CORRESPONDENCE — the record's `objectuiWorkspaceVersion`
  *      is the version `packages/core/package.json` DECLARES at the pinned
  *      commit. Checks 1-3 reach both fields and relate neither: the version is
@@ -100,12 +99,11 @@
  * ## What this deliberately does NOT do, and where that risk is held
  *
  * No per-PR regeneration: that would put an objectui clone and build (network,
- * minutes) inside a required lint job — the shape `check-sdui-lockstep`'s
- * header declines, for the same reasons. Under an unchanged pin the pinned
+ * minutes) inside a required lint job, a network dependency this repo
+ * declines in a lint job. Under an unchanged pin the pinned
  * commit's registry is immutable, so content drift per-PR is not a live axis.
  * The residual axis — this repo's OWN adapter (`manifestFromConfigs`) changing
- * while the pin stands still — is held by `packages/sdui-parser`'s lockstep
- * gate and unit suite, and by regeneration being byte-deterministic (two runs
+ * while the pin stands still — is held by `packages/sdui-parser`'s unit suite, and by regeneration being byte-deterministic (two runs
  * over one built tree, identical bytes), so the remedy this gate prints always
  * converges.
  *

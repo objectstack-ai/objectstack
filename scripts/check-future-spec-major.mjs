@@ -26,9 +26,10 @@
 //     an event that will never come.
 //
 // WHY A GATE AND NOT ANOTHER SWEEP. The prose fix is one commit; the class
-// returns because nothing reads the number. `docs/v17-docs-sweep.md` already
-// carries a DETECTION FINGERPRINT row for it, and a fingerprint is a thing a
-// human remembers to grep. This is the machine that greps.
+// returns because nothing reads the number. The v17 docs-sweep ledger carried
+// a DETECTION FINGERPRINT row for it, and a fingerprint is a thing a human
+// remembers to grep. This is the machine that greps — so the row itself now
+// lives here, verbatim, as `SWEEP_FINGERPRINT` below.
 //
 // ── THE TWO WAYS THIS GATE COULD READ A FALSE ZERO, both measured ──────────
 //
@@ -123,8 +124,8 @@
 // quotation of a bad tombstone REDS ON THE RULING THAT FORBIDS THE BUG:
 //
 //   • `docs/adr/0087-…md` — the ruling itself, quoting the wrong form.
-//   • `docs/v17-docs-sweep.md` — the sweep ledger's detection fingerprint for
-//     this very class, plus the log line recording that it was added.
+//   • the detection fingerprint for this very class — once a row of the v17
+//     docs-sweep ledger, now `SWEEP_FINGERPRINT` in this file.
 //   • `packages/spec/src/shared/retired-key.test.ts` — a synthetic "next
 //     major" fixture that MUST name a version that does not exist.
 //
@@ -132,8 +133,8 @@
 //
 //   R1 — STRUCTURAL. A citation wholly inside a Markdown DOUBLE-backtick code
 //        span (`` … ``) is the phrase quoted AS A PATTERN, not a sentence
-//        dating a removal. That is what a fingerprint row is, so the sweep
-//        ledger's table needs no ledger entry and the next fingerprint row
+//        dating a removal. That is what a fingerprint row is, so a
+//        fingerprint table needs no ledger entry and the next fingerprint row
 //        will not either. A SINGLE-backtick span is NOT exempt — that is the
 //        live tombstone form axis (2) above.
 //
@@ -299,6 +300,22 @@ function findCitations(text) {
   return found;
 }
 
+// ── The detection fingerprint, relocated ───────────────────────────────────
+//
+// The v17 docs-sweep ledger's fingerprint row for this class, verbatim — its
+// "Fingerprints" table in `docs/v17-docs-sweep.md` as of commit `df8aac41`.
+// It lives here because this gate is the machine form of that row: the
+// pattern a human greps for, what a hit means and which record arbitrates the
+// number stay beside the matcher that enforces them, and outlive the sweep
+// that wrote them down. It is R1's fixture too: the self-test reads it back as
+// a double-backtick pattern span (GREEN) and, with the double backticks
+// reduced to single, as the live tombstone form (RED).
+const SWEEP_FINGERPRINT =
+  '| `` `@objectstack/spec` 18 `` (any v17 removal dated to **18**) | dates a removal that '
+  + 'ships in **17** to the next major — the reader plans for it a release late and their '
+  + 'upgrade breaks. Check the *number*, not just the surface name: `spec-changes.json` '
+  + '`toMajor` is the arbiter | #4286, #3963 |\n';
+
 // ── R2: the witnessed, self-invalidating ledger ────────────────────────────
 //
 // ⛔ Adding an entry here is not a way to silence a finding — it is a claim
@@ -339,17 +356,6 @@ const QUOTATION_EXEMPTIONS = Object.freeze([
       'The ADR-0087 level ruling itself, quoting the wrong form in order to '
       + 'forbid it. This gate exists because of this sentence; reddening on it '
       + 'would make the gate refuse its own authority.',
-  },
-  {
-    file: 'docs/v17-docs-sweep.md',
-    major: 18,
-    kind: 'quotation',
-    covers: 1,
-    witness: /\*\*Fingerprint added:\*\* the `@objectstack\/spec` 18 row above/,
-    why:
-      'The sweep ledger\'s append-only run log, recording the run that added '
-      + 'the detection fingerprint for this class. The log is history: '
-      + 'rewriting the number would falsify what that run did.',
   },
   {
     file: 'packages/spec/src/shared/retired-key.test.ts',
@@ -574,6 +580,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the protocol major is never attached to the package name → GREEN': 1,
   'R1 — a double-backtick pattern span → GREEN': 1,
   'R1 — a SINGLE-backtick span is the live tombstone form → RED': 1,
+  'R1 — the relocated fingerprint with its double backticks reduced to single → RED': 1,
   'R1 — a ```-fenced code block is NOT a pattern span → RED': 1,
   'R2 — a witnessed quotation entry → GREEN': 1,
   'R2 — a witnessed measurement count → GREEN': 1,
@@ -597,7 +604,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // duplicate-label refusal: two rows sharing a label collapse to ONE key above,
 // so the roster falls below this number; the table cross-check names WHICH
 // label collided.
-const SELF_TEST_BATTERY_FLOOR = 33;
+const SELF_TEST_BATTERY_FLOOR = 34;
 
 // The fixtures' reference major, and the tree one major up from it.
 const MANIFEST_17 = JSON.stringify({ name: PKG, version: `${SELF_FIXTURE_MAJOR}.4.0` });
@@ -611,6 +618,13 @@ const PARTITION_SHARD_TABLE =
 
 function selfTest() {
   const F = (text, file = 'packages/core/src/demo.ts') => [{ file, text }];
+  // A real ledger entry, looked up by the file it excuses — never by position,
+  // so retiring one entry cannot silently re-point a row at its neighbour.
+  const ledgerEntry = (file) => {
+    const entry = QUOTATION_EXEMPTIONS.find((e) => e.file === file);
+    if (!entry) throw new Error(`no QUOTATION_EXEMPTIONS entry names ${file}`);
+    return entry;
+  };
 
   const cases = [
     {
@@ -731,18 +745,27 @@ function selfTest() {
     },
     {
       label: 'R1 — a double-backtick pattern span → GREEN',
-      files: F(
-        '| `` `@objectstack/spec` 18 `` (any v17 removal dated to **18**) | dates a removal '
-        + 'that ships in **17** to the next major | #4286 |\n',
-        'docs/v17-docs-sweep.md',
-      ),
+      files: F(SWEEP_FINGERPRINT, 'docs/fingerprints.md'),
       expect: 'green',
     },
     {
       label: 'R1 — a SINGLE-backtick span is the live tombstone form → RED',
-      files: F('Removed in `@objectstack/spec` 18 under ADR-0049.\n', 'docs/v17-docs-sweep.md'),
+      files: F('Removed in `@objectstack/spec` 18 under ADR-0049.\n', 'docs/fingerprints.md'),
       expect: 'red',
-      wants: [/v17-docs-sweep\.md:1/],
+      wants: [/fingerprints\.md:1/],
+    },
+    {
+      // The negative control for the row above: the SAME relocated row with
+      // only its delimiters changed. Were the replacement to miss, the text
+      // would stay a pattern span and this row would read GREEN — a red here
+      // is therefore also proof the fixture still carries the citation.
+      label: 'R1 — the relocated fingerprint with its double backticks reduced to single → RED',
+      files: F(
+        SWEEP_FINGERPRINT.replace('`` `@objectstack/spec` 18 ``', '`@objectstack/spec` 18'),
+        'docs/fingerprints.md',
+      ),
+      expect: 'red',
+      wants: [/fingerprints\.md:1 .*18, above the published major 17/],
     },
     {
       label: 'R1 — a ```-fenced code block is NOT a pattern span → RED',
@@ -767,7 +790,7 @@ function selfTest() {
         + "        + 'controls objectstack 12966 and @objectstack/spec 4997 on the same corpus.',\n",
         'packages/spec/src/migrations/entries/semantic/18.kernel-health-check-and-hot-reload-durations-unit-in-key.ts',
       ),
-      ledger: [QUOTATION_EXEMPTIONS[3]],
+      ledger: [ledgerEntry('packages/spec/src/migrations/entries/semantic/18.kernel-health-check-and-hot-reload-durations-unit-in-key.ts')],
       expect: 'green',
     },
     {
@@ -777,7 +800,7 @@ function selfTest() {
         + '"`@objectstack/spec` 18" is wrong on the day it is written (#18021).\n',
         'docs/adr/0087-metadata-protocol-upgrade-contract.md',
       ),
-      ledger: [QUOTATION_EXEMPTIONS[0]],
+      ledger: [ledgerEntry('docs/adr/0087-metadata-protocol-upgrade-contract.md')],
       expect: 'green',
     },
     {
@@ -788,7 +811,7 @@ function selfTest() {
         + '\nAnd separately: `startTime` was removed in @objectstack/spec 18 (ADR-0049).\n',
         'docs/adr/0087-metadata-protocol-upgrade-contract.md',
       ),
-      ledger: [QUOTATION_EXEMPTIONS[0]],
+      ledger: [ledgerEntry('docs/adr/0087-metadata-protocol-upgrade-contract.md')],
       expect: 'red',
       wants: [/0087-metadata-protocol-upgrade-contract\.md:4/],
     },
@@ -796,7 +819,7 @@ function selfTest() {
       label: 'R2 — a witness that matches nothing → RED (self-invalidating)',
       files: F('Nothing here quotes the bad form, though the package is named: @objectstack/spec 17.\n',
         'docs/adr/0087-metadata-protocol-upgrade-contract.md'),
-      ledger: [QUOTATION_EXEMPTIONS[0]],
+      ledger: [ledgerEntry('docs/adr/0087-metadata-protocol-upgrade-contract.md')],
       expect: 'red',
       wants: [/matched NOTHING/, /no longer finds the sentence it excuses/],
     },
@@ -810,7 +833,7 @@ function selfTest() {
         + "const E = '`z` was removed in @objectstack/spec 99 — a FIFTH, unpinned.';\n",
         'packages/spec/src/shared/retired-key.test.ts',
       ),
-      ledger: [QUOTATION_EXEMPTIONS[2]],
+      ledger: [ledgerEntry('packages/spec/src/shared/retired-key.test.ts')],
       expect: 'red',
       wants: [/covers 5 citation\(s\), pinned at 4/],
     },
@@ -821,11 +844,11 @@ function selfTest() {
       expect: 'green',
     },
     {
-      // The two quotation sentences the real ledger excuses, verbatim in
-      // shape, on a tree that reached their major: legitimate citations now,
-      // so neither entry has anything to excuse. Before dormancy both read
-      // "matched NOTHING" here — the version branch's red, with the quotations
-      // exactly where they always were.
+      // The quotation sentence the real ledger excuses at 18, verbatim in
+      // shape, on a tree that reached its major: a legitimate citation now,
+      // so the entry has nothing to excuse. Before dormancy it read "matched
+      // NOTHING" here — the version branch's red, with the quotation exactly
+      // where it always was.
       label: 'R2 — an entry at or below the published major is DORMANT, never a matched-NOTHING red → GREEN',
       files: [
         {
@@ -833,12 +856,8 @@ function selfTest() {
           text: 'The ruling: prose dating it to\n'
             + '"`@objectstack/spec` 18" is wrong on the day it is written (#18021).\n',
         },
-        {
-          file: 'docs/v17-docs-sweep.md',
-          text: '- **Fingerprint added:** the `@objectstack/spec` 18 row above. Runs 1-2 matched on\n',
-        },
       ],
-      ledger: [QUOTATION_EXEMPTIONS[0], QUOTATION_EXEMPTIONS[1]],
+      ledger: [ledgerEntry('docs/adr/0087-metadata-protocol-upgrade-contract.md')],
       manifest: MANIFEST_18,
       expect: 'green',
     },
