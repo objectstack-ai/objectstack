@@ -242,6 +242,8 @@ export class FieldFileService implements IFieldFileService {
     const ids = [...new Set(fileIds.filter(nonEmptyString))];
     const found = new Map<string, FieldFileDescription>();
     if (ids.length === 0) return found;
+    // Which organization's files the read reaches is the driver's tenant term,
+    // the lifecycle's own lookup channel. ⛔ No organization comparison here.
     const rows =
       (await engine.find('sys_file', {
         where: { id: { $in: ids } },

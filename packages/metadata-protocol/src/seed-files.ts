@@ -176,7 +176,13 @@ export class SeedDatasetFiles {
     willWrite: boolean;
     dryRun: boolean;
   }): Promise<SeedFileRowOutcome> {
-    const claims: Array<{ field: string; fileIds: string[] }> = [];
+    // Every field is judged before any file is stored, so a refused row stores
+    // nothing.
+    const planned: Array<{
+      field: string;
+      def: FileField;
+      contents: Array<{ reference: SeedFileReference; bytes: Buffer; content: SeedFileContent }>;
+    }> = [];
     for (const [field, def] of this.fields) {
       const value = args.record[field];
       if (value === undefined || value === null) continue;
@@ -240,7 +246,11 @@ export class SeedDatasetFiles {
             'Load this seed through a server that composes the storage service.',
         );
       }
+      planned.push({ field, def, contents });
+    }
 
+    const claims: Array<{ field: string; fileIds: string[] }> = [];
+    for (const { field, def, contents } of planned) {
       // A file the matched row already holds, stored from the same path with
       // the same bytes, name and type, is kept; each held file serves once.
       const held = args.existing ? heldIdsOf(args.existing[field]) : [];
@@ -267,7 +277,7 @@ export class SeedDatasetFiles {
           continue;
         }
         try {
-          const stored = await this.service.storeFile({
+          const stored = await this.service!.storeFile({
             organizationId: args.organizationId,
             filename: name,
             mimeType,

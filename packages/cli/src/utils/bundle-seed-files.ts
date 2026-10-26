@@ -6,17 +6,23 @@ import path from 'node:path';
 import { isSeedFileReference, type SeedFileContent, type SeedFileReference } from '@objectstack/spec/data';
 
 /**
- * [#25779] `os build` / `os compile`'s half of a seed file: read each file a
- * seed record names with `seedFile(path)` and write its bytes into the
- * dataset's `files` map, so the compiled artifact carries them to every boot
- * that loads it — `os dev`, `os serve`, a published package, an artifact URL.
+ * [#25779] The CLI's half of a seed file — the files seed records name with
+ * `seedFile(path)`, read off disk and carried in the artifact, so every boot
+ * that loads it has the bytes: `os dev`, `os serve`, a published package, an
+ * artifact URL.
  *
- * The path is relative to the package root, the directory holding
- * `objectstack.config.ts` (the root a declarative connector's file ref resolves
- * against too), and confined to it. A path that names no file there, or a file
- * whose type cannot be told from its extension and that no reference names a
- * `contentType` for, fails the build: the seed would otherwise load without the
- * file its field requires.
+ * Two calls, split the way the package docs are (`collectAndLintDocs` /
+ * `placeCollectedDocs`):
+ *
+ *  - {@link collectSeedFiles} — the GATE, run by `os validate` and `os build`
+ *    alike. It reads each file, relative to the directory holding the config
+ *    (the root a declarative connector's file ref resolves against too) and
+ *    confined to it, and refuses a path that names no file, or a file whose
+ *    type cannot be told from its extension and that no reference names a
+ *    `contentType` for: the seed would otherwise load without the file its
+ *    field requires. It writes nothing.
+ *  - {@link placeSeedFiles} — `os build`'s ASSEMBLY: each dataset's bytes into
+ *    its `files` map. It judges nothing.
  */
 
 /** A refusal, located in the artifact like a schema issue is. */
@@ -26,8 +32,10 @@ export interface SeedFileBundleIssue {
   message: string;
 }
 
-export interface SeedFileBundleResult {
-  /** Files bundled, counted once per dataset that carries them. */
+export interface CollectedSeedFiles {
+  /** Each dataset that names a seed file, with the `files` map it is to carry. */
+  datasets: Map<object, Record<string, SeedFileContent>>;
+  /** Files read, counted once per dataset that carries them. */
   files: number;
   /** Their bytes, before base64. */
   bytes: number;
@@ -77,8 +85,13 @@ interface DatasetLike {
   files?: Record<string, SeedFileContent>;
 }
 
-/** Every seed dataset in the artifact — the top level's and each package body's — with where it sits. */
-function datasetsOf(bundle: Record<string, unknown>): Array<{ dataset: DatasetLike; location: string }> {
+/**
+ * Every seed dataset in the stack, with where it sits: the top level's
+ * `data`, the manifest's, and each `packages[i].manifest` body's. Read by
+ * position, off the objects themselves, because {@link placeSeedFiles} writes
+ * into these very datasets — the ones the artifact serializes.
+ */
+function datasetsOf(stack: Record<string, unknown>): Array<{ dataset: DatasetLike; location: string }> {
   const found: Array<{ dataset: DatasetLike; location: string }> = [];
   const seen = new Set<unknown>();
   const take = (list: unknown, location: string): void => {
@@ -89,11 +102,11 @@ function datasetsOf(bundle: Record<string, unknown>): Array<{ dataset: DatasetLi
       found.push({ dataset: dataset as DatasetLike, location: `${location}[${i}]` });
     });
   };
-  take(bundle.data, 'data');
-  const manifest = bundle.manifest as { data?: unknown } | undefined;
+  take(stack.data, 'data');
+  const manifest = stack.manifest as { data?: unknown } | undefined;
   if (manifest && typeof manifest === 'object') take(manifest.data, 'manifest.data');
-  if (Array.isArray(bundle.packages)) {
-    bundle.packages.forEach((pkg, i) => {
+  if (Array.isArray(stack.packages)) {
+    stack.packages.forEach((pkg, i) => {
       const body = (pkg as { manifest?: { data?: unknown } } | null)?.manifest;
       if (body && typeof body === 'object') take(body.data, `packages[${i}].manifest.data`);
     });
@@ -125,15 +138,16 @@ function referencesOf(
 }
 
 /**
- * Write the bytes of every seed file the artifact's datasets name into their
- * `files` maps, reading each path under `packageRoot`. Changes `bundle` in
- * place; answers what it bundled and what it refused.
+ * Read every seed file the stack's datasets name — the top level's, the
+ * manifest's and each package body's, where each dataset sits — and judge it.
+ * `configPath` is the config's path; seed file paths resolve against its
+ * directory. Reads only: the stack is not changed.
  */
-export function bundleSeedFiles(bundle: Record<string, unknown>, packageRoot: string): SeedFileBundleResult {
-  const result: SeedFileBundleResult = { files: 0, bytes: 0, issues: [] };
-  const root = path.resolve(packageRoot);
+export function collectSeedFiles(configPath: string, stack: Record<string, unknown>): CollectedSeedFiles {
+  const result: CollectedSeedFiles = { datasets: new Map(), files: 0, bytes: 0, issues: [] };
+  const root = path.dirname(path.resolve(configPath));
   const read = new Map<string, Buffer | null>();
-  for (const { dataset, location } of datasetsOf(bundle)) {
+  for (const { dataset, location } of datasetsOf(stack)) {
     const byPath = referencesOf(dataset, location);
     if (byPath.size === 0) continue;
     const files: Record<string, SeedFileContent> = { ...(dataset.files ?? {}) };
@@ -167,8 +181,9 @@ export function bundleSeedFiles(bundle: Record<string, unknown>, packageRoot: st
         });
         continue;
       }
+      // A type the author names wins over the one the extension suggests.
       const declared = references.map((r) => r.reference.contentType).find((t) => typeof t === 'string');
-      const contentType = SEED_FILE_TYPES[path.extname(seedPath).toLowerCase()] ?? declared;
+      const contentType = declared ?? SEED_FILE_TYPES[path.extname(seedPath).toLowerCase()];
       if (!contentType) {
         result.issues.push({
           location: first,
@@ -187,7 +202,17 @@ export function bundleSeedFiles(bundle: Record<string, unknown>, packageRoot: st
       result.files += 1;
       result.bytes += bytes.byteLength;
     }
-    dataset.files = files;
+    result.datasets.set(dataset, files);
   }
   return result;
+}
+
+/**
+ * Write what {@link collectSeedFiles} read into the datasets it read it for:
+ * each one's `files` map. Run after the gate passed, on the stack it read.
+ */
+export function placeSeedFiles(collected: CollectedSeedFiles): void {
+  for (const [dataset, files] of collected.datasets) {
+    (dataset as DatasetLike).files = files;
+  }
 }

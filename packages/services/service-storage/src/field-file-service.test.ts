@@ -81,14 +81,21 @@ afterEach(async () => {
   }
 });
 
-/** A real engine with `sys_file` and `ff_doc`, whose `file` field holds one file and `scans` several. */
-async function engine(): Promise<ObjectQL> {
+/**
+ * A real engine with `sys_file` and `ff_doc`, whose `file` field holds one
+ * file and `scans` several, under `posture`. Which organization's files a read
+ * reaches is the driver's tenant term — the wall the posture puts up, never a
+ * comparison the verb writes — so a block that pins the organization boundary
+ * boots `isolated`; under `single` there is one tenant and no wall.
+ */
+async function engine(posture: 'single' | 'isolated'): Promise<ObjectQL> {
   const ql = new ObjectQL({ logger: quietLogger() } as any);
   ql.registerDriver(
     new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }) as any,
     true,
   );
   await ql.init();
+  ql.setTenancyPostureProvider(() => posture);
   engines.push(ql);
   ql.registry.registerObject(SystemFile as any, 'test-25779');
   ql.registry.registerObject(
@@ -103,8 +110,8 @@ async function engine(): Promise<ObjectQL> {
 }
 
 /** Boot the plugin over a fresh engine; `ready: false` stops after `start()`, as a seed in `start()` sees it. */
-async function boot(opts: { ready?: boolean } = {}) {
-  const ql = await engine();
+async function boot(opts: { ready?: boolean; posture?: 'single' | 'isolated' } = {}) {
+  const ql = await engine(opts.posture ?? 'single');
   const rootDir = await fs.mkdtemp(join(tmpdir(), 'oss-25779-'));
   const plugin = new StorageServicePlugin({ adapter: 'local', local: { rootDir }, registerRoutes: false });
   const { ctx, run } = makeCtx();
@@ -192,7 +199,7 @@ describe('FIELD_FILE_SERVICE: the server-side field-file verb (#25779)', () => {
   });
 
   it('describes the files that exist in the organization, and no other', async () => {
-    const { files } = await boot();
+    const { files } = await boot({ posture: 'isolated' });
     const a = await files.storeFile(input({ organizationId: 'org_a' }));
     const b = await files.storeFile(input({ organizationId: 'org_b' }));
     const inA = await files.describeFiles([a.fileId, b.fileId, 'missing'], 'org_a');
@@ -229,7 +236,7 @@ describe('FIELD_FILE_SERVICE: the server-side field-file verb (#25779)', () => {
   });
 
   it('never takes a file another slot owns, and refuses a file that does not exist', async () => {
-    const { files } = await boot();
+    const { files } = await boot({ posture: 'isolated' });
     const owned = await files.storeFile(input());
     await files.claimFiles(slot('doc_1'), [owned.fileId], 'org_a');
     expect(await refusalOf(files.claimFiles(slot('doc_2'), [owned.fileId], 'org_a'))).toMatchObject({
