@@ -1520,7 +1520,7 @@ describe("DelegatedAdminGate — a set that only shares the position's name is n
   });
 
   it('the delegable-scope listing offers exactly the positions the write admits', async () => {
-    const all = ['audit_pos', 'clerk_pos', 'duty_admin', 'duty_pos', 'duty_plain', 'lead_pos', 'rep_pos'];
+    const all = ['audit_pos', 'clerk_pos', 'duty_admin', 'duty_plain', 'duty_pos', 'lead_pos', 'rep_pos'];
     expect(await n.offered('narrow')).toEqual(all.filter((p) => p !== 'audit_pos' && p !== 'duty_admin'));
     expect(await n.offered('wide')).toEqual(all.filter((p) => p !== 'audit_pos' && p !== 'duty_admin'));
     for (const principal of ['narrow', 'wide']) {
