@@ -139,7 +139,11 @@ const metric = (id, title, layout, extra) => ({
   id, type: 'metric', title, dataset: 'opportunity_metrics', values: ['total_amount'], layout, ...extra,
 });
 const BARE = (layout) => metric('bare', 'Total Pipeline', layout);
-const DELTA = (layout) => metric('delta', 'Pipeline vs prior', layout, { compareTo: { kind: 'previousPeriod' } });
+// A comparison is asked only over a dated window, so the delta tile states one.
+const DELTA = (layout) => metric('delta', 'Pipeline vs prior', layout, {
+  filter: { close_date: { $gte: '2026-04-01', $lte: '2026-06-30' } },
+  compareTo: { kind: 'previousPeriod' },
+});
 
 // Each case is its own dashboard (see the header). 12 columns, a quarter-width tile.
 const CASES = [

@@ -25,12 +25,13 @@
 // lives in the dogfood suite, against a real app:
 // `packages/qa/dogfood/test/org-scoped-sharing-rule-listing.dogfood.test.ts`.
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 // `.js` extension deliberately: this package resolves NodeNext, so an
 // extensionless relative import is a TS2835 the type-check-debt ratchet counts
 // (the sibling test files predate the gate and carry theirs in the ledger — a
 // NEW one would raise it, which is not something a test file gets to do).
-import { bootStack, type VerifyStack } from './harness.js';
+import { bootStack, type BootOptions, type VerifyStack } from './harness.js';
+import { warmUpBoot } from './boot-warm-up.testkit.js';
 
 const app = {
   manifest: {
@@ -55,6 +56,11 @@ const SYS = { isSystem: true } as const;
 
 // Booting the full in-process stack runs well past vitest's 5s default.
 const BOOT_TIMEOUT = 120_000;
+
+// The boot's first load, paid during collection rather than in the first
+// boot's clock (see `boot-warm-up.testkit.ts`). The first boot below uses the
+// default options.
+await warmUpBoot();
 
 afterEach(() => {
   delete process.env.OS_TENANCY_POSTURE;
@@ -94,7 +100,56 @@ async function sessionOrgId(stack: VerifyStack): Promise<string | null> {
   return null;
 }
 
+/** What one boot of `app` answered, read while it was live. */
+interface BootReading {
+  posture: TenancyShape;
+  orgs: any[];
+  sessionOrgId: string | null;
+  /** The roles of the admin's `sys_member` rows in the first organization. */
+  adminRoles: unknown[];
+}
+
+/**
+ * Boot `app` with `opts`, read the posture, the organizations, the org id the
+ * admin's session carries and the admin's membership roles, and stop. Each
+ * read is one the cases below used to make on a boot of their own with the
+ * same options.
+ */
+async function bootAndRead(opts: BootOptions): Promise<BootReading> {
+  const stack = await bootStack(app, opts);
+  try {
+    const shape = await posture(stack);
+    const ql = await stack.kernel.getServiceAsync<any>('objectql');
+    const orgs = rowsOf(await ql.find('sys_organization', { limit: 10, context: SYS }));
+    const orgId = await sessionOrgId(stack);
+    const users = rowsOf(
+      await ql.find('sys_user', { where: { email: 'admin@objectos.ai' }, limit: 1, context: SYS }),
+    );
+    const memberships = rowsOf(
+      await ql.find('sys_member', {
+        where: { user_id: users[0]?.id, organization_id: orgs[0]?.id },
+        limit: 10,
+        context: SYS,
+      }),
+    );
+    return { posture: shape, orgs, sessionOrgId: orgId, adminRoles: memberships.map((m) => m.role) };
+  } finally {
+    await stack.stop();
+  }
+}
+
 describe('bootStack orgContext (#7762)', () => {
+  // Two boots for the three cases that read one: the flag off (the default
+  // boot) and on, in that order, each stopped before the next starts — the
+  // order the ruling case always booted them in. Every case only reads what a
+  // boot answered, so no case depends on another's run or on their order.
+  let off: BootReading;
+  let on: BootReading;
+  beforeAll(async () => {
+    off = await bootAndRead({});
+    on = await bootAndRead({ orgContext: true });
+  }, BOOT_TIMEOUT * 2);
+
   it(
     'THE RULING: the tenancy posture and `degraded` are IDENTICAL with the flag off vs on',
     async () => {
@@ -104,21 +159,8 @@ describe('bootStack orgContext (#7762)', () => {
       // so binding the admin to an organization must not move it. If this ever
       // fails, `orgContext` is making the open core claim a wall it does not
       // have and the option must not ship in that shape.
-      const off = await bootStack(app, {});
-      let baseline: TenancyShape;
-      try {
-        baseline = await posture(off);
-      } finally {
-        await off.stop();
-      }
-
-      const on = await bootStack(app, { orgContext: true });
-      let withOrg: TenancyShape;
-      try {
-        withOrg = await posture(on);
-      } finally {
-        await on.stop();
-      }
+      const baseline = off.posture;
+      const withOrg = on.posture;
 
       expect(withOrg).toEqual(baseline);
       // Spelled out too, so a future refactor of `posture()` cannot make the
@@ -135,22 +177,16 @@ describe('bootStack orgContext (#7762)', () => {
   it(
     'binds the admin to a real organization, and their session carries it',
     async () => {
-      const stack = await bootStack(app, { orgContext: true });
-      try {
-        const ql = await stack.kernel.getServiceAsync<any>('objectql');
-        const orgs = rowsOf(await ql.find('sys_organization', { limit: 10, context: SYS }));
-        expect(orgs.length, 'the default-org bootstrap minted an organization').toBeGreaterThan(0);
+      const { orgs } = on;
+      expect(orgs.length, 'the default-org bootstrap minted an organization').toBeGreaterThan(0);
 
-        // `session.activeOrganizationId` is the ONE field `resolveAuthzContext`
-        // reads into `tenantId` → `ExecutionContext`. Without it on the session
-        // row, every org-scoped read downstream is org-less no matter how many
-        // organizations exist in the table.
-        const orgId = await sessionOrgId(stack);
-        expect(orgId, "the admin's session carries an active organization").toBeTruthy();
-        expect(orgs.map((o) => o.id)).toContain(orgId);
-      } finally {
-        await stack.stop();
-      }
+      // `session.activeOrganizationId` is the ONE field `resolveAuthzContext`
+      // reads into `tenantId` → `ExecutionContext`. Without it on the session
+      // row, every org-scoped read downstream is org-less no matter how many
+      // organizations exist in the table.
+      const orgId = on.sessionOrgId;
+      expect(orgId, "the admin's session carries an active organization").toBeTruthy();
+      expect(orgs.map((o) => o.id)).toContain(orgId);
     },
     BOOT_TIMEOUT,
   );
@@ -162,31 +198,15 @@ describe('bootStack orgContext (#7762)', () => {
       // Default Organization (a boot invariant), and the admin is bound to it
       // without asking — the shape `objectstack dev` / `serve` boot. There is
       // no org-less `single` boot left to keep a fixture on (ADR-0131 D11).
-      const stack = await bootStack(app, {});
-      try {
-        const ql = await stack.kernel.getServiceAsync<any>('objectql');
-        const orgs = rowsOf(await ql.find('sys_organization', { limit: 10, context: SYS }));
-        expect(orgs.map((o) => o.slug)).toEqual(['default']);
-        expect(await sessionOrgId(stack)).toBe(orgs[0].id);
-        // The harness line this case pins is the owner bind (ADR-0093 D7), on
-        // for every boot: the admin OWNS the Default Organization. The two
-        // assertions above hold without it (the boot invariant creates the
-        // organization and the membership reconciler binds the admin), but as
-        // `member` — which is what an `objectstack dev` admin never is.
-        const users = rowsOf(
-          await ql.find('sys_user', { where: { email: 'admin@objectos.ai' }, limit: 1, context: SYS }),
-        );
-        const memberships = rowsOf(
-          await ql.find('sys_member', {
-            where: { user_id: users[0]?.id, organization_id: orgs[0].id },
-            limit: 10,
-            context: SYS,
-          }),
-        );
-        expect(memberships.map((m) => m.role)).toEqual(['owner']);
-      } finally {
-        await stack.stop();
-      }
+      const { orgs } = off;
+      expect(orgs.map((o) => o.slug)).toEqual(['default']);
+      expect(off.sessionOrgId).toBe(orgs[0].id);
+      // The harness line this case pins is the owner bind (ADR-0093 D7), on
+      // for every boot: the admin OWNS the Default Organization. The two
+      // assertions above hold without it (the boot invariant creates the
+      // organization and the membership reconciler binds the admin), but as
+      // `member` — which is what an `objectstack dev` admin never is.
+      expect(off.adminRoles).toEqual(['owner']);
     },
     BOOT_TIMEOUT,
   );

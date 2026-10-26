@@ -193,7 +193,15 @@ export function tierOfFile(pkgRoot: string, relPath: string): TierSignals {
 // ---------------------------------------------------------------------------
 
 const TEST_FILE_RE = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
-const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.turbo', 'coverage']);
+/**
+ * `tmp` is this package's git-ignored scratch tree (#26047). Sibling tests
+ * render whole scaffolds into it, real `*.test.ts` files included, and delete
+ * them while other children load this config. Walking it put fixture files in
+ * the population and, when a delete landed mid-walk, threw `ENOENT` out of the
+ * config load, so a `vitest list` child exited 1. Nothing under it is ever a
+ * test of this package.
+ */
+const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.turbo', 'coverage', 'tmp']);
 
 /**
  * `pkgRoot`-relative, POSIX-separated paths of every test file on disk that

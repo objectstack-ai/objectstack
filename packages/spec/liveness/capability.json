@@ -11,19 +11,19 @@
     "label": {
       "status": "live",
       "verifiedAt": "2026-10-10",
-      "evidence": "objectui: packages/app-shell/src/views/metadata-admin/ResourceListPage.tsx (the default `label` / `description` columns of every metadata type's list, the capability list from `GET /api/v1/meta/capability` included; read at the pinned `.objectui-sha` 20c6d351ad)",
+      "evidence": "ui/packages/app-shell/src/views/metadata-admin/ResourceListPage.tsx (the default `label` / `description` columns of every metadata type's list, the capability list from `GET /api/v1/meta/capability` included; read at the pinned `.objectui-sha` 20c6d351ad)",
       "note": "display (Setup's capability list/detail, rendered from the sys_capability row). 2026-08-28: RE-ANCHORED (commit 8f10a79f7) and REPOINTED — `:122` had rotted onto a docblock sentence about the `unchanged` outcome counter, ~45 lines above `capabilityRowFields`. Its two siblings cited `:123` and `:124`, the next two lines of that same docblock: the three row-field pointers had drifted as ONE block, which is why none of them looked wrong beside the others. Re-closed by hand against 8cb96ec41."
     },
     "description": {
       "status": "live",
       "verifiedAt": "2026-10-10",
-      "evidence": "objectui: packages/app-shell/src/views/metadata-admin/ResourceListPage.tsx (the default `label` / `description` columns of every metadata type's list, the capability list from `GET /api/v1/meta/capability` included; read at the pinned `.objectui-sha` 20c6d351ad)",
+      "evidence": "ui/packages/app-shell/src/views/metadata-admin/ResourceListPage.tsx (the default `label` / `description` columns of every metadata type's list, the capability list from `GET /api/v1/meta/capability` included; read at the pinned `.objectui-sha` 20c6d351ad)",
       "note": "display. 2026-08-28: RE-ANCHORED (commit 8f10a79f7) and REPOINTED — `:123` had rotted onto the closing `*/` of that docblock (see the `label` entry: all three of this file's row-field pointers moved together). Re-closed by hand against 8cb96ec41."
     },
     "scope": {
       "status": "live",
       "verifiedAt": "2026-10-10",
-      "evidence": "objectui: packages/app-shell/src/views/metadata-admin/SchemaForm.tsx (the item page renders each property of the type's served schema, `scope` included, for a capability read from `GET /api/v1/meta/capability/:name`; read at the pinned `.objectui-sha` 20c6d351ad) — display",
+      "evidence": "ui/packages/app-shell/src/views/metadata-admin/SchemaForm.tsx (the item page renders each property of the type's served schema, `scope` included, for a capability read from `GET /api/v1/meta/capability/:name`; read at the pinned `.objectui-sha` 20c6d351ad) — display",
       "note": "platform vs org decides whether holding the capability is a global power or one scoped to the caller's organization — the same distinction PLATFORM_CAPABILITIES carries on the curated side. Not display: it is the field that would be escalated if a tenant could overlay a package-shipped declaration, which is why the #5961 registry entry sets `supportsOverlay: false` / `allowEnvironmentOverlay: false`. 2026-08-28: RE-ANCHORED (commit 8f10a79f7) and REPOINTED — `:124` had rotted onto `unchanged: number;`, the counter field itself (see the `label` entry). Re-closed by hand against 8cb96ec41."
     },
     "packageId": {
