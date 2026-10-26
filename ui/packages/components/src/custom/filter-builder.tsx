@@ -14,6 +14,7 @@ import {
   VIEW_FILTER_LIST_VALUE_OPERATORS,
   VIEW_FILTER_PAIR_VALUE_OPERATORS,
   normalizeFilterOperator,
+  type ViewFilterRule,
 } from "@objectstack/spec/ui"
 import { expandEmptyOperator } from "@objectstack/spec/data"
 import { SchemaRendererContext } from "@object-ui/react"
@@ -64,11 +65,17 @@ import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover"
  *     protocol has no member for (objectui#9559 ruling B keeps them opt-in and
  *     unfolded). It was `string`, which let a caller hand the builder an id no
  *     dropdown entry can hold.
- *   - `value` — REQUIRED and narrowed to the scalar-or-list union this builder
- *     edits, where the authority declares `value?: any`. Every exported helper
- *     below that takes a row's value (`reshapeFilterValue`, `retypeFilterValue`,
+ *   - `value` — the SPEC's rule value, taken BY REFERENCE
+ *     (`ViewFilterRule["value"]`, `@objectstack/spec/ui`), where the authority
+ *     declares `value?: any`. Every exported helper below that takes a row's
+ *     value (`reshapeFilterValue`, `retypeFilterValue`,
  *     `narrowFilterValueToOptions`, …) is typed on this member, so `any` here
- *     would switch their checking off in silence.
+ *     would switch their checking off in silence. OPTIONAL and admitting
+ *     `null`, as the spec's is: a value-less operator (`is_null`, `is_empty`,
+ *     …) is authored with no `value`, so a required member refused the
+ *     authored `FilterGroup` the `filter-builder` renderer hands over. A list
+ *     or pair holds strings and numbers only, as the spec's does — a boolean
+ *     carried into one is spelled as its string (`normalizeToArray`).
  *
  * Its own NAME, not the authority's (objectui#6349, batch 12). Under the
  * authority's name this was a second declaration of `FilterBuilderCondition`
@@ -81,7 +88,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover"
 export interface FilterBuilderRow
   extends Omit<AuthoredFilterBuilderCondition, "operator" | "value"> {
   operator: FilterBuilderOperator
-  value: string | number | boolean | (string | number | boolean)[]
+  value?: ViewFilterRule["value"]
 }
 
 /**
@@ -859,21 +866,26 @@ export function retypeFilterValue(
 
   switch (filterValueArity(operator)) {
     case "list": {
-      const carried: (string | number | boolean)[] = []
+      const carried: (string | number)[] = []
       for (const entry of normalizeToArray(value)) {
         const converted = convertScalarToFamily(entry, family)
-        if (converted !== undefined && converted !== "") carried.push(converted)
+        if (converted !== undefined && converted !== "") carried.push(toListEntry(converted))
       }
       return carried
     }
     case "pair": {
       const [min = "", max = ""] = normalizeToArray(value)
-      const lower = convertScalarToFamily(min, family) ?? ""
-      const upper = convertScalarToFamily(max, family) ?? ""
+      const lower = toListEntry(convertScalarToFamily(min, family) ?? "")
+      const upper = toListEntry(convertScalarToFamily(max, family) ?? "")
       return lower === "" && upper === "" ? [] : [lower, upper]
     }
     default: {
       const scalar = Array.isArray(value) ? (value[0] ?? "") : value
+      // A row with no value — the spec's value-less operators are authored
+      // without one — keeps having none. Converting the absence instead read
+      // `undefined` as a value: the text family spelled it `"undefined"` and
+      // the number family threw on `.trim()`.
+      if (isValueUnset(scalar)) return scalar
       return convertScalarToFamily(scalar, family) ?? ""
     }
   }
@@ -1340,7 +1352,7 @@ function offeredOperatorsForRow(
  */
 function isValueUnset(
   value: FilterBuilderRow["value"] | undefined | null,
-): boolean {
+): value is undefined | null | "" {
   return value === undefined || value === null || value === ""
 }
 
@@ -1358,10 +1370,22 @@ function displayScalarValue(value: FilterBuilderRow["value"]): string {
   return isValueUnset(value) ? "" : String(value)
 }
 
+/**
+ * One entry of a list or pair value, in the spec's element vocabulary: a
+ * `ViewFilterRule` list holds strings and numbers, never booleans. A boolean
+ * that reaches a list — an authored `equals true` row whose operator is then
+ * switched to `in` — is spelled as its string, which is also the key a static
+ * option compares on (`allowed.has(String(entry))`), so the entry the user
+ * chose stays the entry they see.
+ */
+function toListEntry(entry: string | number | boolean): string | number {
+  return typeof entry === "boolean" ? String(entry) : entry
+}
+
 /** Normalize a filter value into an array for multi-select scenarios */
-function normalizeToArray(value: FilterBuilderRow["value"]): (string | number | boolean)[] {
+function normalizeToArray(value: FilterBuilderRow["value"]): (string | number)[] {
   if (Array.isArray(value)) return value
-  if (!isValueUnset(value)) return [value as string | number | boolean]
+  if (!isValueUnset(value)) return [toListEntry(value)]
   return []
 }
 
