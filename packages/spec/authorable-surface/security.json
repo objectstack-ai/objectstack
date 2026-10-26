@@ -102,6 +102,7 @@
     "security/ExplainRequest:userId",
     "security/FieldPermission:editable",
     "security/FieldPermission:readable",
+    "security/FieldPermission:when",
     "security/MembershipKey:description",
     "security/MembershipKey:filter",
     "security/MembershipKey:label",

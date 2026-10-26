@@ -355,7 +355,7 @@ describe('[#25653] the predicate also reads the app-automation elevation mark', 
   const ASSIGNMENT = new Set(['sys_user_position', 'sys_user_permission_set']);
 
   for (const [source, context, subject, prescription] of [
-    ['hook', HOOK_SYSTEM, /a hook that runs as system \(runAs: 'system'\)/, /Set the hook's runAs to 'user'/],
+    ['hook', HOOK_SYSTEM, /a hook that runs as system \(runAs: 'system', a system context it inherits, or ctx\.api\.sudo\(\)\)/, /Set the hook's runAs to 'user' and leave ctx\.api\.sudo\(\) out/],
     ['action', ACTION_SYSTEM, /an action body \(an action body runs as system\)/, /a flow whose runAs is 'user'/],
   ] as const) {
     for (const object of OBJECTS) {

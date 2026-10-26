@@ -8,6 +8,29 @@ import type {
   FieldPermissionParsed,
 } from '@objectstack/spec/security';
 import { objectPermissionGrants } from '@objectstack/spec/security';
+import { fieldPermissionVote, type FieldConditionVerdict } from '@objectstack/core';
+
+/**
+ * [#25866] How a caller judges a row-conditioned field permission entry's
+ * `when` for the row it holds: `matched` (the entry votes as declared),
+ * `unmatched` (the entry is absent) or `unjudged` (the entry is its lock).
+ * The write gate supplies one over the incoming row of an insert or the stored
+ * row of a by-id update; a reader that holds no row supplies none, and every
+ * conditioned entry is then `unjudged`.
+ */
+export type FieldConditionJudge = (when: string) => FieldConditionVerdict;
+
+/** [#25866] One row-conditioned entry, as a row-blind reader reports it. */
+export interface ConditionedFieldEntry {
+  /** The field name, without the object prefix. */
+  field: string;
+  /** The declaring permission set's name. */
+  set: string;
+  /** The entry's `when`, as authored. */
+  when: string;
+  /** The entry's edit vote on a matching row. */
+  editable: boolean;
+}
 
 /**
  * Operation type mapping to permission checks.
@@ -425,10 +448,23 @@ export class PermissionEvaluator {
    * Get the merged field permissions for an object.
    * Returns a map of field names to their effective permissions.
    * Uses "most permissive" merging.
+   *
+   * [#25866 / ruling of record 6408558941] An entry that carries a `when`
+   * (`FieldPermissionSchema.when`, a row condition in RLS `using`'s CEL)
+   * votes only on the rows the condition names. `judge` is the caller's
+   * reading of that condition for the row it holds (`FieldConditionJudge`);
+   * the vote each verdict yields is `fieldPermissionVote` (`@objectstack/core`),
+   * shared with the row-blind `/auth/me/permissions` merge. Without a `judge`
+   * — every reader that holds no row — a conditioned entry is `unjudged`:
+   * its read bit as declared, NO edit grant, so a row-blind reading is never
+   * wider than the write gate's. An `unmatched` entry is ABSENT, as if the
+   * set had not declared the field: the merge below is unchanged for every
+   * entry without a `when`, and only DECLARING entries vote, as before.
    */
   getFieldPermissions(
     objectName: string,
-    permissionSets: PermissionSet[]
+    permissionSets: PermissionSet[],
+    judge?: FieldConditionJudge,
   ): Record<string, FieldPermissionParsed> {
     const result: Record<string, FieldPermissionParsed> = {};
 
@@ -440,17 +476,49 @@ export class PermissionEvaluator {
         if (!key.startsWith(`${objectName}.`)) continue;
         const fieldName = key.substring(objectName.length + 1);
 
+        const when = (perm as { when?: string }).when;
+        const vote = fieldPermissionVote(perm, when === undefined ? 'matched' : judge ? judge(when) : 'unjudged');
+        if (!vote) continue;
+
         if (!result[fieldName]) {
           result[fieldName] = { readable: false, editable: false };
         }
 
         // Most permissive merge
-        if (perm.readable) result[fieldName].readable = true;
-        if (perm.editable) result[fieldName].editable = true;
+        if (vote.readable) result[fieldName].readable = true;
+        if (vote.editable) result[fieldName].editable = true;
       }
     }
 
     return result;
+  }
+
+  /**
+   * [#25866] The row-conditioned entries the sets declare on `objectName`,
+   * for a reader that holds no row (`os explain`): each is reported AS a
+   * row-conditioned lock — judged per row by the write gate, applied as its
+   * lock everywhere else — rather than folded silently into the mask.
+   */
+  conditionedFieldEntries(
+    objectName: string,
+    permissionSets: PermissionSet[],
+  ): ConditionedFieldEntry[] {
+    const out: ConditionedFieldEntry[] = [];
+    for (const ps of permissionSets) {
+      if (!ps.fields) continue;
+      for (const [key, perm] of Object.entries(ps.fields)) {
+        if (!key.startsWith(`${objectName}.`)) continue;
+        const when = (perm as { when?: string }).when;
+        if (when === undefined) continue;
+        out.push({
+          field: key.substring(objectName.length + 1),
+          set: ps.name,
+          when,
+          editable: perm.editable === true,
+        });
+      }
+    }
+    return out;
   }
 
   /**

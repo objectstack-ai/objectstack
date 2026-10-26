@@ -153,9 +153,12 @@ import {
   resolveUserAuthzGrants,
   // [#25653] The app-automation elevation mark: set by a hook's
   // `runAs: 'system'` derivation, carried across `createContext`'s parse —
-  // see `ScopedContext.withRunAs`.
+  // see `ScopedContext.withRunAs` — and by an app-authored hook's inherited
+  // elevation and `sudo()`, and `ObjectRepository.execute` — see
+  // `ScopedContext[APP_AUTHORED_HOOK_API]`.
   markAppAutomationElevation,
   carryAppAutomationElevation,
+  appAutomationElevationOf,
 } from '@objectstack/core';
 import { WriteEpoch, isWriteEpochOperation } from './write-epoch.js';
 import { bridgeAuthzInvalidation } from './authz-invalidation-bridge.js';
@@ -312,7 +315,7 @@ import {
   divergingHookPayloadKeys,
   MultiUpdateHookKeyDivergenceError,
 } from './multi-update-hook-key-divergence.js';
-import { UnscopedHookApi, SEED_USER_GRANTS, type HookRunAs, type HookRunAsRef, type RunAsDerivableApi } from './hook-run-as.js';
+import { UnscopedHookApi, SEED_USER_GRANTS, APP_AUTHORED_HOOK_API, type HookRunAs, type HookRunAsRef, type RunAsDerivableApi } from './hook-run-as.js';
 import type { HookWriteRecording } from './hook-write-provenance.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
 // [#19911] The settlement's question "does judging the FK's own lock need the
@@ -22957,7 +22960,14 @@ export class ObjectRepository implements IScopedObjectRepository {
    */
   async execute(actionName: string, params?: any): Promise<any> {
     if (this.engine.executeAction) {
-      const executionContext: ExecutionContext = { ...this.context, isSystem: true };
+      // [#25653] With the `'action'` mark, as `buildActionExecutionContext`
+      // (runtime) gives the REST and MCP doors' action bodies: the action this
+      // reaches is app-authored automation running elevated, so its writes to
+      // the four identity-assignment objects are refused (plugin-security).
+      const executionContext: ExecutionContext = markAppAutomationElevation(
+        { ...this.context, isSystem: true },
+        'action',
+      );
       return this.engine.executeAction(this.objectName, actionName, {
         ...params,
         userId: this.context.userId,
@@ -22990,17 +23000,60 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
     private engine: IDataEngine
   ) {}
 
+  /**
+   * [#25653] Set on the api an app-authored hook is handed
+   * ({@link APP_AUTHORED_HOOK_API}) and kept by every api derived from it
+   * ({@link derive}); read by {@link sudo}.
+   */
+  private appAuthored = false;
+
+  /** A child over `executionContext` that keeps this api's provenance. */
+  private derive(executionContext: ExecutionContext): ScopedContext {
+    const child = new ScopedContext(executionContext, this.engine);
+    child.appAuthored = this.appAuthored;
+    return child;
+  }
+
   /** Get a repository scoped to this context */
   object(name: string): ObjectRepository {
     return new ObjectRepository(name, this.executionContext, this.engine as any);
   }
 
-  /** Create an elevated (system) context */
+  /**
+   * Create an elevated (system) context.
+   *
+   * [#25653] Platform code's `sudo()` carries no app-automation mark, so its
+   * writes to the four identity-assignment objects land. An app-authored
+   * hook's in-process `ctx.api.sudo()` is the hook's elevation: it carries
+   * the `'hook'` mark (unless the context already carries one).
+   */
   sudo(): ScopedContext {
-    return new ScopedContext(
-      { ...this.executionContext, isSystem: true },
-      this.engine
+    const elevated = { ...this.executionContext, isSystem: true };
+    return this.derive(
+      this.appAuthored && !appAutomationElevationOf(elevated)
+        ? markAppAutomationElevation(elevated, 'hook')
+        : elevated,
     );
+  }
+
+  /**
+   * [#25653] The api an app-authored hook runs with — see
+   * {@link APP_AUTHORED_HOOK_API} (`hook-run-as.ts`), where the line between
+   * app-authored and platform hooks is drawn. Derived by `wrapDeclarativeHook`
+   * for a hook the binder bound, before its `runAs` is applied.
+   *
+   * An inherited system context with no `flowRunId` and no mark gets the
+   * `'hook'` mark: the hook runs with that elevation, so its writes to the four
+   * identity-assignment objects are refused as a `runAs: 'system'` hook's are.
+   * A run's context (`flowRunId`) is already judged as the run's; a marked one
+   * keeps its mark; a user's context is not elevated and needs none.
+   */
+  [APP_AUTHORED_HOOK_API](): ScopedContext {
+    const ctx = this.executionContext;
+    const inheritsElevation = ctx.isSystem && !ctx.flowRunId && !appAutomationElevationOf(ctx);
+    const api = new ScopedContext(inheritsElevation ? markAppAutomationElevation(ctx, 'hook') : ctx, this.engine);
+    api.appAuthored = true;
+    return api;
   }
 
   /**
@@ -23031,16 +23084,12 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
    */
   withRunAs(runAs: Exclude<HookRunAs, 'inherit'>, ref: HookRunAsRef): IScopedContext {
     if (runAs === 'system') {
-      return new ScopedContext(
+      return this.derive(
         markAppAutomationElevation({ ...this.executionContext, isSystem: true }, 'hook'),
-        this.engine
       );
     }
     if (!this.executionContext.userId) return new UnscopedHookApi(ref);
-    return new ScopedContext(
-      { ...this.executionContext, isSystem: false },
-      this.engine
-    );
+    return this.derive({ ...this.executionContext, isSystem: false });
   }
 
   /**
@@ -23108,15 +23157,12 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
       ctx.userId,
       ctx.tenantId ? { tenantId: ctx.tenantId } : {},
     );
-    return new ScopedContext(
-      {
-        ...ctx,
-        ...(needsGrants ? { positions: grants.positions, permissions: grants.permissions } : {}),
-        ...(needsPeers ? { org_user_ids: grants.org_user_ids } : {}),
-        ...(needsEmail && grants.email ? { email: grants.email } : {}),
-      },
-      this.engine
-    );
+    return this.derive({
+      ...ctx,
+      ...(needsGrants ? { positions: grants.positions, permissions: grants.permissions } : {}),
+      ...(needsPeers ? { org_user_ids: grants.org_user_ids } : {}),
+      ...(needsEmail && grants.email ? { email: grants.email } : {}),
+    });
   }
 
   /**
@@ -23201,10 +23247,7 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
       // boundaries the store does not. It is identity-equal to the store's
       // handle, so `transactionCoversDriverFor` still attributes it to the
       // OUTER owner and the #5351 same-origin gate judges it unchanged.
-      const joinedCtx = new ScopedContext(
-        { ...this.executionContext, transaction: ambient.transaction },
-        this.engine
-      );
+      const joinedCtx = this.derive({ ...this.executionContext, transaction: ambient.transaction });
       // JOINED, not owned: the outer caller decides commit vs rollback (#5696).
       return callback(joinedCtx, { owned: false });
     }
@@ -23230,10 +23273,7 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
     }
 
     const trx = await driver.beginTransaction();
-    const trxCtx = new ScopedContext(
-      { ...this.executionContext, transaction: trx },
-      this.engine
-    );
+    const trxCtx = this.derive({ ...this.executionContext, transaction: trx });
     // Publish this transaction into the engine's ambient store so internal
     // queries during writes reuse its connection (ADR-0034) — and so a nested
     // `transaction()` on either surface can JOIN it. The store entry also
@@ -23384,20 +23424,14 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
       // store's handle — so `buildDriverOptions` binds every op on it to the
       // outer connection and `transactionCoversDriverFor` still attributes the
       // handle to the OUTER owner (#5351 unchanged).
-      const ctx = new ScopedContext(
-        { ...this.executionContext, transaction: ambient.transaction },
-        this.engine
-      );
+      const ctx = this.derive({ ...this.executionContext, transaction: ambient.transaction });
       this.joinedHandles.add(ambient.transaction);
       return { ctx, handle: ambient.transaction, owned: false };
     }
     const driver = this.txDriver();
     if (!driver) return null;
     const trx = await driver.beginTransaction();
-    const ctx = new ScopedContext(
-      { ...this.executionContext, transaction: trx },
-      this.engine
-    );
+    const ctx = this.derive({ ...this.executionContext, transaction: trx });
     return { ctx, handle: trx, owned: true };
   }
 
