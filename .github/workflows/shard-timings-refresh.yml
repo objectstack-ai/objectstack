@@ -88,11 +88,12 @@
 #
 # ⛔ Do NOT make ci.yml's `Save Turbo cache (main only)` step fire on `schedule`
 # as well. It is `github.event_name == 'push'` on purpose and that is now
-# load-bearing here: if the hourly run seeded the cache it restores, the next
-# hourly run would replay almost the whole workspace, the generator would refuse
-# every replayed task, and this lane would measure nothing — by construction,
-# every hour, forever. Affected-only pushes seeding a narrower cache is the
-# direction that HELPS: it leaves more real misses for the hourly run to time.
+# load-bearing here: if the scheduled run seeded the cache it restores, the next
+# scheduled run would replay almost the whole workspace, the generator would
+# refuse every replayed task, and this lane would measure nothing — by
+# construction, every 4 hours, forever. Affected-only pushes seeding a narrower
+# cache is the direction that HELPS: it leaves more real misses for the
+# scheduled run to time.
 #
 # ⚠ AND IT IS "RUNS", PLURAL, WHICH THE DOCUMENTED PROCEDURE DOES NOT SAY.
 # Measured on this lane's first live run (34083991141), when the runs it read
