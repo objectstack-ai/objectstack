@@ -17,8 +17,8 @@
  * the empty default and no permissions are bound. The verdict (withheld) was
  * right; the warning blamed the author for a scope the frame never built.
  *
- * After: same verdict, no per-predicate warning, one quiet note per load. A
- * frame that DOES mount the scope still reports a real fault (control).
+ * After: same verdict, and nothing printed. A frame that DOES mount the scope
+ * still reports a real fault (control).
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
@@ -27,7 +27,6 @@ import { renderHook } from '@testing-library/react';
 import { __resetVisibilityPredicateWarnings } from '@object-ui/react';
 import {
   ExpressionProvider,
-  __resetUnboundNavigationScopeNote,
   createExpressionEvaluator,
   evaluateNavigationVisibility,
   useHasExpressionScope,
@@ -39,33 +38,24 @@ const NOT_SALES_REP = { dialect: 'cel', source: '!("sales_rep" in current_user.p
 const CAN_READ_LEAD = { dialect: 'cel', source: 'current_user.can("crm_lead", "read")' };
 
 let warn: MockInstance<typeof console.warn>;
-let info: MockInstance<typeof console.info>;
 beforeEach(() => {
   __resetVisibilityPredicateWarnings();
-  __resetUnboundNavigationScopeNote();
   warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-  info = vi.spyOn(console, 'info').mockImplementation(() => {});
 });
-afterEach(() => {
-  warn.mockRestore();
-  info.mockRestore();
-});
+afterEach(() => warn.mockRestore());
 
 const appShellWarnings = () =>
   warn.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('app-shell:visible'));
-const scopeNotes = () =>
-  info.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('Navigation `visible` predicates are not answered'));
 
 describe('evaluateNavigationVisibility on a frame with no predicate scope (objectstack#25892)', () => {
   const empty = () => createExpressionEvaluator({ user: {}, features: {} });
 
-  it('withholds the entries, prints no app-shell:visible warning, and notes the frame once', () => {
+  it('withholds the entries and prints no app-shell:visible warning', () => {
     const evaluator = empty();
     expect(evaluateNavigationVisibility(NOT_SALES_REP, evaluator, false)).toBe(false);
     expect(evaluateNavigationVisibility(CAN_READ_LEAD, evaluator, false)).toBe(false);
     expect(evaluateNavigationVisibility(NOT_SALES_REP, evaluator, false)).toBe(false);
     expect(appShellWarnings()).toEqual([]);
-    expect(scopeNotes()).toHaveLength(1);
   });
 
   it('CONTROL: the same predicates on a bound frame still report, once each', () => {
@@ -73,33 +63,31 @@ describe('evaluateNavigationVisibility on a frame with no predicate scope (objec
     expect(evaluateNavigationVisibility(NOT_SALES_REP, evaluator)).toBe(false);
     expect(evaluateNavigationVisibility(CAN_READ_LEAD, evaluator)).toBe(false);
     expect(appShellWarnings()).toHaveLength(2);
-    expect(scopeNotes()).toEqual([]);
   });
 
-  it('CONTROL: literals, an absent gate and a predicate that evaluates keep their answers, with no note', () => {
+  it('CONTROL: literals, an absent gate and a predicate that evaluates keep their answers', () => {
     const evaluator = empty();
     expect(evaluateNavigationVisibility(undefined, evaluator, false)).toBe(true);
     expect(evaluateNavigationVisibility(true, evaluator, false)).toBe(true);
     expect(evaluateNavigationVisibility(false, evaluator, false)).toBe(false);
     expect(evaluateNavigationVisibility({ dialect: 'cel', source: '1 == 1' }, evaluator, false)).toBe(true);
-    expect(scopeNotes()).toEqual([]);
+    expect(evaluateNavigationVisibility({ dialect: 'cel', source: '1 == 2' }, evaluator, false)).toBe(false);
+    expect(appShellWarnings()).toEqual([]);
   });
 
   it('CONTROL: a blank gate is still drawn and still reported, since it is blank whatever the scope', () => {
     expect(evaluateNavigationVisibility({ dialect: 'cel', source: '  ' }, empty(), false)).toBe(true);
     expect(appShellWarnings()).toHaveLength(1);
-    expect(scopeNotes()).toEqual([]);
   });
 });
 
 describe('useNavVisibility picks the frame from the mounted provider (objectstack#25892)', () => {
-  it('no ExpressionProvider: withheld, silent, one note', () => {
+  it('no ExpressionProvider: withheld, and silent', () => {
     const { result } = renderHook(() => ({ evaluate: useNavVisibility(undefined), scoped: useHasExpressionScope() }));
     expect(result.current.scoped).toBe(false);
     expect(result.current.evaluate(NOT_SALES_REP as never)).toBe(false);
     expect(result.current.evaluate(CAN_READ_LEAD as never)).toBe(false);
     expect(appShellWarnings()).toEqual([]);
-    expect(scopeNotes()).toHaveLength(1);
   });
 
   it('under ExpressionProvider: the signed-in user answers `positions`, and an unbound `can()` is still reported', () => {
@@ -117,6 +105,5 @@ describe('useNavVisibility picks the frame from the mounted provider (objectstac
     // No permissions provider above: the fault is real on this frame, and stays loud.
     expect(result.current.evaluate(CAN_READ_LEAD as never)).toBe(false);
     expect(appShellWarnings()).toHaveLength(1);
-    expect(scopeNotes()).toEqual([]);
   });
 });

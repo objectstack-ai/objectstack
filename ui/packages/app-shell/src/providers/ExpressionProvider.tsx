@@ -630,16 +630,18 @@ export function evaluateVisibility(
  *
  * ## A frame with no predicate scope (objectstack#25892)
  *
- * `scopeBound: false` is the frame that mounts no `ExpressionProvider` (the
- * Studio, the organizations pages, the full-page assistant), where the bell's
- * activity roster still walks every app's navigation. There `current_user` is
+ * `scopeBound: false` is a frame that mounts no `ExpressionProvider` (the
+ * Studio is the measured one), where the header bell's activity roster still
+ * walks every app's navigation. There `current_user` is
  * the empty default and no permissions are bound, so a predicate naming either
  * faults whatever the author wrote: the fault says nothing about the
  * predicate. The verdict is the same (the entry is withheld), but the fault is
- * not reported per predicate; one quiet note says once that this frame cannot
- * answer such gates. The app's own shell, which does bind the scope, still
- * reports a real fault. A blank gate is reported on either frame, since it is
- * blank whatever the scope.
+ * not reported: such a frame does not render the app's navigation, it only
+ * lists from it, and the app's own shell, which does bind the scope, still
+ * reports a real fault. No once-per-load note replaces the warnings either: a
+ * package prints only `warn` / `error` (the `no-console` rule), and a warning
+ * on every Studio load would be the same noise this removes. A blank gate is
+ * reported on either frame, since it is blank whatever the scope.
  *
  * ⛔ This is UI gating, not a security boundary: the server enforces what a
  * member may read whatever the shell draws.
@@ -657,7 +659,6 @@ export function evaluateNavigationVisibility(
 
   const withhold = (r: unknown): false => {
     if (scopeBound) reportAppShellVisibleFault('visible', expression, r, 'withholding');
-    else noteUnboundNavigationScope();
     return false;
   };
 
@@ -685,30 +686,6 @@ export function evaluateNavigationVisibility(
   } catch {
     return withhold(reason);
   }
-}
-
-/**
- * The one note a frame with no predicate scope prints (objectstack#25892), in
- * place of a warning per navigation predicate it cannot answer. Once per page
- * load: it describes the frame, not any one predicate.
- */
-const UNBOUND_NAVIGATION_SCOPE_NOTE =
-  '[ObjectUI] Navigation `visible` predicates are not answered on this screen: it mounts no ' +
-  'expression scope, so `current_user` and its permissions are not bound here. Entries gated ' +
-  'by such a predicate are left out without a warning each; the app itself still evaluates ' +
-  'and reports them.';
-
-let unboundNavigationScopeNoted = false;
-
-function noteUnboundNavigationScope(): void {
-  if (unboundNavigationScopeNoted) return;
-  unboundNavigationScopeNoted = true;
-  console.info(UNBOUND_NAVIGATION_SCOPE_NOTE);
-}
-
-/** Test-only reset for the once-per-load note above. */
-export function __resetUnboundNavigationScopeNote(): void {
-  unboundNavigationScopeNoted = false;
 }
 
 /**
