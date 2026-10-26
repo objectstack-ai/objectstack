@@ -38,16 +38,22 @@ const shared: Options = {
  * `src/dev-plugin.ts` (its CommonJS build `await import()`s
  * `@objectstack/objectql`, which reaches core the other way).
  *
- * So the declaration pass runs once, for CJS only, and the ESM `index.d.ts` is
- * a one-line re-export of `index.d.cts`: each condition is still handed a
- * declaration of its own module kind (attw: no `FalseESM`, no `FalseCJS`),
- * but every class in both IS the `.d.cts` one. The re-export runs ESM → CJS on
- * purpose: an ES module may import a CommonJS one under every `module`
- * setting, while the reverse (`.d.cts` re-exporting `.d.ts`) is TS1479 in a
- * consumer's program: measured under `module: node16` on TypeScript 6.0 and
- * 5.6, and under `nodenext` too on 5.6.
+ * So the declaration pass runs once, for ESM only, and the CommonJS
+ * `index.d.cts` is a one-line re-export of `index.d.ts`: each condition is
+ * still handed a declaration of its own module kind (attw: no `FalseESM`), but
+ * every class in both IS the `.d.ts` one, and what that declaration imports
+ * from `@objectstack/spec` resolves exactly as it did when both conditions
+ * read the `.d.ts`. ⛔ Not the other way round: with the declarations in the
+ * `.d.cts` and the `.d.ts` re-exporting it, core's own imports of spec resolve
+ * through spec's `require` condition, and spec's twin declarations then fail
+ * `@objectstack/driver-memory`'s build (TS2345, `ComposedReadableIds` against
+ * itself). The `.d.cts` → `.d.ts` re-export is TS1479 inside this package's
+ * file for a consumer on `module: node16` (or on TypeScript 5.6 under
+ * `nodenext`), which `skipLibCheck` silences; the single `types` entry this
+ * replaces raised that same TS1479 at the consumer's own import, where no
+ * option silences it.
  *
- * The JS half's `onSuccess` writes the `.d.ts` files and the declaration half
+ * The JS half's `onSuccess` writes the `.d.cts` files and the declaration half
  * never emits one, so the two halves (which tsup runs concurrently) never
  * write the same file. `clean` lives on the JS half only: tsup's clean keeps
  * declaration files, so it cannot delete what the declaration half writes.
@@ -61,10 +67,10 @@ export default defineConfig([
     onSuccess: emitDts
       ? async () => {
           await Promise.all(
-            ENTRY_NAMES.map((name) => writeFile(`dist/${name}.d.ts`, `export * from './${name}.cjs';\n`)),
+            ENTRY_NAMES.map((name) => writeFile(`dist/${name}.d.cts`, `export * from './${name}.js';\n`)),
           );
         }
       : undefined,
   },
-  ...(emitDts ? [{ ...shared, clean: false, dts: { only: true }, format: ['cjs'] } satisfies Options] : []),
+  ...(emitDts ? [{ ...shared, clean: false, dts: { only: true }, format: ['esm'] } satisfies Options] : []),
 ]);
