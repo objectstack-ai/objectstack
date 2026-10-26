@@ -47,7 +47,7 @@ import { lowerFilterCondition, type FilterCondition, type FilterLoweringOptions 
 // [#5574] D6, executable. The ceiling and the refusal message live in
 // `packages/spec/src/data/bulk-write-hook-conformance.ts` so BOTH phases and
 // both verbs enforce one definition; the engine raises, the contract decides.
-import { MAX_BULK_PER_ROW_HOOK_ROWS, resolveBulkPerRowHookBudget } from '@objectstack/spec/data';
+import { MAX_BULK_PER_ROW_HOOK_ROWS } from '@objectstack/spec/data';
 // [ADR-0126 §8] The packaged-action activation ledger: its row contract, its
 // stores and the engine-held projection the dispatch doors consult.
 import { ActionActivationProjection, type ActionActivationRow, type ActionActivationStore } from './action-activation.js';
@@ -125,6 +125,14 @@ import {
   resolveSecretField,
   stripSearchCompanionFromRead,
 } from './engine-secret-internal-fields.js';
+// [#25522 cut 6] The predicate-write hook dispatch bodies; the methods of the
+// same names below hand each body the members it reads (`HookDispatchHost`).
+import {
+  assertBulkPerRowHookBudget,
+  buildPerRowAfterContexts,
+  dispatchPerRowBeforeHooks,
+  inAfterAbortUnit,
+} from './engine-hook-dispatch.js';
 import { ExecutionContext, ExecutionContextSchema, type InstalledPackageSource } from '@objectstack/spec/kernel';
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
@@ -222,7 +230,8 @@ import { applyArtifactForwardConversions, resolveDeclaredRange } from '@objectst
 // engine is the consumer-side tolerant parsing PD #12 forbids and precedent
 // #5841 retired.
 import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/types';
-import { DuplicateRecordError, envelopeUniqueViolation } from './duplicate-record-error.js';
+import { DuplicateRecordError } from './duplicate-record-error.js';
+import { NotNullRefusalError, envelopeDriverWriteRefusal } from './not-null-refusal-error.js';
 // [#8682] The write-path loggers' redaction — bound values never reach the log.
 // [#21274] …and its boundary face — nor the error that leaves the engine.
 // [#21385] It lives in `@objectstack/types` now, so `driver-sql`'s own log lines
@@ -316,10 +325,6 @@ import { recordHookPayloadWrites } from './hook-write-provenance.js';
 // and points at `ctx.previous` — the module owns the measurement and the
 // reason the explanation cannot be composed any further downstream.
 import { dispatchHooksExplainingWithheldReadonly } from './hook-withheld-readonly-fault.js';
-import {
-  divergingHookPayloadKeys,
-  MultiUpdateHookKeyDivergenceError,
-} from './multi-update-hook-key-divergence.js';
 import { UnscopedHookApi, SEED_USER_GRANTS, APP_AUTHORED_HOOK_API, type HookRunAs, type HookRunAsRef, type RunAsDerivableApi } from './hook-run-as.js';
 import type { HookWriteRecording } from './hook-write-provenance.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
@@ -5404,18 +5409,11 @@ export class ObjectQL implements IObjectQLEngine {
 
   /** [#22782] The unit {@link opensAfterAbortUnit} asked for; `write` re-enters the door, which joins it. */
   private async inAfterAbortUnit<T>(write: () => Promise<T>): Promise<T> {
-    let written: SummaryRecomputeError | undefined;
-    const result = await this.transaction(async () => {
-      try {
-        return await write();
-      } catch (e) {
-        if (!(e instanceof SummaryRecomputeError)) throw e;
-        written = e;
-        return undefined as T;
-      }
-    });
-    if (written) throw written;
-    return result;
+    // [#25522 cut 6] The body moved to `engine-hook-dispatch.ts` (see `HookDispatchHost`).
+    const host: ThisParameterType<typeof inAfterAbortUnit> = {
+      transaction: (...a) => this.transaction(...a),
+    };
+    return (inAfterAbortUnit<T>).call(host, write);
   }
 
   /**
@@ -5471,23 +5469,12 @@ export class ObjectQL implements IObjectQLEngine {
     batchCtx: HookContext,
     payload?: Record<string, unknown>,
   ): HookContext[] {
-    const schema = this._registry.getObject(object);
-    const options = (batchCtx.input as { options?: unknown } | undefined)?.options;
-    return rows.map((row, index) => ({
-      ...batchCtx,
-      event,
-      input: payload
-        ? { id: (row as { id?: unknown }).id, data: { ...payload }, options }
-        : { id: (row as { id?: unknown }).id, options },
-      // [#6966] `mode` and `scope` ride over from the batch context; only the
-      // position differs. Spreading `batchCtx` would carry index 0 onto every
-      // row, which is the one member a per-row consumer keys "do this once" on.
-      dispatch: { ...(batchCtx.dispatch as object), index } as HookContext['dispatch'],
-      previous: coerceBooleanFields(schema as any, row as any),
-      result: payload
-        ? coerceBooleanFields(schema as any, { ...row, ...payload } as any)
-        : undefined,
-    }) as unknown as HookContext);
+    // [#25522 cut 6] The body moved to `engine-hook-dispatch.ts` (see `HookDispatchHost`).
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof buildPerRowAfterContexts> = {
+      get _registry() { return readRegistry(); },
+    };
+    return buildPerRowAfterContexts.call(host, object, event, rows, batchCtx, payload);
   }
 
   /**
@@ -5571,109 +5558,13 @@ export class ObjectQL implements IObjectQLEngine {
     rows: Record<string, unknown>[],
     batchCtx: HookContext,
   ): Promise<void> {
-    const schema = this._registry.getObject(object);
-    const carriesPayload = event === 'beforeUpdate';
-    // ── [#14099] D3's ENFORCEMENT half: one observation window per row ──────
-    //
-    // The #14088 recorder, armed a SECOND time for this loop and NESTED over
-    // the batch-scoped recording `update()` already armed at its entry. The
-    // nesting is what makes both readings true at once: a write through this
-    // view lands on the outer recording's view, which lands on the real
-    // payload — so the outer record (the one the read-only strips read for
-    // provenance) still sees every hook write, while `closeWindow()` gives
-    // this loop what only it needs: the keys assigned by ONE row's chain.
-    //
-    // ⭐ ONE recording for the whole loop, not one per row, and that is a
-    // contract point rather than a saving: every per-row context must carry
-    // THE SAME payload object (D3, pinned by reference identity in
-    // `bulk-write-per-row-hooks.test.ts`). A fresh view per row would still be
-    // write-through onto one payload — no copy, nothing to reconcile — but it
-    // would hand each row a DIFFERENT object, which is a difference an author
-    // can observe and which this contract says is not there.
-    const batchPayloadAtEntry = (batchCtx.input as { data?: unknown }).data;
-    const hookWrites =
-      carriesPayload && batchPayloadAtEntry !== null && typeof batchPayloadAtEntry === 'object'
-        ? recordHookPayloadWrites(batchPayloadAtEntry as Record<string, unknown>)
-        : undefined;
-    if (hookWrites) (batchCtx.input as { data?: unknown }).data = hookWrites.payload;
-    const perRowHookWrittenKeys: ReadonlySet<string>[] = [];
-    for (let index = 0; index < rows.length; index++) {
-      const row = rows[index];
-      const rowId = (row as { id?: unknown }).id;
-      const options = (batchCtx.input as { options?: unknown }).options;
-      const rowCtx = {
-        ...batchCtx,
-        event,
-        // [#6966] See `buildPerRowAfterContexts` — same rule. The `scope`
-        // identity carried over from `batchCtx` is what lets a `before*`
-        // handler leave something an `after*` handler can still find: a per-row
-        // context is a fresh object, so a stash written on the context itself
-        // dies with the row that held it.
-        dispatch: { ...(batchCtx.dispatch as object), index } as HookContext['dispatch'],
-        // D3: THE payload, read fresh so a previous row's REPLACEMENT is what
-        // this row sees. Never a copy.
-        input: carriesPayload
-          ? { id: rowId, data: (batchCtx.input as { data?: unknown }).data, options }
-          : { id: rowId, options },
-        previous: coerceBooleanFields(schema as any, row as any),
-        // D2: no post-state in the before phase.
-        result: undefined,
-      } as unknown as HookContext;
-
-      await this.triggerHooks(event, rowCtx);
-
-      // D3, the accumulate half — see the class doc above.
-      if (carriesPayload) {
-        (batchCtx.input as { data?: unknown }).data = (rowCtx.input as { data?: unknown }).data;
-        // [#14099] and the enforcement half: close THIS row's window, so the
-        // next row opens a fresh one.
-        if (hookWrites) perRowHookWrittenKeys.push(hookWrites.closeWindow());
-      }
-      // D4.
-      const observed = (rowCtx.input as { id?: unknown }).id;
-      if (observed !== rowId) {
-        throw new HookTargetRebindError({
-          object, event, path: 'per-row', expectedId: rowId, observedId: observed,
-        });
-      }
-    }
-
-    // [#14099] Close this loop's recording and put the underlying payload back
-    // in `batchCtx.input.data`, so no recording VIEW travels on to the outer
-    // seal, the strips or a driver.
-    //
-    // `hookWrittenKeys` is `undefined` exactly when a hook REPLACED the payload
-    // object somewhere in this batch (`hook-write-provenance.ts`'s KNOWN
-    // LIMIT). Then the whole batch ABSTAINS: the windows collected before the
-    // replacement describe writes the replacement discarded, so refusing on
-    // them would be a verdict about a payload that is no longer the one being
-    // written. Abstaining keeps the pre-#14099 behaviour for that shape, which
-    // is the same fail-safe direction #14088 chose for the same limit.
-    const sealedLoopWrites = hookWrites?.seal((batchCtx.input as { data?: unknown }).data);
-    if (sealedLoopWrites) {
-      (batchCtx.input as { data?: unknown }).data = sealedLoopWrites.data;
-    }
-
-    // [#14099] The refusal, ruled 2026-09-02 (recommendation C). Placed after
-    // the loop and not inside it, for two reasons that are both about the
-    // envelope rather than about cost: the diverging set is `union` minus
-    // `intersection` over EVERY row, so the message names every offending key
-    // instead of the first pair to disagree, and it is order-independent — the
-    // same batch answers the same way whatever order the driver returned the
-    // matched rows in.
-    //
-    // ⭐ Still BEFORE any write, which is the load-bearing half. This method is
-    // called from `update()`'s predicate branch ahead of the outer hook-write
-    // seal, both readonly strips, `evaluateValidationRules` and every
-    // `driver.updateMany` — and it runs outside `update()`'s own `try`, so the
-    // envelope reaches the caller undecorated. Not "after the first row", not
-    // "inside a transaction that then rolls back": nothing was written.
-    if (sealedLoopWrites?.hookWrittenKeys !== undefined) {
-      const diverging = divergingHookPayloadKeys(perRowHookWrittenKeys);
-      if (diverging.length > 0) {
-        throw new MultiUpdateHookKeyDivergenceError(object, diverging, rows.length);
-      }
-    }
+    // [#25522 cut 6] The body moved to `engine-hook-dispatch.ts` (see `HookDispatchHost`).
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof dispatchPerRowBeforeHooks> = {
+      get _registry() { return readRegistry(); },
+      triggerHooks: (...a) => this.triggerHooks(...a),
+    };
+    return dispatchPerRowBeforeHooks.call(host, object, event, rows, batchCtx);
   }
 
   /**
@@ -5806,15 +5697,8 @@ export class ObjectQL implements IObjectQLEngine {
    * message with nothing to keep synchronised.
    */
   private assertBulkPerRowHookBudget(object: string, event: string, matched: number): void {
-    const verdict = resolveBulkPerRowHookBudget({ object, event, matched });
-    if (verdict.kind === 'ok') return;
-    throw Object.assign(new Error(verdict.message), {
-      code: verdict.code,
-      object: verdict.object,
-      event: verdict.event,
-      matched: verdict.matched,
-      limit: verdict.limit,
-    });
+    // [#25522 cut 6] The body moved to `engine-hook-dispatch.ts`; it reads no member.
+    return assertBulkPerRowHookBudget(object, event, matched);
   }
 
   // ========================================
@@ -8627,13 +8511,15 @@ export class ObjectQL implements IObjectQLEngine {
         // driver's error. `envelopeUniqueViolation` returns everything that is
         // not a unique violation untouched (a deadlock, a NOT NULL, an
         // unreachable store), so only the recognised conflict changes shape.
+        // [#24768] …and a NOT NULL refusal on a declared field becomes the
+        // validator's own `ValidationError` (`envelopeDriverWriteRefusal`).
         // [#25073] On a driver-issued number the member answers instead, and
         // in answering re-seeds the counter it proved stale.
         const collided: string[] = byDriver
           ? ((await driver.issueAutonumbers(object, [row], driverOptions, error)) as string[][] | undefined)?.[0] ?? []
           : this.isIssuedAutonumberCollision(error, issued) ? issued.map((one) => one.field) : [];
         if (collided.length === 0) {
-          throw envelopeUniqueViolation(error, object, this.getSchema(object));
+          throw envelopeDriverWriteRefusal(error, object, this.getSchema(object), 'insert', this.validationMessageContext(object, execCtx));
         }
         // Whatever happens next, the stale counter must not survive this call:
         // leaving it in place is what turned one collision into a storm.
@@ -8676,7 +8562,7 @@ export class ObjectQL implements IObjectQLEngine {
           try {
             return await driver.create(object, row, driverOptions);
           } catch (retryError) {
-            throw envelopeUniqueViolation(retryError, object, this.getSchema(object));
+            throw envelopeDriverWriteRefusal(retryError, object, this.getSchema(object), 'insert', this.validationMessageContext(object, execCtx));
           }
         }
       }
@@ -16981,7 +16867,7 @@ export class ObjectQL implements IObjectQLEngine {
                   });
                 }
               }
-              throw envelopeUniqueViolation(error, object, this.getSchema(object));
+              throw envelopeDriverWriteRefusal(error, object, this.getSchema(object), 'insert', msgCtx);
             }
           }
         } else {
@@ -17169,7 +17055,9 @@ export class ObjectQL implements IObjectQLEngine {
         // `writeFailureLogMeta` rebuilds the `{ error: { message, stack } }`
         // context the `error` slot used to build (see its header: `warn` has no
         // slot, and an Error's fields are non-enumerable).
-        const logged = e instanceof DuplicateRecordError ? e.cause : e;
+        // [#24768] A NOT NULL refusal's `ValidationError` carries the driver's
+        // error the same way, for the same reason.
+        const logged = e instanceof DuplicateRecordError || e instanceof NotNullRefusalError ? e.cause : e;
         this.logger.warn(
           'Insert operation failed',
           writeFailureLogMeta(redactBoundStatement(logged), { object }),
@@ -18603,6 +18491,8 @@ export class ObjectQL implements IObjectQLEngine {
                // returns everything else untouched (a NOT NULL, a deadlock, a
                // missing table, an unreachable store), so only the conflict
                // changes shape; the contract is stated on `update()` above.
+               // [#24768] A NOT NULL refusal on a declared field is the second
+               // shape that changes: the validator's own `ValidationError`.
                // Wrapped HERE rather than at the outer `catch` below, and
                // deliberately: that `try` also encloses the `afterUpdate`
                // dispatch and the roll-up recompute, so an envelope applied
@@ -18611,7 +18501,7 @@ export class ObjectQL implements IObjectQLEngine {
                try {
                    result = await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
                } catch (driverError) {
-                   throw envelopeUniqueViolation(driverError, object, this.getSchema(object));
+                   throw envelopeDriverWriteRefusal(driverError, object, this.getSchema(object), 'update', updateMsgCtx);
                }
                // [#21613] The by-id update returns the driver's post-write
                // readback (`select *` on driver-sql), so a column no metadata
@@ -18974,7 +18864,7 @@ export class ObjectQL implements IObjectQLEngine {
                try {
                    result = await driver.updateMany!(object, ast, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
                } catch (driverError) {
-                   throw envelopeUniqueViolation(driverError, object, this.getSchema(object));
+                   throw envelopeDriverWriteRefusal(driverError, object, this.getSchema(object), 'update', updateMsgCtx);
                }
                isPredicateWrite = true;
            }
@@ -19134,7 +19024,7 @@ export class ObjectQL implements IObjectQLEngine {
           //
           // [#17052] The insert door's twin here too: the level is `warn`,
           // because `throw e` on the next line IS the answer to the caller.
-          const logged = e instanceof DuplicateRecordError ? e.cause : e;
+          const logged = e instanceof DuplicateRecordError || e instanceof NotNullRefusalError ? e.cause : e;
           this.logger.warn(
             'Update operation failed',
             writeFailureLogMeta(redactBoundStatement(logged), { object }),

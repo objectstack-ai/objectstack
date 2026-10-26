@@ -30,7 +30,7 @@ import { useAgents, isAskAgent, agentHasCapability } from '@object-ui/plugin-cha
 // May this session author metadata? Shared with the chat surfaces since the
 // maker convergence (cloud#1674) — the doctrine (objectstack#8270 posture,
 // unknown→fail-open) lives with the hook.
-import { useCanAuthorMetadata } from '../../hooks/useCanAuthorMetadata.js';
+import { useCanAuthorMetadata, useCanReadPendingDrafts } from '../../hooks/useCanAuthorMetadata.js';
 import { HomeAppsStrip } from './HomeAppsStrip.js';
 import { appSegmentOf, lastOpenedByApp } from './appLastOpened.js';
 import { recentItemObject, recentItemTypeLabel } from './recentItemTypeLabel.js';
@@ -292,10 +292,16 @@ function usePackageName(packageId: string | null): string | undefined {
  * publish. `usePublishAllDrafts` is the shared one-click publish, also run by
  * the ADR-0037 draft-preview bar. Returns the row, or `null` with nothing to
  * publish.
+ *
+ * Read only for a session the ledger admits (objectstack-ai/objectstack#25894):
+ * Home is every member's landing, and a member holding none of the ledger's
+ * capabilities was sent a `GET /meta/_drafts` that answers 403 on every visit.
+ * Held, the read is held too, so the row is `null`, as with nothing to publish.
  */
 function usePendingDraftsRow(t: (key: string, opts?: any) => string, language: string): React.ReactNode {
   const { publishAll, publishing } = usePublishAllDrafts(t);
-  const { count, entries } = usePendingDrafts({});
+  const canReadDrafts = useCanReadPendingDrafts();
+  const { count, entries } = usePendingDrafts({ enabled: canReadDrafts });
   const drafted = (count ?? 0) > 0;
   // Named only when every draft is in one package: a row naming one package
   // for drafts spread over several would misplace the rest. Named by the name

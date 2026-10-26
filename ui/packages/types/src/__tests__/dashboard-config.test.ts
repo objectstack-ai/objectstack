@@ -232,9 +232,10 @@ describe('DashboardConfig Zod Validation', () => {
     // schema having become `.strict()`, which would refuse every unknown key.
     const result = DashboardConfigSchema.safeParse({ objectui5852NotAKey: 'x' });
     expect(result.success).toBe(true);
-    // ...and it is dropped from the output, which is exactly what a plain
-    // deletion of `aria` would have silently done to an authored value.
-    expect(result.success && 'objectui5852NotAKey' in result.data).toBe(false);
+    // ...and it rides through unread — dropped from the output while the mirror
+    // was strip mode, kept since objectstack#25923 (`.passthrough()`) — which is
+    // what a plain deletion of `aria` would have silently done to an authored value.
+    expect(result.success && 'objectui5852NotAKey' in result.data).toBe(true);
   });
 
   it('CONTROL: a legal config still parses green — the tombstone narrowed nothing else', () => {

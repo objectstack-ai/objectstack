@@ -277,7 +277,7 @@ describe('tsconfig.scripts.json — coverage of scripts/ (objectui#3494)', () =>
       parsedProject().fileNames.map((f) => path.relative(repoRoot, f).split(path.sep).join('/')),
     );
     for (const file of [
-      'scripts/__tests__/ci-cd-pipeline-doc.test.ts',
+      'scripts/__tests__/check-pre-install-import-graph.test.ts',
       'scripts/__tests__/docs-links-workflow.test.ts',
       'scripts/__tests__/lint-workflow.test.ts',
       'scripts/__tests__/scripts-type-check.test.ts',

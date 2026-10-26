@@ -17,6 +17,11 @@ export * from './plugin-order.js';
 // because the ordering it performs is `resolvePluginOrder` directly above.
 // `@objectstack/objectql` re-exports it, so its published surface is unchanged.
 export * from './artifact-packages.js';
+// ADR-0141 D5 — the order a boot hydrates installed packages in. Two batches
+// read it (`@objectstack/service-package`'s `sys_packages` hydrate and
+// `@objectstack/cloud-connection`'s ledger rehydrate), and it sorts with
+// `resolvePluginOrder` above.
+export * from './hydration-order.js';
 // [#22301] The two halves of resolving an app's `requires` that `os serve`
 // (`@objectstack/cli`) and the verification handle (`@objectstack/verify`) both
 // read — the package-owned collection reader (ADR-0130 D4) and the token →

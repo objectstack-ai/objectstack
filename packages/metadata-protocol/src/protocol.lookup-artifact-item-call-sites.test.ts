@@ -22,26 +22,46 @@
  *
  * The population is the card's own enumeration command,
  * `git grep -n 'lookupArtifactItem(' -- packages/metadata-protocol/src`
- * (tests excluded), which is one file: every match is a call or the
- * definition. Each is keyed by the class member it sits in and its argument
- * text, which survive line moves and fail on any change of scope. A new call,
- * a removed one or a re-scoped one turns this red until its row is recorded
- * here with its disposition (and the card's table in the PR that adds it).
+ * (tests excluded), which is two files: every match is a call or a
+ * definition. Each is keyed by the file, the class member or module function
+ * it sits in, and its argument text, which survive line moves and fail on any
+ * change of scope. A new call, a removed one or a re-scoped one turns this red
+ * until its row is recorded here with its disposition (and the card's table in
+ * the PR that adds it).
+ *
+ * [#25467 cut 15] The second file is `protocol-artifact-lookup.ts`. The
+ * lookup's body moved there with `shippedArtifactsOf`'s, so it holds the
+ * function the class member delegates to and that member's two calls; the
+ * class member keeps its signature in `protocol.ts`, and `shippedArtifactsOf`'s
+ * stub there hands the moved body the lookup as a closure, one more site.
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 const SOURCE = readFileSync(fileURLToPath(new URL('./protocol.ts', import.meta.url)), 'utf8');
+/** [#25467 cut 15] The seam module the lookup's body moved to; scanned with its own header shape. */
+const SEAM_FILE = 'protocol-artifact-lookup.ts';
+const SEAM = readFileSync(fileURLToPath(new URL(`./${SEAM_FILE}`, import.meta.url)), 'utf8');
 const CALLEE = 'lookupArtifactItem(';
 
 /** A class member's header in `protocol.ts`: four spaces, optional modifiers, its name, its parameter list. */
 const MEMBER_HEADER = /^ {4}(?:(?:private|public|protected|static|async|override|readonly)\s+)*([A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\(/;
+/** A module function's header in the seam module: `export`, optional `async`, `function`, its name, its parameter list. */
+const FUNCTION_HEADER = /^export (?:async )?function ([A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\(/;
 
-interface Site { readonly member: string; readonly args: string }
+interface Site { readonly file?: string; readonly member: string; readonly args: string }
 
-/** Every `lookupArtifactItem(` in the source: the member it sits in and its argument text, whitespace-normalised. */
-function sitesOf(source: string): Site[] {
+/** Every `lookupArtifactItem(` in `protocol.ts` and the seam module: the file, the member it sits in and its argument text, whitespace-normalised. */
+function sitesIn(): Site[] {
+    return [
+        ...sitesOf(SOURCE, MEMBER_HEADER),
+        ...sitesOf(SEAM, FUNCTION_HEADER).map((site) => ({ ...site, file: SEAM_FILE })),
+    ];
+}
+
+/** Every `lookupArtifactItem(` in one source: the member it sits in (by `header`) and its argument text, whitespace-normalised. */
+function sitesOf(source: string, header: RegExp): Site[] {
     const lines = source.split('\n');
     const sites: Site[] = [];
     for (let at = source.indexOf(CALLEE); at !== -1; at = source.indexOf(CALLEE, at + 1)) {
@@ -53,8 +73,8 @@ function sitesOf(source: string): Site[] {
         const args = source.slice(at + CALLEE.length, end - 1).replace(/\s+/g, ' ').trim().replace(/,$/, '');
         let member = '(no member)';
         for (let line = source.slice(0, at).split('\n').length - 1; line >= 0; line--) {
-            const header = MEMBER_HEADER.exec(lines[line]);
-            if (header) { member = header[1]; break; }
+            const found = header.exec(lines[line]);
+            if (found) { member = found[1]; break; }
         }
         sites.push({ member, args });
     }
@@ -70,7 +90,9 @@ type Disposition = 'definition' | 'served-package envelope' | 'no';
  */
 const SITES: ReadonlyArray<Site & { readonly noPackage: boolean; readonly disposition: Disposition; readonly why: string }> = [
     { member: 'lookupArtifactItem', args: 'type: string, name: string, currentPackageId?: string, member?: string', noPackage: false, disposition: 'definition',
-        why: 'the definition itself' },
+        why: 'the definition itself: the class member\'s declared signature (its body delegates to the seam function below)' },
+    { file: SEAM_FILE, member: 'lookupArtifactItem', args: 'this: Pick<ArtifactLookupHost, \'engine\'>, type: string, name: string, currentPackageId?: string, member?: string', noPackage: false, disposition: 'definition',
+        why: '[#25467 cut 15] the definition\'s body, the function the class member delegates to' },
     { member: 'readMetaItem', args: 'request.type, request.name, envelopePackageId(request.packageId, item), bundleMemberOf(request.type, item)', noPackage: true, disposition: 'served-package envelope',
         why: 'the by-name read\'s envelope: naming no package, the package of the item it serves (the list\'s rule); [#23074] at the served item\'s own bundle member' },
     { member: 'readFlattenedMetaItems', args: 'request.type, itemName, itemPackageId, bundleMemberOf(request.type, it)', noPackage: true, disposition: 'served-package envelope',
@@ -91,10 +113,12 @@ const SITES: ReadonlyArray<Site & { readonly noPackage: boolean; readonly dispos
         why: 'a boolean containment test over the one owner of an object' },
     { member: 'packagedArtifactOwner', args: 'folded.type, folded.name', noPackage: true, disposition: 'no',
         why: 'a shipped-package check by name: it returns a package id, never an envelope on a served body' },
-    { member: 'shippedArtifactsOf', args: 'type, name', noPackage: true, disposition: 'no',
+    { file: SEAM_FILE, member: 'shippedArtifactsOf', args: 'type, name', noPackage: true, disposition: 'no',
         why: 'the lock\'s artifact layer (the one item-lock resolution), never an envelope on a served body' },
-    { member: 'shippedArtifactsOf', args: 'type, name, packageId', noPackage: false, disposition: 'no',
+    { file: SEAM_FILE, member: 'shippedArtifactsOf', args: 'type, name, packageId', noPackage: false, disposition: 'no',
         why: 'scoped to a named package, and kept only when it is that package\'s own' },
+    { member: 'shippedArtifactsOf', args: '...a', noPackage: true, disposition: 'no',
+        why: '[#25467 cut 15] the class member\'s host closure: it forwards the moved body\'s two calls (the rows above) unchanged, so its disposition is theirs' },
     { member: 'hydrateOverlayIntoRegistry', args: 'type, (data as any).name, options.packageId ?? undefined, bundleMemberOf(type, data)', noPackage: true, disposition: 'no',
         why: 'scoped to the row\'s own package; undefined only for a package-less row, whose body names no package; [#23074] at the row\'s own bundle member' },
     { member: 'expandRuntimeViewContainer', args: 'type, String(item.name), ownPackageId', noPackage: false, disposition: 'no',
@@ -109,10 +133,10 @@ const SITES: ReadonlyArray<Site & { readonly noPackage: boolean; readonly dispos
         why: 'the save door\'s collision check: the package id names a shipper in a refusal, never an envelope on a served body' },
 ];
 
-const keyOf = (site: Site) => `${site.member}: ${CALLEE}${site.args})`;
+const keyOf = (site: Site) => `${site.file ?? 'protocol.ts'} ${site.member}: ${CALLEE}${site.args})`;
 
 describe('[#22024] every lookupArtifactItem( in protocol.ts has a recorded disposition', () => {
-    const found = sitesOf(SOURCE);
+    const found = sitesIn();
 
     it('the sites in the source are exactly the recorded ones', () => {
         const recorded = SITES.map(keyOf).sort();
@@ -128,9 +152,19 @@ describe('[#22024] every lookupArtifactItem( in protocol.ts has a recorded dispo
 
     it('the population is the card\'s enumeration: one definition and every call, each in a member', () => {
         // Non-vacuity: a scan that found nothing, or lost the members, cannot pass the test above by accident.
-        expect(found.filter((site) => site.member === 'lookupArtifactItem' && site.args.includes(': string'))).toHaveLength(1);
+        // [#25467 cut 15] One definition per file: the class member's signature and the seam function it delegates to.
+        expect(found.filter((site) => site.member === 'lookupArtifactItem' && site.args.includes(': string')).map((site) => site.file ?? 'protocol.ts'))
+            .toEqual(['protocol.ts', SEAM_FILE]);
         expect(found.filter((site) => site.member === '(no member)')).toEqual([]);
         expect(found.length).toBe(SITES.length);
+    });
+
+    it('[#25467 cut 15] the seam module is scanned: the definition\'s body and both of shippedArtifactsOf\'s calls are found there', () => {
+        // Non-vacuity for the second file: a scan that read the wrong file, or none, finds no site there.
+        expect(found.filter((site) => site.file === SEAM_FILE).map(keyOf).sort()).toEqual(
+            SITES.filter((site) => site.file === SEAM_FILE).map(keyOf).sort(),
+        );
+        expect(found.filter((site) => site.file === SEAM_FILE)).toHaveLength(3);
     });
 
     it('a site passing fewer than three arguments is recorded as passing no package', () => {
