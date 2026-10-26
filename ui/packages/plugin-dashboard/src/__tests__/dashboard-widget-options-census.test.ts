@@ -57,7 +57,7 @@ import { stripComments } from '../../../../scripts/js-comment-mask.mjs';
 import {
   CONSUMED_WIDGET_OPTION_KEYS,
   UNCONSUMED_WIDGET_OPTION,
-} from '../dashboard-widget-options.js';
+} from '@objectstack/sdui-parser';
 import { uiRoot } from '../../../../scripts/ui-root.mjs';
 
 /**
@@ -262,8 +262,10 @@ describe('leg 4 — repo tripwire: files reading widget.options', () => {
       }
     };
     for (const root of ['packages', 'apps']) walk(join(repoRoot, root));
-    // The measured surface on origin/main@8689166f6, plus the census module
-    // itself (whose header describes the bag in prose — it never renders one).
+    // The measured surface on origin/main@8689166f6. The census module itself
+    // (whose header describes the bag in prose) left this walk when the ui copy
+    // of the parser was retired for `@objectstack/sdui-parser` at the repo root
+    // (objectstack#25712 item 3).
     // A new entry means a new consumer of the bag: re-run the census (module
     // header) before extending either this list or the accepted-key set.
     //
@@ -276,7 +278,6 @@ describe('leg 4 — repo tripwire: files reading widget.options', () => {
       'packages/plugin-dashboard/src/DashboardGridLayout.tsx',
       'packages/plugin-dashboard/src/DashboardRenderer.tsx',
       'packages/plugin-dashboard/src/DatasetWidget.tsx',
-      'packages/sdui-parser/src/dashboard-widget-options.ts',
     ]);
   });
 });

@@ -69,7 +69,7 @@ import '@testing-library/jest-dom';
 import { ComponentRegistry } from '@object-ui/core';
 import { SchemaRenderer, SchemaRendererProvider } from '@object-ui/react';
 import { ComponentPropsMap } from '@objectstack/spec/ui';
-import { manifestFromConfigs, validateTree } from '@object-ui/sdui-parser';
+import { manifestFromConfigs, validateTree } from '@objectstack/sdui-parser';
 // Module scope, not a hook: this import IS the registration (AGENTS.md's
 // test-discipline section — an unbounded module load must not be billed to a
 // bounded window).

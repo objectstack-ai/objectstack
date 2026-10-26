@@ -57,7 +57,7 @@ vi.mock('react-map-gl/maplibre', () => ({
 
 import { ComponentRegistry } from '@object-ui/core';
 import { safeValidateSchema } from '@object-ui/types/zod';
-import { manifestFromConfigs, validateTree } from '@object-ui/sdui-parser';
+import { manifestFromConfigs, validateTree } from '@objectstack/sdui-parser';
 // Module scope, not a hook: this import IS the registration (AGENTS.md
 // test-discipline section).
 import './index';

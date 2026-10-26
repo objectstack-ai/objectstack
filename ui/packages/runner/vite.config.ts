@@ -108,8 +108,8 @@ export default defineConfig({
       // Reached transitively through the packages above — see the closure note.
       // `@object-ui/i18n`          <- react/src/index.ts, components/src/lib/close-label.tsx
       "@object-ui/i18n": path.resolve(__dirname, "../../packages/i18n/src"),
-      // `@object-ui/sdui-parser`   <- components/src/renderers/layout/page.tsx
-      "@object-ui/sdui-parser": path.resolve(__dirname, "../../packages/sdui-parser/src"),
+      // `@objectstack/sdui-parser` <- components/src/renderers/layout/page.tsx
+      "@objectstack/sdui-parser": path.resolve(__dirname, "../../../packages/sdui-parser/src"),
       // `@object-ui/react-runtime` <- components/src/renderers/layout/react-page.tsx
       "@object-ui/react-runtime": path.resolve(__dirname, "../../packages/react-runtime/src"),
       // `@object-ui/fields`        <- plugin-kanban/src/ObjectKanban.tsx

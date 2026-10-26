@@ -29,8 +29,7 @@ import { describe, it, expect } from 'vitest';
 import type { ValidationResult as SpecKernelValidationResult } from '@objectstack/spec/kernel';
 import type { ValidationResult as SpecContractsValidationResult } from '@objectstack/spec/contracts';
 
-import type { ManifestValidationResult } from '../types.js';
-import { validateTree } from '../validate.js';
+import { validateTree, type ManifestValidationResult } from '@objectstack/sdui-parser';
 
 describe('validateTree still returns the manifest-shaped result', () => {
   it('returns diagnostics / requires / bindings, not a `valid` flag', () => {

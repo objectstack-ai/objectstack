@@ -20,17 +20,7 @@
         "$TURBO_ROOT$/scripts/build-plugin-stylesheet.mjs",
         "$TURBO_ROOT$/scripts/check-dist-completeness.mjs",
         "$TURBO_ROOT$/scripts/invoked-as.mjs",
-        "$TURBO_ROOT$/scripts/vitest-invocation-guard.mjs",
-        "$TURBO_ROOT$/packages/sdui-parser/scripts/gen-manifest.ts",
-        "$TURBO_ROOT$/packages/sdui-parser/src/body-dialect.ts",
-        "$TURBO_ROOT$/packages/sdui-parser/src/codegen.ts",
-        "$TURBO_ROOT$/packages/sdui-parser/src/dashboard-widget-options.ts",
-        "$TURBO_ROOT$/packages/sdui-parser/src/index.ts",
-        "$TURBO_ROOT$/packages/sdui-parser/src/input-type.ts",
-        "$TURBO_ROOT$/packages/sdui-parser/src/parse.ts",
-        "$TURBO_ROOT$/packages/sdui-parser/src/provenance.ts",
-        "$TURBO_ROOT$/packages/sdui-parser/src/types.ts",
-        "$TURBO_ROOT$/packages/sdui-parser/src/validate.ts"
+        "$TURBO_ROOT$/scripts/vitest-invocation-guard.mjs"
       ]
     },
     "test": {

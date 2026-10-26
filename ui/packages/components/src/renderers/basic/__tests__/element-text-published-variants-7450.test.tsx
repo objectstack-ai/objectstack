@@ -45,7 +45,7 @@ import { describe, it, expect } from 'vitest';
 import { render } from '@testing-library/react';
 import { ComponentRegistry } from '@object-ui/core';
 import { SchemaRenderer } from '@object-ui/react';
-import { compile, manifestFromConfigs } from '@object-ui/sdui-parser';
+import { compile, manifestFromConfigs } from '@objectstack/sdui-parser';
 import { shapeEnumOptions } from '@object-ui/test-support';
 import { TextSchema, safeValidateSchema } from '@object-ui/types/zod';
 import { ElementTextPropsSchema } from '@objectstack/spec/ui';

@@ -25,8 +25,7 @@
  * (`apps/console/dev/manifest-dump.tsx`) exactly: eager-import the 16 registry
  * modules IN ITS ORDER, read `ComponentRegistry.getPublicConfigs()`, and
  * serialize through `manifestFromConfigs` from `@objectstack/sdui-parser`,
- * the one parser the save gate runs (#25712 item 3 retires the renderer's
- * second copy under `ui/packages/sdui-parser`).
+ * the one parser both the save gate and the renderer run (#25712 item 3).
  *
  * `apps/console/node_modules/@object-ui/` in the built tree carries every
  * registry package as a workspace symlink whose `exports["."].import` is

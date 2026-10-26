@@ -39,7 +39,7 @@ import {
   SchemaRendererProvider,
   type RelatedRecordActionsValue,
 } from '@object-ui/react';
-import { manifestFromConfigs, validateTree } from '@object-ui/sdui-parser';
+import { manifestFromConfigs, validateTree } from '@objectstack/sdui-parser';
 import { ComponentPropsMap } from '@objectstack/spec/ui';
 
 /** The props `ObjectMap` handed the MapGL component on its last render. */

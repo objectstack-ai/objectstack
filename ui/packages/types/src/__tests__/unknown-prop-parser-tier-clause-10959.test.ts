@@ -23,7 +23,7 @@
  *
  * The render half is true: the value changed nothing on the page and logged
  * nothing. The warning half was false. The parser tier's `validateTree`
- * (`@object-ui/sdui-parser`) answers a key its registration does not declare
+ * (`@objectstack/sdui-parser`) answers a key its registration does not declare
  * with `unknown-prop`, and `header-bar` declares only `crumbs`, `search`,
  * `actions` and `rightContent`. It answers `body` the same way on these nine,
  * whatever its shape, because each of them declares the `children` input:
@@ -42,7 +42,7 @@
  * ## Why this file pins the prose, and where the parser half lives
  *
  * `@object-ui/types` declares no workspace dependency and its tests import
- * none, so `@object-ui/sdui-parser` is not importable here without declaring
+ * none, so `@objectstack/sdui-parser` is not importable here without declaring
  * it (the same reason as objectui#10928's pin). The `body` half of the parser
  * behaviour is pinned in `packages/sdui-parser`: "the retired `body` spelling
  * follows the SAME predicate" in `containment-declared-slot-9910.test.ts`, and
