@@ -49,7 +49,7 @@
 //   - `lib: ["ES2022"]` IS declared, and here it is the one departure that
 //     MOVES A NUMBER — the only sibling in the family for which it does, so
 //     ⛔ do not read the family's "measured effect: zero" line onto this file.
-//     Against the INHERITED value it is still zero: the root config declares
+//     Against the INHERITED value it is still zero: the base config declares
 //     `lib: ["ES2020"]` and this program reports the same 27 either way. The
 //     movement is against what this package had BEFORE it inherited anything —
 //     `target: ES2022` with no `lib` at all, i.e. the `lib.es2022.full` default,
@@ -70,7 +70,7 @@
 //   - ⛔ STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`,
 //     `noUnusedParameters`, `noImplicitReturns`, `noFallthroughCasesInSwitch`
 //     and `types: ["node"]` are inherited from `tsconfig.json` and through it
-//     the root config, and none is re-declared here. ⚠️ A child declaring its
+//     the base config, and none is re-declared here. ⚠️ A child declaring its
 //     own `paths` would REPLACE the parent map rather than merge into it,
 //     silently sending a source-resolved specifier back to `dist/`, so this
 //     file declares none. Nothing here may loosen a type rule; if a test does
@@ -86,7 +86,7 @@
 // the full attribution, which has no remainder in either direction:
 // recorded 2, raw 2 (TS2307 x1, TS2304 x1, both inside `node_modules` `.d.ts`),
 // -2 dissolved by the inherited `skipLibCheck`, +25 exposed by the declared
-// `lib` above, +2 exposed by the root config's `noUnusedParameters`
+// `lib` above, +2 exposed by the base config's `noUnusedParameters`
 // (TS6133 x2), ledger 27.
 //
 // Every one of the 27 is PRE-EXISTING in the sense this family means: this
