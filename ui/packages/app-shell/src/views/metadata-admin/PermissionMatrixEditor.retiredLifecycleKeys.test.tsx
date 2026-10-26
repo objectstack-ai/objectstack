@@ -109,8 +109,10 @@ describe('PermissionMatrixEditor · retired lifecycle keys (objectui#6595)', () 
     const headers = screen
       .getAllByRole('columnheader')
       .map((th) => th.textContent?.trim() ?? '');
-    // Object + capabilities + Bulk; the capability strip is what this pins.
-    expect(headers.slice(1, -1)).toEqual(LIVE_COLUMN_SHORTS);
+    // Object + capabilities + the two record-scope pickers (objectstack#26187)
+    // + Bulk; the capability strip is what this pins.
+    expect(headers.slice(1, -3)).toEqual(LIVE_COLUMN_SHORTS);
+    expect(headers.slice(-3, -1)).toEqual(['Read scope', 'Write scope']);
     // Stated twice on purpose: the set assertion above is the guard, these two
     // name the keys this card retired so a future reader sees them by name.
     expect(headers).not.toContain('Re');

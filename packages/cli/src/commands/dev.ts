@@ -22,6 +22,7 @@ import {
   type DevelopmentUpgradeResult,
 } from '../utils/dev-organization-ownership-upgrade.js';
 import { childEnvWithResolvedArtifact } from '../utils/internal-artifact-channel.js';
+import { devCompilesAtBoot } from '../utils/dev-compile-at-boot.js';
 import { makeDirectorySync } from '../utils/make-directory.js';
 // THE artifact precedence, written once (#21501) — shared with `start`, and
 // with the `serve` child this command spawns. ⛔ No rung of it is restated here.
@@ -247,48 +248,6 @@ export function forwardSeedSettledToParent(msg: unknown): boolean {
     if (typeof process.send === 'function') process.send(msg);
   } catch { /* the parent's channel closed — best-effort, exactly like the child's */ }
   return true;
-}
-
-/**
- * Whether this `os dev` boot compiles the cwd config into the artifact it is
- * about to serve, before the server starts (#26130).
- *
- * Yes by default whenever the boot serves an artifact this command builds and
- * there is a config to build it from. The reason is the dev boot's two copies
- * of one stack. A host config's `os dev` boot serves the stack from TWO places:
- * the config MODULE, evaluated in the `serve` child (the AppPlugin wrap, whose
- * registry copy is what a provider-bound connector is materialized from, so
- * what dispatch calls), and the compiled artifact (the dev artifact door, whose
- * copy is what `/api/v1/meta/<type>` serves). A config that reads the
- * environment at module evaluation, as `examples/app-showcase`'s self URL reads
- * `OS_PORT`, gives the module copy THIS boot's value and the artifact copy the
- * value of whichever environment last compiled it. Measured on the showcase
- * with `OS_PORT=41302` over an artifact built without it:
- * `GET /api/v1/meta/connector/showcase_status_api` served
- * `http://127.0.0.1:3000` while the materialized connector called 41302.
- *
- * Compiling here, in this process's environment (the `serve` child inherits
- * the same one), makes both copies one evaluation's answer, so nothing has to
- * restate which variables a config reads or in what order. The watch loop's
- * recompiles already run in that environment, so the two stay one answer for
- * the whole session.
- *
- * `--no-compile` keeps the old shortcut, booting the artifact as built (and
- * the startup staleness warning says when it is older than the sources); a
- * missing artifact is still compiled, since there is nothing else to serve. A
- * pinned artifact (`--artifact`, `OS_ARTIFACT_URL`, a remote
- * `OS_ARTIFACT_PATH`) is never rebuilt. With no config and a missing artifact
- * the answer is yes, so the caller refuses there with the one remedy line.
- */
-export function devCompilesAtBoot(opts: {
-  compile: boolean;
-  pinned: boolean;
-  configExists: boolean;
-  artifactExists: boolean;
-}): boolean {
-  if (opts.pinned) return false;
-  if (!opts.artifactExists) return true;
-  return opts.compile && opts.configExists;
 }
 
 /**

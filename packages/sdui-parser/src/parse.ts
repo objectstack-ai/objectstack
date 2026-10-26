@@ -4,7 +4,7 @@
  * A small recursive-descent parser for a CONSTRAINED JSX subset. It is
  * deliberately not a full JS/JSX parser: a bounded grammar is the point
  * (Markdoc model) — it shrinks the attack surface and the expressible-but-wrong
- * space. Output is the existing SDUI `SchemaNode` tree. Nothing is executed.
+ * space. Output is an SDUI node tree (`ParsedSchemaNode`). Nothing is executed.
  *
  * Grammar (informal):
  *   document := element                       (exactly one root)
@@ -14,7 +14,8 @@
  *   tag      := [A-Za-z][A-Za-z0-9:_-]star      (matches registry keys)
  */
 
-import type { Diagnostic, ParseOptions, ParseResult, SchemaElement, SchemaNode } from './types.js';
+import type { Diagnostic, ParseOptions, ParseResult, SchemaElement, ParsedSchemaNode } from './types.js';
+import { markHtmlTierNode } from './provenance.js';
 
 /** Event handlers and raw-HTML injection are never allowed (parse ≠ execute). */
 const EVENT_ATTR = /^on[A-Z]/;
@@ -45,12 +46,12 @@ const FORBIDDEN_ATTRS = new Set(['dangerouslySetInnerHTML', 'ref', 'key']);
  * member), so removing it there would make every legitimate node warn. The
  * refusal belongs here, at parse.
  *
- * ⚠️ The code is the EXISTING `forbidden-attr`, not a new one, and that is
- * load-bearing rather than lazy: `scripts/check-sdui-lockstep.mjs` holds this
- * copy's diagnostic-code set equal to objectui's at the pinned revision, so a
- * code minted on one side only IS the dialect split that gate exists to catch
- * (#12719). `forbidden-attr` already carries this shape — an attribute this
- * tier refuses, named beside its element — and both copies stamp it.
+ * ⚠️ The code is the EXISTING `forbidden-attr`, not a new one. While the save
+ * gate and the renderer ran separate copies of this parser, a code minted on
+ * one side only was the dialect split #12719 describes; one copy remains
+ * (#25712), and the reason that outlives the split is the shape:
+ * `forbidden-attr` already carries it — an attribute this tier refuses, named
+ * beside its element.
  */
 const DISCRIMINATOR_ATTR = 'type';
 
@@ -115,7 +116,7 @@ class Parser {
     }
 
     this.skipWs();
-    let children: SchemaNode[] | undefined;
+    let children: ParsedSchemaNode[] | undefined;
     if (this.eat('/')) {
       if (!this.eat('>')) this.error('bad-self-close', `Malformed self-closing <${tag}>`, this.pos, tag);
     } else if (this.eat('>')) {
@@ -124,6 +125,14 @@ class Parser {
       this.error('unterminated-open-tag', `Unterminated <${tag}> open tag`, start, tag);
     }
 
+    // Stamp html-tier provenance at the point of production (objectui#4000).
+    // Renderers whose type carries authoring advice aimed at the JSON surface
+    // read this to tell "the author wrote a tag in OUR tier, and there is no
+    // other spelling available to them" apart from "the author wrote this type
+    // in JSON, where the advice applies". Symbol-keyed, so it is invisible to
+    // JSON, to the DOM, and to anything an authored document could forge — see
+    // provenance.ts. Values reached through a braced attribute are NOT marked:
+    // that JSON was written by hand, and the JSON surface's advice does apply.
     // DEFENSE IN DEPTH (ruled together with the refusal above). `props` used to
     // be spread AFTER `type: tag`, so an authored `type` attribute overwrote the
     // discriminator the tag established and nothing downstream restored it —
@@ -134,7 +143,12 @@ class Parser {
     // regression of its own — the authored value would then be dropped in
     // silence, trading one silence for another. It is correct only BECAUSE the
     // attribute is refused loudly one function up.
-    const node: SchemaElement = { ...props, type: tag };
+    //
+    // ⚠️ The `markHtmlTierNode` wrapper survives the reversal: it stamps the
+    // object the spread produced, so the marker is applied after every key is
+    // in place regardless of their order. Pinned in provenance.test.ts, because
+    // this is the one edit that could drop it.
+    const node: SchemaElement = markHtmlTierNode({ ...props, type: tag });
     if (children && children.length) node.children = children;
     return node;
   }
@@ -181,8 +195,8 @@ class Parser {
     return undefined;
   }
 
-  private parseChildren(parentTag: string): SchemaNode[] {
-    const children: SchemaNode[] = [];
+  private parseChildren(parentTag: string): ParsedSchemaNode[] {
+    const children: ParsedSchemaNode[] = [];
     for (;;) {
       if (this.pos >= this.src.length) {
         this.error('unclosed-element', `Unclosed <${parentTag}>`, this.pos, parentTag);
@@ -233,15 +247,14 @@ class Parser {
       // HTML collapses a whitespace run to ONE space; it does not delete it. A
       // bare `.trim()` here deleted the space that separates a text run from an
       // adjacent sibling element, so `A <strong>x</strong> page` compiled to
-      // `A`/`page` and the words ran together wherever the tree is rendered.
-      // The rule (triage option (b), shared verbatim with the downstream copy
-      // of this parser so the two agree): collapse the run, then keep a single
-      // leading space only when a sibling precedes the run, and a single
-      // trailing space only when a sibling element follows it. At the parent's
-      // own start/end the edge space is still dropped, so `<p>  hi  </p>` stays
-      // `hi`. A whitespace-only run survives as one space only when it sits
-      // BETWEEN siblings — that is the bounded over-generosity of this rule
-      // inside block containers like `<ul>`, pinned in the tests.
+      // `A`/`page` and rendered as `Axpage` (objectui#5661). The rule: collapse
+      // the run, then keep a single leading space only when a sibling precedes
+      // the run, and a single trailing space only when a sibling element
+      // follows it. At the parent's own start/end the edge space is still
+      // dropped, so `<p>  hi  </p>` stays `hi`. A whitespace-only run survives
+      // as one space only when it sits BETWEEN siblings — that is the bounded
+      // over-generosity of this rule inside block containers like `<ul>`,
+      // pinned in the tests.
       const text = this.readTextRun();
       const collapsed = text.replace(/\s+/g, ' ');
       const core = collapsed.trim();
@@ -357,13 +370,6 @@ class Parser {
  * subset existed. The reader below only ever sees strings `JSON.parse` has
  * already thrown on, which makes strict-JSON invariance a property of the
  * structure rather than of a test.
- *
- * LOCKSTEP: this grammar is the port of objectui's `packages/sdui-parser` copy
- * (objectui#6614). The two copies must agree on the accepted grammar AND on
- * diagnostic codes — if they drift, the save gate and the renderer speak
- * different dialects and a page can save clean and render inert
- * (objectstack#12719 states the invariant; #12977 carries this half of it).
- * Change this block only together with the objectui copy.
  */
 export function interpretBrace(raw: string): unknown {
   const trimmed = raw.trim();

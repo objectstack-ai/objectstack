@@ -22,18 +22,18 @@
  * 1. **The row set equals this file's own expectation table.** `EXPECTED_GRANT`
  *    below is written here, by hand, NOT derived from the map: a row added to
  *    the map without an expectation, or one dropped from it, turns this red.
- * 2. **Every row × four grant shapes** — create-only, edit-only, read-only and
- *    full — through the REAL `MePermissionsProvider`: each affordance shows
+ * 2. **Every row × five grant shapes** — create-only, edit-only, read-only,
+ *    full and an auditor's row that omits every write bit — through the REAL `MePermissionsProvider`: each affordance shows
  *    exactly when its grant allows it. A row naming the wrong grant (the p1
  *    defect was a create affordance reading the edit grant) fails at least two
  *    shapes.
- * 3. **The field question** of every field row, over the same four shapes and
+ * 3. **The field question** of every field row, over the same five shapes and
  *    over explicit field-level entries: the create question follows the
  *    server's insert rule (no entry → `allowCreate`), the edit question its
  *    update rule (no entry → `allowEdit`), and an explicit entry answers both
  *    alike.
  * 4. **The form reader itself** (`gateFormFields`, `closedFormAffordance`) over
- *    the four shapes, both modes — the p1 card's reader, read through the map.
+ *    the five shapes, both modes — the p1 card's reader, read through the map.
  * 5. **Fail-open**: with no permission provider every row and every field
  *    question reads open, as the `fieldWriteGate.ts` docblock states.
  * 6. **The census**: no console source file outside the map reads a CRUD
@@ -148,7 +148,7 @@ const EXPECTED_FIELD_GRANT: Record<string, Grant> = {
 
 const OBJECT = 'pin_object';
 
-/** The four grant shapes, as `/me/permissions` carries them, and the verbs each holds. */
+/** The five grant shapes, as `/me/permissions` carries them, and the verbs each holds. */
 const SHAPES: Array<{ shape: string; bits: Record<string, boolean>; holds: ReadonlySet<Grant> }> = [
   {
     shape: 'create-only',
@@ -169,6 +169,14 @@ const SHAPES: Array<{ shape: string; bits: Record<string, boolean>; holds: Reado
     shape: 'full',
     bits: { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: true },
     holds: new Set<Grant>(['create', 'update', 'delete']),
+  },
+  {
+    // The server serves only the bits a set grants: an auditor's row carries
+    // no write bit at all, and an absent bit is no grant (spec
+    // `objectPermissionGrants`), so it must read exactly like read-only.
+    shape: 'auditor (write bits absent)',
+    bits: { allowRead: true, viewAllRecords: true },
+    holds: new Set<Grant>(),
   },
 ];
 
@@ -438,7 +446,7 @@ describe('the owner field: an update that writes it needs the transfer grant (ob
 // file must hold none, unless it is named in `OUT_OF_FAMILY` with the reason it
 // is not an affordance-to-grant reader. READ gates (`can(x, 'read')`, the
 // route, navigation and related-list visibility gates) are not matched: every
-// one of the four grant shapes holds read, so they are a different question —
+// one of the five grant shapes holds read, so they are a different question —
 // may the caller SEE — and not this family's.
 // ---------------------------------------------------------------------------
 
