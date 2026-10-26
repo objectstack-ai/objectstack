@@ -34,7 +34,7 @@
  *    once FLS lands)
  */
 
-import { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { mergeFilterNodes, toFilterNodeSafely } from '@object-ui/core';
 import { useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
@@ -42,7 +42,6 @@ import {
   Button,
   Card,
   CardContent,
-  Input,
   Label,
   Badge,
   Table,
@@ -71,7 +70,7 @@ import {
   Combobox,
   type ComboboxOption,
 } from '@object-ui/components';
-import { LookupField, objectRefOptionLabel } from '@object-ui/fields';
+import { LookupField, getLazyFieldWidget, objectRefOptionLabel } from '@object-ui/fields';
 import { ConsolePageHeader, useAdapter, useMetadata } from '@object-ui/app-shell';
 import { Search, X, AlertCircle, ScrollText, ExternalLink } from 'lucide-react';
 import { actionBadgeVariant, actionFilterOptionsOf } from './auditLogActions';
@@ -104,6 +103,15 @@ interface AuditRow {
 }
 
 const PAGE_SIZE = 50;
+
+/**
+ * The platform date picker a record form's `date` field draws (objectui#12642):
+ * a text box in the display locale's format with a calendar popover, through
+ * the shared lazy widget registry, so it stays in its own chunk. It writes
+ * `YYYY-MM-DD` and `''` on clear, the values the From / To filters send.
+ * Resolved once at module scope, not in render (`react-hooks/static-components`).
+ */
+const DateFilterWidget = getLazyFieldWidget('date');
 
 /** The object this page browses. */
 const AUDIT_OBJECT = 'sys_audit_log';
@@ -562,11 +570,27 @@ export function AuditLogPage() {
           </div>
           <div className="space-y-1.5">
             <Label htmlFor={fromDateId} className="text-xs">{t('console.system.auditLog.from', { defaultValue: 'From' })}</Label>
-            <Input id={fromDateId} type="date" value={fromDate} onChange={(e) => { setFromDate(e.target.value); setPage(0); }} className="h-9" />
+            {/* The record form's date picker. Its `id` reaches the text box, the
+                control the label names; typed text commits on blur or Enter. */}
+            <Suspense fallback={<Skeleton className="h-9 w-full" />}>
+              <DateFilterWidget
+                id={fromDateId}
+                value={fromDate}
+                onChange={(v: unknown) => { setFromDate(v == null ? '' : String(v)); setPage(0); }}
+                field={{ type: 'date', name: 'created_at_from', label: t('console.system.auditLog.from', { defaultValue: 'From' }) }}
+              />
+            </Suspense>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor={toDateId} className="text-xs">{t('console.system.auditLog.to', { defaultValue: 'To' })}</Label>
-            <Input id={toDateId} type="date" value={toDate} onChange={(e) => { setToDate(e.target.value); setPage(0); }} className="h-9" />
+            <Suspense fallback={<Skeleton className="h-9 w-full" />}>
+              <DateFilterWidget
+                id={toDateId}
+                value={toDate}
+                onChange={(v: unknown) => { setToDate(v == null ? '' : String(v)); setPage(0); }}
+                field={{ type: 'date', name: 'created_at_to', label: t('console.system.auditLog.to', { defaultValue: 'To' }) }}
+              />
+            </Suspense>
           </div>
           {activeFilterCount > 0 && (
             <div className="md:col-span-5 flex justify-end">

@@ -26,7 +26,11 @@
  *    it is that filter's own control: the Action select's trigger, the Object
  *    combobox, the Actor lookup's trigger, and the two date fields;
  *  - the controls found by their labels are the live filters: the action, the
- *    From date and the To date each still send the filter they always sent.
+ *    From date and the To date each still send the filter they always sent;
+ *  - From and To are the platform date picker the record forms draw
+ *    (objectstack#25875), not the browser's native date input: the label names
+ *    the picker's text box, never its calendar button, and a day typed in the
+ *    display locale's format commits on blur or Enter as `YYYY-MM-DD`.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -160,9 +164,14 @@ describe('AuditLogPage — each filter control is named by its visible label (ob
     expect(object).toHaveTextContent('Any object');
     // The Actor lookup's trigger button.
     expect(actor).toBe(screen.getByTestId('lookup-trigger-user_id'));
-    // The two date fields.
-    expect(from).toHaveAttribute('type', 'date');
-    expect(to).toHaveAttribute('type', 'date');
+    // The two date fields: the platform picker's text box, not the native
+    // date input and not the picker's calendar button (objectstack#25875).
+    for (const field of [from, to]) {
+      expect(field.tagName).toBe('INPUT');
+      expect(field).toHaveAttribute('type', 'text');
+      expect(field.closest('[data-slot="date-picker"]'), 'date picker not rendered').not.toBeNull();
+    }
+    expect(document.querySelector('input[type="date"]')).toBeNull();
     expect(new Set([action, object, actor, from, to]).size).toBe(5);
 
     // The accessible name assistive technology announces is the label's.
@@ -188,14 +197,20 @@ describe('AuditLogPage — each filter control is named by its visible label (ob
     renderPage();
     await settle();
 
+    // Typed in the display locale's format (en-US here), committed on blur.
+    const from = controlLabelled('From');
     await act(async () => {
-      fireEvent.change(controlLabelled('From'), { target: { value: '2026-10-01' } });
+      fireEvent.change(from, { target: { value: '10/01/2026' } });
+      fireEvent.blur(from);
     });
     await settle();
     await waitFor(() => expect(lastFilter()).toEqual({ created_at: { $gte: '2026-10-01' } }));
 
+    // …and on Enter.
+    const to = controlLabelled('To');
     await act(async () => {
-      fireEvent.change(controlLabelled('To'), { target: { value: '2026-10-20' } });
+      fireEvent.change(to, { target: { value: '10/20/2026' } });
+      fireEvent.keyDown(to, { key: 'Enter' });
     });
     await settle();
     await waitFor(() =>
