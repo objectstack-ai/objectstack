@@ -2683,23 +2683,41 @@ async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, asker: 
   const listFields = (fields: string[], label: (f: string) => string): string =>
     `[${fields.slice(0, 25).map(label).join(', ')}${fields.length > 25 ? ', …' : ''}]`;
   const maskNarrows = hidden.length > 0 || partial.length > 0;
+  // [#25866 / ruling of record 6408558941] An entry that carries a `when` is
+  // judged per ROW by the write gate (the incoming row of an insert, the
+  // stored row before an update); this report holds no row, so each such entry
+  // is reported AS a row-conditioned lock — which is also how every row-blind
+  // reader applies it — rather than folded silently into the mask above.
+  const conditioned = [
+    ...deps.evaluator.conditionedFieldEntries(object, sets),
+    ...(delegatorSets ? deps.evaluator.conditionedFieldEntries(object, delegatorSets) : []),
+  ];
+  const conditionedSentence =
+    conditioned.length > 0
+      ? ` ${conditioned.length} field permission(s) carry a row condition — judged per row by the write gate, ` +
+        `applied as the lock everywhere else: ${listFields(
+          conditioned.map((e) => `${e.field} (${e.editable ? 'editable' : 'locked'} when ${e.when}, set "${e.set}")`),
+          (f) => f,
+        )}.`
+      : '';
   layers.push({
     layer: 'fls',
     verdict: maskNarrows ? 'narrows' : 'not_applicable',
-    detail: maskNarrows
-      ? [
-          hidden.length > 0
-            ? `${hidden.length} field(s) masked from responses: ${listFields(hidden, (f) => f)}`
-            : null,
-          partial.length > 0
-            ? `${partial.length} field(s) PARTIALLY masked — the key is still served, its value ` +
-              `replaced: ${listFields(partial, (f) => `${f} (${describeMaskingRule(partialRules[f])})`)}`
-            : null,
-        ]
-          .filter((s): s is string => s !== null)
-          .join('; ') +
-        (delegatorSets ? ' (intersection of agent + delegator masks, D10).' : '.')
-      : 'No field-level masking applies.',
+    detail:
+      (maskNarrows
+        ? [
+            hidden.length > 0
+              ? `${hidden.length} field(s) masked from responses: ${listFields(hidden, (f) => f)}`
+              : null,
+            partial.length > 0
+              ? `${partial.length} field(s) PARTIALLY masked — the key is still served, its value ` +
+                `replaced: ${listFields(partial, (f) => `${f} (${describeMaskingRule(partialRules[f])})`)}`
+              : null,
+          ]
+            .filter((s): s is string => s !== null)
+            .join('; ') +
+          (delegatorSets ? ' (intersection of agent + delegator masks, D10).' : '.')
+        : 'No field-level masking applies.') + conditionedSentence,
     contributors: [],
   });
 

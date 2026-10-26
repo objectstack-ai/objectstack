@@ -1,0 +1,8 @@
+{
+  "file": "packages/metadata-core/src/protocol-handshake.ts",
+  "adrs": [
+    "ADR-0141",
+    "ADR-0087"
+  ],
+  "invariant": "ADR-0141 D2's pre-install dependency check is ONE predicate (`checkDeclaredDependencies`) every install door runs right after the ADR-0087 D1 handshake and before anything registers: the protocol `installPackage` primitive, the no-protocol fallback of `POST /api/v1/packages`, and `POST /api/v1/marketplace/install-local` — never a boot rehydrate and never `PATCH /api/v1/packages/:id`. An entry is satisfied when its id is delivered by the same act (presence only) or installed at a version inside its range; an unreadable range or installed version does NOT satisfy (fail closed), the opposite of the handshake beside it, which admits an unrecognised range with a warning. `rangeAdmitsVersion` is a sibling of `rangeAdmitsMajor` sharing its alternative split, length bound and operator peel; ⛔ no fourth range reader, and the handshake's verdicts do not move."
+}

@@ -266,7 +266,7 @@ describe('explainAccess (ADR-0090 D6)', () => {
 // hidden/partial split here is `FieldMasker.maskResults`' own.
 // ---------------------------------------------------------------------------
 describe('explainAccess — fls reports partial masking (#9127)', () => {
-  const flsOf = async (over: Partial<ExplainEngineDeps>) => {
+  const flsOf = async (over: Partial<ExplainEngineDeps> & { sets?: any[] }) => {
     const d = await explainAccess(makeDeps(over), {
       object: 'leave_request',
       operation: 'read',
@@ -284,6 +284,41 @@ describe('explainAccess — fls reports partial masking (#9127)', () => {
     expect(fls.detail).toContain('1 field(s) masked from responses');
     expect(fls.detail).toContain('ssn');
     expect(fls.detail).not.toContain('PARTIALLY');
+  });
+
+  it('[#25866] a row-conditioned entry (`when`) is reported AS a row-conditioned lock, not folded into the mask', async () => {
+    // The card's shape: `amount` is locked on approved rows only. The report
+    // holds no row, so it says so — which is also how every row-blind reader
+    // applies the entry — instead of reporting a plain lock or nothing.
+    const fls = await flsOf({
+      sets: [
+        {
+          name: 'hr_user',
+          objects: { leave_request: { allowRead: true, allowEdit: true } },
+          fields: { 'leave_request.amount': { readable: true, editable: false, when: "status == 'approved'" } },
+        },
+      ] as any,
+      getFieldMask: () => ({}),
+      getPartialMaskRules: async () => ({}),
+    });
+    expect(fls.verdict).toBe('not_applicable');
+    expect(fls.detail).toContain('No field-level masking applies.');
+    expect(fls.detail).toContain('1 field permission(s) carry a row condition');
+    expect(fls.detail).toContain('judged per row by the write gate');
+    expect(fls.detail).toContain(`amount (locked when status == 'approved', set "hr_user")`);
+  });
+
+  it('[#25866] an entry without a `when` adds no row-condition sentence', async () => {
+    const fls = await flsOf({
+      sets: [
+        {
+          name: 'hr_user',
+          objects: { leave_request: { allowRead: true, allowEdit: true } },
+          fields: { 'leave_request.amount': { readable: true, editable: false } },
+        },
+      ] as any,
+    });
+    expect(fls.detail).toBe('No field-level masking applies.');
   });
 
   it('PARTIAL (gated): a rule field the caller has not unmasked is NOT reported as hidden', async () => {
