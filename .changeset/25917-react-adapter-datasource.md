@@ -11,7 +11,7 @@ refactor(react): `AdapterCtx` / `useAdapter` are typed by `DataSource`, and `@ob
 Clause-②: yes (narrowing)
 Metadata-protocol: none
 
-<!-- adr-0087: not-required (no-migration-prescription) PROBE -->
+<!-- adr-0087: not-required (runtime-interface-only ui/packages/react/src/context/AppShellContext.tsx#useAdapter, ui/packages/react/src/context/AppShellContext.tsx#AdapterCtx) No metadata moves: the two narrowed declarations are runtime TypeScript exports of a React context and its hook, with no Zod schema, spec declaration or stored row behind them, so there is nothing for objectstack migrate meta to rewrite; the compiler names the affected call site. -->
 
 The runtime no longer depends on one adapter, so a bring-your-own backend installs `@object-ui/react` without the ObjectStack adapter, and learns at the type level which `DataSource` members it lacks.
 
