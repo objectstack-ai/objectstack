@@ -58,19 +58,21 @@ const ACCOUNT = {
  * distinguishes an absent key from every present shape, so the REST case
  * cannot pass by accident of a falsy value. The two drift attempts run in
  * try/catch so a strict-mode TypeError on a frozen target is reported as a
- * reading, not as a failed hook.
+ * reading, not as a failed hook; they run only where the key is present,
+ * since an absent key is the body's own to define (as with `ctx.dispatch`).
  */
 const PROBE_SOURCE = `
-  var before = ctx.provenance ? ctx.provenance.flowRunId : null;
-  try { ctx.provenance.flowRunId = 'drifted'; } catch (e) {}
-  try { ctx.provenance = { flowRunId: 'replaced' }; } catch (e) {}
+  var present = typeof ctx.provenance;
+  if (present !== 'undefined') {
+    try { ctx.provenance.flowRunId = 'drifted'; } catch (e) {}
+    try { ctx.provenance = { flowRunId: 'replaced' }; } catch (e) {}
+  }
   ctx.log.info('probe', {
     event: ctx.event,
     name: ctx.input ? ctx.input.name : null,
-    provenanceType: typeof ctx.provenance,
+    provenanceType: present,
     flowRunId: ctx.provenance ? ctx.provenance.flowRunId : null,
     keys: ctx.provenance ? Object.keys(ctx.provenance).sort() : null,
-    before: before,
     inputProvenance: ctx.input ? ctx.input.provenance : null,
     sessionUserId: ctx.session ? ctx.session.userId : null,
   });
@@ -132,10 +134,10 @@ describe('#25905 — a shipped body observes ctx.provenance across the sandbox b
       expect(o.name).toBe('from-flow');
       // The whole card: the declared key, readable from inside QuickJS.
       expect(o.provenanceType).toBe('object');
+      // Read AFTER the body tried to drift the member and replace the key:
+      // the graft is frozen, so neither moved.
       expect(o.flowRunId).toBe('run_25905');
       expect(o.keys).toEqual(['flowRunId']);
-      // Read-only: neither the member nor the key drifted.
-      expect(o.before).toBe('run_25905');
       expect(o.sessionUserId).toBe('u_probe');
     }
 
