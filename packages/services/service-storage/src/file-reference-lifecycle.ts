@@ -3,6 +3,8 @@
 import { randomUUID } from 'node:crypto';
 import { FILE_REFERENCE_TYPES, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY } from '@objectstack/spec/data';
 import type { IStorageService } from '@objectstack/spec/contracts';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
+import { callerContext } from './attachment-access-hooks.js';
 
 /**
  * Field-reference file ownership (ADR-0104 D3 wave 2).
@@ -31,8 +33,24 @@ import type { IStorageService } from '@objectstack/spec/contracts';
  *  2. **Read authorisation derives from exactly one parent record**, not the
  *     union of every referrer's. Copying a private record's file id into a
  *     world-readable record — the sort of thing generated code does without
- *     any visible mistake — cannot widen who can read the bytes, because the
- *     second record gets its own copy.
+ *     any visible mistake — cannot widen who can read the ORIGINAL, because
+ *     the second record gets its own copy.
+ *
+ * ### A write references only a file its writer may read
+ *
+ * [#25692] A copy is new bytes the writing record's readers can read, and a
+ * claim hands a file to the writing record's readers. So neither may run for
+ * a writer who could not read the file in the first place — otherwise holding
+ * a file's id would be holding its bytes, which is exactly what ADR-0104 D3's
+ * governed download ended. The question is the download door's own, asked of
+ * the write's caller: {@link FileReferenceReadAuthorizer}, which the storage
+ * plugin binds to the door's verdict rather than restating it here. A file the
+ * writer may not read is answered exactly as one the organization-scoped
+ * lookup cannot see ({@link systemReadContext}): the value is kept as written,
+ * nothing is claimed or copied, and its field's `accept` / `maxSize` are not
+ * judged against it, so the write learns nothing about the file. System
+ * writes and context-less programmatic calls carry no caller to ask, and
+ * reference files as before.
  *
  * ### The one write that cannot honour it, and is refused
  *
@@ -167,6 +185,61 @@ function systemReadContext(organizationId?: string | null): Record<string, unkno
 function actingOrganizationOf(ctx: any): string | null {
   const org = ctx?.session?.organizationId;
   return typeof org === 'string' && org.length > 0 ? org : null;
+}
+
+/**
+ * [#25692] "May the caller of this record write read this file?" — the
+ * download door's verdict on the file's bytes, asked of the write's caller.
+ *
+ * Supplied by the storage plugin, which binds it to the door's own judgement
+ * (`storage-service-plugin.ts`), and never decided in this module: one file,
+ * one access rule, so the bytes, the metadata and a reference to them are
+ * judged by one predicate. `true` admits; `false` refuses. A throw is not a
+ * verdict — the plugin's binding lets only an authorization-store outage
+ * through, and it propagates, so an unreadable store fails the write rather
+ * than reading as either answer.
+ */
+export type FileReferenceReadAuthorizer = (
+  file: Record<string, unknown>,
+  context: ExecutionContext,
+) => Promise<boolean>;
+
+/**
+ * The caller to ask {@link FileReferenceReadAuthorizer} about, or `null` when
+ * there is none: a context-less programmatic call (no session — a bare kernel,
+ * a seed) or a system write (engine self-writes, migrations, a `runAs:
+ * 'system'` hook or flow). Neither has a principal whose read could be judged,
+ * and the attachment gates exempt both on the same grounds. An anonymous
+ * caller IS a caller: a session with no user, refused by the door for every
+ * file it does not serve anonymously.
+ */
+function referencingCallerOf(ctx: any): ExecutionContext | null {
+  if (!ctx?.session || ctx.session.isSystem) return null;
+  return callerContext(ctx);
+}
+
+/**
+ * The `sys_file` row a field's id token names, as THIS write may reference it,
+ * or `null`. Both halves of the claim path — copy-on-claim before the write,
+ * the claim after it — ask through here, so they cannot disagree about which
+ * file a write may take.
+ *
+ *  1. The row as the acting organization reaches it ({@link systemReadContext}).
+ *  2. [#25692] Then, when the plugin bound a read verdict and the write has a
+ *     caller, whether that caller may read it. A file it may not read is
+ *     answered as the lookup answers a file it cannot see.
+ */
+async function findReferenceableFile(
+  engine: FileReferenceEngine,
+  fileId: string,
+  organizationId: string | null,
+  caller: ExecutionContext | null,
+  authorizeRead: FileReferenceReadAuthorizer | undefined,
+): Promise<Record<string, unknown> | null> {
+  const row = await engine.findOne('sys_file', { where: { id: fileId }, context: systemReadContext(organizationId) });
+  if (!row) return null;
+  if (!caller || !authorizeRead) return row;
+  return (await authorizeRead(row, caller)) ? row : null;
 }
 
 /** Bound on owned files released per record delete. */
@@ -513,7 +586,9 @@ async function copyOwnedFile(
  * read of the same rows.
  *
  * `recordId` is null on insert: a new record can never be the current owner,
- * so every already-owned id is copied.
+ * so every already-owned id is copied. [#25692] `caller` is the write's caller
+ * ({@link referencingCallerOf}): a file it may not read is neither copied nor
+ * judged against the field's declaration.
  */
 async function applyCopyOnClaim(
   engine: FileReferenceEngine,
@@ -524,6 +599,8 @@ async function applyCopyOnClaim(
   data: Record<string, unknown>,
   fileFields: string[],
   organizationId: string | null,
+  caller: ExecutionContext | null,
+  authorizeRead: FileReferenceReadAuthorizer | undefined,
 ): Promise<void> {
   for (const field of fileFields) {
     if (!(field in data)) continue;
@@ -533,17 +610,17 @@ async function applyCopyOnClaim(
 
     const replacements = new Map<string, string>();
     for (const token of [...new Set(tokens)]) {
-      const row = await engine.findOne('sys_file', {
-        where: { id: token },
-        context: systemReadContext(organizationId),
-      });
+      const row = await findReferenceableFile(engine, token, organizationId, caller, authorizeRead);
       // Unknown id: not a file this platform manages (external/legacy value),
-      // or not one the acting organization can reach (`systemReadContext`).
-      // Left verbatim — the read resolver ignores it for the same reason.
+      // not one the acting organization can reach (`systemReadContext`), or
+      // [#25692] not one this write's caller may read. Left verbatim — the
+      // read resolver ignores it for the same reason.
       if (!row) continue;
 
-      // The file is real and about to be referenced by this field, so its
-      // declared constraints bind now — before ownership, before any copy.
+      // The file is real, this caller may read it, and it is about to be
+      // referenced by this field, so its declared constraints bind now —
+      // before ownership, before any copy. [#25692] Never before the read
+      // verdict: the refusal names the file's size or type.
       assertFileConstraints(fieldDefOf(engine, object, field), field, row);
 
       // Unclaimed: the after-hook will claim it for this slot. Nothing to copy.
@@ -592,9 +669,10 @@ async function applyCopyOnClaim(
  * a second record pointing at bytes it does not own is visible to
  * `verify-references`, whereas a silently transferred owner would not be.
  *
- * The file is looked up as the acting organization reaches it
- * ({@link systemReadContext}), the same lookup copy-on-claim made before the
- * write: a file outside that reach is not claimed.
+ * The file is looked up as copy-on-claim looked it up before the write
+ * ({@link findReferenceableFile}): as the acting organization reaches it and,
+ * [#25692] when the write has a caller, as that caller may read it. A file
+ * outside either is not claimed.
  */
 async function claimFile(
   engine: FileReferenceEngine,
@@ -604,9 +682,11 @@ async function claimFile(
   recordId: string,
   field: string,
   organizationId: string | null,
+  caller: ExecutionContext | null,
+  authorizeRead: FileReferenceReadAuthorizer | undefined,
 ): Promise<void> {
-  const row = await engine.findOne('sys_file', { where: { id: fileId }, context: systemReadContext(organizationId) });
-  if (!row) return; // not a platform-managed file the acting organization reaches — nothing to own
+  const row = await findReferenceableFile(engine, fileId, organizationId, caller, authorizeRead);
+  if (!row) return; // not a platform-managed file this write may reference — nothing to own
   if (row.ref_id != null && !isSameSlot(row, object, recordId, field)) {
     logger.warn(
       `[storage] file reference: ${fileId} is already owned by ` +
@@ -727,11 +807,18 @@ async function ownedBySlot(
  * Install the ownership hooks. Global (no object filter): any object may
  * declare a file-class field, and {@link activeFileFields} exits immediately
  * for those that do not.
+ *
+ * [#25692] `authorizeRead` is the download door's read verdict, bound by the
+ * storage plugin: with it, a write references only a file its caller may read
+ * (see the module header). Absent — a bare kernel, a test of the bookkeeping
+ * alone — no caller is asked, which is also where the door itself binds no
+ * gate and serves every file.
  */
 export function installFileReferenceHooks(
   engine: FileReferenceEngine,
   getStorage: () => IStorageService | null | undefined,
   logger: FileReferenceLogger,
+  authorizeRead?: FileReferenceReadAuthorizer,
 ): void {
   // ── beforeInsert / beforeUpdate: copy-on-claim ────────────────────
   // Runs before the driver write so the persisted value is already the id
@@ -744,7 +831,10 @@ export function installFileReferenceHooks(
       if (!object || !data || typeof data !== 'object') return;
       const fileFields = activeFileFields(engine, object);
       if (fileFields.length === 0) return;
-      await applyCopyOnClaim(engine, getStorage, logger, object, null, data, fileFields, actingOrganizationOf(ctx));
+      await applyCopyOnClaim(
+        engine, getStorage, logger, object, null, data, fileFields,
+        actingOrganizationOf(ctx), referencingCallerOf(ctx), authorizeRead,
+      );
     },
     { packageId: PACKAGE_ID },
   );
@@ -798,7 +888,10 @@ export function installFileReferenceHooks(
       // copy-on-claim pass is what makes "the before hook always reconciles the
       // payload it is given" a property of this handler instead of a case
       // analysis a later edit has to re-derive.
-      await applyCopyOnClaim(engine, getStorage, logger, object, recordId, data, fileFields, actingOrganizationOf(ctx));
+      await applyCopyOnClaim(
+        engine, getStorage, logger, object, recordId, data, fileFields,
+        actingOrganizationOf(ctx), referencingCallerOf(ctx), authorizeRead,
+      );
     },
     { packageId: PACKAGE_ID },
   );
@@ -815,10 +908,11 @@ export function installFileReferenceHooks(
       const recordId = row.id;
       if (recordId == null) return;
       const organizationId = actingOrganizationOf(ctx);
+      const caller = referencingCallerOf(ctx);
       for (const field of fileFields) {
         for (const token of [...new Set(idTokensIn(row[field]))]) {
           try {
-            await claimFile(engine, logger, token, object, String(recordId), field, organizationId);
+            await claimFile(engine, logger, token, object, String(recordId), field, organizationId, caller, authorizeRead);
           } catch (err) {
             logger.warn(
               `[storage] file reference: failed to claim ${token} for ${object}/${String(recordId)}.${field} ` +
@@ -865,6 +959,7 @@ export function installFileReferenceHooks(
       if (!ids || ids.length !== 1) return;
       const recordId = String(ids[0]);
       const organizationId = actingOrganizationOf(ctx);
+      const caller = referencingCallerOf(ctx);
 
       for (const field of fileFields) {
         // Only a field the write actually TOUCHED can have changed ownership;
@@ -878,7 +973,7 @@ export function installFileReferenceHooks(
           const held = new Set(current.map((r) => String(r.id)));
           for (const token of incoming) {
             if (held.has(token)) continue; // already ours
-            await claimFile(engine, logger, token, object, recordId, field, organizationId);
+            await claimFile(engine, logger, token, object, recordId, field, organizationId, caller, authorizeRead);
           }
         } catch (err) {
           logger.warn(
