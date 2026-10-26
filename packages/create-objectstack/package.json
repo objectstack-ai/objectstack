@@ -5,6 +5,9 @@
   "bin": {
     "create-objectstack": "./bin/create-objectstack.js"
   },
+  "sideEffects": [
+    "./dist/index.js"
+  ],
   "exports": {
     "./created-summary": {
       "types": "./dist/created-summary.d.ts",
@@ -40,7 +43,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/objectstack-ai/objectstack.git",
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
     "directory": "packages/create-objectstack"
   },
   "homepage": "https://objectstack.ai/docs",

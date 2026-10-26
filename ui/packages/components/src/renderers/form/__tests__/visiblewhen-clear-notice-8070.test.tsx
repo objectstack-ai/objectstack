@@ -22,7 +22,9 @@
  * the ruling's default — one form-level notice under the form's existing
  * outcome-toast id, naming every cleared column at once, so it retires like the
  * form's other outcome messages: a later submit outcome supersedes it, and the
- * dismissal at the next attempt takes it down.
+ * dismissal at the next attempt takes it down. A client-side refusal raises no
+ * toast of its own (objectstack#25874 — each field's message carries it), so
+ * that attempt dismisses the id instead of superseding it.
  *
  * Only a field that HELD something is named: an already-empty value, an empty
  * list and an unchecked two-state control (whose empty state is `false`) are
@@ -199,7 +201,7 @@ describe('#8070 — a visibleWhen clear is named to the user', () => {
     expect(notices()[1]).not.toContain('Contact');
   });
 
-  it('a later submit refusal supersedes the notice, and the next accepted attempt retires it — one id throughout', async () => {
+  it('a later submit attempt retires the notice, refused or accepted — one id throughout', async () => {
     const onSubmit = vi.fn();
     renderForm({
       fields: [{ name: 'subject', label: 'Subject', type: 'input', required: true }, ...FIELDS.slice(0, 2)],
@@ -211,13 +213,15 @@ describe('#8070 — a visibleWhen clear is named to the user', () => {
     await waitFor(() => expect(warningSpy).toHaveBeenCalledTimes(1));
     const noticeId = (warningSpy.mock.calls[0][1] as { id: string }).id;
 
-    // Refused on the client: the refusal is published under the SAME id, which
-    // sonner treats as an update of the notice rather than a second toast.
+    // Refused on the client: the refusal is the inline message under Subject,
+    // and the attempt dismisses the notice's id rather than leaving it up.
     save();
-    await waitFor(() => expect(errorSpy).toHaveBeenCalledTimes(1));
-    expect(errorSpy.mock.calls[0][1]).toMatchObject({ id: noticeId });
+    await waitFor(() => expect(dismissSpy).toHaveBeenCalledWith(noticeId));
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(onSubmit).not.toHaveBeenCalled();
 
-    // Accepted on the client: the attempt starts by dismissing that id.
+    // Accepted on the client: the attempt starts by dismissing that id too.
+    dismissSpy.mockClear();
     fireEvent.change(screen.getByLabelText(/subject/i), { target: { value: 'Kickoff' } });
     save();
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
