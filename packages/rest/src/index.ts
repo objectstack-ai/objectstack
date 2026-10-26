@@ -75,6 +75,12 @@ export type { ExportFieldMeta } from './export-format.js';
 // its own envelope.
 export { assertFilterParamSuppliedOnce, refuseRepeatedQueryParams, repeatedQueryParamMessage } from './query-multiplicity.js';
 
+// [#26020] Query-parameter RECOGNITION (AGENTS.md route rule 5), the portable
+// half: a pure function of the parsed query and the route's closed set, for a
+// door OUTSIDE this package that writes its own envelope (plugin-auth's raw-app
+// invitation preview) — the same reason `repeatedQueryParamMessage` travels.
+export { unknownQueryParamRefusalMessage } from './query-allowlist.js';
+
 // [#20193] THE per-caller read gate of one `/meta/:type/:name` document — the
 // ADR-0046 §6.7 docs audience, the app nav filter (`requiredPermissions`, the
 // ADR-0045 §3 publish gate, the docs-audience entry arm) and the ADR-0057 D10

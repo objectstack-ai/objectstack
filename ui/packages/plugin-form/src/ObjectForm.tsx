@@ -670,6 +670,16 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
   // `t`, is what its dependency list carries. It changes when the language, or
   // that language's late-arriving catalogue, does.
   const maxFileSizeSentence = t('form.maxFileSize', { size: '' });
+  const [initialData, setInitialData] = useState<any>(null);
+  // The persisted record, for `previous`-scoped field rules and the read-only
+  // submit strip (objectui#3484). Edit mode only, and WITHOUT the schema
+  // defaults folded in below: `previous` must be the row as the server last
+  // stored it, not "the row plus what a blank column would default to". It is
+  // also the from-state a `state_machine` select narrows by (#25933).
+  const previousValues =
+    schema.mode === 'edit' && schema.recordId && initialData && typeof initialData === 'object'
+      ? (initialData as Record<string, any>)
+      : undefined;
   // The ONE field-gate step every layout draws through (objectui#10612):
   // field-level security plus the ADR-0092 D4 managed-object lock, which this
   // arm's field generator used to stamp on its own — see `gateFormFields`.
@@ -681,8 +691,9 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
         mode: schema.mode,
         objectSchema,
         deniedDescription,
+        previousValues,
       }) as FormField[],
-    [perms, schema.objectName, schema.mode, objectSchema, deniedDescription],
+    [perms, schema.objectName, schema.mode, objectSchema, deniedDescription, previousValues],
   );
   // objectui#11000 — why `gateFields` locked every field, when the lock is the
   // form-wide one: the affordance for the mode is closed. Rendered above the
@@ -701,7 +712,6 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
     />
   );
   const [formFields, setFormFields] = useState<FormField[]>([]);
-  const [initialData, setInitialData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   // objectui#10682 — the load error, kept per read (the object schema and the
   // record), each written only by the current run of its read and cleared when
@@ -1523,15 +1533,6 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
     }
   }, [schema]);
 
-
-  // The persisted record, for `previous`-scoped field rules and the read-only
-  // submit strip (objectui#3484). Edit mode only, and WITHOUT the schema
-  // defaults folded in above: `previous` must be the row as the server last
-  // stored it, not "the row plus what a blank column would default to".
-  const previousValues =
-    schema.mode === 'edit' && schema.recordId && initialData && typeof initialData === 'object'
-      ? (initialData as Record<string, any>)
-      : undefined;
 
   // Auto-layout parity with the flat path (which runs these inside
   // applyAutoLayout): drop platform-managed system fields — and, in create

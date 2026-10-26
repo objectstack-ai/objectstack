@@ -65,7 +65,7 @@ import {
 // generic replacement text — the same two `@objectstack/rest` composes into
 // `isScriptFaultMessage` / `UNCLASSIFIED_FAULT`, so this door's crash reading
 // cannot drift from the `/data` door's. ⛔ Never re-inline either.
-import { isNativeErrorName, INTERNAL_ERROR_MESSAGE, sandboxBusinessMessage } from '@objectstack/types';
+import { isNativeErrorName, INTERNAL_ERROR_MESSAGE, sandboxBusinessMessage, driverNotNullRefusalAnswer } from '@objectstack/types';
 // [ADR-0029 D9.6] The ONE "does a code package ship this?" reading, which the
 // activation write below asks to name the ledger row's package.
 import { isCodeArtifactBody, isTenantAuthored } from '@objectstack/metadata-core';
@@ -1017,6 +1017,24 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         // `validation-failure.ts`), so it never reaches this branch.
         if (typeof err?.status === 'number' || typeof err?.statusCode === 'number') {
             return { handled: true, response: deps.errorFromThrown(err, 500) };
+        }
+
+        // [#26031] A driver's NOT NULL refusal that the engine let out (a
+        // column no field declares, i.e. drift) is the caller's write refused,
+        // and `RestServer` answers it `400 VALIDATION_FAILED` with the column's
+        // `required` entry and the drift hint. This door relayed it through the
+        // terminal below instead: the driver's text as the message (the
+        // physical table and column), the status-derived `VALIDATION_ERROR`,
+        // and the driver's code as `declaredCode`. The body is now the
+        // classification's own NOT NULL arm (`driverNotNullRefusalAnswer`),
+        // the one the dispatcher's `/data` exit answers too, in this
+        // transport's envelope; nothing here reads the driver's text. Asked
+        // before the fault predicate so a driver class with no string `code`
+        // is still the refusal it is, never the sanitised 500.
+        const notNullRefusal = driverNotNullRefusalAnswer(err, objectName);
+        if (notNullRefusal) {
+            const { error: refusal, ...details } = notNullRefusal.body;
+            return { handled: true, response: deps.error(String(refusal), notNullRefusal.status, details) };
         }
 
         // [#3913 follow-up] …and it does not cover an UNEXPECTED FAULT either.

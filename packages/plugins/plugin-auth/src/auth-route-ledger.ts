@@ -253,6 +253,12 @@ export const AUTH_ROUTE_LEDGER: readonly AuthRouteLedgerEntry[] = [
   // restores the URL the `sys_member` `add_member` toolbar action has always
   // targeted (on multi-org the only UI path to attach an existing user).
   { route: 'POST /api/v1/auth/organization/add-member', family: 'organization', source: 'objectstack', disposition: 'server-only', requires: 'organization', note: 'no SDK method builds this URL — the sys_member add_member action posts it directly; ObjectStack mount wrapping the vendor server-only auth.api.addMember, platform-admin gated (ADR-0068); on multi-org it is the only UI path that attaches an existing user to an organization' },
+  // #26020 (ruling 6413975861, Q1 A) — the tracker id stays HERE and never in
+  // the `note` string, per the #16678 note above. `public` is this file's word
+  // for "unauthenticated, browser-facing", and the first row to carry it: the
+  // Console's signed-out invitation landing page reads it, and no SDK method
+  // builds it.
+  { route: 'GET /api/v1/auth/organization/invitation-preview', family: 'organization', source: 'objectstack', disposition: 'public', requires: 'organization', note: 'the signed-out invitation preview: answers a caller with NO session, keyed by the invitation id the link carries (a capability token, ADR-0138 D2 class-2-shaped door by its dated note). Returns exactly { organizationName, inviterName, email } with the address masked, for a pending, unexpired invitation only; one uniform 404 for an unknown, expired, accepted, rejected or cancelled id; a fixed per-address rate limit (ADR-0121 D6); closed query set { id }. The vendor GET /organization/get-invitation answers 401 without a session and is unchanged' },
   { route: 'POST /api/v1/auth/organization/add-team-member', family: 'organization', source: 'better-auth', disposition: 'sdk', client: 'organizations.teams.addMember', requires: 'organization' },
   { route: 'POST /api/v1/auth/organization/cancel-invitation', family: 'organization', source: 'better-auth', disposition: 'sdk', client: 'organizations.invitations.cancel', requires: 'organization' },
   { route: 'POST /api/v1/auth/organization/create', family: 'organization', source: 'better-auth', disposition: 'sdk', client: 'organizations.create', requires: 'organization' },
