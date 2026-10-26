@@ -696,7 +696,7 @@ function EntryDetail({
     onComparedRef.current = onCompared;
   });
 
-  const isNew = entry.kind === 'new';
+  const classifiedNew = entry.kind === 'new';
   const awaitingKind = entry.kind === undefined && classifying;
   useEffect(() => {
     if (awaitingKind) return;
@@ -708,7 +708,7 @@ function EntryDetail({
           // (objectstack-ai/objectstack#25894). An item the
           // classification could not answer still 404s here when it is new —
           // that's data, not an error.
-          isNew
+          classifiedNew
             ? null
             : fetchItemBody(entry.type, entry.name, { packageId: entry.packageId, member: entry.member }),
           fetchItemBody(entry.type, entry.name, {
@@ -732,7 +732,7 @@ function EntryDetail({
     return () => {
       cancelled = true;
     };
-  }, [entry.type, entry.name, entry.packageId, entry.member, isNew, awaitingKind]);
+  }, [entry.type, entry.name, entry.packageId, entry.member, classifiedNew, awaitingKind]);
 
   // objectui#12929 — how many records the choice would reach: asked once per
   // object, and only where a choice is offered.
