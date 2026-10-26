@@ -1,7 +1,5 @@
 # 多仓协调
 
-分诊席每次 fire 路由与查重前读本文;执行席跨仓认领、派发或转移时读本文。
-
 - 产品依赖方向固定:`objectstack`(后端与 `ui/` 前端,`packages/spec` 唯一契约)→ `cloud`、`hotcrm`。
 - 多车道仓 `objectstack`:中央分诊是 `domain:*`/type/定级的唯一生产者。
 - 单车道仓 `cloud`、`objectos`、`hotcrm`、`www.objectos.ai`;未来新仓默认此类。
