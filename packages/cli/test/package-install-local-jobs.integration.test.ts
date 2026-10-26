@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 180 — spawns the real producer once per single-cause fixture: three `os start` boots of the tsx source entry (install, restart on the same home, and the `--artifact` control on its own home, run beside the other two) and six `os package install` runs; slowest of three local runs after the control ran beside them 104.4 s, x 1.34 (this file's CI-over-local ratio before: 161.8 s in hourly full battery run 40290659753 over a 120.7 s local median) x 1.25, rounded up; no CI reading of this shape yet
+// test-budget: 210 — spawns the real producer once per single-cause fixture: three `os start` boots of the tsx source entry in sequence (install, restart on the same home, and the `--artifact` control on its own home) and six `os package install` runs; slowest CI reading of this shape 161.8 s (hourly full battery run 40290659753; 160.9 s in run 38332198724, the card's window) x 1.25, rounded up
 
 /**
  * #21489 — a package's job BODIES run on every door that brings an artifact
@@ -359,17 +359,6 @@ async function quietAfter(live: LiveStart, token: string, object: string, job: s
   return { floor, after };
 }
 
-/**
- * Run phases that share no state at once, and wait for EVERY one to settle
- * before reporting the first failure: a phase that rejects must not leave a
- * sibling still booting after `afterAll` has stopped the process groups.
- */
-async function allPhases(chains: Array<() => Promise<void>>): Promise<void> {
-  const settled = await Promise.allSettled(chains.map((chain) => chain()));
-  const failed = settled.find((s): s is PromiseRejectedResult => s.status === 'rejected');
-  if (failed) throw failed.reason;
-}
-
 interface InstallRun { exit: number | null; output: string }
 const readings: {
   bodyInstall?: InstallRun;
@@ -423,64 +412,55 @@ beforeAll(async () => {
   writeFileSync(hostArtifact, JSON.stringify(HOST_ARTIFACT, null, 2), 'utf8');
   const home = join(runtimeDir, 'home');
 
-  // Boots 1 and 2 share one home and run in order. Boot 3, the CONTROL, has
-  // its own cwd and home and reads nothing they write, so it runs beside
-  // them; every boot binds a kernel-assigned port.
-  await allPhases([
-    // ── boot 1: the host, hot installs, the body job runs ─────────────────
-    async () => {
-      const first = await bootStart(runtimeDir, home, ['--artifact', hostArtifact]);
-      const token = await authenticate(first);
-      readings.bodyInstall = await packageInstall(bodyApp, first);
-      readings.otherInstall = await packageInstall(otherApp, first);
-      readings.dropInstall = await packageInstall(dropAppV1, first);
-      readings.handlerInstall = await packageInstall(handlerApp, first);
-      readings.installed = await http(first, 'GET', '/api/v1/marketplace/install-local', token);
-      readings.afterInstall = await awaitRuns(first, token, HOST_TICK, BODY_JOB, 0);
+  // ── boot 1: the host, hot installs, the body job runs ─────────────────
+  const first = await bootStart(runtimeDir, home, ['--artifact', hostArtifact]);
+  const token = await authenticate(first);
+  readings.bodyInstall = await packageInstall(bodyApp, first);
+  readings.otherInstall = await packageInstall(otherApp, first);
+  readings.dropInstall = await packageInstall(dropAppV1, first);
+  readings.handlerInstall = await packageInstall(handlerApp, first);
+  readings.installed = await http(first, 'GET', '/api/v1/marketplace/install-local', token);
+  readings.afterInstall = await awaitRuns(first, token, HOST_TICK, BODY_JOB, 0);
 
-      // Reinstall the drop package with a version that no longer declares DROP_GONE.
-      readings.dropBefore = await awaitRuns(first, token, HOST_TICK, DROP_GONE, 0);
-      readings.dropReinstall = await packageInstall(dropAppV2, first);
-      readings.dropGoneHot = await quietAfter(first, token, HOST_TICK, DROP_GONE);
-      readings.dropKeptHot = await awaitRuns(first, token, HOST_TICK, DROP_KEPT,
-        rowsOf(await jobRows(first, token, HOST_TICK, DROP_KEPT)).length);
+  // Reinstall the drop package with a version that no longer declares DROP_GONE.
+  readings.dropBefore = await awaitRuns(first, token, HOST_TICK, DROP_GONE, 0);
+  readings.dropReinstall = await packageInstall(dropAppV2, first);
+  readings.dropGoneHot = await quietAfter(first, token, HOST_TICK, DROP_GONE);
+  readings.dropKeptHot = await awaitRuns(first, token, HOST_TICK, DROP_KEPT,
+    rowsOf(await jobRows(first, token, HOST_TICK, DROP_KEPT)).length);
 
-      // Uninstall the body package; the other package is the control.
-      readings.uninstall = await http(first, 'DELETE', `/api/v1/marketplace/install-local/${BODY_APP_ID}`, token);
-      readings.bodyGoneHot = await quietAfter(first, token, HOST_TICK, BODY_JOB);
-      readings.otherHot = await awaitRuns(first, token, HOST_TICK, OTHER_JOB,
-        rowsOf(await jobRows(first, token, HOST_TICK, OTHER_JOB)).length);
-      readings.output.install = first.output();
-      await stopGroup(first.child);
+  // Uninstall the body package; the other package is the control.
+  readings.uninstall = await http(first, 'DELETE', `/api/v1/marketplace/install-local/${BODY_APP_ID}`, token);
+  readings.bodyGoneHot = await quietAfter(first, token, HOST_TICK, BODY_JOB);
+  readings.otherHot = await awaitRuns(first, token, HOST_TICK, OTHER_JOB,
+    rowsOf(await jobRows(first, token, HOST_TICK, OTHER_JOB)).length);
+  readings.output.install = first.output();
+  await stopGroup(first.child);
 
-      // ── boot 2: same host, home and cwd — the ledger rehydrates on kernel:ready ──
-      const second = await bootStart(runtimeDir, home, ['--artifact', hostArtifact]);
-      const token2 = await authenticate(second);
-      // The rows boot 1 left behind are the floors: only a run in THIS boot lifts one.
-      const floorOf = async (object: string, job: string) => rowsOf(await jobRows(second, token2, object, job)).length;
-      const bodyFloor = await floorOf(HOST_TICK, BODY_JOB);
-      const goneFloor = await floorOf(HOST_TICK, DROP_GONE);
-      const restartedAt = Date.now();
-      readings.afterRestart = await awaitRuns(second, token2, HOST_TICK, OTHER_JOB, await floorOf(HOST_TICK, OTHER_JOB));
-      readings.dropKeptRestart = await awaitRuns(second, token2, HOST_TICK, DROP_KEPT, await floorOf(HOST_TICK, DROP_KEPT));
-      await sleep(Math.max(0, QUIET_WAIT_MS - (Date.now() - restartedAt)));
-      readings.bodyGoneRestart = { floor: bodyFloor, after: await floorOf(HOST_TICK, BODY_JOB) };
-      readings.dropGoneRestart = { floor: goneFloor, after: await floorOf(HOST_TICK, DROP_GONE) };
-      readings.output.restart = second.output();
-      await stopGroup(second.child);
-    },
+  // ── boot 2: same host, home and cwd — the ledger rehydrates on kernel:ready ──
+  const second = await bootStart(runtimeDir, home, ['--artifact', hostArtifact]);
+  const token2 = await authenticate(second);
+  // The rows boot 1 left behind are the floors: only a run in THIS boot lifts one.
+  const floorOf = async (object: string, job: string) => rowsOf(await jobRows(second, token2, object, job)).length;
+  const bodyFloor = await floorOf(HOST_TICK, BODY_JOB);
+  const goneFloor = await floorOf(HOST_TICK, DROP_GONE);
+  const restartedAt = Date.now();
+  readings.afterRestart = await awaitRuns(second, token2, HOST_TICK, OTHER_JOB, await floorOf(HOST_TICK, OTHER_JOB));
+  readings.dropKeptRestart = await awaitRuns(second, token2, HOST_TICK, DROP_KEPT, await floorOf(HOST_TICK, DROP_KEPT));
+  await sleep(Math.max(0, QUIET_WAIT_MS - (Date.now() - restartedAt)));
+  readings.bodyGoneRestart = { floor: bodyFloor, after: await floorOf(HOST_TICK, BODY_JOB) };
+  readings.dropGoneRestart = { floor: goneFloor, after: await floorOf(HOST_TICK, DROP_GONE) };
+  readings.output.restart = second.output();
+  await stopGroup(second.child);
 
-    // ── boot 3: the CONTROL — both job forms in the boot artifact ─────────
-    async () => {
-      const controlHome = join(controlApp, 'home');
-      const third = await bootStart(controlApp, controlHome, ['--artifact', join(controlApp, 'dist', 'objectstack.json')]);
-      const token3 = await authenticate(third);
-      readings.controlHandler = await awaitRuns(third, token3, HANDLER_TICK, HANDLER_JOB, 0);
-      readings.controlBody = await awaitRuns(third, token3, BODY_TICK, BODY_JOB, 0);
-      readings.output.control = third.output();
-      await stopGroup(third.child);
-    },
-  ]);
+  // ── boot 3: the CONTROL — both job forms in the boot artifact ─────────
+  const controlHome = join(controlApp, 'home');
+  const third = await bootStart(controlApp, controlHome, ['--artifact', join(controlApp, 'dist', 'objectstack.json')]);
+  const token3 = await authenticate(third);
+  readings.controlHandler = await awaitRuns(third, token3, HANDLER_TICK, HANDLER_JOB, 0);
+  readings.controlBody = await awaitRuns(third, token3, BODY_TICK, BODY_JOB, 0);
+  readings.output.control = third.output();
+  await stopGroup(third.child);
 }, 3 * BOOT_TIMEOUT_MS + 12 * RUN_WAIT_MS);
 
 afterAll(async () => {

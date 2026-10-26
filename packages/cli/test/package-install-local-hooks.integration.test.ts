@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 150 — spawns the real producer once per single-cause fixture: two `os start` boots of the tsx source entry on one home (the hot installs, then the rehydrate of an entry an earlier build wrote) and five `os package install` runs, one per package under test; slowest CI reading 114.4 s (hourly full battery run 40290659753, 2026-10-26) x 1.25, rounded up
+// test-budget: 150 — spawns the real producer once per single-cause fixture: two `os start` boots of the tsx source entry on one home (the hot installs, then the rehydrate of an entry an earlier build wrote) and five `os package install` runs, one per package under test; slowest CI reading 117.1 s (run 38332198724, the card's window; 114.4 s in hourly full battery run 40290659753) x 1.25, rounded up
 
 /**
  * #21585 — install-local refuses the code it cannot run: a hook with no `body`,

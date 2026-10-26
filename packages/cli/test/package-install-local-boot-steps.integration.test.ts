@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 70 — spawns the real producer once per single-cause fixture: three `os start` boots of the tsx source entry (install, restart on the same home, and the `--artifact` control on its own home, run beside the other two) and one `os package install` run; slowest of three local runs after the control ran beside them 49.1 s, x 1.11 (this file's CI-over-local ratio before: 68.2 s in hourly full battery run 40290659753 over a 61.3 s local median) x 1.25, rounded up; no CI reading of this shape yet
+// test-budget: 120 — spawns the real producer once per single-cause fixture: three `os start` boots of the tsx source entry in sequence (install, restart on the same home, and the `--artifact` control on its own home) and one `os package install` run; slowest CI reading of this shape 94.3 s (run 38222448090, the card's window; 68.2 s in hourly full battery run 40290659753) x 1.25, rounded up
 
 /**
  * #21322 — a hot install (`os package install <artifact>` into a RUNNING
@@ -301,17 +301,6 @@ async function probe(live: LiveStart, token: string): Promise<Phase> {
   return { permissionSet, created, updated, notes };
 }
 
-/**
- * Run phases that share no state at once, and wait for EVERY one to settle
- * before reporting the first failure: a phase that rejects must not leave a
- * sibling still booting after `afterAll` has stopped the process groups.
- */
-async function allPhases(chains: Array<() => Promise<void>>): Promise<void> {
-  const settled = await Promise.allSettled(chains.map((chain) => chain()));
-  const failed = settled.find((s): s is PromiseRejectedResult => s.status === 'rejected');
-  if (failed) throw failed.reason;
-}
-
 const phases: Record<'install' | 'restart' | 'control', Phase | undefined> = {
   install: undefined, restart: undefined, control: undefined,
 };
@@ -331,33 +320,24 @@ beforeAll(async () => {
   writeFileSync(hostArtifact, JSON.stringify(HOST_ARTIFACT, null, 2), 'utf8');
   const home = join(runtimeDir, 'home');
 
-  // Boots 1 and 2 share one home and run in order. Boot 3, the CONTROL, has
-  // its own cwd and home and only reads the package file, so it runs beside
-  // them; every boot binds a kernel-assigned port.
-  await allPhases([
-    // ── boot 1: the host, hot install, probe ───────────────────────────────
-    async () => {
-      const first = await bootStart(runtimeDir, home, ['--artifact', hostArtifact]);
-      const token = await authenticate(first);
-      installs.push(await packageInstall(appDir, first));
-      phases.install = await probe(first, token);
-      await stopGroup(first.child);
+  // ── boot 1: the host, hot install, probe ───────────────────────────────
+  const first = await bootStart(runtimeDir, home, ['--artifact', hostArtifact]);
+  const token = await authenticate(first);
+  installs.push(await packageInstall(appDir, first));
+  phases.install = await probe(first, token);
+  await stopGroup(first.child);
 
-      // ── boot 2: same host, home and cwd — the ledger rehydrates on kernel:ready ──
-      const second = await bootStart(runtimeDir, home, ['--artifact', hostArtifact]);
-      phases.restart = await probe(second, await authenticate(second));
-      await stopGroup(second.child);
-    },
+  // ── boot 2: same host, home and cwd — the ledger rehydrates on kernel:ready ──
+  const second = await bootStart(runtimeDir, home, ['--artifact', hostArtifact]);
+  phases.restart = await probe(second, await authenticate(second));
+  await stopGroup(second.child);
 
-    // ── boot 3: the CONTROL — the same file as the boot artifact ───────────
-    async () => {
-      const controlDir = join(root, 'control');
-      mkdirSync(controlDir, { recursive: true });
-      const third = await bootStart(controlDir, join(controlDir, 'home'), ['--artifact', join(appDir, 'dist', 'objectstack.json')]);
-      phases.control = await probe(third, await authenticate(third));
-      await stopGroup(third.child);
-    },
-  ]);
+  // ── boot 3: the CONTROL — the same file as the boot artifact ───────────
+  const controlDir = join(root, 'control');
+  mkdirSync(controlDir, { recursive: true });
+  const third = await bootStart(controlDir, join(controlDir, 'home'), ['--artifact', join(appDir, 'dist', 'objectstack.json')]);
+  phases.control = await probe(third, await authenticate(third));
+  await stopGroup(third.child);
 }, 4 * BOOT_TIMEOUT_MS);
 
 afterAll(async () => {
