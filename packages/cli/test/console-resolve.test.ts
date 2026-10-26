@@ -196,7 +196,7 @@ describe('detectConsoleShaDrift', () => {
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain(SHA_A.slice(0, 12));
     expect(warnings[0]).toContain(SHA_B.slice(0, 12));
-    expect(warnings[0]).toContain('objectui:build');
+    expect(warnings[0]).toContain('pnpm console:build');
   });
 
   it('is silent when the dist stamp matches the pin', () => {

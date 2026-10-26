@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 180 — spawns the real producer once per single-cause fixture: every case runs the real schema generator (build-schemas.ts --check) in its own sandbox git tree, one fixture per cause; measured 2026-10-23 on its first CI reading after #25372 split build-schemas-check-mode.test.ts (run 39963105499, Test Core, head dce4c6406): 140.73 s x 1.25, rounded up; one reading only, its wall tracks the run's load, so re-measure once the window has more
+// test-budget: 290 — spawns the real producer once per single-cause fixture: every case runs the real schema generator (build-schemas.ts --check) in its own sandbox git tree, one fixture per cause, and one generator run is about 7 s of JSON Schema emission and spec module load before any assertion; re-measured 2026-10-26 over the 10 executed readings in refresh PR #25960's window (hourly runs 40200279306 to 40272142430), slowest 226.64 s (run 40204927516) x 1.25, rounded up
 //
 // The manifest ratchet and its neighbours: a check reports, it does not write (#4711);
 // an export that never published must be declared (#16431); the output clean spares a
@@ -557,7 +557,7 @@ describe('build-schemas.ts — the output clean spares a sibling generator (#537
 describe('build-schemas.ts — the bundle counts the definitions it carries (#12588)', () => {
   const OUT = () => path.join(sandbox, 'json-schema');
 
-  beforeEach(() => {
+  beforeAll(() => {
     // A current, self-consistent tree, so the run exits 0 and these assertions
     // are about the bundle rather than about some ratchet upstream of it.
     seedManifest((s) => s);
@@ -566,11 +566,20 @@ describe('build-schemas.ts — the bundle counts the definitions it carries (#12
     seedSurfaceBase(tip, (k) => k);
   });
 
+  /**
+   * One generation for the block. Both cases read the same fixture and only
+   * READ what the run printed and wrote, so the first case to need it runs the
+   * generator and the other reads that run, the way
+   * `openapi-self-consistency.test.ts` shares its shipped run.
+   */
+  let generation: ReturnType<typeof run> | undefined;
+  const generated = (): ReturnType<typeof run> => (generation ??= run([]));
+
   it(
     'writes x-schema-count equal to its own $defs size, and to the files on disk',
     { timeout: SPAWN_TIMEOUT_MS },
     () => {
-      const { status, output } = run([]);
+      const { status, output } = generated();
       expect(status).toBe(0);
 
       const bundle = JSON.parse(
@@ -605,7 +614,7 @@ describe('build-schemas.ts — the bundle counts the definitions it carries (#12
     'accounts for every emit the definition count does not include',
     { timeout: SPAWN_TIMEOUT_MS },
     () => {
-      const { status, output } = run([]);
+      const { status, output } = generated();
       expect(status).toBe(0);
 
       const bundle = JSON.parse(

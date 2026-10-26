@@ -609,6 +609,16 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
         warn: (msg, meta) =>
           this.config.logger ? this.config.logger.warn(msg, meta) : console.warn(msg, meta),
       });
+      const expiry = invitationExpiryArg(invitation.expiresAt);
+      if (expiry.expiresAt === undefined) {
+        const msg =
+          `[AuthManager] invitation mail: invitation '${invitation.id}' carries no readable expiry, ` +
+          'so the auth.invitation mail (which states when it expires) will be refused and not sent; ' +
+          'resend the invitation once its expiry is set';
+        const meta = { invitationId: invitation.id, expiresAt: String(invitation.expiresAt) };
+        if (this.config.logger) this.config.logger.warn(msg, meta);
+        else console.warn(msg, meta);
+      }
       try {
         await emailService.sendTemplate({
           template: 'auth.invitation',
@@ -623,6 +633,14 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
             role: roleLabel,
             acceptUrl,
             appName: this.getAppName(),
+            // When the link stops working (better-auth's window, 48 h by
+            // default): every body says so, so an invitation opened late is
+            // not a surprise at the accept page. Handed over as an ISO-8601
+            // instant; the template's `datetime` formatter renders it in the
+            // mail's locale. The template declares it REQUIRED, so an
+            // unreadable value is never invented: it is left out, said so
+            // once below, and the send is refused (`MISSING_VARIABLES`).
+            ...expiry,
           },
           relatedObject: 'sys_invitation',
           relatedId: invitation.id,
@@ -680,4 +698,18 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
     );
   }
   return organizationPlugin;
+}
+
+/**
+ * The `expiresAt` fragment of the invitation mail's data: the invitation's
+ * expiry as an ISO-8601 instant, or nothing when the value does not read as a
+ * date. better-auth hands the callback a `Date`; a string or epoch number is
+ * read the same way. A value that is not a real instant is left out rather
+ * than rendered as `Invalid Date`; the template declares the variable
+ * required, so that send is refused rather than sent with a dangling sentence.
+ */
+function invitationExpiryArg(expiresAt: unknown): { expiresAt?: string } {
+  if (!(expiresAt instanceof Date) && typeof expiresAt !== 'string' && typeof expiresAt !== 'number') return {};
+  const instant = new Date(expiresAt);
+  return Number.isNaN(instant.getTime()) ? {} : { expiresAt: instant.toISOString() };
 }

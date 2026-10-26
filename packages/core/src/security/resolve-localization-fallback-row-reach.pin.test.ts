@@ -49,7 +49,7 @@ describe('[ADR-0131 D8] the fallback judges each row it is handed, not only the 
       sys_organization: [{ id: 'org_a' }, { id: 'org_b' }],
       sys_setting: [tz(null, 'America/New_York'), tz('org_b', 'Asia/Tokyo'), tz('org_a', 'Europe/Paris')],
     });
-    expect((await resolveLocalizationContext({ ql, tenantId: 'org_a' })).timezone).toBe('Europe/Paris');
+    expect((await resolveLocalizationContext({ ql, organizationId: 'org_a' })).timezone).toBe('Europe/Paris');
   });
 
   it('with no row of its own, that caller gets the built-in default — neither foreign row', async () => {
@@ -57,7 +57,7 @@ describe('[ADR-0131 D8] the fallback judges each row it is handed, not only the 
       sys_organization: [{ id: 'org_a' }, { id: 'org_c' }],
       sys_setting: [tz(null, 'America/New_York'), tz('org_a', 'Europe/Paris')],
     });
-    expect((await resolveLocalizationContext({ ql, tenantId: 'org_c' })).timezone).toBe('UTC');
+    expect((await resolveLocalizationContext({ ql, organizationId: 'org_c' })).timezone).toBe('UTC');
   });
 
   it('the lean embedding takes only the row with no organization, behind another organization\'s', async () => {

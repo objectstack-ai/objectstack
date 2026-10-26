@@ -66,7 +66,7 @@
       "title": "Create → read → update → delete a record through the console UI",
       "since": "v15",
       "status": "active",
-      "revision": 13,
+      "revision": 14,
       "priority": "P0",
       "surface": "browser",
       "personas": [
@@ -138,7 +138,7 @@
         {
           "clause": "clone (POST /data/:object/:id/clone, gated by enable.clone default-on) returns 201 with a NEW id and the source's field VALUES copied, but engine-owned columns (id, audit, autonumber, formula, summary) and readonly columns RE-DERIVED not carried, and the clone is owned by the CLONER — not the source's owner. ⚠️ The readonly half is UNOBSERVABLE on the stock seed: showcase_account declares no readonly column, no showcase object has an approval_status, and the showcase's one readonly field (showcase_contact.lead_score) is null on every seeded row, so carried and re-derived read identically. Drive that half at this clause's own layer, the clone door, on a source row whose readonly value the run planted in its own file DB (verify). A run that does not plant one records that half blocked(fixture), never pass, and never off two reads that agree only because the column is null. The pins fixtures.knownGaps[1] names are evidence of their own layers only (RUNNER rule 6). The value has to be planted, because the server drops a readonly column a caller sets over HTTP (`x-objectstack-dropped-fields: lead_score;reason=readonly`, QA run #21782)",
           "oracle": "api",
-          "verify": "the 201 result carries {id (new ≠ sourceId), sourceId, record}; field-by-field diff shows business values copied and system/readonly columns re-derived (#3043 CLONE_STRIP_FIELDS + the engine's create-side static-readonly strip, #14147); owner_id resolves to the signed-in cloner (the clone is a create in the caller's context — packages/metadata-protocol/src/protocol.ts cloneData). ⚠ The owner half needs a cloner who is NOT the source's owner: the admin cloning a row the admin created reads the same owner_id either way (QA run #24572). Drive it as the provisioned contributor-bound member cloning a seeded showcase_field_zoo row (QA run #24572's suggestion, source-derived and not yet run — record the substitution): showcase_contributor grants allowCreate there (not on showcase_account, which it may only read; examples/app-showcase/src/security/permission-sets.ts), the zoo is public_read_write, and the same clone shows f_autonumber and f_formula re-derived. The readonly half: with the server stopped, write a value into one seeded showcase_contact row's lead_score in the run's own file DB with node:sqlite (no sqlite3 CLI in this container), `UPDATE showcase_contact SET lead_score = 42 WHERE id = 'ID'`, which reports one changed row; restart, read the row back over GET /api/v1/data/showcase_contact/ID (lead_score 42), then POST /api/v1/data/showcase_contact/ID/clone as the admin. The 201's droppedFields names lead_score with reason readonly (cloneData forwards the copy whole to engine.insert and reports the engine's onFieldsDropped verdict, packages/metadata-protocol/src/protocol.ts), and a GET of the clone carries no lead_score value: the field declares no defaultValue to fall back to (examples/app-showcase/src/data/objects/contact.object.ts). Derived from source, not replayed here",
+          "verify": "the 201 result carries {id (new ≠ sourceId), sourceId, record}; field-by-field diff shows business values copied and system/readonly columns re-derived (#3043 CLONE_STRIP_FIELDS + the engine's create-side static-readonly strip, #14147); owner_id resolves to the signed-in cloner (the clone is a create in the caller's context — packages/metadata-protocol/src/protocol.ts cloneData). ⚠ The owner half needs a cloner who is NOT the source's owner: the admin cloning a row the admin created reads the same owner_id either way (QA run #24572). Drive it as the provisioned contributor-bound member cloning a seeded showcase_field_zoo row (QA run #24572's suggestion, replayed by P0 run #25812 at 6679644a: the member's clone of a seeded zoo row answered 201 with owner_id and created_by the member while the source's owner was the admin, and f_autonumber re-derived 0002 → 0003; record the substitution): showcase_contributor grants allowCreate there (not on showcase_account, which it may only read; examples/app-showcase/src/security/permission-sets.ts), the zoo is public_read_write, and the same clone shows f_autonumber and f_formula re-derived. The readonly half: with the server stopped, write a value into one seeded showcase_contact row's lead_score in the run's own file DB with node:sqlite (no sqlite3 CLI in this container), `UPDATE showcase_contact SET lead_score = 42 WHERE id = 'ID'`, which reports one changed row; restart, read the row back over GET /api/v1/data/showcase_contact/ID (lead_score 42), then POST /api/v1/data/showcase_contact/ID/clone as the admin. The 201's droppedFields names lead_score with reason readonly (cloneData forwards the copy whole to engine.insert and reports the engine's onFieldsDropped verdict, packages/metadata-protocol/src/protocol.ts), and a GET of the clone carries no lead_score value: the field declares no defaultValue to fall back to (examples/app-showcase/src/data/objects/contact.object.ts). Derived from source, not replayed here",
           "evidence": "clone response + source-vs-clone field diff + owner_id read; for the readonly half, the planted source read, the 201's droppedFields and the clone's lead_score read (or that half's blocked(fixture), with the knownGaps[1] pins beside it)"
         },
         {
@@ -240,6 +240,12 @@
           "date": "2026-10-20",
           "change": "acceptance[6] (clause, verify, evidence) drives its readonly half at its own layer; automated is removed and fixtures.knownGaps[1] added. PR #24963's carried finding (round 16's acceptance notes): the P0 api clause said to score its readonly half from the pins in automated, never as blocked(fixture). Read at base e4d604efd3 under RUNNER rule 6: protocol.readonly-insert.test.ts drives cloneData over a stub engine and engine-insert-static-readonly-strip.test.ts a real engine over a recording driver, neither through HTTP, and no pin holds a full clause of this item. The live leg can be staged: a lead_score value written into the run's own file DB travels in the clone's copy, and cloneData reports the engine's readonly drop in the 201's droppedFields (packages/metadata-protocol/src/protocol.ts). So the half is driven at the clone door on a planted row, or recorded blocked(fixture) with the pins beside it as evidence of their own layers. Also PR #24982's pin finding: acceptance[4].verify now names the console pin cf153eb2e535, where e2e/live/record-history-display.spec.ts keeps blob 7ebc45106cff (it named 616df6598b42). acceptance[6].clause changed how its readonly half is scored and staged; what the clause asserts did not change",
           "ref": "#25003"
+        },
+        {
+          "revision": 14,
+          "date": "2026-10-26",
+          "change": "acceptance[6].verify: the ownership half's 'source-derived and not yet run' note is replaced by its replay. P0 run #25812 (6679644a, pin b41ed7f68956) drove it: the contributor-bound member's clone of a seeded showcase_field_zoo row answered 201 with owner_id and created_by the member (the source owned by the admin), and f_autonumber re-derived 0002 → 0003. Wave anchor #25807. No clause changed",
+          "ref": "#25846"
         }
       ]
     },
@@ -248,7 +254,7 @@
       "title": "Field-type matrix: every FieldTypeSchema member renders its widget, accepts a valid value, round-trips over HTTP, and rejects invalid input",
       "since": "v15",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -382,7 +388,7 @@
       ],
       "automated": {
         "kind": "api",
-        "ref": "packages/qa/dogfood/test/field-zoo-roundtrip.dogfood.test.ts (+ field-zoo.matrix.ts vectors, field-zoo-value-shape.test.ts contract)"
+        "ref": "packages/qa/dogfood/test/field-zoo-roundtrip.dogfood.test.ts — the HTTP round-trip of every MATRIX vector. Its vectors and REFERENCE_TARGETS live in field-zoo.matrix.ts beside it, a data module that a ref parser treats as a fixture, not a pin; field-zoo-value-shape.test.ts asserts no clause directly (the write vectors parse under valueSchemaFor). Two limits: the suite seeds real reference ids only and asserts no dangling-id refusal, so acceptance[5]'s refusal half and negative[1] are the run's (#4441); and f_autonumber is a 'present' check (non-null), so acceptance[4]'s 'server-assigned' rests on the suite never writing it, not on an assertion"
       },
       "source": [
         "packages/spec/src/data/field.zod.ts#FieldType (FieldType enum — 49 members, listed exhaustively in variants)",
@@ -421,6 +427,12 @@
           "date": "2026-10-20",
           "change": "steps[1] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
           "ref": "#25003"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-26",
+          "change": "automated.ref, from Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read on main cc378e93: field-zoo.matrix.ts is named as a vectors module and field-zoo-value-shape.test.ts as asserting no clause, and the ref now says the suite asserts no dangling-id refusal (acceptance[5], negative[1]) and checks f_autonumber as 'present' only (acceptance[4]). No clause changed",
+          "ref": "#25846"
         }
       ],
       "enumSource": {
@@ -434,7 +446,7 @@
       "title": "List-view capability matrix: filter, search, sort, pagination, saved views, inline edit, export, visualization switcher, bulk/row actions, conditional formatting",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -490,7 +502,7 @@
         {
           "clause": "quick-search issues a server-side `search` (not client filtering) and finds the CJK account via pinyin ('huaning' → 华宁科技)",
           "oracle": "api",
-          "verify": "the captured request carries `search`; the response contains the CJK row; the same query direct against GET /api/v1/data/showcase_account reproduces it",
+          "verify": "the captured request carries `search`; the response contains the CJK row; the same query direct against GET /api/v1/data/showcase_account reproduces it (packages/qa/dogfood/test/showcase-search.dogfood.test.ts pins search.cross-field-object-search's matching, Northwind / retail, not this CJK 'huaning' recall, so it scores nothing here — QA runs #24572 and #24598)",
           "evidence": "request trace + response JSON"
         },
         {
@@ -548,7 +560,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "objectui: e2e/live/saved-view-filter.spec.ts (acceptance[1]), e2e/live/user-filters.spec.ts (acceptance[7]'s whitelist half ONLY: its visualization-switcher case reads exactly Grid, Kanban, Gallery, Calendar, Timeline and Gantt in the All Tasks Display popover, then switches to Kanban and reads only the trigger's label, so 'each re-renders the SAME task records' is driven by hand. Its lookup quick-filter case, which this item's stale record named, is retired: objectui 0b36ffa deleted it because the shipped showcase declares no lookup user filter, so no ref here cites it), e2e/live/inline-edit-polish-2572.spec.ts (acceptance[5]'s PATCH half ONLY, carrier-neutrally on a Project record page's inline edit, not this item's grid cell: the PATCH carries the edited budget and not the untouched spent. It never re-reads the row, so the re-read half is driven by hand); packages/qa/dogfood/test/showcase-search.dogfood.test.ts (scores NO clause of this item: it pins search.cross-field-object-search's matching — Northwind / retail — not acceptance[2]'s CJK 'huaning' recall, QA runs #24572 and #24598)"
+        "ref": "objectui: e2e/live/saved-view-filter.spec.ts (acceptance[1]'s 200 half ONLY: it asserts that no showcase_task data response answered 400 or above and that the count bar starts '2 '; it captures neither the AST filter param nor the response total, so the param read and the count-against-total match are driven by hand), e2e/live/user-filters.spec.ts (acceptance[7]'s whitelist half ONLY: its visualization-switcher case reads exactly Grid, Kanban, Gallery, Calendar, Timeline and Gantt in the All Tasks Display popover, then switches to Kanban and reads only the trigger's label, so 'each re-renders the SAME task records' is driven by hand. Its lookup quick-filter case, which this item's stale record named, is retired: objectui 0b36ffa deleted it because the shipped showcase declares no lookup user filter, so no ref here cites it), e2e/live/inline-edit-polish-2572.spec.ts (acceptance[5]'s PATCH half ONLY, carrier-neutrally on a Project record page's inline edit, not this item's grid cell: the PATCH carries the edited budget and not the untouched spent. It never re-reads the row, so the re-read half is driven by hand)"
       },
       "source": [
         "examples/app-showcase/src/ui/views/task.view.ts#inlineEdit (saved views, sort string form, inlineEdit, exportOptions, bulk/row actions, allowedVisualizations)",
@@ -593,6 +605,12 @@
           "date": "2026-10-20",
           "change": "automated.stale removed, automated.ref scoped per objectui spec, and acceptance[5].verify narrowed — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired both specs the stale record named, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. user-filters.spec.ts: blob aa52b2b8de2a at the old pin 12dc7b47c340, ab50146bcfd0 at both 0b36ffa and 616df6598b42; the tabs case moved to the Task Triage page, the switcher is read through the Display popover, the grid's cells are gridcells, and the lookup quick-filter case is retired (the shipped showcase declares no lookup user filter). inline-edit-polish-2572.spec.ts: blob 84e0677df02e, then 4cc1557d475f at both; it creates its own project and asserts the lock at exec_review. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, both repaired specs assert less than the clauses the stale record sent to hand-driving: the switcher case reads the six entries but switches only to Kanban and reads no records (acceptance[7]'s whitelist half), and inline-edit-polish asserts the PATCH's keys on a Project record page but never re-reads the row (acceptance[5]'s PATCH half). So the ref and acceptance[5].verify narrow to those halves. saved-view-filter.spec.ts (blob 94a201c63a0a at all three) keeps acceptance[1]. No clause changed",
           "ref": "#24857"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-26",
+          "change": "automated.ref, from Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read at ui/e2e/live/saved-view-filter.spec.ts on main cc378e93. (1) saved-view-filter.spec.ts asserts only that no showcase_task data response was 400 or above and the count bar starts '2 '; the ref now scopes it to acceptance[1]'s 200 half. (2) showcase-search.dogfood.test.ts leaves the ref, since by the ref's own words it scores no clause of this item; acceptance[2].verify keeps the note. No clause changed",
+          "ref": "#25846"
         }
       ]
     },
@@ -601,7 +619,7 @@
       "title": "View-type gallery: every ListViewSchema visualization renders seeded records",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -672,7 +690,7 @@
         {
           "clause": "no variant throws a pageerror or renders an empty <main> (the automated smoke covers the page-level render for these surfaces)",
           "oracle": "test",
-          "verify": "pnpm -C examples/app-showcase test:smoke — the All Views / Task Board / Calendar / Gallery / Schedule / Timeline / Work Map SURFACES stay green",
+          "verify": "pnpm -C examples/app-showcase test:smoke — the All Views / Task Board / Calendar / Gallery / Schedule / Timeline / Work Map SURFACES stay green. It is a Playwright spec (examples/app-showcase/e2e/showcase-smoke.spec.ts) that needs a built console (pnpm console:build) and a live stack, which its config boots or reuses: it scores only when the run executes it, and a vitest-only pin run leaves this clause not-run",
           "evidence": "test run output"
         }
       ],
@@ -702,6 +720,12 @@
           "date": "2026-08-07",
           "change": "initial — deep-test view-type gallery derived from the spec's own enum, 8 types on task + tree on business-unit",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-26",
+          "change": "acceptance[5].verify says its pin is a Playwright spec needing a built console and a live stack, so it scores only when the run executes it (Tier 1 run #25815 (6679644a, pin b41ed7f68956)). No clause changed",
+          "ref": "#25846"
         }
       ]
     },
@@ -824,7 +848,7 @@
       "title": "Header-level conditional rules: visibleWhen / requiredWhen / readonlyWhen on invoice fields, enforced on BOTH ends",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -837,7 +861,7 @@
           "seeded invoices: INV-1002 (draft), INV-1001 (sent), INV-1003 (paid)"
         ],
         "knownGaps": [
-          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
+          "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import."
         ]
       },
       "steps": [
@@ -900,7 +924,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "objectui: e2e/live/required-when-submit.spec.ts (acceptance[0]: a requiredWhen-required Issued On blocks submit with its field error) + e2e/live/field-conditional-rules.spec.ts (acceptance[0]'s required marker, acceptance[2]'s client lock and acceptance[3], on the New Invoice dialog as Status flips: Issued On's required marker, tax_rate's input giving way to the read-only field group at paid, and paid_on mounted, and required, only at paid). No pin covers acceptance[1], [4] or [5]: e2e/live/list-row-action-cel.spec.ts, cited here until revision 3, gates the task list's Mark Done row action, not the paid invoice's Edit / Delete gating acceptance[4] scores, so it was dropped"
+        "ref": "objectui: e2e/live/required-when-submit.spec.ts (acceptance[0]: a requiredWhen-required Issued On blocks submit with its field error) + e2e/live/field-conditional-rules.spec.ts (acceptance[0]'s required marker and acceptance[3], on the New Invoice dialog as Status flips: Issued On's required marker, and paid_on mounted, and required, only at paid). Neither pins acceptance[2]'s client lock: on that New dialog the spec asserts the OPPOSITE at paid, tax_rate enabled and no read-only field group, because the server exempts INSERT from readonlyWhen and the create form follows it (objectui#13436); the lock lives on an edit form of a paid invoice, which no pin drives. Both read the DOM through Playwright locators with no screenshot step: their wait for visibility is what stands in for the render-first order acceptance[0] and [3]'s dom oracle asks for, so a run citing them says so. No pin covers acceptance[1], [2], [4] or [5]; the row-action spec cited here until revision 3 was dropped (history, revision 3)"
       },
       "source": [
         "examples/app-showcase/src/data/objects/invoice.object.ts#userActions (the B2 rules + userActions gating, with server-semantics comments)",
@@ -931,6 +955,12 @@
           "date": "2026-10-20",
           "change": "automated.stale removed — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired field-conditional-rules.spec.ts, the one spec the stale record named, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. Its blob is c37a93cdc839 at the old pin 12dc7b47c340 and 4e8c3d6ebec3 at both 0b36ffa and 616df6598b42: at paid it now expects tax_rate's input gone and the read-only field group shown, and an editable input again at sent and draft. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, the spec asserts all three clauses the ref claims for it (acceptance[0]'s required marker, acceptance[2]'s client lock and acceptance[3]), so the ref keeps them and its stale note gives way to what the spec drives. required-when-submit.spec.ts keeps acceptance[0]. No clause changed",
           "ref": "#24857"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-26",
+          "change": "automated.ref, from Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read at ui/e2e/live/field-conditional-rules.spec.ts on main cc378e93. (1) It claimed the spec pins acceptance[2]'s client lock; at paid on the New dialog the spec asserts tax_rate enabled and no read-only group, since INSERT is exempt from readonlyWhen (objectui#13436), and no pin drives an edit form of a paid invoice, so acceptance[2] joins the unpinned list. (2) It says both pins read the DOM by Playwright locator with no screenshot step. (3) It no longer names the row-action spec dropped at revision 3, which a ref parser read as a pin. fixtures.knownGaps[0], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
+          "ref": "#25846"
         }
       ]
     },
@@ -939,7 +969,7 @@
       "title": "Grid-level conditional rules: row-scoped requiredWhen and parent-scoped readonlyWhen in the inline line-item grid",
       "since": "v16",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -952,7 +982,7 @@
           "a draft invoice with editable lines (INV-1002) and a paid one (INV-1003); for clause 5, INV-1002 must carry a SECOND line with a DISTINCT stored position. The stock INV-1002 ships one line, and a line added through the data API with no position defaults to 0, which collides with the first; seed it with position 1, or any value the first line does not hold — AND with its `amount` (quantity × unit_price): amount is computed in the client and stored as sent (examples/app-showcase/src/data/objects/invoice.object.ts, the amount field's comment), so a line staged over the data API without it carries amount null and the invoice total ignores it (QA run #24616). Or add the line through the grid, which computes it. On an invoice whose lines share a stored position the grid legitimately re-emits the sibling's position on save: it stamps row[sortField] = index on every change (GridField), with the sort field deriveDetail picks from the child (position)"
         ],
         "knownGaps": [
-          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
+          "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import."
         ]
       },
       "steps": [
@@ -1006,7 +1036,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "objectui: e2e/live/grid-conditional-rules.spec.ts (acceptance[0]'s inline-flag half ONLY — on the New Invoice dialog's first line, Description carries no required flag at Qty 2, is flagged at Qty 100 and clears once filled; the spec adds no second row and never saves, so neither the unflagged sibling row nor the blocked save is pinned), e2e/live/grid-parent-rules.spec.ts (acceptance[2] for Qty and Unit Price ONLY — on the New Invoice dialog's first line, with Qty filled, both inputs are enabled at status draft, disabled at paid with the typed quantity kept, and enabled again at draft; it never asserts the Product cell, which declares the same parent-scoped readonlyWhen). No pin covers acceptance[1], acceptance[3] or acceptance[4]. Dropped at revision 8: e2e/live/grid-file-upload.spec.ts, which uploads a file into the first line's Receipt cell and asserts only that the submitted /api/v1/batch carries a receipt with a name and an http(s) url; it never re-reads the saved line or fetches the file, so even green it would score no clause of this item (seat ruling 6281811723). Its stale-spec repair stays on objectstack-ai/objectui#13104 for the items it serves"
+        "ref": "objectui: e2e/live/grid-conditional-rules.spec.ts (acceptance[0]'s inline-flag half ONLY — on the New Invoice dialog's first line, Description carries no required flag at Qty 2, is flagged at Qty 100 and clears once filled; the spec adds no second row and never saves, so neither the unflagged sibling row nor the blocked save is pinned), e2e/live/grid-parent-rules.spec.ts (acceptance[2] for Qty and Unit Price ONLY — on the New Invoice dialog's first line, with Qty filled, both inputs are enabled at status draft, disabled at paid with the typed quantity kept, and enabled again at draft; it never asserts the Product cell, which declares the same parent-scoped readonlyWhen). No pin covers acceptance[1], acceptance[3] or acceptance[4]. Both are Playwright live specs: they score only in a run that executes them against a booted stack and console, and even green they score only the halves named here. The file-upload spec dropped at revision 8 is not a pin of this item (history, revision 8); its stale-spec repair stays on objectstack-ai/objectui#13104 for the items it serves"
       },
       "source": [
         "examples/app-showcase/src/data/objects/invoice.object.ts (row/parent-scoped rules on the line object; ADR-0036 / #1581)",
@@ -1061,6 +1091,12 @@
           "date": "2026-10-20",
           "change": "automated.ref, acceptance[2].verify and acceptance[3].verify narrowed, and automated.stale removed — the seat ruling 6281811723 (on #24723) and round 8's finding (i) for wave anchor #24579 (18.0 sweep; round 8's report 6281776167). Tier 1 run #24598 at the sweep's console pin 4016370af3c9 ran grid-file-upload.spec.ts red as a stale spec (cause from QA run #24572). Even green it asserts only the receipt the outgoing /api/v1/batch carries and never re-reads the line or fetches the file, so it scores no clause here: it is dropped from the ref and named there, and the stale record, which named only it, goes with it. grid-parent-rules.spec.ts asserts that Qty and Unit Price lock at paid and unlock at draft, and never the Product cell that the clause's 'three cells' include (#24598 scored acceptance[2] pass on it): acceptance[2].verify and the ref now say so. QA run #24616 drove acceptance[1], [3] and [4] by hand. Both specs are byte-identical at 4016370af3c9 and at the shipped pin 12dc7b47c340. No clause changed",
           "ref": "#24752"
+        },
+        {
+          "revision": 9,
+          "date": "2026-10-26",
+          "change": "automated.ref, from Tier 1 run #25815 (6679644a, pin b41ed7f68956): (1) it no longer names the grid-file-upload spec dropped at revision 8, which a ref parser read as a pin; the drop and its reason stay in history revision 8. (2) It says both remaining pins are Playwright live specs that score only in a browser run against a booted stack, and only the halves named. fixtures.knownGaps[0], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
+          "ref": "#25846"
         }
       ]
     },
@@ -1069,7 +1105,7 @@
       "title": "Cascading and gated select options: dependsOn + per-option visibleWhen, client narrows / server rejects",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1084,7 +1120,7 @@
           "showcase_invoice.contact dependsOn ['account'] — the dependent LOOKUP twin (contact picker scoped to the chosen account's people; seed gives Northwind 26 contacts, Contoso 2, Fabrikam 1)"
         ],
         "knownGaps": [
-          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
+          "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import."
         ]
       },
       "steps": [
@@ -1106,7 +1142,7 @@
         {
           "clause": "the server rejects an out-of-set submitted option with VALIDATION_FAILED and fields[] carrying {field: 'province', code: 'invalid_option'} — and accepts the in-set one",
           "oracle": "api",
-          "verify": "the two direct POSTs from the steps; refusal envelope must name the field and code (pinned by the same spec's API half; server site: objectql evaluateOptionVisibility, objectui#2284)",
+          "verify": "the two direct POSTs from the steps; refusal envelope must name the field and code (pinned by the same spec's API half — a Playwright live spec that needs a booted showcase and the console, so it scores this clause and negative[0] only when the run executes it against its own boot; server site: objectql evaluateOptionVisibility, objectui#2284)",
           "evidence": "both responses"
         },
         {
@@ -1176,6 +1212,12 @@
           "date": "2026-10-20",
           "change": "automated.stale removed, automated.ref scoped per case and acceptance[0].verify narrowed — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired the re-filter case the stale record named, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. cascading-options.spec.ts: blob 648d5c917d19 at the old pin 12dc7b47c340, 5f65228948b7 at both 0b36ffa and 616df6598b42; the case now waits for the flat ModalForm's modal-form-footer instead of md-form-submit. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, the case asserts less than acceptance[0], which the stale record sent to hand-driving: it enumerates province under cn and under us and sees Zhejiang leave the trigger, but never reads the province before a country is chosen. So the ref and acceptance[0].verify narrow to the re-filter and clear halves. The server case keeps acceptance[1]. No clause changed",
           "ref": "#24857"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-26",
+          "change": "acceptance[1].verify says its pin is a Playwright live spec (Tier 1 run #25815 (6679644a, pin b41ed7f68956)): it scores acceptance[1] and negative[0] only when the run executes it against a booted showcase. fixtures.knownGaps[0], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
+          "ref": "#25846"
         }
       ]
     },
@@ -1184,7 +1226,7 @@
       "title": "Master + line items save as one atomic batch, with server-side roll-up",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1197,7 +1239,7 @@
           "seeded products for the catalog lookup (SKUs incl. SERVICE-HR, WIDGET-A; picking one auto-fills description + unit_price)"
         ],
         "knownGaps": [
-          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
+          "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import."
         ]
       },
       "steps": [
@@ -1213,7 +1255,7 @@
         {
           "clause": "the happy-path save lands master + children in ONE atomic batch request (not N sequential writes), with the child ops referencing the parent",
           "oracle": "network",
-          "verify": "the save issues a single batch call whose payload contains the parent and both line ops. objectui e2e/live/master-detail.spec.ts pins the clause carrier-neutrally, not on this invoice: on the showcase 'New Project + Tasks' page (showcase_project_workspace), 'Create submits the populated parent in one atomic batch' asserts that the first POST /api/v1/batch the save sends opens with the populated showcase_project op, and 'Create with a task line includes the child op referencing the parent' asserts that the same batch carries one showcase_task op whose project is {$ref: 0}. It stages one child through the per-row form, not two lines in this item's invoice grid, and it reads the first batch rather than counting them, so read this run's two-line invoice payload from the network trace",
+          "verify": "the save issues a single batch call whose payload contains the parent and both line ops. objectui e2e/live/master-detail.spec.ts pins the clause carrier-neutrally, not on this invoice: on the showcase 'New Project + Tasks' page (showcase_project_workspace), 'Create submits the populated parent in one atomic batch' asserts that the first POST /api/v1/batch the save sends opens with the populated showcase_project op, and 'Create with a task line includes the child op referencing the parent' asserts that the same batch carries one showcase_task op whose project is {$ref: 0}. It stages one child through the per-row form, not two lines in this item's invoice grid, and it reads the first batch rather than counting them, so read this run's two-line invoice payload from the network trace and count the batch calls the save sends ('not N sequential writes' is the run's)",
           "evidence": "the batch request payload"
         },
         {
@@ -1257,7 +1299,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "objectui: e2e/live/master-detail.spec.ts (acceptance[0], carrier-neutrally: the showcase 'New Project + Tasks' page, one showcase_task child staged through the per-row form, not this item's invoice grid with two lines), e2e/live/form-view-subforms.spec.ts (acceptance[4] ONLY: the stock New Invoice dialog renders the relationship-derived Line Items section, found by its heading, and its line grid). Dropped at revision 5: e2e/live/summary-rollup.spec.ts, which rolls showcase_task's estimate_hours up into showcase_project (total_estimate as a SUM, task_count as a COUNT) through a direct POST /api/v1/batch, reading both back after that create and again after a child delete. It never opens the invoice form and never reads invoice.total, the roll-up acceptance[2] scores, so it asserts no clause of this item (Tier 1 run #24598 scored acceptance[2] not-run on it for that carrier mismatch)"
+        "ref": "objectui: e2e/live/master-detail.spec.ts (acceptance[0], carrier-neutrally: the showcase 'New Project + Tasks' page, one showcase_task child staged through the per-row form, not this item's invoice grid with two lines), e2e/live/form-view-subforms.spec.ts (acceptance[4] ONLY: the stock New Invoice dialog renders the relationship-derived Line Items section, found by its heading, and its line grid). The roll-up spec dropped at revision 5 is not a pin of this item (history, revision 5)"
       },
       "source": [
         "#3358 §4",
@@ -1306,6 +1348,12 @@
           "date": "2026-10-20",
           "change": "automated.stale removed and automated.ref scoped for form-view-subforms.spec.ts — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired form-view-subforms.spec.ts, the one spec the stale record named, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. Its blob is 4f2a95b529f3 at the old pin 12dc7b47c340 and 9485f378abd7 at both 0b36ffa and 616df6598b42: it now finds the Line Items section by its heading role, so the dialog's screen-reader-only description no longer collides with the locator. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, it asserts acceptance[4], the clause the stale record sent to hand-driving, and the ref now names that scope and no wider one. master-detail.spec.ts keeps acceptance[0]. No clause changed",
           "ref": "#24857"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-26",
+          "change": "From Tier 1 run #25815 (6679644a, pin b41ed7f68956): (1) automated.ref no longer names the summary-rollup spec it dropped at revision 5, which a ref parser read as a pin. (2) acceptance[0].verify says the batch count, as well as the two-line invoice payload, stays the run's: master-detail.spec.ts reads the first batch of a one-child Project save. fixtures.knownGaps[0], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
+          "ref": "#25846"
         }
       ]
     },
@@ -1314,7 +1362,7 @@
       "title": "Related lists derive from the relationship and page on the server — never fetch every child row — and are read-gated on both ends",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1331,7 +1379,7 @@
         ],
         "knownGaps": [
           "STALE (QA run #24616): the child-read-gate clause needs two members bound to the manager and contributor positions, and a stock boot provides them — the search:qa-contributor-bound-member recipe (invite, sign-up, then an admin POST of sys_user_position; run it twice, once with position 'manager', once with 'contributor'). It is not blocked(fixture) on a single-user boot; the paging clauses still run on the seeded admin alone",
-          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
+          "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import."
         ]
       },
       "steps": [
@@ -1444,6 +1492,12 @@
           "date": "2026-10-20",
           "change": "automated.stale removed — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired detail-related-list.spec.ts, the only pin, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. Its blob is 48a1d10e59da at the old pin 12dc7b47c340 and f12f7237fd6f at both 0b36ffa and 616df6598b42: it now reads the record id from the /record/ID route a Northwind row opens, and finds the primary Projects list in its own tab. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, it asserts acceptance[2], the one clause the ref claims, so the ref keeps it and loses its stale note. No clause changed",
           "ref": "#24857"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-26",
+          "change": "fixtures.knownGaps[1], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
+          "ref": "#25846"
         }
       ]
     },
@@ -1452,7 +1506,7 @@
       "title": "Action params render their real widgets, and the param contract is enforced at dispatch",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1521,7 +1575,7 @@
       ],
       "automated": {
         "kind": "api",
-        "ref": "packages/qa/dogfood/test/action-params-contract.dogfood.test.ts — acceptance[2] ONLY (a malformed param bag is refused before the action body runs; the conformant bag passes). No pin covers acceptance[0], [1] or [3]: objectui e2e/live/action-modal.spec.ts, cited here until revision 3, opens and closes a task's Edit modal and asserts none of the gallery action's param widgets, so it was dropped"
+        "ref": "packages/qa/dogfood/test/action-params-contract.dogfood.test.ts — acceptance[2] ONLY (a malformed param bag is refused before the action body runs; the conformant bag passes). No pin covers acceptance[0], [1] or [3]. The objectui spec cited here until revision 3 asserts none of the gallery action's param widgets and was dropped (history, revision 3); it is not a pin of this item"
       },
       "source": [
         "#3358 §4 (evidence table)",
@@ -1547,6 +1601,12 @@
           "date": "2026-10-20",
           "change": "automated.ref narrowed to its framework half — §2 theme \"pins that cover no full clause\" of wave anchor #24579 (18.0 sweep). Tier 1 run #24598: action-modal.spec.ts passed at the sweep's console pin 4016370af3c9 but only opens and closes a task's Edit modal, asserting none of acceptance[0], [1] or [3], so the objectui half is dropped; action-params-contract.dogfood.test.ts pins acceptance[2] (QA runs #24572 / #24616). No clause changed",
           "ref": "#24697"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-26",
+          "change": "automated.ref no longer names the objectui spec it dropped at revision 3. A ref parser read that path as a pin (Tier 1 run #25815 (6679644a, pin b41ed7f68956)), and it scores nothing here. The drop and its reason stay in history revision 3. What the ref pins is unchanged",
+          "ref": "#25846"
         }
       ]
     },
@@ -1634,7 +1694,7 @@
       "title": "CSV import: GBK decode, required-field hint, legacy-fallback notice",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -1646,12 +1706,12 @@
           "an importable showcase object (e.g. showcase_contact) and a GBK-encoded CSV fixture; the pinned unit suites carry their own byte fixtures"
         ],
         "knownGaps": [
-          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact.",
-          "acceptance[2] (the legacy-fallback notice) is PIN-ONLY BY DESIGN, never a live leg. The wizard takes the per-row legacy path only when its data source has no importRecords, and the console's ObjectStackAdapter always provides one (objectui packages/data-objectstack/src/index.ts), so no live server reaches the path. QA run #21782 recorded it blocked(dependency); parked on #22017 row 3. Score it ONLY from importLegacyReferenceGuard.test.tsx run in an objectui checkout at the .objectui-sha revision (present at objectui 0abd4f9f8769: 'blocks the import and writes nothing when a lookup column is mapped'). A run without that checkout records blocked(environment: no objectui checkout at the pin), never a hand-driven verdict"
+          "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import.",
+          "acceptance[2] (the legacy-fallback notice) is PIN-ONLY BY DESIGN, never a live leg. The wizard takes the per-row legacy path only when its data source has no importRecords, and the console's ObjectStackAdapter always provides one (objectui packages/data-objectstack/src/index.ts), so no live server reaches the path. QA run #21782 recorded it blocked(dependency); parked on #22017 row 3. Score it ONLY from importLegacyReferenceGuard.test.tsx run with cwd ui/ in this checkout (present on main at cc378e93, as at objectui 0abd4f9f8769: 'blocks the import and writes nothing when a lookup column is mapped'). A run that does not execute that suite records blocked(environment: ui/ suite not run), never a hand-driven verdict"
         ]
       },
       "steps": [
-        "run the pinned unit suites (they feed real GBK bytes and assert the exact decode, the disabled-Next hint, and the visible degrade notice): pnpm exec vitest run packages/plugin-grid/src/importParsers.test.ts packages/plugin-grid/src/__tests__/importMissingRequiredHint.test.tsx packages/plugin-grid/src/__tests__/importLegacyReferenceGuard.test.tsx — from the REPO ROOT of an objectui checkout at the .objectui-sha revision. ⛔ Not `pnpm --filter @object-ui/plugin-grid exec vitest run src/…`: objectui's vitest invocation guard (scripts/vitest-invocation-guard.mjs) refuses a package-cwd run, which would otherwise silently execute the wrong suite (objectui#3378)",
+        "run the pinned unit suites (they feed real GBK bytes and assert the exact decode, the disabled-Next hint, and the visible degrade notice): pnpm exec vitest run packages/plugin-grid/src/importParsers.test.ts packages/plugin-grid/src/__tests__/importMissingRequiredHint.test.tsx packages/plugin-grid/src/__tests__/importLegacyReferenceGuard.test.tsx — with cwd ui/, the objectui tree's root in this checkout (the .objectui-sha pin is retired: the console builds from ui/ at the framework commit, so the run cites that commit). ⛔ Not `pnpm --filter @object-ui/plugin-grid exec vitest run src/…`: the vitest invocation guard (ui/scripts/vitest-invocation-guard.mjs) refuses a package-cwd run, which would otherwise silently execute the wrong suite (objectui#3378)",
         "capture the suite output as the primary evidence (the native file-picker hand-off is deliberately not browser-automated)",
         "optionally spot-check visually: open the import wizard on showcase_contact, load a GBK CSV past the native picker, and screenshot the decoded preview",
         "in the spot-check, map columns while leaving a required field (name) unmapped; observe the Next control and its hint",
@@ -1661,19 +1721,19 @@
         {
           "clause": "GBK bytes decode to the exact expected strings (no mojibake) — pinned",
           "oracle": "test",
-          "verify": "pnpm exec vitest run packages/plugin-grid/src/importParsers.test.ts (from the objectui root)",
+          "verify": "pnpm exec vitest run packages/plugin-grid/src/importParsers.test.ts (cwd ui/, the objectui root in this checkout)",
           "evidence": "test run output"
         },
         {
           "clause": "an unmapped required field disables Next AND shows the named required-field hint — pinned",
           "oracle": "test",
-          "verify": "pnpm exec vitest run packages/plugin-grid/src/__tests__/importMissingRequiredHint.test.tsx (from the objectui root)",
+          "verify": "pnpm exec vitest run packages/plugin-grid/src/__tests__/importMissingRequiredHint.test.tsx (cwd ui/, the objectui root in this checkout)",
           "evidence": "test run output"
         },
         {
           "clause": "the legacy-reference fallback path shows a visible degrade notice instead of silently degrading — pinned, and PIN-ONLY: no live ObjectStack server reaches the legacy path (fixtures.knownGaps)",
           "oracle": "test",
-          "verify": "pnpm exec vitest run packages/plugin-grid/src/__tests__/importLegacyReferenceGuard.test.tsx (from the objectui root)",
+          "verify": "pnpm exec vitest run packages/plugin-grid/src/__tests__/importLegacyReferenceGuard.test.tsx (cwd ui/, the objectui root in this checkout)",
           "evidence": "test run output"
         },
         {
@@ -1729,6 +1789,12 @@
           "date": "2026-10-13",
           "change": "steps[0] and acceptance[0], [1] and [2].verify run the three pins from the objectui root (assertion defect, #23163 A0; parked on #23121, carried by #23169). `pnpm --filter @object-ui/plugin-grid exec vitest run src/…` is refused by objectui's vitest invocation guard (scripts/vitest-invocation-guard.mjs, objectui#3378): from inside a package the root projects glob resolves against the cwd and the run would execute the wrong suite. The same three files run as `pnpm exec vitest run packages/plugin-grid/src/…` from the root; all three exist at 1fb1ced36243, still this repo's .objectui-sha. No clause's assertion changed",
           "ref": "#23169"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-26",
+          "change": "The pinned suites run from ui/ in this checkout: steps[0], knownGaps[1] and acceptance[0]–[2].verify named an objectui checkout at the retired .objectui-sha pin. Tier 1 run #25815 (6679644a, pin b41ed7f68956) read the pins as objectui files that score acceptance[0]–[2] only when an objectui pin worktree runs them; with the objectui tree under ui/, the three files are at ui/packages/plugin-grid on main cc378e93 and score when that tree's vitest runs them. The legacy-path blocked reason is reworded to match. fixtures.knownGaps[0], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
+          "ref": "#25846"
         }
       ]
     },
@@ -1737,7 +1803,7 @@
       "title": "Action buttons surface at exactly their declared locations — list toolbar, list row, record header/more/related/section — and each dispatches for real",
       "since": "v15",
       "status": "active",
-      "revision": 14,
+      "revision": 15,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1751,7 +1817,7 @@
         ],
         "knownGaps": [
           "NO PIN COVERS A FULL CLAUSE — `automated` was dropped at revision 13, so this P1 item is hand-driven (Tier 2). The two objectui live specs it cited are adjacent: e2e/live/list-row-action-cel.spec.ts opens the first task row's menu and asserts only that at most one Mark Done renders (not both sides of acceptance[3], nor its fail-closed half), and e2e/live/action-modal.spec.ts only that the host's row Edit opens and closes a modal (one dispatch kind of acceptance[2], on no declared action). Tier 1 run #24598 scored every clause not-run on them. Re-add `automated` only with a pin that asserts a full clause.",
-          "[CLOSED by #22030 (PR #22036, 60ccda5a24), lifted by #22039 — the gap text is rewritten to say where each location now lives] a stock showcase boot hosts all six locations on showcase_task, including the three this gap used to block. record_header and record_more: Task Detail (showcase_task_detail, the record page the console opens for any task), whose first node is a page:header. That header renders the action ids it lists, each placed by its own locations, followed by the host's Edit / Share / Delete. Inline (record_header) on a desktop viewport, where the header's default inline budget is 3 (1 on mobile; a record_header action past the budget folds into ⋯): showcase_mark_done (script, shown only while the task is not done), showcase_log_time (form) and showcase_archive_task (script, disabled until the task is done). Under the ⋯ overflow (record_more without record_header): showcase_open_docs (url), showcase_recalc_estimate (api) and showcase_recalc_selection (api). record_related: Project Detail (showcase_project_detail, the record page for any project) → the Related tab (?tab=related), which holds the Tasks related list, a record:related_list for showcase_task through its project FK; open a project that has tasks. It is an authored node, not the synthesizer's strip: the page's tabs override still replaces that strip, and this tab puts the list back with no actions key, so its rows carry showcase_log_time beside the task's list_item actions. The Tasks tab beside it is the record:line_items grid, which hosts no record_related action. An expected action missing from one of these hosts is a missing placement, never blocked(fixture). The hosts were read from objectui source at pin a58626c88dc8 and from the served metadata, not from a browser render, so the first run against them is their first browser evidence",
+          "[CLOSED by #22030 (PR #22036, 60ccda5a24), lifted by #22039 — the gap text is rewritten to say where each location now lives] a stock showcase boot hosts all six locations on showcase_task, including the three this gap used to block. record_header and record_more: Task Detail (showcase_task_detail, the record page the console opens for any task), whose first node is a page:header. That header renders the action ids it lists, each placed by its own locations, followed by the host's Edit / Share / Delete. Inline (record_header) on a desktop viewport, where the header's default inline budget is 3 (1 on mobile; a record_header action past the budget folds into ⋯): showcase_mark_done (script, shown only while the task is not done), showcase_log_time (form) and showcase_archive_task (script, disabled until the task is done). Under the ⋯ overflow (record_more without record_header): showcase_open_docs (url), showcase_recalc_estimate (api) and showcase_recalc_selection (api). The Task Detail quick-actions bar (record_section) names its actions explicitly (actionNames: mark_done, log_time and archive_task, in examples/app-showcase/src/ui/pages/task-detail.page.ts), so showcase_recalc_estimate, which declares record_section too, is absent there by page authoring, not a missing placement (run #25817). record_related: Project Detail (showcase_project_detail, the record page for any project) → the Related tab (?tab=related), which holds the Tasks related list, a record:related_list for showcase_task through its project FK; open a project that has tasks. It is an authored node, not the synthesizer's strip: the page's tabs override still replaces that strip, and this tab puts the list back with no actions key, so its rows carry showcase_log_time beside the task's list_item actions, and its header renders the list_toolbar action (Reassign…), as in 18.1 (run #25817): that list's own toolbar placement, not an extra one. The Tasks tab beside it is the record:line_items grid, which hosts no record_related action. An expected action missing from one of these hosts is a missing placement, never blocked(fixture). The hosts were read from objectui source at pin a58626c88dc8 and from the served metadata, not from a browser render, so the first run against them is their first browser evidence",
           "acceptance[4] half (a), the locations-LESS probe, is BLOCKED(fixture) on stock (QA run #23163 A4, objectstack 36b2889c). A runtime-authored action (a scratch or writable package) is not joined into the served object's actions[] — the run's positive control, the same probe WITH a declared location, was invisible too — so a runtime probe sees nothing on any surface and proves nothing. The half needs a PACKAGED specimen with no `locations` key, as showcase_new_task is the packaged `locations: []` one. The stock showcase ships none: that shape is exactly what packages/lint's action-no-placement rule warns about. Score half (a) blocked(fixture) and half (b) on showcase_new_task as before"
         ]
       },
@@ -1766,7 +1832,7 @@
       ],
       "steps": [
         "boot the showcase on its own port and DB; sign in as admin; open the showcase_task list view",
-        "for each location variant, navigate to its surface (list header / row menu / a not-done task's Task Detail title bar / that title bar's ⋯ menu / the rows of the Tasks related list on a project's Project Detail Related tab, not the Tasks tab's line-items grid / the Task Detail quick-actions bar; fixtures.knownGaps names each record host), screenshot AFTER render settles, then read the rendered action buttons from the DOM",
+        "for each location variant, navigate to its surface (list header / row menu / a not-done task's Task Detail title bar / that title bar's ⋯ menu (scope the ⋯ click to `main`: the sidebar's 'More actions' button shares its accessible name, a click trap, manual-set run #25817) / the rows of the Tasks related list on a project's Project Detail Related tab, not the Tasks tab's line-items grid / the Task Detail quick-actions bar; fixtures.knownGaps names each record host), screenshot AFTER render settles, then read the rendered action buttons from the DOM",
         "record for every fixture action WHERE it rendered — building the full placement matrix (rendered locations vs declared locations)",
         "dispatch one action per location with a ref-targeted click: bulk_reassign from the list toolbar — select a row FIRST: with none selected it toasts 'This action runs on a single record — select a row first' and dispatches nothing — (screen-flow wizard opens), quick_view (modal opens), mark_done (script executes), log_time (a `form` action opens its FormView as a ROUTED PAGE, not a dialog: /_console/forms/showcase_task.form?recordId=…&recordObject=showcase_task — objectui core ActionRunner.ts, \"open a FormView as a routed page (/forms/:name)\"; QA run #24616), open_docs (url navigation), recalc_selection from the ⋯ menu (api POST); capture each network trace",
         "verify the state-changing dispatches server-side: mark_done flips the task's done flag (API re-read), recalc_selection's per-record branch recomputes the estimate",
@@ -1906,6 +1972,12 @@
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot the showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
           "ref": "#25003"
+        },
+        {
+          "revision": 15,
+          "date": "2026-10-26",
+          "change": "From manual-set run #25817 (6679644a, pin b41ed7f68956), re-read on main cc378e93. (1) knownGaps[1] says the Project Detail Related tab's Tasks list header renders the list_toolbar Reassign…, as in 18.1, so a run reads it as that list's toolbar placement. (2) steps[1] scopes the ⋯ click to `main`, because the sidebar's 'More actions' shares the header ⋯'s accessible name. (3) knownGaps[1] says the Task Detail quick-actions bar names its actions explicitly (task-detail.page.ts actionNames), so showcase_recalc_estimate, which declares record_section too, is absent there by page authoring. No clause changed",
+          "ref": "#25846"
         }
       ],
       "enumSource": {
@@ -2058,7 +2130,7 @@
       "title": "Gantt is interactive, not a picture: drag persists, locked tasks survive auto-schedule, host veto restores",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -2070,8 +2142,8 @@
           "the task gantt view (task.view.ts 'Schedule (Gantt)': startDateField/endDateField/titleField/progressField)"
         ],
         "knownGaps": [
-          "the stock task gantt view (examples/app-showcase/src/ui/views/task.view.ts, listViews.gantt) declares NO dependenciesField / lockField / parentField, so the auto-schedule, locked-task and subtree-drag surfaces are unreachable LIVE on stock fixtures. ⚠ All three ARE GanttConfig keys (packages/spec/src/ui/view.zod.ts#GanttConfigSchema). QA run #21782 read `lockField` as no spec key; that is wrong, so the variants need no re-point. A2 and A3 are scored from the objectui pins `automated` names per clause. The one sub-leg no pin reaches is a DIRECT drag on a locked LEAF bar: GanttView.tsx returns from the drag start for a locked task, but only the summary-drag and link-drop locked cases are unit-pinned. It needs the view extended live, with lockField pointing at a boolean on showcase_task such as `done` (a view overlay or a scratch copy). That recipe is not run-proven, so score the sub-leg blocked(fixture) until a run proves it. Re-confirmed by QA run #23163 (objectstack 36b2889c, objectui 1fb1ced36243): the stock view still declares no lockField, and no pin reaches the direct leaf drag. The nearest pin, GanttView.tree.test.tsx ('omits drag/resize/progress handles and the dependency dot on a locked bar'), proves a locked leaf loses its resize grips and link dot, NOT that dragging its body writes nothing, so it does not score the sub-leg either",
-          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
+          "the stock task gantt view (examples/app-showcase/src/ui/views/task.view.ts, listViews.gantt) declares NO dependenciesField / lockField / parentField, so the auto-schedule, locked-task and subtree-drag surfaces are unreachable LIVE on stock fixtures. ⚠ All three ARE GanttConfig keys (packages/spec/src/ui/view.zod.ts#GanttConfigSchema). QA run #21782 read `lockField` as no spec key; that is wrong, so the variants need no re-point. The objectui pins `automated` names per clause are component-layer evidence for A2 and A3, never their pass (RUNNER rule 6): those api clauses are scored from live row reads. The one sub-leg no pin reaches is a DIRECT drag on a locked LEAF bar: GanttView.tsx returns from the drag start for a locked task, but only the summary-drag and link-drop locked cases are unit-pinned. It needs the view extended live, with lockField pointing at a boolean on showcase_task such as `done` (a view overlay or a scratch copy). That recipe is not run-proven, so score the sub-leg blocked(fixture) until a run proves it. Re-confirmed by QA run #23163 (objectstack 36b2889c, objectui 1fb1ced36243): the stock view still declares no lockField, and no pin reaches the direct leaf drag. The nearest pin, GanttView.tree.test.tsx ('omits drag/resize/progress handles and the dependency dot on a locked bar'), proves a locked leaf loses its resize grips and link dot, NOT that dragging its body writes nothing, so it does not score the sub-leg either",
+          "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import."
         ]
       },
       "variants": [
@@ -2122,7 +2194,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "objectui: packages/plugin-gantt/src (GanttView.autoscheduledlg.test.tsx, GanttView.summaryedit.test.tsx, GanttView.deptypes.test.tsx, scheduling.selfextent.test.ts, GanttView.countinterp.i18n.test.tsx, GanttView.dnd.test.tsx). Per clause, at objectui 0abd4f9f8769: acceptance[1] by GanttView.autoscheduledlg.test.tsx ('computes first and asks — nothing is written before confirm', 'cancel discards without writing', 'confirm applies the shift') and GanttView.countinterp.i18n.test.tsx (two unlocked violators shift, the locked one is reported in the skipped notice); acceptance[2] by scheduling.selfextent.test.ts ('a locked violated task is reported in skippedLocked and left in place') and GanttView.dnd.test.tsx ('summary drag skips locked descendants — they are neither previewed nor committed'). acceptance[0] and acceptance[3] are not covered here"
+        "ref": "objectui: packages/plugin-gantt/src (GanttView.autoscheduledlg.test.tsx, GanttView.summaryedit.test.tsx, GanttView.deptypes.test.tsx, scheduling.selfextent.test.ts, GanttView.countinterp.i18n.test.tsx, GanttView.dnd.test.tsx). Per clause (the named cases are present at the 18.2.0 Tier 1 run's pin b41ed7f68956 and in ui/packages/plugin-gantt on main cc378e93; 0abd4f9f8769 is where the mapping was first read): acceptance[1] by GanttView.autoscheduledlg.test.tsx ('computes first and asks — nothing is written before confirm', 'cancel discards without writing', 'confirm applies the shift') and GanttView.countinterp.i18n.test.tsx (two unlocked violators shift, the locked one is reported in the skipped notice); acceptance[2] by scheduling.selfextent.test.ts ('a locked violated task is reported in skippedLocked and left in place') and GanttView.dnd.test.tsx ('summary drag skips locked descendants — they are neither previewed nor committed'). acceptance[0] and acceptance[3] are not covered here. These cases stop at the component's update callback or the pure scheduler and observe no server write, while acceptance[1] and [2] are api clauses (row-set diffs, before/after reads): they are component-layer evidence beside those clauses, never their pass (RUNNER rule 6)"
       },
       "source": [
         "#3358 §8 (the three never-imported gantt rows)",
@@ -2160,6 +2232,12 @@
           "date": "2026-10-19",
           "change": "steps[4] corrected from QA run #24616 (18.0 sweep round 2, ba4afcc2): the veto step named no way to make the server reject a drag on stock; the run's recipe (a contributor member's task reassigned away server-side, then dragged → 404 → snap-back with the 'Save failed' toast) needs no lockField and scored acceptance[3] pass. No clause changed. Wave anchor #24579 round 2 §3 (6272314386)",
           "ref": "#24671"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-26",
+          "change": "From Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read in ui/packages/plugin-gantt on main cc378e93. (1) automated.ref and knownGaps[0] scored acceptance[1] and [2] from component and unit cases that stop at the component's update callback; those clauses' oracle is api, so the cases are now named as evidence of their layer only. (2) The ref named objectui 0abd4f9f8769 for the mapping while the run pinned b41ed7f68956; it now says the cases are present at both. fixtures.knownGaps[1], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
+          "ref": "#25846"
         }
       ]
     },
@@ -2231,7 +2309,7 @@
       "title": "Dirty forms guard ACCIDENTAL closes: the X / Escape / backdrop prompt on a dirty form, the footer Cancel discards without a prompt by design, save proceeds, nothing is lost silently",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -2240,7 +2318,7 @@
       "fixtures": {
         "app": "showcase",
         "knownGaps": [
-          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
+          "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import."
         ]
       },
       "steps": [
@@ -2267,7 +2345,7 @@
         {
           "clause": "the guard's behavior is pinned by the existing unit suite",
           "oracle": "test",
-          "verify": "objectui, from the REPO ROOT of a checkout at the .objectui-sha revision: pnpm exec vitest run packages/plugin-form/src/discardGuard.test.tsx (QA run #23163 read 14/14 at 1fb1ced36243). ⛔ Not `pnpm --filter @object-ui/plugin-form exec vitest run src/discardGuard.test.tsx`: objectui's vitest invocation guard (scripts/vitest-invocation-guard.mjs) refuses a run whose cwd is inside a package, because the root config's project globs resolve against the cwd and such a run would silently execute the wrong suite (objectui#3378)",
+          "verify": "with cwd ui/, the objectui tree's root in this checkout (the console builds from ui/ at the framework commit; the .objectui-sha pin is retired): pnpm exec vitest run packages/plugin-form/src/discardGuard.test.tsx. The file holds 11 it() cases on main at cc378e93: the X close, the footer Cancel and the pristine paths for ModalForm and DrawerForm, plus the beforeunload guard. QA run #23163's 14/14 was counted on another tree, so cite the count the run's own tree reports. No case drives Escape or a backdrop click, so acceptance[0]'s and negative[0]'s Escape and backdrop legs are driven by hand. ⛔ Not `pnpm --filter @object-ui/plugin-form exec vitest run src/discardGuard.test.tsx`: the vitest invocation guard (ui/scripts/vitest-invocation-guard.mjs) refuses a run whose cwd is inside a package, because the root config's project globs resolve against the cwd and such a run would silently execute the wrong suite (objectui#3378)",
           "evidence": "test output"
         }
       ],
@@ -2303,6 +2381,12 @@
           "date": "2026-10-13",
           "change": "acceptance[2].verify runs the pin from the objectui root (assertion defect, #23163 A2), and the title, steps[1], acceptance[0], negative[0] and source[0] separate the deliberate footer Cancel from the accidental closes (wording, #23163 A0); both parked on #23121, carried by #23169. The verify string `pnpm --filter @object-ui/plugin-form exec vitest run src/…` is refused by objectui's vitest invocation guard (objectui#3378); `pnpm exec vitest run packages/plugin-form/src/discardGuard.test.tsx` from the objectui root ran 14/14 at 1fb1ced36243 in QA run #23163. The footer Cancel closes a dirty form with no prompt by design (ModalForm handleCancel, pinned in discardGuard.test.tsx), and the guard covers the X, Escape and backdrop paths. Re-read from objectui source at that pin, still this repo's .objectui-sha",
           "ref": "#23169"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-26",
+          "change": "acceptance[2].verify, from Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read at ui/packages/plugin-form/src/discardGuard.test.tsx on main cc378e93. (1) It ran the suite from an objectui checkout at the retired .objectui-sha pin; it now runs from ui/ in this checkout. (2) The '14/14' from QA run #23163 does not match this tree, which holds 11 it() cases; the verify names the count and its tree. (3) The suite covers the X close, Cancel and pristine paths but no Escape or backdrop click, so those legs of acceptance[0] and negative[0] are named as hand-driven. fixtures.knownGaps[0], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
+          "ref": "#25846"
         }
       ]
     },
@@ -2373,7 +2457,7 @@
       "title": "User-built FilterBuilder/SortBuilder toolbar merges with the view filter, restores across nav, and reproduces rows from the URL",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2387,7 +2471,7 @@
           "10 seeded tasks spanning statuses/priorities/estimate_hours so a 2-condition toolbar filter returns a non-trivial subset (examples/app-showcase/src/data/seed/index.ts)"
         ],
         "knownGaps": [
-          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
+          "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import."
         ]
       },
       "steps": [
@@ -2445,7 +2529,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "objectui: e2e/live/user-filters.spec.ts — acceptance[4] ONLY: its dropdown-selection case pins the uf_<field> half (a uf_priority selection survives a reload), and its filter-tabs case, now on the Task Triage interface page, pins the uf__tab half (picking the urgent tab writes uf__tab=urgent, and it survives a reload). No pin covers acceptance[0]–[3]: e2e/live/saved-view-filter.spec.ts, cited here until revision 5, pins a saved view's stored filter alone, not the toolbar merge acceptance[0] scores, so it was dropped"
+        "ref": "objectui: e2e/live/user-filters.spec.ts — acceptance[4] ONLY: its dropdown-selection case pins the uf_<field> half (a uf_priority selection survives a reload), and its filter-tabs case, now on the Task Triage interface page, pins the uf__tab half (picking the urgent tab writes uf__tab=urgent, and it survives a reload). Both cases reproduce the filter on page.reload() and read only the URL param and the record-count bar's '2': neither captures the data request acceptance[4]'s network oracle names, nor compares row identity, so the same-request and same-rows half is driven by hand. No pin covers acceptance[0]–[3]; the saved-view spec cited here until revision 5 was dropped (history, revision 5)"
       },
       "source": [
         "objectui: packages/plugin-list/src/ListView.tsx (buildEffectiveFilter, convertFilterGroupToAST, mergeFilterNodes; $filter + $orderby assembly)",
@@ -2490,6 +2574,12 @@
           "date": "2026-10-20",
           "change": "automated.stale removed — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired user-filters.spec.ts, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. Its blob is aa52b2b8de2a at the old pin 12dc7b47c340 and ab50146bcfd0 at both 0b36ffa and 616df6598b42: the filter-tabs case now drives the tabs element on the Task Triage interface page (ADR-0053), and the lookup quick-filter case is retired. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, the two cases the ref claims assert acceptance[4]'s two halves as it says (uf_priority=urgent and uf__tab=urgent each survive a reload), so the ref keeps acceptance[4] and loses its stale note. No case this item cites was retired. No clause changed",
           "ref": "#24857"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-26",
+          "change": "automated.ref, from Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read at ui/e2e/live/user-filters.spec.ts on main cc378e93. (1) acceptance[4]'s two user-filters cases reproduce the filter on page.reload() and check the URL param and the record-count bar's '2' only. They never capture the data request the clause's network oracle names, nor compare row identity, so the ref now says that half is driven by hand. (2) The ref no longer names the saved-view spec it dropped at revision 5, which a ref parser read as a pin. fixtures.knownGaps[0], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
+          "ref": "#25846"
         }
       ]
     },
@@ -2601,7 +2691,7 @@
       "title": "Concurrent edits collide loudly (OCC 409 + conflict dialog), never silent last-write-wins; inline two-surface edit is ONE atomic OCC-guarded save",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2614,7 +2704,7 @@
           "a record with both a details-body field and a header-highlight field for the two-surface inline-edit fold-in (RecordDetailView highlight fields)"
         ],
         "knownGaps": [
-          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
+          "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import."
         ]
       },
       "steps": [
@@ -2678,7 +2768,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "objectui: packages/plugin-form/src/occSave.test.tsx — acceptance[3] (the overwrite retry re-keyed to the 409's currentVersion) and the modal-form half of acceptance[1] (Keep editing / Overwrite); it mocks the data source, so acceptance[0]'s server 409 is not pinned. No pin covers acceptance[2], [4] or [5]: e2e/live/inline-edit-polish-2572.spec.ts, cited here until revision 4, saves one inline field with no If-Match and never provokes a conflict, so it scores no clause here even when green (it is also stale at the pin, see records-forms.list-view-capabilities' automated.stale) and was dropped"
+        "ref": "objectui: packages/plugin-form/src/occSave.test.tsx — the client halves of two clauses, over a mocked data source. acceptance[3]: '409 → \"overwrite\" retries re-keyed to the server currentVersion and completes the save' pins the retry's re-keyed ifMatch only, not the clause's api oracle (the retry answering 200 and a re-read showing one winner). acceptance[1]: the modal form's Keep editing / Overwrite choice, in jsdom; the clause's dom oracle wants the rendered dialog, screenshot first, and the inline ConcurrentUpdateDialog half has no pin. acceptance[0]'s server 409 is not pinned. No pin covers acceptance[2], [4] or [5]; the inline-edit spec cited here until revision 4 was dropped (history, revision 4)"
       },
       "source": [
         "objectui: packages/plugin-detail/src/ConcurrentUpdateDialog.tsx (Reload/Overwrite UX), packages/plugin-form/src/occSave.tsx (If-Match → 409, conflict dialog, re-key overwrite)",
@@ -2710,6 +2800,12 @@
           "date": "2026-10-20",
           "change": "automated.ref narrowed and acceptance[4].verify corrected — §2 themes \"pins that cover no full clause\" and \"objectui live e2e is not green at its own pin\" of wave anchor #24579 (18.0 sweep). Tier 1 run #24598 at the sweep's console pin 4016370af3c9: occSave.test.tsx passed and pins acceptance[3] and the modal half of acceptance[1]; inline-edit-polish-2572.spec.ts failed as a stale spec (QA run #24572), and it scores no clause of this item even when green (a one-field save, no If-Match, no conflict), so it is dropped rather than marked stale. QA run #24616 passed the item by hand. No clause text changed",
           "ref": "#24697"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-26",
+          "change": "automated.ref rewritten from Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read at ui/packages/plugin-form/src/occSave.test.tsx on main cc378e93. (1) The overwrite case runs over a mocked data source, so it pins acceptance[3]'s client re-key only, not its api oracle. (2) The modal Keep editing / Overwrite case runs in jsdom; acceptance[1]'s dom oracle wants a rendered dialog, and the inline ConcurrentUpdateDialog half has no pin. (3) The ref no longer names the inline-edit spec it dropped at revision 4, which a ref parser read as a pin; its pointer to a list-view-capabilities 'automated.stale' key that no longer exists goes with it. fixtures.knownGaps[0], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
+          "ref": "#25846"
         }
       ]
     },
@@ -2718,7 +2814,7 @@
       "title": "Record discussion: an @mention comment reconciles optimistically, persists to sys_comment, interleaves with activity, pings the mentioned user's bell — and the feed filter shows exactly each mode's subset without dropping author-extended activity",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2859,7 +2955,7 @@
       ],
       "automated": {
         "kind": "api",
-        "ref": "The FEEDS_DISABLED clauses (6, 7) have engine/API pins that predate this item's coverage of them: packages/plugins/plugin-audit/src/capability-gate-update-verb.test.ts (describe '[#10170] enable.feeds is asked on the UPDATE verb too' — by-id and predicate re-thread onto `lead_walled`, plus the insert-verb control and the absent-thread_id boundary) and packages/qa/dogfood/test/comments-permission-matrix.dogfood.test.ts (the create side over real REST against the `cmt_nofeeds` fixture, packages/qa/dogfood/test/fixtures/comments-fixture.ts). ⚠️ Those pins run against their OWN fixtures and the objectql/REST seams — they do NOT reach the console half of the negative (panel hidden, sys_comment fetch skipped), and they never exercised the showcase surface, which is why clauses 6 and 7 still carry their own steps and the qa-feeds-disabled recipe. The remaining clauses (1-5: optimistic reconcile, activity interleave, mention bell) are browser-only and have no pin. The recipient read gate (acceptance[9]) is pinned by packages/plugins/plugin-audit/src/mention-recipient-gate.integration.test.ts (#24794: isolated, group and single cases, id and email spellings, author exclusion, the withheld-recipient log line), which reaches the ENGINE layer with plugin-security's read layer played by a middleware (knownGaps[2]); it scores that clause partial at most under RUNNER rule 6."
+        "ref": "The FEEDS_DISABLED clauses (6, 7) have engine/API pins that predate this item's coverage of them: packages/plugins/plugin-audit/src/capability-gate-update-verb.test.ts (describe '[#10170] enable.feeds is asked on the UPDATE verb too' — by-id and predicate re-thread onto `lead_walled`, plus the insert-verb control and the absent-thread_id boundary) and packages/qa/dogfood/test/comments-permission-matrix.dogfood.test.ts (the create side over real REST against the `cmt_nofeeds` fixture, packages/qa/dogfood/test/fixtures/comments-fixture.ts: its '(f) enable.feeds:false still answers FEEDS_DISABLED' case asserts the 403 and the code, and never reads the thread's zero rows after the refusal, so acceptance[5]'s zero-row half is the run's). ⚠️ Those pins run against their OWN fixtures and the objectql/REST seams — they do NOT reach the console half of the negative (panel hidden, sys_comment fetch skipped), and they never exercised the showcase surface, which is why clauses 6 and 7 still carry their own steps and the qa-feeds-disabled recipe. The remaining clauses (1-5: optimistic reconcile, activity interleave, mention bell) are browser-only and have no pin. The recipient read gate (acceptance[9]) is pinned by packages/plugins/plugin-audit/src/mention-recipient-gate.integration.test.ts (#24794: isolated, group and single cases, id and email spellings, author exclusion, the withheld-recipient log line), which reaches the ENGINE layer with plugin-security's read layer played by a middleware (knownGaps[2]); it scores that clause partial at most under RUNNER rule 6. acceptance[8]'s fallback oracle, where the milestone channel is unavailable, is objectui packages/plugin-detail/src/renderers/__tests__/recordActivityFeed.test.ts (the activity → feed map's superset pin and its UNMAPPED_ACTIVITY_FEED_TYPE fallback), a unit pin the run executes in the objectui tree."
       },
       "history": [
         {
@@ -2897,6 +2993,12 @@
           "date": "2026-10-20",
           "change": "personas[1] and fixtures.knownGaps[0] mint the second user through the admin door. Anchor comment 6290946648 (round 16's carried finding, from #24864 / PR #24869): both said 'a second signed-up user', and knownGaps[0] recorded the mention and bell clauses blocked(fixture) without one. Read at base e4d604efd3: the showcase declares no auth.audience, so resolveAudience answers invite_only and an uninvited sign-up answers 403 SELF_REGISTRATION_CLOSED (packages/plugins/plugin-auth/src/audience-posture.ts), while runAdminCreateUser mints the user with mustChangePassword true by default (admin-user-endpoints.ts), as steps[13] (revision 5) already does. personas[1]'s 'sys_user rows come from sign-up, not seeds' goes too: the showcase seeds its demo personas (examples/app-showcase/src/security/demo-personas.ts), though none of them is this item's mention target. No clause changed",
           "ref": "#25003"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-26",
+          "change": "automated.ref, from Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read on main cc378e93. (1) acceptance[5]: the comments-permission-matrix FEEDS_DISABLED case asserts 403 + code only and never reads the thread's zero rows; the ref says so. (2) acceptance[8] names recordActivityFeed.test.ts as its fallback oracle, but the ref did not, so a ref-driven run never ran it; it is added, at ui/packages/plugin-detail/src/renderers/__tests__/. The run's notes on acceptance[6] / negative[3] and acceptance[9] confirm the clause and ref text as written (engine-level pins, partial at most). No clause changed",
+          "ref": "#25846"
         }
       ]
     },
@@ -3123,7 +3225,7 @@
       "title": "Select-all-matching covers every matching id across pages (server total, not the rendered page); clear resets both selection sources",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -3136,7 +3238,7 @@
           "the bulk actions above, so the BulkActionBar and both its aggregate and per-record dispatch are exercisable (objectui plugin-grid BulkActionBar)"
         ],
         "knownGaps": [
-          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
+          "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import."
         ]
       },
       "steps": [
@@ -3191,7 +3293,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "objectui: packages/plugin-grid/src/__tests__/{objectBulkActionDispatch,BulkActionBar,bulkActionRefresh}.test.tsx"
+        "ref": "objectui: packages/plugin-grid/src/__tests__/{objectBulkActionDispatch,BulkActionBar,bulkActionRefresh}.test.tsx — component layer, jsdom, over a mocked data source. None of the three exercises resolveBulkRows' paged fan-out or its HARD_CAP, so acceptance[1], acceptance[4] and negative[0] are not pinned by them. packages/plugin-grid/src/__tests__/bulkFanoutHostParams.test.tsx, outside this list, does drive that fan-out at the same component layer (500-record pages that replay the host's query, and 'still honours HARD_CAP over a match set larger than the cap'): it is evidence beside those clauses, never their pass, because their oracle is the dispatched set against a live filtered count (RUNNER rule 6). bulkActionRefresh.test.tsx's 'bulk bar Clear resets both selection sources' case asserts acceptance[3] and negative[2] in jsdom; their dom oracle wants the rendered page, screenshot first"
       },
       "source": [
         "objectui: packages/plugin-grid/src/ObjectGrid.tsx (selectAllMatching, resolveBulkRows paged fan-out + HARD_CAP, resetSelection #3056, totalMatching), packages/plugin-grid/src/components/BulkActionBar.tsx (cross-page banner)",
@@ -3222,6 +3324,12 @@
           "date": "2026-10-19",
           "change": "steps[5] and acceptance[2].clause corrected from QA run #24616 (18.0 sweep round 2, ba4afcc2), re-read at the console pin 4016370af3c9: showcase_recalc_selection is an api-type action whose one request (POST /api/v1/apps/showcase/recalc) carries `_selectedIds` at the body's top level; params._selectedIds is the grid's hand-off to the action runner (ObjectGrid.tsx), not the wire spelling — list-view-capabilities already states the top-level form for the same action. Wave anchor #24579 round 2 §3 (6272314386)",
           "ref": "#24671"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-26",
+          "change": "automated.ref says what its three files score, from Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read under ui/packages/plugin-grid on main cc378e93. (1) None exercises resolveBulkRows' paged fan-out or HARD_CAP (acceptance[1], [4], negative[0]). The run's 'unpinned even at component level' does not hold: bulkFanoutHostParams.test.tsx, not in the ref, drives the fan-out and the cap at component level, so the ref names it as evidence of that layer only. (2) The Clear case in bulkActionRefresh.test.tsx pins acceptance[3] and negative[2] in jsdom, and their dom oracle needs the browser. fixtures.knownGaps[0], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
+          "ref": "#25846"
         }
       ]
     },
@@ -3327,7 +3435,7 @@
       "title": "Record edit undo: toast Undo / Ctrl+Z restores the prior value through the API and logs a revert; undo after a concurrent change must not silently clobber",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -3340,7 +3448,7 @@
           "a writable record and an action that declares `undoable: true` with operation 'update' (a patch of one field) — at objectui 1fb1ced36243 the ONLY path that pushes an Undo op: useConsoleActionRuntime and RecordDetailView attach the toast Undo for `undoable` actions, while inline grid and form edits push none. objectui react/src/hooks/useGlobalUndo.ts + core globalUndoManager hold the stack. ⚠ The stock showcase declares NO undoable action (examples/app-showcase has zero `undoable` keys), and a runtime-authored action is not joined into the served object's actions[] (records-forms.action-location-matrix knownGaps), so the action must ship PACKAGED in the showcase — see `blocked`"
         ],
         "knownGaps": [
-          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact.",
+          "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import.",
           "BLOCKED(fixture) on stock, all four clauses (QA run #23163, objectstack 36b2889c, objectui 1fb1ced36243). Inline edits push no Undo op at this pin — only actions declaring `undoable` do — and the showcase declares none, while a runtime-authored undoable action is not served. The item becomes runnable when examples/app-showcase ships a packaged undoable update action on a writable object (operation 'update' with a patch, so the Undo captures the prior value of every written field — ActionSchema.undoable in packages/spec/src/ui/action.zod.ts). Lift `blocked` in the revision that names that fixture. ⛔ Do not score an inline edit's missing Undo as this item's FAIL: the console never offers one by design"
         ]
       },
@@ -3390,7 +3498,7 @@
       "blocked": { "by": "fixture", "ref": "fixture gap: no packaged `undoable` update action in examples/app-showcase (QA run #23163 A0-A3; recorded on #23169)" },
       "automated": {
         "kind": "unit",
-        "ref": "objectui: packages/core/src/actions/__tests__/UndoManager.test.ts (undo/redo stack)"
+        "ref": "objectui: packages/core/src/actions/__tests__/UndoManager.test.ts (undo/redo stack) — scores NO clause of this item: it tests the in-memory stack alone, and every clause here reads a dataSource write, a UI trigger or an audit row. It is evidence of the mechanism the clauses ride on; drive each clause by hand"
       },
       "source": [
         "objectui: packages/react/src/hooks/useGlobalUndo.ts (executeOp, undo/redo, Ctrl+Z/Ctrl+Shift+Z), packages/app-shell/src/views/RecordDetailView.tsx (success-toast Undo action), @object-ui/core globalUndoManager",
@@ -3414,6 +3522,12 @@
           "date": "2026-10-13",
           "change": "fixtures.requires[0], knownGaps[1] (new), steps[0] and a `blocked` annotation (fixture gap, #23163 A0-A3; parked on #23121, carried by #23169). At objectui 1fb1ced36243 only actions declaring `undoable` push an Undo op (useConsoleActionRuntime, RecordDetailView); inline edits push none. The showcase declares no undoable action, and a runtime-authored one is not served, so QA run #23163 scored all four clauses blocked(fixture). The item stays blocked until the showcase ships a packaged undoable update action (operation update + patch). That fixture is product work outside this checklist edit; `blocked.ref` names the gap so the selector excludes the item from default runs until then. No clause changed",
           "ref": "#23169"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-26",
+          "change": "automated.ref says UndoManager.test.ts scores no clause: it tests only the in-memory undo/redo stack, and no clause of this item is a stack-semantics clause (Tier 1 run #25815 (6679644a, pin b41ed7f68956)). fixtures.knownGaps[0], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
+          "ref": "#25846"
         }
       ]
     },
@@ -3422,7 +3536,7 @@
       "title": "Async import job: terminal state + per-row results, undo removes exactly the imported rows, cancel mid-job leaves a coherent partial",
       "since": "v17",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -3432,12 +3546,12 @@
         "app": "showcase",
         "requires": [
           "an import-job-capable client wired into the console AND an object with an async-import route (framework packages/rest/src/rest-route-ledger.ts: POST /api/v1/data/:object/import/jobs, /import/jobs/:jobId/{cancel,undo,results}) — the STOCK console already satisfies the client half (run #21845, console pin 2e818d0b51ec); no extra wiring is needed",
-          "the objectui import specs, which self-gate on IMPORT_CONSOLE_LIVE=1 (console) or a reachable import harness /live.html",
-          "RUNTIME FIXTURE — the live-gated console spec (proved by run #21845; nothing committed in either repo): in an objectui checkout, run e2e/import-console/import-console-undo.spec.ts with IMPORT_CONSOLE_LIVE=1 against the booted showcase, from a SCRATCH COPY of the spec whose page goto path is the console-mounted /_console/apps/{app}/{object} (the spec's own path does not carry the /_console mount the framework serves the console under). The spec imports a name,email,status CSV and counts rows on LIVE_IMPORT_OBJECT, and NO showcase object carries those three fields — author a scratch object first (e.g. qa_lead with name / email / status text fields and a declared sharingModel, in a writable package, published) and run with LIVE_IMPORT_APP=showcase_app LIVE_IMPORT_OBJECT=qa_lead, as QA run #23949 did"
+          "the objectui import specs (ui/e2e/import-console and ui/e2e/import-harness in this checkout), which self-gate on IMPORT_CONSOLE_LIVE=1 (console) or a reachable import harness /live.html",
+          "RUNTIME FIXTURE — the live-gated console spec (proved by run #21845; nothing committed in either repo): from ui/ in this checkout, run e2e/import-console/import-console-undo.spec.ts under its own config (playwright.import-console.config.ts) with IMPORT_CONSOLE_LIVE=1 against the booted showcase, from a SCRATCH COPY of the spec whose page goto path is the console-mounted /_console/apps/{app}/{object} (the spec's own path does not carry the /_console mount the framework serves the console under). The spec imports a name,email,status CSV and counts rows on LIVE_IMPORT_OBJECT, and NO showcase object carries those three fields — author a scratch object first (e.g. qa_lead with name / email / status text fields and a declared sharingModel, in a writable package, published) and run with LIVE_IMPORT_APP=showcase_app LIVE_IMPORT_OBJECT=qa_lead, as QA run #23949 did"
         ],
         "knownGaps": [
           "CLOSED for runs by the live-gated console spec in requires (#21845): e2e/import-console/import-console-undo.spec.ts skips unless IMPORT_CONSOLE_LIVE=1, and its goto path needs the /_console mount — with both supplied it runs against the stock console. A skip without the gate is the control, never a result. The harness twin e2e/import-harness/import-undo.spec.ts still skips unless the harness origin serves /live.html; it is optional evidence, and the API half below needs no gate at all",
-          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact.",
+          "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import.",
           "HAND-DRIVEN CONSOLE ROUTE, measured by QA run #24616 without the gated spec: on showcase_task's list, Import → Preview → tick 'Import in the background (runs as an undoable job)' → import → History → 'Undo import'. The Undo asks a NATIVE window.confirm (objectui plugin-grid ImportWizard.tsx), which Playwright dismisses by default, so an unhandled dialog makes Undo a silent no-op (automation-input): accept it (page.on('dialog', d => d.accept())). showcase_contact's list shows no Import button (it sits in the header's overflow menu there); showcase_task's does"
         ]
       },
@@ -3458,7 +3572,7 @@
         {
           "clause": "undo removes EXACTLY the imported rows — a marker filter count returns to its pre-import value, with no collateral deletion of pre-existing rows",
           "oracle": "api",
-          "verify": "filtered GET marker count: pre-import == post-undo, and post-import == pre-import + imported count (the specs assert record counts at the backend on both sides)",
+          "verify": "filtered GET marker count: pre-import == post-undo, and post-import == pre-import + imported count (the specs count with an unfiltered, page-bounded GET /api/v1/data/OBJECT and read records.length, not this marker filter, so they are evidence beside this count, never the count)",
           "evidence": "the three marker counts (pre / post-import / post-undo)"
         },
         {
@@ -3486,7 +3600,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "objectui: e2e/import-console/import-console-undo.spec.ts and its harness twin e2e/import-harness/import-undo.spec.ts — each covers acceptance[1] (undo returns the record count to its pre-import value), acceptance[3] (the job list read on undoable and revertedAt) and acceptance[0]'s undoable-job half; neither reads a job's per-row results, and no pin covers acceptance[2] (cancel). Both self-gate (fixtures.knownGaps[0]), run under their own Playwright configs (playwright.import-console.config.ts, playwright.import-harness.config.ts) and default to crm_app / crm_lead, so a showcase run sets LIVE_IMPORT_APP and LIVE_IMPORT_OBJECT (IMPORT_HARNESS_OBJECT for the twin)"
+        "ref": "objectui: e2e/import-console/import-console-undo.spec.ts and its harness twin e2e/import-harness/import-undo.spec.ts — each holds acceptance[0]'s undoable-job half and is evidence beside two more clauses, never their pass: for acceptance[1] it counts rows with an unfiltered GET /api/v1/data/OBJECT and reads records.length, a page-bounded list length rather than the clause's marker-filter count; for acceptance[3] it reads the job list once, before the undo (filter j.undoable && !j.revertedAt), and confirms the revert only through the console testid import-history-reverted-ID, so 'revertedAt once a job is reverted' is never read off GET /import/jobs; neither reads a job's per-row results, and no pin covers acceptance[2] (cancel). Both self-gate (fixtures.knownGaps[0]), run under their own Playwright configs (playwright.import-console.config.ts, playwright.import-harness.config.ts) and default to crm_app / crm_lead: a skip or a non-showcase target scores nothing, so a showcase run sets LIVE_IMPORT_APP and LIVE_IMPORT_OBJECT (IMPORT_HARNESS_OBJECT for the twin)"
       },
       "source": [
         "framework: packages/rest/src/rest-route-ledger.ts#REST_ROUTE_LEDGER (POST /data/:object/import/jobs; /import/jobs/:jobId/{cancel,undo,results}; GET /import/jobs[/:jobId] — re-pointed #18104: jobId is a route PATH PARAMETER, carried in this file only inside a route string)",
@@ -3530,6 +3644,12 @@
           "date": "2026-10-20",
           "change": "automated.ref narrowed per clause and acceptance[0].verify corrected — §2 theme \"pins that cover no full clause\" of wave anchor #24579 (18.0 sweep). The two self-gated specs, read at the sweep's console pin 4016370af3c9 and byte-identical at the shipped pin 12dc7b47c340, cover acceptance[1], acceptance[3] and acceptance[0]'s undoable-job half; neither reads a job's per-row results, and none covers acceptance[2]. Tier 1 run #24598 did not run them (they need their own configs); QA run #24616 passed the item by hand after round 1's #24572 handed it over. No clause text changed",
           "ref": "#24697"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-26",
+          "change": "From Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read at ui/e2e/import-console/import-console-undo.spec.ts and ui/e2e/import-harness/import-undo.spec.ts on main cc378e93. (1) acceptance[3]: the specs read the job list once, before undo, and confirm the revert through a UI testid, so revertedAt is never read off GET /import/jobs; the ref no longer says they cover it. (2) acceptance[1]: they count with an unfiltered GET and records.length, a page-bounded length, not the marker-filter count; the ref and acceptance[1].verify say so. (3) The ref says a self-skip or the crm_app / crm_lead default scores nothing. fixtures.knownGaps[1], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93; fixtures.requires[1] and [2] name the specs under ui/ for the same reason. No clause changed",
+          "ref": "#25846"
         }
       ]
     },
@@ -3538,7 +3658,7 @@
       "title": "Object lifecycle hooks fire on the write path with the right timing, gate, async and error semantics — driven over /api/v1/data/*, oracled by the record effect and the log line",
       "since": "v15",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3595,7 +3715,7 @@
         {
           "clause": "beforeInsert stamps server-controlled defaults: an inquiry POSTed with NO source reads back source == 'web' — the hook is the sole producer of that value (the field has no default), so a correct read PROVES the hook ran; status == 'new' corroborates but is not hook-attributable alone (the 'new' option is default:true)",
           "oracle": "api",
-          "verify": "POST /api/v1/data/showcase_inquiry omitting source/status → GET the created row shows source 'web' (and status 'new'); pinned for the anonymous public-form path by packages/qa/dogfood/test/showcase-public-form.dogfood.test.ts",
+          "verify": "POST /api/v1/data/showcase_inquiry omitting source/status → GET the created row shows source 'web' (and status 'new'); the anonymous public-form path is pinned by packages/qa/dogfood/test/showcase-public-form.dogfood.test.ts, which drives POST /forms/contact-us/submit, not this /data door: the 'web' stamp is engine-side, so the pin scores the stamp, while the /data POST omitting source and status is driven by hand",
           "evidence": "the POST payload + the re-read JSON"
         },
         {
@@ -3631,7 +3751,7 @@
         {
           "clause": "onError:'abort' on a THROWING before* hook rolls the write back: the POST is refused and a filtered GET count stays 0 — no orphan row lands",
           "oracle": "api",
-          "verify": "scratch throwing beforeInsert; POST → error envelope; before/after filtered count both 0 (mirrors the dogfood hef_ref_guard beforeDelete → REST error-body pin in hook-error-format.dogfood.test.ts)",
+          "verify": "scratch throwing beforeInsert; POST → error envelope; before/after filtered count both 0 (mirrors the dogfood hef_ref_guard pin in hook-error-format.dogfood.test.ts, which proves a throwing beforeDelete under the default onError leaves the row; no pin drives a throwing beforeInsert POST, so this clause and negative[0]'s beforeInsert half are the run's scratch hook)",
           "evidence": "the refusal response + the before/after counts"
         },
         {
@@ -3735,6 +3855,12 @@
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
           "ref": "#25003"
+        },
+        {
+          "revision": 10,
+          "date": "2026-10-26",
+          "change": "From Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read on main cc378e93. (1) acceptance[0].verify: the public-form pin drives POST /forms/contact-us/submit, not the /data door the verify names; the hook's 'web' stamp is engine-side, so the pin scores the stamp and the /data POST is hand-driven. (2) acceptance[6].verify: the hef_ref_guard pin proves a throwing beforeDelete leaves the row; no pin drives a throwing beforeInsert POST. The run's third note, that the four objectql units hold 79 cases against the ref's '83 tests', is not taken: they hold 79 it() call sites, one of which is a four-row it.each in hook-binder.test.ts, so 83 tests run. No clause changed",
+          "ref": "#25846"
         }
       ]
     },
@@ -3743,7 +3869,7 @@
       "title": "Per-type CONSTRAINT enforcement on the write path (not just widget render): length/range/option/reference/computed limits, and where the platform deliberately does NOT enforce",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3832,13 +3958,13 @@
         {
           "clause": "reference types (lookup/master_detail/tree/user) store the id verbatim and reject a DANGLING id with code 'reference_not_found' {target} for a non-system caller (#4441) — with the boundary that the gate is EXISTENCE-only: an id that exists but is out of lookupFilters/dependsOn scope is accepted (unscoped by design)",
           "oracle": "api",
-          "verify": "a fabricated f_lookup id → reference_not_found; a real seeded account id → verbatim re-read; engine.ts assertReferencesResolve + referenceExists (isSystem/readonly/caller-supplied narrowing). Pinned by packages/objectql/src/engine-lookup-referential-integrity.test.ts",
+          "verify": "a fabricated f_lookup id → reference_not_found; a real seeded account id → verbatim re-read; engine.ts assertReferencesResolve + referenceExists (isSystem/readonly/caller-supplied narrowing). Engine-layer evidence, never this clause's pass (RUNNER rule 6): packages/objectql/src/engine-lookup-referential-integrity.test.ts drives ObjectQL in-process, not the /data door",
           "evidence": "the dangling refusal + the verbatim re-read + a note that an out-of-scope existing id is accepted"
         },
         {
           "clause": "autonumber is server-assigned and a client value is IGNORED on both write paths: a POSTed f_autonumber is replaced by the engine sequence value (stripRuntimeOwnedFields, #5503) and a PATCH of it is dropped — the call returns success while the column holds the generated number, never the forged one",
           "oracle": "api",
-          "verify": "POST f_autonumber='HACK-9999' re-reads as a sequence number, not 'HACK-9999'; PATCH is a no-op on the field. rule-validator.ts RUNTIME_OWNED_FIELD_TYPES=['autonumber'] + stripRuntimeOwnedFields/stripReadonlyFields. Pinned by packages/objectql/src/engine-autonumber-runtime-owned.test.ts",
+          "verify": "POST f_autonumber='HACK-9999' re-reads as a sequence number, not 'HACK-9999'; PATCH is a no-op on the field. rule-validator.ts RUNTIME_OWNED_FIELD_TYPES=['autonumber'] + stripRuntimeOwnedFields/stripReadonlyFields. Engine-layer evidence, never this clause's pass (RUNNER rule 6): packages/objectql/src/engine-autonumber-runtime-owned.test.ts drives ObjectQL in-process, not the /data door",
           "evidence": "the create re-read + the PATCH no-op re-read"
         },
         {
@@ -3862,7 +3988,7 @@
       ],
       "automated": {
         "kind": "api",
-        "ref": "packages/qa/dogfood/test/field-zoo-roundtrip.dogfood.test.ts (+ field-zoo.matrix.ts vectors, field-zoo-value-shape.test.ts) for round-trip & masking; packages/objectql/src/engine-lookup-referential-integrity.test.ts for reference_not_found (#4441); packages/objectql/src/engine-autonumber-runtime-owned.test.ts for the autonumber strip (#5503)"
+        "ref": "packages/qa/dogfood/test/field-zoo-roundtrip.dogfood.test.ts — accepted vectors only, over HTTP: it writes one in-range value per field and re-reads it, so none of the refusal codes acceptance[0]–[4] score (max_length, min_value, max_value, invalid_number, invalid_option, invalid_type) is pinned at any layer by this ref. Its vectors live in field-zoo.matrix.ts beside it, a data module and not a test file; field-zoo-value-shape.test.ts parses those write vectors under valueSchemaFor. packages/objectql/src/engine-lookup-referential-integrity.test.ts (reference_not_found, #4441) and packages/objectql/src/engine-autonumber-runtime-owned.test.ts (the autonumber strip, #5503) drive ObjectQL in-process, not the /data door acceptance[5] and [6] name: engine-layer evidence beside those clauses, never their pass (RUNNER rule 6)"
       },
       "source": [
         "packages/objectql/src/validation/record-validator.ts#validateOne (validateOne: max_length/min_length, min_value/max_value/invalid_number, invalid_option for select+multiselect, normalizeMultiValueFields; NO scale/precision rounding)",
@@ -3892,6 +4018,12 @@
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
           "ref": "#25003"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-26",
+          "change": "From Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read on main cc378e93. (1) automated.ref claimed 'round-trip & masking' coverage that asserts accepted vectors only; it now says no refusal code of acceptance[0]–[4] is pinned by this ref at any layer. (2) It names field-zoo.matrix.ts as the data module it is, not a pin. (3) The engine pins for acceptance[5] and [6] drive ObjectQL in-process, not the /data door the api oracle names; the ref and both verifies now call them engine-layer evidence. No clause changed",
+          "ref": "#25846"
         }
       ]
     },
@@ -3900,7 +4032,7 @@
       "title": "Cascade clear-semantics and the server boundary: stale-child clear on parent change, the WRITTEN-value server gate, and where cascade scope is client-only",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3937,13 +4069,13 @@
         {
           "clause": "SELECT server WRITTEN-value gate: a directly-POSTed child inconsistent with its parent (both in the payload) is rejected with code 'invalid_option' naming province; the consistent one is accepted — the objectql rule-validator, not the picker, is the boundary",
           "oracle": "api",
-          "verify": "{country:'cn',province:'ca'} → invalid_option (message key option_unavailable) on province; {country:'cn',province:'zj'} → 200. rule-validator.ts evaluateOptionVisibility re-evaluates the picked option's visibleWhen over the merged record. Pinned at the HTTP door by objectui e2e/live/cascading-options.spec.ts 'the server rejects an out-of-set option value, and accepts an in-set one' ({country:'us', province:'zj'} → 400 VALIDATION_FAILED with invalid_option on province; {country:'cn', province:'zj'} → 201). packages/objectql/src/validation/rule-validator.option-visibility.test.ts calls evaluateValidationRules directly: validator-layer evidence only, never this clause's pass (RUNNER rule 6, a pin scores only the layer it drives)",
+          "verify": "{country:'cn',province:'ca'} → invalid_option (message key option_unavailable) on province; {country:'cn',province:'zj'} → 201 (the write is a create). rule-validator.ts evaluateOptionVisibility re-evaluates the picked option's visibleWhen over the merged record. Pinned at the HTTP door by objectui e2e/live/cascading-options.spec.ts 'the server rejects an out-of-set option value, and accepts an in-set one' ({country:'us', province:'zj'} → 400 VALIDATION_FAILED with invalid_option on province; {country:'cn', province:'zj'} → 201). The pin drives {country:'us', province:'zj'}, not this verify's cn/ca vector, and asserts the code alone, never the option_unavailable message key: the cn/ca refusal and its message key are the run's. packages/objectql/src/validation/rule-validator.option-visibility.test.ts calls evaluateValidationRules directly: validator-layer evidence only, never this clause's pass (RUNNER rule 6, a pin scores only the layer it drives)",
           "evidence": "both responses"
         },
         {
           "clause": "KNOWN GAP recorded: a parent-only PATCH does NOT revalidate an unwritten stale child — after create {cn,zj} a PATCH {country:'us'} (province omitted) is accepted 200 and the row still holds province='zj' (invalid for us). The server checks only WRITTEN choice fields; the client clear is the only thing that keeps the change-parent path consistent",
           "oracle": "api",
-          "verify": "the create → parent-only PATCH → GET sequence shows province='zj' retained under country='us'; grounded in rule-validator.ts evaluateOptionVisibility `!(name in data) continue`. A run that shows the server auto-clearing/rejecting the stale child would be NEW enforcement to file, not a pass here",
+          "verify": "the create → parent-only PATCH → GET sequence shows province='zj' retained under country='us'; grounded in rule-validator.ts evaluateOptionVisibility `!(name in data) continue` (packages/objectql/src/validation/rule-validator.option-visibility.test.ts's 'does not check a field the patch never wrote' case is validator-layer evidence of that skip, never this clause's pass, RUNNER rule 6). A run that shows the server auto-clearing/rejecting the stale child would be NEW enforcement to file, not a pass here",
           "evidence": "the create, the parent-only PATCH response, and the GET showing the retained stale child"
         },
         {
@@ -3978,7 +4110,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "objectui: e2e/live/cascading-options.spec.ts (acceptance[0]'s client clear-on-change, through its re-filter case: country cn offers gd and zj, us offers ca and tx, and the chosen Zhejiang leaves the province trigger. It never submits, so 'the stale province is not carried into the submit' is driven by hand. Its second case, 'the server rejects an out-of-set option value, and accepts an in-set one', is acceptance[1] at the HTTP door: it POSTs {country:'us', province:'zj'} to the live backend and asserts 400 VALIDATION_FAILED with an invalid_option field on province, then {country:'cn', province:'zj'} and asserts 201); packages/objectql/src/validation/rule-validator.option-visibility.test.ts (scores NO clause of this item: it calls evaluateValidationRules directly, so its written-value rejection and its 'does not check a field the patch never wrote' case are validator-layer evidence for acceptance[1] and acceptance[2], which score the POST and PATCH answers — RUNNER rule 6)"
+        "ref": "objectui: e2e/live/cascading-options.spec.ts (acceptance[0]'s client clear-on-change, through its re-filter case: country cn offers gd and zj, us offers ca and tx, and the chosen Zhejiang leaves the province trigger. It never submits, so 'the stale province is not carried into the submit' is driven by hand. Its second case, 'the server rejects an out-of-set option value, and accepts an in-set one', is acceptance[1] at the HTTP door: it POSTs {country:'us', province:'zj'} to the live backend and asserts 400 VALIDATION_FAILED with an invalid_option field on province, then {country:'cn', province:'zj'} and asserts 201)"
       },
       "source": [
         "packages/objectql/src/validation/rule-validator.ts#evaluateOptionVisibility (evaluateOptionVisibility — WRITTEN-value only via `!(name in data) continue`; a predicate that cannot be evaluated refuses the write as rule_violation / unevaluable (ADR-0137 D2), except a system write with no acting user whose predicate reads one; invalid_option/option_unavailable)",
@@ -4030,6 +4162,12 @@
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
           "ref": "#25003"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-26",
+          "change": "From Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read at ui/e2e/live/cascading-options.spec.ts on main cc378e93. (1) acceptance[1].verify expected 200 for the in-set write; it is a create and answers 201. The verify now also says the pin drives {country:'us', province:'zj'} rather than its cn/ca vector and asserts the invalid_option code alone, so the option_unavailable message key is the run's. (2) automated.ref no longer lists rule-validator.option-visibility.test.ts, which by its own words scores no clause (validator layer); acceptance[1].verify still names it, and acceptance[2].verify now does, as validator-layer evidence. No clause changed",
+          "ref": "#25846"
         }
       ]
     },
@@ -4038,7 +4176,7 @@
       "title": "Secret/encrypted field: ciphertext at rest, masked on every read, no-op mask re-submit, and fail-CLOSED without an ICryptoProvider (ADR-0100)",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4110,11 +4248,11 @@
       ],
       "automated": {
         "kind": "api",
-        "ref": "packages/qa/dogfood/test/field-zoo-roundtrip.dogfood.test.ts (+ field-zoo.matrix.ts masked vectors for f_secret & f_password) — acceptance[0] (its API oracle, the masked GET: knownGaps[2] makes the raw-column read the DB-inspectable extra), acceptance[1] and negative[0], at the HTTP door: the showcase is booted in-process, POST /data/showcase_field_zoo writes both fields, and GET /data/showcase_field_zoo/ID reads them back as SECRET_MASK, never the written value. packages/objectql/src/secret-fields.test.ts drives a real ObjectQL engine over a stub driver, with no HTTP, so it scores NO api clause of this item: it is engine-layer evidence beside acceptance[0]'s DB-inspectable leg ('encrypts on write: row stores a ref, sys_secret holds ciphertext, no cleartext on the row'), and for acceptance[2] ('update: echoing the read mask back does NOT overwrite the stored secret'), acceptance[3] ('fail-closed: writing a secret field with no CryptoProvider throws'), acceptance[4] (the 'objectql aggregate() rejects credential fields (ADR-0100 / #3171)' describe) and negative[1]–[3]. acceptance[2] and [4] are driven over the API; acceptance[3] is blocked(fixture) on every stock composition (knownGaps[1])"
+        "ref": "packages/qa/dogfood/test/field-zoo-roundtrip.dogfood.test.ts (+ field-zoo.matrix.ts masked vectors for f_secret & f_password) — acceptance[0]'s masked-GET half ONLY (its API oracle; knownGaps[2] makes the raw-column read the DB-inspectable extra, and that leg, the 'secret:' ref column and the sys_secret ciphertext, is asserted only by the engine-layer secret-fields.test.ts below), acceptance[1] and negative[0], at the HTTP door: the showcase is booted in-process, POST /data/showcase_field_zoo writes both fields, and GET /data/showcase_field_zoo/ID reads them back as SECRET_MASK, never the written value. packages/objectql/src/secret-fields.test.ts drives a real ObjectQL engine over a stub driver, with no HTTP, so it scores NO api clause of this item: it is engine-layer evidence beside acceptance[0]'s DB-inspectable leg ('encrypts on write: row stores a ref, sys_secret holds ciphertext, no cleartext on the row'), and for acceptance[2] ('update: echoing the read mask back does NOT overwrite the stored secret'), acceptance[3] ('fail-closed: writing a secret field with no CryptoProvider throws'), acceptance[4] (the 'objectql aggregate() rejects credential fields (ADR-0100 / #3171)' describe) and negative[1]–[3]. acceptance[2] and [4] are driven over the API; acceptance[3] is blocked(fixture) on every stock composition (knownGaps[1])"
       },
       "source": [
         "packages/objectql/src/secret-fields.ts#SECRET_REF_PREFIX (SECRET_MASK, SECRET_REF_PREFIX, collectSecretFields/collectMaskedReadFields/collectCredentialFields)",
-        "packages/objectql/src/engine.ts#encryptSecretFields (encryptSecretFields — encrypt→sys_secret→ref, echoed-mask drop, fail-closed throw; decrypt path)",
+        "packages/objectql/src/engine-secret-internal-fields.ts#encryptSecretFields (encryptSecretFields — encrypt→sys_secret→ref, echoed-mask drop, fail-closed throw; decrypt path)",
         "packages/spec/src/data/field.zod.ts#FieldType (FieldType 'secret'/'password' ADR-0100 notes; ackPlaintextMasking)",
         "packages/cli/src/commands/serve.ts#host (LocalCryptoProvider host wiring via setCryptoProvider)",
         "packages/platform-objects/src/system/sys-secret.object.ts (ciphertext store)",
@@ -4144,6 +4282,12 @@
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated on ' → 'boot the showcase on its own port and DB, on '. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
           "ref": "#25003"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-26",
+          "change": "automated.ref says the dogfood pin scores acceptance[0]'s masked-GET half only; the 'secret:' ref column and sys_secret ciphertext leg is asserted only in packages/objectql/src/secret-fields.test.ts, at the engine layer (Tier 1 run #25815 (6679644a, pin b41ed7f68956)). No clause changed",
+          "ref": "#25846"
         }
       ]
     },
@@ -4152,7 +4296,7 @@
       "title": "fieldGroups[].visibleWhen section predicate: both spellings accepted, the parse normalizes to the envelope, retired visibleOn refused with the located prescription, derivation carries it verbatim — the console gates the section on the form AND the detail page (objectui#11630 fixed)",
       "since": "v17",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4200,7 +4344,7 @@
         {
           "clause": "the console renders the derived section GATED — the whole 'Pro details' section, header included, absent while kind=basic and appearing LIVE when kind flips to pro, on form and detail alike. At objectui 1fb1ced36243 both halves hold: plugin-form fieldGroups.ts copies visibleWhen onto the derived form section, and the detail page references the group (`{ group }`) so record:details evaluates its visibleWhen per record (objectui#11630, fixed). A section rendered ungated on EITHER page is now a FAIL — a regression, not the known defect. Read the adapters at the running build's revision, or observe the gating itself, before scoring either half",
           "oracle": "dom",
-          "verify": "screenshots of both kind states on form and detail, after settle; plus the console revision consulted (stale-console-bundle discipline) — on both pages the section gates live. objectui pins the detail half in packages/plugin-detail/src/renderers/__tests__/record-details.groupVisibleWhen-11630.test.tsx ('record:details evaluates a group's visibleWhen exactly as the form does'); run it from an objectui checkout at the .objectui-sha revision to cite it beside the live read",
+          "verify": "screenshots of both kind states on form and detail, after settle; plus the console revision consulted (stale-console-bundle discipline) — on both pages the section gates live. objectui pins the detail half in packages/plugin-detail/src/renderers/__tests__/record-details.groupVisibleWhen-11630.test.tsx ('record:details evaluates a group's visibleWhen exactly as the form does'); run it with cwd ui/ in this checkout (pnpm exec vitest run packages/plugin-detail/src/renderers/__tests__/record-details.groupVisibleWhen-11630.test.tsx) to cite it beside the live read",
           "evidence": "the four screenshots + the console revision/adapter reading the verdict rests on"
         },
         {
@@ -4264,6 +4408,12 @@
           "date": "2026-10-21",
           "change": "Respelled — fixtures.requires[0]: 'and an isolated boot — the item' → 'and a boot on its own port and DB — the item'. PR #25003's out-of-scope finding (round 17 of wave anchor #24579; ACCEPT 6304389370, landing record 6304641541): 22 non-history texts in 17 items named the own-port boot or its DB with 'isolated' in other words, the phrasing round 12 found a runner reading as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names the boot or the DB by what it is, the run's own port and DB (RUNNER.md's trap-table counter: own port/DB, skill §0), and names no posture. Read at base 93e6c1a5f8. No clause changed",
           "ref": "#25018"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-26",
+          "change": "acceptance[3].verify ran its detail pin from an objectui checkout at the retired .objectui-sha pin; it now runs from ui/ in this checkout, where the file is on main cc378e93. Carried for #26035. No clause changed",
+          "ref": "#25846"
         }
       ]
     },
@@ -4272,7 +4422,7 @@
       "title": "Field-level `unique` on the write path: colliding writes refused 409 UNIQUE_VIOLATION on both driver families, NULL-distinct, organization-scoped by default, whole-batch refusal, autonumber resync converges",
       "since": "v17",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -4325,7 +4475,7 @@
           "evidence": "the refusal + full before/after row reads"
         },
         {
-          "clause": "the scope matrix matches ADR-0120 D1/D3 on BOTH families: bare `unique: true` ≡ 'organization' (per-tenant where a tenant column exists; NULL-organization rows fold to ONE bucket), 'global' is platform-wide even with a tenant column — and the SQL family materializes the same rule via uniqueIndexesFromFields (driver-sql/src/schema-drift.ts), its refusal satisfying isUniqueViolationError (packages/types/src/unique-violation.ts#isUniqueViolationError), the predicate the platform's 409 UNIQUE_VIOLATION envelope is built on (packages/objectql/src/duplicate-record-error.ts#envelopeUniqueViolation): measured at SqlDriver through the pins' createAsApi mapping, never over a REST door (the REST answers are acceptance[0]–[3]'s, on the stock SQLite boot)",
+          "clause": "the scope matrix matches ADR-0120 D1 as ADR-0131 D1 amends it, on BOTH families: bare `unique: true` ≡ 'organization' (per-tenant where a tenant column exists, keyed on the PLAIN organization column, so a row with no organization, which only a pre-18 store can still hold since the tenant column is NOT NULL, is exempt; ADR-0120 D3's one NULL-organization bucket is retired), 'global' is platform-wide even with a tenant column and still constrains rows with no organization — and the SQL family materializes the same rule via uniqueIndexesFromFields (driver-sql/src/schema-drift.ts), its refusal satisfying isUniqueViolationError (packages/types/src/unique-violation.ts#isUniqueViolationError), the predicate the platform's 409 UNIQUE_VIOLATION envelope is built on (packages/objectql/src/duplicate-record-error.ts#envelopeUniqueViolation): measured at SqlDriver through the pins' createAsApi mapping, never over a REST door (the REST answers are acceptance[0]–[3]'s, on the stock SQLite boot)",
           "oracle": "test",
           "verify": "memory-unique-constraint.test.ts (scope legs) + sql-driver-8577-tenant-scoped-declared-unique.test.ts green; live two-org probe only if two organizations are provisioned (knownGaps)",
           "evidence": "test output (+ live scope probe where run)"
@@ -4412,6 +4562,12 @@
           "date": "2026-10-21",
           "change": "acceptance[0].clause: the developerMessage now NAMES THE OBJECT by its declared label ('Duplicate record refused on 'LABEL': …'), by its API name ('qa_unique') only where the object declares no label, where it named the object by its API name ('Duplicate record refused on 'qa_unique': …'). The engine's unique-refusal sentence (packages/objectql/src/duplicate-record-error.ts) names the object and field by label since #24951; the REST data route carries that sentence on developerMessage. Status 409, code UNIQUE_VIOLATION, the generic user-facing `error` and 'No record was written.' are unchanged",
           "ref": "#25021"
+        },
+        {
+          "revision": 10,
+          "date": "2026-10-26",
+          "change": "acceptance[4].clause re-authored to ADR-0131 D1, from Tier 1 run #25815 (6679644a, pin b41ed7f68956). It said bare unique folds NULL-organization rows to ONE bucket (ADR-0120 D3); both pins assert the opposite, read on main cc378e93: memory-unique-constraint.test.ts 'a row with NO organization is exempt — the plain organization key part (ADR-0131 D1), the D3 bucket retired', and sql-driver-8577-tenant-scoped-declared-unique.test.ts 'AFTER: on a pre-18 nullable column, rows with no organization are NOT constrained (ADR-0131 D1)'. The clause now asserts the exemption, and that 'global' still constrains such rows (the memory pin's constant-scope case). Run records before this revision scored the old clause. The run's other note on this item, that no pin drives a REST door for acceptance[0]–[3] and negative[0]–[2], confirms the ref as written",
+          "ref": "#25846"
         }
       ]
     },
@@ -4420,7 +4576,7 @@
       "title": "deleteBehavior matrix: set_null clears / member-removes, master_detail cascades, restrict answers 409 DELETE_RESTRICTED with the cascade remedy, required-FK set_null escalates to restrict",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -4507,7 +4663,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/objectql/src/engine-cascade-delete.test.ts (+ engine-cascade-delete-atomic.test.ts, engine-cascade-delete-multivalue-probe.test.ts) — defaults, coercion+log, escalation, per-row multi-value narrowing"
+        "ref": "packages/objectql/src/engine-cascade-delete.test.ts (+ engine-cascade-delete-atomic.test.ts, engine-cascade-delete-multivalue-probe.test.ts) — defaults, coercion+log, escalation, per-row multi-value narrowing; packages/spec/src/data/field.test.ts ('deleteBehavior: set_null on master_detail is a parse-time rejection') — acceptance[5]'s parse seam, at the schema layer. Every pin drives ObjectQL over a test driver, or the Zod schema, never the HTTP door: they are engine-layer evidence beside acceptance[0]–[4] and negative[0]–[3], whose oracle is api, and score none of them, so those clauses stay the run's until a REST pin exists (RUNNER rule 6). acceptance[5] (oracle test) scores its coercion+log half from engine-cascade-delete.test.ts and its parse half from field.test.ts; the verify's PUT refusal has no pin"
       },
       "source": [
         "packages/spec/src/data/field.zod.ts#deleteBehavior (deleteBehavior inline enum; #9689 parse rejection, #9784 default materialization)",
@@ -4532,6 +4688,12 @@
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
           "ref": "#25003"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-26",
+          "change": "automated.ref, from Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read on main cc378e93. (1) Every pin is engine-level (ObjectQL over a test driver). A precedent scored acceptance[0]–[4] and negative[0]–[3] pass from them before RUNNER rule 6; at their api oracle they now score nothing until a REST pin exists, which the ref says. (2) packages/spec/src/data/field.test.ts pins acceptance[5]'s #9689 parse seam at schema level and was not in the ref; it is added, and the verify's PUT refusal is recorded as unpinned. No clause changed",
+          "ref": "#25846"
         }
       ]
     },
@@ -4540,7 +4702,7 @@
       "title": "Clone contract edges: enable.clone gate both ways (403 CLONE_DISABLED), overrides win but cannot forge readonly, bare-201 body per CloneDataResponseSchema, internal fields stripped from the response",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -4587,7 +4749,7 @@
         {
           "clause": "internal fields never ride the 201: omitInternalFieldsFromWriteResponse runs on the insert result (#7823, protocol.ts) — the write-response strip that guards the clone body the same as createData's",
           "oracle": "test",
-          "verify": "metadata-protocol's search-clone-schema-conformance.test.ts (parses the real cloneData producer) + the #7823 strip suite green; live probe only where an internal-carrying object exists (knownGaps)",
+          "verify": "metadata-protocol's search-clone-schema-conformance.test.ts (parses the real cloneData producer) + the #7823 strip suite (packages/metadata-protocol/src/protocol.write-response-internal-fields.tripwire.test.ts, which enumerates cloneData) green; live probe only where an internal-carrying object exists (knownGaps)",
           "evidence": "test output (+ live body scan where run)"
         },
         {
@@ -4608,7 +4770,7 @@
       ],
       "automated": {
         "kind": "api",
-        "ref": "packages/metadata-protocol — search-clone-schema-conformance.test.ts (parses the real cloneData producer); packages/rest — search-clone-route-schema-conformance.test.ts (drives the live mount); named on the ledger row rest-route-ledger.ts"
+        "ref": "packages/metadata-protocol/src/search-clone-schema-conformance.test.ts (parses the real cloneData producer); packages/rest/src/search-clone-route-schema-conformance.test.ts (calls the registered clone handler on RestServer over a mock server, with a mocked protocol whose cloneData resolves a constant body: no HTTP adapter and no engine, so it pins the route's relay of a 201 body, not a live mount); packages/metadata-protocol/src/protocol.write-response-internal-fields.tripwire.test.ts (the #7823 strip suite acceptance[3] names: it enumerates cloneData among the protocol's data ingresses); the route is named on its ledger row in packages/rest/src/rest-route-ledger.ts"
       },
       "source": [
         "packages/metadata-protocol/src/protocol.ts#cloneData (cloneData: registration gate #3770, CLONE_DISABLED, findOne-in-context, CLONE_STRIP_FIELDS + system/autonumber/formula/summary strip, overrides, omitInternalFieldsFromWriteResponse #7823; the static-readonly strip moved to engine.insert #14147)",
@@ -4628,6 +4790,12 @@
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
           "ref": "#25003"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-26",
+          "change": "From Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read on main cc378e93. (1) automated.ref said the rest pin 'drives the live mount'; it calls the registered handler on RestServer(mockServer) with a mocked protocol whose cloneData returns a constant body, so the ref now says what it pins. (2) acceptance[3] named 'the #7823 strip suite' with no file; protocol.write-response-internal-fields.tripwire.test.ts enumerates cloneData and is now named in the verify and the ref. (3) The ref spelled files as package + em dash + basename; it now gives src/ paths a strict parser resolves. No clause changed",
+          "ref": "#25846"
         }
       ]
     },
@@ -4636,7 +4804,7 @@
       "title": "Per-field trackHistory: a tracked edit lands the ADR-0052 §5b old→new timeline summary with display values, an untracked edit does not, and object-level enable.trackHistory gates the History tab and derived history op both ways",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4703,7 +4871,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/plugins/plugin-audit/src/audit-lookup-summary.test.ts (reference titles + read plan); audit-option-label-summary.test.ts (option labels); objectui e2e/live/record-history-display.spec.ts (the History tab's display contract, which negative[3] assigns to records-forms.crud-roundtrip. It claims no clause of this item: it opens showcase_account's History tab but never reads the task detail, so acceptance[2]'s gating is driven by hand)"
+        "ref": "packages/plugins/plugin-audit/src/audit-lookup-summary.test.ts (reference titles + read plan); audit-option-label-summary.test.ts (option labels); objectui e2e/live/record-history-display.spec.ts (the History tab's display contract, which negative[3] assigns to records-forms.crud-roundtrip. It opens showcase_account's History tab in a browser, the enable.trackHistory object, so it holds acceptance[2]'s flag-true half; it never reads the task detail, so the absence half has no pin and is driven by hand)"
       },
       "source": [
         "packages/plugins/plugin-audit/src/audit-writers.ts#planTrackedLookupReads (planTrackedLookupReads), (renderTrackedChangeSummary — ADR-0052 §5b, #7230/#7289 localization), (zero-reads-by-default plan)",
@@ -4747,6 +4915,12 @@
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
           "ref": "#25003"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-26",
+          "change": "automated.ref: record-history-display.spec.ts does hold acceptance[2]'s flag-true half, since it opens showcase_account's History tab in a browser; only the task-detail absence half is unpinned (Tier 1 run #25815 (6679644a, pin b41ed7f68956); re-read at ui/e2e/live/record-history-display.spec.ts on main cc378e93). No clause changed",
+          "ref": "#25846"
         }
       ]
     },
@@ -4849,7 +5023,7 @@
       "title": "A validation rule reads a parent field one hop through a lookup",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -4895,7 +5069,7 @@
         {
           "clause": "a rule whose parent the acting user cannot read still ENFORCES, and still lets a legitimate write through — the read is system-authority, bounded by the fields the predicate names",
           "oracle": "api",
-          "verify": "on stock showcase no such persona exists (fixtures.knownGaps), so score this from the engine pin in `automated` or live on the scratch substitute. With such a persona, the non-churned write is 2xx and the churned write is 400 carrying the AUTHORED message; an unevaluable-rule envelope for this persona is the defect this clause exists to catch, and so is a 2xx on the churned account",
+          "verify": "on stock showcase no such persona exists (fixtures.knownGaps), so score this from the engine pin in `automated` or live on the scratch substitute. The engine-pin verdict is a layer exception this item declares (fixtures.knownGaps), not a RUNNER rule 6 pass of this api clause: the run record says the verdict rests on the engine layer. With such a persona, the non-churned write is 2xx and the churned write is 400 carrying the AUTHORED message; an unevaluable-rule envelope for this persona is the defect this clause exists to catch, and so is a 2xx on the churned account",
           "evidence": "both responses for the restricted persona"
         }
       ],
@@ -4934,6 +5108,12 @@
           "date": "2026-10-16",
           "change": "acceptance[1].verify corrected (checklist-accuracy finding of QA run #23949, wave #23878): the 400 carries the authored message, not the rule name — a rule that evaluates true answers {field: '_record', code: 'rule_violation', message: authored} (rule-validator.ts), and #23949 saw no rule name in the body. The verify text now scores the code, the field and the declared message. Not loosened: a 'could not be evaluated' refusal still FAILS",
           "ref": "#24036"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-26",
+          "change": "acceptance[3].verify says its engine-pin route is a declared layer exception, not a rule-6 pass of an HTTP oracle, and the run record names the layer (Tier 1 run #25815 (6679644a, pin b41ed7f68956)). No clause changed",
+          "ref": "#25846"
         }
       ]
     },
@@ -5053,7 +5233,7 @@
       "title": "A script action whose server-side hook refuses the write with a user-facing sentence answers a 4xx, the console shows exactly one error toast carrying that sentence, and the record is left unchanged",
       "since": "v17.5",
       "status": "active",
-      "revision": 3,
+      "revision": 5,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -5065,16 +5245,16 @@
           "the refusal pair on showcase_task: the hook showcase_guard_task_reopen (examples/app-showcase/src/data/hooks/index.ts — beforeUpdate, condition previous.done == true && record.done != true, sandboxed body throws new Error(TASK_REOPEN_REFUSAL), onError:'abort') and the action showcase_reopen_task (examples/app-showcase/src/ui/actions/index.ts — a declared record write: operation 'update' with patch { done: false } and no body, which the action route performs as the caller, execution perRecord, visible 'has(record.done) && record.done == true', locations list_item only — the Task Detail page is kind:'full' and renders no record_header bar)",
           "the refusal sentence, verbatim: 'A finished task cannot be reopened. Create a follow-up task instead.' (TASK_REOPEN_REFUSAL in the hooks file — re-read it there before the run, never from this line)",
           "a seeded FINISHED task (done: true) — 'Audit current IA' or 'App wireframes' (examples/app-showcase/src/data/seed/index.ts) — which is the only kind of record the action is offered on",
-          "a console built at this repo's .objectui-sha (pnpm objectui:build), served by the same boot the run drives",
+          "a console built from this checkout's ui/ tree (pnpm console:build, which copies ui/apps/console's build into packages/console/dist), served by the same boot the run drives",
           "a browser driver that can read the network log and the DOM of one page (Playwright with launchOptions.executablePath=/opt/pw-browsers/chromium on these containers — RUNNER environment facts)"
         ],
         "knownGaps": [
-          "the console half is pinned in the objectui repo, not here — objectui packages/app-shell/src/utils/__tests__/consoleServerAction.errorToast.test.ts characterizes the console failure chain (a 500 or a 400 carrying the sentence yields exactly one error toast with that sentence) with fetch and the toast sink as doubles. It is not runnable from this checkout and it stubs the transport, so it is not this item's evidence; this item exists to observe the whole chain live, on a stock app.",
+          "the console half has a unit pin in this checkout — ui/packages/app-shell/src/utils/__tests__/consoleServerAction.errorToast.test.ts characterizes the console failure chain (a 500 or a 400 carrying the sentence yields exactly one error toast with that sentence) with fetch and the toast sink as doubles. It runs from ui/ with that package's vitest (cwd ui/: pnpm exec vitest run packages/app-shell/src/utils/__tests__/consoleServerAction.errorToast.test.ts), but it stubs the transport and the toast sink, so it is not this item's evidence; this item exists to observe the whole chain live, on a stock app.",
           "the toaster auto-dismisses every toast after 4s (objectui ConsoleToaster toastOptions.duration 4000) and closes it with an exit animation that marks the node data-removed=\"true\" first — count inside that window, and exclude removed nodes, or a correct single toast reads as zero."
         ]
       },
       "steps": [
-        "re-read examples/app-showcase/src/data/hooks/index.ts and copy TASK_REOPEN_REFUSAL verbatim — the oracle string; boot the showcase with RUNNER's canonical checklist boot (own port, own file DB, --seed-admin) with the console built at .objectui-sha; sign in through the form as the seeded admin",
+        "re-read examples/app-showcase/src/data/hooks/index.ts and copy TASK_REOPEN_REFUSAL verbatim — the oracle string; boot the showcase with RUNNER's canonical checklist boot (own port, own file DB, --seed-admin) with the console built by pnpm console:build from this checkout; sign in through the form as the seeded admin",
         "pick a finished task: GET /api/v1/data/showcase_task?where=... (or the list) and record its id, done, progress and modified timestamp — this is the before-image",
         "open the showcase_task list in the console (/_console/apps/showcase_app/showcase_task); screenshot after render settles; open the finished task's row menu ('Open menu' on its row) and confirm 'Reopen' is offered there",
         "start capturing the network log and, before clicking, count toast nodes: document.querySelectorAll('[data-sonner-toast]:not([data-removed=\"true\"])').length — the baseline (expected 0)",
@@ -5149,6 +5329,18 @@
           "date": "2026-10-23",
           "change": "fixtures.requires[0] and source respelled for #25468: showcase_reopen_task no longer writes from a script body through ctx.api (an elevated write); it declares its write (operation 'update', patch { done: false }), which the action route performs as the caller, so the hook now refuses the caller's own update and the nested action-VM hop is gone from this path. Its type stays 'script', the schema default. The answer is unchanged: measured on a dogfood boot of the change, the seeded admin's Reopen on a finished task answers 400 VALIDATION_ERROR whose error.message is TASK_REOPEN_REFUSAL, and the console dispatches an operation 'update' action through the same registered script handler (objectui ActionRunner.executeUpdateOperation at the .objectui-sha pin 6fb31dc), so the toast chain knownGaps[0] cites is the one this item observes. The two source rows for the nested action-VM hop (quickjs-runner.ts#sandboxRefusalMessage and the unit pin nested-hook-refusal-is-a-rejection.test.ts) no longer describe this path and leave source; the route's catch in domains/actions.ts and the dogfood pin showcase-record-write-actions.dogfood.test.ts replace them. No clause changed",
           "ref": "#25468"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-26",
+          "change": "fixtures.requires[3] and steps[0] named the retired pin flow (a console built at .objectui-sha by pnpm objectui:build); the console now builds from this checkout's ui/ tree with pnpm console:build (root package.json; RUNNER.md as of PR #26052). Carried for #26035, which left this file's retired pin wording to this card. No clause changed",
+          "ref": "#25846"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-26",
+          "change": "fixtures.knownGaps[0] said the console-half pin lives in the objectui repo and is not runnable from this checkout; it is at ui/packages/app-shell/src/utils/__tests__/consoleServerAction.errorToast.test.ts and runs from ui/ with that package's vitest, so the note says where it is and how it runs, and still says it stubs fetch and the toast sink and is not this item's evidence (devx seat 2 REVISE on #26125). Re-read on main cc378e93. No clause changed",
+          "ref": "#25846"
         }
       ]
     },
@@ -5236,7 +5428,7 @@
       "title": "Write semantics changed on v18: a warning-severity validation hit comes back in the 2xx write answer as warnings[], a blocking after* hook abort rolls the whole write back, a `tree` field (with or without an explicit reference) honours its deleteBehavior, and a cascade delete is distinguishable to the child hook",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -5287,7 +5479,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/objectql/src/validation/advisory-write-answer.test.ts + packages/objectql/src/engine-after-hook-abort-unit.test.ts + packages/objectql/src/engine-cascade-delete.test.ts + packages/objectql/src/engine-cascade-delete-tree.test.ts + packages/verify/src/delete-behavior-referenceless-tree.test.ts"
+        "ref": "packages/objectql/src/validation/advisory-write-answer.test.ts + packages/objectql/src/engine-after-hook-abort-unit.test.ts + packages/objectql/src/engine-cascade-delete.test.ts + packages/objectql/src/engine-cascade-delete-tree.test.ts + packages/verify/src/delete-behavior-referenceless-tree.test.ts — acceptance[0]'s pins. For the api clauses they are evidence of their own layers (RUNNER rule 6): advisory-write-answer.test.ts calls ObjectStackProtocolImplementation createData / updateData in-process, so the REST PATCH body acceptance[1] reads is not observed; engine-after-hook-abort-unit.test.ts drives ObjectQL directly, so no HTTP pin covers the aborting afterInsert (acceptance[2], negative[0])"
       },
       "source": [
         "packages/objectql/src/engine.ts",
@@ -5300,6 +5492,12 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it; records-forms.validation-rule-type-matrix still says the advisory is server-log only — that clause is stale against 22726 (reported, not edited here)",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-26",
+          "change": "automated.ref says what its pins reach at the api clauses' layer (Tier 1 run #25815 (6679644a, pin b41ed7f68956); re-read on main cc378e93): advisory-write-answer.test.ts calls the protocol in-process, so acceptance[1]'s REST PATCH body is unobserved; engine-after-hook-abort-unit.test.ts drives ObjectQL directly, so acceptance[2] and negative[0] have no HTTP pin. The run's third note, acceptance[3] scored on the referenceless rtl_* tree fixture, needs no edit: the clause names no carrier. No clause changed",
+          "ref": "#25846"
         }
       ]
     },
@@ -5308,7 +5506,7 @@
       "title": "Discussion on v18: reactions are their own records (sys_comment_reaction — 201 with user_id forced, duplicate 409, unreadable comment 403, no update, no deleting another member's), the retired sys_comment.reactions column is refused, a comment edit is platform-stamped, and milestone activity is withheld whole from a reader missing a watched field",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -5361,7 +5559,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/plugins/plugin-audit/src/objects/sys-comment-reaction.object.test.ts + packages/plugins/plugin-security/src/comment-reaction-own-record-floor.test.ts + packages/plugins/plugin-audit/src/comment-edit-stamp.integration.test.ts + packages/plugins/plugin-audit/src/sys-comment-reactions-door.integration.test.ts + packages/plugins/plugin-audit/src/activity-field-redaction.test.ts"
+        "ref": "packages/plugins/plugin-audit/src/objects/sys-comment-reaction.object.test.ts + packages/plugins/plugin-security/src/comment-reaction-own-record-floor.test.ts + packages/plugins/plugin-audit/src/comment-edit-stamp.integration.test.ts + packages/plugins/plugin-audit/src/sys-comment-reactions-door.integration.test.ts (a 'door' test by name only: it boots ObjectKernel + ObjectQLPlugin over sqlite-wasm and maps the thrown error with mapDataError, with no HTTP adapter, so it is engine-layer evidence beside acceptance[1] and [2] and never their pass, RUNNER rule 6) + packages/plugins/plugin-audit/src/activity-field-redaction.test.ts"
       },
       "source": [
         "packages/plugins/plugin-audit/src/objects/sys-comment-reaction.object.ts",
@@ -5380,6 +5578,12 @@
           "date": "2026-10-19",
           "change": "fixtures.requires gains the member's grant on sys_comment and sys_comment_reaction, from QA run #24558 (18.0 since:v18 sweep, 5b14b7f3): a plain org member holds no object permission on either (403 PERMISSION_DENIED on both doors), so every member clause needs a runtime set the item never named; the run bound one (qa_comment_set). No clause changed. Wave anchor #24579 §3 (the record's continuation comment)",
           "ref": "#24671"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-26",
+          "change": "automated.ref says sys-comment-reactions-door.integration.test.ts drives no HTTP door (Tier 1 run #25815 (6679644a, pin b41ed7f68956); re-read on main cc378e93): it boots ObjectKernel + ObjectQLPlugin over sqlite-wasm and maps errors with mapDataError, so it cannot score the api clauses acceptance[1] and [2]. No clause changed",
+          "ref": "#25846"
         }
       ]
     },
@@ -5388,7 +5592,7 @@
       "title": "Defaults that changed meaning on v18 (ADR-0087 D3 18.* entries): an omitted list-view page size is 50 (was 25), an omitted editInline means editable in place, an autonumber with no `unique` is unique per organization, and a field-heavy form opens as a bounded modal on desktop",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -5404,7 +5608,7 @@
           "the console bundle for the browser legs — see knownGaps"
         ],
         "knownGaps": [
-          "STALE (QA runs #24558, #24616): the pinned console at .objectui-sha 4016370af3c9 builds against current spec and its stamp matches the pin, so the browser clauses run — they are no longer blocked(environment)"
+          "STALE (QA runs #24558, #24616): the console those runs pinned (.objectui-sha 4016370af3c9, a pin since retired) built against current spec, so the browser clauses ran — they are no longer blocked(environment). The console now builds from this checkout's ui/ tree (pnpm console:build), with no pin to drift from"
         ]
       },
       "steps": [
@@ -5465,6 +5669,12 @@
           "date": "2026-10-19",
           "change": "personas[1], fixtures.knownGaps[0], steps[0], steps[1] and acceptance[2].clause corrected from QA runs #24558 (5b14b7f3) and #24616 (ba4afcc2), re-read at objectstack f89d29e382 and the console pin 4016370af3c9. (1) knownGaps[0] was stale: the pinned console builds and was served. (2) The meta read serves the authored view, so step 1 has no resolved pageSize / editInline to read (`pagination` is an optional block; its pageSize default materialises only inside one); the defaults show in the renderer. (3) The inline affordance is the Edit inline switch, and the edit mode is session state that starts off (ObjectView.tsx), so 'offered' does not mean editable cells on load. (4) The updater persona needs a contributor binding and assigned tasks. Wave anchor #24579 round 2 §3 (6272314386)",
           "ref": "#24671"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-26",
+          "change": "fixtures.knownGaps[0] named the .objectui-sha pin as live; it now records what runs #24558 and #24616 read at that pin and says the console builds from ui/ with pnpm console:build. Carried for #26035. No clause changed",
+          "ref": "#25846"
         }
       ]
     }

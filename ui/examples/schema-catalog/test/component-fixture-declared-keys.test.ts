@@ -78,6 +78,7 @@ import { describe, it, expect } from 'vitest';
 import {
   ButtonSchema,
   CommandItemSchema,
+  deriveStrictAuthoringSchema,
   MenuItemSchema,
   RadioGroupSchema,
   SelectOptionSchema,
@@ -174,11 +175,15 @@ describe('toast fixtures: the variant value is a declared member (objectui#6157,
   );
 });
 
-describe('command palette fixture: every item key survives a CommandItem parse', () => {
+describe('command palette fixture: every item key is a declared CommandItem key', () => {
   /**
-   * `CommandItemSchema` is a bare `z.object`, so an undeclared key is STRIPPED
-   * and `.success` stays true. Round-trip equality is what detects it.
+   * `CommandItemSchema` is non-strict, so an undeclared key does not fail its
+   * `.success`. It was a bare strip-mode `z.object` and round-trip equality
+   * detected the dropped key; since objectstack#25923 it is `.passthrough()` and
+   * KEEPS the key, so round-trip equality sees nothing either. The strict
+   * authoring twin is the instrument: it refuses an undeclared key by name.
    */
+  const StrictCommandItemSchema = deriveStrictAuthoringSchema(CommandItemSchema);
   const items = (
     (schemaOf('components-form-command/file-command-palette')
       .groups as Json[])[0].items as Json[]
@@ -188,14 +193,14 @@ describe('command palette fixture: every item key survives a CommandItem parse',
     expect(items).toHaveLength(3);
   });
 
-  it.each([0, 1, 2])('item %i loses no authored key when parsed', (i) => {
-    expect(CommandItemSchema.parse(items[i])).toEqual(items[i]);
+  it.each([0, 1, 2])('item %i authors only declared keys', (i) => {
+    expect(StrictCommandItemSchema.safeParse(items[i]).success).toBe(true);
   });
 
   it('counter-probe: an item carrying the removed `shortcut` key fails this same check', () => {
     const withInventedKey = { ...items[0], shortcut: ['Ctrl', 'N'] };
     expect(CommandItemSchema.safeParse(withInventedKey).success).toBe(true);
-    expect(CommandItemSchema.parse(withInventedKey)).not.toEqual(withInventedKey);
+    expect(StrictCommandItemSchema.safeParse(withInventedKey).success).toBe(false);
   });
 });
 
@@ -482,11 +487,20 @@ describe('catalog corpus: every menubar item uses the declared MenuItem spelling
    * expose under any stable public name — and an introspection helper that
    * silently resolved to the wrong node would report a confident, wrong
    * vocabulary. Feeding the schema every candidate key and reading back what
-   * SURVIVES uses the strip behaviour itself as the instrument, so this control
-   * measures the shipped schema instead of the shape of zod's internals.
+   * SURVIVED used the strip behaviour itself as the instrument; since
+   * objectstack#25923 the mirror is `.passthrough()` and every key survives, so
+   * the instrument is now the strict authoring twin: a candidate key is
+   * declared when the base item plus that key alone is ACCEPTED by it. It still
+   * measures the shipped schema, not the shape of zod's internals.
    */
-  function declaredKeysOf(schema: { parse: (v: unknown) => unknown }, probe: Json): string[] {
-    return Object.keys(schema.parse(probe) as Json).sort();
+  const StrictMenuItemSchema = deriveStrictAuthoringSchema(MenuItemSchema);
+  function declaredKeysOf(base: Json, candidates: Json): string[] {
+    return [
+      ...Object.keys(base),
+      ...Object.keys(candidates).filter(
+        (key) => StrictMenuItemSchema.safeParse({ ...base, [key]: candidates[key] }).success,
+      ),
+    ].sort();
   }
 
   /** Depth-first over an items array, descending through submenu `children`. */
@@ -525,20 +539,14 @@ describe('catalog corpus: every menubar item uses the declared MenuItem spelling
   // both a `label` AND `separator: true` matches neither arm cleanly and is
   // not a meaningful "declared keys" instrument any more. `type` is no longer
   // part of this probe at all — see the dedicated refusal pins below, which
-  // is where it moved (a hard refusal, not a strip, can't be read back by
-  // `declaredKeysOf`'s "call `.parse` and see what survives" method, since a
-  // refusal never returns a value to read keys off).
-  const declaredCommandKeys = declaredKeysOf(MenuItemSchema, {
-    label: 'probe',
-    icon: 'file',
-    disabled: false,
-    shortcut: 'Ctrl+T',
-    value: 'probe',
-  });
-  const declaredDividerKeys = declaredKeysOf(MenuItemSchema, {
-    separator: true,
-    value: 'probe',
-  });
+  // is where it moved (`declaredKeysOf` asks the strict twin about one
+  // candidate key at a time; a key refused by a hard rule on the arm itself
+  // would read as "undeclared" there for the wrong reason).
+  const declaredCommandKeys = declaredKeysOf(
+    { label: 'probe' },
+    { icon: 'file', disabled: false, shortcut: 'Ctrl+T', value: 'probe' },
+  );
+  const declaredDividerKeys = declaredKeysOf({ separator: true }, { value: 'probe' });
   const items = allExamples().flatMap((e) => collectMenubarItems(e.schema, e.id));
 
   it('label/icon/disabled/shortcut survive on the command arm; the unknown `value` key does not — the control', () => {
@@ -957,11 +965,13 @@ describe('catalog corpus: no `select` option authors the undeclared `type` key (
     expect(declared).not.toContain('type');
 
     // ...and this is why the corpus assertion below is the instrument rather
-    // than a `.success` probe: the schema is a bare `z.object`, so it STRIPS
-    // the undeclared key and reports success.
+    // than a `.success` probe: the schema is non-strict, so it reports success
+    // on the undeclared key — it STRIPPED it while it was a bare `z.object`, and
+    // keeps it since objectstack#25923 made it `.passthrough()`. Either way the
+    // tolerant parse raises nothing.
     const parsed = SelectOptionSchema.safeParse({ label: 'Option 3', value: '3', type: 'option' });
     expect(parsed.success).toBe(true);
-    expect(Object.keys((parsed as unknown as { data: Json }).data)).not.toContain('type');
+    expect(Object.keys((parsed as unknown as { data: Json }).data)).toContain('type');
   });
 
   it('no `select` option authors `type`', () => {

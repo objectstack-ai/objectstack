@@ -117,13 +117,17 @@ describe('objectui#10611 (b) — LIT CONTROL: a `filters[]` entry without `opera
   });
 });
 
-/* ── (c) why a tombstone: an undeclared entry key is STRIPPED in silence ──── */
+/* ── (c) why a tombstone: an undeclared entry key is ACCEPTED in silence ─── */
 
-describe('objectui#10611 (c) — CONTROL: an undeclared `filters[]` key is STRIPPED, not refused', () => {
-  it('a misspelled `operatr` parses green and is gone after the parse — what a deletion would have left', () => {
+describe('objectui#10611 (c) — CONTROL: an undeclared `filters[]` key is accepted, not refused', () => {
+  it('a misspelled `operatr` parses green — what a deletion would have left', () => {
+    // It was gone after the parse while the mirror was strip mode; since
+    // objectstack#25923 the mirror is `.passthrough()` and keeps it. Either way
+    // the tolerant face does not refuse it, which is why the retired key is a
+    // tombstone and not a deletion.
     const r = FilterUIMirror.safeParse(node([{ ...QTY, operatr: 'gt' }]));
     expect(r.success).toBe(true);
-    expect(Object.keys((r.data as { filters: Array<Record<string, unknown>> }).filters[0]!)).not.toContain('operatr');
+    expect(Object.keys((r.data as { filters: Array<Record<string, unknown>> }).filters[0]!)).toContain('operatr');
   });
 });
 

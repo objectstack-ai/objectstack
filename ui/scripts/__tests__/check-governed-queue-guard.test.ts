@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,8 +11,10 @@ import {
   GOVERNED_SURFACES,
   governedPathsIn,
 } from '../check-governed-queue-guard.mjs';
+import { skillBundleBase } from '../skill-bundle-root.mjs';
 
 import { selfTestCases, stripAnsi } from './helpers/child-verdict';
+import { workspaceRoot } from '../workspace-root.mjs';
 
 const ROOT = path.resolve(fileURLToPath(import.meta.url), '../../..');
 const GATE = 'scripts/check-governed-queue-guard.mjs';
@@ -107,21 +109,52 @@ describe('the governed surface is the ruled definition, and it is real', () => {
     ]);
   });
 
-  it('every declared surface exists in this tree', () => {
-    for (const surface of GOVERNED_SURFACES) {
+  /**
+   * The one row whose directory left this tree: objectstack#25712 deleted
+   * `ui/.github/workflows/`, which GitHub never ran under the monorepo. ⚠️ PENDING
+   * the maintainer's call on objectstack#25712, since the row is objectui#12255's
+   * ruling: drop it, keep it as below, or retire this register for the root one
+   * (sub-issue 4).
+   */
+  const MOVED = 'workflows';
+
+  it('every declared surface exists in this tree, the moved workflows row aside', () => {
+    for (const surface of GOVERNED_SURFACES.filter((s) => s.id !== MOVED)) {
       // `in` rather than `surface.prefix ?? surface.exact`: the register is a
       // union of frozen literals, so exactly one of the two keys exists on each
       // member and neither exists on all of them. `tsconfig.scripts.json` infers
       // these types from the `.mjs` (allowJs, checkJs off), so the optional-chain
       // spelling is a real type error here rather than a stylistic preference.
       const target = 'prefix' in surface ? surface.prefix : surface.exact;
+      // The published `skills/` catalog is the monorepo root's since the cutover
+      // (decision C, `scripts/skill-bundle-root.mjs`), so that row is read from there.
+      const base = surface.id === 'skills-catalog' ? skillBundleBase(ROOT) : ROOT;
       expect(
-        fs.existsSync(path.join(ROOT, target)),
+        fs.existsSync(path.join(base, target)),
         `GOVERNED_SURFACES declares ${target}, which does not exist. A governed path nobody can ` +
           `edit is a rule about nothing; either the surface moved (update the register) or the ` +
           `entry was speculative (drop it).`,
       ).toBe(true);
     }
+  });
+
+  it('the workflows row moved: the root register governs ui/.github/workflows/** at Tier H', () => {
+    // Self-retiring: once the directory is back, the case above must read it again.
+    expect(
+      fs.existsSync(path.join(ROOT, '.github/workflows')),
+      'ui/.github/workflows/ exists again: fold the workflows row back into the existence case above',
+    ).toBe(false);
+    // The guard that runs is the root one, so its own predicate is asked, by path.
+    const probe = 'ui/.github/workflows/ci.yml';
+    const run = spawnSync('node', ['scripts/pm/check-governed-merges.mjs', '--test', probe, '--json'], {
+      cwd: workspaceRoot(),
+      encoding: 'utf8',
+    });
+    expect(run.stdout, run.stderr).toMatch(/^\{/);
+    const verdict = JSON.parse(run.stdout) as { governed: boolean; tier: string; matched: Array<{ id: string; files: string[] }> };
+    expect(verdict.governed).toBe(true);
+    expect(verdict.tier).toBe('H');
+    expect(verdict.matched.map((s) => [s.id, s.files])).toEqual([['ui-workflows', [probe]]]);
   });
 
   it('governs every workflow, its own included, and not the script that workflow runs', () => {

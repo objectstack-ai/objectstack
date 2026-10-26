@@ -40,6 +40,7 @@ import { type LikeShape } from '../like-pattern.js';
 import { textMatchPredicateSql, sqlDialectFor, type AnalyticsSqlDialect } from '../text-match-sql.js';
 import { resolveAnalyticsDateRangeString } from '@objectstack/core';
 import { explicitDateRangeWindow } from '../date-range-array-arm.js';
+import { scopedMeasureFilter } from '../scoped-measure-key.js';
 import {
   rebucketCrossObject,
   RECOMBINABLE_METHODS,
@@ -301,7 +302,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     if (query.measures && query.measures.length > 0) {
       for (const measure of query.measures) {
         const { field, method } = this.resolveMeasureAggregation(cube, measure);
-        const measureFilter = datasetScope?.measureFilters?.[measure];
+        const measureFilter = scopedMeasureFilter(datasetScope, measure, cube.name);
         const filterCondition = measureFilter
           ? this.filterNodeToCondition(normalizeAnalyticsFilterTree({ where: measureFilter }, lowering), cube)
           : null;
@@ -691,7 +692,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     if (query.measures) {
       for (const m of query.measures) {
         const { field, method } = this.resolveMeasureAggregation(cube, m);
-        const measureFilter = datasetScope?.measureFilters?.[m];
+        const measureFilter = scopedMeasureFilter(datasetScope, m, cube.name);
         const predicate = measureFilter
           ? this.renderFilterNodeSql(normalizeAnalyticsFilterTree({ where: measureFilter }, echoLowering), cube, params, ctx)
           : null;
@@ -1006,7 +1007,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * one more producer — so it folds in HERE for the #10861 reason and not into
    * `dataset-compiler.ts`, which still cannot see which driver will serve the
    * dataset. Only the REQUESTED measures are folded: both doors' aggregation
-   * loops read `measureFilters[m]` for `m of query.measures` and nothing else,
+   * loops read `scopedMeasureFilter(…, m, …)` for `m of query.measures` and nothing else,
    * so a filter declared on a measure this query never asks for reaches no
    * engine, and refusing on it would reject a query for a member that was never
    * going to be evaluated.
@@ -1052,7 +1053,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // edit; `query.measures` is the iteration order both aggregation loops use,
     // so the view covers exactly the filters that will be lowered.
     const measureLeaves = (query.measures ?? []).flatMap((m) => {
-      const measureFilter = datasetScope?.measureFilters?.[m];
+      const measureFilter = scopedMeasureFilter(datasetScope, m, cube.name);
       return measureFilter
         ? leaves(
             normalizeAnalyticsFilterTree({ where: measureFilter }, NO_DATETIME_COLUMNS),
