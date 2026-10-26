@@ -5,7 +5,7 @@
  *
  * ## The hole this closes
  *
- * The `apps` / `dashboards` / `pages` half of this package's i18n is
+ * The `apps` / `dashboards` / `datasets` / `pages` half of this package's i18n is
  * HAND-AUTHORED in `<locale>.ts`. Every gate over it judges PRESENCE or
  * OWNERSHIP — `app-nav-translation-parity.test.ts` (a translation exists for
  * every declared id, and none outlives its declaration), `check:i18n-coverage`
@@ -202,8 +202,13 @@ import type { TranslationData } from '@objectstack/spec/system';
  * The `TranslationData` sections written by hand in `<locale>.ts`, judged by
  * {@link findStaleLeaves}. Their recorded digests live in the hand-maintained
  * `<locale>.source-hashes.ts`.
+ *
+ * `datasets` joined the list with its first hand-authored entries (the System
+ * Overview's measure and dimension labels): a section written by hand and left
+ * off this list would serve a stale translation under a green build — the
+ * hole this module exists to close.
  */
-export const HAND_AUTHORED_SECTIONS = ['apps', 'dashboards', 'pages'] as const;
+export const HAND_AUTHORED_SECTIONS = ['apps', 'dashboards', 'datasets', 'pages'] as const;
 
 /**
  * The `TranslationData` sections written by `os i18n extract` into

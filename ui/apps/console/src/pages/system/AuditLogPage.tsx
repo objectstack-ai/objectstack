@@ -620,7 +620,7 @@ export function AuditLogPage() {
                   <TableHead>{t('console.system.auditLog.object', { defaultValue: 'Object' })}</TableHead>
                   <TableHead>{t('common.record', { defaultValue: 'Record' })}</TableHead>
                   <TableHead>{t('console.system.auditLog.actor', { defaultValue: 'Actor' })}</TableHead>
-                  <TableHead className="w-[130px]">IP</TableHead>
+                  <TableHead className="w-[130px]">{t('console.system.auditLog.ipAddress', { defaultValue: 'IP Address' })}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
