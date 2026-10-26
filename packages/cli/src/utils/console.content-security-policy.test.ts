@@ -9,7 +9,8 @@
  * document carries. These cases run the REAL plugin on a REAL Hono app (the
  * `HonoHttpServer` production resolves as `http.server`); the error-reporting
  * case adds the REAL `RuntimeConfigPlugin`, so the `connect-src` follows what
- * that door serves.
+ * that door serves; the storage cases add the REAL `StorageServicePlugin`, so
+ * the `connect-src` follows the adapter it builds.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
@@ -18,6 +19,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { HonoHttpServer } from '@objectstack/plugin-hono-server';
 import { RuntimeConfigPlugin } from '@objectstack/cloud-connection';
+import { S3StorageAdapter, StorageServicePlugin, type StorageServicePluginOptions } from '@objectstack/service-storage';
 
 import { createConsoleStaticPlugin } from './console.js';
 
@@ -45,6 +47,8 @@ const ENV = [
   'OS_CONSOLE_MAP_STYLE_URL',
   'OS_CLOUD_URL',
   'OS_TELEMETRY_CLIENT_ERROR_REPORTING_DSN',
+  'AWS_ACCESS_KEY_ID',
+  'AWS_SECRET_ACCESS_KEY',
 ];
 
 let saved: Record<string, string | undefined>;
@@ -77,6 +81,8 @@ afterEach(() => {
 
 async function mount(opts: {
   runtimeConfig?: ConstructorParameters<typeof RuntimeConfigPlugin>[0];
+  /** The kernel services the console plugin's context resolves by name. */
+  services?: Map<string, unknown>;
   warnings?: string[];
 } = {}) {
   const server = new HonoHttpServer(0);
@@ -99,7 +105,14 @@ async function mount(opts: {
     } as any);
     for (const fn of hooks) await fn();
   }
-  await createConsoleStaticPlugin(distPath).start({ getServiceAsync: async () => server, logger });
+  await createConsoleStaticPlugin(distPath).start({
+    getServiceAsync: async () => server,
+    getService: (name: string) => {
+      if (opts.services?.has(name)) return opts.services.get(name);
+      throw new Error(`no service ${name}`);
+    },
+    logger,
+  });
   const app = server.getRawApp();
   return async (p: string, init?: RequestInit): Promise<Response> => app.request(`${ORIGIN}${p}`, init);
 }
@@ -386,5 +399,105 @@ describe('connect-src', () => {
       logger: { warn: () => {}, info: () => {}, debug: () => {}, error: () => {} },
     } as any));
     expect(await verdict(() => mount())).toBe(runtimeConfig);
+  });
+});
+
+/**
+ * The kernel services a REAL `StorageServicePlugin` registers when it is
+ * initialised with `options`: the `storage` service the upload doors presign
+ * through, built from the same options.
+ */
+async function storageServices(options: StorageServicePluginOptions): Promise<Map<string, unknown>> {
+  const services = new Map<string, unknown>();
+  await new StorageServicePlugin(options).init({
+    registerService: (name: string, service: unknown) => { services.set(name, service); },
+    getService: (name: string) => {
+      if (services.has(name)) return services.get(name);
+      throw new Error(`no service ${name}`);
+    },
+    logger: { warn: () => {}, info: () => {}, debug: () => {}, error: () => {} },
+  } as any);
+  return services;
+}
+
+/** An S3-compatible store whose presigned URLs are virtual-hosted: the bucket is in the host name. */
+const R2_STORAGE: StorageServicePluginOptions = {
+  adapter: 's3',
+  s3: { bucket: 'csp-uploads', region: 'auto', endpoint: 'https://acct123.r2.cloudflarestorage.com', keyPrefix: 'projects/env_1' },
+};
+
+describe('connect-src names the host the storage service presigns browser uploads to', () => {
+  it('adds the origin of the presigned upload URL when the deployment stores files in S3', async () => {
+    const request = await mount({ services: await storageServices(R2_STORAGE) });
+    const res = await request('/_console/');
+    expect(directives(res.headers.get('content-security-policy')).get('connect-src')).toEqual([
+      "'self'",
+      'https://demotiles.maplibre.org',
+      'https://csp-uploads.acct123.r2.cloudflarestorage.com',
+    ]);
+  });
+
+  it('allows exactly the origin of a real presigned upload URL from the same storage service', async () => {
+    // The presign itself signs with whatever credentials the adapter resolves.
+    process.env.AWS_ACCESS_KEY_ID = 'AKIAFAKEFAKEFAKEFAKE';
+    process.env.AWS_SECRET_ACCESS_KEY = 'fake-secret-access-key';
+    for (const options of [
+      R2_STORAGE,
+      { adapter: 's3', s3: { bucket: 'csp-uploads', region: 'eu-west-2', keyPrefix: null } },
+      { adapter: 's3', s3: { bucket: 'csp.uploads.example', region: 'us-east-1', keyPrefix: null } },
+      { adapter: 's3', s3: { bucket: 'csp-uploads', region: 'us-east-1', endpoint: 'http://127.0.0.1:9000', keyPrefix: null } },
+    ] satisfies StorageServicePluginOptions[]) {
+      const services = await storageServices(options);
+      const presigned = await (services.get('storage') as S3StorageAdapter).getPresignedUpload('a/b.txt', 60, { contentType: 'text/plain' });
+      const request = await mount({ services });
+      const res = await request('/_console/');
+      const connectSrc = directives(res.headers.get('content-security-policy')).get('connect-src')!;
+      expect(connectSrc, options.s3.endpoint ?? options.s3.region).toEqual([
+        "'self'",
+        'https://demotiles.maplibre.org',
+        new URL(presigned.uploadUrl).origin,
+      ]);
+    }
+  });
+
+  it('follows the adapter a storage settings change swaps in, on the next document', async () => {
+    const services = await storageServices(R2_STORAGE);
+    const request = await mount({ services });
+    const storage = services.get('storage') as { swap(next: unknown): void };
+    storage.swap(new S3StorageAdapter({
+      bucket: 'moved', region: 'auto', endpoint: 'https://acct456.r2.cloudflarestorage.com', keyPrefix: null, forcePathStyle: true,
+    }));
+    const res = await request('/_console/');
+    expect(directives(res.headers.get('content-security-policy')).get('connect-src')).toEqual([
+      "'self'",
+      'https://demotiles.maplibre.org',
+      'https://acct456.r2.cloudflarestorage.com',
+    ]);
+  });
+
+  it('adds nothing when the deployment stores files on the local disk, whose uploads go to the server itself', async () => {
+    const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'os-test-console-csp-storage-'));
+    try {
+      const request = await mount({ services: await storageServices({ adapter: 'local', local: { rootDir } }) });
+      const res = await request('/_console/');
+      expect(directives(res.headers.get('content-security-policy')).get('connect-src')).toEqual([
+        "'self'",
+        'https://demotiles.maplibre.org',
+      ]);
+    } finally {
+      fs.rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps OS_CONSOLE_CSP_CONNECT_SRC working beside it, after the storage origin', async () => {
+    process.env.OS_CONSOLE_CSP_CONNECT_SRC = 'https://glyphs.example.com';
+    const request = await mount({ services: await storageServices(R2_STORAGE) });
+    const res = await request('/_console/');
+    expect(directives(res.headers.get('content-security-policy')).get('connect-src')).toEqual([
+      "'self'",
+      'https://demotiles.maplibre.org',
+      'https://csp-uploads.acct123.r2.cloudflarestorage.com',
+      'https://glyphs.example.com',
+    ]);
   });
 });
