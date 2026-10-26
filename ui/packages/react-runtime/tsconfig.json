@@ -10,7 +10,6 @@
     "declaration": true,
     "composite": true,
     "tsBuildInfoFile": "./tsconfig.tsbuildinfo",
-    "jsx": "react-jsx",
     "lib": ["ES2020", "DOM"]
   },
   "include": ["src"],

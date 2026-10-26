@@ -11,22 +11,22 @@
     "label": {
       "status": "live",
       "verifiedAt": "2026-09-27",
-      "evidenceScope": "cross-repo",
-      "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupAppAttr (reads `apps.<name>.label` down the locale chain); packages/spec/src/system/i18n-resolver.ts#translateApp (applies it over the authored value on every /meta app read); objectui @f8a9d0fb: packages/app-shell/src/layout/AppSwitcher.tsx#AppSwitcher (`resolveKeyedI18nLabel(activeApp.label, t)` on the pill, and `app.label` on each switcher row); objectui @f8a9d0fb: packages/app-shell/src/layout/ConsoleLayout.tsx#ConsoleLayout (`appLabel` into `AppHeader`, and the `AppShell` branding title); objectui @f8a9d0fb: packages/app-shell/src/console/home/HomeAppsStrip.tsx#HomeAppsStrip (the launcher tiles)",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupAppAttr (reads `apps.<name>.label` down the locale chain); packages/spec/src/system/i18n-resolver.ts#translateApp (applies it over the authored value on every /meta app read); ui/packages/app-shell/src/layout/AppSwitcher.tsx#AppSwitcher (`resolveKeyedI18nLabel(activeApp.label, t)` on the pill, and `app.label` on each switcher row); ui/packages/app-shell/src/layout/ConsoleLayout.tsx#ConsoleLayout (`appLabel` into `AppHeader`, and the `AppShell` branding title); ui/packages/app-shell/src/console/home/HomeAppsStrip.tsx#HomeAppsStrip (the launcher tiles)",
       "note": "localized on serve by translateApp; rendered by the App Switcher (mounted in `AppHeader`), the console header and the tab title (`ConsoleLayout`), and Home's launcher tiles (`HomeAppsStrip`). 2026-09-27 (#20146): REPOINTED off objectui's `AppSidebar.tsx` — deprecated, never mounted (the console renders `UnifiedSidebar`), and removed from objectui main by objectui PR #10617 — to the mounted reader(s) above, each re-read at the `.objectui-sha` pin f8a9d0fb and unchanged at objectui main fb91ac9b0. localized on serve by translateApp, rendered by the app switcher and shell header. 2026-08-28: RE-ANCHORED (commit 8f10a79f7) and REPOINTED — `:481` had rotted onto `if (!spec) return spec;`, a guard on the ACTION result-dialog path. Re-closed by hand against 8cb96ec41."
     },
     "description": {
       "status": "live",
       "verifiedAt": "2026-09-27",
-      "evidenceScope": "cross-repo",
-      "evidence": "objectui @f8a9d0fb: apps/console/src/pages/system/AppManagementPage.tsx#AppManagementPage (each row of the `/system/apps` list renders `resolveKeyedI18nLabel(app.description, t)` under the app's title, and `filteredApps` matches the search query against the same resolved text); framework packages/spec/src/system/i18n-resolver.ts#lookupAppAttr (reads `apps.<name>.description`); packages/spec/src/system/i18n-resolver.ts#translateApp",
+      "evidenceScope": "in-repo",
+      "evidence": "ui/apps/console/src/pages/system/AppManagementPage.tsx#AppManagementPage (each row of the `/system/apps` list renders `resolveKeyedI18nLabel(app.description, t)` under the app's title, and `filteredApps` matches the search query against the same resolved text); framework packages/spec/src/system/i18n-resolver.ts#lookupAppAttr (reads `apps.<name>.description`); packages/spec/src/system/i18n-resolver.ts#translateApp",
       "note": "LIVE, but narrower than this row used to say: the one mounted reader is the admin app list at `/system/apps` (`AppManagementPage`), which shows the localized description under each app's title and searches it; localized by translateApp. The presentation this row used to cite, the description under the active app's title in the sidebar, has NO successor: that was AppSidebar, and it was never mounted. Not a reader: objectui's app-shell `AppCard` also reads `app.description`, but at the pin it is only barrel-exported, with no mount site, which is the same trap AppSidebar was. 2026-09-27 (#20146): REPOINTED off objectui's `AppSidebar.tsx` — deprecated, never mounted (the console renders `UnifiedSidebar`), and removed from objectui main by objectui PR #10617 — to the mounted reader(s) above, each re-read at the `.objectui-sha` pin f8a9d0fb and unchanged at objectui main fb91ac9b0. 2026-08-28: RE-ANCHORED (commit 8f10a79f7) and REPOINTED — `:482` had rotted onto the `title` lookup inside `resolveActionResultDialog`; it, `:481` (label) and `:478` (name) were three consecutive lines of ONE unrelated function, which is what a block of pointers looks like after the file above them grows. Re-closed by hand against 8cb96ec41."
     },
     "icon": {
       "status": "live",
       "verifiedAt": "2026-09-27",
-      "evidenceScope": "cross-repo",
-      "evidence": "objectui @f8a9d0fb: packages/app-shell/src/layout/AppSwitcher.tsx#AppSwitcher (`getIcon(app.icon)` on each switcher row); objectui @f8a9d0fb: packages/app-shell/src/console/home/HomeAppsStrip.tsx#HomeAppsStrip (`getIcon(app.icon)` on each launcher tile)",
+      "evidenceScope": "in-repo",
+      "evidence": "ui/packages/app-shell/src/layout/AppSwitcher.tsx#AppSwitcher (`getIcon(app.icon)` on each switcher row); ui/packages/app-shell/src/console/home/HomeAppsStrip.tsx#HomeAppsStrip (`getIcon(app.icon)` on each launcher tile)",
       "note": "App Launcher / switcher icon. 2026-09-27 (#20146): REPOINTED off objectui's `AppSidebar.tsx` — deprecated, never mounted (the console renders `UnifiedSidebar`), and removed from objectui main by objectui PR #10617 — to the mounted reader(s) above, each re-read at the `.objectui-sha` pin f8a9d0fb and unchanged at objectui main fb91ac9b0."
     },
     "branding": {
@@ -34,30 +34,30 @@
         "primaryColor": {
           "status": "live",
           "verifiedAt": "2026-09-27",
-          "evidenceScope": "cross-repo",
-          "evidence": "objectui @f8a9d0fb: packages/app-shell/src/layout/ConsoleLayout.tsx#ConsoleLayout (hands `activeApp.branding.primaryColor` to `AppShell`'s `branding` prop); objectui @f8a9d0fb: packages/layout/src/AppShell.tsx#useAppShellBranding (maps it onto the `--primary`, `--ring` and `--sidebar-primary` theme tokens, with a dark-mode variant)",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/app-shell/src/layout/ConsoleLayout.tsx#ConsoleLayout (hands `activeApp.branding.primaryColor` to `AppShell`'s `branding` prop); ui/packages/layout/src/AppShell.tsx#useAppShellBranding (maps it onto the `--primary`, `--ring` and `--sidebar-primary` theme tokens, with a dark-mode variant)",
           "note": "the app's brand colour, applied to the whole console while the app is active."
         },
         "accentColor": {
           "status": "live",
           "verifiedAt": "2026-09-27",
-          "evidenceScope": "cross-repo",
-          "evidence": "objectui @f8a9d0fb: packages/app-shell/src/layout/ConsoleLayout.tsx#ConsoleLayout (hands `activeApp.branding.accentColor` to `AppShell`'s `branding` prop); objectui @f8a9d0fb: packages/layout/src/AppShell.tsx#useAppShellBranding (maps it onto the `--accent` theme tokens)",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/app-shell/src/layout/ConsoleLayout.tsx#ConsoleLayout (hands `activeApp.branding.accentColor` to `AppShell`'s `branding` prop); ui/packages/layout/src/AppShell.tsx#useAppShellBranding (maps it onto the `--accent` theme tokens)",
           "note": "declared to match an existing objectui read (inverse-drift fix, liveness audit #1878/#1891/#1894)."
         },
         "favicon": {
           "status": "live",
           "verifiedAt": "2026-09-27",
-          "evidenceScope": "cross-repo",
-          "evidence": "objectui @f8a9d0fb: packages/app-shell/src/layout/ConsoleLayout.tsx#ConsoleLayout (hands `activeApp.branding.favicon` to `AppShell`'s `branding` prop); objectui @f8a9d0fb: packages/layout/src/AppShell.tsx#useAppShellBranding (sets the favicon link's href)",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/app-shell/src/layout/ConsoleLayout.tsx#ConsoleLayout (hands `activeApp.branding.favicon` to `AppShell`'s `branding` prop); ui/packages/layout/src/AppShell.tsx#useAppShellBranding (sets the favicon link's href)",
           "note": "the tab icon while the app is active."
         },
         "logo": {
           "status": "live",
           "verifiedAt": "2026-10-16",
-          "evidenceScope": "cross-repo",
-          "evidence": "objectui @daeb77fc: packages/app-shell/src/layout/AppMark.tsx#AppMark (reads `branding.logo` and draws it as an `object-contain` image at the surface's size, falling back to the `icon` tile when it is absent or fails to load); objectui @daeb77fc: packages/app-shell/src/layout/AppSwitcher.tsx#AppSwitcher (`AppMark` at 22 px on the top-bar app pill and on every switcher row; the switcher is mounted in `AppHeader`); objectui @daeb77fc: packages/app-shell/src/layout/UnifiedSidebar.tsx#UnifiedSidebar (`AppMark` at 26 px in the phone drawer header)",
-          "producer": "objectui @daeb77fc: packages/plugin-designer/src/AppCreationWizard.tsx#AppCreationWizard (writes `branding.logo`, with a preview); objectui @daeb77fc: packages/plugin-designer/src/BrandingEditor.tsx#BrandingEditor (writes it, with a preview); objectui @daeb77fc: packages/plugin-designer/src/pages/EditAppPage.tsx#EditAppPage (pre-fills the editor from it)",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/app-shell/src/layout/AppMark.tsx#AppMark (reads `branding.logo` and draws it as an `object-contain` image at the surface's size, falling back to the `icon` tile when it is absent or fails to load); ui/packages/app-shell/src/layout/AppSwitcher.tsx#AppSwitcher (`AppMark` at 22 px on the top-bar app pill and on every switcher row; the switcher is mounted in `AppHeader`); ui/packages/app-shell/src/layout/UnifiedSidebar.tsx#UnifiedSidebar (`AppMark` at 26 px in the phone drawer header)",
+          "producer": "ui/packages/plugin-designer/src/AppCreationWizard.tsx#AppCreationWizard (writes `branding.logo`, with a preview); ui/packages/plugin-designer/src/BrandingEditor.tsx#BrandingEditor (writes it, with a preview); ui/packages/plugin-designer/src/pages/EditAppPage.tsx#EditAppPage (pre-fills the editor from it)",
           "note": "the app's one square (1:1) icon, an image URL: objectui's `AppMark` renders it on the top-bar app pill, on each App Switcher row and in the phone drawer header, each at its own size, and an app without it gets its `icon` on a tile. Read at the `.objectui-sha` pin daeb77fc. 2026-10-16: FLIPPED from `planned` — the reader shipped under objectui#12201, after the 2026-09-27 drill found `branding.logo` authored by the designer (`producer`) and rendered by nothing mounted. ONE SPELLING: `AppSchema` declares only `branding.logo`. An app-level `logo` is REFUSED by the strict app shape (`unrecognized_keys`), and the refusal suggests `branding` through the alias table; it is not folded or rewritten, and no ADR-0087 conversion carries it."
         }
       },
@@ -66,21 +66,21 @@
     "active": {
       "status": "live",
       "verifiedAt": "2026-09-27",
-      "evidenceScope": "cross-repo",
-      "evidence": "objectui @f8a9d0fb: packages/app-shell/src/layout/AppSwitcher.tsx#AppSwitcher (`a.active !== false && a.hidden !== true` builds the switcher list); objectui @f8a9d0fb: packages/app-shell/src/layout/UnifiedSidebar.tsx#UnifiedSidebar (the same filter, and the active-app lookup over the apps with `active !== false`); objectui @f8a9d0fb: packages/app-shell/src/utils/appRoute.ts#filterActiveApps (the shared openable-apps predicate: Home's launcher, the `app-launcher` renderer and `resolveHostAppSegment` call it); objectui @f8a9d0fb: packages/app-shell/src/layout/AppHeader.tsx#AppHeader (the avatar menu lists only apps with `active !== false`)",
+      "evidenceScope": "in-repo",
+      "evidence": "ui/packages/app-shell/src/layout/AppSwitcher.tsx#AppSwitcher (`a.active !== false && a.hidden !== true` builds the switcher list); ui/packages/app-shell/src/layout/UnifiedSidebar.tsx#UnifiedSidebar (the same filter, and the active-app lookup over the apps with `active !== false`); ui/packages/app-shell/src/utils/appRoute.ts#filterActiveApps (the shared openable-apps predicate: Home's launcher, the `app-launcher` renderer and `resolveHostAppSegment` call it); ui/packages/app-shell/src/layout/AppHeader.tsx#AppHeader (the avatar menu lists only apps with `active !== false`)",
       "note": "`active: false` delists the app from the App Switcher, the sidebar, Home's launcher, the avatar menu and every link `resolveHostAppSegment` builds into an app, and the sidebar's active-app lookup skips it. Deliberately does NOT disable routing: the console's route resolver (objectui app-shell `AppContent`) matches the URL segment against ALL apps with `matchAppBySegment(apps, appName)`, so a direct /apps/<name> URL keeps rendering the app. Weaker than the name implies, but a real consumer. CORRECTED 2026-09-27: this note used to place the \"lookup spans all apps\" behaviour in the sidebar, citing an AppSidebar comment. Measured at the pin, that comment is about HIDDEN apps; the sidebar lookup excludes `active: false`, and what keeps an inactive app routable is `AppContent`. 2026-09-27 (#20146): REPOINTED off objectui's `AppSidebar.tsx` — deprecated, never mounted (the console renders `UnifiedSidebar`), and removed from objectui main by objectui PR #10617 — to the mounted reader(s) above, each re-read at the `.objectui-sha` pin f8a9d0fb and unchanged at objectui main fb91ac9b0."
     },
     "isDefault": {
       "status": "live",
       "verifiedAt": "2026-08-01",
-      "evidence": "objectui @940ba24: apps/console/src/components/RootLandingRedirect.tsx:46",
+      "evidence": "ui/apps/console/src/components/RootLandingRedirect.tsx (:46 at objectui @940ba24)",
       "note": "ROUTING semantics: the root landing redirects to the app marked default (it was once a display-only badge — the file says so)."
     },
     "hidden": {
       "status": "live",
       "verifiedAt": "2026-09-27",
-      "evidenceScope": "cross-repo",
-      "evidence": "objectui @f8a9d0fb: packages/app-shell/src/layout/AppSwitcher.tsx#AppSwitcher (`a.hidden !== true` keeps a hidden app out of the switcher list); objectui @f8a9d0fb: packages/app-shell/src/layout/UnifiedSidebar.tsx#UnifiedSidebar (the same filter; its active-app lookup still spans hidden apps, so /apps/account renders); objectui @f8a9d0fb: packages/app-shell/src/utils/appRoute.ts#filterActiveApps (Home's launcher and the `app-launcher` renderer); objectui @f8a9d0fb: packages/app-shell/src/layout/AppHeader.tsx#AppHeader (the avatar menu lists the apps with `hidden === true`, Account excepted because the Profile link already stands for it); packages/platform-objects/src/apps/account.app.ts#ACCOUNT_APP (the canonical author — `hidden: true` under the comment that states why: surface via the avatar dropdown, not the App Switcher)",
+      "evidenceScope": "in-repo",
+      "evidence": "ui/packages/app-shell/src/layout/AppSwitcher.tsx#AppSwitcher (`a.hidden !== true` keeps a hidden app out of the switcher list); ui/packages/app-shell/src/layout/UnifiedSidebar.tsx#UnifiedSidebar (the same filter; its active-app lookup still spans hidden apps, so /apps/account renders); ui/packages/app-shell/src/utils/appRoute.ts#filterActiveApps (Home's launcher and the `app-launcher` renderer); ui/packages/app-shell/src/layout/AppHeader.tsx#AppHeader (the avatar menu lists the apps with `hidden === true`, Account excepted because the Profile link already stands for it); packages/platform-objects/src/apps/account.app.ts#ACCOUNT_APP (the canonical author — `hidden: true` under the comment that states why: surface via the avatar dropdown, not the App Switcher)",
       "note": "NAVIGATION PRESENTATION ONLY, and re-verified as such at #4829: keep the app out of the App Switcher; the shell surfaces it from the avatar menu (the built-in Account app is the canonical author). It is NOT an access gate — a hidden app stays fully routable and permission-checked for every user, which is its birth contract in app.zod.ts. Between ADR-0045 (2026-06-12) and its 2026-08-09 amendment the REST gate ALSO read this key as \"unpublished\", which erased the Account app from GET /meta/app for every non-builder; that reading now lives on `_unpublished`. The consumer is therefore the client switcher alone. 2026-08-28: RE-ANCHORED (commit 8f10a79f7) — the framework pointer was ACCURATE (`account.app.ts:40` is still `hidden: true`), so this leg is the grammar migration and not a repair. What the anchor buys is that it survives the file growing above it, which is exactly how this ledger's sibling citations rotted. Re-closed by hand against 8cb96ec41. 2026-09-27 (#20146): REPOINTED off objectui's `AppSidebar.tsx` — deprecated, never mounted (the console renders `UnifiedSidebar`), and removed from objectui main by objectui PR #10617 — to the mounted reader(s) above, each re-read at the `.objectui-sha` pin f8a9d0fb and unchanged at objectui main fb91ac9b0. The avatar-menu surface this note names is now cited too (`AppHeader`)."
     },
     "navigation": {
@@ -88,44 +88,44 @@
         "id": {
           "status": "live",
           "verifiedAt": "2026-09-27",
-          "evidenceScope": "cross-repo",
-          "evidence": "objectui @f8a9d0fb: packages/app-shell/src/layout/UnifiedSidebar.tsx#useNavOrder (persists the drag-reordered item ids per app); objectui @f8a9d0fb: packages/app-shell/src/layout/UnifiedSidebar.tsx#UnifiedSidebar (`useNavPins` pins by item id); objectui @f8a9d0fb: packages/layout/src/NavigationRenderer.tsx#NavigationRenderer (the sortable id, pin toggles, render keys, and the active-row match); objectui @f8a9d0fb: packages/app-shell/src/views/nav-menu-renderer.tsx#NavMenuRenderer (row keys, and the active row through `resolveActiveNavItem`)",
-          "note": "item identity: render keys, pin/reorder persistence, i18n nav key (`apps.<app>.navigation.<id>.label`). 2026-09-27 (#20146): REPOINTED off objectui's `AppSidebar.tsx` — deprecated, never mounted (the console renders `UnifiedSidebar`), and removed from objectui main by objectui PR #10617 — to the mounted reader(s) above, each re-read at the `.objectui-sha` pin f8a9d0fb and unchanged at objectui main fb91ac9b0."
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/app-shell/src/layout/UnifiedSidebar.tsx#UnifiedSidebar (`useNavPins` pins by item id); ui/packages/layout/src/NavigationRenderer.tsx#NavigationRenderer (the sortable id, pin toggles, render keys, and the active-row match); ui/packages/app-shell/src/views/nav-menu-renderer.tsx#NavMenuRenderer (row keys, and the active row through `resolveActiveNavItem`)",
+          "note": "item identity: render keys, pin/reorder persistence, i18n nav key (`apps.<app>.navigation.<id>.label`). 2026-09-27 (#20146): REPOINTED off objectui's `AppSidebar.tsx` — deprecated, never mounted (the console renders `UnifiedSidebar`), and removed from objectui main by objectui PR #10617 — to the mounted reader(s) above, each re-read at the `.objectui-sha` pin f8a9d0fb and unchanged at objectui main fb91ac9b0. 2026-10-26 (#25712, objectui merged into this repo as ui/): the `UnifiedSidebar.tsx#useNavOrder` clause (\"persists the drag-reordered item ids per app\") was dropped, not repointed: objectui#12059 made the runtime sidebar menu non-reorderable (the Pinned section keeps the user's order), and the hook left with it. The other three readers were re-rooted under ui/ as cited."
         },
         "label": {
           "status": "live",
           "verifiedAt": "2026-08-28",
-          "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupNavLabel (reads `apps.<app>.navigation.<id>.label` — keyed by the node id, one flat keyspace regardless of tree depth); packages/spec/src/system/i18n-resolver.ts#translateApp (walks the tree and swaps the label in); objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:284-316 (resolveNavItemLabel)",
+          "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupNavLabel (reads `apps.<app>.navigation.<id>.label` — keyed by the node id, one flat keyspace regardless of tree depth); packages/spec/src/system/i18n-resolver.ts#translateApp (walks the tree and swaps the label in); ui/packages/layout/src/NavigationRenderer.tsx (:284-316 at objectui @940ba24) (resolveNavItemLabel)",
           "note": "rendered everywhere; translateApp swaps in the per-locale label by node id. 2026-08-28: RE-ANCHORED (commit 8f10a79f7) and REPOINTED — `:456` had rotted onto `opts?: ResolveOptions` in `lookupActionResultDialogText`'s signature, ~195 lines above `lookupNavLabel`. Re-closed by hand against 8cb96ec41."
         },
         "icon": {
           "status": "live",
           "verifiedAt": "2026-08-01",
-          "evidence": "objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:961",
+          "evidence": "ui/packages/layout/src/NavigationRenderer.tsx (:961 at objectui @940ba24)",
           "note": "every variant branch resolves and renders it."
         },
         "order": {
           "status": "live",
           "verifiedAt": "2026-08-01",
-          "evidence": "objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:1154, :913",
+          "evidence": "ui/packages/layout/src/NavigationRenderer.tsx (:1154 at objectui @940ba24), :913",
           "note": "low-first stable sort at the top level and inside each group."
         },
         "badge": {
           "status": "live",
           "verifiedAt": "2026-08-01",
-          "evidence": "objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:983-985"
+          "evidence": "ui/packages/layout/src/NavigationRenderer.tsx (:983-985 at objectui @940ba24)"
         },
         "badgeVariant": {
           "status": "live",
           "verifiedAt": "2026-08-01",
-          "evidence": "objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:983, :1024",
+          "evidence": "ui/packages/layout/src/NavigationRenderer.tsx (:983 at objectui @940ba24), :1024",
           "note": "declared to match this exact read (inverse-drift fix, audit #1878/#1891/#1894)."
         },
         "visible": {
           "status": "live",
           "verifiedAt": "2026-09-27",
-          "evidenceScope": "cross-repo",
-          "evidence": "objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:891 (item gate); objectui @f8a9d0fb: packages/app-shell/src/layout/UnifiedSidebar.tsx#UnifiedSidebar (`evalVis`, the CEL evaluation through the ExpressionProvider's `evaluateVisibility`, handed to `NavigationRenderer` and to `hasVisibleNavigationItems`); objectui @f8a9d0fb: packages/app-shell/src/views/nav-menu-renderer.tsx#NavMenuRenderer (the same `evalVis`, and each row returns nothing when `evalVis(item.visible)` is false)",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/layout/src/NavigationRenderer.tsx (:891 at objectui @940ba24) (item gate); ui/packages/app-shell/src/layout/UnifiedSidebar.tsx#UnifiedSidebar (`evalVis`, the CEL evaluation through the ExpressionProvider's `evaluateVisibility`, handed to `NavigationRenderer` and to `hasVisibleNavigationItems`); ui/packages/app-shell/src/views/nav-menu-renderer.tsx#NavMenuRenderer (the same `evalVis`, and each row returns nothing when `evalVis(item.visible)` is false)",
           "note": "the CEL visibility gate — enforced per item. This is the layer the retired `areas[].visible` (#4651) prescribes moving to: same CEL dialect, one level down, and actually evaluated. CLIENT-side only, at both levels, and deliberately so: #4722 made the server enforce `requiredPermissions` / `requiresService` inside `areas[]` but left CEL where it was, because evaluating it server-side needs a bound `user` context the REST read layer does not have. Anything that must never reach the browser belongs in `requiredPermissions`, not `visible` — the asymmetry is pinned in packages/rest/src/rest.test.ts. 2026-09-27 (#20146): REPOINTED off objectui's `AppSidebar.tsx` — deprecated, never mounted (the console renders `UnifiedSidebar`), and removed from objectui main by objectui PR #10617 — to the mounted reader(s) above, each re-read at the `.objectui-sha` pin f8a9d0fb and unchanged at objectui main fb91ac9b0. The `NavigationRenderer` item-gate leg is unchanged by this re-point."
         },
         "dataSource": {
@@ -168,67 +168,67 @@
         "requiredPermissions": {
           "status": "live",
           "verifiedAt": "2026-09-27",
-          "evidence": "packages/rest/src/meta-item-read-gate.ts#filterNav (the server strips an entry whose `requiredPermissions` are not a subset of the caller's system permissions — from the top-level tree AND, since #4722, from every `areas[].navigation` tree through this same closure); objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:894",
+          "evidence": "packages/rest/src/meta-item-read-gate.ts#filterNav (the server strips an entry whose `requiredPermissions` are not a subset of the caller's system permissions — from the top-level tree AND, since #4722, from every `areas[].navigation` tree through this same closure); ui/packages/layout/src/NavigationRenderer.tsx (:894 at objectui @940ba24)",
           "note": "enforced in BOTH layers: the server strips unsatisfied entries before serving — from the top-level navigation tree AND, since #4722, from every `areas[].navigation` tree through the same filterNav — and the client re-gates per item. 2026-08-28: RE-ANCHORED (commit 8f10a79f7) and REPOINTED — `:1844` had rotted onto a bare `try {` inside `computeExecCtx`'s auth-service lookup, ~320 lines above the gate. Re-closed by hand against 8cb96ec41."
         },
         "requiresObject": {
           "status": "live",
           "verifiedAt": "2026-08-01",
-          "evidence": "objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:899-901",
+          "evidence": "ui/packages/layout/src/NavigationRenderer.tsx (:899-901 at objectui @940ba24)",
           "note": "runtime-capability gate against the SchemaRegistry (client-side; the server gates only requiresService)."
         },
         "requiresService": {
           "status": "live",
           "verifiedAt": "2026-09-27",
-          "evidence": "packages/rest/src/meta-item-read-gate.ts#filterNav (ADR-0057 D10 — an entry naming a service the kernel has not registered is dropped before the tree is served; fail-open when the kernel cannot be probed); objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:900-902",
+          "evidence": "packages/rest/src/meta-item-read-gate.ts#filterNav (ADR-0057 D10 — an entry naming a service the kernel has not registered is dropped before the tree is served; fail-open when the kernel cannot be probed); ui/packages/layout/src/NavigationRenderer.tsx (:900-902 at objectui @940ba24)",
           "note": "ADR-0057 D10 capability gate, server + client. 2026-08-28: RE-ANCHORED (commit 8f10a79f7) and REPOINTED — `:1832` had rotted onto `environmentId = await this.resolveRequestEnvironmentId(environmentId, req)` in `computeExecCtx`, its sibling `requiredPermissions` twelve lines below it in the same unrelated block. Re-closed by hand against 8cb96ec41."
         },
         "type": {
           "status": "live",
           "verifiedAt": "2026-08-02",
-          "evidence": "objectui @e8bec83: packages/layout/src/NavigationRenderer.tsx:905-1020 (branch dispatch), :397-471 (href resolution per variant), :963-971 (action branch — hidden when the host passes no dispatcher)",
+          "evidence": "ui/packages/layout/src/NavigationRenderer.tsx (:905-1020 at objectui @e8bec83) (branch dispatch), :397-471 (href resolution per variant), :963-971 (action branch — hidden when the host passes no dispatcher)",
           "note": "the discriminant. Variant payload keys outside this walk are covered in the type note — all live, the `actionDef` dispatch gap included since #4509 wired it to the console action runtime."
         },
         "objectName": {
           "status": "live",
           "verifiedAt": "2026-08-01",
-          "evidence": "objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:296, :397-418"
+          "evidence": "ui/packages/layout/src/NavigationRenderer.tsx (:296 at objectui @940ba24), :397-418"
         },
         "viewName": {
           "status": "live",
           "verifiedAt": "2026-08-01",
-          "evidence": "objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:294-296, :418",
+          "evidence": "ui/packages/layout/src/NavigationRenderer.tsx:401-403, :525",
           "note": "target precedence recordId → filters → viewName; also keys the view-label i18n lookup. With no `viewName` (packages/spec/src/ui/app.zod.ts, ObjectNavItemSchema; moved out of spec source, #23434): the entry links to the bare object route, where objectui @b9814b334 packages/app-shell/src/views/ObjectView.tsx#activeViewId opens `defaultViewId || views[0]`, the view objectui @b9814b334 packages/app-shell/src/views/ObjectView.tsx#buildViewTabs marks default, and the `all` tab that function adds only for an object with no list view (#21973); first read at objectui @0abd4f9f8769 (the same two symbols), re-read 2026-10-15."
         },
         "recordId": {
           "status": "live",
           "verifiedAt": "2026-08-01",
-          "evidence": "objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:397-406, :598",
+          "evidence": "ui/packages/layout/src/NavigationRenderer.tsx (:397-406 at objectui @940ba24), :598",
           "note": "direct-to-record deep link; {current_user_id}/{current_org_id} and context-selector {<id>} template vars substituted by the shell."
         },
         "recordMode": {
           "status": "live",
           "verifiedAt": "2026-08-01",
-          "evidence": "objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:406"
+          "evidence": "ui/packages/layout/src/NavigationRenderer.tsx (:406 at objectui @940ba24)"
         },
         "filters": {
           "status": "live",
           "verifiedAt": "2026-08-01",
-          "evidence": "objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:416-418",
+          "evidence": "ui/packages/layout/src/NavigationRenderer.tsx (:416-418 at objectui @940ba24)",
           "note": "serialized as filter[<field>]=<value> params onto the bare /data surface (objectui ADR-0055); exclusivity with recordId/viewName is parse-rejected (objectNavTargetExclusivity)."
         },
         "runAction": {
           "status": "live",
           "verifiedAt": "2026-08-20",
-          "evidenceScope": "cross-repo",
-          "evidence": "objectui @9a3daf8: packages/app-shell/src/hooks/useNavRunAction.ts:64-90 — the single read-once/consume-once CONSUMER, reading the param at mount through useState's initializer and stripping it with history.replaceState only once the caller's `armed` predicate confirms the action is present and runnable. Wired generically at objectui @9a3daf8: packages/app-shell/src/views/ObjectView.tsx:944-960 — EVERY object list, marking exactly the requested action autoTrigger so param dialogs, confirms and entitlement gates all still apply. Entitlement-gated wiring at objectui @9a3daf8: packages/app-shell/src/environment/EnvironmentListToolbar.tsx:108-114 — useAutoRunCreate additionally waits for entitlements to resolve, and ObjectView deliberately excludes sys_environment from its generic arming so two consumers cannot race to strip one param.",
-          "producer": "objectui @9a3daf8: packages/layout/src/NavigationRenderer.tsx:487 defines NAV_RUN_ACTION_PARAM (the wire name's ONE definition, replacing the two bare 'runAction' literals cloud#844 shipped), and :507-512 withRunAction encodes the declared slot onto the href inside resolveHref's object branch — applied at :563 (filters slice) and :568 (bare/named view), the LIST landings only, never the recordId branch above them. It WRITES the deep link and runs nothing: the consumer cited in `evidence` is the second input, which is why this row needs both halves (#4837).",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/app-shell/src/hooks/useNavRunAction.ts (:64-90 at objectui @9a3daf8) — the single read-once/consume-once CONSUMER, reading the param at mount through useState's initializer and stripping it with history.replaceState only once the caller's `armed` predicate confirms the action is present and runnable. Wired generically at ui/packages/app-shell/src/views/ObjectView.tsx (:944-960 at objectui @9a3daf8) — EVERY object list, marking exactly the requested action autoTrigger so param dialogs, confirms and entitlement gates all still apply. Entitlement-gated wiring at ui/packages/app-shell/src/environment/EnvironmentListToolbar.tsx:112-118 — useAutoRunCreate additionally waits for entitlements to resolve, and ObjectView deliberately excludes sys_environment from its generic arming so two consumers cannot race to strip one param.",
+          "producer": "ui/packages/layout/src/NavigationRenderer.tsx:850 defines NAV_RUN_ACTION_PARAM (the wire name's ONE definition, replacing the two bare 'runAction' literals cloud#844 shipped), and :870-875 withRunAction encodes the declared slot onto the href inside resolveHref's object branch — applied at :963 (filters slice) and :968 (bare/named view), the LIST landings only, never the recordId branch above them. It WRITES the deep link and runs nothing: the consumer cited in `evidence` is the second input, which is why this row needs both halves (#4837).",
           "note": "[#4848] SDUI deep-link 'navigate = run action'. FLIPPED planned → live 2026-08-20 (#10068): the objectui half landed as objectui#5216 via objectui PR #5354 (merged 2026-08-19), absorbed here by the .objectui-sha pin 9a3daf8 — the pin postdates that merge, so both pointers above were read at the pin this repo builds against, not at objectui main. The authoring tier was always enforced (framework packages/spec/src/stack.zod.ts validateCrossReferences nav walk; packages/lint/src/validate-action-name-refs.ts nav runAction arm), and what was missing until now was a shipped shell that reads the DECLARED slot rather than the transitional raw `?runAction=` query literal — hence `planned` + authorWarn, both now dropped. TWO pointers, not one, and the split is not cosmetic: a NavigationRenderer-only pointer (what the original work-list anticipated) would say the slot is live because something EMITS it, while what makes authoring it change runtime behaviour is that a shell CONSUMES it — and that lives in app-shell, not layout. ⚠️ ENFORCEMENT vs CONSUMPTION, measured from objectui against the installed package: the published @objectstack/spec@17.0.0 does NOT enforce the runAction × recordId exclusivity — the objectNavTargetExclusivity superRefine exists on this repo's main (packages/spec/src/ui/app.zod.ts, message 'runAction cannot be combined with recordId') but the pinned GA build accepts the combination, and it also accepts `runAction: ''`. That is the merged-but-unpublished window, not a defect, and nothing was filed as one. The consequence this row records: objectui's list-surface-only precedence and its empty-string-is-absent handling are LOAD-BEARING rather than defensive, because the pinned schema will not refuse either input for it. Generalising (objectui hit it three times in one day, tracked at objectui#5328): merged upstream ≠ published ≠ pinned downstream, and the rule covers refinements and error messages, not only fields — the refinement case FAILS SILENT, because a missing key announces itself (the consumer will not compile, or safeParse rejects) while a missing refinement lets the input through and the consumer proceeds. The cloud half (#7251) is unblocked by this landing but is its own card; cloud's transitional pin on the create_environment action name was deliberately left untouched."
         },
         "children": {
           "status": "live",
           "verifiedAt": "2026-08-01",
-          "evidence": "objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:910-913",
+          "evidence": "ui/packages/layout/src/NavigationRenderer.tsx (:910-913 at objectui @940ba24)",
           "note": "recursive render with per-group order sort; the server's filterNav collapses groups emptied by permission stripping (rest-server.ts:1837)."
         }
       },
@@ -239,37 +239,37 @@
         "id": {
           "status": "live",
           "verifiedAt": "2026-09-27",
-          "evidenceScope": "cross-repo",
-          "evidence": "objectui @f8a9d0fb: packages/app-shell/src/layout/UnifiedSidebar.tsx#UnifiedSidebar (`activeAreaId` state, the active-area lookup by `a.id === activeAreaId`, and each area-switcher row's key and click target)",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/app-shell/src/layout/UnifiedSidebar.tsx#UnifiedSidebar (`activeAreaId` state, the active-area lookup by `a.id === activeAreaId`, and each area-switcher row's key and click target)",
           "note": "area-switcher identity and active-area state key. 2026-09-27 (#20146): REPOINTED off objectui's `AppSidebar.tsx` — deprecated, never mounted (the console renders `UnifiedSidebar`), and removed from objectui main by objectui PR #10617 — to the mounted reader(s) above, each re-read at the `.objectui-sha` pin f8a9d0fb and unchanged at objectui main fb91ac9b0."
         },
         "label": {
           "status": "live",
           "verifiedAt": "2026-09-27",
-          "evidenceScope": "cross-repo",
-          "evidence": "objectui @f8a9d0fb: packages/app-shell/src/layout/UnifiedSidebar.tsx#UnifiedSidebar (`resolveInlineI18nLabel(area.label, language)` on each area-switcher row)",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/app-shell/src/layout/UnifiedSidebar.tsx#UnifiedSidebar (`resolveInlineI18nLabel(area.label, language)` on each area-switcher row)",
           "note": "2026-09-27 (#20146): REPOINTED off objectui's `AppSidebar.tsx` — deprecated, never mounted (the console renders `UnifiedSidebar`), and removed from objectui main by objectui PR #10617 — to the mounted reader(s) above, each re-read at the `.objectui-sha` pin f8a9d0fb and unchanged at objectui main fb91ac9b0."
         },
         "icon": {
           "status": "live",
           "verifiedAt": "2026-09-27",
-          "evidenceScope": "cross-repo",
-          "evidence": "objectui @f8a9d0fb: packages/app-shell/src/layout/UnifiedSidebar.tsx#UnifiedSidebar (`getIcon(area.icon)` on each area-switcher row)",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/app-shell/src/layout/UnifiedSidebar.tsx#UnifiedSidebar (`getIcon(area.icon)` on each area-switcher row)",
           "note": "2026-09-27 (#20146): REPOINTED off objectui's `AppSidebar.tsx` — deprecated, never mounted (the console renders `UnifiedSidebar`), and removed from objectui main by objectui PR #10617 — to the mounted reader(s) above, each re-read at the `.objectui-sha` pin f8a9d0fb and unchanged at objectui main fb91ac9b0."
         },
         "description": {
           "status": "live",
           "verifiedAt": "2026-09-30",
-          "evidenceScope": "cross-repo",
-          "evidence": "objectui @db11afd4967: packages/app-shell/src/views/metadata-admin/previews/AppPreview.tsx#readAreas (resolves each area's `description` through `resolveI18nLabel` in the designer locale; unauthored stays undefined and draws nothing); objectui @db11afd4967: packages/app-shell/src/views/metadata-admin/previews/AppPreview.tsx#AppPreview (draws it under the area's label in the preview's Areas list, in read and design mode)",
-          "producer": "objectui @db11afd4967: packages/app-shell/src/views/metadata-admin/previews/index.ts#registerBuiltinPreviews (registers AppPreview for `app`); objectui @db11afd4967: packages/app-shell/src/views/metadata-admin/ResourceEditPage.tsx#MetadataResourceEditPageImpl (`app` registers no custom EditPage, so the generic edit route resolves `getMetadataPreview('app')` and hands it the draft); framework: packages/rest/src/meta-item-read-gate.ts#filterAppForUserWithReason (the served app keeps every key of each area it serves)",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/app-shell/src/views/metadata-admin/previews/AppPreview.tsx#readAreas (resolves each area's `description` through `resolveI18nLabel` in the designer locale; unauthored stays undefined and draws nothing); ui/packages/app-shell/src/views/metadata-admin/previews/AppPreview.tsx#AppPreview (draws it under the area's label in the preview's Areas list, in read and design mode)",
+          "producer": "ui/packages/app-shell/src/views/metadata-admin/previews/index.ts#registerBuiltinPreviews (registers AppPreview for `app`); ui/packages/app-shell/src/views/metadata-admin/ResourceEditPage.tsx#MetadataResourceEditPageImpl (`app` registers no custom EditPage, so the generic edit route resolves `getMetadataPreview('app')` and hands it the draft); framework: packages/rest/src/meta-item-read-gate.ts#filterAppForUserWithReason (the served app keeps every key of each area it serves)",
           "note": "RE-GRADED dead → live 2026-09-30 (#20299) under the #7131 previews ruling (README, 'Designer previews count as consumers'): for a display key, being shown to a human is the whole claimed effect. objectui#11027, read at the `.objectui-sha` pin db11afd4967, added the Areas list; the superseded note measured AppPreview at @e9ab52f9 with zero `areas` reads. UNCHANGED: still docs-shaped, deliberately KEPT (ADR-0033) and not authorWarn'd."
         },
         "navigation": {
           "status": "live",
           "verifiedAt": "2026-09-27",
-          "evidenceScope": "cross-repo",
-          "evidence": "objectui @f8a9d0fb: packages/app-shell/src/layout/UnifiedSidebar.tsx#UnifiedSidebar (`activeArea?.navigation || activeApp?.navigation`: the active area's tree replaces the top-level one); objectui @940ba24: packages/layout/src/AppSchemaRenderer.tsx:469",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/app-shell/src/layout/UnifiedSidebar.tsx#UnifiedSidebar (`activeArea?.navigation || activeApp?.navigation`: the active area's tree replaces the top-level one); ui/packages/layout/src/AppSchemaRenderer.tsx:545",
           "note": "the active area's tree replaces the top-level navigation. Since #4722 area trees ARE server-side gated: filterAppForUser (packages/rest/src/rest-server.ts:1870) runs the SAME filterNav over every `areas[].navigation`, so an item's `requiredPermissions` / `requiresService` is enforced identically in both trees and a gated entry (with its objectName/pageName/componentRef target) never reaches the browser. An area emptied BY the gate is dropped, mirroring the top-level group collapse; an area authored empty is passed through. Still client-only at both levels: `visible` (CEL — needs a bound user context the read layer lacks) and `requiresObject`. The area-LEVEL keys stay retired (#4651) — this enforces the items inside, not a revived area gate. 2026-09-27 (#20146): REPOINTED off objectui's `AppSidebar.tsx` — deprecated, never mounted (the console renders `UnifiedSidebar`), and removed from objectui main by objectui PR #10617 — to the mounted reader(s) above, each re-read at the `.objectui-sha` pin f8a9d0fb and unchanged at objectui main fb91ac9b0. The `AppSchemaRenderer` leg is unchanged by this re-point."
         }
       },
@@ -280,35 +280,35 @@
         "id": {
           "status": "live",
           "verifiedAt": "2026-08-01",
-          "evidence": "objectui @940ba24: packages/app-shell/src/layout/ContextSelectors.tsx:199",
+          "evidence": "ui/packages/app-shell/src/layout/ContextSelectors.tsx (:199 at objectui @940ba24)",
           "note": "also the nav template-variable name ({<id>} substitution into recordId/params)."
         },
         "label": {
           "status": "live",
           "verifiedAt": "2026-08-01",
-          "evidence": "objectui @940ba24: packages/app-shell/src/layout/ContextSelectors.tsx:232"
+          "evidence": "ui/packages/app-shell/src/layout/ContextSelectors.tsx (:232 at objectui @940ba24)"
         },
         "icon": {
           "status": "live",
           "verifiedAt": "2026-08-01",
-          "evidence": "objectui @940ba24: packages/app-shell/src/layout/ContextSelectors.tsx:231"
+          "evidence": "ui/packages/app-shell/src/layout/ContextSelectors.tsx (:231 at objectui @940ba24)"
         },
         "optionsSource": {
           "status": "live",
           "verifiedAt": "2026-08-01",
-          "evidence": "objectui @940ba24: packages/app-shell/src/layout/ContextSelectors.tsx:90-125",
+          "evidence": "ui/packages/app-shell/src/layout/ContextSelectors.tsx (:90-125 at objectui @940ba24)",
           "note": "endpoint fetched, valueKey/labelKey dotted-path mapped, `filter` predicates applied per row (rowPasses, :69-71)."
         },
         "allValue": {
           "status": "live",
           "verifiedAt": "2026-08-02",
-          "evidence": "objectui @940ba24: packages/app-shell/src/layout/ContextSelectors.tsx:177, :199, :246",
+          "evidence": "ui/packages/app-shell/src/layout/ContextSelectors.tsx (:177 at objectui @940ba24), :199, :246",
           "note": "RE-VERIFIED 2026-08-02 (#4509) — the re-check the previous note asked for, now that includeAll is gone. Still live, and the reading is unchanged: it is the 'nothing concrete selected' sentinel for auto-selection and query-param defaulting. What changed is the DECLARATION: the describe() no longer calls it 'the value emitted when All is selected', because that event cannot occur and never could — selectors are mandatory-scope and the renderer never offered an All row. Live by the letter AND by the letter now; the vestigial-by-intent caveat retired with includeAll."
         },
         "persist": {
           "status": "live",
           "verifiedAt": "2026-08-01",
-          "evidence": "objectui @940ba24: packages/app-shell/src/layout/ContextSelectors.tsx:164",
+          "evidence": "ui/packages/app-shell/src/layout/ContextSelectors.tsx (:164 at objectui @940ba24)",
           "note": "'none' opts out of persistence; query/session honored."
         }
       },
@@ -323,7 +323,7 @@
     "defaultAgent": {
       "status": "live",
       "verifiedAt": "2026-08-01",
-      "evidence": "objectui @940ba24: packages/app-shell/src/hooks/surfaceAgent.ts:81, packages/app-shell/src/layout/ChatDock.tsx:253",
+      "evidence": "ui/packages/app-shell/src/hooks/surfaceAgent.ts (:81 at objectui @940ba24), ui/packages/app-shell/src/layout/ChatDock.tsx (:253 at objectui @940ba24)",
       "note": "bounded surface-binding knob (ADR-0063): resolved to the two platform agents (ask/build), alias-aware, anything else rejected — exactly as the schema documents."
     },
     "_unpublished": {

@@ -148,10 +148,23 @@ export const DOOR_CLASSES: readonly DoorClass[] = [
   {
     id: 2,
     name: 'share links',
-    enforcedBy: 'registerShareLinkRoutes (plugin-sharing), the capability token',
+    enforcedBy:
+      'registerShareLinkRoutes (plugin-sharing), the capability token; and the signed-out invitation preview ' +
+      '(plugin-auth runInvitationPreview), the invitation id as the capability token',
     // The two token-addressed reads. The create / list / revoke routes beside
     // them manage links and need a signed-in caller: they are everything-else.
-    match: routeIs('GET /api/v1/share-links/:token/resolve', 'GET /api/v1/share-links/:token/messages'),
+    //
+    // [#26020] And the invitation preview, by ADR-0138 D2's dated note (ruling
+    // 6413975861): a class-2-shaped door, one validated read of one pending
+    // invitation, projected. It sits in the `/auth` namespace, so without this
+    // row the control-plane allowlist below would claim it and the sweep would
+    // judge nothing. Matched here first, the sweep's probe (which carries no
+    // invitation id) is held to the class's answer: a 4xx, nothing served.
+    match: routeIs(
+      'GET /api/v1/share-links/:token/resolve',
+      'GET /api/v1/share-links/:token/messages',
+      'GET /api/v1/auth/organization/invitation-preview',
+    ),
     expect: REFUSED_WITHOUT_A_SUBJECT,
   },
   {

@@ -13,7 +13,6 @@
     // package so the location is a decision, not a side effect of an unrelated option.
     "tsBuildInfoFile": "./tsconfig.tsbuildinfo",
     "composite": true,
-    "jsx": "react-jsx",
     "lib": ["ES2020", "DOM"]
   },
   "include": ["src"],

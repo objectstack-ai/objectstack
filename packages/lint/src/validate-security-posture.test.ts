@@ -30,6 +30,7 @@ import {
   SECURITY_CBP_NO_RELATION,
   SECURITY_CBP_AMBIGUOUS_RELATION,
   SECURITY_MODIFY_ALL_DELETE_WITHHELD,
+  SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
 } from './validate-security-posture.js';
 import { lintDataModel } from './data-model-rules.js';
 import { explainRule } from './rule-explanations.js';
@@ -1568,6 +1569,16 @@ const NOT_SCHEMA_RECEIVERS: Record<string, string> = {
   visible: "a `VisibleExtension` — this file's own fold of one extension entry, not an authored surface.",
   left: 'a `VisibleExtension`, the left operand of the fold-order comparator.',
   right: 'a `VisibleExtension`, the right operand of the fold-order comparator.',
+  // [#25760] `callerIdentityKeyedFields` walks the formula package's own CEL
+  // AST (`CelAstNode`, `{ op, args }`), the parse of a predicate string — not
+  // an authored surface; the authored read behind it is `policy[predicate]`.
+  n: "a `CelAstNode` — the formula package's parse of a predicate, not an authored surface.",
+  r: 'a `CelAstNode` — the receiver operand of a member access in that parse.',
+  // [#25760] Not a receiver at all: the predicate grammar's caller-identity
+  // spelling (`current_user.id`), quoted inside the owner arm's verdict and
+  // hint text. The scan reads code with its string literals intact, so the
+  // spelling presents as a receiver `current_user` reading a key `id`.
+  current_user: "the RLS predicate grammar's `current_user.id`, a string literal in the owner arm's message text — not a receiver.",
 };
 
 const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: string; keys: () => string[] }> = [
@@ -1599,9 +1610,22 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
   { receiver: 'o', expected: ['name'], declaredBy: 'ObjectSchema', keys: () => Object.keys(ObjectSchema.shape) },
   {
     receiver: 'ps',
-    expected: ['fields', 'isDefault', 'label', 'name', 'objects'],
+    // [#25760] `rowLevelSecurity` joined when the controlled-by-parent owner
+    // arm started reading a set's update policies.
+    expected: ['fields', 'isDefault', 'label', 'name', 'objects', 'rowLevelSecurity'],
     declaredBy: 'PermissionSetSchema',
     keys: () => Object.keys(PermissionSetSchema.shape),
+  },
+  // [#25760] One row-level policy, read by the controlled-by-parent owner arm
+  // for the keys that decide whether it is that arm's subject. `using` and
+  // `check` are read through a computed key (`policy[predicate]`), which the
+  // scan cannot see; the corpus fixture below carries both spellings, so a
+  // retired `check` would still fail the key-legality guard.
+  {
+    receiver: 'policy',
+    expected: ['enabled', 'name', 'object', 'operation'],
+    declaredBy: 'PermissionSetSchema.rowLevelSecurity[]',
+    keys: () => shapeKeysOf(PermissionSetSchema.shape.rowLevelSecurity),
   },
   // `reference_to` is absent — the other half of the #5017 fix.
   { receiver: 'def', expected: ['reference'], declaredBy: 'FieldSchema', keys: () => Object.keys(FieldSchema.shape) },
@@ -1756,6 +1780,10 @@ describe('validateSecurityPosture — reads only keys the spec declares (meta-te
       // #23210: the merged-shape pass's own collections — JS Map / Set / Array methods.
       'bodies', 'entries', 'targets', 'owners', 'extensions', 'byCarrier', 'writers', 'tiedWriters',
       'merged', 'baseFields', 'blamed',
+      // #25760: the controlled-by-parent owner arm's own collections and the predicate string.
+      'cbpDetailsWithoutOptIn', // the detail names without the opt-in — JS Set methods.
+      'policies', // one set's `rowLevelSecurity` records — `.length`, a JS property.
+      'predicate', // a policy's `using` / `check` text, a string — `.trim`.
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });
@@ -1870,6 +1898,7 @@ const RULE_IDS: Record<string, string> = {
   SECURITY_CBP_NO_RELATION,
   SECURITY_CBP_AMBIGUOUS_RELATION,
   SECURITY_MODIFY_ALL_DELETE_WITHHELD,
+  SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
 };
 
 const TEXT_FIELD = { a: { type: 'text', label: 'A' } } as const;
@@ -1962,6 +1991,26 @@ const REACHABILITY_CORPUS: Array<{ label: string; stack: Record<string, unknown>
     },
   },
   {
+    // [#25760] A resolving controlled_by_parent detail with no opt-in, and an
+    // `update` policy keyed on the caller — every key the arm reads
+    // (`rowLevelSecurity[].{name,object,operation,using,check,enabled}` and
+    // the detail's `sharing`) is one an author can legally write.
+    label: 'cbp-owner-policy-without-opt-in',
+    stack: {
+      objects: [
+        objectFixture({ name: 'invoice', sharingModel: 'private' }),
+        objectFixture({
+          name: 'line_item', sharingModel: 'controlled_by_parent',
+          fields: { invoice: { type: 'master_detail', label: 'Invoice', reference: 'invoice', required: true } },
+        }),
+      ],
+      permissions: [{
+        name: 'ps', label: 'PS', objects: {},
+        rowLevelSecurity: [{ name: 'own_lines', object: 'line_item', operation: 'update', using: 'owner_id == current_user.id', enabled: true }],
+      }],
+    },
+  },
+  {
     label: 'grant-expired-at-authoring',
     stack: { data: [{ object: 'sys_user_position', records: [{ user_id: 'u1', position: 'p', valid_until: '2020-01-01T00:00:00Z' }] }] },
   },
@@ -1983,7 +2032,8 @@ describe('validateSecurityPosture — every branch is reachable without an undec
   it('maps every `findings.push` site in the source', () => {
     // 16 since #23268: the external dial's alias and wider-than-internal sites left with the key.
     // 17 since #25575: allowDelete: false beside modifyAllRecords: true.
-    expect(pushedRuleIds()).toHaveLength(17);
+    // 18 since #25760: an owner-keyed update policy on a controlled_by_parent detail that has not opted in.
+    expect(pushedRuleIds()).toHaveLength(18);
   });
 
   it('reaches every `findings.push` site from that corpus', () => {

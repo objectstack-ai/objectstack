@@ -82,6 +82,14 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Campo referenciador",
         help: "Nombre del campo del registro propietario que contiene este id de archivo"
       },
+      released_ref_object: {
+        label: "Objeto que la liberó",
+        help: "Nombre corto del objeto del registro que fue el último propietario de este archivo, tras liberarlo"
+      },
+      released_ref_id: {
+        label: "Registro que la liberó",
+        help: "Clave principal del registro que fue el último propietario de este archivo, tras liberarlo"
+      },
       metadata: {
         label: "Metadatos (JSON)"
       },

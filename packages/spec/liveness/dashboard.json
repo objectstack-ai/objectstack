@@ -24,32 +24,32 @@
         "id": {
           "status": "live",
           "verifiedAt": "2026-08-03",
-          "evidence": "objectui @91757a7: packages/plugin-dashboard/src/DashboardRenderer.tsx:298-299 (widget-title i18n key), :401-402 (drag reorder match), :656-667 (render key + design-mode selection / data-widget-id), :733 (sortable id)",
+          "evidence": "ui/packages/plugin-dashboard/src/DashboardRenderer.tsx (:298-299 at objectui @91757a7) (widget-title i18n key), :401-402 (drag reorder match), :656-667 (render key + design-mode selection / data-widget-id), :733 (sortable id)",
           "note": "widget identity — the key every per-widget affordance (i18n, reorder, selection, drill) is looked up by."
         },
         "title": {
           "status": "live",
           "verifiedAt": "2026-08-03",
-          "evidence": "objectui @91757a7: packages/plugin-dashboard/src/DashboardRenderer.tsx:297 + :525 (metric label fallback); packages/plugin-dashboard/src/DatasetWidget.tsx:383,389 (drill-drawer title), :418 (CSV export filename)",
+          "evidence": "ui/packages/plugin-dashboard/src/DashboardRenderer.tsx (:297 at objectui @91757a7) + :525 (metric label fallback); packages/plugin-dashboard/src/DatasetWidget.tsx:383,389 (drill-drawer title), :418 (CSV export filename)",
           "note": "rendered as the widget card heading; also the drill-drawer title and the export filename."
         },
         "description": {
           "status": "live",
           "verifiedAt": "2026-08-03",
-          "evidence": "objectui @91757a7: packages/plugin-dashboard/src/DashboardRenderer.tsx:306-308 (tWidgetDescription → card sub-heading)",
+          "evidence": "ui/packages/plugin-dashboard/src/DashboardRenderer.tsx (:306-308 at objectui @91757a7) (tWidgetDescription → card sub-heading)",
           "note": "rendered under the widget title, localized per dashboard+widget id."
         },
         "type": {
           "status": "live",
           "verifiedAt": "2026-08-03",
-          "evidence": "objectui @91757a7: packages/plugin-dashboard/src/widgetDispatch.ts (classifyWidgetType — series/metric/table/custom families + spec aliases); objectui: packages/plugin-dashboard/src/DashboardRenderer.tsx:419 and :438; objectui: packages/plugin-dashboard/src/DatasetWidget.tsx:169-175",
+          "evidence": "ui/packages/plugin-dashboard/src/widgetDispatch.ts (classifyWidgetType — series/metric/table/custom families + spec aliases); ui/packages/plugin-dashboard/src/DashboardRenderer.tsx (:419 at objectui @91757a7) and :438; ui/packages/plugin-dashboard/src/DatasetWidget.tsx (:169-175 at objectui @91757a7)",
           "note": "the render dispatch key — chooses the renderer family and, with it, the grid span."
         },
         "chartConfig": {
           "status": "live",
           "verifiedAt": "2026-09-20",
-          "evidenceScope": "cross-repo",
-          "evidence": "objectui @53ded82bf: packages/core/src/utils/chart-presentation.ts#chartConfigPresentation lowers the NINE appearance keys onto the chart schema, one guard per key — showLegend, showDataLabels, title, subtitle, description, height, annotations, interaction, and colors split two ways into the positional palette and categoryColors; objectui @53ded82bf: packages/plugin-dashboard/src/DatasetWidget.tsx#DatasetWidget (calls chartConfigPresentation and spreads the result onto the chart schema handed to SchemaRenderer); objectui @53ded82bf: packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.dom.test.tsx; objectui @53ded82bf: packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.test.tsx",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/core/src/utils/chart-presentation.ts#chartConfigPresentation lowers the NINE appearance keys onto the chart schema, one guard per key — showLegend, showDataLabels, title, subtitle, description, height, annotations, interaction, and colors split two ways into the positional palette and categoryColors; ui/packages/plugin-dashboard/src/DatasetWidget.tsx#DatasetWidget (calls chartConfigPresentation and spreads the result onto the chart schema handed to SchemaRenderer); ui/packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.dom.test.tsx; ui/packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.test.tsx",
           "note": "APPEARANCE ONLY on the dataset-bound chart path, as of 2026-09-20 — read PER KEY, never forwarded as a bag. This carrier is no longer `ChartConfigSchema`: the widget's `chartConfig` now parses as `DashboardWidgetChartConfigSchema`, a per-carrier `.extend()` that tombstones the four STRUCTURE keys (`type`, `xAxis`, `yAxis`, `series`) — ADR-0021 · ADR-0049, maintainer ruling 2026-09-12, decision batch #121 item 1, verbatim 「同意」. On a dataset-bound widget the dataset decides which series exist and which column each one reads, so those four are refused by name here and their rows below are graded `dead` with the removal recorded; the nine appearance keys stay live and are unchanged. ⚠️ THE EARLIER READING IS NOT WITHDRAWN, IT IS OVERRIDDEN: the 2026-09-12 per-key pass measured `xAxis`/`yAxis`/`series` LIVE on their presentation half (`mergeAuthoredPresentation` merges authored presentation onto the derived bindings, dropping `ChartAxis.field` and `ChartSeries.name`), and that measurement was correct. The ruling took the keys anyway, because `field` was a live MEMBERSHIP channel — the renderer synthesised a series from an authored axis when the chart declared none, so one authored field could silently re-point a dataset-bound series at another column while the chart still drew. The presentation those objects also carried (axis titles, formats, bounds, grid lines, per-series labels, colours and mark types) goes with them; a dataset-bound chart takes that from the dataset's own dimension and measure declarations. ⚠️ The objectui merge code at the pin `53ded82bf7a4` is therefore now unreachable metadata-side on this face and is the sibling's follow-up (objectui#4044), not evidence of a live key. `type` was already graded `dead` here and the removal executes that verdict; `aria` was removed in the same protocol-18 wave by `chart-config-aria-removed`. ⚠️ Coordinate, not key name: `ChartConfigSchema` itself keeps all four keys for the react `<ObjectChart data={…}>` tier (no dataset ⇒ the author's axes are the only ones), and `ReportChartSchema` keeps its own narrowed `xAxis`/`yAxis` — this row is `dashboard/widgets.chartConfig` and only that.",
           "children": {
             "type": {
@@ -61,22 +61,22 @@
             "title": {
               "status": "live",
               "verifiedAt": "2026-09-12",
-              "evidenceScope": "cross-repo",
-              "evidence": "objectui @53ded82bf: packages/core/src/utils/chart-presentation.ts#chartConfigPresentation; objectui @53ded82bf: packages/plugin-dashboard/src/DatasetWidget.tsx#DatasetWidget (calls mergeAuthoredPresentation, then chartConfigPresentation, and spreads both results onto the chart schema handed to SchemaRenderer); objectui @53ded82bf: packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.dom.test.tsx; objectui @53ded82bf: packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.test.tsx",
+              "evidenceScope": "in-repo",
+              "evidence": "ui/packages/core/src/utils/chart-presentation.ts#chartConfigPresentation; ui/packages/plugin-dashboard/src/DatasetWidget.tsx#DatasetWidget (calls mergeAuthoredPresentation, then chartConfigPresentation, and spreads both results onto the chart schema handed to SchemaRenderer); ui/packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.dom.test.tsx; ui/packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.test.tsx",
               "note": "Lowered onto the chart schema when it is a non-empty string, and drawn by `AdvancedChartImpl` in its ChartFrame. Pinned in the DOM: \"draws chartConfig.title / .subtitle above the plot\", with its own negative \"adds no title chrome when chartConfig declares none\"."
             },
             "subtitle": {
               "status": "live",
               "verifiedAt": "2026-09-12",
-              "evidenceScope": "cross-repo",
-              "evidence": "objectui @53ded82bf: packages/core/src/utils/chart-presentation.ts#chartConfigPresentation; objectui @53ded82bf: packages/plugin-dashboard/src/DatasetWidget.tsx#DatasetWidget (calls mergeAuthoredPresentation, then chartConfigPresentation, and spreads both results onto the chart schema handed to SchemaRenderer); objectui @53ded82bf: packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.dom.test.tsx; objectui @53ded82bf: packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.test.tsx",
+              "evidenceScope": "in-repo",
+              "evidence": "ui/packages/core/src/utils/chart-presentation.ts#chartConfigPresentation; ui/packages/plugin-dashboard/src/DatasetWidget.tsx#DatasetWidget (calls mergeAuthoredPresentation, then chartConfigPresentation, and spreads both results onto the chart schema handed to SchemaRenderer); ui/packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.dom.test.tsx; ui/packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.test.tsx",
               "note": "Same lowering and the same DOM pin as `title` — a non-empty string reaches the ChartFrame."
             },
             "description": {
               "status": "live",
               "verifiedAt": "2026-09-12",
-              "evidenceScope": "cross-repo",
-              "evidence": "objectui @53ded82bf: packages/core/src/utils/chart-presentation.ts#chartConfigPresentation; objectui @53ded82bf: packages/plugin-dashboard/src/DatasetWidget.tsx#DatasetWidget (calls mergeAuthoredPresentation, then chartConfigPresentation, and spreads both results onto the chart schema handed to SchemaRenderer); objectui @53ded82bf: packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.dom.test.tsx; objectui @53ded82bf: packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.test.tsx",
+              "evidenceScope": "in-repo",
+              "evidence": "ui/packages/core/src/utils/chart-presentation.ts#chartConfigPresentation; ui/packages/plugin-dashboard/src/DatasetWidget.tsx#DatasetWidget (calls mergeAuthoredPresentation, then chartConfigPresentation, and spreads both results onto the chart schema handed to SchemaRenderer); ui/packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.dom.test.tsx; ui/packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.test.tsx",
               "note": "Lowered as the chart container's accessible name — `role=\"img\"` plus `aria-label`. Pinned in the DOM by name: \"announces chartConfig.description as the chart graphic accessible name\", against the negative \"leaves the graphic unlabelled when no description is declared\". This is the accessibility channel that actually works on this face, and it is why `aria` beside it is left unforwarded rather than flattened into the same slot."
             },
             "xAxis": {
@@ -100,43 +100,43 @@
             "colors": {
               "status": "live",
               "verifiedAt": "2026-09-12",
-              "evidenceScope": "cross-repo",
-              "evidence": "objectui @53ded82bf: packages/core/src/utils/chart-presentation.ts#chartConfigPresentation; objectui @53ded82bf: packages/plugin-dashboard/src/DatasetWidget.tsx#DatasetWidget (calls mergeAuthoredPresentation, then chartConfigPresentation, and spreads both results onto the chart schema handed to SchemaRenderer); objectui @53ded82bf: packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.test.tsx",
+              "evidenceScope": "in-repo",
+              "evidence": "ui/packages/core/src/utils/chart-presentation.ts#chartConfigPresentation; ui/packages/plugin-dashboard/src/DatasetWidget.tsx#DatasetWidget (calls mergeAuthoredPresentation, then chartConfigPresentation, and spreads both results onto the chart schema handed to SchemaRenderer); ui/packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.test.tsx",
               "note": "Both arms of the overloaded union reach the renderer, through two DIFFERENT props, and the split happens in the lowering: a `string[]` becomes the positional palette `colors`, a `{ value: color }` record becomes `categoryColors` merged OVER the category dimension field's own select/lookup option colours — the precedence the spec field comment states. Pinned in both directions: \"lowers an array `colors` as the positional palette\" / \"lowers a record `colors` as the per-category map, not as the palette\"."
             },
             "height": {
               "status": "live",
               "verifiedAt": "2026-09-12",
-              "evidenceScope": "cross-repo",
-              "evidence": "objectui @53ded82bf: packages/core/src/utils/chart-presentation.ts#chartConfigPresentation; objectui @53ded82bf: packages/plugin-dashboard/src/DatasetWidget.tsx#DatasetWidget (calls mergeAuthoredPresentation, then chartConfigPresentation, and spreads both results onto the chart schema handed to SchemaRenderer); objectui @53ded82bf: packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.dom.test.tsx; objectui @53ded82bf: packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.test.tsx",
+              "evidenceScope": "in-repo",
+              "evidence": "ui/packages/core/src/utils/chart-presentation.ts#chartConfigPresentation; ui/packages/plugin-dashboard/src/DatasetWidget.tsx#DatasetWidget (calls mergeAuthoredPresentation, then chartConfigPresentation, and spreads both results onto the chart schema handed to SchemaRenderer); ui/packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.dom.test.tsx; ui/packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.test.tsx",
               "note": "Applied as the chart container's inline height when it is a finite number greater than zero; a non-positive value is dropped in favour of the container default rather than collapsing the plot. Pinned in the DOM (\"applies chartConfig.height over the container default\") and at the unit boundary (\"drops a non-positive or non-numeric height\")."
             },
             "showLegend": {
               "status": "live",
               "verifiedAt": "2026-09-12",
-              "evidenceScope": "cross-repo",
-              "evidence": "objectui @53ded82bf: packages/core/src/utils/chart-presentation.ts#chartConfigPresentation; objectui @53ded82bf: packages/plugin-dashboard/src/DatasetWidget.tsx#DatasetWidget (calls mergeAuthoredPresentation, then chartConfigPresentation, and spreads both results onto the chart schema handed to SchemaRenderer); objectui @53ded82bf: packages/plugin-dashboard/src/__tests__/DatasetWidget.showLegend.test.tsx; objectui @53ded82bf: packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.test.tsx",
+              "evidenceScope": "in-repo",
+              "evidence": "ui/packages/core/src/utils/chart-presentation.ts#chartConfigPresentation; ui/packages/plugin-dashboard/src/DatasetWidget.tsx#DatasetWidget (calls mergeAuthoredPresentation, then chartConfigPresentation, and spreads both results onto the chart schema handed to SchemaRenderer); ui/packages/plugin-dashboard/src/__tests__/DatasetWidget.showLegend.test.tsx; ui/packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.test.tsx",
               "note": "The FIRST key ever lowered on this face (#3135) and for a long time the only one — the whole reason the row above it once read \"chart-config bag forwarded to the chart renderer\" and was false. Forwarded in both directions, pinned in both directions, with the third pin asserting the key is absent when no `chartConfig` is declared so the renderer default survives."
             },
             "showDataLabels": {
               "status": "live",
               "verifiedAt": "2026-09-12",
-              "evidenceScope": "cross-repo",
-              "evidence": "objectui @53ded82bf: packages/core/src/utils/chart-presentation.ts#chartConfigPresentation; objectui @53ded82bf: packages/plugin-dashboard/src/DatasetWidget.tsx#DatasetWidget (calls mergeAuthoredPresentation, then chartConfigPresentation, and spreads both results onto the chart schema handed to SchemaRenderer); objectui @53ded82bf: packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.test.tsx",
+              "evidenceScope": "in-repo",
+              "evidence": "ui/packages/core/src/utils/chart-presentation.ts#chartConfigPresentation; ui/packages/plugin-dashboard/src/DatasetWidget.tsx#DatasetWidget (calls mergeAuthoredPresentation, then chartConfigPresentation, and spreads both results onto the chart schema handed to SchemaRenderer); ui/packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.test.tsx",
               "note": "Forwarded as a boolean in both directions and printed by the chart block as a Recharts `LabelList`. Pinned: \"forwards showDataLabels in both directions\"."
             },
             "annotations": {
               "status": "live",
               "verifiedAt": "2026-09-12",
-              "evidenceScope": "cross-repo",
-              "evidence": "objectui @53ded82bf: packages/core/src/utils/chart-presentation.ts#chartConfigPresentation; objectui @53ded82bf: packages/plugin-dashboard/src/DatasetWidget.tsx#DatasetWidget (calls mergeAuthoredPresentation, then chartConfigPresentation, and spreads both results onto the chart schema handed to SchemaRenderer); objectui @53ded82bf: packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.test.tsx",
+              "evidenceScope": "in-repo",
+              "evidence": "ui/packages/core/src/utils/chart-presentation.ts#chartConfigPresentation; ui/packages/plugin-dashboard/src/DatasetWidget.tsx#DatasetWidget (calls mergeAuthoredPresentation, then chartConfigPresentation, and spreads both results onto the chart schema handed to SchemaRenderer); ui/packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.test.tsx",
               "note": "Forwarded when the array is non-empty, and drawn as ReferenceLine / ReferenceArea over the plot. The empty array is deliberately dropped instead of emitted — pinned as \"drops an empty annotations array instead of emitting a dead key\"."
             },
             "interaction": {
               "status": "live",
               "verifiedAt": "2026-09-12",
-              "evidenceScope": "cross-repo",
-              "evidence": "objectui @53ded82bf: packages/core/src/utils/chart-presentation.ts#chartConfigPresentation; objectui @53ded82bf: packages/plugin-dashboard/src/DatasetWidget.tsx#DatasetWidget (calls mergeAuthoredPresentation, then chartConfigPresentation, and spreads both results onto the chart schema handed to SchemaRenderer); objectui @53ded82bf: packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.test.tsx",
+              "evidenceScope": "in-repo",
+              "evidence": "ui/packages/core/src/utils/chart-presentation.ts#chartConfigPresentation; ui/packages/plugin-dashboard/src/DatasetWidget.tsx#DatasetWidget (calls mergeAuthoredPresentation, then chartConfigPresentation, and spreads both results onto the chart schema handed to SchemaRenderer); ui/packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.test.tsx",
               "note": "Forwarded when it is a non-array object, and honoured by the chart block as the tooltip toggle plus `Brush`. Pinned with `annotations` in \"forwards annotations and the interaction toggles\"."
             },
             "aria": {
@@ -150,14 +150,14 @@
         "colorVariant": {
           "status": "live",
           "verifiedAt": "2026-08-09",
-          "evidenceScope": "cross-repo",
-          "evidence": "objectui @09987b68: packages/plugin-dashboard/src/DatasetWidget.tsx:641 — metricAccentTextClass(widget?.colorVariant) tints the dataset-bound metric card's value; objectui @09987b68: packages/plugin-dashboard/src/colorVariants.ts:44-53 — VARIANT_TEXT_CLASSES, the eight tokens of WidgetColorVariantSchema; objectui @09987b68: packages/plugin-dashboard/src/__tests__/DatasetWidget.colorVariant.test.tsx — renders every token and derives the vocabulary from the spec enum at runtime; packages/platform-objects/src/apps/dashboards/system_overview.dashboard.ts — 7 of the 16 authored sites this now paints",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/plugin-dashboard/src/DatasetWidget.tsx:1296 — metricAccentTextClass(widget?.colorVariant) tints the dataset-bound metric card's value; ui/packages/plugin-dashboard/src/colorVariants.ts:44-53 — VARIANT_TEXT_CLASSES, the eight tokens of WidgetColorVariantSchema; ui/packages/plugin-dashboard/src/__tests__/DatasetWidget.colorVariant.test.tsx — renders every token and derives the vocabulary from the spec enum at runtime; packages/platform-objects/src/apps/dashboards/system_overview.dashboard.ts — 7 of the 16 authored sites this now paints",
           "note": "CORRECTED dead → live 2026-08-09 (#6774). #5010 ruling B chose ENFORCE over remove — the declaration stays and objectui implements it — and objectui#3359 / PR objectui#3799 (merge `c4c0ac897`, 2026-08-08) did: DatasetWidget resolves the declared token through the accent table MetricWidget already shared, so the 16 authored sites (7 in packages/platform-objects' system_overview, 9 across examples/app-showcase) paint the accent they declare. Absorbed by this repo's `.objectui-sha` pin `09987b68` — `git merge-base --is-ancestor c4c0ac897 09987b68` re-verified against this branch's base rather than inherited from the unlock comment. No declaration, and the enum's own `default`, still resolve to no class, so every widget that never authored the key renders byte-identically. The 2026-08-03 `dead` verdict was accurate when written and is kept here as history: every read of `widget.colorVariant` was then an AUTHORING surface (WidgetConfigPanel.tsx:407, plugin-designer/DashboardEditor.tsx:266-267, metadata-admin/inspectors/DashboardWidgetInspector.tsx:380, DashboardWithConfig.tsx:113), DashboardRenderer built the metric component schema explicitly, and only `options.colorVariant` ever reached MetricWidget. `authorWarn`/`authorHint` are dropped with the flip — the CLI advisory told authors to relocate a key that now works, and PR #5255's positive contrast pinning that warning is released in the same change."
         },
         "requiresObject": {
           "status": "live",
           "verifiedAt": "2026-08-03",
-          "evidence": "objectui @91757a7: packages/app-shell/src/views/DashboardView.tsx:143-147 (prunes widgets whose requiresObject is not in the runtime SchemaRegistry)",
+          "evidence": "ui/packages/app-shell/src/views/DashboardView.tsx:215-219 (prunes widgets whose requiresObject is not in the runtime SchemaRegistry)",
           "note": "client-side capability gate. NOT gated server-side — packages/rest/src/rest-server.ts:1818 names `requiresObject` as deliberately not filtered there, unlike its `requiresService` sibling."
         },
         "requiresService": {
@@ -169,49 +169,49 @@
         "filter": {
           "status": "live",
           "verifiedAt": "2026-08-03",
-          "evidence": "objectui @91757a7: packages/plugin-dashboard/src/DatasetWidget.tsx:221 (→ DatasetSelection.runtimeFilter); packages/plugin-dashboard/src/DashboardRenderer.tsx:484,539,567 (inline paths) and :646 (AND-merged with the dashboard-scoped filter)",
+          "evidence": "ui/packages/plugin-dashboard/src/DatasetWidget.tsx (:221 at objectui @91757a7) (→ DatasetSelection.runtimeFilter); packages/plugin-dashboard/src/DashboardRenderer.tsx:484,539,567 (inline paths) and :646 (AND-merged with the dashboard-scoped filter)",
           "note": "presentation-scope filter, ANDed into the dataset query; also the base a dashboard global filter merges into."
         },
         "compareTo": {
           "status": "live",
           "verifiedAt": "2026-08-04",
-          "evidence": "packages/services/service-analytics/src/dataset-executor.ts — runCompare() reads `compareTo.kind` (shiftRange) and resolves `compareTo.dimension` via resolveCompareDimension(); packages/spec/src/contracts/analytics-service.ts DatasetCompareTo is the same `{ kind, dimension? }` shape the widget now declares; objectui @91757a7: packages/plugin-dashboard/src/DatasetWidget.tsx:163-168 (forwards the structured object into DatasetSelection.compareTo)",
+          "evidence": "packages/services/service-analytics/src/dataset-executor.ts — runCompare() reads `compareTo.kind` (shiftRange) and resolves `compareTo.dimension` via resolveCompareDimension(); packages/spec/src/contracts/analytics-service.ts DatasetCompareTo is the same `{ kind, dimension? }` shape the widget now declares; ui/packages/plugin-dashboard/src/DatasetWidget.tsx (:163-168 at objectui @91757a7) (forwards the structured object into DatasetSelection.compareTo)",
           "note": "CONVERGED 2026-08-04 (#5011) — this entry SUPERSEDES the path-split record it carried, which is now history rather than the shape. What it recorded was real: the widget declared three arms ('previousPeriod' / 'previousYear' / { offset }) that only the LEGACY inline object-provider chart path could run (objectui packages/core/src/utils/compare-to.ts shiftFilterByCompareTo), while on the ADR-0021 dataset path — the one the spec calls the single author-facing analytics shape — DatasetWidget deliberately DROPPED the two string arms and forwarded `{ offset }` into a contract with no `offset` in it, so dataset-executor.ts threw 'compareTo requires a timeDimension \"undefined\"'. Same key, two fates, the failing one blessed. The fix converged the widget's vocabulary onto the executor's: `compareTo` is now `{ kind, dimension? }`, a thin projection of DatasetSelection.compareTo, so `declared = enforced` holds by construction with no second vocabulary left to drift. `dimension` is optional and resolved BY THE EXECUTOR (exactly one dated time dimension → that one; zero or several → a loud error listing candidates) — a producer-side resolution rule, not the consumer-side tolerance PD #12 forbids. `{ offset }` retired via the ADR-0087 `dashboard-widget-compareto-converged` conversion (+ the `dashboard-widget-compareto-offset` semantic migration for durations with no faithful target). Still LIVE, and now on the canonical path: the reason the verdict is unchanged is that the CONSUMER was never missing, only the agreement about what it consumes. ⚠️ One half is out of this repo: objectui's legacy inline chart path (DashboardRenderer.tsx:495 → ObjectChart, CompareToConfig in packages/core/src/utils/compare-to.ts) still expects the retired three-arm shape and adapts in objectui#3337, which also deletes the now-unnecessary DatasetWidget.tsx:163-168 string-drop workaround. Until that lands, read this `live` as 'the dataset path honours it'; the inline path is mid-handoff, not unread."
         },
         "dataset": {
           "status": "live",
           "verifiedAt": "2026-08-03",
-          "evidence": "objectui @91757a7: packages/plugin-dashboard/src/DatasetWidget.tsx:160 (dataset name → queryDataset)",
+          "evidence": "ui/packages/plugin-dashboard/src/DatasetWidget.tsx:620 (dataset name → queryDataset)",
           "note": "ADR-0021 binding — the semantic-layer dataset the widget selects from."
         },
         "dimensions": {
           "status": "live",
           "verifiedAt": "2026-08-03",
-          "evidence": "objectui @91757a7: packages/plugin-dashboard/src/DatasetWidget.tsx:161, :170-175 (also decides metric vs matrix shape), :267 (posted selection)",
+          "evidence": "ui/packages/plugin-dashboard/src/DatasetWidget.tsx (:161 at objectui @91757a7), :170-175 (also decides metric vs matrix shape), :267 (posted selection)",
           "note": "ADR-0021 dimension selection by name."
         },
         "values": {
           "status": "live",
           "verifiedAt": "2026-08-03",
-          "evidence": "objectui @91757a7: packages/plugin-dashboard/src/DatasetWidget.tsx:162 (measure names → DatasetSelection.measures)",
+          "evidence": "ui/packages/plugin-dashboard/src/DatasetWidget.tsx:622 (measure names → DatasetSelection.measures)",
           "note": "ADR-0021 measure selection by name. Single-series chart types (packages/spec/src/ui/dashboard.zod.ts, the dimensioned arm of checkDashboardWidgetChartMeasureArity; moved out of spec source, #23434): in objectui @89cad75d5570 packages/plugin-charts/src/AdvancedChartImpl.tsx#AdvancedChartImplInner the `pie` / `donut`, `funnel`, `treemap` and `sankey` arms each bind `series[0]?.dataKey` and read no other series; `radar` draws every series and `scatter` refuses a second series on the chart."
         },
         "layout": {
           "status": "live",
           "verifiedAt": "2026-08-03",
-          "evidence": "objectui @91757a7: packages/plugin-dashboard/src/DashboardRenderer.tsx:210-212 — column-count inference, and :423 the effective grid span with an auto-flow fallback when absent; objectui: packages/plugin-dashboard/src/DashboardGridLayout.tsx",
+          "evidence": "ui/packages/plugin-dashboard/src/DashboardRenderer.tsx:369-371 — column-count inference, and :703 the effective grid span with an auto-flow fallback when absent; ui/packages/plugin-dashboard/src/DashboardGridLayout.tsx",
           "note": "grid position; absence means auto-place, which is the Studio designer's default path."
         },
         "options": {
           "status": "live",
           "verifiedAt": "2026-08-03",
-          "evidence": "objectui @91757a7: packages/plugin-dashboard/src/DashboardRenderer.tsx:439 — spread into every component schema; objectui: packages/plugin-dashboard/src/DatasetWidget.tsx:190-191 — declared query keys lowered into the DatasetSelection",
+          "evidence": "ui/packages/plugin-dashboard/src/DashboardRenderer.tsx:755 — spread into every component schema; ui/packages/plugin-dashboard/src/DatasetWidget.tsx:714-715 — declared query keys lowered into the DatasetSelection",
           "note": "the renderer-extras bag; its four DECLARED keys (dateGranularity / sortBy / sortOrder / limit, framework#3588) reach the analytics query, the rest pass through to the renderer. The #20960 census (packages/spec/src/ui/dashboard.zod.ts; moved out of spec source, #23434): on the dataset-bound path objectui main @5262f7dd packages/plugin-dashboard/src/DatasetWidget.tsx#DatasetWidget reads the declared query keys (`dateGranularity`, `sortBy`, `sortOrder`, `limit`) and the metric tile's `description` (#resolvedSubCaption) and nothing else of the bag; none of the keys this repo's examples wrote (`format`, `currency`, `color`, `suffix`, `showLegend`, `horizontal`, `showDataLabels`) is read there, only the legacy inline arm spreads the bag, and each was removed from its producer."
         },
         "filterBindings": {
           "status": "live",
           "verifiedAt": "2026-08-28",
-          "evidence": "objectui @91757a7: packages/core/src/utils/dashboard-filters.ts:343 (resolveBoundField), :380-386 (explicit binding honoured, unbound reported); framework: packages/lint/src/validate-widget-bindings.ts#effectiveFilterField",
+          "evidence": "ui/packages/core/src/utils/dashboard-filters.ts:697 (resolveBoundField), :734-740 (explicit binding honoured, unbound reported); framework: packages/lint/src/validate-widget-bindings.ts#effectiveFilterField",
           "note": "per-widget binding of a dashboard-level filter to one of this widget's fields, or `false` to opt out (framework#2501). 2026-08-28: RE-ANCHORED (commit 8f10a79f7) and REPOINTED on the framework leg — `:280` had rotted onto the closing brace of `dashboardFilterDefs`; the reader is ten lines below it in `effectiveFilterField`, where a string re-targets, `false` opts out, and both win over the legacy `targetWidgets` allow-list. Re-closed by hand against 8cb96ec41."
         },
         "suppressWarnings": {

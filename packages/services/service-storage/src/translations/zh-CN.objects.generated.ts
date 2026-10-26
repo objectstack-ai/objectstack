@@ -82,6 +82,14 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "引用方字段",
         help: "所属记录上保存该文件 ID 的字段名"
       },
+      released_ref_object: {
+        label: "释放来源对象",
+        help: "最后拥有该文件、并已将其释放的记录所属对象的短名称"
+      },
+      released_ref_id: {
+        label: "释放来源记录",
+        help: "最后拥有该文件、并已将其释放的记录的主键"
+      },
       metadata: {
         label: "元数据(JSON)"
       },

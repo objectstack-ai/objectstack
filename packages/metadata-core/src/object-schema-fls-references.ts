@@ -732,6 +732,9 @@ export const OBJECT_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     managedBy: keep, ownership: keep, systemFields: keep, datasource: keep, access: keep,
     requiredPermissions: keep, fileAccessDelegate: keep, editMode: keep, enable: keep,
     sharingModel: keep, externalSharingModel: keep, protection: keep,
+    // [#25760] The per-object sharing opt-ins (`sharing.controlledByParent.ownerMayEdit`,
+    // ADR-0055 §3 amendment): a block of booleans that names no field.
+    sharing: keep,
     // [#22386] Read attachments: a block name and its leaf keys name what a
     // service attaches to a served row, never a field — the spec refuses a
     // block that repeats a declared field name — so nothing here can be denied.

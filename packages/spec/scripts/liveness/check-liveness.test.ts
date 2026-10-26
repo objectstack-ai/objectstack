@@ -85,6 +85,14 @@ function setChildEvidence(root: string, type: string, prop: string, child: strin
   writeFileSync(file, `${JSON.stringify(ledger, null, 2)}\n`);
 }
 
+/** Rewrite one property's `producer` in a copied ledger. */
+function setProducer(root: string, type: string, prop: string, producer: string): void {
+  const file = path.join(root, `${type}.json`);
+  const ledger = JSON.parse(readFileSync(file, 'utf8'));
+  ledger.props[prop].producer = producer;
+  writeFileSync(file, `${JSON.stringify(ledger, null, 2)}\n`);
+}
+
 /** Rewrite one property's `status` in a copied ledger. */
 function setStatus(root: string, type: string, prop: string, status: string): void {
   const file = path.join(root, `${type}.json`);
@@ -158,14 +166,16 @@ describe('check:liveness — evidence pointers (#5623)', () => {
     }
   });
 
-  // THE BOUNDARY. Tightening the local case must not drag the ~101 cross-repo
+  // THE BOUNDARY. Tightening the local case must not drag the cross-repo
   // attributions in with it: those files are legitimately absent from this
   // checkout, and failing on them would make the gate unsatisfiable for every
-  // property whose consumer is the renderer or the closed cloud runtime.
+  // property whose consumer is the closed cloud runtime. (The renderer was the
+  // other such realm until it merged in as `ui/` — #25712 — and its marker now
+  // FAILS instead; see the retired-realm case below.)
   it('stays green when the missing path is attributed to ANOTHER repo', () => {
     const root = path.join(tmp, 'foreign');
     cpSync(LEDGERS, root, { recursive: true });
-    setEvidence(root, 'query', 'limit', 'objectui: packages/app-shell/src/no-such-file.tsx:12');
+    setEvidence(root, 'query', 'limit', 'ee: packages/ee-runtime/src/no-such-file.ts:12');
     setEvidence(root, 'query', 'offset', 'cloud: packages/ee-runtime/src/also-not-here.ts:9');
     // The closed cloud runtime is repo-ROOTED and still foreign — the shape that
     // would break first if the boundary were drawn on the path text alone.
@@ -227,10 +237,10 @@ describe('check:liveness — evidence pointers (#5623)', () => {
   it('never bounds a citation attributed to ANOTHER repo', () => {
     // Same boundary as the existence check: those files are absent here, so
     // every line in them would read as past EOF and the gate would become
-    // unsatisfiable for every renderer-side property.
+    // unsatisfiable for every cloud-side property.
     const root = path.join(tmp, 'foreign-line');
     cpSync(LEDGERS, root, { recursive: true });
-    setEvidence(root, 'query', 'limit', 'objectui: packages/app-shell/src/RecordDetailView.tsx:99999');
+    setEvidence(root, 'query', 'limit', 'cloud: packages/ee-runtime/src/publish-gate.ts:99999');
 
     const { status, output } = runGate(root);
     expect(status, output).toBe(0);
@@ -255,25 +265,70 @@ describe('check:liveness — evidence pointers (#5623)', () => {
     // the shape this regex documents — drop the line, rename it, or collapse it
     // to one number and this reds. A `path:NNN` citation written again gives this
     // case a population back; restore a floor with it.
+    //
+    // RESTORED 2026-10-26 (#25712) on that instruction: re-rooting the objectui
+    // pointers under `ui/` put `path:NNN` citations back into the local
+    // population, so the floor and the equality come back with it. The same
+    // standing instruction holds in reverse: when that population is converted
+    // to `#symbol` anchors and reaches zero again, delete the floor as #13043 did.
     const { status, output } = runGate(path.join(tmp, 'liveness'));
     expect(status, output).toBe(0);
     const line = output.split('\n').find((l) => l.startsWith('line citations:')) ?? '';
     const m = /line citations: (\d+) pointer\(s\) written .*?, (\d+) inside the cited file/.exec(line);
     expect(m, line).not.toBeNull();
+    expect(Number(m![1]), line).toBeGreaterThan(0);
+    expect(m![2], line).toBe(m![1]);
     expect(line).not.toContain('PAST EOF');
   });
 
   it('still fails a local path that shares a string with a foreign clause', () => {
     // A realm marker's scope ends at the clause boundary. If it did not, one
-    // `objectui:` anywhere in an entry would silence the whole entry — a
+    // `cloud:` anywhere in an entry would silence the whole entry — a
     // one-token opt-out of the gate.
     const root = path.join(tmp, 'mixed');
     cpSync(LEDGERS, root, { recursive: true });
-    setEvidence(root, 'query', 'limit', `objectui: packages/app-shell/src/x.tsx; ${ROTTED}:1345`);
+    setEvidence(root, 'query', 'limit', `cloud: packages/ee-runtime/src/x.ts; ${ROTTED}:1345`);
 
     const { status, output } = runGate(root);
     expect(status, output).toBe(1);
     expect(output).toContain(`query/limit → ${ROTTED}`);
+  });
+
+  // #25712 — objectui merged into this repo as `ui/` (#25677). Its realm marker
+  // is RETIRED: a path still attributed to it is neither counted foreign (it
+  // would never fail) nor resolved as local (both trees have `packages/core/`, so
+  // it could resolve against a file that never was the reader). The gate fails
+  // it on a list of its own, with the in-repo spelling as the remedy.
+  it('FAILS on a path attributed to the retired objectui realm, and prints its ui/ spelling', () => {
+    const root = path.join(tmp, 'retired-realm');
+    cpSync(LEDGERS, root, { recursive: true });
+    // `packages/core/src/index.ts` EXISTS in this repo — the shape that a
+    // local reading of the retired marker would wrongly pass.
+    setEvidence(root, 'query', 'limit', 'objectui @f8a9d0fb: packages/core/src/index.ts');
+
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(1);
+    expect(output).toMatch(/✗ 1 pointer\(s\) attributed to a retired realm/);
+    expect(output).toContain('query/limit → objectui: packages/core/src/index.ts (now ui/packages/core/src/index.ts)');
+    // Never read as a missing LOCAL file, and never counted foreign.
+    expect(output).not.toContain('cite a file that is missing from THIS repo');
+  });
+
+  it('FAILS on a retired-realm pointer in `producer`, and on a row of any status', () => {
+    // The realm no longer exists, so the attribution is wrong whatever the row
+    // says about liveness: a `dead` row's evidence is not resolved, but it is
+    // still read for a retired marker.
+    const root = path.join(tmp, 'retired-realm-dead');
+    cpSync(LEDGERS, root, { recursive: true });
+    setProducer(root, 'query', 'limit', 'objectui: packages/core/src/index.ts#nope');
+    setEvidence(root, 'query', 'offset', 'objectui: packages/core/src/index.ts');
+    setStatus(root, 'query', 'offset', 'dead');
+    moveCount(root, 'query', String(readRow(LEDGERS, 'query', 'offset').status), 'dead');
+
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(1);
+    expect(output).toContain('query/limit [producer] → objectui: packages/core/src/index.ts (now ui/packages/core/src/index.ts)');
+    expect(output).toContain('query/offset → objectui: packages/core/src/index.ts (now ui/packages/core/src/index.ts)');
   });
 });
 
@@ -417,8 +472,9 @@ describe('check:liveness — the evidence-scan population (#13041)', () => {
     // case used to rely on `field.useGrouping` being `planned` in the shipped
     // ledger, and when that row went `live` the case kept passing while it drove
     // a `live` row — the one leg it exists for went unexercised, silently. The
-    // row's shipped `producer` and `evidenceScope` cite only objectui-attributed
-    // paths and trip nothing on a `planned` row, and `moveCount` keeps the copy's
+    // row's shipped `producer` cites only `ui/` paths that resolve (they were
+    // objectui-attributed until #25712), so it trips nothing on a `planned` row,
+    // and `moveCount` keeps the copy's
     // count shard in step with the flip, so the pointer written below is still
     // the run's only cause — and the rot is the plainest kind, the one the
     // existence check has caught for `live` entries since #5623.
@@ -884,7 +940,7 @@ describe('check:liveness — the evidence summary line (#5623)', () => {
   it('reports foreign attributions separately and never as missing', () => {
     const { output } = runGate();
     const line = summaryLine(output);
-    expect(line).toMatch(/; \d+ attributed to another repo \(objectui \/ cloud — not resolvable here\)\./);
+    expect(line).toMatch(/; \d+ attributed to another repo \(cloud \/ ee — not resolvable here\)\./);
   });
 });
 
@@ -959,8 +1015,8 @@ describe('check:liveness — an unrecognized ledger `status` (#13083)', () => {
     // evidence-scan finding can be confused for it. The gate scans `evidence`
     // only for a status in `EVIDENCE_SCANNED_STATUSES`, which `planed` is not,
     // and it resolves `producer` at any status, but every path this row's
-    // `producer` cites is objectui-attributed, so none of them is resolved
-    // against this checkout.
+    // `producer` cites is a `ui/` path that resolves, with every anchor present
+    // (objectui-attributed until #25712), so none of them trips anything.
     setStatus(root, 'field', 'useGrouping', 'planed');
     return root;
   }

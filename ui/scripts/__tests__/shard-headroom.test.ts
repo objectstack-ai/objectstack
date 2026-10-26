@@ -2,10 +2,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parse as parseYaml } from 'yaml';
 
 // Plain-JS CI helper; its types are INFERRED from the .mjs source by
 // `tsconfig.scripts.json` (`allowJs`), so no `@ts-expect-error` here.
 import { EXIT_OK, EXIT_USAGE, headroom, main, render, shardNames } from '../shard-headroom.mjs';
+import { UI_COVERAGE, rootWorkflow } from './helpers/root-ci';
 
 /**
  * The report-only headroom reading of the two test aggregators (objectui#12208,
@@ -92,12 +94,36 @@ describe('⛔ not a gate', () => {
   });
 });
 
-// `ci.yml wires it as a reading of the right matrix and the right cap` retired
-// with objectstack#25712. It held the headroom step's `--job`, `--shards` and
-// `--cap-minutes` to the two objectui ci.yml aggregators that ran it,
-// `test-aggregate` (over `test`) and `coverage-report` (over `test-coverage`),
-// and that file runs nowhere under the monorepo. Both are row 7 of the
-// objectstack#25697 workflow roster: `Test (the shard aggregate)`, "dropped
-// until cutover", and `Test (coverage shard n/8) · Test (coverage)`, "kept,
-// follow-up port". No root job runs this reading until one of them is ported;
-// the port brings the wiring pin back against its job (`helpers/root-ci.ts`).
+// `ci.yml wires it as a reading of the right matrix and the right cap` held the
+// headroom step's `--job`, `--shards` and `--cap-minutes` to the two objectui
+// ci.yml aggregators that ran it, and that file runs nowhere under the
+// monorepo (objectstack#25712). Both are row 7 of the objectstack#25697
+// workflow roster. The coverage half came back with the lane's nightly port
+// (objectstack#25924) and is pinned below against its root job. The other half,
+// `test-aggregate` over `test` (`Test (the shard aggregate)`, "dropped until
+// cutover"), has no root job, so no root job runs that reading until it is
+// ported; that port brings its wiring pin back the same way.
+describe('ui-coverage-nightly.yml wires it as a reading of the right matrix and the right cap', () => {
+  interface Step { name?: string; run?: unknown; if?: string; 'continue-on-error'?: boolean }
+  interface Job { name?: string; 'timeout-minutes'?: number; steps?: Step[]; strategy?: { matrix?: { shard?: unknown[] } } }
+  const workflow = parseYaml(rootWorkflow(UI_COVERAGE.file)) as { jobs: Record<string, Job> };
+
+  it(`${UI_COVERAGE.report} reads ${UI_COVERAGE.shards}: its job name, its width and its timeout-minutes`, () => {
+    const steps = (workflow.jobs[UI_COVERAGE.report]?.steps ?? []).filter(
+      (s) => typeof s.run === 'string' && s.run.includes('scripts/shard-headroom.mjs'),
+    );
+    expect(steps, `${UI_COVERAGE.report} must run the headroom reading exactly once`).toHaveLength(1);
+    const [step] = steps;
+    const run = step.run as string;
+    const target = workflow.jobs[UI_COVERAGE.shards];
+    const width = (target.strategy?.matrix?.shard ?? []).length;
+    expect(width, `${UI_COVERAGE.shards} must declare a shard matrix`).toBeGreaterThan(0);
+    expect(run).toContain(`--job '${String(target.name).replace('${{ matrix.shard }}', '{n}')}'`);
+    expect(run).toContain(`--shards ${width} `);
+    expect(run).toContain(`--cap-minutes ${target['timeout-minutes']} `);
+    // ⛔ Not a gate: it runs whatever happened above it, and nothing it
+    // does can change the aggregator's conclusion.
+    expect(step.if).toBe('always()');
+    expect(step['continue-on-error']).toBe(true);
+  });
+});

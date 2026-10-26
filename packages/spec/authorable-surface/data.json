@@ -687,6 +687,7 @@
     "data/Object:publicSharing",
     "data/Object:requiredPermissions",
     "data/Object:searchableFields",
+    "data/Object:sharing",
     "data/Object:sharingModel",
     "data/Object:stageField",
     "data/Object:systemFields",

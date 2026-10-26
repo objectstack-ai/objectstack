@@ -58,7 +58,7 @@
       "children": {
         "label": {
           "status": "live",
-          "evidence": "objectui @63d00da: packages/fields/src/index.tsx#SelectCellRenderer",
+          "evidence": "ui/packages/fields/src/index.tsx#SelectCellRenderer",
           "verifiedAt": "2026-10-16",
           "note": "The badge text of a select cell (`option?.label`), and every select / radio control's item label."
         },
@@ -70,13 +70,13 @@
         },
         "description": {
           "status": "live",
-          "evidence": "objectui @63d00da: packages/fields/src/widgets/LookupField.tsx#LookupField",
+          "evidence": "ui/packages/fields/src/widgets/LookupField.tsx#LookupField",
           "verifiedAt": "2026-10-16",
           "note": "Lookup option search matches it beside the label (objectui#6153)."
         },
         "color": {
           "status": "live",
-          "evidence": "objectui @63d00da: packages/fields/src/index.tsx#SelectCellRenderer",
+          "evidence": "ui/packages/fields/src/index.tsx#SelectCellRenderer",
           "verifiedAt": "2026-10-16",
           "note": "The badge / dot colour of a select cell (`option?.color`)."
         },
@@ -141,8 +141,8 @@
     "dueLike": {
       "status": "live",
       "verifiedAt": "2026-10-09",
-      "evidenceScope": "cross-repo",
-      "evidence": "objectui @55e90fd: packages/fields/src/index.tsx#resolveDueLike (`declared === true` on the cell's field, read by both the date and the datetime cell renderer: the relative overdue wording and the overdue colour once the date has passed); objectui @55e90fd: packages/plugin-detail/src/fieldEnrichment.ts#ENRICHED_FIELD_METADATA_KEYS (copies the object-schema field's `dueLike` onto the detail field, so the record detail sections hand it to that cell). The same two reads are present at the `.objectui-sha` pin f0268ad78",
+      "evidenceScope": "in-repo",
+      "evidence": "ui/packages/fields/src/index.tsx#resolveDueLike (`declared === true` on the cell's field, read by both the date and the datetime cell renderer: the relative overdue wording and the overdue colour once the date has passed); ui/packages/plugin-detail/src/fieldEnrichment.ts#ENRICHED_FIELD_METADATA_KEYS (copies the object-schema field's `dueLike` onto the detail field, so the record detail sections hand it to that cell). The same two reads are present at the `.objectui-sha` pin f0268ad78",
       "note": "Deadline semantic, `date` / `datetime` only (DEADLINE_FIELD_TYPES; the superRefine refuses it on every other type). Declared by #22227 as the protocol half of objectui#11815's maintainer ruling D (declared-only overdue). LIVE on the detail surfaces today: an authored TRUE paints the overdue affordance there even where the field name matches no pattern. PARTIAL until objectui#11815 (Blocked-by #22227) lands: objectui's grid copy set does not carry the key yet, and objectui still ALSO infers due-likeness from the field name (`DUE_LIKE_FIELD_NAME`), which that card retires — after it, absent means not a deadline everywhere, as the key's describe states. Display only: nothing on the write path reads it."
     },
     "settledWhen": {
@@ -190,9 +190,9 @@
     "widget": {
       "status": "live",
       "verifiedAt": "2026-08-09",
-      "evidenceScope": "cross-repo",
-      "evidence": "objectui @09987b68: packages/plugin-form/src/ObjectForm.tsx:585-590 — threads the per-field widget override into the renderer, naming permission-facet-link; objectui @09987b68: packages/components/src/renderers/form/form.tsx:230 — resolveWidgetType resolves widget || field.widget || type; objectui @09987b68: packages/plugin-detail/src/index.tsx:563 — ComponentRegistry.register('permission-facet-link', withFieldCarrier(PermissionFacetLink), { namespace: 'field' }); objectui @09987b68: packages/fields/src/index.tsx:2203-2205 — fieldWidgetMap carries object-ref / filter-condition / recipient-picker",
-      "note": "objectui generic form widget override. ObjectForm (packages/plugin-form/src/ObjectForm.tsx) threads `field.widget` into the renderer; form.tsx resolves `widget || type` and looks it up as `field:<widget>` in the ComponentRegistry (renderFieldComponent). Used to render pick-not-type controls for sys_sharing_rule (object-ref / filter-condition / recipient-picker) and sys_permission_set (permission-facet-link). Degrades to the `type` renderer when the widget is unregistered. CORRECTED 2026-08-09 (#6773): this note named `capability-multiselect` as sys_permission_set's widget, and that half was never true. No producer stamped it — ADR-0056 P1 stamps `permission-facet-link` on all six facets through the single `applyFieldWidgetOverrides` choke point (objectui packages/data-objectstack/src/index.ts:2492-2501) — and `field:capability-multiselect` was registered only by the docs-site-only `registerFields()`, never by the live `registerAllFields()` walk over `fieldWidgetMap`, so authoring it always fell through to the `type` renderer. objectui#3308 / PR objectui#3793 then retired the name outright (ADR-0049 enforce-or-remove); it is absent from `packages/*/src` at pin `09987b68` apart from tombstone comments and a retirement pin test. The other three names were re-checked at the same pin and are still in `fieldWidgetMap`. The verdict itself is unchanged and was never at risk — `widget` is live on the sys_sharing_rule trio alone; what was wrong was one worked example, i.e. false evidence in the base the next enforce-or-remove audit reads (the #5175 lesson)."
+      "evidenceScope": "in-repo",
+      "evidence": "ui/packages/plugin-form/src/ObjectForm.tsx (:585-590 at objectui @09987b68) — threads the per-field widget override into the renderer, naming permission-facet-link; ui/packages/components/src/renderers/form/form.tsx (:230 at objectui @09987b68) — resolveWidgetType resolves widget || field.widget || type; ui/packages/fields/src/index.tsx (:2203-2205 at objectui @09987b68) — fieldWidgetMap carries object-ref / filter-condition / recipient-picker",
+      "note": "objectui generic form widget override. ObjectForm (packages/plugin-form/src/ObjectForm.tsx) threads `field.widget` into the renderer; form.tsx resolves `widget || type` and looks it up as `field:<widget>` in the ComponentRegistry (renderFieldComponent). Used to render pick-not-type controls for sys_sharing_rule (object-ref / filter-condition / recipient-picker) and sys_permission_set (permission-facet-link). Degrades to the `type` renderer when the widget is unregistered. CORRECTED 2026-08-09 (#6773): this note named `capability-multiselect` as sys_permission_set's widget, and that half was never true. No producer stamped it — ADR-0056 P1 stamps `permission-facet-link` on all six facets through the single `applyFieldWidgetOverrides` choke point (objectui packages/data-objectstack/src/index.ts:2492-2501) — and `field:capability-multiselect` was registered only by the docs-site-only `registerFields()`, never by the live `registerAllFields()` walk over `fieldWidgetMap`, so authoring it always fell through to the `type` renderer. objectui#3308 / PR objectui#3793 then retired the name outright (ADR-0049 enforce-or-remove); it is absent from `packages/*/src` at pin `09987b68` apart from tombstone comments and a retirement pin test. The other three names were re-checked at the same pin and are still in `fieldWidgetMap`. The verdict itself is unchanged and was never at risk — `widget` is live on the sys_sharing_rule trio alone; what was wrong was one worked example, i.e. false evidence in the base the next enforce-or-remove audit reads (the #5175 lesson). 2026-10-26 (#25712, objectui merged into this repo as ui/): the `plugin-detail/src/index.tsx:563` clause (the `permission-facet-link` widget registration) was dropped, not repointed: objectui#12998 removed that widget, and the key-mention check found the file no longer names `widget` once the path became in-repo. The other three readers keep their @09987b68 reading."
     },
     "requiredPermissions": {
       "status": "live",
@@ -265,9 +265,9 @@
     "useGrouping": {
       "status": "live",
       "verifiedAt": "2026-09-30",
-      "evidenceScope": "cross-repo",
-      "evidence": "objectui: packages/core/src/utils/number-display.ts#shouldGroupDisplayNumber makes the one grouping decision, and an authored boolean `useGrouping` answers it first, in either direction, so only an ABSENT key reaches the interim heuristic, currency ⇒ grouped, else a declared `scale: 0` ⇒ ungrouped; objectui: packages/core/src/utils/number-display.ts#formatDisplayNumber takes the field's `useGrouping`, asks that decision and spells the answer for `Intl.NumberFormat`, an ungrouped answer as `useGrouping: false` and an authored `true` as `useGrouping: true`, the 1:1 mapping this key declares; objectui: packages/fields/src/index.tsx#NumberCellRenderer reads `field.useGrouping`, booleans only, and hands it to formatDisplayNumber — all three read at objectui @db11afd4967c, which is this repo's `.objectui-sha` pin, so the reader is the one inside the console this repo builds against rather than on objectui main",
-      "producer": "objectui: packages/plugin-grid/src/ObjectGrid.tsx#generateColumns copies the object definition's `useGrouping` onto the column's field metadata beside `scale` on each of its three column paths; objectui: packages/plugin-detail/src/fieldEnrichment.ts#ENRICHED_FIELD_METADATA_KEYS lists it among the object-metadata keys copied onto a detail-view field; objectui: packages/plugin-detail/src/RecordDetailPanel.tsx#buildRecordDetailFields, packages/plugin-detail/src/RelatedList.tsx#effectiveColumns and packages/plugin-list/src/ObjectGallery.tsx#ObjectGallery relay it beside `scale` the same way — seven hand-copy sites, read at objectui @db11afd4967c, the pin. They are the producer half because the cell reads the field metadata these sites build, never the object definition: a site that dropped the key would leave an authored `false` year reading `2,026` on that surface",
+      "evidenceScope": "in-repo",
+      "evidence": "ui/packages/core/src/utils/number-display.ts#shouldGroupDisplayNumber makes the one grouping decision, and an authored boolean `useGrouping` answers it first, in either direction, so only an ABSENT key reaches the interim heuristic, currency ⇒ grouped, else a declared `scale: 0` ⇒ ungrouped; ui/packages/core/src/utils/number-display.ts#formatDisplayNumber takes the field's `useGrouping`, asks that decision and spells the answer for `Intl.NumberFormat`, an ungrouped answer as `useGrouping: false` and an authored `true` as `useGrouping: true`, the 1:1 mapping this key declares; ui/packages/fields/src/index.tsx#NumberCellRenderer reads `field.useGrouping`, booleans only, and hands it to formatDisplayNumber — all three read at objectui @db11afd4967c, which is this repo's `.objectui-sha` pin, so the reader is the one inside the console this repo builds against rather than on objectui main",
+      "producer": "ui/packages/plugin-grid/src/ObjectGrid.tsx#generateColumns copies the object definition's `useGrouping` onto the column's field metadata beside `scale` on each of its three column paths; ui/packages/plugin-detail/src/fieldEnrichment.ts#ENRICHED_FIELD_METADATA_KEYS lists it among the object-metadata keys copied onto a detail-view field; ui/packages/plugin-detail/src/RecordDetailPanel.tsx#buildRecordDetailFields, ui/packages/plugin-detail/src/RelatedList.tsx#effectiveColumns and ui/packages/plugin-list/src/ObjectGallery.tsx#ObjectGallery relay it beside `scale` the same way — seven hand-copy sites, read at objectui @db11afd4967c, the pin. They are the producer half because the cell reads the field metadata these sites build, never the object definition: a site that dropped the key would leave an authored `false` year reading `2,026` on that surface",
       "note": "[#7768] Declared 2026-08-11 as Option A of that card's fork, the narrowest shape with measured pull. Maps 1:1 to `Intl.NumberFormat`'s `useGrouping`. FLIPPED `planned` → `live` 2026-09-30, on the condition this row's earlier note set, that the objectui consumer actually read the key: the renderer half landed as objectui ae582b70a, and objectui's compare `ae582b70a...db11afd4967c` answers ahead 21, behind 0, so it is inside the console this repo pins — measured at the pin, not on objectui main. An authored boolean decides in either direction. An ABSENT key is still the renderer's call: the interim heuristic objectui#4033 introduced stays for exactly that case, and it reads the declared `scale` alone, never `min` or `max` — a declared `scale: 0` with no currency is a discrete integer, a year or an ordinal, and renders ungrouped, while any other number keeps grouping. Never `authorWarn`'d, so the flip drops no warning, and an author who set the key while it was `planned` re-authors nothing. CAVEAT — display only, and only on the surfaces whose field metadata carries the key to the cell: the seven relay sites `producer` names."
     },
     "reference": {
@@ -334,8 +334,8 @@
     "rows": {
       "status": "live",
       "verifiedAt": "2026-08-31",
-      "evidenceScope": "cross-repo",
-      "evidence": "objectui: packages/fields/src/widgets/RichTextField.tsx:283 (`const rows = richField?.rows || 8;`, applied at :321 as `rows={rows}` on the inline editor surface — the one widget behind the `markdown`/`html`/`richtext` registry keys, objectui#5498); objectui: packages/fields/src/widgets/TextAreaField.tsx:94 (`const rows = textareaField?.rows || 4;`, applied at :126) — the objectui#6140 measurement table, re-confirmed 2026-08-31 on a local objectui checkout (e3d117a)",
+      "evidenceScope": "in-repo",
+      "evidence": "ui/packages/fields/src/widgets/RichTextField.tsx (:283 in objectui, commit not pinned) (`const rows = richField?.rows || 8;`, applied at :321 as `rows={rows}` on the inline editor surface — the one widget behind the `markdown`/`html`/`richtext` registry keys, objectui#5498); ui/packages/fields/src/widgets/TextAreaField.tsx (:94 in objectui, commit not pinned) (`const rows = textareaField?.rows || 4;`, applied at :126) — the objectui#6140 measurement table, re-confirmed 2026-08-31 on a local objectui checkout (e3d117a)",
       "note": "Inline multiline-editor height (the HTML textarea rows attribute; fullscreen/dialog surfaces size themselves and ignore it). Declared 2026-08-31 (objectui#6140, maintainer ruling 2026-08-25 Option A): the consumers shipped first, reached through an `as any` on the metadata carrier — the declaration was the missing half, aligning the TextareaFieldMetadata precedent. Authorable only on the multiline editor types (textarea/markdown/html/richtext — MULTILINE_EDITOR_FIELD_TYPES superRefine in field.zod.ts)."
     },
     "displayField": {
@@ -374,19 +374,19 @@
     },
     "searchable": {
       "status": "live",
-      "evidence": "objectui: packages/plugin-dashboard/src/WidgetConfigPanel.tsx:458",
+      "evidence": "ui/packages/plugin-dashboard/src/WidgetConfigPanel.tsx (:458 in objectui, commit not pinned)",
       "note": "LIVE via objectui renderer — the 2026-06 audit mis-classified as dead (renderer side not re-verified). Corrected after checking ../objectui."
     },
     "externalId": {
       "status": "live",
-      "evidence": "objectui: apps/console/src/utils/metadataConverters.ts:125 reads field.externalId",
-      "note": "LIVE via objectui renderer — the 2026-06 audit mis-classified as dead (renderer side not re-verified). Corrected after checking ../objectui."
+      "evidence": "objectui console `metadataConverters.ts` (:125, commit not pinned) read field.externalId; that module was deleted in objectui dc14bcb for having zero importers, so no reader is cited here — re-verification owed (#25712 follow-up F23)",
+      "note": "LIVE via objectui renderer — the 2026-06 audit mis-classified as dead (renderer side not re-verified). Corrected after checking ../objectui. 2026-10-26 (#25712, objectui merged into this repo as ui/): the only cited reader, objectui console `metadataConverters.ts`, was deleted in objectui dc14bcb (\"zero importers\"), so the pointer is now prose. Follow-up F23 on #25712 owns finding the current reader or re-classifying."
     },
     "currencyConfig": {
       "status": "live",
       "verifiedAt": "2026-09-27",
-      "evidenceScope": "cross-repo",
-      "evidence": "objectui: packages/i18n/src/currency.ts:60 reads field.currencyConfig.defaultCurrency ONLY when currencyConfig.currencyMode is 'fixed' — the second step of resolveFieldCurrency's precedence chain; a 'dynamic' config, or one naming no mode, skips it for the tenant default localization.currency; objectui: packages/fields/src/widgets/CurrencyField.tsx:55 calls resolveFieldCurrency and applies the resolved code at :91 through formatAmount, which passes it to Intl.NumberFormat via formatDisplayNumber — measured objectui @25c7d584",
+      "evidenceScope": "in-repo",
+      "evidence": "ui/packages/i18n/src/currency.ts:60 reads field.currencyConfig.defaultCurrency ONLY when currencyConfig.currencyMode is 'fixed' — the second step of resolveFieldCurrency's precedence chain; a 'dynamic' config, or one naming no mode, skips it for the tenant default localization.currency; ui/packages/fields/src/widgets/CurrencyField.tsx:55 calls resolveFieldCurrency and applies the resolved code at :91 through formatAmount, which passes it to Intl.NumberFormat via formatDisplayNumber — measured objectui @25c7d584",
       "note": "RE-CITED 2026-09-27 (#20126): since objectui#10461 the reader takes defaultCurrency only under currencyMode 'fixed', and the chain no longer cites the date/datetime-semantics ADR, which never names currency; line pointers moved with it (currency.ts :32 → :60, CurrencyField.tsx :45/:51 → :55/:91). Verdict unchanged: LIVE. RE-CITED 2026-08-10 (#7133/#7142): the old pointer 'packages/fields/src/index.tsx:469' now lands in formatRelativeDays, a date-phrase helper with no currency involvement — the resolver moved to @object-ui/i18n and packages/fields/src/currency.ts:14 only re-exports it, which is why the old line drifted onto unrelated code rather than disappearing. Verdict unchanged: LIVE, and now cited at both the reader that consumes the key and the widget that applies the resolved currency. The removed `currencyConfig.precision` (#19992; packages/spec/src/data/field.zod.ts; moved out of spec source, #23434): the widget's one width is the currency's ISO 4217 minor unit, objectui @b9814b334 packages/fields/src/widgets/CurrencyField.tsx#CurrencyField through objectui @b9814b334 packages/fields/src/widgets/number-format.ts#currencyDisplayWidth over objectui @b9814b334 packages/fields/src/currency.ts#currencyFractionDigits, and no objectui code reads `currencyConfig.precision`; re-read 2026-10-15, first cited sha-less (the source then named `currencyFractionDigits(currency)` as the widget's own line)."
     },
     "dimensions": {
@@ -395,14 +395,14 @@
     },
     "inlineTitle": {
       "status": "live",
-      "evidence": "objectui: packages/app-shell/src/providers/MetadataProvider.tsx + plugin-form/deriveMasterDetail.ts",
+      "evidence": "ui/packages/app-shell/src/providers/MetadataProvider.tsx + plugin-form/deriveMasterDetail.ts",
       "note": "LIVE via objectui renderer — the 2026-06 audit mis-classified as dead (renderer side not re-verified). Corrected after checking ../objectui."
     },
     "inlineColumns": {
       "status": "live",
       "verifiedAt": "2026-08-17",
-      "evidenceScope": "cross-repo",
-      "evidence": "objectui: packages/app-shell/src/providers/MetadataProvider.tsx (attachInlineSubforms passes d.inlineColumns as the subform's columns) → plugin-form/MasterDetailForm.tsx (hydrateColumns) → fields/GridField.tsx (the name-keyed GridColumn renderer, objectui#3951)",
+      "evidenceScope": "in-repo",
+      "evidence": "ui/packages/app-shell/src/providers/MetadataProvider.tsx (attachInlineSubforms passes d.inlineColumns as the subform's columns) → plugin-form/MasterDetailForm.tsx (hydrateColumns) → fields/GridField.tsx (the name-keyed GridColumn renderer, objectui#3951)",
       "note": "LIVE via objectui renderer. #9227 closed the element shape (strict, name-keyed InlineGridColumnSchema): the child keys below are exactly the GridColumn keys the widget has a live read for, measured against objectui main 2026-08-17. NOTE the .objectui-sha pin (665661ab) predates objectui#3951 — the PINNED console still reads the retired field spelling; the drilled evidence below cites objectui main, which is the contract this schema mirrors. Renderer read points moved out of spec source (#23434). Column-type hydration (packages/spec/src/stack.zod.ts HYDRATED_INLINE_COLUMN_TYPE; packages/spec/src/inline-grid-column-carriers.test.ts): objectui @db11afd4967c packages/plugin-form/src/deriveMasterDetail.ts#hydrateColumns leaves a column that declares a `type` alone and otherwise sets `type: fieldTypeToColumnType(childField.type)`; objectui @db11afd4967c packages/plugin-form/src/deriveMasterDetail.ts#fieldTypeToColumnType maps each of the column schema's nine types' namesake field type to that same column type, and its only `currency` arm is the `currency` field type. Line-position field (packages/spec/src/data/inline-grid-sort-fields.ts INLINE_GRID_SORT_FIELDS): objectui @89cad75d5570 packages/plugin-form/src/deriveMasterDetail.ts#SORT_FIELD_NAMES, the same six names in the same order. Per-row expand form (packages/spec/src/data/inline-grid-columns.ts deriveInlineRowFormFields and its test): objectui @31971ff1e28f packages/plugin-form/src/deriveMasterDetail.ts#deriveFormFields is the derivation rule, and the first two test fixtures are its own cases in objectui @31971ff1e28f packages/plugin-form/src/deriveMasterDetail.test.ts (describe \"deriveFormFields (per-row expand form)\"); the offer condition (isInlineRowFormOffered) is the one objectui @31971ff1e28f packages/plugin-form/src/MasterDetailForm.tsx#MasterDetailLines applies — `inlineMode === 'form'`, or more `formFields` than `columns`.",
       "children": {
         "name": {
@@ -489,35 +489,35 @@
     },
     "inlineAmountField": {
       "status": "live",
-      "evidence": "objectui: packages/app-shell/src/providers/MetadataProvider.tsx",
+      "evidence": "ui/packages/app-shell/src/providers/MetadataProvider.tsx",
       "note": "LIVE via objectui renderer — the 2026-06 audit mis-classified as dead (renderer side not re-verified). Corrected after checking ../objectui."
     },
     "relatedList": {
       "status": "live",
       "verifiedAt": "2026-08-10",
-      "evidenceScope": "cross-repo",
-      "evidence": "objectui: packages/app-shell/src/utils/deriveRelatedLists.ts:131 skips the FK entirely when relatedList is false and :138 marks the derived list isPrimary when it is 'primary'; objectui: packages/app-shell/src/views/RecordDetailView.tsx:1037 calls deriveRelatedLists and renders what it returns, consuming the derived structure rather than the key — measured objectui @11c1e71e",
+      "evidenceScope": "in-repo",
+      "evidence": "ui/packages/app-shell/src/utils/deriveRelatedLists.ts:295 skips the FK entirely when relatedList is false and :302 marks the derived list isPrimary when it is 'primary'; ui/packages/app-shell/src/views/RecordDetailView.tsx:1732 calls deriveRelatedLists and renders what it returns, consuming the derived structure rather than the key — measured objectui @11c1e71e",
       "note": "RE-CITED 2026-08-10 (#7133/#7142): the old split citation's RecordDetailView half went to prose — every `relatedList` occurrence in that file is now a comment (:1013, :1847, :1857, :1864). The working half is deriveRelatedLists, which is what branches on the value. RecordDetailView is kept, explicitly labelled as the consumer of the DERIVED list, so the next re-audit does not read its zero key-hits as rot a second time. Verdict unchanged: LIVE."
     },
     "relatedListTitle": {
       "status": "live",
       "verifiedAt": "2026-08-10",
-      "evidenceScope": "cross-repo",
-      "evidence": "objectui: packages/app-shell/src/utils/deriveRelatedLists.ts:140-141 uses relatedListTitle as the related-list title when it is a non-empty string, falling back to a label derived from the child object; objectui: packages/app-shell/src/views/RecordDetailView.tsx:1037 renders the derived list — measured objectui @11c1e71e",
+      "evidenceScope": "in-repo",
+      "evidence": "ui/packages/app-shell/src/utils/deriveRelatedLists.ts:306-307 uses relatedListTitle as the related-list title when it is a non-empty string, falling back to a label derived from the child object; ui/packages/app-shell/src/views/RecordDetailView.tsx:1732 renders the derived list — measured objectui @11c1e71e",
       "note": "RE-CITED 2026-08-10 (#7133/#7142): same repair as `relatedList` — the RecordDetailView half of the old split citation is comments only (:1847 describes the rule it no longer implements), while deriveRelatedLists is the reader that applies the value. Verdict unchanged: LIVE."
     },
     "relatedListColumns": {
       "status": "live",
       "verifiedAt": "2026-08-17",
-      "evidenceScope": "cross-repo",
-      "evidence": "objectui: packages/app-shell/src/utils/deriveRelatedLists.ts (columns override on the derived descriptor) → views/RecordDetailView.tsx → plugin-detail/RelatedList.tsx (normalizeColumn hydrates STRING entries: header from the child field label, type-aware cell via makeCell)",
+      "evidenceScope": "in-repo",
+      "evidence": "ui/packages/app-shell/src/utils/deriveRelatedLists.ts (columns override on the derived descriptor) → views/RecordDetailView.tsx → plugin-detail/RelatedList.tsx (normalizeColumn hydrates STRING entries: header from the child field label, type-aware cell via makeCell)",
       "note": "LIVE via objectui renderer. #9227 narrowed the elements to child FIELD-NAME STRINGS — the only authored form in-repo (three showcase objects) and the only form the renderer hydrates fully; the page-block sibling record:related_list.columns (ui/component.zod.ts) is the same strings-only shape. RE-CITED 2026-09-03 (#14166): the 2026-08-17 reading against objectui main had the data-table accessor resolving `accessorKey || name`; objectui#6963 retired the `name` alias, and at the `.objectui-sha` pin `67dadd602a3a` object entries span two vocabularies (RelatedList resolves identity via columnIdentity, canonical `field`; the data-table accessor resolves `accessorKey` only), so a spec-canonical {field} object renders BLANK cells — refused at parse instead. Verdict unchanged: LIVE."
     },
     "relatedListFilter": {
       "status": "live",
       "verifiedAt": "2026-09-20",
-      "evidenceScope": "cross-repo",
-      "evidence": "objectui: packages/app-shell/src/utils/deriveRelatedLists.ts#deriveRelatedLists:276 puts the authored value on the derived descriptor as `filter`, gated by the same file's #isDeclaredFilter predicate — the declared-vs-absent discrimination its relatedListTitle / relatedListColumns siblings do, with no alias accepted and no shape coerced; objectui: packages/app-shell/src/views/RecordDetailView.tsx#synthParts:2079 destructures that descriptor key as `declaredFilter` (:2041) and writes it onto the synthesized `record:related_list` node, the same `filter` slot the component-level input already lowers, so RelatedList AND-composes it with { [referenceField]: parentId } and the tab strip's count probe composes the same pair — measured objectui @53ded82bf7, which is this repo's `.objectui-sha` pin, so both pointers were read AT THE PIN this repo builds against rather than on objectui main",
+      "evidenceScope": "in-repo",
+      "evidence": "ui/packages/app-shell/src/utils/deriveRelatedLists.ts#deriveRelatedLists:319 puts the authored value on the derived descriptor as `filter`, gated by the same file's #isDeclaredFilter predicate — the declared-vs-absent discrimination its relatedListTitle / relatedListColumns siblings do, with no alias accepted and no shape coerced; ui/packages/app-shell/src/views/RecordDetailView.tsx#synthParts:3160 destructures that descriptor key as `declaredFilter` (:3121) and writes it onto the synthesized `record:related_list` node, the same `filter` slot the component-level input already lowers, so RelatedList AND-composes it with { [referenceField]: parentId } and the tab strip's count probe composes the same pair — measured objectui @53ded82bf7, which is this repo's `.objectui-sha` pin, so both pointers were read AT THE PIN this repo builds against rather than on objectui main",
       "note": "[#8704] Contract-first spec half (maintainer ruling 2026-08-15, 「接受全部建议。」 item 3): the declarative default filter the auto-derived related list AND-composes with { [referenceField]: parentId }, badge-count parity included — both clauses normative in the key's describe()/JSDoc and pinned in field.test.ts. Reuses FilterConditionSchema, so the #8793 bare-preset schema door judges it at parse (pinned at this position) and the engine FILTER doors (#8296 formula refusal etc.) judge the composed query at run time. Seeded `planned` + authorWarn per enforce-or-mark, the app.navigation runAction (#4848) shape rather than the useGrouping one, and that seeding wrote its own flip condition: 「Flip to `live` (and drop authorWarn) with a deriveRelatedLists/RecordDetailView evidence pointer when objectui#4664 lands.」 **FLIPPED `planned` → `live` 2026-09-20 (#19187), and the condition was re-measured rather than relayed**: objectui#4664 landed as objectui d796c8dde (objectui PR #6946, 2026-08-31) and `git merge-base --is-ancestor d796c8dde 53ded82bf7` exits 0, so the consumer is inside the console this repo pins — the #10068 discipline (read both pointers at the pin, never at objectui main) one row over. What the flip drops is not bookkeeping: the authorHint it carried told an author 「the auto-derived related list does not apply this filter yet」 about a key the pinned console applies, and `packages/lint`'s ledger-driven advisory repeated that sentence at every compile, steering authors off a working key. The sentence is recorded rather than deleted because it was TRUE from #8704 until the pin absorbed d796c8dde — a `planned` row falsifies by its consumer landing, which is the one direction no citation check can see (the pointer never rots; there was no pointer). The form hint's face today (packages/spec/src/data/field.form.ts; moved out of spec source, #23434): objectui @b9814b334 packages/app-shell/src/views/metadata-admin/SchemaForm.tsx#resolveFieldFace lands the `filter-condition` hint on `{ kind: 'raw-json', hint }`, past both structural fallbacks, because objectui @b9814b334 packages/app-shell/src/views/metadata-admin/widgets.tsx#WIDGETS registers no `filter-condition`; re-read 2026-10-15, first cited sha-less."
     },
     "trackHistory": {
