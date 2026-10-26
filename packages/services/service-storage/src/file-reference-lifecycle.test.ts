@@ -1257,7 +1257,7 @@ describe('a write references only a file its caller may read', () => {
     });
   });
 
-  it('a field\'s declared accept / maxSize are not judged against a file the caller may not read', async () => {
+  it('constraint verdicts do not run ahead of the read check', async () => {
     const engine = fakeEngine({
       files: [file({ mime_type: 'application/pdf', size: 10_000_000 })],
       registry: {

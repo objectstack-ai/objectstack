@@ -47,10 +47,9 @@ import { callerContext } from './attachment-access-hooks.js';
  * plugin binds to the door's verdict rather than restating it here. A file the
  * writer may not read is answered exactly as one the organization-scoped
  * lookup cannot see ({@link systemReadContext}): the value is kept as written,
- * nothing is claimed or copied, and its field's `accept` / `maxSize` are not
- * judged against it, so the write learns nothing about the file. System
- * writes and context-less programmatic calls carry no caller to ask, and
- * reference files as before.
+ * nothing is claimed or copied, and constraint verdicts do not run ahead of
+ * the read check. System writes and context-less programmatic calls carry no
+ * caller to ask, and reference files as before.
  *
  * ### The one write that cannot honour it, and is refused
  *
@@ -656,8 +655,8 @@ async function applyCopyOnClaim(
 
       // The file is real, this caller may read it, and it is about to be
       // referenced by this field, so its declared constraints bind now —
-      // before ownership, before any copy. [#25692] Never before the read
-      // verdict: the refusal names the file's size or type.
+      // before ownership, before any copy, and [#25692] never ahead of the
+      // read check above.
       assertFileConstraints(fieldDefOf(engine, object, field), field, row);
 
       // Unclaimed: the after-hook will claim it for this slot. Nothing to copy.
