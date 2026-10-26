@@ -177,9 +177,10 @@ describe('control: a value carrying markup characters, per face', () => {
     expect(body).toBe(
       "O'Brien (ob@acme.test) invited you to join R&D <Lab> on Acme as Member.\n\n" + `Accept: ${LINK}`,
     );
-    // `\s`: the space ICU puts before `AM` is a narrow no-break space in
-    // current releases and a plain one in older ones.
-    expect(expiry).toMatch(/^March 4, 2031 at 5:06:07\sAM UTC\.$/);
+    // The long date is ICU locale data, so it is computed with this Node's own `Intl`.
+    const instant = new Intl.DateTimeFormat('en-US', { dateStyle: 'long', timeStyle: 'long', timeZone: 'UTC' })
+      .format(new Date('2031-03-04T05:06:07.000Z'));
+    expect(expiry).toBe(`${instant}.`);
     expect(sent.subject).toBe("O'Brien invited you to R&D <Lab>");
     expect(rows[0].subject).toBe("O'Brien invited you to R&D <Lab>");
   });

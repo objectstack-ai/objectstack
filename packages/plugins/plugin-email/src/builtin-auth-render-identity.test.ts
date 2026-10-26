@@ -125,27 +125,27 @@ const RENDERED: Record<string, { subject: string; html: string; text: string }> 
   // from its expected string by hand, not copied from a run); the subject and
   // HTML pins are the row path's, unchanged.
   // [#25802] The four invitation rows gained the expiry sentence; their bodies
-  // are re-pinned from the registry render in that commit (every other row's
-  // bytes were unchanged by it, the UTC render included).
+  // are re-pinned from the registry render in that commit, with the formatted
+  // instant cut to EXPIRY_HOLE (every other row's bytes were unchanged by it).
   'auth.invitation@en-US': {
     subject: 'Grace <Hopper> invited you to Analytical & Engines',
-    html: '3257f890eae1ea9ab5aa15fd9462cc0af8398245c17d1fae7c881ab7e3318958',
-    text: '803d50c95e31d97c1cc5cd6f0f2fc3713e3a461de9d4c5479e11641346160c85',
+    html: '3e211033743dc60b2cdefc3ebc75496f92521e6928d39aa5a8b7f4ae939b6522',
+    text: '9ad810e17f17ec421a549070c88d8c41c99eb2018c0f3211ec5142c3a85a6120',
   },
   'auth.invitation@zh-CN': {
     subject: 'Grace <Hopper> 邀请您加入 Analytical & Engines',
-    html: '96c09860c09b3a76164c0c181a27663bc35424d8869c13711456a9c6605660a5',
-    text: '33b3161880d56360587262f876b2c498a90fdf41b1d816c7c50392a9aecdb756',
+    html: '0481419a8f4983cec604f915466ae22f263705945a93c1f389d591591f047044',
+    text: '847c2c5dca77944ec27125d8f24ce2c89a75fd0629edecd0193a72947f4b84fb',
   },
   'auth.invitation@ja-JP': {
     subject: 'Grace <Hopper> さんが Analytical & Engines に招待しています',
-    html: '73805dd36d6f274c1ea823b16fb3503607b5da266edf7a94af259f23b4344dbd',
-    text: 'efd6c6bccd941f2f90c6c112b760cff5473b0b5baaed46c788746b9d7d924b50',
+    html: 'faee1bc20d4b0e4d42bbf4ed0b3838e3c49c6d63f540a33d12f1d427aa3d0954',
+    text: '79fd55bb6aad81c1e6f59d8c4bd4d387827c4d6b988a4f2887f996da9aba9dd3',
   },
   'auth.invitation@es-ES': {
     subject: 'Grace <Hopper> te ha invitado a Analytical & Engines',
-    html: 'fa9c29ebe44c378fa5c46a0718194fb6f914ee645f0a720a3c7c6340d022b1b4',
-    text: '7ecdc33615b38d36bcac72447e1a2248df5aa37e5aad66969876bbe6a6f00b16',
+    html: '58f4b3f845eb870fc6cc494e8e4b95e102d988ba7e97cbc384267275fddc70ae',
+    text: 'fb576ed4a00198bd02ac3e54aa1d27239b2f1025562fa5be7a8da15ff3d78388',
   },
   // [#23343] Declared after the row path was deleted, so these four never had
   // a seeded row: they are pinned against their first registry render, in the
@@ -235,6 +235,9 @@ const RENDERED: Record<string, { subject: string; html: string; text: string }> 
   },
 };
 
+/** What the expiry instant is replaced with before a face is digested. */
+const EXPIRY_HOLE = '{{EXPIRES_AT_LONG}}';
+
 const sha256 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
 
 /** Boot the plugin over a real ObjectQL and hand back the `email` service it installs. */
@@ -267,7 +270,28 @@ describe('every built-in auth mail renders byte-identical from the registry', ()
     const rendered: Record<string, { subject: string; html: string; text: string }> = {};
     for (const tpl of BUILTIN_AUTH_TEMPLATES) {
       const r = await svc.renderTemplate({ template: tpl.name, locale: tpl.locale, data: DATA, timezone: 'UTC' });
-      rendered[`${tpl.name}@${tpl.locale}`] = { subject: r.subject, html: sha256(r.html), text: sha256(r.text) };
+      // [#25802] The one hole whose bytes are ICU locale data, not template
+      // text: the long-formatted expiry. Its wording moves between ICU
+      // releases (es-ES `2031, 5:06:07` on ICU 77, `2031 a las 5:06:07` on
+      // ICU 78), so it is cut out at its exact position and the digest pins
+      // every other byte; that the template renders exactly that instant is
+      // asserted here, against this Node's own `Intl`.
+      const instant = new Intl.DateTimeFormat(tpl.locale, {
+        dateStyle: 'long',
+        timeStyle: 'long',
+        timeZone: 'UTC',
+      }).format(new Date(DATA.expiresAt));
+      const cut = (face: string) => face.split(instant);
+      const html = cut(r.html);
+      const text = cut(r.text);
+      const expected = tpl.name === 'auth.invitation' ? 2 : 1;
+      expect(html, `${tpl.name}@${tpl.locale} HTML expiry holes`).toHaveLength(expected);
+      expect(text, `${tpl.name}@${tpl.locale} text expiry holes`).toHaveLength(expected);
+      rendered[`${tpl.name}@${tpl.locale}`] = {
+        subject: r.subject,
+        html: sha256(html.join(EXPIRY_HOLE)),
+        text: sha256(text.join(EXPIRY_HOLE)),
+      };
     }
 
     expect(Object.keys(rendered)).toHaveLength(32);

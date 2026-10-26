@@ -384,32 +384,50 @@ describe('#24154 — the invitation names the role label, and both faces say the
 // ── #25802 — the invitation says when it expires, in the mail's locale ─────
 
 /**
- * The expiry sentence each locale's bodies carry for 2031-03-04T05:06:07Z read
- * in UTC — the sentence frame and the date, written out by hand. The time of
- * day is pinned only where no locale-data punctuation sits inside it (the
- * en-US `AM` is preceded by a narrow no-break space whose presence varies by
- * ICU release); the zone name is pinned everywhere, because a date with no
- * zone is the ambiguity the long style exists to remove.
+ * The expiry sentence FRAME each locale's bodies wrap around the date, written
+ * out by hand: `[before, after]` the formatted instant.
  */
-const EXPECTED_EXPIRY: Record<Locale, string[]> = {
-  'en-US': ['This invitation expires on March 4, 2031 at 5:06:07', 'UTC.'],
-  'zh-CN': ['此邀请将于 2031年3月4日 UTC 05:06:07 过期。'],
-  'ja-JP': ['この招待の有効期限は 2031年3月4日 5:06:07 UTC です。'],
-  'es-ES': ['Esta invitación caduca el 4 de marzo de 2031, 5:06:07 UTC.'],
+const EXPIRY_FRAME: Record<Locale, [string, string]> = {
+  'en-US': ['This invitation expires on ', '.'],
+  'zh-CN': ['此邀请将于 ', ' 过期。'],
+  'ja-JP': ['この招待の有効期限は ', ' です。'],
+  'es-ES': ['Esta invitación caduca el ', '.'],
 };
+
+/**
+ * The instant as the `datetime:long` formatter must render it: the long date
+ * and time in that locale and zone, computed HERE with the running Node's own
+ * `Intl`, never copied from a render. The wording inside it is ICU locale
+ * data and moves between releases (es-ES reads `2031, 5:06:07` on ICU 77 and
+ * `2031 a las 5:06:07` on ICU 78), so a literal would pin the ICU build, not
+ * the template. What does not move is pinned beside it: the year and the
+ * zone's name are in it, because a date with no zone is the ambiguity the
+ * long style exists to remove.
+ */
+function longInstant(locale: Locale, timeZone: string): string {
+  return new Intl.DateTimeFormat(locale, { dateStyle: 'long', timeStyle: 'long', timeZone }).format(
+    new Date(INVITATION_FACTS.expiresAt),
+  );
+}
 
 describe('#25802 — the invitation states its expiry in the mail locale', () => {
   it.each(SUPPORTED_LOCALES)('%s: both faces carry the expiry sentence, in the send timezone', async (locale) => {
     const { html, text } = await renderInvitationFaces(locale, INVITATION_FACTS, 'UTC');
-    for (const part of EXPECTED_EXPIRY[locale]) {
-      expect(html, `${locale} HTML body`).toContain(part);
-      expect(text, `${locale} text body`).toContain(part);
-    }
+    const instant = longInstant(locale, 'UTC');
+    expect(instant).toContain('2031');
+    expect(instant).toContain('UTC');
+    const [before, after] = EXPIRY_FRAME[locale];
+    expect(text, `${locale} text body`).toContain(`${before}${instant}${after}`);
+    // The HTML face escapes the hole; no locale's long date carries a character it escapes.
+    expect(html, `${locale} HTML body`).toContain(`${before}${instant}${after}`);
   });
 
   it('the reference timezone the send names moves the wall-clock, and the zone is named', async () => {
     const { text } = await renderInvitationFaces('zh-CN', INVITATION_FACTS, 'Asia/Shanghai');
-    expect(text).toContain('此邀请将于 2031年3月4日 GMT+8 13:06:07 过期。');
+    const shanghai = longInstant('zh-CN', 'Asia/Shanghai');
+    expect(shanghai).not.toBe(longInstant('zh-CN', 'UTC'));
+    expect(shanghai).toContain('13:06:07');
+    expect(text).toContain(`此邀请将于 ${shanghai} 过期。`);
   });
 
   it.each(SUPPORTED_LOCALES)('%s: a send without expiresAt is refused (MISSING_VARIABLES), never sent with a dangling sentence', async (locale) => {
