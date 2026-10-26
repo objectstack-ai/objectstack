@@ -63,6 +63,10 @@ const stripJsonComments: (source: string) => string = stripUntyped;
 /** Rooted at THIS file, never at `process.cwd()`. */
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..', '..', '..', '..');
+// The published skill bundle is in the objectstack monorepo's `skills/` catalog
+// since the cutover (decision C, objectstack#25803), one level above this tree,
+// so its `skills/objectui/...` paths are read from there.
+const SKILLS_BASE = resolve(REPO_ROOT, '..');
 
 const GUIDES = [
   'skills/objectui/guides/data-integration.md',
@@ -133,7 +137,7 @@ type Fence = { guide: string; fenceLine: number; teachesWrong: boolean; node: Re
 function bindOnlyListFences(): Fence[] {
   const out: Fence[] = [];
   for (const guide of GUIDES) {
-    const { fences } = scanSkillFences(readFileSync(resolve(REPO_ROOT, guide), 'utf8'));
+    const { fences } = scanSkillFences(readFileSync(resolve(SKILLS_BASE, guide), 'utf8'));
     for (const fence of fences) {
       if (!fence.marked || fence.kind !== 'json') continue;
       // The marker's own gate already requires every marked fence to parse.
