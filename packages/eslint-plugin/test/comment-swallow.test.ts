@@ -32,7 +32,8 @@ const COMMENT_SWALLOW_CASES: ReadonlyArray<readonly [string, boolean]> = [
   ['import { readFileSync } from "node:fs";', true],
   ['/** the docblock whose terminator closed the phantom span */', true],
   // SILENT — prose, and marked-up example code.
-  [' * import { createHonoApp } from "@objectstack/hono";', false],
+  // Split so the workspace-import census does not read test data as an import.
+  [' * import { createHonoApp } from "@objectstack/' + 'hono";', false],
   [' * export default app;', false],
   ['let us assume the value is null, and', false],
   ['class hierarchies are not the point here;', false],
@@ -64,7 +65,7 @@ const swallowed = { messageId: 'swallowed' };
 ruleTester.run('comment-swallow/no-code-inside-block-comment', rule, {
   valid: [
     { code: '/* one line */ const a = 1;' },
-    { code: '/**\n * import { createHonoApp } from "@objectstack/hono";\n * export default app;\n */\nexport const a = 1;' },
+    { code: '/**\n * import { createHonoApp } from "@objectstack/' + 'hono";\n * export default app;\n */\nexport const a = 1;' },
     { code: '/*\n  let us assume the value is null, and\n  class hierarchies are not the point here;\n*/\nconst a = 1;' },
     // Whatever precedes the opener on its own line is live code.
     { code: 'const a = 1; /*\n * note\n */' },
