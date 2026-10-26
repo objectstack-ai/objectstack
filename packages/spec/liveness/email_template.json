@@ -12,9 +12,9 @@
     "label": {
       "status": "live",
       "verifiedAt": "2026-10-11",
-      "evidence": "objectui @4997995022f8: packages/app-shell/src/views/metadata-admin/ResourceListPage.tsx#defaultColumns:838 (the Studio metadata list's default `label` column, which line 421 falls back to when a type registers no `listColumns`, and whose cell line 687 reads as `row.item[c.key]`); objectui @4997995022f8: packages/app-shell/src/views/metadata-admin/default-schemas.ts#registerDefaultMetadataSchemas:336 (`email_template` is registered with a `defaultSchema` and a `fieldOrder` and no `listColumns` of its own, so every row of its list renders the authored label)",
+      "evidence": "ui/packages/app-shell/src/views/metadata-admin/ResourceListPage.tsx#defaultColumns:1292 (the Studio metadata list's default `label` column, which line 573 falls back to when a type registers no `listColumns`, and whose cell line 902 reads as `row.item[c.key]`); ui/packages/app-shell/src/views/metadata-admin/default-schemas.ts#registerDefaultMetadataSchemas:331 (`email_template` is registered with a `defaultSchema` and a `fieldOrder` and no `listColumns` of its own, so every row of its list renders the authored label)",
       "note": "Docs-shaped: shown to a human in the Studio metadata list, never by the send path. Until 2026-10-11 it was materialized into the `sys_email_template.label` column (the Setup record title); that projection retired with the rows (ADR-0131 D6/D10), and the Studio list read — measured at the `.objectui-sha` pin 4997995022f8 — is the consumer now, under the designer-previews-count-as-consumers ruling (#7131).",
-      "evidenceScope": "cross-repo"
+      "evidenceScope": "in-repo"
     },
     "category": {
       "status": "dead",
@@ -86,9 +86,9 @@
     "description": {
       "status": "live",
       "verifiedAt": "2026-10-11",
-      "evidence": "objectui @4997995022f8: packages/app-shell/src/views/metadata-admin/ResourceListPage.tsx#defaultColumns:839 (the Studio metadata list's default `description` column, which line 421 falls back to when a type registers no `listColumns`, and whose cell line 687 reads as `row.item[c.key]`); objectui @4997995022f8: packages/app-shell/src/views/metadata-admin/default-schemas.ts#registerDefaultMetadataSchemas:336 (`email_template` is registered with a `defaultSchema` and a `fieldOrder` and no `listColumns` of its own)",
+      "evidence": "ui/packages/app-shell/src/views/metadata-admin/ResourceListPage.tsx#defaultColumns:1293 (the Studio metadata list's default `description` column, which line 573 falls back to when a type registers no `listColumns`, and whose cell line 902 reads as `row.item[c.key]`); ui/packages/app-shell/src/views/metadata-admin/default-schemas.ts#registerDefaultMetadataSchemas:331 (`email_template` is registered with a `defaultSchema` and a `fieldOrder` and no `listColumns` of its own)",
       "note": "Docs-shaped: read by humans in Studio, never by the send path. Until 2026-10-11 it was materialized into `sys_email_template.description`; that projection retired with the rows (ADR-0131 D6/D10), and the Studio list read — measured at the `.objectui-sha` pin 4997995022f8 — is the consumer now (#7131).",
-      "evidenceScope": "cross-repo"
+      "evidenceScope": "in-repo"
     }
   }
 }

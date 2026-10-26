@@ -60,7 +60,6 @@ import {
 } from './sys-metadata-repository.js';
 import { managedItemSealedSentence, packagedBaseRegimeRow, packagedBaseRegimeSentence } from './packaged-base-regime.js';
 import {
-    resolveArtifactLockLayer,
     resolveItemLock,
     resolveItemLockLazily,
     resolveOverlayLockLayer,
@@ -72,11 +71,6 @@ import {
 } from './item-lock.js';
 import {
     bumpWriteEpoch,
-    metaOverlayCacheTtlMs,
-    readMetaOverlayCache,
-    readOverlayCacheGeneration,
-    writeMetaOverlayCache,
-    type MetaOverlayCacheKey,
 } from './meta-overlay-cache.js';
 import {
     ConflictError,
@@ -399,6 +393,10 @@ import { discardDraftInItsScope, listDrafts } from './protocol-drafts.js';
 import { originGatedRemovalRefusal, refusePackagedBaseOverride } from './protocol-packaged-base-refusal.js';
 // [#25467 cut 14] The publish batch's seed apply and its own pending declarations.
 import { applySeedBodies, collectBatchPendingDeclarations } from './protocol-publish-batch.js';
+// [#25467 cut 15] The artifact registry's lookups: an item's artifact, the packages that ship a type, and the lock's artifact layer.
+import { artifactLockLayerAt, lookupArtifactItem, shippedArtifactsOf, shippingPackagesOf } from './protocol-artifact-lookup.js';
+// [#25467 cut 16] The stored-overlay row reads: a type's active rows, their parsed entries, the names with a row of their own, and one item's rows.
+import { namesWithOwnStoredRow, readActiveOverlayRows, readItemActiveRows, storedOverlayEntries } from './protocol-stored-overlay-reads.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -2830,7 +2828,7 @@ function rowMatchesOverlayWhere(row: object, where: Readonly<Record<string, unkn
  * package (`packageId`) and then the package-less rows (`null`); with none,
  * `undefined`, which matches a row of any package.
  */
-function addressPackages(packageId: string | undefined): ReadonlyArray<string | null | undefined> {
+export function addressPackages(packageId: string | undefined): ReadonlyArray<string | null | undefined> {
     return [...new Set(servedOverlayRowCandidates({ packageId })
         .map((candidate) => candidate.packageId))];
 }
@@ -6229,7 +6227,7 @@ function isNonCanonicalStoredType(type: string): boolean {
  * row). [#21804] `type` is the spelling the row is stored under (its own
  * `type` column), which the served-row resolution reads.
  */
-interface StoredOverlayEntry {
+export interface StoredOverlayEntry {
     name: string;
     data: any;
     packageId: string | undefined;
@@ -10261,81 +10259,13 @@ export class ObjectStackProtocolImplementation implements
     private async readActiveOverlayRows(
         request: { type: string; packageId?: string },
     ): Promise<any[]> {
-        const { packageId } = request;
-        const queryActive = async (): Promise<any[]> => {
-            const whereClause: Record<string, unknown> = {
-                type: request.type,
-                state: 'active',
-            };
-            if (packageId) whereClause.package_id = packageId;
-            // [#21911] The explicit system opt-in — see findServedOverlayRow.
-            // [ADR-0131 D6/D7] The environment's rows only, on every find —
-            // see {@link findEnvironmentRows}.
-            let rs = await this.findEnvironmentRows('sys_metadata', { where: whereClause, context: { isSystem: true } });
-            if ((!rs || rs.length === 0)) {
-                const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
-                if (alt) {
-                    const altWhere: Record<string, unknown> = { type: alt, state: 'active' };
-                    if (packageId) altWhere.package_id = packageId;
-                    rs = await this.findEnvironmentRows('sys_metadata', { where: altWhere, context: { isSystem: true } });
-                }
-            }
-            return rs ?? [];
+        // [#25467 cut 16] The body moved to `protocol-stored-overlay-reads.ts` (see `StoredOverlayReadHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof readActiveOverlayRows> = {
+            get engine() { return readEngine(); },
+            findEnvironmentRows: (...a) => this.findEnvironmentRows(...a),
         };
-        // ── Leg D of #11633 (#11967): the cross-request overlay cache ──
-        //
-        // ⭐ The cache sits HERE, and its position IS the resolution of the
-        // SchemaRegistry-hydration trap #11633 §4 names. What is cached is
-        // the ROW SET — the value the `queryActive` call produces —
-        // never the merged answer below it. Everything downstream of this
-        // point still runs on every call, hit or miss: the overlay parse,
-        // the package-aware merge, `hydrateOverlayIntoRegistry`, the
-        // MetadataService merge, the disabled-package filter, the nav
-        // contributions, the decorations. A hit changes where the rows came
-        // from and nothing about what is done with them, so the read-side
-        // registry hydration cannot be skipped by one.
-        //
-        // ⛔ Do NOT move this below the merge. That is precisely the naive
-        // shape the trap describes, and it would additionally serve three
-        // mutable sources — the SchemaRegistry, the MetadataService and the
-        // artifact table — whose changes nothing in this key can observe.
-        // See `meta-overlay-cache.ts` for the measured four-source table.
-        //
-        // ⭐ The epoch reading is taken BEFORE the read, and it is this
-        // pre-read value that is stored with the rows. A write landing
-        // WHILE this read is in flight therefore moves the epoch past what
-        // the entry records, so the entry is already dead when it is
-        // written — the safe direction. Reading it afterwards would stamp
-        // pre-write rows with a post-write epoch and make that staleness
-        // permanent: the clear-then-repopulate-from-a-stale-read failure
-        // #11633 §7 pin 2 names.
-        const overlayCacheKey: MetaOverlayCacheKey = {
-            type: request.type,
-            packageId,
-        };
-        const overlayCacheTtlMs = metaOverlayCacheTtlMs();
-        const overlayCacheEpoch = overlayCacheTtlMs > 0 ? readOverlayCacheGeneration(this.engine) : undefined;
-        const overlayCacheNow = Date.now();
-        const cachedRecords = readMetaOverlayCache(
-            this.engine, overlayCacheKey, overlayCacheEpoch, overlayCacheTtlMs, overlayCacheNow,
-        );
-
-        let records: any[];
-        if (cachedRecords !== undefined) {
-            records = cachedRecords as any[];
-        } else {
-            records = await queryActive();
-            // ⭐ An EMPTY row set is cached too, and that is the main point
-            // rather than an edge case: the empty result is what triggers the
-            // alt-type retry above, so "no overlay rows for this type" is the
-            // answer whose caching removes BOTH reads. #11633 §1 measured that
-            // an app whose objects are all code-authored pays the doubled read
-            // on every request; this is the line that stops it.
-            writeMetaOverlayCache(
-                this.engine, overlayCacheKey, overlayCacheEpoch, records, overlayCacheTtlMs, overlayCacheNow,
-            );
-        }
-        return records;
+        return readActiveOverlayRows.call(host, request);
     }
 
     /**
@@ -10349,33 +10279,11 @@ export class ObjectStackProtocolImplementation implements
         request: { type: string },
         records: any[],
     ): StoredOverlayEntry[] {
-        // Parse each overlay body once — replaying the stored-row
-        // conversion chain (#3903) so every consumer of this list sees
-        // the canonical protocol shape — and surface its persisted
-        // software-package binding so the sidebar package filter and
-        // provenance classification see overlay rows the way they see
-        // registry items.
-        return records.map((record) => {
-            const data = this.convertStoredItem(
-                String(record.type ?? request.type),
-                typeof record.metadata === 'string'
-                    ? JSON.parse(record.metadata)
-                    : record.metadata,
-            ) as any;
-            const recPkg = (record as { package_id?: string | null }).package_id ?? undefined;
-            if (recPkg && data && typeof data === 'object' && (data as any)._packageId === undefined) {
-                (data as any)._packageId = recPkg;
-            }
-            // [ADR-0131 D6/D7] Every row is the environment's: the family
-            // declares no organization column, and the reads that feed this
-            // ({@link readActiveOverlayRows}) leave a legacy organization's
-            // rows out off the physical column. (The form doors' legacy layer
-            // that once needed the row's own scope here is deleted.)
-            return {
-                name: String(record.name), data, packageId: recPkg, organizationId: null,
-                type: String(record.type ?? request.type),
-            };
-        });
+        // [#25467 cut 16] The body moved to `protocol-stored-overlay-reads.ts` (see `StoredOverlayReadHost`).
+        const host: ThisParameterType<typeof storedOverlayEntries> = {
+            convertStoredItem: (...a) => this.convertStoredItem(...a),
+        };
+        return storedOverlayEntries.call(host, request, records);
     }
 
     /**
@@ -10428,13 +10336,8 @@ export class ObjectStackProtocolImplementation implements
      * other package served the expansion.
      */
     private namesWithOwnStoredRow(records: readonly any[], packageId?: string): ReadonlySet<string> {
-        const packages = addressPackages(packageId);
-        const names = new Set<string>();
-        for (const record of records) {
-            if (typeof record?.name !== 'string') continue;
-            if (packages.some((pkg) => pkg === undefined || (record?.package_id ?? null) === pkg)) names.add(record.name);
-        }
-        return names;
+        // [#25467 cut 16] The body moved to `protocol-stored-overlay-reads.ts`.
+        return namesWithOwnStoredRow(records, packageId);
     }
 
     /**
@@ -10659,28 +10562,13 @@ export class ObjectStackProtocolImplementation implements
      * read is per call and never kept, exactly as before.
      */
     private async readItemActiveRows(type: string, name: string, cached = false): Promise<StoredOverlayRow[]> {
-        const other = PLURAL_TO_SINGULAR[type] ?? SINGULAR_TO_PLURAL[type];
-        const read = async (): Promise<StoredOverlayRow[]> => {
-            // [#21911] The explicit system opt-in — see findServedOverlayRow.
-            const rows: StoredOverlayRow[] | null | undefined = await this.findEnvironmentRows('sys_metadata', {
-                where: { type: other === undefined ? type : { $in: [type, other] }, name, state: 'active' },
-                context: { isSystem: true },
-            });
-            return rows ?? [];
+        // [#25467 cut 16] The body moved to `protocol-stored-overlay-reads.ts` (see `StoredOverlayReadHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof readItemActiveRows> = {
+            get engine() { return readEngine(); },
+            findEnvironmentRows: (...a) => this.findEnvironmentRows(...a),
         };
-        if (!cached) return read();
-        // ⭐ The epoch is read BEFORE the read and stored with its rows, as the
-        // list read's is (see `readActiveOverlayRows`): a write landing while
-        // this read is in flight leaves the entry dead on arrival.
-        const key: MetaOverlayCacheKey = { type, name };
-        const ttlMs = metaOverlayCacheTtlMs();
-        const epoch = ttlMs > 0 ? readOverlayCacheGeneration(this.engine) : undefined;
-        const now = Date.now();
-        const hit = readMetaOverlayCache(this.engine, key, epoch, ttlMs, now);
-        if (hit !== undefined) return hit as StoredOverlayRow[];
-        const rows = await read();
-        writeMetaOverlayCache(this.engine, key, epoch, rows, ttlMs, now);
-        return rows;
+        return readItemActiveRows.call(host, type, name, cached);
     }
 
     /**
@@ -16491,28 +16379,12 @@ export class ObjectStackProtocolImplementation implements
      * ignores it, so a caller that needs the member checks the answer.
      */
     private lookupArtifactItem(type: string, name: string, currentPackageId?: string, member?: string): unknown {
-        const registry = (this.engine as any)?.registry;
-        if (!registry) return undefined;
-        const singular = PLURAL_TO_SINGULAR[type] ?? type;
-        // Prefer the artifact-only lookup: it scans composite
-        // (`<packageId>:<name>`) entries first, so an overlay row hydrated
-        // into the plain key (getMetaItems / loadMetaFromDb) can never
-        // shadow the packaged artifact's protection envelope (ADR-0010
-        // §3.3 — pre-fix, that shadow made a `_lock: full` app read back
-        // as unlocked after PUT+GET until restart). `currentPackageId`
-        // (ADR-0048) makes that scan package-scoped (prefer-local).
-        if (typeof registry.getArtifactItem === 'function') {
-            return registry.getArtifactItem(singular, name, currentPackageId, member)
-                ?? registry.getArtifactItem(type, name, currentPackageId, member);
-        }
-        // Partial registry mocks in tests — fall back to getItem and apply
-        // the same package-provenance filter inline.
-        if (typeof registry.getItem !== 'function') return undefined;
-        const item = registry.getItem(singular, name, currentPackageId) ?? registry.getItem(type, name, currentPackageId);
-        if (!item || !(item as any)._packageId || (item as any)._packageId === 'sys_metadata') {
-            return undefined;
-        }
-        return item;
+        // [#25467 cut 15] The body moved to `protocol-artifact-lookup.ts` (see `ArtifactLookupHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof lookupArtifactItem> = {
+            get engine() { return readEngine(); },
+        };
+        return lookupArtifactItem.call(host, type, name, currentPackageId, member);
     }
 
     /**
@@ -16531,7 +16403,11 @@ export class ObjectStackProtocolImplementation implements
      * caller that asks about many items of one type.
      */
     private artifactLockLayerAt(address: ItemAddress, shipping?: ShippingPackages): readonly unknown[] {
-        return resolveArtifactLockLayer(address, () => this.shippedArtifactsOf(address.type, address.name, shipping));
+        // [#25467 cut 15] The body moved to `protocol-artifact-lookup.ts` (see `ArtifactLookupHost`).
+        const host: ThisParameterType<typeof artifactLockLayerAt> = {
+            shippedArtifactsOf: (...a) => this.shippedArtifactsOf(...a),
+        };
+        return artifactLockLayerAt.call(host, address, shipping);
     }
 
     /**
@@ -16556,18 +16432,12 @@ export class ObjectStackProtocolImplementation implements
      * owner is the whole set.
      */
     private shippedArtifactsOf(type: string, name: string, shipping?: ShippingPackages): unknown[] {
-        const shipped: unknown[] = [];
-        const add = (artifact: unknown): void => {
-            if (artifact !== undefined && artifact !== null && !shipped.includes(artifact)) shipped.push(artifact);
+        // [#25467 cut 15] The body moved to `protocol-artifact-lookup.ts` (see `ArtifactLookupHost`).
+        const host: ThisParameterType<typeof shippedArtifactsOf> = {
+            lookupArtifactItem: (...a) => this.lookupArtifactItem(...a),
+            shippingPackagesOf: (...a) => this.shippingPackagesOf(...a),
         };
-        add(this.lookupArtifactItem(type, name));
-        if ((PLURAL_TO_SINGULAR[type] ?? type) === 'object') return shipped;
-        const packages = shipping ?? this.shippingPackagesOf(type);
-        for (const packageId of new Set([...(packages.byName.get(name) ?? []), ...packages.anyName])) {
-            const own = this.lookupArtifactItem(type, name, packageId) as { _packageId?: unknown } | undefined;
-            if (own?._packageId === packageId) add(own);
-        }
-        return shipped;
+        return shippedArtifactsOf.call(host, type, name, shipping);
     }
 
     /**
@@ -16592,43 +16462,12 @@ export class ObjectStackProtocolImplementation implements
      * #21803, which asked that lookup alone.
      */
     private shippingPackagesOf(type: string): ShippingPackages {
-        const registry = (this.engine as any)?.registry;
-        const byName = new Map<string, Set<string>>();
-        const anyName = new Set<string>();
-        if (!registry) return { byName, anyName };
-        const isPackage = (id: unknown): id is string => typeof id === 'string' && id !== '' && id !== 'sys_metadata';
-        const listing = (read: () => unknown): readonly unknown[] => {
-            try {
-                const listed = read();
-                return Array.isArray(listed) ? listed : [];
-            } catch {
-                return []; // See this method's header: the package-less lookup still answers.
-            }
+        // [#25467 cut 15] The body moved to `protocol-artifact-lookup.ts` (see `ArtifactLookupHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof shippingPackagesOf> = {
+            get engine() { return readEngine(); },
         };
-        if (typeof registry.listItems === 'function') {
-            for (const spelling of new Set([PLURAL_TO_SINGULAR[type] ?? type, type])) {
-                for (const entry of listing(() => registry.listItems(spelling))) {
-                    const { _packageId: id, name } = (entry ?? {}) as { _packageId?: unknown; name?: unknown };
-                    if (!isPackage(id)) continue;
-                    if (typeof name !== 'string') {
-                        anyName.add(id);
-                        continue;
-                    }
-                    const ids = byName.get(name);
-                    if (ids) ids.add(id);
-                    else byName.set(name, new Set([id]));
-                }
-            }
-        }
-        if (typeof registry.getAllPackages === 'function') {
-            const canTell = typeof registry.isPackageDisabled === 'function';
-            for (const record of listing(() => registry.getAllPackages())) {
-                const r = record as { manifest?: { id?: unknown }; id?: unknown } | null | undefined;
-                const id = r?.manifest?.id ?? r?.id;
-                if (isPackage(id) && (!canTell || registry.isPackageDisabled(id))) anyName.add(id);
-            }
-        }
-        return { byName, anyName };
+        return shippingPackagesOf.call(host, type);
     }
 
     /**

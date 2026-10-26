@@ -25,6 +25,7 @@ import { isDeepStrictEqual } from 'node:util';
 
 import type { ScreenFieldSpec, ScreenSpec } from '@objectstack/spec/contracts';
 import type { FieldErrorCode } from '@objectstack/spec/api';
+import { isFileIdToken } from '@objectstack/spec/data';
 
 /** One violation of a screen's declared field contract. */
 export interface ScreenInputIssue {
@@ -58,6 +59,21 @@ function isPresent(v: unknown): boolean {
 }
 
 /**
+ * The closed set of screen-field `type` members that are VALUE domains, each
+ * with the predicate a present value must meet and the sentence a value that
+ * fails it is refused with. Every other member is a widget hint and constrains
+ * nothing — see {@link validateScreenInputs} for why the set is closed.
+ */
+const SCREEN_FIELD_VALUE_DOMAINS: ReadonlyMap<string, { admits: (value: unknown) => boolean; expected: string }> =
+  new Map([
+    ['number', { admits: (value) => typeof value === 'number' && Number.isFinite(value), expected: 'a number' }],
+    // [#25801] The uploaded `sys_file` id — ADR-0104 D3's stored form — judged
+    // by the spec's one arbiter, the predicate the record write's claim path
+    // reads too, so an id this door admits is one a later write can claim.
+    ['file', { admits: isFileIdToken, expected: 'the id of an uploaded file' }],
+  ]);
+
+/**
  * Whether a screen surfaces a field contract worth enforcing.
  *
  * Two screens deliberately declare NOTHING and so keep the historical
@@ -85,7 +101,8 @@ export function screenDeclaresInputContract(screen: ScreenSpec | undefined): boo
  *
  * Enforced, and nothing beyond it:
  *  - `required` presence for every field the caller was actually asked for;
- *  - the VALUE SHAPE of a `type: 'number'` field (#17306);
+ *  - the VALUE SHAPE of a `type: 'number'` field (#17306) and of a
+ *    `type: 'file'` field (#25801);
  *  - the declared numeric bound pair `min` / `max` (#17306);
  *  - undeclared keys.
  *
@@ -120,9 +137,27 @@ export function screenDeclaresInputContract(screen: ScreenSpec | undefined): boo
  * ⚠️ Narrow on purpose in two directions. It keys off `type: 'number'`, not
  * off the presence of a bound: a bound declared on a non-numeric field still
  * constrains nothing (`FieldSchema.min`/`.max` are unconditioned on `type`
- * too), and no other widget hint is read as a value domain. And it is a
- * PRESENCE-conditioned check, like the bound: an absent value is `required`'s
- * question, and a field the caller was never shown is nobody's.
+ * too). And it is a PRESENCE-conditioned check, like the bound: an absent
+ * value is `required`'s question, and a field the caller was never shown is
+ * nobody's.
+ *
+ * `'file'` is the second closed member (#25801), and for the same reason:
+ * its meaning is a value domain, not a rendering preference. The client
+ * renders the platform upload widget, the upload lands as a `sys_file` no
+ * record owns yet, and the resume carries that file's id — ADR-0104 D3's
+ * stored form, so a later node can write it into an object's `file` field,
+ * whose write claims the file. A present value that is not a file id (a URL,
+ * the expanded `{ id, name, url }` read form, a number) is refused with the
+ * same `invalid_type`, ⛔ never reduced to an id here: the console reduces its
+ * own value before it posts, and a caller that skips the console has sent the
+ * wrong shape. The id is judged by the spec's `isFileIdToken`, the one
+ * predicate the claim path reads, so the two cannot disagree about what a
+ * file reference is. Whether the CALLER may read that file is the claiming
+ * write's question, asked there under the write's own caller (#25692) — not
+ * this door's, which holds no storage service.
+ *
+ * No other widget hint is read as a value domain: the set is
+ * {@link SCREEN_FIELD_VALUE_DOMAINS}, and a member joins it by ruling.
  */
 export function validateScreenInputs(
   fields: readonly ScreenFieldSpec[],
@@ -149,13 +184,15 @@ export function validateScreenInputs(
     });
   }
 
-  // Value shape for a `type: 'number'` field (#17306, ruling A′). Its own pass,
-  // BEFORE the bound: a value that is not a number cannot be compared against
-  // one, so the shape is the first thing true or false about it. A caller that
-  // posts `"25"` under a `max` of 20 gets one issue naming the shape, not a
-  // silent pass and not a bound verdict computed on a string.
+  // Value shape for a value-domain `type` — `'number'` (#17306, ruling A′) and
+  // `'file'` (#25801). Its own pass, BEFORE the bound: a value that is not a
+  // number cannot be compared against one, so the shape is the first thing
+  // true or false about it. A caller that posts `"25"` under a `max` of 20 gets
+  // one issue naming the shape, not a silent pass and not a bound verdict
+  // computed on a string.
   for (const field of declared.values()) {
-    if (field.type !== 'number') continue;
+    const domain = typeof field.type === 'string' ? SCREEN_FIELD_VALUE_DOMAINS.get(field.type) : undefined;
+    if (!domain) continue;
     const value = bag[field.name];
     // Absent is `required`'s question (see the bound pass below for the same
     // split), and a field the user was never shown is neither's.
@@ -163,11 +200,11 @@ export function validateScreenInputs(
     if (field.visibleWhen != null && String(field.visibleWhen).trim() !== '') {
       if (visibility(field) !== true) continue;
     }
-    if (typeof value === 'number' && Number.isFinite(value)) continue;
+    if (domain.admits(value)) continue;
     issues.push({
       field: field.name,
       code: 'invalid_type',
-      message: `Screen field "${field.name}" must be a number`,
+      message: `Screen field "${field.name}" must be ${domain.expected}`,
     });
   }
 

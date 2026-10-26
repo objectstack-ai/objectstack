@@ -85,6 +85,8 @@ const CONFIG_OBJECT_KEYS_IN_SHAPE_ORDER = [
   'access',
   'lifecycle',
   'enable',
+  // [#25760] `sharing` — the controlled_by_parent opt-ins block (ADR-0055 §3 amendment).
+  'sharing',
   'defaultRowScope',
   'publicSharing',
   'protection',

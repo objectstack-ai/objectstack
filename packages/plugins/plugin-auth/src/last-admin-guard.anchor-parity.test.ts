@@ -162,13 +162,20 @@ async function resolverStanding(engine: ObjectQL, userId: string, email?: string
 const ban = (engine: ObjectQL, id: string) => engine.update('sys_user', { id, banned: true }, SYSTEM);
 
 /** The refusal envelope, or `undefined` when the write landed. */
-async function refusalOf(write: Promise<unknown>): Promise<{ code?: unknown; status?: unknown } | undefined> {
+async function refusalOf(
+  write: Promise<unknown>,
+): Promise<{ code?: unknown; status?: unknown; fields?: unknown; causeCode?: unknown } | undefined> {
   try {
     await write;
     return undefined;
   } catch (err) {
-    const e = err as { code?: unknown; status?: unknown };
-    return { code: e.code, status: e.status };
+    const e = err as { code?: unknown; status?: unknown; fields?: Array<{ field?: unknown; code?: unknown }>; cause?: { code?: unknown } };
+    return {
+      code: e.code,
+      status: e.status,
+      fields: e.fields?.map((f) => [f.field, f.code]),
+      causeCode: e.cause?.code,
+    };
   }
 }
 
@@ -210,7 +217,12 @@ describe('[ADR-0131 D1/D9] where an organization-less admin_full_access grant ca
         expect(refusal?.code).toBe('ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED');
         expect(rows).toEqual([]);
       } else if (c.expected === 'refused-not-null') {
-        expect(refusal?.code).toBe('SQLITE_CONSTRAINT_NOTNULL');
+        // The COLUMN refused it: since #24768 the engine answers a NOT NULL
+        // refusal on a declared field as its own `ValidationError`, the
+        // driver's refusal on `cause`.
+        expect(refusal?.code).toBe('VALIDATION_FAILED');
+        expect(refusal?.fields).toEqual([['organization_id', 'required']]);
+        expect(refusal?.causeCode).toBe('SQLITE_CONSTRAINT_NOTNULL');
         expect(rows).toEqual([]);
       } else if (c.expected === 'derived') {
         expect(refusal).toBeUndefined();

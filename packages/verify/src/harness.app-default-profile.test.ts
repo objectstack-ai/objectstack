@@ -27,7 +27,7 @@
 // fixture object is denied unless the app's declared profile is actually wired.
 // A name-only assertion could not tell "wired" from "wired but inert".
 
-import { describe, it, expect, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { defineStack } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { PermissionSetSchema } from '@objectstack/spec/security';
@@ -48,9 +48,15 @@ import {
 // in `DEBT`, `TEST_DEBT` or `EXEMPT`. The layer is at zero with no ledger, so
 // an error a new file introduces is red on arrival.
 import { bootStack, type VerifyStack } from './harness.js';
+import { warmUpBoot } from './boot-warm-up.testkit.js';
 
 // Booting the full in-process stack runs well past vitest's 5s default.
 const BOOT_TIMEOUT = 120_000;
+
+// The boot's first load, paid during collection rather than in the first
+// boot's clock (see `boot-warm-up.testkit.ts`). Every boot below that is not
+// the opt-out case uses the default options.
+await warmUpBoot();
 
 const APP_DEFAULT_SET = 'appdefault_member_default';
 
@@ -142,10 +148,20 @@ const wiredBaseline = (stack: VerifyStack): Promise<string | null> =>
   stack.kernel.getServiceAsync<string | null>('security.fallbackPermissionSet');
 
 describe('bootStack honours the app-declared default permission set (#7001)', () => {
+  // The first two cases read ONE boot of the declared-default configuration
+  // with the default options: the first reads the profile the boot wired, a
+  // fixed answer of the boot, and the second signs a member up and reads as
+  // them, which changes no wiring. Neither reads what the other writes, so
+  // they hold in either order.
+  let declaredDefault: VerifyStack;
+  beforeAll(async () => {
+    declaredDefault = await boot(buildAppWithDeclaredDefault());
+  }, BOOT_TIMEOUT);
+
   it(
     'wires the SAME profile `serve` wires for the same config',
     async () => {
-      const stack = await boot(buildAppWithDeclaredDefault());
+      const stack = declaredDefault;
 
       // The exact expression `serve.ts` evaluates for its `fallbackPermissionSet`.
       const servesChoice = appDefaultPermissionSetName(appWithDeclaredDefault.permissions);
@@ -162,7 +178,7 @@ describe('bootStack honours the app-declared default permission set (#7001)', ()
   it(
     'and that profile is load-bearing: a fresh member holds the declared grants',
     async () => {
-      const stack = await boot(buildAppWithDeclaredDefault());
+      const stack = declaredDefault;
       await stack.signIn(); // first user is the seeded dev admin
       const memberToken = await stack.signUp('appdefault-member@verify.test');
 

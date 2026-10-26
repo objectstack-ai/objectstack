@@ -785,6 +785,39 @@ and `placeholder`, and the console's flow runner overlays it in the active
 locale — see the flows row in
 [Translations](/docs/ui/translations#what-you-can-translate).
 
+#### A file field
+
+`type: 'file'` asks for a file before the record that will own it exists, so a
+wizard can collect everything first and write once, after its last screen:
+
+```typescript
+{ id: 'ask', type: 'screen', config: { fields: [
+  { name: 'contract_name', label: 'Name', type: 'text', required: true },
+  { name: 'contract_file', label: 'Signed copy', type: 'file', required: true },
+] } },
+{ id: 'write', type: 'create_record', config: { objectName: 'contract',
+  fields: { name: { dialect: 'cel', source: 'contract_name' }, doc: { dialect: 'cel', source: 'contract_file' } } } },
+```
+
+- **The console uploads, the run receives the file's id.** The flow dialog
+  renders the platform upload widget and uploads through the file service. The
+  file lands as a `sys_file` that no record owns yet, and Submit stays disabled
+  until the upload settles. The resume carries the file's **id**, the stored
+  form of a `file` field.
+- **The write after the screen claims the file.** Writing the id into an
+  object's `file` field makes that record the file's one owner. Under the
+  default `runAs: 'user'` the write first checks that the run's user may read
+  the file, as the download door does. A `runAs: 'system'` run's write is not
+  checked, as no system write is.
+- **Anything but an id is refused on resume.** Like `type: 'number'`, `file` is a
+  shape `validateScreenInputs` checks. A URL, the expanded
+  `{ id, name, url, … }` read form, a list or a number is refused with
+  `invalid_type` inside the run's `INVALID_SCREEN_INPUT`, never reduced to an id.
+  The run stays parked, and the corrected submission still lands.
+- **One file per field.** A screen field has no `multiple`, `accept` or `maxSize`.
+  The target `file` field's own `accept` / `maxSize` still apply at the write
+  that claims the file.
+
 **Screen (object form):**
 
 Set `config.objectName`

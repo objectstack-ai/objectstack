@@ -88,10 +88,11 @@ describe('validateScreenInputs — the declared bound pair (#17306)', () => {
     }
   });
 
-  it('reads only `type: \'number\'` as a value domain — every other widget hint stays open', () => {
-    // The closure is one member of an open vocabulary, not a new rule that
-    // every `type` constrains its value. A bound on a non-numeric field still
-    // constrains nothing, exactly as `FieldSchema.min`/`.max` do.
+  it('reads only the closed value-domain members as value domains — every other widget hint stays open', () => {
+    // The closure is a closed set of members of an open vocabulary (`number`,
+    // and since #25801 `file` — `screen-input-file-field.test.ts`), not a new
+    // rule that every `type` constrains its value. A bound on a non-numeric
+    // field still constrains nothing, exactly as `FieldSchema.min`/`.max` do.
     const texty: ScreenFieldSpec = { name: 'discount', type: 'text', min: 0, max: 20 };
     expect(validateScreenInputs([texty], { discount: 'twenty' }, ALWAYS_VISIBLE)).toEqual([]);
     const untyped: ScreenFieldSpec = { name: 'discount', min: 0, max: 20 };

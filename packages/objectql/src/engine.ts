@@ -133,6 +133,9 @@ import {
   dispatchPerRowBeforeHooks,
   inAfterAbortUnit,
 } from './engine-hook-dispatch.js';
+// [#25522 cut 7] The raw-command and transaction-routing bodies; the methods of
+// the same names below hand each body the members it reads (`ExecuteTransactionsHost`).
+import { enforceTransactionOrigin, execute, warnTransactionUnsupported } from './engine-execute-transactions.js';
 import { ExecutionContext, ExecutionContextSchema, type InstalledPackageSource } from '@objectstack/spec/kernel';
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
@@ -184,7 +187,7 @@ import {
 import { WriteEpoch, isWriteEpochOperation } from './write-epoch.js';
 import { bridgeAuthzInvalidation } from './authz-invalidation-bridge.js';
 import { SummaryRecomputeError, type SummaryRecomputeFailure } from './summary-errors.js';
-import { CrossDatasourceTransactionWriteError, TransactionUnsupportedError } from './transaction-errors.js';
+import { TransactionUnsupportedError } from './transaction-errors.js';
 import {
   aggregateSummaryValue,
   summaryEmptySetValue,
@@ -230,7 +233,8 @@ import { applyArtifactForwardConversions, resolveDeclaredRange } from '@objectst
 // engine is the consumer-side tolerant parsing PD #12 forbids and precedent
 // #5841 retired.
 import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/types';
-import { DuplicateRecordError, envelopeUniqueViolation } from './duplicate-record-error.js';
+import { DuplicateRecordError } from './duplicate-record-error.js';
+import { NotNullRefusalError, envelopeDriverWriteRefusal } from './not-null-refusal-error.js';
 // [#8682] The write-path loggers' redaction — bound values never reach the log.
 // [#21274] …and its boundary face — nor the error that leaves the engine.
 // [#21385] It lives in `@objectstack/types` now, so `driver-sql`'s own log lines
@@ -8510,13 +8514,15 @@ export class ObjectQL implements IObjectQLEngine {
         // driver's error. `envelopeUniqueViolation` returns everything that is
         // not a unique violation untouched (a deadlock, a NOT NULL, an
         // unreachable store), so only the recognised conflict changes shape.
+        // [#24768] …and a NOT NULL refusal on a declared field becomes the
+        // validator's own `ValidationError` (`envelopeDriverWriteRefusal`).
         // [#25073] On a driver-issued number the member answers instead, and
         // in answering re-seeds the counter it proved stale.
         const collided: string[] = byDriver
           ? ((await driver.issueAutonumbers(object, [row], driverOptions, error)) as string[][] | undefined)?.[0] ?? []
           : this.isIssuedAutonumberCollision(error, issued) ? issued.map((one) => one.field) : [];
         if (collided.length === 0) {
-          throw envelopeUniqueViolation(error, object, this.getSchema(object));
+          throw envelopeDriverWriteRefusal(error, object, this.getSchema(object), 'insert', this.validationMessageContext(object, execCtx));
         }
         // Whatever happens next, the stale counter must not survive this call:
         // leaving it in place is what turned one collision into a storm.
@@ -8559,7 +8565,7 @@ export class ObjectQL implements IObjectQLEngine {
           try {
             return await driver.create(object, row, driverOptions);
           } catch (retryError) {
-            throw envelopeUniqueViolation(retryError, object, this.getSchema(object));
+            throw envelopeDriverWriteRefusal(retryError, object, this.getSchema(object), 'insert', this.validationMessageContext(object, execCtx));
           }
         }
       }
@@ -16864,7 +16870,7 @@ export class ObjectQL implements IObjectQLEngine {
                   });
                 }
               }
-              throw envelopeUniqueViolation(error, object, this.getSchema(object));
+              throw envelopeDriverWriteRefusal(error, object, this.getSchema(object), 'insert', msgCtx);
             }
           }
         } else {
@@ -17052,7 +17058,9 @@ export class ObjectQL implements IObjectQLEngine {
         // `writeFailureLogMeta` rebuilds the `{ error: { message, stack } }`
         // context the `error` slot used to build (see its header: `warn` has no
         // slot, and an Error's fields are non-enumerable).
-        const logged = e instanceof DuplicateRecordError ? e.cause : e;
+        // [#24768] A NOT NULL refusal's `ValidationError` carries the driver's
+        // error the same way, for the same reason.
+        const logged = e instanceof DuplicateRecordError || e instanceof NotNullRefusalError ? e.cause : e;
         this.logger.warn(
           'Insert operation failed',
           writeFailureLogMeta(redactBoundStatement(logged), { object }),
@@ -18486,6 +18494,8 @@ export class ObjectQL implements IObjectQLEngine {
                // returns everything else untouched (a NOT NULL, a deadlock, a
                // missing table, an unreachable store), so only the conflict
                // changes shape; the contract is stated on `update()` above.
+               // [#24768] A NOT NULL refusal on a declared field is the second
+               // shape that changes: the validator's own `ValidationError`.
                // Wrapped HERE rather than at the outer `catch` below, and
                // deliberately: that `try` also encloses the `afterUpdate`
                // dispatch and the roll-up recompute, so an envelope applied
@@ -18494,7 +18504,7 @@ export class ObjectQL implements IObjectQLEngine {
                try {
                    result = await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
                } catch (driverError) {
-                   throw envelopeUniqueViolation(driverError, object, this.getSchema(object));
+                   throw envelopeDriverWriteRefusal(driverError, object, this.getSchema(object), 'update', updateMsgCtx);
                }
                // [#21613] The by-id update returns the driver's post-write
                // readback (`select *` on driver-sql), so a column no metadata
@@ -18857,7 +18867,7 @@ export class ObjectQL implements IObjectQLEngine {
                try {
                    result = await driver.updateMany!(object, ast, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
                } catch (driverError) {
-                   throw envelopeUniqueViolation(driverError, object, this.getSchema(object));
+                   throw envelopeDriverWriteRefusal(driverError, object, this.getSchema(object), 'update', updateMsgCtx);
                }
                isPredicateWrite = true;
            }
@@ -19017,7 +19027,7 @@ export class ObjectQL implements IObjectQLEngine {
           //
           // [#17052] The insert door's twin here too: the level is `warn`,
           // because `throw e` on the next line IS the answer to the caller.
-          const logged = e instanceof DuplicateRecordError ? e.cause : e;
+          const logged = e instanceof DuplicateRecordError || e instanceof NotNullRefusalError ? e.cause : e;
           this.logger.warn(
             'Update operation failed',
             writeFailureLogMeta(redactBoundStatement(logged), { object }),
@@ -21773,61 +21783,15 @@ export class ObjectQL implements IObjectQLEngine {
    * whenever feasible — they auto-apply tenancy + soft-delete + audit warnings.
    */
   async execute(command: any, options?: Record<string, any>): Promise<any> {
-      // Driver selection priority:
-      //   1. options.object  → route via getDriver(objectName)
-      //   2. options.datasource → explicit driver name
-      //   3. default driver (set via datasourceMapping or defaultDriver)
-      // This lets system services (e.g. PackageService, AuditService) issue raw
-      // SQL against the control-plane / default DB without having to know the
-      // object name behind every CREATE TABLE / SELECT statement.
-      let driver: IDataDriver | undefined;
-      if (options?.object) {
-          driver = this.getDriver(options.object);
-      } else if (options?.datasource && this.drivers.has(options.datasource)) {
-          driver = this.drivers.get(options.datasource);
-      } else if (this.defaultDriver && this.drivers.has(this.defaultDriver)) {
-          driver = this.drivers.get(this.defaultDriver);
-      } else if (this.drivers.size === 1) {
-          // Single registered driver — unambiguously the right one.
-          driver = this.drivers.values().next().value;
-      }
-
-      if (!driver) {
-          throw new Error(
-              'Execute requires options.object to select a driver, or a default driver to be configured. ' +
-              'Configure datasourceMapping with `default: true` or pass `{ object }` / `{ datasource }` in options.',
-          );
-      }
-      if (!driver.execute) {
-          throw new Error('Selected driver does not implement execute()');
-      }
-
-      // Support both call shapes:
-      //   execute('SELECT ...', { args: [...] })
-      //   execute({ sql: 'SELECT ...', args: [...] })
-      let rawCommand: any = command;
-      let params: any[] | undefined = options?.args ?? options?.params;
-      if (command && typeof command === 'object' && !Array.isArray(command) && 'sql' in command) {
-          rawCommand = command.sql;
-          if (params === undefined) {
-              params = command.args ?? command.params;
-          }
-      }
-
-      // [#21274] A boundary outside the middleware seam: the raw command's
-      // bound `params` are the caller's values, and the driver's refusal
-      // carries the dialect error on its `cause`.
-      //
-      // [#21345] And the one door whose statement the engine did not compose:
-      // it may open with a word the shared leak predicate does not list (a
-      // common-table-expression form, a dialect's upsert or merge verb), so
-      // the cut must not wait for the predicate to recognise it. The door
-      // knows it sent a statement, and says so.
-      try {
-          return await driver.execute(rawCommand, params, options);
-      } catch (e) {
-          throw redactPropagatedDriverFault(e, { statementSent: true });
-      }
+      // [#25522 cut 7] The body moved to `engine-execute-transactions.ts` (see `ExecuteTransactionsHost`).
+      const readDrivers = () => this.drivers;
+      const readDefaultDriver = () => this.defaultDriver;
+      const host: ThisParameterType<typeof execute> = {
+        getDriver: (...a) => this.getDriver(...a),
+        get drivers() { return readDrivers(); },
+        get defaultDriver() { return readDefaultDriver(); },
+      };
+      return execute.call(host, command, options);
   }
 
   /**
@@ -22044,32 +22008,14 @@ export class ObjectQL implements IObjectQLEngine {
    * doubles, foreign engines) reach it on EVERY call.
    */
   private warnTransactionUnsupported(datasource: string | undefined, declaredUnsupported = false): void {
-    const name = datasource ?? '<no default datasource>';
-    if (this.transactionUnsupportedReported.has(name)) return;
-    this.transactionUnsupportedReported.add(name);
-    // [#18063] The two reasons reach the same degrade and must not read the
-    // same. Telling an operator a Turso REMOTE datasource "has no
-    // beginTransaction" sends them looking for a missing method on a class that
-    // publishes one; the fix for that reason is a different transport, not a
-    // different driver.
-    const cause = declaredUnsupported
-      ? `driver '${name}' declares supports.transactionsUnsupported — its transport cannot carry a ` +
-        'transaction handle even though it inherits beginTransaction'
-      : `driver '${name}' has no beginTransaction`;
-    const remedy = declaredUnsupported
-      ? 'Point this datasource at a transport that honours transactions (for libSQL: the local or ' +
-        'embedded-replica mode rather than the remote one), or have the caller fail '
-      : 'Register a driver that implements beginTransaction for this datasource, or have the caller fail ';
-    this.logger.warn(
-      `transaction() requested a transaction but ${cause} — ` +
-        'running WITHOUT transaction or rollback. Every write the callback makes commits as it executes, ' +
-        'so a later throw leaves the earlier ones PERSISTED even though the call rejects as if the whole ' +
-        'unit of work had been undone; no caller is told, and the records stay behind. ' +
-        remedy +
-        "closed itself when it cannot tolerate losing atomicity (batchData's atomic gate, ADR-0119 D4, is " +
-        'the pattern). Reported once per driver per engine instance.',
-      { datasource: name, declaredUnsupported },
-    );
+    // [#25522 cut 7] The body moved to `engine-execute-transactions.ts` (see `ExecuteTransactionsHost`).
+    const readTransactionUnsupportedReported = () => this.transactionUnsupportedReported;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof warnTransactionUnsupported> = {
+      get transactionUnsupportedReported() { return readTransactionUnsupportedReported(); },
+      get logger() { return readLogger(); },
+    };
+    return warnTransactionUnsupported.call(host, datasource, declaredUnsupported);
   }
 
   /**
@@ -22121,31 +22067,16 @@ export class ObjectQL implements IObjectQLEngine {
     driver: IDataDriver,
     operation: 'insert' | 'update' | 'delete',
   ): void {
-    const scope = this.txStore.getStore()?.scope;
-    // No engine-owned transaction in scope (or a handle threaded explicitly by
-    // the sandbox trio, which this store never sees) — nothing to be outside
-    // of. See `transactionCoversDriverFor` for why that limit is declared.
-    if (!scope) return;
-    // Identity, not name: this is about riding the same connection.
-    if (driver === scope.driver) return;
-    const target = this.datasourceNameOf(driver);
-
-    if (!this.isSystemLedgerObject(objectName)) {
-      throw new CrossDatasourceTransactionWriteError(objectName, operation, target, scope.datasource);
-    }
-
-    if (scope.reportedOutOfScope.has(target)) return;
-    scope.reportedOutOfScope.add(target);
-    this.logger.debug(
-      `${operation} of '${objectName}' inside transaction() is routed to datasource '${target}' while the ` +
-        `transaction is open on '${scope.datasource}' — executing it OUTSIDE the transaction, on its own ` +
-        'connection (ADR-0057 §3.6 system ledger — the one class carved out of the cross-datasource write ' +
-        'refusal). It commits independently and will ' +
-        'SURVIVE a rollback of this transaction: an audit/telemetry/event row may describe a write that was ' +
-        'undone. That is the decided direction of error for an append-only ledger — an extra reconcilable ' +
-        'row beats a missing row for a write that did commit. Said once per transaction per datasource.',
-      { object: objectName, operation, datasource: target, transactionDatasource: scope.datasource },
-    );
+    // [#25522 cut 7] The body moved to `engine-execute-transactions.ts` (see `ExecuteTransactionsHost`).
+    const readTxStore = () => this.txStore;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof enforceTransactionOrigin> = {
+      get txStore() { return readTxStore(); },
+      datasourceNameOf: (...a) => this.datasourceNameOf(...a),
+      isSystemLedgerObject: (...a) => this.isSystemLedgerObject(...a),
+      get logger() { return readLogger(); },
+    };
+    return enforceTransactionOrigin.call(host, objectName, driver, operation);
   }
 
   // ============================================

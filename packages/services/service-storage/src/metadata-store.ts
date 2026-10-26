@@ -29,6 +29,11 @@ export interface FileRecord {
   ref_object?: string | null;
   ref_id?: string | null;
   ref_field?: string | null;
+  /** [#26046] The record whose field last owned this file, kept when it let
+   * the file go; the file is read by that record's rule until claimed again.
+   * NULL on every file no record has let go. */
+  released_ref_object?: string | null;
+  released_ref_id?: string | null;
   /**
    * The registry-injected tenant column (#12745).
    *
