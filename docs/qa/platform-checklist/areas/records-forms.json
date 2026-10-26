@@ -4114,7 +4114,7 @@
       },
       "source": [
         "packages/objectql/src/secret-fields.ts#SECRET_REF_PREFIX (SECRET_MASK, SECRET_REF_PREFIX, collectSecretFields/collectMaskedReadFields/collectCredentialFields)",
-        "packages/objectql/src/engine.ts#encryptSecretFields (encryptSecretFields — encrypt→sys_secret→ref, echoed-mask drop, fail-closed throw; decrypt path)",
+        "packages/objectql/src/engine-secret-internal-fields.ts#encryptSecretFields (encryptSecretFields — encrypt→sys_secret→ref, echoed-mask drop, fail-closed throw; decrypt path)",
         "packages/spec/src/data/field.zod.ts#FieldType (FieldType 'secret'/'password' ADR-0100 notes; ackPlaintextMasking)",
         "packages/cli/src/commands/serve.ts#host (LocalCryptoProvider host wiring via setCryptoProvider)",
         "packages/platform-objects/src/system/sys-secret.object.ts (ciphertext store)",
