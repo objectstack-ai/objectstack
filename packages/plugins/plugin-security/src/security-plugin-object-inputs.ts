@@ -45,8 +45,13 @@
 import type { SecurityPlugin } from './security-plugin.js';
 import type { PermissionSet, RowLevelSecurityPolicy } from '@objectstack/spec/security';
 import type { FieldMaskingRule, NumberComparandDoorFieldMeta } from '@objectstack/spec/data';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { MatchesFilterOptions } from '@objectstack/formula';
+import type { FieldConditionVerdict } from '@objectstack/core';
 import { intersectFieldMasks } from './explain-engine.js';
+import { storedFormCheckJudge } from './rls-check-stored-form.js';
+import type { FieldConditionJudge } from './permission-evaluator.js';
+import type { RlsFieldGuard } from './rls-compiler.js';
 import { declaredComparisonColumns } from './declared-comparison-columns.js';
 import { isPlatformTenantPolicy, isAuthoredTenantPolicy } from './platform-tenant-policies.js';
 import { objectDefaultRowScopePolicy } from './object-default-row-scope.js';
@@ -104,10 +109,12 @@ export interface ObjectInputsHost {
   computePartialMaskRules: SecurityPlugin['computePartialMaskRules'];
   computeReadPartialMaskRules: SecurityPlugin['computeReadPartialMaskRules'];
   foldFieldRequiredPermissions: SecurityPlugin['foldFieldRequiredPermissions'];
+  getObjectFieldNames: SecurityPlugin['getObjectFieldNames'];
   loadObjectFieldNames: SecurityPlugin['loadObjectFieldNames'];
   probeMetadataOutage: SecurityPlugin['probeMetadataOutage'];
   probeUnpublishedDraft: SecurityPlugin['probeUnpublishedDraft'];
   warnAuthoredTenantPolicyOnce: SecurityPlugin['warnAuthoredTenantPolicyOnce'];
+  writeCheckFieldOptions: SecurityPlugin['writeCheckFieldOptions'];
 }
 
 /** The body of `SecurityPlugin#collectRLSPolicies`; the method's docblock there is its contract. */
@@ -270,24 +277,157 @@ export function computeQueryGuardFieldPerms(
   return out;
 }
 
+/**
+ * [#25866] The row a field write is judged on, for the row-conditioned
+ * entries (`FieldPermissionSchema.when`) the caller's sets may carry.
+ */
+export interface FieldWriteRow {
+  /** The engine operation the payload rides on. */
+  operation: 'insert' | 'update';
+  /** The caller's execution context — the `current_user` a `when` resolves against. */
+  context: ExecutionContext | undefined;
+  /**
+   * On an `update`, the stored row the write will change, read as the CALLER
+   * reads it (the middleware's memoised pre-image), fetched only when some set
+   * carries a `when` for the object. `null` means there is no row to judge —
+   * a predicate update, a row absent or invisible to the caller — and absent
+   * means the caller holds none (`canWriteObject`): both judge every
+   * conditioned entry as its LOCK. Unread on an `insert`, which is judged on
+   * each incoming row of the payload.
+   */
+  preImage?: () => Promise<Record<string, unknown> | null>;
+}
+
+/** The entries with a `when` on `objectName` across the sets, as authored (distinct). */
+function conditionsOn(objectName: string, sets: ReadonlyArray<PermissionSet | null | undefined>[]): Set<string> {
+  const out = new Set<string>();
+  const prefix = `${objectName}.`;
+  for (const list of sets) {
+    for (const ps of list) {
+      if (!ps?.fields) continue;
+      for (const [key, perm] of Object.entries(ps.fields)) {
+        const when = (perm as { when?: string } | null | undefined)?.when;
+        if (when !== undefined && key.startsWith(prefix)) out.add(when);
+      }
+    }
+  }
+  return out;
+}
+
 /** The body of `SecurityPlugin#computeForbiddenFieldWrites`; the method's docblock there is its contract. */
-export function computeForbiddenFieldWrites(
-  this: Pick<ObjectInputsHost, 'fieldMasker' | 'foldFieldRequiredPermissions' | 'permissionEvaluator'>,
+export async function computeForbiddenFieldWrites(
+  this: Pick<
+    ObjectInputsHost,
+    | 'datetimeFieldNamesCache'
+    | 'fieldMasker'
+    | 'foldFieldRequiredPermissions'
+    | 'getObjectFieldNames'
+    | 'logger'
+    | 'metadata'
+    | 'numberComparandFieldsCache'
+    | 'permissionEvaluator'
+    | 'ql'
+    | 'rlsCompiler'
+    | 'writeCheckFieldOptions'
+  >,
   objectName: string,
   data: Record<string, any> | Record<string, any>[],
   secMeta: Pick<ObjectSecurityMeta, 'fieldRequiredPermissions'>,
   permissionSets: PermissionSet[],
   delegatorSets: PermissionSet[] | null,
-): string[] {
-  let fieldPerms = this.permissionEvaluator.getFieldPermissions(objectName, permissionSets);
-  fieldPerms = this.foldFieldRequiredPermissions(fieldPerms, secMeta.fieldRequiredPermissions, permissionSets);
-  if (delegatorSets) {
-    let delFieldPerms = this.permissionEvaluator.getFieldPermissions(objectName, delegatorSets);
-    delFieldPerms = this.foldFieldRequiredPermissions(delFieldPerms, secMeta.fieldRequiredPermissions, delegatorSets);
-    fieldPerms = intersectFieldMasks(fieldPerms, delFieldPerms);
+  row: FieldWriteRow,
+): Promise<string[]> {
+  const perms = (judge: FieldConditionJudge | undefined): Record<string, { readable: boolean; editable: boolean }> => {
+    let fieldPerms = this.permissionEvaluator.getFieldPermissions(objectName, permissionSets, judge);
+    fieldPerms = this.foldFieldRequiredPermissions(fieldPerms, secMeta.fieldRequiredPermissions, permissionSets);
+    if (delegatorSets) {
+      let delFieldPerms = this.permissionEvaluator.getFieldPermissions(objectName, delegatorSets, judge);
+      delFieldPerms = this.foldFieldRequiredPermissions(delFieldPerms, secMeta.fieldRequiredPermissions, delegatorSets);
+      fieldPerms = intersectFieldMasks(fieldPerms, delFieldPerms);
+    }
+    return fieldPerms;
+  };
+  const forbiddenUnder = (payload: Record<string, any> | Record<string, any>[], fieldPerms: Record<string, { readable: boolean; editable: boolean }>): string[] =>
+    Object.keys(fieldPerms).length === 0 ? [] : this.fieldMasker.detectForbiddenWrites(payload, fieldPerms);
+
+  // No set carries a `when` for this object: the row-blind derivation, as
+  // before — no row is read, no predicate compiled.
+  const conditions = conditionsOn(objectName, [permissionSets, delegatorSets ?? []]);
+  if (conditions.size === 0) return forbiddenUnder(data, perms(undefined));
+
+  // [#25866 / ruling of record 6408558941] Some entry votes per row. The row
+  // is the incoming row of an insert, each one of a bulk payload on its own,
+  // or the stored row of a by-id update, read BEFORE the write as the caller
+  // reads it. Each distinct `when` is compiled ONCE, in process — the same
+  // compile, user context, field guard and comparand faces an RLS `check`
+  // clause takes (`RLSCompiler.compileRowPredicate`) — and judged by the write
+  // gate's own stored-form judge (`storedFormCheckJudge` over
+  // `matchesFilterCondition`), never by a query rewrite. A condition that
+  // yields no filter (an unresolved `current_user.*` for this caller, a column
+  // the object does not declare, a comparand the faces refuse — all refused at
+  // authoring by the lint rule, so only a request-time cause reaches here) or
+  // a row that cannot be judged (no pre-image) leaves the entry `unjudged`: its
+  // LOCK, the fail-closed reading, and the line below says why.
+  const rows: Array<Record<string, unknown> | null> = row.operation === 'insert'
+    ? (Array.isArray(data) ? data : [data]).map((r) => (r && typeof r === 'object' ? r : null))
+    : [row.preImage ? await row.preImage() : null];
+  const unjudged: FieldConditionJudge = () => 'unjudged';
+  if (rows.every((r) => r === null)) {
+    if (row.operation === 'update') {
+      this.logger.warn?.(
+        `[Security] A field permission on '${objectName}' carries a row condition (when) but the ` +
+          `${row.preImage ? 'stored row could not be read as the caller (absent or invisible)' : 'update addresses no single row (predicate update, or a reader that holds no row)'}; ` +
+          'each conditioned entry is applied as its lock on this write.',
+      );
+    }
+    return forbiddenUnder(data, perms(unjudged));
   }
-  if (Object.keys(fieldPerms).length === 0) return [];
-  return this.fieldMasker.detectForbiddenWrites(data, fieldPerms);
+
+  const declared = await this.getObjectFieldNames(this.metadata, objectName, this.ql);
+  const fieldGuard: RlsFieldGuard | undefined = declared
+    ? {
+        declared,
+        datetime: this.datetimeFieldNamesCache.get(objectName),
+        number: this.numberComparandFieldsCache.get(objectName),
+      }
+    : undefined;
+  const columns = await this.writeCheckFieldOptions(objectName);
+  const judges = new Map<string, ((image: Record<string, unknown>) => boolean) | null>();
+  for (const when of conditions) {
+    const outcome = this.rlsCompiler.compileRowPredicate(when, row.context, fieldGuard);
+    if (outcome.filter) {
+      judges.set(when, storedFormCheckJudge([outcome.filter], columns));
+    } else {
+      judges.set(when, null);
+      this.logger.warn?.(
+        `[Security] A field permission on '${objectName}' carries a row condition that cannot be judged for this ` +
+          `request (${outcome.cause.reason}) and is applied as its lock: ${when} — ${outcome.cause.detail}`,
+      );
+    }
+  }
+  const judgeOf = (image: Record<string, unknown> | null): FieldConditionJudge => (when): FieldConditionVerdict => {
+    const judge = judges.get(when);
+    if (!judge || image === null) return 'unjudged';
+    try {
+      return judge(image) ? 'matched' : 'unmatched';
+    } catch (thrown) {
+      this.logger.warn?.(
+        `[Security] A field permission on '${objectName}' carries a row condition the stored-form judge refused ` +
+          `and is applied as its lock: ${when} — ${thrown instanceof Error ? thrown.message : String(thrown)}`,
+      );
+      return 'unjudged';
+    }
+  };
+
+  if (row.operation === 'update') return forbiddenUnder(data, perms(judgeOf(rows[0])));
+  // An insert judges each incoming row on its own values and refuses the
+  // union — the same answer the masker gives a bulk payload under one map.
+  const forbidden = new Set<string>();
+  rows.forEach((image, i) => {
+    const payload = (Array.isArray(data) ? data : [data])[i];
+    for (const f of forbiddenUnder(payload, perms(judgeOf(image)))) forbidden.add(f);
+  });
+  return [...forbidden].sort();
 }
 
 /** The body of `SecurityPlugin#computeReadPartialMaskRules`; the method's docblock there is its contract. */
