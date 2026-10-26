@@ -5,7 +5,7 @@
  *
  * ## The measurement this inverts
  *
- * ObjectStack Cloud's `migrate-control-db.yml`, staging control plane,
+ * ObjectOS Cloud's `migrate-control-db.yml`, staging control plane,
  * `apply=false`, inside `docker run --rm`. The CLI finished in 4.3 seconds and
  * said so — `17 change(s)`, `Graceful shutdown started`, `Graceful shutdown
  * complete` — and then the log's next line is the run being cancelled by hand
