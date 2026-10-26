@@ -1462,18 +1462,29 @@ exists in the acting organization. One file had two access rules.
   its object's `fileAccessDelegate` where one is declared; a member of the
   organization for a file no record owns; a reader of any parent for an
   attachments-scope file; anyone for a `public_read` file.
-- **The quiet answer.** A file the writer may not read is answered as one the
-  organization-scoped lookup cannot see: the id is kept as written, nothing
-  is claimed or copied, and constraint verdicts do not run ahead of the read
-  check. #25682 gave this answer across organizations; this addendum states
-  it within one.
+- **The quiet answer.** At the write door, a file the writer may not read is
+  answered as one the organization-scoped lookup cannot see: the id is kept
+  as written, nothing is claimed or copied, and constraint verdicts do not run
+  ahead of the read check. #25682 gave this answer across organizations; this
+  addendum states it within one. Unless the record already owned the file,
+  the kept id gives no reader anything through it: a reader refused
+  `sys_file` read gets the refused marker (`metadataRefused`), and the
+  download door judges the file by its own rule, never by this record. A slot
+  holding a file it does not own is a state that step 5's
+  `verify-references` classifies as blocking. #26043 tracks replacing this
+  answer with a field-level refusal.
 - **A write's own copy** is claimed by the same write without being asked
   again.
 - **Outage.** An authorization-store outage fails the write with its declared
   envelope. Any other fault in the judgement is a refusal.
 - **No caller, no question.** System writes and context-less programmatic
-  writes reference files as before. A deliberate server-side copy between
-  records runs as a system write.
+  writes reference files as before. Everything else has a caller. A flow runs
+  as `runAs: 'user'` by default and is judged as the user it acts for. A
+  hook's data operations take the context of the write that fired them by
+  default (`runAs: 'inherit'`), or the triggering user's (`runAs: 'user'`).
+  An API-key caller is judged as the key's user. Only a declared
+  `runAs: 'system'` run, or a write already made as the system, is exempt. A
+  deliberate server-side copy between records runs as a system write.
 
 ### What it qualifies
 
