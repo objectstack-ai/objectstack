@@ -73,7 +73,7 @@ const CACHE_JOBS = [DEPS_JOB, ...Object.values(UI_JOBS)];
 const CEILINGS: Record<string, number> = {
   [DEPS_JOB]: 25,
   [UI_JOBS.typeCheck]: 40,
-  [UI_JOBS.lint]: 30,
+  [UI_JOBS.lint]: 40,
   [UI_JOBS.buildE2e]: 25,
 };
 

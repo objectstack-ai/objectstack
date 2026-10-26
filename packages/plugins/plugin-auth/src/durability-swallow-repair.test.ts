@@ -677,6 +677,7 @@ describe('#12981 batch 6 — the plugin-auth admin-audit swallows report instead
         })),
         requestPasswordReset: vi.fn(async () => ({ status: true })),
       }),
+      getAuthContext: async () => ({ password: { config: { minPasswordLength: 8, maxPasswordLength: 128 } } }),
       getDataEngine: () => engine as never,
       phoneNumberEnabled: () => false,
       emailServiceAvailable: () => true,

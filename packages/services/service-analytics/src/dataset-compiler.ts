@@ -10,10 +10,16 @@ import {
   virtualFieldAggregateRemedy,
 } from '@objectstack/spec/data';
 import type { Dataset, DatasetMeasure, DatasetDimension } from '@objectstack/spec/ui';
-import { resolveI18nLabel } from '@objectstack/spec/ui';
+import {
+  DATASET_DURATION_AGGREGATES,
+  DATASET_DURATION_FIELD_TYPE,
+  DATASET_DURATION_UNIT_SECONDS,
+  resolveI18nLabel,
+} from '@objectstack/spec/ui';
 import type { FilterCondition } from '@objectstack/spec/data';
 import { datasetInvalidError } from './dataset-refusal.js';
 import { TEMPORAL_SOURCE_FIELD_TYPES } from './measure-result-type.js';
+import type { DurationMeasureSpec } from './strategies/types.js';
 
 /**
  * Dataset → Cube compiler (ADR-0021 D-A=(c), WS2).
@@ -86,6 +92,12 @@ export interface CompiledDataset {
   filter?: FilterCondition;
   /** Per-measure scoped filters, keyed by measure name (applied by executor). */
   measureFilters: Record<string, FilterCondition>;
+  /**
+   * [#25778] Duration measures, keyed by measure name — NOT in `cube.measures`
+   * (a cube metric reads one column, a duration two). Carried to the
+   * strategies on the dataset-scope channel; see `DatasetScope.measureDurations`.
+   */
+  durations: Record<string, DurationMeasureSpec>;
 }
 
 /**
@@ -260,8 +272,10 @@ const DIVERGENCE_BY_AGGREGATE = (aggregate: string, fieldType: string, column = 
  * prescribes; it never re-states which pairs are accepted (that is the table's
  * line above it).
  *
- * The temporal sentence is the one #16737 measured and shipped, kept verbatim
- * for the class it was written about. The deriving sentence is #16099's
+ * The temporal sentence is the one #16737 measured and shipped; [#25778] its
+ * second half named a stored "days open" number as the only way to a duration,
+ * and now names the `duration` measure that answers one without a stored copy.
+ * The deriving sentence is #16099's
  * generalisation: counting is the aggregate that reads no arithmetic off a
  * value, so it is what an author who wanted "how much text is there" actually
  * wants. [#17560] The selecting sentence is the third: an author who wrote
@@ -281,8 +295,9 @@ const REMEDY_BY_SOURCE_CLASS = (fieldType: string, aggregate: string): string =>
   const virtual = virtualFieldAggregateRemedy(aggregate, fieldType);
   if (virtual !== undefined) return virtual;
   return TEMPORAL_SOURCE_FIELD_TYPES.has(fieldType)
-    ? 'For a temporal field, `min`/`max` return a real instant; a DURATION has to be '
-      + 'stored as a number (a computed "days open" field) and aggregated as one.'
+    ? 'For a temporal field, `min`/`max` return a real instant; the time BETWEEN two `datetime` '
+      + 'fields of a record is a `duration: { from, to, unit }` measure, aggregated by '
+      + `${DATASET_DURATION_AGGREGATES.join(' / ')}.`
     : aggregate === 'count_distinct'
       ? 'For a JSON-stored field, `count` counts the rows; a distinct count has to be taken '
         + 'over a field that stores one scalar value, so store the part you count in a field '
@@ -439,6 +454,85 @@ function assertAggregateFieldTypeCompatible(
     `${flaggedList ? ', none of them with `multiple: true`' : ''}. ` +
     `${REMEDY_BY_SOURCE_CLASS(fieldType, aggregate)}`,
   );
+}
+
+/**
+ * One column of the base object by its bare name — the spec's `duration.from` /
+ * `to` shape (`ANALYTICS_BASE_COLUMN`, which `@objectstack/spec` does not
+ * export). Judged again here because a dataset can reach the compile without
+ * passing the schema.
+ */
+const DURATION_BASE_COLUMN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * [#25778] Compile one dataset measure's `duration` — the column pair, the
+ * unit, and the measure's aggregate — after judging what the metadata can
+ * settle before any query runs.
+ *
+ * - The SHAPE the spec holds at parse — each column one bare name, the unit
+ *   one of `DATASET_DURATION_UNIT_SECONDS` — and the AGGREGATE, one of
+ *   `DATASET_DURATION_AGGREGATES`. These are the guard for a dataset that
+ *   reaches the compiler without meeting that parse (the same posture as every
+ *   other `DATASET_INVALID` here): the native-SQL face writes the columns into
+ *   its statement and divides by the unit's length.
+ * - Each COLUMN is a field the base object declares as `datetime`, judged
+ *   through the same `declaredValueShape` hook the aggregate × field-type gate
+ *   reads, with the same tiering: no hook, or a field the hook cannot resolve,
+ *   is not judged. A column of another declared type is refused, naming the
+ *   column, its type and the one type accepted — so a `text` column holding
+ *   ISO strings, or a `date`, never reaches the SQL as an instant it is not.
+ *   An undeclared column is the field gate's and the database's to refuse.
+ */
+function compileDurationMeasure(
+  datasetName: string,
+  objectName: string,
+  measure: DatasetMeasure & { duration: NonNullable<DatasetMeasure['duration']> },
+  declaredValueShape?: (objectName: string, field: string) => ValueShapeFieldDef | undefined,
+): DurationMeasureSpec {
+  const { from, to, unit } = measure.duration;
+  for (const [slot, column] of [['from', from], ['to', to]] as const) {
+    if (typeof column === 'string' && DURATION_BASE_COLUMN.test(column)) continue;
+    throw datasetInvalidError(
+      `[dataset-compiler] dataset "${datasetName}" duration measure "${measure.name}" reads ` +
+      `\`duration.${slot}\` ${JSON.stringify(column) ?? 'undefined'}, which names no column: it takes one ` +
+      `\`${DATASET_DURATION_FIELD_TYPE}\` field of "${objectName}" by its bare name.`,
+    );
+  }
+  if (!Object.prototype.hasOwnProperty.call(DATASET_DURATION_UNIT_SECONDS, unit)) {
+    throw datasetInvalidError(
+      `[dataset-compiler] dataset "${datasetName}" duration measure "${measure.name}" takes \`duration.unit\` ` +
+      `${Object.keys(DATASET_DURATION_UNIT_SECONDS).join(' / ')}; it declares ${JSON.stringify(unit) ?? 'none'}.`,
+    );
+  }
+  const aggregate = measure.aggregate;
+  if (!aggregate || !(DATASET_DURATION_AGGREGATES as readonly string[]).includes(aggregate)) {
+    throw datasetInvalidError(
+      `[dataset-compiler] dataset "${datasetName}" duration measure "${measure.name}" takes \`aggregate\` ` +
+      `${DATASET_DURATION_AGGREGATES.join(' / ')}; it declares ${aggregate ? `"${aggregate}"` : 'none'}.`,
+    );
+  }
+  if (declaredValueShape) {
+    for (const [slot, column] of [['from', from], ['to', to]] as const) {
+      const fieldType = declaredValueShape(objectName, column)?.type;
+      if (!fieldType || fieldType === DATASET_DURATION_FIELD_TYPE) continue;
+      throw datasetInvalidError(
+        `[dataset-compiler] dataset "${datasetName}" duration measure "${measure.name}" reads ` +
+        `\`duration.${slot}\` "${column}", which object "${objectName}" declares as \`${fieldType}\`. ` +
+        `A duration spans two \`${DATASET_DURATION_FIELD_TYPE}\` fields of the same record, because an instant is ` +
+        `the one value every backend measures the time between alike; a \`${fieldType}\` field holds no ` +
+        `instant. Point \`duration.${slot}\` at a \`${DATASET_DURATION_FIELD_TYPE}\` field of "${objectName}".`,
+      );
+    }
+  }
+  return {
+    aggregate: aggregate as DurationMeasureSpec['aggregate'],
+    from,
+    to,
+    unit,
+    // [#6761] The same registry-locale label a cube metric gets.
+    label: resolveI18nLabel(measure.label, REGISTRY_LOCALE) ?? measure.name,
+    ...(typeof measure.format === 'string' ? { format: measure.format } : {}),
+  };
 }
 
 /** Map a dataset dimension type to the Cube dimension `type`. */
@@ -707,10 +801,26 @@ export function compileDataset(
   const measures: Record<string, Metric> = {};
   const derived: DerivedMeasureSpec[] = [];
   const measureFilters: Record<string, FilterCondition> = {};
+  const durations: Record<string, DurationMeasureSpec> = {};
 
   for (const m of dataset.measures) {
     if (m.derived) {
       derived.push({ name: m.name, op: m.derived.op, of: m.derived.of });
+      continue;
+    }
+    // [#25778] A duration measure reads two columns, which no cube metric can
+    // carry: it goes to the dataset-scope sidecar and NOT into
+    // `cube.measures`, so any reader that does not know it refuses it rather
+    // than aggregating one of its columns (see `DatasetScope.measureDurations`).
+    // Its scoped `filter` rides the ordinary channel.
+    if (m.duration) {
+      durations[m.name] = compileDurationMeasure(
+        dataset.name,
+        dataset.object,
+        m as DatasetMeasure & { duration: NonNullable<DatasetMeasure['duration']> },
+        options?.declaredValueShape,
+      );
+      if (m.filter) measureFilters[m.name] = m.filter;
       continue;
     }
     if (m.field) assertDeclared(m.field, 'measure', m.name);
@@ -755,5 +865,6 @@ export function compileDataset(
     derived,
     filter: dataset.filter,
     measureFilters,
+    durations,
   };
 }

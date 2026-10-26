@@ -1,10 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectui#11858 — when Monaco's CDN loader script cannot be fetched (no
- * egress, a strict CSP), SchemaForm's `code` widget renders an editable
- * textarea that saves, the failure is reported once per page, and nothing
- * escapes as an uncaught error.
+ * objectui#11858 — when Monaco cannot be loaded (its bundled chunk cannot be
+ * fetched), SchemaForm's `code` widget renders an editable textarea that
+ * saves, the failure is reported once per page, and nothing escapes as an
+ * uncaught error.
  *
  * ## The defect this file keeps fixed
  *
@@ -28,18 +28,18 @@
  *    formula's ADR-0089 envelope parsed by the spec: the envelope write the
  *    editor makes (objectui#10963) is the one the textarea makes.
  *
- * ## Nothing about Monaco is mocked
+ * ## Only the chunk is stood in for
  *
  * As in `useMonacoFallback.loaderRejection-11800.test.tsx`, this drives the REAL
- * `@monaco-editor/loader` and the real plugin-editor `<Editor>`: the leak lives
- * in the loader, and a stubbed `loader.init` would hand back a promise the
- * caller CAN catch. Two pieces of browser behaviour are modelled, and only
- * these two, the same way that file models them:
+ * `@monaco-editor/loader` and the real plugin-editor `<Editor>`; only
+ * plugin-editor's `configureBundledMonaco`, which hands the bundled Monaco to
+ * the loader before the page's one `loader.init()`, stands for the chunk. Two
+ * pieces of browser behaviour are modelled, and only these two, the same way
+ * that file models them:
  *
- *  - **The network.** The loader appends a `vs/loader.js` script and waits for
- *    its `error` event. The script is held back from the DOM and its `error`
- *    event fired by the test, after both lazy editor modules have loaded, so
- *    an editor that mounted before the loader answered would have mounted.
+ *  - **The network.** `configureBundledMonaco` waits until the test lets the
+ *    chunk fail, after both lazy editor modules have loaded, so an editor that
+ *    mounted before the chunk answered would have mounted.
  *  - **Unhandled rejections.** Each Node report is replayed as a cancelable
  *    `unhandledrejection` event on `window`, and the ones left uncancelled are
  *    counted. Vitest's own listeners are put back afterwards.
@@ -69,6 +69,26 @@ import { CodeWidget } from './widgets';
 import type { FormFieldSpec, FormViewSpec } from './form-spec';
 
 const LOADER_SCRIPT = /\/vs\/loader\.js$/;
+const CHUNK_URL = 'http://localhost/_console/assets/editor.api2-hash.js';
+
+const chunk = vi.hoisted(() => {
+  let fail!: () => void;
+  const answered = new Promise<void>((resolve) => {
+    fail = resolve;
+  });
+  return { answered, fail: () => fail() };
+});
+
+// The bundled Monaco chunk cannot be fetched: plugin-editor's
+// `configureBundledMonaco` rejects, as its import of the chunk does, once the
+// test says the network answered. The rest of plugin-editor is real.
+vi.mock('@object-ui/plugin-editor', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@object-ui/plugin-editor')>()),
+  configureBundledMonaco: async () => {
+    await chunk.answered;
+    throw new TypeError(`Failed to fetch dynamically imported module: ${CHUNK_URL}`);
+  },
+}));
 
 let uncaught: unknown[] = [];
 let vitestListeners: NodeJS.UnhandledRejectionListener[] = [];
@@ -152,7 +172,7 @@ const STORED_EXPRESSION = FieldSchema.parse({
   expression: { dialect: 'cel', source: 'record.amount * 2', meta: META },
 }).expression;
 
-describe('CodeWidget — a failing Monaco loader falls back to an editable textarea (objectui#11858)', () => {
+describe('CodeWidget — a Monaco chunk that cannot be fetched falls back to an editable textarea (objectui#11858)', () => {
   it('the rows are what they claim: spec code rows, and a spec-parsed envelope', () => {
     // Guards the premises, so a spec that renames a row or changes its type
     // fails here instead of turning the pins below into tests of nothing.
@@ -185,15 +205,13 @@ describe('CodeWidget — a failing Monaco loader falls back to an editable texta
     );
     await settle();
 
-    expect(heldLoaderScripts, 'the loader appends its script once per page').toHaveLength(1);
-    const [loaderScript] = heldLoaderScripts;
     // Before the network answers, no Monaco editor is mounted: it would show
     // its own "Loading..." and call `loader.init()` itself.
-    expect.soft(screen.queryAllByText('Loading...'), 'Monaco editors mounted before the loader answered').toHaveLength(0);
+    expect.soft(screen.queryAllByText('Loading...'), 'Monaco editors mounted before the chunk answered').toHaveLength(0);
 
-    // The network answers: the loader script failed to load.
-    act(() => {
-      loaderScript.dispatchEvent(new Event('error'));
+    // The network answers: the chunk could not be fetched.
+    await act(async () => {
+      chunk.fail();
     });
 
     const hookBody = (await screen.findByRole('textbox', { name: /^source/i }, { timeout: 2000 })) as HTMLTextAreaElement;
@@ -216,14 +234,15 @@ describe('CodeWidget — a failing Monaco loader falls back to an editable texta
 
     await settle();
     // Soft, so a regression reports every reading at once, not just the first.
-    expect.soft(uncaught, 'uncaught rejections after the loader failed').toHaveLength(0);
+    expect.soft(uncaught, 'uncaught rejections after the chunk failed').toHaveLength(0);
     const editorInitErrors = consoleError.mock.calls.filter(
       ([first]) => typeof first === 'string' && first.startsWith('Monaco initialization'),
     );
     expect.soft(editorInitErrors, "<Editor>'s own init error lines").toHaveLength(0);
     const reports = monacoReports(consoleWarn.mock.calls);
     expect.soft(reports, 'console lines reporting the Monaco failure').toHaveLength(1);
-    expect.soft(reports.join('\n'), 'the report names the loader script URL').toContain(loaderScript.src);
+    expect.soft(reports.join('\n'), 'the report names the chunk URL').toContain(CHUNK_URL);
+    expect.soft(heldLoaderScripts, "loader scripts appended (the loader's CDN default)").toHaveLength(0);
     expect.soft(screen.queryAllByText('Loading...'), 'Monaco editors mounted after the failure').toHaveLength(0);
 
     // Reopen: a code row mounted after the failure is known renders the
@@ -248,7 +267,7 @@ describe('CodeWidget — a failing Monaco loader falls back to an editable texta
     await settle();
 
     expect.soft(uncaught, 'uncaught rejections after a reopen').toHaveLength(0);
-    expect.soft(heldLoaderScripts, 'loader scripts after a reopen').toHaveLength(1);
+    expect.soft(heldLoaderScripts, 'loader scripts after a reopen').toHaveLength(0);
     expect.soft(monacoReports(consoleWarn.mock.calls), 'reports after a reopen').toHaveLength(1);
   });
 });

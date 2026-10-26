@@ -3437,18 +3437,29 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // [objectui#7189] The entries the SERVER groups by: the render grouping less
   // any key this principal may not read (see `groupingKeyReadable`). Keyed on
   // the names, so a host rebuilding `grouping` every render re-asks nothing.
+  // [objectstack#25786] A level's `orderBy` rides along — the header query
+  // compiles its `min` / `max` column from it — under the same read gate: an
+  // `orderBy` this principal may not read is dropped, and the level orders by
+  // its own key, since the header row would carry that field's value and the
+  // group order would disclose it.
   const serverGroupingKey = serverGroupedFetch
     ? JSON.stringify(
       usableGroupingFields(groupingForRender?.fields)
         .filter((gf) => groupingKeyReadable(gf.field))
-        .map((gf) => [gf.field, gf.order ?? null, gf.collapsed ?? null]),
+        .map((gf) => [
+          gf.field,
+          gf.order ?? null,
+          gf.collapsed ?? null,
+          gf.orderBy && groupingKeyReadable(gf.orderBy) ? gf.orderBy : null,
+        ]),
     )
     : '[]';
   const serverGroupingFields = React.useMemo(
-    () => (JSON.parse(serverGroupingKey) as Array<[string, 'asc' | 'desc' | null, boolean | null]>)
-      .map(([field, order, collapsed]) => ({
+    () => (JSON.parse(serverGroupingKey) as Array<[string, 'asc' | 'desc' | null, boolean | null, string | null]>)
+      .map(([field, order, collapsed, orderBy]) => ({
         field,
         ...(order ? { order } : {}),
+        ...(orderBy !== null ? { orderBy } : {}),
         ...(collapsed !== null ? { collapsed } : {}),
       })),
     [serverGroupingKey],

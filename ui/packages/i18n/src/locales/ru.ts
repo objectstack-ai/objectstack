@@ -459,6 +459,10 @@ const ru = {
     selected_other: "Выбрано: {{count}}",
     edit: "Редактировать",
     delete: "Удалить",
+    // The inline-edit row buttons and the hover open affordance (#25916).
+    openRecord: "Открыть запись",
+    cancelChanges: "Отменить изменения",
+    saveRow: "Сохранить строку",
   },
   grid: {
     bulkSelected: "Выбрано: {{count}}",
@@ -2522,6 +2526,8 @@ const ru = {
         stepInput: 'Вход',
         stepOutput: 'Выход',
         stepError: 'Ошибка',
+        // A client that lacks the method a panel calls (#25916).
+        clientMethodUnavailable: "Метод {{method}} недоступен в этом клиенте",
       },
       // objectui#13460 — the Integrations page's "Connect an AI agent" card (`AgentConnectSection`).
       agentConnect: {
@@ -4528,6 +4534,8 @@ const ru = {
       detailLoadFailed: 'Не удалось загрузить детали изменения:',
       detailNone: 'Различий не обнаружено — черновик совпадает с опубликованной версией.',
       detailChangedKeys: 'Также изменено:',
+      detailNewKeys: 'Включает:',
+      generatedGroup: 'Создано платформой ({{n}})',
       confirmNote: 'Публикация атомарно выпускает все {{count}} ожидающих черновиков этого пакета.',
       confirmNote_one: 'Публикация атомарно выпускает {{count}} ожидающий черновик этого пакета.',
       confirmNote_few: 'Публикация атомарно выпускает все {{count}} ожидающих черновика этого пакета.',
@@ -4961,6 +4969,14 @@ const ru = {
       unknownType: "Неизвестный тип представления метаданных. Ожидается {{a}}, {{b}} или {{c}}.",
       unknownTypeNamed: "Неизвестный тип представления метаданных «{{type}}». Ожидается {{a}}, {{b}} или {{c}}.",
     },
+  },
+  reactPage: {
+    disabledTitle: "Страницы React отключены в этом развёртывании",
+    disabledBody: "Страницы {{kind}} выполняют JavaScript автора прямо в приложении, поэтому они отключены, пока развёртывание их не включит. Оператор, доверяющий авторам своих страниц, задаёт {{flag}} на сервере (хост, встраивающий рендерер, вызывает {{call}}).",
+    loadFailed: "Не удалось загрузить среду выполнения React",
+    sourceRequired: "Странице {{kind}} требуется непустое значение {{source}}.",
+    loading: "Загрузка среды выполнения React…",
+    error: "Ошибка страницы React",
   },
 };
 

@@ -1974,6 +1974,151 @@ describe('SecurityPlugin', () => {
     });
   });
 
+  // -------------------------------------------------------------------------
+  // [#25866 / ruling of record 6408558941] A field permission entry with a
+  // row condition (`when`) votes only on the rows the condition names: the
+  // incoming row of an insert, the STORED row of a by-id update (before the
+  // write). The judge is the write gate's own in-process one
+  // (`RLSCompiler.compileRowPredicate` + `storedFormCheckJudge`), never a
+  // query rewrite; a row that cannot be judged applies the entry as its lock.
+  // -------------------------------------------------------------------------
+  const whenFields = ['id', 'owner_id', 'name', 'amount', 'status', 'assigned_to'];
+  const whenSetWith = (when: string): PermissionSet => ({
+    name: 'member_default',
+    label: 'Member',
+    objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+    fields: { 'task.amount': { readable: true, editable: false, when } },
+  } as any);
+  const whenCtx = { userId: 'u1', tenantId: 'org-1', positions: [], permissions: ['member_default'] };
+  const bootWhen = async (when: string, over: { findOneImpl?: (q: any) => any } = {}) => {
+    const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+    const harness = makeMiddlewareCtx({ permissionSets: [whenSetWith(when)], objectFields: whenFields, ...over });
+    await plugin.init(harness.ctx);
+    await plugin.start(harness.ctx);
+    return { plugin, harness };
+  };
+  const APPROVED_LOCK = "status == 'approved'";
+
+  it('[#25866] insert — the condition is judged on the INCOMING row: a draft admits the locked field', async () => {
+    const { harness } = await bootWhen(APPROVED_LOCK);
+    const opCtx: any = { object: 'task', operation: 'insert', data: { name: 'A', amount: 5, status: 'draft' }, context: whenCtx };
+    await expect(harness.run(opCtx)).resolves.toBeDefined();
+    // No row-condition line: the row was judged, not locked blind.
+    expect(harness.ctx.logger.warn).not.toHaveBeenCalledWith(expect.stringMatching(/row condition/));
+  });
+
+  it('[#25866] insert — an approved incoming row matches the condition and the lock refuses the field', async () => {
+    const { harness } = await bootWhen(APPROVED_LOCK);
+    const opCtx: any = { object: 'task', operation: 'insert', data: { name: 'A', amount: 5, status: 'approved' }, context: whenCtx };
+    await expect(harness.run(opCtx)).rejects.toThrow(/Field write denied/);
+    await expect(harness.run(opCtx)).rejects.toMatchObject({ details: { forbiddenFields: ['amount'] } });
+  });
+
+  it('[#25866] insert — a bulk payload judges each row on its own and refuses the union', async () => {
+    const { harness } = await bootWhen(APPROVED_LOCK);
+    const opCtx: any = {
+      object: 'task', operation: 'insert', context: whenCtx,
+      data: [{ name: 'A', amount: 1, status: 'draft' }, { name: 'B', amount: 2, status: 'approved' }],
+    };
+    await expect(harness.run(opCtx)).rejects.toMatchObject({ details: { forbiddenFields: ['amount'] } });
+    const drafts: any = {
+      object: 'task', operation: 'insert', context: whenCtx,
+      data: [{ name: 'A', amount: 1, status: 'draft' }, { name: 'B', amount: 2 }],
+    };
+    await expect(harness.run(drafts)).resolves.toBeDefined();
+  });
+
+  it('[#25866] update by id — judged on the STORED row before the write, not on the payload', async () => {
+    // The stored row is approved: the lock applies even though the payload
+    // would move the row back to draft in the same write.
+    const { harness } = await bootWhen(APPROVED_LOCK, {
+      findOneImpl: () => ({ id: 'r1', owner_id: 'u1', name: 'A', amount: 1, status: 'approved' }),
+    });
+    const opCtx: any = {
+      object: 'task', operation: 'update', context: whenCtx,
+      data: { amount: 2, status: 'draft' }, options: { where: { id: 'r1' } },
+    };
+    await expect(harness.run(opCtx)).rejects.toMatchObject({ details: { forbiddenFields: ['amount'] } });
+  });
+
+  it('[#25866] update by id — a stored draft row admits the field, even when the payload approves it', async () => {
+    const { harness } = await bootWhen(APPROVED_LOCK, {
+      findOneImpl: () => ({ id: 'r1', owner_id: 'u1', name: 'A', amount: 1, status: 'draft' }),
+    });
+    const opCtx: any = {
+      object: 'task', operation: 'update', context: whenCtx,
+      data: { amount: 2, status: 'approved' }, options: { where: { id: 'r1' } },
+    };
+    await expect(harness.run(opCtx)).resolves.toBeDefined();
+    // The pre-image was read as the CALLER, by id, exactly once for the operation.
+    expect(harness.findOne).toHaveBeenCalledWith('task', expect.objectContaining({ where: { id: 'r1' }, context: whenCtx }));
+  });
+
+  it('[#25866] update — a predicate update has no single row to judge and applies the entry as its lock', async () => {
+    const { harness } = await bootWhen(APPROVED_LOCK);
+    const opCtx: any = {
+      object: 'task', operation: 'update', context: whenCtx,
+      data: { amount: 2 }, options: { where: { status: 'draft' }, multi: true },
+    };
+    await expect(harness.run(opCtx)).rejects.toMatchObject({ details: { forbiddenFields: ['amount'] } });
+    expect(harness.ctx.logger.warn).toHaveBeenCalledWith(expect.stringMatching(/row condition.*applied as its lock/));
+  });
+
+  it('[#25866] update by id — a stored row the caller cannot read (or that is absent) applies the lock', async () => {
+    // In the middleware the row-level pre-image gate (2.7) runs first and
+    // answers a null pre-image with 404 RECORD_NOT_FOUND, so the write never
+    // reaches the field gate. The field gate's OWN reading of a null pre-image
+    // is still the lock — the second line, and the one `canWriteObject` and a
+    // predicate update rely on — so it is pinned here on the derivation itself.
+    const { plugin, harness } = await bootWhen(APPROVED_LOCK, { findOneImpl: () => null });
+    const opCtx: any = {
+      object: 'task', operation: 'update', context: whenCtx,
+      data: { amount: 2 }, options: { where: { id: 'r1' } },
+    };
+    await expect(harness.run(opCtx)).rejects.toMatchObject({ code: 'RECORD_NOT_FOUND' });
+    const forbidden = await (plugin as any).computeForbiddenFieldWrites(
+      'task', { amount: 2 }, { fieldRequiredPermissions: {} }, [whenSetWith(APPROVED_LOCK)], null,
+      { operation: 'update', context: whenCtx, preImage: async () => null },
+    );
+    expect(forbidden).toEqual(['amount']);
+    expect(harness.ctx.logger.warn).toHaveBeenCalledWith(expect.stringMatching(/stored row could not be read as the caller.*applied as its lock/));
+    // The same derivation with a readable draft pre-image admits the field.
+    const admitted = await (plugin as any).computeForbiddenFieldWrites(
+      'task', { amount: 2 }, { fieldRequiredPermissions: {} }, [whenSetWith(APPROVED_LOCK)], null,
+      { operation: 'update', context: whenCtx, preImage: async () => ({ id: 'r1', status: 'draft' }) },
+    );
+    expect(admitted).toEqual([]);
+  });
+
+  it('[#25866] the condition resolves `current_user.*` against the caller, as an RLS predicate does', async () => {
+    const { harness } = await bootWhen('assigned_to == current_user.id');
+    const mine: any = { object: 'task', operation: 'insert', data: { name: 'A', amount: 1, assigned_to: 'u1' }, context: whenCtx };
+    await expect(harness.run(mine)).rejects.toMatchObject({ details: { forbiddenFields: ['amount'] } });
+    const theirs: any = { object: 'task', operation: 'insert', data: { name: 'A', amount: 1, assigned_to: 'u2' }, context: whenCtx };
+    await expect(harness.run(theirs)).resolves.toBeDefined();
+  });
+
+  it('[#25866] a condition that does not resolve for this request applies the lock and says why', async () => {
+    const { harness } = await bootWhen('assigned_to == current_user.nope');
+    const opCtx: any = { object: 'task', operation: 'insert', data: { name: 'A', amount: 1, assigned_to: 'u1' }, context: whenCtx };
+    await expect(harness.run(opCtx)).rejects.toMatchObject({ details: { forbiddenFields: ['amount'] } });
+    expect(harness.ctx.logger.warn).toHaveBeenCalledWith(expect.stringMatching(/cannot be judged for this request.*applied as its lock/));
+  });
+
+  it('[#25866] a field the entry does not name is never refused, matched or not', async () => {
+    const { harness } = await bootWhen(APPROVED_LOCK);
+    const opCtx: any = { object: 'task', operation: 'insert', data: { name: 'A', status: 'approved' }, context: whenCtx };
+    await expect(harness.run(opCtx)).resolves.toBeDefined();
+  });
+
+  it('[#25866] canWriteObject — an insert is judged on the payload; an update holds no row and applies the lock', async () => {
+    const { plugin } = await bootWhen(APPROVED_LOCK);
+    await expect(plugin.canWriteObject('task', 'insert', whenCtx, { name: 'A', amount: 1, status: 'draft' })).resolves.toBe(true);
+    await expect(plugin.canWriteObject('task', 'insert', whenCtx, { name: 'A', amount: 1, status: 'approved' })).resolves.toBe(false);
+    await expect(plugin.canWriteObject('task', 'update', whenCtx, { amount: 2 })).resolves.toBe(false);
+    await expect(plugin.canWriteObject('task', 'update', whenCtx, { name: 'renamed' })).resolves.toBe(true);
+  });
+
   it('[#2982 follow-up] bulk-write predicate guard inspects the CALLER predicate, not injected owner/RLS filters', async () => {
     // The anti-oracle guard (2.9) must reject a caller filtering on an
     // FLS-hidden field, but must NOT reject an owner_id predicate a sibling
@@ -2460,6 +2605,44 @@ describe('PermissionEvaluator', () => {
     const ps2 = makePermSet('ps2', {}, { 'contact.email': { readable: false, editable: true } });
     const result = evaluator.getFieldPermissions('contact', [ps1, ps2]);
     expect(result['email']).toEqual({ readable: true, editable: true });
+  });
+
+  it('[#25866] a conditioned entry votes by the judge: matched as declared, unmatched ABSENT, unjudged as its lock', () => {
+    const evaluator = new PermissionEvaluator();
+    const ps = makePermSet('ps', {}, { 'contact.email': { readable: true, editable: true, when: "x == 1" } as any });
+    expect(evaluator.getFieldPermissions('contact', [ps], () => 'matched')).toEqual({ email: { readable: true, editable: true } });
+    expect(evaluator.getFieldPermissions('contact', [ps], () => 'unmatched')).toEqual({});
+    expect(evaluator.getFieldPermissions('contact', [ps], () => 'unjudged')).toEqual({ email: { readable: true, editable: false } });
+    // No judge — every reader that holds no row — is the unjudged reading.
+    expect(evaluator.getFieldPermissions('contact', [ps])).toEqual({ email: { readable: true, editable: false } });
+  });
+
+  it('[#25866] an unmatched conditioned lock leaves a sibling grant intact; an entry without a `when` votes on every row', () => {
+    const evaluator = new PermissionEvaluator();
+    const lock = makePermSet('lock', {}, { 'contact.email': { readable: true, editable: false, when: "x == 1" } as any });
+    const grant = makePermSet('grant', {}, { 'contact.email': { readable: true, editable: true } });
+    const judge = vi.fn(() => 'unmatched' as const);
+    expect(evaluator.getFieldPermissions('contact', [lock, grant], judge)).toEqual({ email: { readable: true, editable: true } });
+    expect(judge).toHaveBeenCalledTimes(1);
+    expect(judge).toHaveBeenCalledWith('x == 1');
+    // Matched, the lock is present — and the most-permissive merge still lets the grant win (union without deny).
+    expect(evaluator.getFieldPermissions('contact', [lock, grant], () => 'matched')).toEqual({ email: { readable: true, editable: true } });
+    expect(evaluator.getFieldPermissions('contact', [lock], () => 'matched')).toEqual({ email: { readable: true, editable: false } });
+  });
+
+  it('[#25866] conditionedFieldEntries lists the row-conditioned entries of the object, as authored', () => {
+    const evaluator = new PermissionEvaluator();
+    const ps = makePermSet('hr', {}, {
+      'contact.email': { readable: true, editable: false, when: "status == 'approved'" } as any,
+      'contact.phone': { readable: true, editable: false },
+      'task.title': { readable: true, editable: true, when: 'done == false' } as any,
+    });
+    expect(evaluator.conditionedFieldEntries('contact', [ps])).toEqual([
+      { field: 'email', set: 'hr', when: "status == 'approved'", editable: false },
+    ]);
+    expect(evaluator.conditionedFieldEntries('task', [ps])).toEqual([
+      { field: 'title', set: 'hr', when: 'done == false', editable: true },
+    ]);
   });
 
   it('should filter field permissions to the correct object', () => {

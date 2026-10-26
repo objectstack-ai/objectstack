@@ -312,7 +312,11 @@ export function bindHooksToEngine(
         continue;
       }
 
-      const wrapped = wrapDeclarativeHook(hook, resolved, { logger, metrics: opts.metrics });
+      // [#25653] `appAuthored`: every hook this binder binds is app-authored —
+      // the same set the `skipAutomations` opt-out keys on through `meta`
+      // below — so its inherited elevation and its `sudo()` carry the
+      // app-automation mark (`APP_AUTHORED_HOOK_API`, `hook-run-as.ts`).
+      const wrapped = wrapDeclarativeHook(hook, resolved, { logger, metrics: opts.metrics, appAuthored: true });
       const events = Array.isArray(hook.events) ? hook.events : [];
 
       for (const event of events) {

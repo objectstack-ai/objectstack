@@ -90,6 +90,9 @@ const PRODUCERS: Readonly<Record<string, number>> = {
   // The publish backfill pair, moved out of `protocol.ts` whole on the same
   // terms.
   'protocol-publish-backfill.ts': 3,
+  // The package door's save refusal, moved out of `protocol.ts` whole on the
+  // same terms.
+  'protocol-packaged-base-refusal.ts': 1,
   'sys-metadata-repository.ts': 5,
   'runtime-authoring-gate.ts': 1,
 };
