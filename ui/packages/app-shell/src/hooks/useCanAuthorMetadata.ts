@@ -73,3 +73,26 @@ export function useCanReadAuthoringTrail(): boolean {
   const { hasCapabilities } = usePermissions();
   return AUTHORING_TRAIL_CAPABILITIES.some((capability) => hasCapabilities([capability]));
 }
+
+/**
+ * objectstack-ai/objectstack#25894 — the capabilities the pending-drafts ledger
+ * (`GET /meta/_drafts`) admits. The door asks `mayReadPendingDrafts`, the
+ * ADR-0106 D4 mask-exemption cohort (`OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES`
+ * in `@objectstack/metadata-core`): the write capability plus the two
+ * read-only exemptions. Any ONE of them opens it. `system` is a principal
+ * flag with no client half, as for the trail above.
+ */
+export const PENDING_DRAFTS_CAPABILITIES: readonly string[] = ['studio.access', 'setup.access', AUTHORING_CAPABILITY];
+
+/**
+ * May this session read the pending-drafts ledger?
+ *
+ * Asked by a surface that reads the ledger for whoever opens it (Home's drafts
+ * row), so a member the door refuses is not sent a request that always answers
+ * 403. Unknown fails OPEN, as {@link useCanAuthorMetadata} does: the server
+ * enforces regardless.
+ */
+export function useCanReadPendingDrafts(): boolean {
+  const { hasCapabilities } = usePermissions();
+  return PENDING_DRAFTS_CAPABILITIES.some((capability) => hasCapabilities([capability]));
+}
