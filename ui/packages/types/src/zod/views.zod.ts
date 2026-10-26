@@ -63,7 +63,7 @@ export const ViewTypeSchema = z.enum([...SpecListViewTypeEnum.options, 'list', '
 /**
  * Detail View Field Schema
  */
-export const DetailViewFieldSchema = z.object({
+export const DetailViewFieldSchema = z.looseObject({
   name: z.string().describe('Field name/path'),
   label: z.string().optional().describe('Display label'),
   type: z.enum([
@@ -97,7 +97,7 @@ export const DetailViewFieldSchema = z.object({
 /**
  * Detail View Section Schema
  */
-export const DetailViewSectionSchema = z.object({
+export const DetailViewSectionSchema = z.looseObject({
   name: z.string().optional().describe('Stable identifier for i18n key resolution'),
   title: z.string().optional().describe('Section title'),
   description: z.string().optional().describe('Section description'),
@@ -137,7 +137,7 @@ export const DetailViewSectionSchema = z.object({
 /**
  * Detail View Tab Schema
  */
-export const DetailViewTabSchema = z.object({
+export const DetailViewTabSchema = z.looseObject({
   key: z.string().describe('Tab key/identifier'),
   label: z.string().describe('Tab label'),
   icon: z.string().optional().describe('Tab icon'),
@@ -182,7 +182,7 @@ const DETAIL_VIEW_NEITHER_CHANNEL = neitherContentChannelGuidance(
  * `ObjectFormSchema.sections[].fields`. So a section inside a group is not judged on
  * this key.
  */
-const DetailViewSectionGroupSchema = z.object({
+const DetailViewSectionGroupSchema = z.looseObject({
   title: z.string().describe('Group title'),
   description: z.string().optional().describe('Group description'),
   icon: z.string().optional().describe('Group icon'),
@@ -196,7 +196,7 @@ const DetailViewSectionGroupSchema = z.object({
  * member for member from the interface's `HighlightField`; `type` is the field
  * mirror's own member, as the twin's `DetailViewField['type']` is. Module-private.
  */
-const DetailViewHighlightFieldSchema = z.object({
+const DetailViewHighlightFieldSchema = z.looseObject({
   name: z.string().describe('Field name from the record data'),
   label: z.string().describe('Display label'),
   type: DetailViewFieldSchema.shape.type,
@@ -393,7 +393,7 @@ export const DetailViewSchema = BaseSchema.extend({
  */
 export const ViewSwitcherSchema = BaseSchema.extend({
   type: z.literal('view-switcher'),
-  views: z.array(z.object({
+  views: z.array(z.looseObject({
     type: ViewTypeSchema.describe('View type'),
     label: z.string().optional().describe('View label'),
     icon: z.string().optional().describe('View icon'),
@@ -408,7 +408,7 @@ export const ViewSwitcherSchema = BaseSchema.extend({
   persistPreference: z.boolean().optional().describe('Persist view preference'),
   storageKey: z.string().optional().describe('Storage key for persisting view'),
   allowCreateView: z.boolean().optional().describe('Show "+" button to add/create a new view'),
-  viewActions: z.array(z.object({
+  viewActions: z.array(z.looseObject({
     type: z.enum(['share', 'settings', 'duplicate', 'delete']).describe('Action type'),
     icon: z.string().optional().describe('Action icon'),
   })).optional().describe('Per-view action icons'),
@@ -435,7 +435,7 @@ export const ViewSwitcherSchema = BaseSchema.extend({
  */
 export const FilterUISchema = BaseSchema.extend({
   type: z.literal('filter-ui'),
-  filters: z.array(z.object({
+  filters: z.array(z.looseObject({
     field: z.string().describe('Filter field'),
     label: z.string().optional().describe('Filter label'),
     type: z.enum(['text', 'number', 'select', 'multi-select', 'date', 'date-range', 'boolean']).describe('Filter type'),
@@ -446,7 +446,7 @@ export const FilterUISchema = BaseSchema.extend({
       + 'or emitted. Nothing in this component implements operators, so remove the key; how each value is '
       + 'matched is up to the host that consumes the change.',
     ),
-    options: z.array(z.object({ label: z.string(), value: z.any() })).optional().describe('Options for select filter'),
+    options: z.array(z.looseObject({ label: z.string(), value: z.any() })).optional().describe('Options for select filter'),
     placeholder: z.string().optional().describe('Placeholder'),
   })).describe('Available filters'),
   values: z.record(z.string(), z.any()).optional().describe('Current filter values'),
@@ -476,11 +476,11 @@ export const FilterUISchema = BaseSchema.extend({
  */
 export const SortUISchema = BaseSchema.extend({
   type: z.literal('sort-ui'),
-  fields: z.array(z.object({
+  fields: z.array(z.looseObject({
     field: z.string().describe('Field name'),
     label: z.string().optional().describe('Field label'),
   })).describe('Sortable fields'),
-  sort: z.array(z.object({
+  sort: z.array(z.looseObject({
     field: z.string().describe('Field to sort by'),
     direction: z.enum(['asc', 'desc']).describe('Sort direction'),
   })).optional().describe('Current sort configuration'),
