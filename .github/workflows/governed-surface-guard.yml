@@ -35,7 +35,12 @@ on:
     # the addition and it is the point: flipping a governed draft to ready is
     # the first move of the exact sequence this guard exists to interrupt, and
     # it is not in the default set — without it the warning would not re-fire
-    # at the one moment a seat most needs to read it.
+    # at the one moment a seat most needs to read it. That same flip is the
+    # moment an approver taps merge, and the re-fired run holds this REQUIRED
+    # context `in_progress` for its whole wall (a direct merge is refused
+    # meanwhile) — which is why this leg is kept cheap rather than dropped: it
+    # checks out commits and trees only and installs nothing unless the diff
+    # needs the generator toolchain (the two checkout steps below).
     types: [opened, synchronize, reopened, ready_for_review]
   merge_group:
 
@@ -87,7 +92,10 @@ jobs:
     # (n = 288): max 1.1 minutes; 2× is 2.2, and never below 10. 20 + 10 = 30.
     timeout-minutes: 30
     steps:
+      # The QUEUE leg's checkout, unchanged: the refusing leg reads the queue
+      # head with the whole tree on disk.
       - name: Checkout repository
+        if: github.event_name != 'pull_request'
         uses: actions/checkout@v7
         # CHECKOUT BUDGET: lint.yml's `typecheck-source-gates` sizes it.
         timeout-minutes: 20
@@ -99,6 +107,27 @@ jobs:
           # script refuses outright (exit 1) if either sha is missing, rather
           # than diffing what it happens to have.
           fetch-depth: 0
+
+      # The EARLY-WARNING leg's checkout: the same full history, without file
+      # contents. The judgment reads commits and trees only (`merge-base`,
+      # `log`, `diff-tree --name-only`), and the only files it and the
+      # self-test open live under `scripts/` and `.github/` — so a blobless
+      # fetch plus a sparse tree of those two answers byte-identically.
+      # Measured 2026-10-26 on this repository: a blobless full-history clone
+      # took 7 s for 105 MiB against 58 s for 956 MiB with contents, and the
+      # judgment on PR #25965 printed the same bytes on both checkouts. ⛔ Still
+      # `fetch-depth: 0` — the #9902 reason above holds on this leg too. A diff
+      # that needs the generator toolchain gets the full tree back below.
+      - name: Checkout repository (commits and trees only)
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v7
+        timeout-minutes: 20
+        with:
+          fetch-depth: 0
+          filter: blob:none
+          sparse-checkout: |
+            scripts
+            .github
 
       # Pinned to the same major and spelling as every other setup-node in this
       # repo, and it keeps its literal `node-version` (rather than
@@ -167,16 +196,37 @@ jobs:
       # verdict stays inside the script — where the exit contract lives — instead
       # of becoming an opaque red step nobody can read a governance answer out of.
       #
-      # Both legs install. The `pull_request` leg is a FORECAST of the queue
-      # verdict ("the merge-queue run of this same check will REFUSE it"), so a
-      # leg that cannot recompute forecasts a refusal that will not happen — the
-      # false-alarm direction, which trains seats to hold PRs that need no
-      # holding. Same diff, same answer, on both legs and at the seat.
+      # Both legs install WHEREVER THE RECOMPUTE CAN CHANGE THE ANSWER. The
+      # `pull_request` leg is a FORECAST of the queue verdict ("the merge-queue
+      # run of this same check will REFUSE it"), so a leg that cannot recompute
+      # forecasts a refusal that will not happen — the false-alarm direction,
+      # which trains seats to hold PRs that need no holding. Same diff, same
+      # answer, on both legs and at the seat. But a diff that touches no
+      # register path never runs a generator at all, so on that leg the script
+      # is asked first (`--toolchain-needed`, the same predicate the lift
+      # consults) and the toolchain is acquired only on `true`. The queue leg
+      # never asks, so its output stays empty and it always installs; a
+      # question that fails leaves it empty too, which also installs.
+      - name: Does this diff need the generator toolchain?
+        id: toolchain
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        run: node scripts/pm/check-governed-queue-guard.mjs --toolchain-needed >> "$GITHUB_OUTPUT"
+
+      # The generators read the whole tree, which the sparse checkout above
+      # left out; the blobs arrive on demand from the partial clone's remote.
+      - name: Restore the full tree for the generator recompute
+        if: github.event_name == 'pull_request' && steps.toolchain.outputs.needed != 'false'
+        continue-on-error: true
+        run: git sparse-checkout disable
+
       - name: Setup pnpm
+        if: steps.toolchain.outputs.needed != 'false'
         uses: ./.github/actions/setup-pnpm
         continue-on-error: true
 
       - name: Get pnpm store directory
+        if: steps.toolchain.outputs.needed != 'false'
         shell: bash
         continue-on-error: true
         run: |
@@ -185,6 +235,7 @@ jobs:
       # Deliberately the same key as lint.yml's: one store, one entry, and this
       # job is a cache READER in the steady state rather than a second writer.
       - name: Setup pnpm cache
+        if: steps.toolchain.outputs.needed != 'false'
         uses: actions/cache@v6
         continue-on-error: true
         with:
@@ -194,6 +245,7 @@ jobs:
             ${{ runner.os }}-pnpm-store-v3-
 
       - name: Install dependencies
+        if: steps.toolchain.outputs.needed != 'false'
         continue-on-error: true
         run: pnpm install --frozen-lockfile
 
