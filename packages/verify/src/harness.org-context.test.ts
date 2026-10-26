@@ -77,7 +77,6 @@ async function posture(stack: VerifyStack): Promise<TenancyShape> {
   };
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function rowsOf(r: any): any[] {
   return Array.isArray(r) ? r : Array.isArray(r?.records) ? r.records : [];
 }
@@ -85,7 +84,6 @@ function rowsOf(r: any): any[] {
 /** The org id the admin's SESSION carries — the one wire field a real login sets. */
 async function sessionOrgId(stack: VerifyStack): Promise<string | null> {
   await stack.signIn();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ql = await stack.kernel.getServiceAsync<any>('objectql');
   const users = rowsOf(
     await ql.find('sys_user', { where: { email: 'admin@objectos.ai' }, limit: 1, context: SYS }),
@@ -105,7 +103,6 @@ async function sessionOrgId(stack: VerifyStack): Promise<string | null> {
 /** What one boot of `app` answered, read while it was live. */
 interface BootReading {
   posture: TenancyShape;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   orgs: any[];
   sessionOrgId: string | null;
   /** The roles of the admin's `sys_member` rows in the first organization. */
@@ -122,7 +119,6 @@ async function bootAndRead(opts: BootOptions): Promise<BootReading> {
   const stack = await bootStack(app, opts);
   try {
     const shape = await posture(stack);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ql = await stack.kernel.getServiceAsync<any>('objectql');
     const orgs = rowsOf(await ql.find('sys_organization', { limit: 10, context: SYS }));
     const orgId = await sessionOrgId(stack);

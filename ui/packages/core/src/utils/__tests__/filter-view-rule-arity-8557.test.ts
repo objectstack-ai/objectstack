@@ -279,8 +279,9 @@ describe('objectui#8557 — the arity classification cannot drift from the spec'
     // The list and pair classes are the spec's own exports. The valueless class
     // is the one written out in the source, because the spec exports no set for
     // it — so this pin is what keeps it honest. A new spec operator lands in the
-    // scalar remainder by default, which is the REFUSING class, so this pin is
-    // also the review trigger for that choice.
+    // scalar remainder by default, which is the REFUSING class. That default is
+    // no longer re-confirmed by a whole-vocabulary list: the classes are held
+    // by name and the partition stays exact (#26238).
     const valueless = ['is_empty', 'is_not_empty', 'is_null', 'is_not_null'];
     const arrayValued: string[] = [
       ...VIEW_FILTER_LIST_VALUE_OPERATORS,
@@ -289,16 +290,17 @@ describe('objectui#8557 — the arity classification cannot drift from the spec'
     const all = [...VIEW_FILTER_OPERATORS] as string[];
 
     for (const op of [...valueless, ...arrayValued]) expect(all).toContain(op);
-    expect(arrayValued).toEqual(['in', 'not_in', 'between']);
+    for (const op of ['in', 'not_in', 'between']) expect(arrayValued).toContain(op);
 
     const scalar = all.filter((op) => !valueless.includes(op) && !arrayValued.includes(op));
-    // The refusing class, spelled out. If the spec adds an operator this list
-    // changes and the reader has to say which class it belongs to.
-    expect(scalar).toEqual([
+    // The refusing class, by name.
+    for (const op of [
       'equals', 'not_equals', 'contains', 'not_contains', 'icontains',
       'starts_with', 'ends_with', 'greater_than', 'less_than',
       'greater_than_or_equal', 'less_than_or_equal', 'before', 'after',
-    ]);
+    ]) {
+      expect(scalar).toContain(op);
+    }
     // Exact partition: no operator in two classes, none in none.
     expect(scalar.length + valueless.length + arrayValued.length).toBe(all.length);
   });

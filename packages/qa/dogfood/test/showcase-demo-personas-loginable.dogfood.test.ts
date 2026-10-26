@@ -84,7 +84,6 @@ const rowsOf = (r: unknown): Array<Record<string, unknown>> =>
 
 describe('showcase demo personas are real logins (#9308 fixture 1)', () => {
   let stack: VerifyStack;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let ql: any;
   let adminId = '';
 

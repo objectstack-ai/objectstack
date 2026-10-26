@@ -66,7 +66,6 @@ interface HookSeen {
 }
 const hookSaw: HookSeen[] = [];
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type HookCtx = { event: string; input: Record<string, any>; previous?: Record<string, any>; session?: Record<string, any>; dispatch?: { mode?: string } };
 
 const capture = (object: string, prior: 'stage' | 'status') => async (ctx: HookCtx) => {
@@ -237,7 +236,6 @@ async function refusalOf(p: Promise<unknown>): Promise<unknown> {
 }
 
 /** The ADR-0112 pair: `code`, and `status` (or the engine's `statusCode`). */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const envelope = (e: unknown) => ({ code: (e as any)?.code, status: (e as any)?.statusCode ?? (e as any)?.status });
 
 const seenFor = (id: unknown, event?: string): HookSeen[] =>

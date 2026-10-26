@@ -86,7 +86,6 @@ async function boot() {
   const start = async () => {
     await plugin.start(ctx as never);
     for (const fn of hooks['kernel:ready'] ?? []) await fn();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return services.email as any;
   };
   return { engine, statements, sent, start };

@@ -53,7 +53,7 @@
  *    `ActionRunner` post-execution sink, with a lit control: the identical
  *    action whose handler omits `silent` DOES toast its `successMessage`. The
  *    other half of that clause — that the console's flow handlers return
- *    `{ success: true, silent: true }` when a run pauses — is pinned by the
+ *    `{ success: true, silent: true, handedOff: true }` when a run pauses — is pinned by the
  *    test named 'flowHandler still OPENS the wizard on a screen pause (success
  *    path intact)' in `useConsoleActionRuntime.test.tsx`, and is deliberately
  *    not copied here.

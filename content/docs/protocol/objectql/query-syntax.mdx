@@ -526,6 +526,67 @@ is in the dataset's `include`; measured and pinned in
 (#15103). The spelling that answers on both paths is the same-table one — every column the
 reference names, offset included, is a column of the object the filter runs over.
 
+### Comparing Against Now, Shifted by Days Held on the Record
+
+A comparand can be **anchored at the current instant** — `{ $now: true, addDays: <offset> }` —
+as the *whole* comparand of one of the six scalar comparison operators, on a `date` or
+`datetime` column. `addDays` is required and takes the same two spellings the field
+reference's does: an integer literal of any sign, or a nested `{ $field }` reference to a
+numeric column of the **same record**. There is no `subDays`: a column that means "days
+before now" holds negative values. For the unshifted instant, write the `{now}` placeholder.
+
+{/* os:check */}
+```typescript
+import type { FilterCondition } from '@objectstack/spec/data';
+
+// opened more than review_sla_days_offset days ago — the column holds NEGATIVE days
+const pastSla: FilterCondition = {
+  opened_at: { $lt: { $now: true, addDays: { $field: 'review_sla_days_offset' } } },
+};
+
+// closed on or after thirty days ago
+const recentlyClosed: FilterCondition = {
+  closed_on: { $gte: { $now: true, addDays: -30 } },
+};
+
+// due within the next seven days (and not yet past)
+const dueSoon: FilterCondition = {
+  $and: [
+    { due_on: { $gte: { $now: true, addDays: 0 } } },
+    { due_on: { $lte: { $now: true, addDays: 7 } } },
+  ],
+};
+```
+
+The engine's token resolver pins `$now` to the one instant every `{N_days_ago}` placeholder
+in the same query resolves from, so a driver sees `{ $now: '<ISO instant>', addDays }`; a
+caller that reaches a driver or the memory evaluator directly, with no resolver in front of
+it, gets that executor's own clock. The target column's class decides the form the instant
+is compared in, exactly as a `{now}` literal is: a `datetime` column keeps the time of day;
+a `date` column meets the instant's **UTC calendar day** (the time of day is dropped, never
+rounded). The anchor itself is never NULL, so the only NULL on the table is the target's:
+
+| Case | Reads as |
+|:-----|:---------|
+| The offset column is NULL | zero days — `now + NULL` is `now` |
+| The target column is NULL | fails the orderings and `$eq`, satisfies `$ne` — its ordinary reading against a literal, so `$not` takes exactly the complement |
+| The target column is not `date` / `datetime` | refused with `INVALID_FILTER` — an instant has no meaning on a number, a wall-clock `time` or text |
+
+Both execution paths answer it: SQL push-down (`driver-sql`, `driver-sqlite-wasm`) binds the
+instant in the column's storage form and shifts it with the same per-dialect day arithmetic
+the `addDays` pair uses (SQLite, PostgreSQL, MySQL), and the in-memory evaluator shifts it in
+the form of the stored value it meets, so the two return the same rows. The offset column is
+held to every rule the `addDays` pair's offset is held to — a declared, numeric column of the
+same table, never the tenant-isolation column, no dotted path — and the analytics native-SQL
+strategy declines a query carrying an anchor so that the driver compiles it, as it does for a
+`{ $field }` comparand. The MongoDB driver refuses the anchor rather than translating it.
+
+**The SLA held on a related record.** The shape that compiles is the same-table one: the SLA
+(or its negative) propagated onto the row, or the dataset's base object carrying the column.
+A dotted offset (`addDays: { $field: 'queue.sla_days' }`) validates, is resolved by the
+memory evaluator, and is refused by SQL push-down with `INVALID_FILTER`, exactly as a dotted
+`$field` is — a dataset's `include` does not widen it (see above).
+
 ### Date, Datetime, and Time Filters
 
 Before a comparison is built, the driver puts the comparand into the **same canonical

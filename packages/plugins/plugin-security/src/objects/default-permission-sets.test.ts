@@ -152,7 +152,6 @@ describe('default permission sets carry the managed denies (static baseline)', (
 describe('sys_invitation is row-scoped to its addressee (#8095)', () => {
   const SELF_PREDICATE = 'email == current_user.email';
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const policiesFor = (setName: string, object: string): any[] =>
     (setByName(setName)?.rowLevelSecurity ?? []).filter((p: any) => p.object === object);
 
@@ -297,7 +296,6 @@ describe('sys_invitation is row-scoped to its addressee (#8095)', () => {
  * they have now. So it is pinned here, structurally, next to the declaration.
  */
 describe('sys_comment delete is moderation-shaped, not ownership-shaped (#8839)', () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const policiesFor = (setName: string, object: string): any[] =>
     (setByName(setName)?.rowLevelSecurity ?? []).filter((p: any) => p.object === object);
 
@@ -367,7 +365,6 @@ describe('sys_comment_reaction delete is ownership-shaped (#22566)', () => {
   it('no shipped set carries a row-level policy on sys_comment_reaction', () => {
     expect(defaultPermissionSets.length).toBeGreaterThanOrEqual(6);
     for (const set of defaultPermissionSets) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const scoped = (set.rowLevelSecurity ?? []).filter((p: any) => p.object === 'sys_comment_reaction');
       expect(scoped, `${set.name} sys_comment_reaction policies`).toEqual([]);
     }

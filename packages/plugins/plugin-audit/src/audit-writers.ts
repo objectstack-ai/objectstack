@@ -96,6 +96,17 @@ import {
   installActivityStampHook,
   planActivityStamp,
 } from './activity-changed-fields.js';
+// [#26167] A summary's code, and the ONE composer of its text — the stored
+// sentence here and each reader's on the read side.
+import {
+  ACTIVITY_SUMMARY_MESSAGE_KEY,
+  composeStoredSummary,
+  withEnglishMessages,
+  type ActivitySummaryFieldChange,
+  type ActivitySummaryLocale,
+  type ActivitySummaryMessage,
+  type ActivitySummaryValue,
+} from './activity-summary-message.js';
 
 /**
  * Minimal structural view of `NotificationService.emit` (ADR-0030). Declared
@@ -138,9 +149,10 @@ export interface AuditWriterOptions {
    */
   getMessaging?(): MessagingEmitSurface | undefined;
   /**
-   * Lazily resolve the i18n service used to localize activity summaries
-   * (framework#3039): verb templates (`messages.activityCreated` …) and object
-   * display labels (`objects.{name}.label`). Absent → English summaries.
+   * Lazily resolve the i18n service used to localize the collaboration
+   * notification titles (`messages.mentionedYou` …). [#26167] Activity
+   * summaries are stored in English and localized per READER on the read side
+   * (`installActivitySummaryLocale`).
    */
   getI18n?(): AuditI18nSurface | undefined;
   /**
@@ -149,7 +161,8 @@ export interface AuditWriterOptions {
    * per scope, so implementations may hit the settings service directly. A
    * held answer lasts until the next write to `sys_setting` or
    * `sys_platform_setting` through this engine, or a short TTL, whichever
-   * comes first. Absent → summaries stay English (status quo).
+   * comes first. Absent → notification titles stay English. [#26167] An
+   * activity summary asks for no locale at write time.
    */
   getLocale?(tenantId?: string, userId?: string): Promise<string | undefined>;
   /**
@@ -702,10 +715,21 @@ function displayFieldValue(
   titlesFor?: Map<string, string>,
   optionLabelFor?: (optionValue: string) => string | undefined,
 ): string {
-  if (value === null || value === undefined || value === '') return '∅';
+  const shown = summaryValueOf(field, value, titlesFor);
+  return shown.option !== undefined ? (optionLabelFor?.(shown.option) ?? shown.text) : shown.text;
+}
+
+/**
+ * [#26167] {@link displayFieldValue} before any option label is translated:
+ * the text it renders with no `optionLabelFor`, and the declared option the
+ * value matched, if any. A field-change summary stores this pair, so the
+ * option label is translated for each READER (`activity-summary-message.ts`).
+ */
+function summaryValueOf(field: any, value: any, titlesFor?: Map<string, string>): ActivitySummaryValue {
+  if (value === null || value === undefined || value === '') return { text: '∅' };
   if (titlesFor && typeof field?.type === 'string' && REFERENCE_FIELD_TYPES.has(field.type)) {
     const ids = referenceIdsOf(value);
-    if (ids.length > 0) return ids.map((id) => titlesFor.get(id) ?? id).join(', ');
+    if (ids.length > 0) return { text: ids.map((id) => titlesFor.get(id) ?? id).join(', ') };
   }
   const options = field?.options;
   if (Array.isArray(options)) {
@@ -713,11 +737,11 @@ function displayFieldValue(
       const ov = o && typeof o === 'object' ? (o.value ?? o.name ?? o.label) : o;
       if (ov === value) {
         const ol = o && typeof o === 'object' ? (o.label ?? o.name ?? ov) : o;
-        return optionLabelFor?.(String(ov)) ?? String(ol);
+        return { text: String(ol), option: String(ov) };
       }
     }
   }
-  return String(value);
+  return { text: String(value) };
 }
 
 /**
@@ -763,9 +787,9 @@ function planTrackedLookupReads(
  * generic "Updated <object>", which names the changed fields
  * ({@link renderChangedFieldsSummary}).
  *
- * [#7230] `translate` is the SAME locale-bound translator the three sibling
+ * [#7230] `locale` is the SAME locale-bound translator the three sibling
  * summary branches already resolve through (`messages.activityCreated` /
- * `messages.activityDeleted` / `messages.activityUpdated`, and `displayLabelFor`
+ * `messages.activityDeleted` / `messages.activityUpdated`, and `objectLabelIn`
  * for the object name). This branch was the one never handed it, so a
  * fully-localized page ended with an English field label — ADR-0053 /
  * framework#3039 write-time localization, applied where it was missed. The key
@@ -784,58 +808,37 @@ function planTrackedLookupReads(
  * [#21081] Returns the fields it rendered beside the text — the same loop
  * answers both, so the activity row's declaration of where its summary came
  * from cannot drift from what was rendered.
+ *
+ * [#26167] …and the summary's CODE: each change's field KEY and its two
+ * values as {@link summaryValueOf} renders them. The #7230 / #7289
+ * localization now happens per READER, by the one composer
+ * (`composeActivitySummary`): the text returned here is that code composed in
+ * `locale`, the stored language.
  */
 function renderTrackedChangeSummary(
   objectName: string,
   fields: Record<string, any> | undefined | null,
   oldVals: Record<string, any> | null,
   newVals: Record<string, any> | null,
-  translate: (key: string, params?: Record<string, unknown>) => string | undefined,
+  locale: ActivitySummaryLocale,
   lookupTitles?: Map<string, Map<string, string>>,
-): { text: string; fields: string[] } | null {
+): { text: string; fields: string[]; message: ActivitySummaryMessage } | null {
   if (!fields || !newVals) return null;
-  const parts: string[] = [];
-  const rendered: string[] = [];
+  const changes: ActivitySummaryFieldChange[] = [];
   for (const key of Object.keys(newVals)) {
     const field = fields[key];
     if (!field || field.trackHistory !== true) continue;
-    const label = fieldLabelForSummary(objectName, key, field, translate);
     const reference = referenceTargetForSummary(field);
     const titlesFor = reference ? lookupTitles?.get(reference) : undefined;
-    // Only a field that DECLARES options can consume this, so the ordinary
-    // tracked scalar allocates no closure; both calls below share the one.
-    const optionLabelFor = Array.isArray(field.options)
-      ? (optionValue: string): string | undefined =>
-          translate(`objects.${objectName}.fields.${key}.options.${optionValue}`)
-      : undefined;
-    const from = displayFieldValue(
-      field,
-      oldVals ? oldVals[key] : undefined,
-      titlesFor,
-      optionLabelFor,
-    );
-    const to = displayFieldValue(field, newVals[key], titlesFor, optionLabelFor);
-    parts.push(`${label}: ${from} → ${to}`);
-    rendered.push(key);
+    changes.push({
+      field: key,
+      from: summaryValueOf(field, oldVals ? oldVals[key] : undefined, titlesFor),
+      to: summaryValueOf(field, newVals[key], titlesFor),
+    });
   }
-  return parts.length > 0 ? { text: parts.join('; '), fields: rendered } : null;
-}
-
-/**
- * A field's label inside an activity summary: the locale bundle's
- * (`objects.<object>.fields.<field>.label`), then the authored def label, then
- * the machine key. One answer for both branches that name a field.
- */
-function fieldLabelForSummary(
-  objectName: string,
-  key: string,
-  field: any,
-  translate: (key: string, params?: Record<string, unknown>) => string | undefined,
-): string {
-  return (
-    translate(`objects.${objectName}.fields.${key}.label`) ??
-    (typeof field?.label === 'string' && field.label.length > 0 ? field.label : key)
-  );
+  if (changes.length === 0) return null;
+  const message: ActivitySummaryMessage = { key: 'fieldChanges', object: objectName, changes };
+  return { text: composeStoredSummary(message, locale), fields: changes.map((c) => c.field), message };
 }
 
 /**
@@ -858,23 +861,26 @@ const MAX_NAMED_CHANGED_FIELDS = 5;
  * rest. When `sys_activity.summary` declares `maxLength` (the SQL driver sizes
  * the column `varchar(n)` from it, so an over-long text fails the whole
  * activity insert), fewer fields are named until the text fits. Returns null
- * when nothing changed, when not even one name fits, or when the locale has a
- * field-less frame but no named-field one, and the caller writes the
- * field-less frame.
+ * when nothing changed or when not even one name fits, and the caller writes
+ * the field-less frame.
  *
  * Returns the fields it COUNTED as well as named in `fields`: the read side
  * drops a summary composed from a field the reader is not served
  * (`activity-field-redaction.ts`), and "and 3 more" says three fields changed.
+ *
+ * [#26167] …and the summary's CODE: the field KEYS it names and the count it
+ * folds, which a reader's language re-composes (`activity-summary-message.ts`
+ * owns the composition, the list join included). The fit to `maxLength` is the
+ * stored sentence's.
  */
 function renderChangedFieldsSummary(
   objectName: string,
   fields: Record<string, any> | undefined | null,
   newVals: Record<string, any> | null,
-  translate: (key: string, params?: Record<string, unknown>) => string | undefined,
-  locale: string | undefined,
-  frame: { object: string; label: string },
+  locale: ActivitySummaryLocale,
+  label: string,
   maxLength: number | undefined,
-): { text: string; fields: string[] } | null {
+): { text: string; fields: string[]; message: ActivitySummaryMessage } | null {
   if (!newVals) return null;
   const changed = new Set(Object.keys(newVals));
   if (changed.size === 0) return null;
@@ -882,54 +888,19 @@ function renderChangedFieldsSummary(
     ...Object.keys(fields ?? {}).filter((key) => changed.has(key)),
     ...[...changed].filter((key) => !fields || !(key in fields)).sort(),
   ];
-  const labels = ordered.map((key) => fieldLabelForSummary(objectName, key, fields?.[key], translate));
-  // The list joins in the locale whose frame is used, so an English fallback
-  // frame never carries a zh-CN "、" list. A locale whose bundle answers only
-  // the field-less `activityUpdated` (an app's own locale, written before this
-  // key existed) keeps that localized frame rather than an English one.
-  const localized = translate('messages.activityUpdatedFields', { ...frame, fields: '' }) !== undefined;
-  if (!localized && translate('messages.activityUpdated', frame) !== undefined) return null;
-  const joinList = listJoinerFor(localized ? locale : undefined);
-  const compose = (shown: number): string => {
-    const items = labels.slice(0, shown);
-    const rest = labels.length - shown;
-    if (rest > 0) {
-      items.push(translate('messages.activityMoreFields', { count: rest }) ?? `${rest} more`);
-    }
-    const list = joinList(items);
-    return (
-      translate('messages.activityUpdatedFields', { ...frame, fields: list }) ??
-      `Updated ${frame.object} "${frame.label}": ${list}`
-    );
-  };
-  for (let shown = Math.min(MAX_NAMED_CHANGED_FIELDS, labels.length); shown >= 1; shown -= 1) {
-    const text = compose(shown);
-    if (maxLength === undefined || text.length <= maxLength) return { text, fields: ordered };
+  for (let shown = Math.min(MAX_NAMED_CHANGED_FIELDS, ordered.length); shown >= 1; shown -= 1) {
+    const message: ActivitySummaryMessage = {
+      key: 'activityUpdatedFields',
+      object: objectName,
+      label,
+      fields: ordered.slice(0, shown),
+      more: ordered.length - shown,
+    };
+    const text = composeStoredSummary(message, locale);
+    if (maxLength === undefined || text.length <= maxLength) return { text, fields: ordered, message };
   }
   return null;
 }
-
-/** A locale's conjunction list ("A, B, and C" / "A、B和C"); `", "` where `Intl` cannot answer. */
-function listJoinerFor(locale: string | undefined): (items: string[]) => string {
-  // `Intl.ListFormat` is ES2021; this package compiles against the ES2020 lib,
-  // so the constructor is probed rather than assumed (as `plugin-auth`'s
-  // invitation role label does).
-  const ListFormat = (Intl as unknown as { ListFormat?: IntlListFormatConstructor }).ListFormat;
-  try {
-    if (ListFormat) {
-      const format = new ListFormat(locale ?? 'en', { type: 'conjunction' });
-      return (items) => format.format(items);
-    }
-  } catch {
-    // A tag `Intl` refuses (a tenant's own locale spelling) still gets a list.
-  }
-  return (items) => items.join(', ');
-}
-
-type IntlListFormatConstructor = new (
-  locale: string,
-  options: { type: 'conjunction' },
-) => { format(list: readonly string[]): string };
 
 /**
  * [#7290] The `{token}` pattern of an `activityMilestones` summary template.
@@ -1473,6 +1444,15 @@ export function installAuditWriters(
     localeGeneration += 1;
   };
 
+  // [#26167] The language an activity summary is STORED in: the English
+  // catalog over the authored labels. Every reader with a locale is served
+  // the summary composed in theirs (`activity-summary-message.ts`).
+  const storedSummaryLocale: ActivitySummaryLocale = withEnglishMessages({
+    translate: () => undefined,
+    locale: undefined,
+    getObjectDef: (objectName) => getObjectDef(objectName),
+  });
+
   // Translate function bound to a locale. Returns undefined on any miss
   // (no locale / no i18n / key miss) so callers keep their English fallback
   // (framework#3039).
@@ -1595,20 +1575,6 @@ export function installAuditWriters(
     } catch {
       return undefined;
     }
-  };
-
-  // Display label for an object under a given translate fn: translated label
-  // → authored def label → API name. Shared by activity summaries and the
-  // collaboration notification titles below.
-  const displayLabelFor = (
-    objectName: string,
-    translate: (key: string, params?: Record<string, unknown>) => string | undefined,
-  ): string => {
-    const def = getObjectDef(objectName);
-    return (
-      translate(`objects.${objectName}.label`) ??
-      (typeof def?.label === 'string' && def.label.length > 0 ? def.label : objectName)
-    );
   };
 
   /**
@@ -2220,24 +2186,21 @@ export function installAuditWriters(
     // milestone fires; every other row carries no kind.
     let kind: { value: string; sources: string[] } | undefined;
     // Summaries are user-facing (the record Discussion feed and Setup
-    // dashboards render them verbatim), so name the object by its display
-    // label ("Semantic Zoo"), not its API name ("showcase_semantic_zoo"), and
-    // localize both the verb template and the object label to the workspace
-    // default locale (ADR-0053, framework#3039). Every step is best-effort:
-    // no locale / no i18n / key miss all degrade to the English literal.
-    const locale = await resolveWriteLocale(tenantId, userId);
-    const translate = translateWith(locale);
-    const objectDisplay = displayLabelFor(ctx.object, translate);
+    // dashboards render them), so name the object by its display label
+    // ("Semantic Zoo"), not its API name ("showcase_semantic_zoo").
+    // [#26167] Each branch records its summary as a CODE (`summaryMessage`),
+    // and the read side composes it in the READER's language
+    // (`activity-summary-message.ts`). The stored `summary` is the English
+    // sentence, the fallback text for every reader that composition does not
+    // reach, so no write asks for a locale. A fired milestone's author-written
+    // template has no code and stays as written.
+    const writeLocale = storedSummaryLocale;
     let summary: string;
+    let summaryMessage: ActivitySummaryMessage | undefined;
     let activityType: string = activityTypeFor(action);
-    if (action === 'create') {
-      summary =
-        translate('messages.activityCreated', { object: objectDisplay, label }) ??
-        `Created ${objectDisplay} "${label}"`;
-    } else if (action === 'delete') {
-      summary =
-        translate('messages.activityDeleted', { object: objectDisplay, label }) ??
-        `Deleted ${objectDisplay} "${label}"`;
+    if (action === 'create' || action === 'delete') {
+      summaryMessage = { key: action === 'create' ? 'activityCreated' : 'activityDeleted', object: ctx.object, label };
+      summary = composeStoredSummary(summaryMessage, writeLocale);
     } else {
       // ADR-0052 §5b — declarative activity, precedence: a configured semantic
       // milestone (§5b.2) wins; else a tracked field-change diff ("Stage:
@@ -2293,11 +2256,12 @@ export function installAuditWriters(
           summaryFields,
           oldValue,
           newValue,
-          translate,
+          writeLocale,
           lookupTitles,
         );
         if (tracked) {
           summary = tracked.text;
+          summaryMessage = tracked.message;
           summarySources = tracked.fields;
         } else {
           // [#25787] No tracked field changed: name the fields that did.
@@ -2305,18 +2269,17 @@ export function installAuditWriters(
             ctx.object,
             summaryFields,
             newValue,
-            translate,
-            locale,
-            { object: objectDisplay, label },
+            writeLocale,
+            label,
             activitySummaryMaxLength(),
           );
           if (named) {
             summary = named.text;
+            summaryMessage = named.message;
             summarySources = [...new Set([...labelSources, ...named.fields])];
           } else {
-            summary =
-              translate('messages.activityUpdated', { object: objectDisplay, label }) ??
-              `Updated ${objectDisplay} "${label}"`;
+            summaryMessage = { key: 'activityUpdated', object: ctx.object, label };
+            summary = composeStoredSummary(summaryMessage, writeLocale);
           }
         }
       }
@@ -2348,6 +2311,7 @@ export function installAuditWriters(
       new: newValue,
       ...(kind ? { [ACTIVITY_KIND_KEY]: kind.value } : {}),
       [ACTIVITY_TEXT_SOURCES_KEY]: textSources,
+      ...(summaryMessage ? { [ACTIVITY_SUMMARY_MESSAGE_KEY]: summaryMessage } : {}),
     };
     const activityRow: Record<string, any> = {
       type: activityType,

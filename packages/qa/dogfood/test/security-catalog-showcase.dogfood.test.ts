@@ -82,7 +82,6 @@ describe.each(POSTURES)('showcase, $label: the security catalog read', ({ opts, 
   beforeAll(async () => {
     booted = await bootShowcase(opts);
     admin = await booted.signIn();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ql: any = await booted.kernel.getServiceAsync('objectql');
     reader = createSecurityCatalogReader({ registry: ql.registry, metadata: booted.kernel.getService('metadata') });
   }, 180_000);

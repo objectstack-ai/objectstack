@@ -833,9 +833,10 @@ export async function listOrgPackages(): Promise<OrgPackagesResult> {
 /**
  * `POST /install-local`. `installMode` is sent only when the caller names one
  * (ADR-0131 D6); absent, the door applies its own default. A refusal rejects
- * with the envelope's own `message`, its `code` and `status` beside it — the
- * install-mode refusals included (`INSTALL_MODE_NOT_PERMITTED`,
- * `UNMANAGED_INSTALL_WALLED_POSTURE`, `RESOURCE_CONFLICT`).
+ * with the envelope's own `message`, its `code`, `status` and `details` beside
+ * it — the install-mode refusals included (`INSTALL_MODE_NOT_PERMITTED`,
+ * `UNMANAGED_INSTALL_WALLED_POSTURE`, `RESOURCE_CONFLICT`), and
+ * `DEPENDENCY_MISSING`, whose `details` the page draws.
  *
  * The first overload is the door's own rule for a request that names no mode:
  * it installs managed and answers the managed shape, as every install did
@@ -873,6 +874,9 @@ export async function installLocal(input: {
     const err = new Error(typeof message === 'string' ? message : `${code}`);
     (err as any).code = code;
     (err as any).status = res.status;
+    // The refusal's facts ride along for a page that draws them — the
+    // `DEPENDENCY_MISSING` entries (ADR-0141 D2, `dependencyMissing.ts`).
+    if (payload?.error?.details !== undefined) (err as any).details = payload.error.details;
     throw err;
   }
   return (payload?.data ?? payload) as LocalInstallResult;
