@@ -48,7 +48,7 @@
 //     #21853, so no `src` file imports from outside `src` today.)
 //   - ⛔ STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`,
 //     `noUnusedParameters`, `noImplicitReturns`, `noFallthroughCasesInSwitch`
-//     are inherited from the root config, and `types: ["node"]` restates
+//     are inherited from the base config, and `types: ["node"]` restates
 //     `tsconfig.json`'s. Nothing here may loosen a type rule; if a test does
 //     not compile, that is the finding. ⛔ Not one `any` and not one
 //     `@ts-expect-error` was added to any test file to open this gate — that
@@ -89,13 +89,9 @@
 // not the fix; the repair is tracked separately (see the PR that added this
 // file) and ⛔ must not be smuggled in by loosening anything here.
 {
-  "extends": "./tsconfig.json",
+  "extends": ["./tsconfig.json", "../../tsconfig.test.base.json"],
   "compilerOptions": {
-    "noEmit": true,
     "rootDir": ".",
-    "module": "esnext",
-    "moduleResolution": "bundler",
-    "lib": ["ES2022"],
     "types": ["node"]
   },
   "include": ["src/**/*"],
