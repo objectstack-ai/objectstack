@@ -232,22 +232,22 @@ describe('the restored refusals, each against a firing control (objectui#8913)',
 
 /* ── The premise correction this card owes back to its own issue ──────────── */
 
-describe('an undeclared LANE key is accepted and dropped, NOT refused (objectui#8913)', () => {
-  it('`columns[].items` — the retired arm\'s spelling — parses green and is stripped', () => {
+describe('an undeclared LANE key is accepted, NOT refused (objectui#8913)', () => {
+  it('`columns[].items` — the retired arm\'s spelling — parses green and rides through undeclared', () => {
     // The dispatching card listed `columns[].items` among the refusals to
     // restore. It is not one, and the reason is the protocol: the retired arm
     // refused that document only because its `cards` was REQUIRED, so a lane
     // spelling `items` and no `cards` failed the required check. `cards` cannot
     // be required here (see this file's header), so the honest verdict for an
-    // undeclared lane key is the STRIP posture — the same one `KanbanColumn`'s
-    // own mirror carries.
+    // undeclared lane key is the non-strict posture — the same one
+    // `KanbanColumn`'s own mirror carries. It was STRIP until objectstack#25923
+    // made every mirror object `.passthrough()`: the key is kept, not refused.
     const r = ObjectKanbanSchema.safeParse(
       board([{ id: 'todo', title: 'To Do', items: [{ id: '1', title: 'Design' }] }]),
     );
     expect(r.success).toBe(true);
     const lane = r.success ? (r.data as { columns: Array<Record<string, unknown>> }).columns[0] : {};
-    expect(lane).toEqual({ id: 'todo', title: 'To Do' });
-    expect('items' in lane).toBe(false);
+    expect(lane).toEqual({ id: 'todo', title: 'To Do', items: [{ id: '1', title: 'Design' }] });
   });
 });
 

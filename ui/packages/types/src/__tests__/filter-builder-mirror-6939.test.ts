@@ -263,12 +263,14 @@ describe('objectui#6939 — the field key is `value`', () => {
   });
 
   it('`name` is not silently tolerated as a passthrough hole either', () => {
-    // A plain `z.object` STRIPS unknown keys, so an undeclared `name` would be
-    // accepted-and-discarded rather than refused. What makes the refusal real
-    // is that `value` is REQUIRED, so the old shape has no identity at all.
+    // A non-strict object does not refuse an unknown key, so an undeclared
+    // `name` is accepted rather than refused — discarded while the mirror was
+    // strip mode, kept since objectstack#25923 (`.passthrough()`). What makes the
+    // refusal real is that `value` is REQUIRED, so the old shape has no identity
+    // at all.
     const parsed = FilterFieldSchema.safeParse({ value: 'a', label: 'A', type: 'text', name: 'a' });
     expect(parsed.success).toBe(true);
-    expect(parsed.success && 'name' in parsed.data).toBe(false);
+    expect(parsed.success && Object.keys(FilterFieldSchema.shape)).not.toContain('name');
   });
 
   it('the reader still matches on `value`', () => {
