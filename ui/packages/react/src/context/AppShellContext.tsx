@@ -1,13 +1,23 @@
 import { createContext, useContext, useEffect, useState } from 'react';
-import type { ObjectStackAdapter } from '@object-ui/data-objectstack';
+import type { DataSource } from '@object-ui/types';
 
 // ---------------------------------------------------------------------------
 // AdapterContext
 // ---------------------------------------------------------------------------
 
-export const AdapterCtx = createContext<ObjectStackAdapter | null>(null);
+/**
+ * The host's data adapter, typed by the protocol-level `DataSource` interface
+ * from `@object-ui/types` — never by one concrete adapter (AGENTS #1: inject a
+ * `DataSource`, don't hard-code a backend). The runtime therefore installs
+ * without any adapter package, and a bring-your-own backend learns at the
+ * type level which members it is missing, not at runtime.
+ *
+ * A host that provides a concrete adapter and reads members beyond
+ * `DataSource` narrows in its own package, where it depends on that adapter.
+ */
+export const AdapterCtx = createContext<DataSource | null>(null);
 
-export function useAdapter(): ObjectStackAdapter | null {
+export function useAdapter(): DataSource | null {
   return useContext(AdapterCtx);
 }
 
