@@ -872,7 +872,6 @@ import type {
   FieldDesignerSchema,
 } from './designer.js';
 import type { ReportComponentSchema, ReportBuilderSchema, ReportViewerSchema } from './reports.js';
-import type { AIFormAssistSchema, AIRecommendationsSchema, NLQuerySchema } from './ai.js';
 import type { ViewComponentSchema } from './views.js';
 import type { ActionBarSchema } from './ui-action.js';
 
@@ -964,7 +963,9 @@ export {
 // `@objectstack/spec` flow schema.
 
 export type {
-  // AI System
+  // AI System — RETIRED with `@object-ui/plugin-ai` (objectstack#25921). Every
+  // name below is a `@deprecated` `never` tombstone; `./ai.ts` carries the
+  // remedy, and the names leave this block under objectstack#25912's sunset rule.
   AIProvider,
   AIModelType,
   AIConfig,
@@ -979,10 +980,8 @@ export type {
   // enforce-or-remove, director ruling of 2026-09-15, decision batch #137
   // item 2, maintainer verbatim 「同意」, letter A). Nothing ever registered
   // the discriminant, so the declaration could only ever route an author to a
-  // node that type-checks and then renders the OBJUI-001 panel. The reasoning,
-  // the boundary against the three AI schemas that DO render, and the in-repo
-  // limit on its census live at the tombstone in `./ai.ts`; the executable half
-  // is `./__tests__/ai-insights-retired-8800.test.ts`.
+  // node that type-checks and then renders the OBJUI-001 panel. Its executable
+  // half is `./__tests__/ai-insights-retired-8800.test.ts`.
 } from './ai.js';
 
 export type {
@@ -1111,9 +1110,9 @@ export type AnySchema =
   | ReportComponentSchema
   | ReportBuilderSchema
   | ReportViewerSchema
-  | AIFormAssistSchema
-  | AIRecommendationsSchema
-  | NLQuerySchema
+  // `ai-form-assist` / `ai-recommendations` / `nl-query` retired with
+  // `@object-ui/plugin-ai` (objectstack#25921); their names in `./ai.ts` are
+  // `never` tombstones.
   | ViewComponentSchema
   | ActionBarSchema
   // objectui#11515 — the TS twin of a zod-only arm; its sibling
