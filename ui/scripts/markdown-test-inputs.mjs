@@ -1014,15 +1014,6 @@ export const ADJUDICATED = new Map([
       walker: 'markdown-tree',
     },
   ],
-  // Reads no markdown: the `README.md` literal names a repo-wide labeler rule, not a file it opens.
-  [
-    'scripts/__tests__/labeler-package-coverage.test.ts',
-    {
-      reads: [],
-      notRead: ['README.md'],
-      walker: 'not-markdown: package directories under `packages/`',
-    },
-  ],
   [
     'scripts/__tests__/layered-read-declared-path-4016.test.ts',
     {
@@ -1062,7 +1053,6 @@ export const ADJUDICATED = new Map([
     'scripts/__tests__/merge-queue-reporting.test.ts',
     {
       reads: ['content/docs/guide/ci-cd-pipeline.md'],
-      walker: 'not-markdown: `.github/workflows/*.yml`',
     },
   ],
   [

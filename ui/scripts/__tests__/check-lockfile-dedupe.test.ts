@@ -118,10 +118,10 @@ import { DEDUPE_SENTINEL } from '../check-lockfile-dedupe.mjs';
 import { FLOORS, TEST_FILE } from '../check-test-path-roots.mjs';
 import { NOT_A_GATE, OPTIONAL_CONTEXTS, REQUIRED_CONTEXTS } from '../dependabot-merge-gate.mjs';
 import { maskComments } from '../js-comment-mask.mjs';
-import { pullRequestTrigger, readWorkflows, repoRoot, subscribesMergeGroup } from './workflow-checks.js';
+import { rootWorkflow, rootWorkflowFiles, rootWorkflowsDir, withoutComments } from './helpers/root-ci';
+import { repoRoot } from './workflow-checks.js';
 
 const SCRIPT = 'scripts/check-lockfile-dedupe.mjs';
-const WORKFLOW = 'lockfile-dedupe.yml';
 const CONTEXT = 'Lockfile Dedupe Check';
 
 /** This file, by its own path — a rename may not silently drop what it pins. */
@@ -177,16 +177,19 @@ interface LiveScan {
  *
  * Two carriers, one population (objectui#9693): the workflows, which say what a
  * job runs, and the files those jobs execute — every tracked test file plus the
- * vitest runtime modules. Workflow comment LINES are stripped by `readWorkflows`;
- * source comments are blanked by `scripts/js-comment-mask.mjs`, the tree's one
- * answer to "comment, or code?", so the paragraphs in this very file explaining
- * the hazard cannot count as the hazard.
+ * vitest runtime modules. The workflows are the root `.github/workflows/`, the
+ * only ones GitHub runs under the monorepo (objectstack#25712), read with their
+ * comment LINES stripped; `ui/.github/workflows/` runs nowhere, so a live
+ * reading there is no reading at all. Source comments are blanked by
+ * `scripts/js-comment-mask.mjs`, the tree's one answer to "comment, or code?",
+ * so the paragraphs in this very file explaining the hazard cannot count as the
+ * hazard.
  */
 function scanForLiveReading(): LiveScan {
-  const workflows = readWorkflows();
+  const workflows = rootWorkflowFiles();
   const sites = workflows
-    .filter((workflow) => takesLiveReading(workflow.lines.join('\n')))
-    .map((workflow) => `.github/workflows/${workflow.file}`);
+    .filter((file) => takesLiveReading(withoutComments(rootWorkflow(file))))
+    .map((file) => path.relative(repoRoot, path.join(rootWorkflowsDir, file)));
 
   const population = trackedFiles().filter((file) => TEST_FILE.test(file) || VITEST_RUNTIME.test(file));
   for (const file of population) {
@@ -208,16 +211,22 @@ function scanForLiveReading(): LiveScan {
 /**
  * The only places a live reading may be taken, and why each may:
  *
- *   - the path-filtered, non-required workflow this gate was built around;
  *   - this file, which drives the checker ONLY through the `PATH` stub above —
  *     every run asserts `pnpmArgv`, so a leg that reached the real pnpm reds
  *     rather than going quiet, which is what makes this exemption checkable
  *     instead of trusted.
  *
+ * The second entry this list carried, objectui's path-filtered
+ * `lockfile-dedupe.yml`, left with objectstack#25712: it sits under
+ * `ui/.github/workflows/`, which runs nowhere. It is row 18 of the
+ * objectstack#25697 workflow roster, "kept, follow-up port", and the port adds
+ * its root workflow back here. Until then the equality below has no workflow
+ * member, so its workflow half rests on the read floor alone.
+ *
  * ⛔ Nothing else belongs here. An addition is a live, registry-dependent
  * reading inside a REQUIRED context — objectui#9562, again.
  */
-const LIVE_READING_SITES = [`.github/workflows/${WORKFLOW}`, THIS_FILE].sort();
+const LIVE_READING_SITES = [THIS_FILE];
 
 /**
  * Real `pnpm@10.31.0` output, same capture objectui#8333 took and the checker's
@@ -499,23 +508,21 @@ describe('--report-only — the mode objectui#9562 ruled (letter A, comment 5717
   });
 });
 
-describe('the lockfile-dedupe gate is wired the way its header claims', () => {
-  const workflows = readWorkflows();
-  const workflow = workflows.find((w) => w.file === WORKFLOW);
-  /** The workflow with comment lines stripped — prose may not satisfy wiring. */
-  const body = () => workflow!.lines.join('\n');
-
-  it('has a workflow that runs the checker', () => {
-    expect(workflow, `${WORKFLOW} not found — the gate would never run`).toBeDefined();
-    // Comment-stripped throughout: a header comment mentioning the script must
-    // not be able to satisfy a wiring assertion about what the job RUNS.
-    expect(body()).toContain(`node ${SCRIPT}`);
-    expect(body()).toContain(`name: ${CONTEXT}`);
-  });
+describe('the lockfile-dedupe gate is fenced and classified the way its header claims', () => {
+  // Retired with objectstack#25712: `has a workflow that runs the checker`, the
+  // `--report-only` pin, `is path-filtered, and the filter lists the gate’s own
+  // runtime closure`, `declares no merge_group trigger` and `uses the shared
+  // pnpm setup rather than a bare corepack call`. Each read objectui's
+  // `lockfile-dedupe.yml`, which runs nowhere under the monorepo: GitHub runs
+  // the root `.github/workflows/` alone. That workflow is row 18 of the
+  // objectstack#25697 workflow roster, "kept, follow-up port", re-aimed at the
+  // one root `pnpm-lock.yaml`; the port brings these pins back against its root
+  // workflow, by path.
 
   it('is the only place the LIVE reading runs, in workflows AND in what they run (objectui#9562, objectui#9693)', () => {
-    // The live, registry-dependent execution belongs to one path-filtered
-    // workflow and nowhere else. ⭐ "Nowhere else" is the whole assertion, and
+    // The live, registry-dependent execution belongs to this file's stubbed legs
+    // and, once roster row 18 is ported, to one path-filtered root workflow:
+    // nowhere else. ⭐ "Nowhere else" is the whole assertion, and
     // it used to be measured over the workflows alone — while the way a
     // required job actually grew a `pnpm dedupe`, the time it happened, was
     // through a TEST FILE, which is not a workflow. So the population is both
@@ -531,14 +538,15 @@ describe('the lockfile-dedupe gate is wired the way its header claims', () => {
     expect(scan.workflows, 'the workflow read collapsed').toBeGreaterThan(20);
     expect(scan.population.length, 'the source read collapsed').toBeGreaterThan(FLOORS.testFiles);
     // …and it reached this file's PEERS and the runtime modules, not just the
-    // two files the expectation names — a scan that only ever looked at itself
+    // file the expectation names — a scan that only ever looked at itself
     // would satisfy the equality below exactly as well.
     expect(scan.population.filter((f) => f.startsWith('scripts/__tests__/') && f !== THIS_FILE).length).toBeGreaterThan(50);
     expect(scan.population).toContain('vitest.setup.base.ts');
 
-    // The equality is also the positive control for both halves: one member is
-    // a workflow and the other a test file, so a carrier that stopped being
-    // read goes red here rather than going quiet.
+    // The equality was also the positive control for both halves while one
+    // member was a workflow and the other a test file. Until the row-18 port
+    // restores the workflow member, the workflow half rests on the floor above
+    // (see `LIVE_READING_SITES`).
     expect(scan.sites, 'a live, registry-dependent reading inside a REQUIRED context — objectui#9562, again').toEqual(
       LIVE_READING_SITES,
     );
@@ -566,37 +574,6 @@ describe('the lockfile-dedupe gate is wired the way its header claims', () => {
     expect(takesLiveReading(maskComments(`/* ${SCRIPT} is the checker */`))).toBe(false);
     // Nor is the word this repository spends on UI dedupe keys everywhere.
     expect(takesLiveReading(maskComments('const dedupe = new Set<string>();'))).toBe(false);
-  });
-
-  it('passes `--report-only`, which is where objectui#9562’s ruling actually lands', () => {
-    // Comment-stripped: the header explains the mode at length, and prose may
-    // not satisfy wiring. The flag on the step is the entire deliverable — the
-    // script supports both modes, so the workflow is what chooses one.
-    expect(body(), 'the gate is blocking again — objectui#9562, undone').toContain(
-      `node ${SCRIPT} --report-only`,
-    );
-  });
-
-  it('is path-filtered, and the filter lists the gate’s own runtime closure', () => {
-    const trigger = pullRequestTrigger(workflow!);
-    expect(trigger.subscribes, 'the gate must run on pull requests').toBe(true);
-    expect(trigger.filtered, 'a path filter is what keeps it out of the REQUIRED set').toBe(true);
-    // Without these the checker can ship having never run once, and the wiring
-    // bug then surfaces on somebody else's next lockfile pull request.
-    for (const file of ['pnpm-lock.yaml', `.github/workflows/${WORKFLOW}`, SCRIPT, 'scripts/invoked-as.mjs']) {
-      expect(body(), `${file} missing from the path filter`).toContain(file);
-    }
-  });
-
-  it('declares no merge_group trigger, per objectui#3523', () => {
-    // A path-filtered, non-required gate that subscribes the queue stalls it
-    // until the ruleset timeout.
-    expect(subscribesMergeGroup(workflow!)).toBe(false);
-  });
-
-  it('uses the shared pnpm setup rather than a bare corepack call', () => {
-    expect(body()).toContain('bash scripts/ci-setup-pnpm.sh');
-    expect(body()).not.toMatch(/^\s*run:.*corepack/m);
   });
 
   it('stays an OPTIONAL context, because the JOB still gates even though its verdict does not', () => {
