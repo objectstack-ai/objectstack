@@ -270,7 +270,16 @@ export interface AutomationContext {
 export interface ScreenFieldSpec {
     name: string;
     label?: string;
-    /** Widget hint (text/select/boolean/number/date/…); the client maps it to a field widget. */
+    /**
+     * Widget hint (text/select/boolean/number/date/file/…); the client maps it
+     * to a field widget.
+     *
+     * Two members are value domains the server re-checks on resume
+     * (`validateScreenInputs`): `'number'` takes a finite JSON number, and
+     * `'file'` (#25801) takes the id of an uploaded `sys_file` — the client
+     * renders the platform upload widget and answers with the id the upload
+     * minted, never the expanded `{ id, name, url, … }` read form.
+     */
     type?: string;
     required?: boolean;
     /** Closed-enum options for select-style fields. */

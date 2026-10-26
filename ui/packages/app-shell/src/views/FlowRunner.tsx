@@ -206,6 +206,19 @@
  * single column it always had. The count is the DECLARED one, so a field a
  * `visibleWhen` reveals mid-edit never makes the dialog jump width.
  * `ActionParamDialog` takes the same bound for a long `params` list.
+ *
+ * ## A file field holds Submit until its upload settles (objectstack#25801)
+ *
+ * A `type: 'file'` screen field is the platform upload widget ({@link ScreenView}),
+ * and its value is the uploaded file's id only once the upload settles. So the
+ * screen body renders inside an uploading scope (`useUploadingScope`, the
+ * aggregation the record form gates its Save on), and while any upload in it
+ * is in flight Submit is disabled and reads the widget's own "Uploading…" —
+ * the same answer `ActionParamDialog` gives its Confirm. The scope also holds
+ * past an unmount, so an upload still running cannot be outrun by a Submit.
+ * The values then go out through `screenResumeValues`, which reduces each file
+ * field to its bare id: the engine reads `'file'` as a value domain and refuses
+ * anything else.
  */
 import { Suspense, useEffect, useState } from 'react';
 import {
@@ -222,6 +235,7 @@ import {
   cn,
 } from '@object-ui/components';
 import { notifyDataChanged, useObjectTranslation } from '@object-ui/react';
+import { UploadingScopeProvider, useUploadingScope } from '@object-ui/fields';
 import type { ActionCopyTemplate } from '@object-ui/core';
 import {
   FLOW_SCREEN_FIELD_COPY_KEYS,
@@ -237,6 +251,7 @@ import {
   initialScreenValues,
   screenFieldBoundViolations,
   screenFields,
+  screenResumeValues,
   visibleScreenFields,
   type ScreenFieldSpec,
   type ScreenSpec,
@@ -424,6 +439,9 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
   const [submitting, setSubmitting] = useState(false);
   const [resumeError, setResumeError] = useState<ResumeError | null>(null);
   const [refused, setRefused] = useState<RefusedOutcome | null>(null);
+  // Every upload widget in the screen body reports into this scope, so Submit
+  // can wait for a file field's id (objectstack#25801 — see the header).
+  const uploads = useUploadingScope();
 
   useEffect(() => {
     if (state) {
@@ -533,6 +551,9 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
   };
 
   const submit = async () => {
+    // A file field's value is its id only once the upload settles; Submit is
+    // disabled meanwhile, and this covers a submit that reaches here anyway.
+    if (uploads.anyUploading) return;
     // Enforce `required` over the fields ACTUALLY ON SCREEN, not the whole
     // declared list. A `visibleWhen` field that is required *when shown* is not
     // required while hidden — the user was never asked for it, and the flow is
@@ -574,7 +595,8 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
     }
     setSubmitting(true);
     try {
-      await resumeWith(values);
+      // File fields go out as their bare `sys_file` id (objectstack#25801).
+      await resumeWith(screenResumeValues(screen, values));
     } catch (err) {
       // The request never produced a response (network / abort), so the
       // suspension was not consumed — this one IS retryable.
@@ -672,29 +694,31 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
                 fallback and destroys the host's state, taking this dialog (and the
                 run it is driving) with it. */}
             <Suspense fallback={<div className="py-6 text-sm text-muted-foreground">{t('common.loading', { defaultValue: 'Loading…' })}</div>}>
-              <ScreenView
-                screen={shown}
-                values={values}
-                onValueChange={setVal}
-                dataSource={dataSource}
-                objects={objects}
-                // Two columns from `sm` up; `space-y-0` replaces the body's own
-                // stack spacing, which would offset every grid cell but the last.
-                className={isLongScreen ? 'grid gap-4 space-y-0 sm:grid-cols-2' : undefined}
-                objectForm={{
-                  onSuccess: onObjectFormSaved,
-                  onCancel: onClose,
-                  // Withdrawn once the run is gone: the record this step created was
-                  // already persisted, so a second Save would duplicate it AND still
-                  // have no suspension to resume.
-                  showSubmit: !terminal,
-                  showCancel: true,
-                  submitText: t('flowRunner.saveAndContinue', { defaultValue: 'Save & Continue' }),
-                  cancelText: terminal
-                    ? t('common.close', { defaultValue: 'Close' })
-                    : t('common.cancel', { defaultValue: 'Cancel' }),
-                }}
-              />
+              <UploadingScopeProvider scope={uploads}>
+                <ScreenView
+                  screen={shown}
+                  values={values}
+                  onValueChange={setVal}
+                  dataSource={dataSource}
+                  objects={objects}
+                  // Two columns from `sm` up; `space-y-0` replaces the body's own
+                  // stack spacing, which would offset every grid cell but the last.
+                  className={isLongScreen ? 'grid gap-4 space-y-0 sm:grid-cols-2' : undefined}
+                  objectForm={{
+                    onSuccess: onObjectFormSaved,
+                    onCancel: onClose,
+                    // Withdrawn once the run is gone: the record this step created was
+                    // already persisted, so a second Save would duplicate it AND still
+                    // have no suspension to resume.
+                    showSubmit: !terminal,
+                    showCancel: true,
+                    submitText: t('flowRunner.saveAndContinue', { defaultValue: 'Save & Continue' }),
+                    cancelText: terminal
+                      ? t('common.close', { defaultValue: 'Close' })
+                      : t('common.cancel', { defaultValue: 'Cancel' }),
+                  }}
+                />
+              </UploadingScopeProvider>
             </Suspense>
           </div>
         )}
@@ -708,10 +732,12 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
             ) : (
               <>
                 <Button variant="outline" onClick={onClose} disabled={submitting}>{t('common.cancel', { defaultValue: 'Cancel' })}</Button>
-                <Button onClick={submit} disabled={submitting}>
+                <Button onClick={submit} disabled={submitting || uploads.anyUploading}>
                   {submitting
                     ? t('flowRunner.submitting', { defaultValue: 'Submitting…' })
-                    : t('common.submit', { defaultValue: 'Submit' })}
+                    : uploads.anyUploading
+                      ? t('fields.file.uploading', { defaultValue: 'Uploading…' })
+                      : t('common.submit', { defaultValue: 'Submit' })}
                 </Button>
               </>
             )}
