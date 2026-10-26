@@ -15,6 +15,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import type { ExplainDecision } from '@objectstack/spec/security';
+import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 import { SecurityPlugin } from './security-plugin.js';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
@@ -31,16 +32,29 @@ const TABLES: Record<string, Array<Record<string, unknown>>> = {
   sys_user_permission_set: [{ user_id: 'u1', permission_set: 'crm_sales_user', organization_id: ORG }],
 };
 
+/**
+ * A `where`-honouring double: the resolver delegates filtering to the engine,
+ * so a fake that ignored `where` would report grants nobody holds. A top-level
+ * `$` combinator is refused rather than approximated.
+ */
+function matches(row: Record<string, unknown>, where: any): boolean {
+  return Object.entries(where ?? {}).every(([k, v]) => {
+    if (k.startsWith('$')) throw new Error(`fake engine: unsupported operator ${k}`);
+    if (v && typeof v === 'object' && '$in' in (v as any)) return (v as any).$in.includes(row[k]);
+    if (v === null) return (row[k] ?? null) === null;
+    return row[k] === v;
+  });
+}
+
 async function plugin(opts: { failGrantRead?: boolean } = {}) {
   const ql: any = bindTestSecurityCatalog({
     registerMiddleware: () => {},
     getSchema: (name: string) => (name === OBJECT ? SCHEMA : null),
-    findOne: async () => null,
+    findOne: async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; },
     async find(object: string, query: any) {
       if (opts.failGrantRead && object === 'sys_user_permission_set') throw new Error('store unavailable');
-      const where = query?.where ?? {};
-      return (TABLES[object] ?? []).filter((row) => Object.entries(where).every(([k, v]) =>
-        v && typeof v === 'object' && '$in' in (v as any) ? (v as any).$in.includes(row[k]) : (v === null ? (row[k] ?? null) === null : row[k] === v)));
+      const rows = (TABLES[object] ?? []).filter((row) => matches(row, query?.where));
+      return typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows;
     },
   }, {
     positions: [{ name: 'sales_rep', permissionSets: ['crm_sales_user'] }],

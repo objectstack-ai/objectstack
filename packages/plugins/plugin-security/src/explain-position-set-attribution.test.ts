@@ -114,9 +114,13 @@ describe('[ADR-0131 D3/D4; #24757] explain attributes a set to a position only t
     const ql = bindTestSecurityCatalog({
       getSchema: () => SCHEMA,
       async find(object: string, opts: any) {
-        const where = opts?.where ?? {};
-        return (tables[object] ?? []).filter((row) => Object.entries(where).every(([k, v]) =>
-          v && typeof v === 'object' && '$in' in (v as any) ? (v as any).$in.includes(row[k]) : (v === null ? (row[k] ?? null) === null : row[k] === v)));
+        const rows = (tables[object] ?? []).filter((row) => Object.entries(opts?.where ?? {}).every(([k, v]) => {
+          // The resolver delegates filtering to the engine: a `$` combinator is refused, not approximated.
+          if (k.startsWith('$')) throw new Error(`fake engine: unsupported operator ${k}`);
+          if (v && typeof v === 'object' && '$in' in (v as any)) return (v as any).$in.includes(row[k]);
+          return v === null ? (row[k] ?? null) === null : row[k] === v;
+        }));
+        return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
       },
     }, {
       positions: [{ name: 'sales_rep', permissionSets: ['crm_sales_user'] }],
