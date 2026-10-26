@@ -10,7 +10,6 @@
 //
 // Hand-written documentation lives in the module folders under content/docs/
 // (data-modeling/, automation/, permissions/, ui/, api/, ai/, plugins/, kernel/, ...).
-// See DX_ROADMAP.md and .cursorrules for details.
 //
 // Usage:
 //   tsx scripts/build-docs.ts            # write

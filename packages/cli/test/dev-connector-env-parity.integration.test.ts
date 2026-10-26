@@ -31,17 +31,39 @@
  * `self-url.ts` builds it, a host plugin contributing that connector's
  * provider (its factory records the `providerConfig` it was handed, which is
  * what dispatch calls), and a `dist/objectstack.json` standing for a build
- * whose environment had no `OS_PORT`. One `os dev` boot with `OS_PORT` set;
- * the served `baseUrl` and the materialized one must both read that port.
+ * whose environment had no `OS_PORT`.
+ *
+ * ## #26243 — the port flag is the port the config reads
+ *
+ * `os dev -p N` and `os serve --port N` handed the flag to the listener alone,
+ * so a config reading `OS_PORT` saw the inherited value or none. Measured on
+ * the showcase with no `OS_PORT`/`PORT`: `os dev -p 41302` and `os serve
+ * --port 41303` both served `/api/v1/meta/connector/showcase_status_api` with
+ * `http://127.0.0.1:3000`, and the self-ping flow answered `400 FLOW_FAILED …
+ * fetch failed`. Both doors now export the flag's port as `OS_PORT`/`PORT`
+ * (`portFlagEnv`) before anything evaluates the config.
+ *
+ * So the `os dev` boot here passes `-p N` over an inherited, stale `OS_PORT`
+ * and the build-time artifact: the served `baseUrl` and the materialized one
+ * must both read N, the port the boot is listening on. That one boot holds
+ * both cards: before #26130's fix the served copy read the artifact's `:3000`,
+ * and before #26243's both copies read the stale `OS_PORT`. The `os serve
+ * --port N` boot, in production posture (no artifact door, so the config
+ * module is the only copy), has no `OS_PORT` at all, and the materialized
+ * `baseUrl` must read N.
  *
  * ## Spawn shape
  *
  * `bin/run.js` with `NODE_ENV` unset, the shipped entry resolving commands from
  * `dist/` (`requireBuiltCli`), in its own process group (`dev` supervises a
- * `serve` grandchild). The listen port is kernel-assigned (`-p 0`), which the
- * flag gives the child; `OS_PORT` is only the value the config reads, exactly
- * as an isolated-port boot hands it to a config. The boot runs in `beforeAll`
- * and every `it` reads what it recorded.
+ * `serve` grandchild). Each boot asks for a NON-ZERO port drawn with
+ * `reservePort()`, because that number is the subject: the config must read
+ * the port the flag names, before the boot, and a kernel-assigned `-p 0` read
+ * back afterwards cannot be known to the config (the draw is ledgered in
+ * `released-port-production-spawn.pin.test.ts`). A lost race on that draw is
+ * reported as one (`portContentionError` / `portDriftError`), not as a
+ * verdict. The boots run in `beforeAll` and every `it` reads what they
+ * recorded.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -52,11 +74,13 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   childEnv,
+  E2E_AUTH_SECRET,
   E2E_SECRET_KEY,
-  KERNEL_ASSIGNED_PORT,
+  portContentionError,
+  portDriftError,
   probeThroughChild,
-  readKernelAssignedPort,
   requireBuiltCli,
+  reservePort,
   RUN_JS_RESOLVES_FROM_DIST,
 } from './helpers/serve-process.js';
 import { linkSpec } from './helpers/define-stack-fixture.js';
@@ -69,10 +93,11 @@ const CLI = resolve(HERE, '../bin/run.js');
 const READY = /Press Ctrl\+C to stop/;
 const BOOT_TIMEOUT_MS = 180_000;
 
-/** The port the boot's environment names, other than the 3000 default. */
-const LIVE_PORT = '41302';
-const LIVE_URL = `http://127.0.0.1:${LIVE_PORT}`;
+/** An `OS_PORT` the `os dev` boot inherits and its `-p` must override. */
+const STALE_PORT = '41302';
 const BUILD_URL = 'http://127.0.0.1:3000';
+/** The self URL a config builds for `port`, the way `CONFIG_SOURCE` builds it. */
+const selfUrlFor = (port: number | string) => `http://127.0.0.1:${port}`;
 const CONNECTOR = 'fxp_self';
 /** Where the fixture provider's factory records the `providerConfig` it was handed. */
 const MATERIALIZED_FILE = 'materialized-provider-config.json';
@@ -133,6 +158,8 @@ export default defineStack({
 `;
 
 interface Reading {
+  /** The non-zero port the boot asked for, and bound. */
+  port?: number;
   served?: unknown;
   materialized?: unknown;
   error?: Error;
@@ -140,7 +167,8 @@ interface Reading {
 
 const groups: ChildProcess[] = [];
 let dir: string;
-let reading: Reading = {};
+let devReading: Reading = {};
+let serveReading: Reading = {};
 
 interface Live {
   child: ChildProcess;
@@ -148,11 +176,15 @@ interface Live {
   output: () => string;
 }
 
-function bootDev(env: Record<string, string | undefined>): Promise<Live> {
+/**
+ * Boot `bin/run.js ARGS` asking for `port`, resolved once the banner tail shows
+ * the child listening on exactly that port.
+ */
+function boot(what: string, args: string[], port: number, env: Record<string, string | undefined>): Promise<Live> {
   return new Promise((resolveBoot, rejectBoot) => {
     const child = spawn(
       process.execPath,
-      [CLI, 'dev', '--no-watch', '--no-restart', '-d', 'file:dev.db', '-p', KERNEL_ASSIGNED_PORT],
+      [CLI, ...args],
       {
         cwd: dir,
         // `childEnv`, never a bare `...process.env` — see its header. `NODE_ENV`
@@ -168,6 +200,7 @@ function bootDev(env: Record<string, string | undefined>): Promise<Live> {
           OS_ARTIFACT_PATH: undefined,
           OS_MODE: undefined,
           NODE_ENV: undefined,
+          OS_PORT: undefined,
           PORT: undefined,
           ...env,
         }),
@@ -186,18 +219,21 @@ function bootDev(env: Record<string, string | undefined>): Promise<Live> {
       else resolveBoot({ child, base: `http://localhost:${verdict}`, output: () => out });
     };
     const timer = setTimeout(
-      () => settle(new Error(`os dev never printed ${READY}\n--- output ---\n${out.slice(-4000)}`)),
+      () => settle(new Error(`${what} never printed ${READY}\n--- output ---\n${out.slice(-4000)}`)),
       BOOT_TIMEOUT_MS,
     );
     const onData = (d: unknown) => {
       out += String(d);
-      // The child is the authority on the port it bound: a kernel-assigned one (#24342).
-      if (READY.test(out)) settle(readKernelAssignedPort(out, 'os dev'));
+      // A boot on another port than the drawn one lost the draw's race; say so.
+      if (READY.test(out)) settle(portDriftError(out, what, port) ?? port);
     };
     child.stdout?.on('data', onData);
     child.stderr?.on('data', onData);
     child.on('exit', (code) =>
-      settle(new Error(`os dev exited ${String(code)} before ${READY}\n--- output ---\n${out.slice(-4000)}`)),
+      settle(
+        portContentionError(out, what, port)
+          ?? new Error(`${what} exited ${String(code)} before ${READY}\n--- output ---\n${out.slice(-4000)}`),
+      ),
     );
   });
 }
@@ -261,9 +297,41 @@ beforeAll(async () => {
     'utf8',
   );
 
+  const materializedPath = join(dir, MATERIALIZED_FILE);
+  /** What the fxp provider's factory was handed on this boot, or why there is nothing. */
+  const materialized = (live: Live): unknown => existsSync(materializedPath)
+    ? (JSON.parse(readFileSync(materializedPath, 'utf8')) as { baseUrl?: unknown }).baseUrl
+    : `(the fxp provider never materialized ${CONNECTOR})\n--- output ---\n${live.output().slice(-3000)}`;
+
+  // `os serve --port N`, production posture, no `OS_PORT`: the config module is
+  // the only copy, and materialization reads it at boot.
   let live: Live | undefined;
   try {
-    live = await bootDev({ OS_PORT: LIVE_PORT });
+    const port = reservePort();
+    live = await boot(
+      'os serve --port',
+      ['serve', 'objectstack.config.ts', '--port', String(port)],
+      port,
+      { OS_AUTH_SECRET: E2E_AUTH_SECRET, OS_DATABASE_URL: 'file:serve.db' },
+    );
+    serveReading = { port, materialized: materialized(live) };
+  } catch (error) {
+    serveReading = { error: error instanceof Error ? error : new Error(String(error)) };
+  } finally {
+    if (live) await stopGroup(live.child);
+    live = undefined;
+    rmSync(materializedPath, { force: true });
+  }
+
+  // `os dev -p N` over a stale inherited `OS_PORT` and the build-time artifact.
+  try {
+    const port = reservePort();
+    live = await boot(
+      'os dev -p',
+      ['dev', '--no-watch', '--no-restart', '-d', 'file:dev.db', '-p', String(port)],
+      port,
+      { OS_PORT: STALE_PORT },
+    );
     const signIn = await http(live, 'POST', '/api/v1/auth/sign-in/email', '', { email: EMAIL, password: PASSWORD });
     const token = signIn.body?.token;
     if (signIn.status !== 200 || typeof token !== 'string') {
@@ -273,36 +341,39 @@ beforeAll(async () => {
     if (meta.status !== 200) {
       throw new Error(`GET /api/v1/meta/connector/${CONNECTOR} answered ${meta.status}: ${JSON.stringify(meta.body)}`);
     }
-    const materializedPath = join(dir, MATERIALIZED_FILE);
-    reading = {
-      served: servedBaseUrl(meta.body),
-      materialized: existsSync(materializedPath)
-        ? (JSON.parse(readFileSync(materializedPath, 'utf8')) as { baseUrl?: unknown }).baseUrl
-        : `(the fxp provider never materialized ${CONNECTOR})\n--- output ---\n${live.output().slice(-3000)}`,
-    };
+    devReading = { port, served: servedBaseUrl(meta.body), materialized: materialized(live) };
   } catch (error) {
-    reading = { error: error instanceof Error ? error : new Error(String(error)) };
+    devReading = { error: error instanceof Error ? error : new Error(String(error)) };
   } finally {
     if (live) await stopGroup(live.child);
   }
-}, BOOT_TIMEOUT_MS + 60_000);
+}, 2 * BOOT_TIMEOUT_MS + 60_000);
 
 afterAll(async () => {
   for (const child of groups) await stopGroup(child);
   try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
 }, 60_000);
 
-function recorded(): Required<Omit<Reading, 'error'>> {
+function recorded(reading: Reading): Required<Omit<Reading, 'error'>> {
   if (reading.error) throw reading.error;
   return reading as Required<Omit<Reading, 'error'>>;
 }
 
-describe('#26130 — `os dev` with OS_PORT serves the connector baseUrl dispatch uses', () => {
-  it('dispatch materializes the connector on the boot environment\'s port (unchanged)', () => {
-    expect(recorded().materialized).toBe(LIVE_URL);
+describe('#26130 + #26243 — `os dev -p N` serves and dispatches the connector baseUrl on N', () => {
+  it('dispatch materializes the connector on the flag\'s port, not the inherited OS_PORT', () => {
+    const { port, materialized } = recorded(devReading);
+    expect(materialized).toBe(selfUrlFor(port));
   });
 
   it('/api/v1/meta/connector/NAME serves that same baseUrl, not the build-time one', () => {
-    expect(recorded().served).toBe(LIVE_URL);
+    const { port, served } = recorded(devReading);
+    expect(served).toBe(selfUrlFor(port));
+  });
+});
+
+describe('#26243 — `os serve --port N` with no OS_PORT', () => {
+  it('dispatch materializes the connector on the flag\'s port, not the 3000 default', () => {
+    const { port, materialized } = recorded(serveReading);
+    expect(materialized).toBe(selfUrlFor(port));
   });
 });
