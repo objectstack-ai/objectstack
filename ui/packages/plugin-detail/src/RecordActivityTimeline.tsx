@@ -39,7 +39,7 @@ import { CommentBody } from './CommentAuthorControls';
 import { useDisplayLocale } from '@object-ui/i18n';
 import { useRecordContext, useSafeFieldLabel } from '@object-ui/react';
 import { useDetailTranslation } from './useDetailTranslation';
-import { foldFeedItems, type TimelineEntry } from './renderers/recordActivityFeed';
+import { foldFeedItems, type ActivityTimelineEntry } from './renderers/recordActivityFeed';
 
 /**
  * Which slice of the record feed the timeline shows.
@@ -598,7 +598,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
   // who, when the latest entry was written, how many entries, and the union of
   // the fields they changed. The toggle expands the run to its entries, each
   // rendered exactly as an unfolded row.
-  const renderFold = (entry: Extract<TimelineEntry, { kind: 'fold' }>): React.ReactNode => {
+  const renderFold = (entry: Extract<ActivityTimelineEntry, { kind: 'fold' }>): React.ReactNode => {
     const latest = entry.items[entry.items.length - 1];
     const count = entry.items.length;
     const labels = changedFieldsOf(entry.items).map(labelOfField);

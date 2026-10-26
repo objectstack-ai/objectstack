@@ -1128,7 +1128,7 @@ export function applyFeedConfig(
 export const FOLD_WINDOW_MS = 10 * 60 * 1000;
 
 /** One row of the rendered timeline: a feed item, or a run of folded updates. */
-export type TimelineEntry =
+export type ActivityTimelineEntry =
   | { kind: 'item'; item: FeedItem }
   | { kind: 'fold'; id: string; items: FeedItem[] };
 
@@ -1180,8 +1180,8 @@ function continuesRun(prev: FeedItem, next: FeedItem): boolean {
  * continues the one before it ({@link continuesRun}). Any other row between two
  * updates ends the run. A run of one is an ordinary row.
  */
-export function foldFeedItems(items: readonly FeedItem[]): TimelineEntry[] {
-  const entries: TimelineEntry[] = [];
+export function foldFeedItems(items: readonly FeedItem[]): ActivityTimelineEntry[] {
+  const entries: ActivityTimelineEntry[] = [];
   let run: FeedItem[] = [];
   const flush = () => {
     if (run.length > 1) {
