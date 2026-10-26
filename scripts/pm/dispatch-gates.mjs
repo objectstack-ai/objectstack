@@ -6006,8 +6006,7 @@ export function packageRootAnchoredHint(hint, base, tree, files) {
  * false: `node_modules`, `dist`, `coverage` and `.turbo` off
  * check-refd-timer-probe's skip set; `.changeset` twice — off
  * check-keyed-text-bounds' `SKIP_DIRS` and off the noise floor the card was
- * filed on; the two gate paths measurement-claim-triage declared it skips (that
- * tool is removed from the tree, held at 7111e14ac9); and
+ * filed on; the two gate paths measurement-claim-triage declares it skips; and
  * `scripts/**`, `docs/adr/**` and `.changeset/**` off `DEFERRED_SURFACES`,
  * which is what the `DEFERRED` arm retired. The changeset pair is what a dev
  * actually saw when #15753 was filed: a card that has not written its
