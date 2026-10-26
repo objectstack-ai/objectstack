@@ -33,7 +33,7 @@
 // THE CENSUS is NOT a gate: it exits 0 on any membership count, it prints "a
 // MEASUREMENT, not a gate" on every run of it, and the file is deliberately not
 // named `check:*` or `gen:*` so the #4203 script ledger has nothing to classify
-// (the shape `scripts/measure-partial-retirement-annotation.mjs`, held at 7111e14ac9, established). The only
+// (the shape `measure-partial-retirement-annotation.mjs` established). The only
 // non-zero exits are a `--self-test` failing its declared controls, an unknown
 // `--self-test=` mode (REFUSED, exit 2), and `ts-parse`'s EXIT_UNPARSEABLE.
 //

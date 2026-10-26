@@ -5,8 +5,7 @@
 
 **Instrument**: `scripts/measure-partial-retirement-annotation.mjs`. Not a gate, not
 wired into any workflow, not a `check:`/`gen:` script. Committed so the numbers are
-reproducible rather than asserted; later removed from the tree and held at commit
-`7111e14ac9`.
+reproducible rather than asserted.
 
 **Mandate**: the maintainer ruling of 2026-08-09 on #6635 — measurement first, no gate
 is built yet. This document reports total hits, a spot-verified true/false-positive
@@ -154,9 +153,6 @@ prefix is dropped). The mapping in the instrument is therefore hand-curated and 
 explicitly so it can be audited.
 
 ## 8. Reproducing
-
-The instrument was removed from the tree; run it from a checkout of commit `7111e14ac9`,
-which holds it (`git worktree add --detach ../objectstack-7111e14ac9 7111e14ac9`).
 
 ```bash
 node scripts/measure-partial-retirement-annotation.mjs            # summary
