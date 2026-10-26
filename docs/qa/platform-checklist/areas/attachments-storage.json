@@ -874,7 +874,7 @@
           "the storage service live (the upload rides the console's UploadProvider adapter into /api/v1/storage)"
         ],
         "knownGaps": [
-          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
+          "THE PIN LIVES IN THIS CHECKOUT UNDER ui/ — since the objectui import the spec is ui/e2e/live/grid-file-upload.spec.ts, a live Playwright spec: from ui/, `pnpm test:e2e:live` runs it (ui/playwright.live.config.ts, testDir ./e2e/live) against a backend on port 3000 and the console dev server on port 5180 (`pnpm --filter @object-ui/console dev`), neither of which the config starts. Run it and cite its output naming the framework sha, OR drive the item by hand in the browser and score it as a manual run. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. RUNNER.md's objectui-pinned-automation standing fact predates the import; by its own rule (a ref that names no path existing in this checkout) this item is no longer in that set."
         ]
       },
       "steps": [
@@ -920,10 +920,10 @@
         "⛔ NOT a failure: a batch carrying the bare id instead of {name, url}. That is the shipped contract (ADR-0104 D3), and reading it as a defect is exactly the checklist-vs-product drift #7669 corrected — clause text that predates an ADR must be restated, never scored against the product"
       ],
       "traps": ["automation-input", "hydration-race", "stale-console-bundle"],
-      "automated": { "kind": "e2e", "ref": "objectui: e2e/live/grid-file-upload.spec.ts" },
+      "automated": { "kind": "e2e", "ref": "ui/e2e/live/grid-file-upload.spec.ts" },
       "source": [
         "docs/plans/release-15.1-test-plan.md §C2 (#3051 + objectui#2585)",
-        "objectui e2e/live/grid-file-upload.spec.ts (the live pin: auto-column, input-not-text, chip, batch payload shape)",
+        "ui/e2e/live/grid-file-upload.spec.ts (the live pin: auto-column, input-not-text, chip, batch payload shape)",
         "examples/app-showcase/src/data/objects/invoice.object.ts#showcase_invoice_line (showcase_invoice_line.receipt = Field.file, objectui#2360 note)",
         "docs/adr/0104-field-runtime-value-shape-contract.md — D3 'File-as-reference: field values point into sys_file': the STORED form is an opaque fileId string (the inline {url, name, size} blob is retired from the write path); the {id, name, size, mimeType, url} FileValueSchema is the EXPANDED form produced at read time, whose url is 'derived, never stored'; field-referenced files get parent-derived read checks",
         "packages/services/service-storage/src/storage-routes.ts#fileId — /upload/complete returns fileId, documented as 'the opaque sys_file id — the value a file field stores as a reference (ADR-0104 D3)'",
@@ -942,7 +942,7 @@
         {
           "revision": 4,
           "date": "2026-10-26",
-          "change": "Three checklist-accuracy findings of Tier 1 record #25815 (release-18.2.0-tier1, at 6679644a), re-read on main f6c61932 (the spec read in this tree's ui/e2e/live/). (1) acceptance[2]: the spec does not capture the /api/v1/storage/* upload requests; storage routing is inferred from the file door returning the uploaded bytes. (2) acceptance[3]: the spec never reads the sys_file row (status 'committed', ref_object/ref_id/ref_field, acl 'private') and never asserts the batch answered success — only the request payload and GET /storage/files/:id. (3) negative[1]: a data: URL would satisfy typeof === 'string' and not-contains('receipt.png'); the guard rests on the follow-up storage GET answering 200 with the PNG bytes. Each verify or negative now says what the pin asserts and which leg is hand-driven. knownGaps[0] and automated.ref keep the objectui-only framing, in step with RUNNER.md's standing fact on objectui-pinned automation, which this card does not edit. No clause, step or oracle changed.",
+          "change": "Three checklist-accuracy findings of Tier 1 record #25815 (release-18.2.0-tier1, at 6679644a), re-read on main f6c61932 (the spec read in this tree's ui/e2e/live/). (1) acceptance[2]: the spec does not capture the /api/v1/storage/* upload requests; storage routing is inferred from the file door returning the uploaded bytes. (2) acceptance[3]: the spec never reads the sys_file row (status 'committed', ref_object/ref_id/ref_field, acl 'private') and never asserts the batch answered success — only the request payload and GET /storage/files/:id. (3) negative[1]: a data: URL would satisfy typeof === 'string' and not-contains('receipt.png'); the guard rests on the follow-up storage GET answering 200 with the PNG bytes. Each verify or negative now says what the pin asserts and which leg is hand-driven. Separately, the item's objectui-only framing predates the objectui import, the retired-pin wording #26035 left to this card: knownGaps[0] said the spec exists only in the objectui repo, so the item could not run here and was to be run 'in an objectui checkout'. The spec is now ui/e2e/live/grid-file-upload.spec.ts in this tree, so automated.ref and source[1] name that path, and knownGaps[0] says how to run it from ui/ (`pnpm test:e2e:live`, with a backend on port 3000 and the console dev server on port 5180) and keeps the rule that an unrun pin is a claim, not evidence. No clause, step or oracle changed.",
           "ref": "#25839"
         }
       ]
