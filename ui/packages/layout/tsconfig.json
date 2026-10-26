@@ -2,15 +2,13 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "outDir": "dist",
-    "jsx": "react-jsx",
     "baseUrl": ".",
     // Overriding `paths` drops the root config's `@object-ui/* -> packages/*/src`
     // mappings, so workspace deps resolve through their built `.d.ts` instead of
     // pulling sibling sources into this program (which would be outside rootDir).
     "paths": {
       "@/*": ["src/*"]
-    },
-    "skipLibCheck": true
+    }
   },
   "include": ["src"],
   // Tooling is excluded by DIRECTORY, not just by file NAME. A helper under

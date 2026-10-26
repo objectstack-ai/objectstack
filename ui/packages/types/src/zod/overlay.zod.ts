@@ -441,7 +441,7 @@ export const HoverCardSchema = BaseSchema.extend({
  */
 export const MenuItemSchema: z.ZodType<MenuItem, MenuItem> = z.lazy(() =>
   z.union([
-    z.object({
+    z.looseObject({
       label: z.string().describe('Menu item label'),
       icon: z.string().optional().describe('Menu item icon'),
       disabled: z.boolean().optional().describe('Whether item is disabled'),
@@ -455,7 +455,7 @@ export const MenuItemSchema: z.ZodType<MenuItem, MenuItem> = z.lazy(() =>
         'renderers used to read and is now a declared refusal, not a strip.'
       ),
     }),
-    z.object({
+    z.looseObject({
       separator: z.literal(true).describe('Renders as a divider between items — no label'),
       type: retirementTombstone('RETIRED (objectui#6523) — see the command-item arm above.'),
     }),
@@ -536,7 +536,7 @@ export const ContextMenuSchema = BaseSchema.extend({
 /**
  * Menubar Menu Schema
  */
-export const MenubarMenuSchema = z.object({
+export const MenubarMenuSchema = z.looseObject({
   label: z.string().describe('Menu label'),
   items: z.array(MenuItemSchema).describe('Menu items'),
 });

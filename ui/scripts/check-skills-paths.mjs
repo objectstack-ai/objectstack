@@ -141,6 +141,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
+import { skillsWalk } from './skill-bundle-root.mjs';
 
 /**
  * The scan surface: markdown under each of these directories, relative to the
@@ -301,12 +302,16 @@ export function scan(root, baseline = readBaseline(root)) {
   let resolved = 0;
 
   for (const scanRoot of SCAN_ROOTS) {
-    const rootFiles = markdownFiles(path.join(root, scanRoot));
+    // The `skills` root is the published bundle, which the cutover moved into
+    // the monorepo's catalog one level up (`skill-bundle-root.mjs`). Its labels
+    // stay `skills/objectui/...`; its path tokens still name this tree's files.
+    const walk = scanRoot === 'skills' ? skillsWalk(root) : { dir: path.join(root, scanRoot), base: root };
+    const rootFiles = markdownFiles(walk.dir);
     const checkedBefore = checked;
     const resolvedBefore = resolved;
 
     for (const full of rootFiles) {
-      const file = path.relative(root, full);
+      const file = path.relative(walk.base, full);
       for (const hit of extractPathTokens(readFileSync(full, 'utf8'))) {
         if (hit.pattern) {
           patterns.push({ file, ...hit });

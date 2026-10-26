@@ -394,6 +394,10 @@ describe('sys_comment_reaction delete is ownership-shaped (#22566)', () => {
  * And `manage_mailboxes` (ruling 6116489638, Q4 → A on the inbound-mail record —
  * platform and organization administrators hold the mailbox administrator
  * capability by default).
+ *
+ * The set's `description` is admin-facing copy, not capability, so it is left
+ * out of the comparison (its shape is pinned by
+ * `permission-set-descriptions.test.ts`).
  */
 describe('admin_full_access imports the kernel capability declaration unchanged (#11965)', () => {
   it('parsed declaration deep-equals the pre-#11965 inline literal', () => {
@@ -432,7 +436,8 @@ describe('admin_full_access imports the kernel capability declaration unchanged 
           .map(([name]) => [`sys_user.${name}`, { readable: true, editable: true }]),
       ),
     });
-    expect(setByName('admin_full_access')).toEqual(preMove);
+    const { description: _copy, ...declared } = setByName('admin_full_access') as Record<string, unknown>;
+    expect(declared).toEqual(preMove);
   });
 
   it('[#21260] no other shipped set carries the ledger audit capability: every other position holds it only by explicit grant', () => {
