@@ -512,11 +512,14 @@ export class QuickJSScriptRunner implements ScriptRunner {
           // wrapper the VM error carried, which #17265 left in place on
           // purpose ("moves the STATUS, not the sentence") and which every
           // door then served verbatim as the author's words.
-          throw new SandboxError(
+          const relayed = readRelayedRefusal(vm);
+          const thrown = new SandboxError(
             `${args.origin.kind} '${args.origin.name}' threw: ${errStr}`,
-            readRelayedRefusal(vm) ?? userFacingMessage(withoutSandboxErrorPrefix(String(errStr))),
+            relayed ?? userFacingMessage(withoutSandboxErrorPrefix(String(errStr))),
             info,
           );
+          if (relayed !== undefined) relayedRefusals.add(thrown);
+          throw thrown;
         }
 
         const resH = vm.getProp(vm.global, '__result');
@@ -2039,6 +2042,23 @@ function readRelayedRefusal(vm: QuickJSContext): string | undefined {
     return undefined;
   }
   return typeof raw === 'string' && raw.length > 0 ? raw : undefined;
+}
+
+/**
+ * [#26153] The errors this runner built from a {@link readRelayedRefusal}
+ * sentence: a NESTED body's refusal the outer body re-threw unchanged.
+ *
+ * The nested body ran through a BodyRunner catch of its own, which already
+ * logged it, so the outer catch asks {@link isRelayedSandboxRefusal} rather
+ * than writing the same refusal a second time. Identity, not a field, for the
+ * reason {@link readRelayedRefusal} stays off {@link SandboxErrorInfo}: this
+ * is a fact about the hop, not something a caller may hand the error.
+ */
+const relayedRefusals = new WeakSet<object>();
+
+/** [#26153] Was this error a nested body's refusal relayed across the VM hop? */
+export function isRelayedSandboxRefusal(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && relayedRefusals.has(err);
 }
 
 /**
