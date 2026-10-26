@@ -911,13 +911,25 @@ function renderChangedFieldsSummary(
 
 /** A locale's conjunction list ("A, B, and C" / "A、B和C"); `", "` where `Intl` cannot answer. */
 function listJoinerFor(locale: string | undefined): (items: string[]) => string {
+  // `Intl.ListFormat` is ES2021; this package compiles against the ES2020 lib,
+  // so the constructor is probed rather than assumed (as `plugin-auth`'s
+  // invitation role label does).
+  const ListFormat = (Intl as unknown as { ListFormat?: IntlListFormatConstructor }).ListFormat;
   try {
-    const format = new Intl.ListFormat(locale ?? 'en', { style: 'long', type: 'conjunction' });
-    return (items) => format.format(items);
+    if (ListFormat) {
+      const format = new ListFormat(locale ?? 'en', { type: 'conjunction' });
+      return (items) => format.format(items);
+    }
   } catch {
-    return (items) => items.join(', ');
+    // A tag `Intl` refuses (a tenant's own locale spelling) still gets a list.
   }
+  return (items) => items.join(', ');
 }
+
+type IntlListFormatConstructor = new (
+  locale: string,
+  options: { type: 'conjunction' },
+) => { format(list: readonly string[]): string };
 
 /**
  * [#7290] The `{token}` pattern of an `activityMilestones` summary template.
