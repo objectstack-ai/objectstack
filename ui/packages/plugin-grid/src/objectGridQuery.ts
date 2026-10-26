@@ -1,13 +1,13 @@
 /**
  * The query helpers of `ObjectGrid` (`./ObjectGrid.tsx`): the held resolution
- * of the node's own filter, the record-source ladder and the find-params
- * signature, moved out of that file verbatim (objectstack#25994, slice 1).
+ * of the node's own filter and the find-params signature, moved out of that
+ * file verbatim (objectstack#25994, slice 1).
  */
 
 import { useState } from 'react';
-import type { ObjectGridSchema, ViewData } from '@object-ui/types';
+import type { ObjectGridSchema } from '@object-ui/types';
 import { isSameAuthoredFilter } from '@object-ui/react';
-import { resolveRecordSourceConfig, resolveFilterPlaceholders, type FilterTokenScope } from '@object-ui/core';
+import { resolveFilterPlaceholders, type FilterTokenScope } from '@object-ui/core';
 
 /**
  * The node's own authored filter: the canonical `filter`. Its deprecated alias
@@ -81,55 +81,6 @@ export function useResolvedGridFilters(authored: AuthoredGridFilters, scope: Fil
     return next.resolved;
   }
   return held.resolved;
-}
-
-/**
- * Helper to get data configuration from schema.
- *
- * The ruled three-rung ladder itself (`data`, then `staticData`, then
- * `objectName`) is `resolveRecordSourceConfig` in `@object-ui/core` — ONE
- * implementation of a contract published on both faces (`77cb489b4`), which
- * this file used to hand-copy (`ce2aaefe1`).
- *
- * What used to stay here was the head above it: the bare-array `data`
- * shorthand, which lifted `data: [...]` to `{ provider: 'value', items }`.
- * ⛔ IT IS GONE (objectui#8348, decision batch #83, maintainer verbatim
- * 「8348 以协议为准」 — the contract decides).
- *
- * MEASURED on `@objectstack/spec` 17.4.0:
- * `ComponentPropsMap['object-grid'].data` is the `ViewData` union, and its own
- * description names the refusal — *"Static inline rows live at
- * `{ provider: 'value', items: [...] }`; the bare-array shortcut is refused —
- * see migration `object-grid-data-view-data-converged`"*. This block's own
- * registration publishes the same arm (`{ name: 'data', type: 'object' }` in
- * `index.tsx`), and `gridDataInputContract.test.ts` has pinned that declaration
- * since objectui#5090. The head was the last carrier of a spelling every one of
- * those faces refuses, so `data` is honoured here on the OBJECT arm only and
- * the shared rung is passed `'view-data'`.
- *
- * ⛔ WHAT THIS REACHES, measured per CARRIER — do NOT read it as "the array is
- * gone". An authored `data` array reaches this component TWICE: as
- * `schema.data`, which this function used to lift, and as the `data` PROP,
- * because `SchemaRenderer` spreads every non-metadata node key and
- * `index.tsx` forwards `{...rest}`. That prop is `passedData` below, and it
- * lifts an array to `{ provider: 'value', items }` at HIGHER priority than this
- * ladder — it is the channel a host such as `ListView` uses to hand down rows it
- * already fetched, and it is indistinguishable here from an authored key.
- *
- * ⇒ at the ladder the array is no longer a record source; through
- * `SchemaRenderer` an authored `data: [ …rows… ]` still draws, from the props
- * channel. Both halves are pinned in
- * `__tests__/gridBareArrayDataRefused-8348.test.tsx`, which had to correct its
- * own first draft on exactly this point. Collapsing the two carriers would take
- * the host path with it and is outside objectui#8348's scope — reported on the
- * card, not changed in passing.
- *
- * The declared spelling for inline rows is
- * `data: { provider: 'value', items: [...] }`, and the deprecated `staticData`
- * array still works as before.
- */
-export function getDataConfig(schema: ObjectGridSchema): ViewData | null {
-  return resolveRecordSourceConfig(schema, 'view-data');
 }
 
 /**

@@ -22,7 +22,7 @@
  */
 
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import type { ObjectGridSchema, DataSource, DependsOnInput, ListColumn, TableSortItem, DataTableSchema, ListViewExportFormat, RecordNavigateAction } from '@object-ui/types';
+import type { ObjectGridSchema, DataSource, DependsOnInput, ListColumn, ViewData, TableSortItem, DataTableSchema, ListViewExportFormat, RecordNavigateAction } from '@object-ui/types';
 import { isSystemManagedField, normalizeTableColumnType } from '@object-ui/types';
 import { parseFilterAST, resolveFieldScale, type FilterCondition } from '@objectstack/spec/data';
 import { SchemaRenderer, useDataScope, useNavigationOverlay, useAction, useSafeFieldLabel, usePredicateScope, useCapabilityGate, useDataInvalidation, notifyDataChanged, useFilterScope, useMetadata } from '@object-ui/react';
@@ -58,7 +58,7 @@ import {
   toast,
 } from '@object-ui/components';
 import { usePullToRefresh } from '@object-ui/mobile';
-import { resolveConditionalFormatting, resolveDependsOnFields, isDeadlineSettled, leadWithNameField, declaredNameField, buildExpandFields, buildExportFileName, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, resolveAffordance, resolveFieldAffordance, type SchemaLike, isProjectableField, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, toFilterNodeSafely, filterRefusalSubject, FilterOperatorError, convertSortToQueryParams, normalizeSortEntries, type QuerySortEntry, resolveRecordSourceObjectName, partitionRowsByPredicate, buildCategoryOrder, buildCategoryRank, toDisplayDate } from '@object-ui/core';
+import { resolveConditionalFormatting, resolveDependsOnFields, isDeadlineSettled, leadWithNameField, declaredNameField, buildExpandFields, buildExportFileName, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, resolveAffordance, resolveFieldAffordance, type SchemaLike, isProjectableField, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, toFilterNodeSafely, filterRefusalSubject, FilterOperatorError, convertSortToQueryParams, normalizeSortEntries, type QuerySortEntry, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, buildCategoryOrder, buildCategoryRank, toDisplayDate } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import {
   RECORD_OVERLAY_DEFAULT_WIDTH,
@@ -87,7 +87,7 @@ import { BulkActionBar } from './components/BulkActionBar';
 import { BulkActionDialog } from './components/BulkActionDialog';
 import type { BulkResult } from './hooks/useBulkExecutor';
 import type { BulkActionDef } from '@object-ui/types';
-import { findParamsSignature, getDataConfig, useResolvedGridFilters } from './objectGridQuery';
+import { findParamsSignature, useResolvedGridFilters } from './objectGridQuery';
 import { type ObjectGridColumn, type ObjectGridColumnDraft, isChipFieldType, normalizeColumns, resolveColumnLabel } from './objectGridColumns';
 import { LinkCell, recordPointerFace, rowRecordId } from './objectGridLinkCell';
 import { useGridTranslation } from './objectGridTranslations';
@@ -461,6 +461,55 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
   onBatchSave?: (changes: Array<{ rowIndex: number; changes: Record<string, any>; row: any }>) => void | Promise<void>;
   onRowSelect?: (selectedRows: any[]) => void;
   onAddRecord?: () => void;
+}
+
+/**
+ * Helper to get data configuration from schema.
+ *
+ * The ruled three-rung ladder itself (`data`, then `staticData`, then
+ * `objectName`) is `resolveRecordSourceConfig` in `@object-ui/core` — ONE
+ * implementation of a contract published on both faces (`77cb489b4`), which
+ * this file used to hand-copy (`ce2aaefe1`).
+ *
+ * What used to stay here was the head above it: the bare-array `data`
+ * shorthand, which lifted `data: [...]` to `{ provider: 'value', items }`.
+ * ⛔ IT IS GONE (objectui#8348, decision batch #83, maintainer verbatim
+ * 「8348 以协议为准」 — the contract decides).
+ *
+ * MEASURED on `@objectstack/spec` 17.4.0:
+ * `ComponentPropsMap['object-grid'].data` is the `ViewData` union, and its own
+ * description names the refusal — *"Static inline rows live at
+ * `{ provider: 'value', items: [...] }`; the bare-array shortcut is refused —
+ * see migration `object-grid-data-view-data-converged`"*. This block's own
+ * registration publishes the same arm (`{ name: 'data', type: 'object' }` in
+ * `index.tsx`), and `gridDataInputContract.test.ts` has pinned that declaration
+ * since objectui#5090. The head was the last carrier of a spelling every one of
+ * those faces refuses, so `data` is honoured here on the OBJECT arm only and
+ * the shared rung is passed `'view-data'`.
+ *
+ * ⛔ WHAT THIS REACHES, measured per CARRIER — do NOT read it as "the array is
+ * gone". An authored `data` array reaches this component TWICE: as
+ * `schema.data`, which this function used to lift, and as the `data` PROP,
+ * because `SchemaRenderer` spreads every non-metadata node key and
+ * `index.tsx` forwards `{...rest}`. That prop is `passedData` below, and it
+ * lifts an array to `{ provider: 'value', items }` at HIGHER priority than this
+ * ladder — it is the channel a host such as `ListView` uses to hand down rows it
+ * already fetched, and it is indistinguishable here from an authored key.
+ *
+ * ⇒ at the ladder the array is no longer a record source; through
+ * `SchemaRenderer` an authored `data: [ …rows… ]` still draws, from the props
+ * channel. Both halves are pinned in
+ * `__tests__/gridBareArrayDataRefused-8348.test.tsx`, which had to correct its
+ * own first draft on exactly this point. Collapsing the two carriers would take
+ * the host path with it and is outside objectui#8348's scope — reported on the
+ * card, not changed in passing.
+ *
+ * The declared spelling for inline rows is
+ * `data: { provider: 'value', items: [...] }`, and the deprecated `staticData`
+ * array still works as before.
+ */
+function getDataConfig(schema: ObjectGridSchema): ViewData | null {
+  return resolveRecordSourceConfig(schema, 'view-data');
 }
 
 /**
