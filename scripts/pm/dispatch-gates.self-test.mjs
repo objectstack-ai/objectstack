@@ -7927,10 +7927,13 @@ export function selfTest({ tier = 'full' } = {}) {
   // LIVE: the classification against the real derivation, in BOTH directions.
   // The positive alone would pass on a rule that classified everything; the
   // negative alone would pass on a rule that classified nothing.
+  // Two invocations of the one queue guard read the payload: the judgment, and
+  // the `pull_request` leg's `--toolchain-needed` install gate.
   const liveCiOnly = [...liveDiscovery.byCheck].filter(([, e]) => e.ciOnly);
+  const QUEUE_GUARD_CI_FAMILIES = ['scripts/pm/check-governed-queue-guard.mjs', 'scripts/pm/check-governed-queue-guard.mjs --toolchain-needed'];
   t(
-    `LIVE: exactly one family classifies CI-measured, and it is the queue guard (got: ${liveCiOnly.map(([c]) => c).join(', ') || 'none'})`,
-    liveCiOnly.length === 1 && liveCiOnly[0][0] === 'scripts/pm/check-governed-queue-guard.mjs',
+    `LIVE: exactly the queue guard's two payload-reading invocations classify CI-measured (got: ${liveCiOnly.map(([c]) => c).join(', ') || 'none'})`,
+    liveCiOnly.map(([c]) => c).sort().join('|') === QUEUE_GUARD_CI_FAMILIES.join('|'),
   );
   t(
     'LIVE: an ordinary local family on the same card is NOT classified — the rule discriminates rather than sweeping',
