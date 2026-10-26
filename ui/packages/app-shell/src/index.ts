@@ -11,7 +11,7 @@ export { AppShell } from './components/AppShell.js';
 // Providers
 export { AdapterProvider, useAdapter } from './providers/AdapterProvider.js';
 export { MetadataProvider, useMetadata, useMetadataItem } from './providers/MetadataProvider.js';
-export { ExpressionProvider, useExpressionContext, evaluateVisibility } from './providers/ExpressionProvider.js';
+export { ExpressionProvider, evaluateVisibility } from './providers/ExpressionProvider.js';
 /**
  * The `user` normalisation `ExpressionProvider` is fed with — exported so every
  * console surface that mounts the provider publishes the SAME `current_user`
@@ -33,17 +33,13 @@ export { buildExpressionUser } from './providers/expressionUser.js';
 // Hooks
 export { useObjectActions } from './hooks/useObjectActions.js';
 export { useUrlOverlay } from './hooks/useUrlOverlay.js';
-export type { UseUrlOverlayOptions, UrlOverlayControls } from './hooks/useUrlOverlay.js';
 export { useSettleSignal } from './hooks/useSettleSignal.js';
-export type { SettleSignalState } from './hooks/useSettleSignal.js';
 export {
   getPendingRequests,
-  isIdle,
   subscribeSettle,
   whenIdle,
   withSettleSignal,
   installSettleSignalGlobal,
-  type ObjectUiGlobal,
 } from './observability/settleSignal.js';
 export { useRecentItems } from './hooks/useRecentItems.js';
 // From its own module, not the `useRecentItems` shim: it reads the metadata
@@ -62,17 +58,10 @@ export type {
 } from './providers/MetadataProvider.js';
 
 export type {
-  ExpressionContextValue,
-} from './providers/ExpressionProvider.js';
-
-export type {
   RecentItem,
-  RecentItemInput,
   RecentItemType,
   RecentNamedItem,
-  RecentTextItem,
 } from './hooks/useRecentItems.js';
-export type { RecentItemLabelResolver } from './hooks/useRecentItemLabel.js';
 
 // Console building blocks — compose these in your App.tsx to build the console
 // routing tree. See examples/console-starter/src/App.tsx for a minimal example.
@@ -104,10 +93,7 @@ export { resolveHostAppSegment, appRouteSegment, filterActiveApps } from './util
 // objectui#5178 — the Approval Center's timeline reads the same `via_override`
 // verdict the record page's approval panel does.
 export {
-  isOverrideOnlyViewer,
-  actionAdmittedByOverride,
   isOverrideDecision,
-  bypassedApproverNames,
   isViaOverrideRow,
 } from './utils/index.js';
 // objectui#7256 — "where is home". `apps/console`'s `/` redirect layers its
@@ -115,7 +101,6 @@ export {
 // affordances use, so the post-login landing and the top-bar logo cannot name
 // two different homes.
 export { HOME_LAUNCHER_PATH, resolveDeclaredHomePath } from './utils/index.js';
-export type { DeclaredHomeApp } from './utils/index.js';
 
 // `a810bb2ae` — ONE read of the ADR-0112 failure envelope, published so a
 // consumer OUTSIDE this package inherits the pinned rule instead of writing a
@@ -137,7 +122,6 @@ export { readEnvelopeFailureText } from './utils/apiErrorEnvelope.js';
 // point gates on (FAB, /ai routes, designer "Ask AI"). Server-pushed, no
 // build-time edition flag. See ./hooks/useAiSurface.
 export { useAiSurfaceEnabled } from './hooks/useAiSurface.js';
-export type { AiSurfaceState } from './hooks/useAiSurface.js';
 
 // Layout chrome
 export {
@@ -158,7 +142,7 @@ export {
   // `@object-ui/layout`'s `PageHeader`, a different component.
   ConsolePageHeader,
 } from './layout/index.js';
-export type { ActivityItem, PreviewBadgeProps, ConsolePageHeaderProps } from './layout/index.js';
+export type { ActivityItem, ConsolePageHeaderProps } from './layout/index.js';
 
 // Top-level chrome (dialogs, providers, error boundaries)
 export {
@@ -170,9 +154,6 @@ export {
   presentNotificationToast,
   RouteFader,
   RedirectWithSplash,
-  type RedirectWithSplashProps,
-  toastWithUndo,
-  type ToastWithUndoOptions,
   ErrorBoundary,
   LoadingScreen,
   ThemeProvider,
@@ -193,16 +174,13 @@ export { initSentry, captureError, setSentryUser, getSentry } from './observabil
 export {
   initRuntimeConfig,
   getRuntimeConfig,
-  getCloudBase,
   getProductName,
   getProductShortName,
   getPlatformStage,
-  getBrandColor,
   getLogoUrl,
   getFaviconUrl,
   getPwaDescription,
   getPwaThemeColor,
-  isRuntimeConfigInitialised,
   // The fail-closed reading of the runtime's client error-reporting sink.
   // Exported so no consumer has to write its own `?.` chain against the
   // payload — one loose truthiness dialect is all it takes to re-open
@@ -214,7 +192,6 @@ export {
 } from './runtime-config.js';
 export type {
   AppShellRuntimeConfig,
-  RuntimeFeatures,
   RuntimeBranding,
   RuntimeTelemetry,
   RuntimeClientErrorReporting,
@@ -236,8 +213,6 @@ export {
 } from './views/index.js';
 export type {
   ConsoleObjectViewProps,
-  RecordFormPageProps,
-  DeclaredActionsBarProps,
   FlowRunnerProps,
   ScreenFlowState,
   ScreenSpec,
@@ -252,11 +227,6 @@ export {
   useNavPins,
   useNavigationSync,
   NavigationSyncEffect,
-  addNavigationItem,
-  removeNavigationItems,
-  renameNavigationItems,
-  navigationEqual,
-  generateNavId,
   useResponsiveSidebar,
   useActionModal,
   useHomePath,
@@ -275,7 +245,7 @@ export {
   useUserStateAdapter,
   useAttachUserStateAdapters,
 } from './context/index.js';
-export type { UserDataAdapter, UserStateKind, CommandPaletteContextValue } from './context/index.js';
+export type { UserDataAdapter, UserStateKind } from './context/index.js';
 
 // Default page implementations (consumers can partial-override slots)
 export { AppContent as DefaultAppContent } from './console/AppContent.js';
@@ -293,7 +263,6 @@ export {
   needsBootstrapProbe,
   isInvitationRedirect,
   type SignUpOffer,
-  type SignUpOfferContext,
 } from './console/auth/signUpOffer.js';
 export { useBootstrapStatus, type BootstrapStatus } from './console/auth/bootstrapStatus.js';
 export { ForgotPasswordPage as DefaultForgotPasswordPage } from './console/auth/ForgotPasswordPage.js';
@@ -319,7 +288,6 @@ export { ConversationsSidebar } from './console/ai/ConversationsSidebar.js';
 export {
   toUIMessages,
   aiMessageRowsToServerMessages,
-  type HydratedUIMessage,
   type RawAiMessageRow,
 } from './hooks/useChatConversation.js';
 
@@ -329,11 +297,8 @@ export {
 export {
   registerAppComponent,
   getAppComponent,
-  listAppComponents,
   componentRefToUrlSegments,
-  urlSegmentsToComponentRef,
 } from './services/componentRegistry.js';
-export type { AppComponentRegistryEntry } from './services/componentRegistry.js';
 // Side-effect import: registers built-in admin components
 // (metadata:directory, metadata:resource) at module load.
 import './services/builtinComponents.js';
@@ -438,7 +403,7 @@ deferBuiltinDesigners(() =>
 // entry imports this barrel, so pointing them at the page barrel made that
 // barrel (and every page, preview and inspector it reaches) eager on every
 // console page load, past the six `lazy()` declarations `AppContent` writes for
-// it. The 11 TYPE-ONLY re-exports below are erased at build and carry no edge;
+// it. The 9 TYPE-ONLY re-exports below are erased at build and carry no edge;
 // they are grouped separately for that reason and not because they are less
 // public.
 export { MetadataDirectoryPage } from './views/metadata-admin/DirectoryPage.js';
@@ -448,7 +413,6 @@ export { MetadataResourceEditPage } from './views/metadata-admin/ResourceEditPag
 export { MetadataResourceHistoryPage } from './views/metadata-admin/ResourceHistoryPage.js';
 export { MetadataDiagnosticsPage } from './views/metadata-admin/DiagnosticsPage.js';
 export { MetadataQuickFind } from './views/metadata-admin/QuickFind.js';
-export { PageShell as MetadataPageShell } from './views/metadata-admin/PageShell.js';
 export { SchemaForm } from './views/metadata-admin/SchemaForm.js';
 export { LayeredDiff } from './views/metadata-admin/LayeredDiff.js';
 // objectui#7611 — the Setup catalog's URL scope (`?scope=environment`), for a
@@ -458,15 +422,11 @@ export { ENVIRONMENT_SCOPE_QUERY } from './views/metadata-admin/catalog-scope.js
 export {
   registerMetadataResource,
   getMetadataResource,
-  listMetadataResources,
   resolveResourceConfig,
 } from './views/metadata-admin/registry.js';
 export {
   useMetadataClient,
-  useMetadataTypes,
-  useTypesIndex,
   useGlobalDiagnostics,
-  matchesQuery,
 } from './views/metadata-admin/useMetadata.js';
 // objectui#11939 — the `useRegistered*` hooks are the render-time reads of the
 // two designer registries: a component that reads through them re-renders when
@@ -492,12 +452,10 @@ export type {
 export type { RichMetadataTypeEntry } from './views/metadata-admin/useMetadata.js';
 export type {
   MetadataPreview,
-  MetadataPreviewProps,
   MetadataSelection,
 } from './views/metadata-admin/preview-registry.js';
 export type {
   MetadataInspector,
-  MetadataInspectorProps,
 } from './views/metadata-admin/inspector-registry.js';
 // The form authoring surface, in ONE declaration per layer: the field
 // (objectui#5040 / #5542) and the two containers above it (objectui#5596).
@@ -515,19 +473,11 @@ export type {
 // The left AI copilot is an injected `aiSlot`; OSS renders three zones.
 export {
   StudioDesignSurface,
-  type StudioDesignSurfaceProps,
 } from './views/studio-design/StudioDesignSurface.js';
 // Per-type canvas renderers for the Studio design surface. Register an override
 // (e.g. a custom `object` records surface) without forking StudioDesignSurface.
 export {
   registerStudioCanvasPreview,
-  getStudioCanvasPreview,
-  listStudioCanvasPreviewTypes,
-  StudioObjectRecordsCanvas,
-} from './views/studio-design/studio-canvas-preview.js';
-export type {
-  StudioCanvasPreview,
-  StudioCanvasPreviewProps,
 } from './views/studio-design/studio-canvas-preview.js';
 // The builder's front door: pick/create a writable package → pillar builder.
 // Standalone at `/studio` and embedded via the `studio:builder` component ref.
@@ -550,13 +500,8 @@ export { PackagedAutomationPage } from './views/setup/PackagedAutomationPage.js'
 // AI assistant bus — connects the metadata designers to the global chat.
 export {
   assistantBus,
-  useAssistant,
-  useRegisterAssistantEditor,
-  requestAssistantOpen,
 } from './assistant/assistantBus.js';
 export type {
   AssistantSnapshot,
-  AssistantEditorContext,
-  AssistantEditorField,
 } from './assistant/assistantBus.js';
 export { RemediationOverlay } from './console/RemediationOverlay.js';
