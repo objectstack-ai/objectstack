@@ -206,7 +206,8 @@ import { applyArtifactForwardConversions, resolveDeclaredRange } from '@objectst
 // engine is the consumer-side tolerant parsing PD #12 forbids and precedent
 // #5841 retired.
 import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/types';
-import { DuplicateRecordError, envelopeUniqueViolation } from './duplicate-record-error.js';
+import { DuplicateRecordError } from './duplicate-record-error.js';
+import { NotNullRefusalError, envelopeDriverWriteRefusal } from './not-null-refusal-error.js';
 // [#8682] The write-path loggers' redaction — bound values never reach the log.
 // [#21274] …and its boundary face — nor the error that leaves the engine.
 // [#21385] It lives in `@objectstack/types` now, so `driver-sql`'s own log lines
@@ -8619,13 +8620,15 @@ export class ObjectQL implements IObjectQLEngine {
         // driver's error. `envelopeUniqueViolation` returns everything that is
         // not a unique violation untouched (a deadlock, a NOT NULL, an
         // unreachable store), so only the recognised conflict changes shape.
+        // [#24768] …and a NOT NULL refusal on a declared field becomes the
+        // validator's own `ValidationError` (`envelopeDriverWriteRefusal`).
         // [#25073] On a driver-issued number the member answers instead, and
         // in answering re-seeds the counter it proved stale.
         const collided: string[] = byDriver
           ? ((await driver.issueAutonumbers(object, [row], driverOptions, error)) as string[][] | undefined)?.[0] ?? []
           : this.isIssuedAutonumberCollision(error, issued) ? issued.map((one) => one.field) : [];
         if (collided.length === 0) {
-          throw envelopeUniqueViolation(error, object, this.getSchema(object));
+          throw envelopeDriverWriteRefusal(error, object, this.getSchema(object), 'insert', this.validationMessageContext(object, execCtx));
         }
         // Whatever happens next, the stale counter must not survive this call:
         // leaving it in place is what turned one collision into a storm.
@@ -8668,7 +8671,7 @@ export class ObjectQL implements IObjectQLEngine {
           try {
             return await driver.create(object, row, driverOptions);
           } catch (retryError) {
-            throw envelopeUniqueViolation(retryError, object, this.getSchema(object));
+            throw envelopeDriverWriteRefusal(retryError, object, this.getSchema(object), 'insert', this.validationMessageContext(object, execCtx));
           }
         }
       }
@@ -17119,7 +17122,7 @@ export class ObjectQL implements IObjectQLEngine {
                   });
                 }
               }
-              throw envelopeUniqueViolation(error, object, this.getSchema(object));
+              throw envelopeDriverWriteRefusal(error, object, this.getSchema(object), 'insert', msgCtx);
             }
           }
         } else {
@@ -17307,7 +17310,9 @@ export class ObjectQL implements IObjectQLEngine {
         // `writeFailureLogMeta` rebuilds the `{ error: { message, stack } }`
         // context the `error` slot used to build (see its header: `warn` has no
         // slot, and an Error's fields are non-enumerable).
-        const logged = e instanceof DuplicateRecordError ? e.cause : e;
+        // [#24768] A NOT NULL refusal's `ValidationError` carries the driver's
+        // error the same way, for the same reason.
+        const logged = e instanceof DuplicateRecordError || e instanceof NotNullRefusalError ? e.cause : e;
         this.logger.warn(
           'Insert operation failed',
           writeFailureLogMeta(redactBoundStatement(logged), { object }),
@@ -18741,6 +18746,8 @@ export class ObjectQL implements IObjectQLEngine {
                // returns everything else untouched (a NOT NULL, a deadlock, a
                // missing table, an unreachable store), so only the conflict
                // changes shape; the contract is stated on `update()` above.
+               // [#24768] A NOT NULL refusal on a declared field is the second
+               // shape that changes: the validator's own `ValidationError`.
                // Wrapped HERE rather than at the outer `catch` below, and
                // deliberately: that `try` also encloses the `afterUpdate`
                // dispatch and the roll-up recompute, so an envelope applied
@@ -18749,7 +18756,7 @@ export class ObjectQL implements IObjectQLEngine {
                try {
                    result = await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
                } catch (driverError) {
-                   throw envelopeUniqueViolation(driverError, object, this.getSchema(object));
+                   throw envelopeDriverWriteRefusal(driverError, object, this.getSchema(object), 'update', updateMsgCtx);
                }
                // [#21613] The by-id update returns the driver's post-write
                // readback (`select *` on driver-sql), so a column no metadata
@@ -19112,7 +19119,7 @@ export class ObjectQL implements IObjectQLEngine {
                try {
                    result = await driver.updateMany!(object, ast, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
                } catch (driverError) {
-                   throw envelopeUniqueViolation(driverError, object, this.getSchema(object));
+                   throw envelopeDriverWriteRefusal(driverError, object, this.getSchema(object), 'update', updateMsgCtx);
                }
                isPredicateWrite = true;
            }
@@ -19272,7 +19279,7 @@ export class ObjectQL implements IObjectQLEngine {
           //
           // [#17052] The insert door's twin here too: the level is `warn`,
           // because `throw e` on the next line IS the answer to the caller.
-          const logged = e instanceof DuplicateRecordError ? e.cause : e;
+          const logged = e instanceof DuplicateRecordError || e instanceof NotNullRefusalError ? e.cause : e;
           this.logger.warn(
             'Update operation failed',
             writeFailureLogMeta(redactBoundStatement(logged), { object }),
