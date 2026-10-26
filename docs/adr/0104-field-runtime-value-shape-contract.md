@@ -1459,9 +1459,11 @@ exists in the acting organization. One file had two access rules.
 - **One judgement, two callers.** The door's verdict is one function, and the
   claim path calls it under the write's caller context; neither restates it.
   It admits the uploader; a reader of the record that owns the file, through
-  its object's `fileAccessDelegate` where one is declared; a member of the
-  organization for a file no record owns; a reader of any parent for an
-  attachments-scope file; anyone for a `public_read` file.
+  its object's `fileAccessDelegate` where one is declared; for a file a record
+  let go, a reader of that record, until the file is claimed again or
+  collected (#26046); a member of the organization for a file no record has
+  owned; a reader of any parent for an attachments-scope file; anyone for a
+  `public_read` file.
 - **The quiet answer.** At the write door, a file the writer may not read is
   answered as one the organization-scoped lookup cannot see: the id is kept
   as written, nothing is claimed or copied, and constraint verdicts do not run
