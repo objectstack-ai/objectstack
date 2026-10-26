@@ -209,17 +209,20 @@ type Resolved<T> = { readonly ok: true; readonly value: T } | { readonly ok: fal
  * refused it. `empty` names each envelope that evaluated to no recipient, for
  * the guard that fails a node left with none. `computed` names each recipient
  * an envelope evaluated to that reads as an email address, for the check that
- * a user holds it ({@link screenComputedAddresses}).
+ * a user holds it ({@link screenComputedAddresses}). `written` names each
+ * recipient written out as a string that reads as one, for the check that a
+ * node which does not mail can deliver it ({@link refuseUndeliverableAddresses}).
  */
 function resolveRecipients(
     engine: AutomationEngine,
     value: unknown,
     variables: VariableMap,
     context: AutomationContext,
-): Resolved<{ recipients: string[]; empty: string[]; computed: ComputedAddress[] }> {
+): Resolved<{ recipients: string[]; empty: string[]; computed: ComputedAddress[]; written: WrittenAddress[] }> {
     const recipients: string[] = [];
     const empty: string[] = [];
     const computed: ComputedAddress[] = [];
+    const written: WrittenAddress[] = [];
     const entries: Array<[string, unknown]> = Array.isArray(value)
         ? value.map((entry, index) => [`recipients[${index}]`, entry])
         : value === undefined ? [] : [['recipients', value]];
@@ -242,15 +245,19 @@ function resolveRecipients(
             }
             const recipient = toStr(item);
             if (recipient === undefined) continue;
-            const address = isExpressionEnvelopeShaped(raw) ? mailedAddressOf(recipient) : undefined;
+            const address = mailedAddressOf(recipient);
             if (address !== undefined) {
-                computed.push({ index: recipients.length, what, source: sourceOf(raw), address });
+                if (isExpressionEnvelopeShaped(raw)) {
+                    computed.push({ index: recipients.length, what, source: sourceOf(raw), address });
+                } else {
+                    written.push({ recipient, address });
+                }
             }
             recipients.push(recipient);
         }
         if (isExpressionEnvelopeShaped(raw) && recipients.length === before) empty.push(sourceOf(raw));
     }
-    return { ok: true, value: { recipients, empty, computed } };
+    return { ok: true, value: { recipients, empty, computed, written } };
 }
 
 /** The user identity object an address is checked against — the messaging resolver's `USER_OBJECT`. */
@@ -273,6 +280,14 @@ interface ComputedAddress {
     /** The envelope's `source`. */
     readonly source: string;
     /** The address the email channel would send to (`a@b.c`, also for `user:a@b.c`). */
+    readonly address: string;
+}
+
+/** A recipient written out in the metadata, as a string, that reads as an email address. */
+interface WrittenAddress {
+    /** The recipient as written (`a@b.c`, or `user:a@b.c`). */
+    readonly recipient: string;
+    /** The address in it. */
     readonly address: string;
 }
 
@@ -376,6 +391,73 @@ async function screenComputedAddresses(
         screened[entry.index] = id;
     }
     return { ok: true, value: screened };
+}
+
+/**
+ * [#25758] An address WRITTEN OUT in `recipients`, on a node whose `channels`
+ * do not include `email`, must reach a user, or the node fails: the message
+ * names the node, each such recipient and the fix. `undefined` when every
+ * written-out address reaches one.
+ *
+ * Ruling B on #25647 makes a written-out address the author's constant, sent as
+ * written, and only the email channel sends to an address itself. The other
+ * channels deliver to a user: the inbox keys its row by the recipient as a user
+ * id, and the sms channel texts a user's number (or a literal phone number). So
+ * on any other node an address reaches someone only when the messaging resolver
+ * maps it to the user who holds it, and it maps only a bare address (the
+ * remainder of `user:a@b.c` is handed on as the id with no lookup). Before, an
+ * address no user held went on as it stood: the inbox wrote a row whose
+ * `user_id` was the address, which no inbox reads, and the node reported
+ * success.
+ *
+ * ⛔ Never re-routed: the node does not add the `email` channel its author did
+ * not declare, and never writes the row. The lookup is the resolver's own
+ * (`sys_user` by `email`, the id projected), as in
+ * {@link screenComputedAddresses}; no data engine, or a lookup that fails,
+ * fails the node, because an address that could not be checked would reach
+ * nobody either.
+ *
+ * A recipient an envelope COMPUTED is not looked at here: ruling A on the
+ * channel scope of ruling B (#25647, `6393736930`) leaves those on a node
+ * that does not mail to the messaging service as before.
+ */
+async function refuseUndeliverableAddresses(
+    data: IDataEngine | undefined,
+    nodeId: string,
+    channels: readonly string[],
+    written: readonly WrittenAddress[],
+): Promise<string | undefined> {
+    if (written.length === 0) return undefined;
+    const where = channels.length === 0
+        ? 'names no `channels`, so it delivers to the inbox, the default'
+        : `names \`channels\` ${channels.map((c) => `\`${c}\``).join(', ')} and not \`email\``;
+    const fix = 'To mail the address as written, add `email` to the node\'s `channels`. To reach a user, name '
+        + 'the user: a user id, an audience selector such as `role:NAME`, or the address that user holds, written bare.';
+    const undeliverable: string[] = [];
+    for (const entry of written) {
+        if (entry.recipient !== entry.address) {
+            undeliverable.push(`\`${entry.recipient}\` (\`user:\` takes a user id, and \`${entry.address}\` is an email address)`);
+            continue;
+        }
+        const lead = `notify: node \`${nodeId}\` ${where}, and writes out the recipient \`${entry.recipient}\`, `
+            + 'an email address. Only the email channel sends to an address; the others deliver to a user';
+        if (!data) {
+            return `${lead}, and there is no data engine to look up whether a user holds it, so nothing was sent. ${fix}`;
+        }
+        let user: Record<string, unknown> | null | undefined;
+        try {
+            user = await data.findOne(USER_OBJECT, { where: { email: entry.address }, fields: ['id'] }, RECIPIENT_READ);
+        } catch (err) {
+            return `${lead}, and looking up the user who holds it failed (${(err as Error).message}), so nothing was `
+                + `sent. ${fix}`;
+        }
+        if (toStr(user?.id) === undefined) undeliverable.push(`\`${entry.recipient}\` (no user holds that address)`);
+    }
+    if (undeliverable.length === 0) return undefined;
+    return `notify: node \`${nodeId}\` ${where}, and writes out ${undeliverable.length === 1 ? 'a recipient' : 'recipients'} `
+        + `no user receives: ${undeliverable.join(', ')}. Only the email channel sends to an address; the others `
+        + `deliver to a user, so nobody would receive ${undeliverable.length === 1 ? 'it' : 'them'}, and nothing was `
+        + `sent. ${fix}`;
 }
 
 /**
@@ -635,7 +717,7 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                     // Studio form keeps its recipients picker, and the marker
                     // rides `NotifyConfigSchema` (`LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`).
                     recipients: {
-                        description: 'Who the notification goes to: a user id or an audience selector (such as team:ID) as a string, or a list of them — each entry a string or a CEL value envelope { dialect: \'cel\', source } evaluated per run; an entry that evaluates to a list adds each of its recipients, and with channels: email an address it evaluates to must be a user\'s. A single-brace {token} is refused. To mail a person who is not a user, use { emailField: \'FIELD\' } as the whole value, naming an email field of the record that triggered the flow, with channels: email; at most 5 such emails go to one address per hour.',
+                        description: 'Who the notification goes to: a user id or an audience selector (such as team:ID) as a string, or a list of them — each entry a string or a CEL value envelope { dialect: \'cel\', source } evaluated per run; an entry that evaluates to a list adds each of its recipients, and with channels: email an address it evaluates to must be a user\'s. An email address written out is sent as written: with channels: email to the address itself, and otherwise to the user who holds it, the node failing when no user does. A single-brace {token} is refused. To mail a person who is not a user, use { emailField: \'FIELD\' } as the whole value, naming an email field of the record that triggered the flow, with channels: email; at most 5 such emails go to one address per hour.',
                     },
                     // The form edits the bare-string spelling of these two
                     // template slots; the contract (`NotifyConfigSchema`) also
@@ -741,6 +823,8 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
             // value: the address in that field of the trigger record. [#25647]
             // Any other recipient an envelope computed that reads as an address
             // must be a user's when the node mails (`screenComputedAddresses`).
+            // [#25758] One written out must reach a user when it does not
+            // (`refuseUndeliverableAddresses`).
             const emailField = isEmailFieldRecipient(cfg.recipients) ? cfg.recipients.emailField : undefined;
             let recipients: string[];
             let emptyRecipients: string[] = [];
@@ -756,6 +840,14 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                     ? await screenComputedAddresses(getData(), audience.value.recipients, audience.value.computed)
                     : { ok: true as const, value: audience.value.recipients };
                 if (!screened.ok) return { success: false, error: screened.error };
+                // [#25758] A node that does not mail delivers only to users,
+                // so an address it writes out must be one a user holds.
+                if (!mails) {
+                    const refused = await refuseUndeliverableAddresses(
+                        getData(), node.id, toStringList(cfg.channels), audience.value.written,
+                    );
+                    if (refused !== undefined) return { success: false, error: refused };
+                }
                 recipients = screened.value;
                 emptyRecipients = audience.value.empty;
             }

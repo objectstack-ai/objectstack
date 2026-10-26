@@ -1432,7 +1432,12 @@ export const ProjectEscalationFlow = defineFlow({
           },
           {
             name: 'Exec',
-            nodes: [{ id: 'alert_exec', type: 'notify', label: 'Alert Exec', config: { recipients: 'exec@example.com', title: '🔴 Critical project: {{ record.name }}', severity: 'critical', sourceObject: 'showcase_project', sourceId: { dialect: 'cel', source: 'record.id' } } }],
+            // [#25758] The organization's owners (`sys_member.role` `owner`):
+            // the Default Organization's is its admin. This inbox-only node
+            // wrote out `exec@example.com`, which no user holds, so the branch
+            // reached nobody; such a node now fails, and only `channels: 'email'`
+            // sends to an address itself.
+            nodes: [{ id: 'alert_exec', type: 'notify', label: 'Alert Exec', config: { recipients: 'role:owner', title: '🔴 Critical project: {{ record.name }}', severity: 'critical', sourceObject: 'showcase_project', sourceId: { dialect: 'cel', source: 'record.id' } } }],
             edges: [],
           },
         ],
