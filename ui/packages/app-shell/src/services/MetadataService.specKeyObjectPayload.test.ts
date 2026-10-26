@@ -19,9 +19,8 @@
  * shapes: `toObjectPayload` builds it and `saveObject` PUTs it whole to
  * `PUT /api/v1/meta/object/:name`.
  *
- * Measured against the installed `@objectstack/spec` (ESM build), whose
- * `ObjectSchema` accept set is 43 keys at 17.3.0 (42 at 17.2.0, when this file
- * was written; the one gained key is `editMode`, unrelated to the three below):
+ * Measured against the installed `@objectstack/spec` (ESM build), at 17.2.0
+ * when this file was written:
  *
  *   ObjectSchema.safeParse({ ...base, group: 'Sales' })  => unrecognized_keys ["group"]
  *   ObjectSchema.safeParse({ ...base, sortOrder: 3 })    => unrecognized_keys ["sortOrder"]
@@ -56,6 +55,26 @@ import { ObjectSchema } from '@objectstack/spec/data';
 import { ObjectStackAdapter } from '@object-ui/data-objectstack';
 import type { ObjectDefinition } from '@object-ui/types';
 import { MetadataService } from './MetadataService';
+
+/**
+ * Levenshtein distance, case-insensitive. The no-near-spelling claim below is
+ * stated over the accept set with this, rather than through a key count that
+ * every unrelated spec adoption moves (#26238).
+ */
+function editDistance(a: string, b: string): number {
+  const [x, y] = [a.toLowerCase(), b.toLowerCase()];
+  const row = Array.from({ length: y.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= x.length; i++) {
+    let diagonal = row[0];
+    row[0] = i;
+    for (let j = 1; j <= y.length; j++) {
+      const above = row[j];
+      row[j] = Math.min(above + 1, row[j - 1] + 1, diagonal + (x[i - 1] === y[j - 1] ? 0 : 1));
+      diagonal = above;
+    }
+  }
+  return row[y.length];
+}
 
 /** The bodies of every PUT the SDK issued, exactly as they went over the wire. */
 function makeCapturingAdapter() {
@@ -153,26 +172,10 @@ describe('the instrument', () => {
   });
 
   it('has no near-spelling for any of them — unlike objectui#6041, nothing here is a rename', () => {
-    // 43 at `@objectstack/spec` 17.3.0, which adopted `editMode` (measured —
-    // gained set exactly `['editMode']`, lost set empty). The count is this
-    // file's corpus guard, not its subject; every claim it guards is below and
-    // unchanged.
-    // 44 at `@objectstack/spec` 17.6.0, which adopted `imageField` (measured against
-    // a 17.5.0 control: gained set exactly `['imageField']`, lost set empty;
-    // objectui#11438). Re-pointed as the 17.3.0 adoption was, not weakened.
-    // 45 at `@objectstack/spec` 18.0.0-next.0, which adopted `attachedOnRead`
-    // (measured against a 17.7.0 control: gained set exactly `['attachedOnRead']`,
-    // lost set empty; objectui#12030). Re-pointed the same way.
-    // 46 on the objectstack `main` pin after 18.0.0-next.3, which adopted
-    // `defaultRowScope` (objectstack#24398; measured against the next.3 pin: the
-    // one top-level key `ObjectSchema` gains between the two commits, none lost;
-    // objectui#12971). Re-pointed the same way.
-    // 47 at `@objectstack/spec` 18.1.0, which adopted `membershipKeys`
-    // (objectstack#25513; measured against the 915e9404 pin: the spec's own
-    // `authorable-surface/data.json` gains exactly `data/Object:membershipKeys`
-    // between the two commits, none lost; objectui#13440). Re-pointed the same way.
+    // The claims are asserted by name over the accept set; an exact key count
+    // used to stand in for them and was re-pointed six times by unrelated spec
+    // adoptions (42 → 48), so it is gone (#26238).
     const accept = new Set(Object.keys(ObjectSchema.shape as Record<string, unknown>));
-    expect(accept.size).toBe(47);
     // `fieldGroups` is the only grouping key on the object, and it groups the
     // FIELDS INSIDE one object — it is not a category for objects themselves,
     // so `group` has no mapping target here.
@@ -180,6 +183,12 @@ describe('the instrument', () => {
     for (const key of ['group', 'sortOrder', 'relationships', 'order', 'category', 'sortField']) {
       expect(accept.has(key), `ObjectSchema unexpectedly accepts \`${key}\``).toBe(false);
     }
+    // Nothing in the accept set is within two edits of a resolved key, so none
+    // of the three was a misspelling of a key the schema does declare.
+    const nearSpellings = [...accept].filter((key) =>
+      ['group', 'sortOrder', 'relationships'].some((resolved) => editDistance(key, resolved) <= 2),
+    );
+    expect(nearSpellings, 'ObjectSchema accepts a near-spelling of a resolved key').toEqual([]);
   });
 });
 
