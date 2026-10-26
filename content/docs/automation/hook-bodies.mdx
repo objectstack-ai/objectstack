@@ -98,6 +98,7 @@ The script sees only what the surrounding `ctx` object exposes:
 | `ctx.input` | Mutable record being inserted/updated/etc. | none |
 | `ctx.previous` | Pre-update record (update events only). | none |
 | `ctx.user` / `ctx.session` | Identity context. | none |
+| `ctx.provenance` | Where the write came from (hook bodies only) — see [Write provenance](#write-provenance--ctxprovenance). Absent on a write with no origin. | none |
 | `ctx.api.object(name).find\|count\|aggregate` | Cross-object reads, scoped to current tenant. | `api.read` |
 | `ctx.api.object(name).insert\|update\|delete` | Cross-object writes. | `api.write` |
 | `ctx.title()` | This record's title — the object's `nameField`, **including when it is a `formula`** (evaluated server-side against the record already in hand: no extra read over the record's own columns, one read per lookup a title such as `record.book.title + ' · ' + record.reader.name` reads through). | none |
@@ -105,6 +106,34 @@ The script sees only what the surrounding `ctx` object exposes:
 | `ctx.crypto.randomUUID()` | UUID generation. | `crypto.uuid` |
 | `ctx.log.{info,warn,error}` | Structured logging. | `log` |
 | `ctx.connector(name).<method>(...)` _(planned)_ | Outbound HTTP / SaaS calls. **Not yet wired into the sandbox** — ships with the separate Connector spec. | (separate Connector spec) |
+
+### Write provenance — `ctx.provenance`
+
+A hook body sees the same server-stamped write provenance an in-process handler does — the declared [`HookContext.provenance`](/docs/references/data/hook), copied into the sandbox member by member:
+
+| Member | Present when |
+|---|---|
+| `ctx.provenance.flowRunId` | The write comes from an automation flow's data node; the value is that flow run's id. |
+| `ctx.provenance.attributedUserId` | The write is authorized as the system and credited to a real person (for example, the admin behind an identity-adapter call). |
+| `ctx.provenance.performedByClientId` | An AI client acting through the MCP OAuth door performed the write on behalf of the user in `ctx.session.userId`. |
+
+Each member is a string or absent, and `ctx.provenance` itself is **absent** when none applies — a plain REST write carries no provenance — so read it as `ctx.provenance?.flowRunId`. That is the guard that tells a flow's write apart from a user writing the same fields by hand, which matters most for a flow that runs `runAs: 'user'`: there `ctx.user`, `ctx.session` and `ctx.input` are identical for both writes.
+
+```ts
+// Only lead conversion may set `converted_from_lead`.
+handler: (ctx) => {
+  if (ctx.input.converted_from_lead && !ctx.provenance?.flowRunId) {
+    throw new Error('converted_from_lead is set by lead conversion only');
+  }
+},
+```
+
+Two guarantees hold, so the mark is safe to build a guard on:
+
+- **It cannot be forged through the data API.** The engine builds it from the server-side execution context, which a transport assembles from the authenticated session and never from request input (the automation engine sets `flowRunId` on its own data nodes); a payload field that happens to be named `provenance` stays a field on `ctx.input`.
+- **It is read-only in the sandbox.** The object is frozen and the key is not writable, so a body cannot change its own copy.
+
+It is a signal for app code, not an authorization input: no security middleware reads it, and each write is still authorized as its caller. Action bodies do not carry it.
 
 ### Naming a record — `ctx.title()`
 
@@ -176,7 +205,7 @@ The CLI builder **rejects** any source that uses:
 - references to identifiers from value-only top-level imports
 - `.sudo(` and `.create(` — members that are real on the **in-process** `ScopedContext` / `ObjectRepository` and absent from the VM's `ctx.api`, so lowering them would ship a body that `TypeError`s on its first run. Write `.insert({ ... })` instead of `.create({ ... })` — it is the only insert verb the `IScopedObjectRepository` contract declares — and reach for [`runAs: 'system'`](/docs/automation/hooks#elevation--runas) instead of `.sudo()`. `Object.create()` is a real sandbox global and is **not** affected.
 - `ctx.dispatch.scope` and `ctx.submitted` — context members the **in-process** `HookContext` carries and the body face deliberately does not: a body's `ctx.dispatch` is `{ mode, index }` only, and it has no `ctx.submitted`. Lowered, a write through `scope` `TypeError`s on its first run and a read of `submitted` sees `undefined`, so a guard on it evaluates as if nothing were submitted. For cross-dispatch work, do it once at `ctx.dispatch.index === 0` or keep the state in the record through `ctx.api`; to derive from a read-only field, read the stored row on `ctx.previous`. `ctx.dispatch.mode` / `ctx.dispatch.index`, and a field that merely happens to be named `scope` or `submitted` (`ctx.input.scope`), are **not** affected.
-- `ctx.provenance`, `ctx.ql` and `ctx.transaction` (hook handlers) — the rest of the in-process `HookContext` the body face does not carry. A body reads `ctx.provenance` as `undefined`, so a guard on `ctx.provenance.flowRunId` evaluates as if the write had no origin; `ctx.ql` (the engine) and `ctx.transaction` (a driver handle) are live host objects no copy into the sandbox can carry. Reach other objects through `ctx.api.object(name)`, and group writes with `ctx.api.transaction(fn)`, which is **not** affected. The enumeration behind this list is derived, not remembered: a test compares every member `HookContextSchema` declares against every member the sandbox marshals, and fails on one that is neither refused here nor recorded as a deliberate exception.
+- `ctx.ql` and `ctx.transaction` (hook handlers) — the rest of the in-process `HookContext` the body face does not carry. `ctx.ql` (the engine) and `ctx.transaction` (a driver handle) are live host objects no copy into the sandbox can carry. Reach other objects through `ctx.api.object(name)`, and group writes with `ctx.api.transaction(fn)`, which is **not** affected. The enumeration behind this list is derived, not remembered: a test compares every member `HookContextSchema` declares against every member the sandbox marshals, and fails on one that is neither refused here nor recorded as a deliberate exception.
 
 Like `.sudo(` and `.create(`, these refuse the **body**, not the handler: `objectstack build` bundles the handler into its runtime module (`objectstack-runtime.*.mjs`) instead and still exits 0 (with a warning naming the hook), `os lint` reports it as `hook-body/bundled-fallback`, and `objectstack build --strict-body` fails on it. The bundled handler runs in-process wherever that module is served beside `objectstack.json`; a deployment that serves the artifact alone has no function to bind the hook to, so it logs the hook as refused at boot and the hook never fires — build with `--strict-body` when the artifact must be body-only.
 

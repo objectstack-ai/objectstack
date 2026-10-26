@@ -17,8 +17,8 @@
 // ## Why one file holds the first two halves
 //
 // `push` on `main` now tests the AFFECTED set. The thing that keeps "main is
-// green" a statement about the whole workspace is the hourly `schedule` run of
-// ci.yml and lint.yml. Two properties have to hold for that to be true, and
+// green" a statement about the whole workspace is the `schedule` run of
+// ci.yml and lint.yml (hourly from #16467, every 4 hours since #25771). Two properties have to hold for that to be true, and
 // neither is visible in the run that would be wrong:
 //
 //   1. THE RUN HAS TO SURVIVE. On a `schedule` event `github.event.pull_
@@ -68,7 +68,7 @@ import { isEntrypoint } from '../invoked-as.mjs';
 // `Unlock-action:` key exactly as the patrol reads it.
 import { blockerTargetsFor, directiveValues, h19BlockOutlivedBlocker, labelNames } from '../pm/check-half-states.mjs';
 
-// The workflows that carry the hourly full run. Spelled as quoted repo-relative
+// The workflows that carry the scheduled full run (every 4 hours, #25771). Spelled as quoted repo-relative
 // literals: the dispatch derivation reads a gate's path literals as the
 // population it watches, so a card touching either file schedules this family.
 export const WATCHED_WORKFLOWS = Object.freeze([
@@ -169,7 +169,7 @@ export function eventContext(
   };
   const events = {
     push: { ref: 'refs/heads/main', before: 'f'.repeat(40), after: sha },
-    schedule: { schedule: '0 * * * *' },
+    schedule: { schedule: '0 */4 * * *' },
     workflow_dispatch: { ref: 'refs/heads/main', inputs: {} },
     pull_request: { action: 'synchronize', number: pr, after: sha, pull_request: { number: pr } },
     merge_group: { action: 'checks_requested', merge_group: { head_sha: sha } },
@@ -205,7 +205,7 @@ export function concurrencyVerdict(groupExpression, { workflow = 'W' } = {}) {
   if (schedule === push) {
     findings.push(
       `a \`schedule\` run and a \`push\` run share the concurrency group '${schedule}', so the next ` +
-        'merge to main cancels the hourly full run. Put `github.event_name` in the key.'
+        'merge to main cancels the scheduled full run. Put `github.event_name` in the key.'
     );
   }
   if (dispatch === push) {
@@ -217,13 +217,13 @@ export function concurrencyVerdict(groupExpression, { workflow = 'W' } = {}) {
   if (dispatch === schedule) {
     findings.push(
       `a \`workflow_dispatch\` run and a \`schedule\` run share the concurrency group '${dispatch}', so ` +
-        'an on-demand full run cancels the hourly one it was meant to pre-empt.'
+        'an on-demand full run cancels the scheduled one it was meant to pre-empt.'
     );
   }
 
   // EVERY PUSH RUN FINISHES (#25373). A push run is the only run that tests
   // its own merge's `--affected` set; a cancelled one leaves that merge with
-  // no verdict on main until the next hourly run. Sharing a group between two
+  // no verdict on main until the next scheduled full run. Sharing a group between two
   // merges lets the second cancel the first -- and `cancel-in-progress: false`
   // does not save it, because GitHub keeps ONE pending run per group and
   // cancels that one when a third arrives. So two pushes of two different
@@ -241,7 +241,7 @@ export function concurrencyVerdict(groupExpression, { workflow = 'W' } = {}) {
   // inequality above is to put something run-unique in the key --
   // `github.run_id`, `github.sha` -- which also switches `cancel-in-progress`
   // off for every OTHER event in the file. So everything that is not a push
-  // must still collapse two runs onto one group: two hourly runs at two `main`
+  // must still collapse two runs onto one group: two scheduled runs at two `main`
   // heads, two on-demand runs, and two heads of the SAME pull request.
   if (group('schedule', SECOND) !== schedule) {
     findings.push('two `schedule` runs on two `main` heads do not share a group (the key is run-unique off push)');
@@ -273,10 +273,10 @@ export function concurrencyVerdict(groupExpression, { workflow = 'W' } = {}) {
 // that can be swallowed files a duplicate an hour.
 //
 // Both prefixes carry the watched workflow's CADENCE (#23880): the card for a
-// nightly workflow must not call itself hourly. For an hourly workflow they
-// spell exactly what they always did -- `hourly full run: red on main` and
-// `os-hourly-full-run` -- so an open card filed before the cadence existed is
-// still found by its title and by its marker, and refreshed, never duplicated.
+// nightly workflow must not call itself hourly. When a workflow's cadence
+// CHANGES, the card already open under the old one must still be found -- by
+// its old title and by its old marker -- and refreshed, never duplicated; that
+// is what `CADENCE_PREDECESSORS` below is for.
 const markerPrefix = (cadence) => `os-${cadence}-full-run`;
 const titlePrefix = (cadence) => `${cadence} full run: red on main`;
 
@@ -287,20 +287,34 @@ const titlePrefix = (cadence) => `${cadence} full run: red on main`;
 // and the card is the only reader of that run. Adding a workflow to the card's
 // watched list therefore means adding its cadence here in the same change.
 export const CARD_CADENCES = Object.freeze({
-  CI: 'hourly',
-  'Lint & Type Check': 'hourly',
+  CI: '4-hourly',
+  'Lint & Type Check': '4-hourly',
 });
 
-// The words each cadence puts in the body. The `hourly` entry is the text the
-// body has always carried, byte for byte.
+// THE CADENCES A CADENCE REPLACED, newest first. `CI` and `Lint & Type Check`
+// ran hourly from #16467 until #25771 (maintainer ruling Q6 = C) moved both to
+// every 4 hours, and the CI card open at that change (#25438) carries the
+// hourly title `hourly full run: red on main (CI)` and the hourly marker
+// `os-hourly-full-run-ci`. `cardIdentity` turns each predecessor into a
+// `legacy` title and marker that `matchesCard` still reads, so that card is
+// refreshed, never orphaned beside a duplicate. A refresh rewrites the body
+// with the CURRENT marker and leaves the title alone (a title is the seat's to
+// edit, and `updateIssue` writes only the body), so the old title is matched
+// for as long as such a card stays open. ⛔ Never drop an entry while a card
+// it names may be open.
+export const CADENCE_PREDECESSORS = Object.freeze({
+  '4-hourly': Object.freeze(['hourly']),
+});
+
+// The words each cadence puts in the body.
 const CADENCE_WORDS = Object.freeze({
-  hourly: Object.freeze({
-    every: 'every hour',
-    previous: 'an hour ago',
+  '4-hourly': Object.freeze({
+    every: 'every 4 hours',
+    previous: '4 hours ago',
     about: (name) => [
-      `\`${name}\` runs the FULL battery on \`main\` every hour (#16467). A \`push\` run on`,
+      `\`${name}\` runs the FULL battery on \`main\` every 4 hours (#16467, #25771). A \`push\` run on`,
       '`main` tests only the packages the merge touched, and a merge-queue build tests only what the group',
-      'contained — so this hourly run is the only thing that says whether the WHOLE tree is green, and',
+      'contained — so this scheduled run is the only thing that says whether the WHOLE tree is green, and',
       'this card is the only channel that reports it. Nothing is blocked by it.',
     ],
   }),
@@ -343,19 +357,26 @@ export function cardIdentity(workflowName) {
     cadence,
     title: `${titlePrefix(cadence)} (${name})`,
     marker: `${markerPrefix(cadence)}-${slug}`,
+    // Read by `matchesCard` only; a card is never FILED under a legacy identity.
+    legacy: (CADENCE_PREDECESSORS[cadence] ?? []).map((old) =>
+      Object.freeze({ title: `${titlePrefix(old)} (${name})`, marker: `${markerPrefix(old)}-${slug}` })
+    ),
     labels: ['bug', 'domain:devx', 'priority:p1'],
   };
 }
 
 // Is this issue THIS card? Two ways in, because either can be edited away: the
-// title prefix, and the body marker. A PULL REQUEST is never this card --
+// title prefix, and the body marker -- each in the current cadence's spelling
+// or in a predecessor's (`identity.legacy`). A PULL REQUEST is never this card --
 // `listForRepo` returns PRs too, and a PR titled after this card would
 // otherwise swallow the file and the real red would never be reported.
 export function matchesCard(issue, identity) {
   if (!issue || issue.pull_request) return false;
   const title = String(issue.title ?? '');
   const body = String(issue.body ?? '');
-  return title.startsWith(identity.title) || body.includes(identity.marker);
+  return [identity, ...(identity.legacy ?? [])].some(
+    (spelling) => title.startsWith(spelling.title) || body.includes(spelling.marker)
+  );
 }
 
 // The de-dup decision, over a PAGED listing of OPEN issues.
@@ -663,7 +684,7 @@ export function withBlockNote(body, noteLines) {
 
 // The card body. The run link and the commit range are the whole product: a red
 // scheduled run says "main broke somewhere since the last green one" -- the last
-// hour for an hourly workflow, the last night for a nightly one -- and the
+// 4 hours for a 4-hourly workflow, the last night for a nightly one -- and the
 // commits between the previous GREEN scheduled run and this one are that span.
 export function renderBody({
   identity,
@@ -753,7 +774,7 @@ export function renderBody({
 //
 // A PR or queue build carries the FAST SET since #22998 (ci.yml's THE TWO
 // SPEEDS); the dogfood and temporal legs run only on `main`'s
-// push, hourly schedule and dispatch runs. "Tested before a release" is
+// push, 4-hourly schedule and dispatch runs. "Tested before a release" is
 // therefore a statement about those runs, and this half makes it a gate:
 // release.yml's `full-battery` job, which `publish` needs, so a refusal here
 // means no deployment is queued at the `release` environment at all.
@@ -778,7 +799,7 @@ export function renderBody({
 //
 // ⛔ It never waits and never reads a run AFTER the release commit: a run on a
 // later `main` head tested a different tree. ⚠️ A `push` run's Test Core is
-// affected-only (#16467), so a push run is a narrower verdict than an hourly
+// affected-only (#16467), so a push run is a narrower verdict than a scheduled
 // one; the ruled rule reads both events, and that narrowing is recorded on
 // #22998 rather than decided here.
 
@@ -808,8 +829,12 @@ export const RELEASE_GATE_JOB = 'full-battery';
 export const RELEASE_PUBLISH_JOB = 'publish';
 
 // How many first-parent commits the window spans, and how many pages of 100
-// completed runs per event per workflow are read. Generous against an hourly
-// cadence: the nearest verdict is normally a handful of commits back.
+// completed runs per event per workflow are read. Generous against the 4-hourly
+// schedule (#25771): every merge's own push run carries a verdict since #25373,
+// so the nearest verdict is normally a handful of commits back, and 300
+// schedule runs are 50 days of them. Neither number is a clock: the gate never
+// asks how OLD the deciding run is, only that it is the nearest one at or
+// before the release commit -- so the cadence moved no freshness window here.
 export const RELEASE_GATE_WINDOW = 400;
 export const RELEASE_GATE_PAGES = 3;
 
@@ -1047,7 +1072,7 @@ async function releaseGate(argv) {
 // remedy is to find what stopped registering, never to lower the number.
 const SELF_TEST_BATTERIES = Object.freeze({
   'scheduled-full-run concurrency isolation': 32,
-  'scheduled-full-run card identity and de-dup': 34,
+  'scheduled-full-run card identity and de-dup': 42,
   'card refresh: a stale pm:blocked (the measured #23885 sequence)': 22,
   'release gate: the selection rule on the recorded 2026-10-12 listing': 8,
   'release gate: the selection rule on synthetic runs': 17,
@@ -1282,10 +1307,10 @@ async function selfTest() {
   const lint = cardIdentity('Lint & Type Check');
 
   await check(() => {
-    if (ci.title !== 'hourly full run: red on main (CI)') throw new Error(`identity: CI title is '${ci.title}'`);
+    if (ci.title !== '4-hourly full run: red on main (CI)') throw new Error(`identity: CI title is '${ci.title}'`);
   });
   await check(() => {
-    if (lint.marker !== 'os-hourly-full-run-lint-type-check') throw new Error(`identity: lint marker is '${lint.marker}'`);
+    if (lint.marker !== 'os-4-hourly-full-run-lint-type-check') throw new Error(`identity: lint marker is '${lint.marker}'`);
   });
   await check(() => {
     if (ci.marker === lint.marker || ci.title === lint.title) {
@@ -1372,9 +1397,22 @@ async function selfTest() {
     if (found?.number !== 42) throw new Error('de-dup: a multi-page scan lost the card');
   });
 
-  // -- The cadence (#23880): each cadence, the back-compat pins for the card
-  //    already open under the hourly identity, and the refusal of a workflow
-  //    the closed map does not name.
+  // -- The cadence (#23880, #25771): each cadence, the back-compat pins for the
+  //    card already open under the HOURLY identity (#25438, filed before the
+  //    move to every 4 hours), and the refusal of a workflow the closed map
+  //    does not name.
+  //
+  //    THE CHOICE #25771 MADE, pinned here: the identity MOVES to the new
+  //    cadence (`4-hourly full run: red on main (CI)`, `os-4-hourly-full-run-ci`)
+  //    and the hourly spellings stay READABLE through `CADENCE_PREDECESSORS`.
+  //    A new card files under the new identity; the open hourly card is found
+  //    by its old title or its old marker, refreshed, and never duplicated.
+  const CURRENT_CI_TITLE = '4-hourly full run: red on main (CI)';
+  const CURRENT_CI_MARKER = 'os-4-hourly-full-run-ci';
+  const CURRENT_CI_MARKER_LINE =
+    'os-4-hourly-full-run-ci — machine-findable marker for this generated card. ⛔ Do not delete this line: ' +
+    'it is how the 4-hourly full run finds this card instead of filing a new one every 4 hours.';
+  // #25438 as it stood on 2026-10-26, byte for byte: title and first body line.
   const OPEN_CI_TITLE = 'hourly full run: red on main (CI)';
   const OPEN_CI_MARKER = 'os-hourly-full-run-ci';
   const OPEN_CI_MARKER_LINE =
@@ -1388,36 +1426,105 @@ async function selfTest() {
     renderBody({ identity: identityUnderTest, runUrl: 'u', headSha: 'a', conclusion: 'failure', sweptAt: 't', rangeNote: 'n' }),
   ];
   await check(() => {
-    if (ci.cadence !== 'hourly' || ci.title !== OPEN_CI_TITLE || ci.marker !== OPEN_CI_MARKER) {
-      throw new Error(`cadence: the CI identity moved (${ci.cadence}, '${ci.title}', '${ci.marker}') -- the open card would be duplicated`);
+    if (ci.cadence !== '4-hourly' || ci.title !== CURRENT_CI_TITLE || ci.marker !== CURRENT_CI_MARKER) {
+      throw new Error(`cadence: the CI identity is (${ci.cadence}, '${ci.title}', '${ci.marker}'), not the 4-hourly one`);
+    }
+  });
+  await check(() => {
+    const legacy = ci.legacy ?? [];
+    if (!legacy.some((l) => l.title === OPEN_CI_TITLE && l.marker === OPEN_CI_MARKER)) {
+      throw new Error(`cadence: the CI identity lost the hourly spelling #25438 carries (${JSON.stringify(legacy)}) -- that card would be orphaned`);
     }
   });
   await check(() => {
     for (const b of bodiesOf(ci)) {
-      if (b.split('\n')[0] !== OPEN_CI_MARKER_LINE) throw new Error(`cadence: the CI marker line moved: '${b.split('\n')[0]}'`);
+      if (b.split('\n')[0] !== CURRENT_CI_MARKER_LINE) throw new Error(`cadence: the CI marker line is '${b.split('\n')[0]}'`);
     }
   });
   await check(async () => {
-    // The open CI card exactly as it was filed before the cadence existed.
-    const open = { number: 23885, title: OPEN_CI_TITLE, body: `${OPEN_CI_MARKER_LINE}\n# ${OPEN_CI_TITLE}` };
+    // #25438 exactly as filed under the hourly identity: found by its title.
+    const open = { number: 25438, title: OPEN_CI_TITLE, body: `${OPEN_CI_MARKER_LINE}\n# ${OPEN_CI_TITLE}` };
     const found = await findExistingCard({ identity: cardIdentity('CI'), listPage: page([issue(7), open]) });
-    if (found?.number !== 23885) throw new Error(`cadence: the open CI card was not found by its title (${found?.number})`);
+    if (found?.number !== 25438) throw new Error(`cadence: #25438 was not found by its hourly title (${found?.number})`);
   });
   await check(async () => {
-    const renamed = { number: 23885, title: 'renamed by a human', body: `${OPEN_CI_MARKER_LINE}\n` };
+    // ...and by its hourly marker alone, after a human renamed it.
+    const renamed = { number: 25438, title: 'renamed by a human', body: `${OPEN_CI_MARKER_LINE}\n` };
     const found = await findExistingCard({ identity: cardIdentity('CI'), listPage: page([renamed]) });
-    if (found?.number !== 23885) throw new Error('cadence: the open CI card was not found by its marker alone');
+    if (found?.number !== 25438) throw new Error('cadence: #25438 was not found by its hourly marker alone');
+  });
+  await check(async () => {
+    // A red 4-hourly run REFRESHES #25438 and files no second card; the
+    // refreshed body carries the current marker, so it is found by that too.
+    const card = { number: 25438, title: OPEN_CI_TITLE, body: `${OPEN_CI_MARKER_LINE}\n# ${OPEN_CI_TITLE}`, labels: [] };
+    const filed = [];
+    const outcome = await fileOrRefreshCard({
+      identity: ci,
+      body: bodiesOf(ci)[0],
+      ownerRepo: 'objectstack-ai/objectstack',
+      listPage: async (n) => (n === 1 ? [card] : []),
+      createIssue: async (made) => {
+        filed.push(made);
+        return { number: 1 };
+      },
+      updateIssue: async ({ number, body: b }) => {
+        if (number === card.number) card.body = b;
+      },
+      listComments: async () => [],
+      getIssue: async () => ({}),
+      addLabels: async () => {},
+      removeLabel: async () => {},
+    });
+    if (outcome.action !== 'refreshed' || outcome.number !== 25438 || filed.length !== 0) {
+      throw new Error(`cadence: a red 4-hourly run did not refresh #25438 (${outcome.action}, ${outcome.number}, filed ${filed.length})`);
+    }
+    if (card.body.split('\n')[0] !== CURRENT_CI_MARKER_LINE) throw new Error('cadence: the refreshed #25438 body lost the current marker');
+    const again = await findExistingCard({ identity: ci, listPage: page([{ ...card, title: 'renamed by a human' }]) });
+    if (again?.number !== 25438) throw new Error('cadence: the refreshed #25438 is not found by the current marker');
+  });
+  await check(async () => {
+    // A legacy spelling is READ, never FILED: an empty board files the new title.
+    const filed = [];
+    await fileOrRefreshCard({
+      identity: ci, body: 'b', ownerRepo: 'objectstack-ai/objectstack',
+      listPage: async () => [],
+      createIssue: async (made) => {
+        filed.push(made);
+        return { number: 1 };
+      },
+      updateIssue: async () => {}, listComments: async () => [], getIssue: async () => ({}),
+      addLabels: async () => {}, removeLabel: async () => {},
+    });
+    if (filed[0]?.title !== CURRENT_CI_TITLE) throw new Error(`cadence: a new card was filed as '${filed[0]?.title}'`);
+  });
+  await check(async () => {
+    // The Lint legacy spelling stays Lint's: CI's hourly card is not Lint's card.
+    const found = await findExistingCard({ identity: lint, listPage: page([{ number: 25438, title: OPEN_CI_TITLE, body: OPEN_CI_MARKER_LINE }]) });
+    if (found) throw new Error(`cadence: Lint's identity matched CI's hourly card #${found.number}`);
   });
   await check(() => {
-    if (lint.cadence !== 'hourly' || lint.title !== 'hourly full run: red on main (Lint & Type Check)') {
-      throw new Error(`cadence: Lint & Type Check is not hourly ('${lint.title}')`);
+    if (lint.cadence !== '4-hourly' || lint.title !== '4-hourly full run: red on main (Lint & Type Check)') {
+      throw new Error(`cadence: Lint & Type Check is not 4-hourly ('${lint.title}')`);
+    }
+    if (!(lint.legacy ?? []).some((l) => l.title === 'hourly full run: red on main (Lint & Type Check)' && l.marker === 'os-hourly-full-run-lint-type-check')) {
+      throw new Error('cadence: Lint & Type Check lost its hourly spelling');
     }
   });
   await check(() => {
     for (const b of bodiesOf(ci)) {
-      if (/nightly|every night|the night before/.test(b)) throw new Error(`cadence: an hourly card body says nightly:\n${b}`);
+      if (/nightly|every night|the night before/.test(b)) throw new Error(`cadence: a 4-hourly card body says nightly:\n${b}`);
+      if (/every hour\b|an hour ago|this hourly run/.test(b)) throw new Error(`cadence: a 4-hourly card body still says hourly:\n${b}`);
     }
   });
+  for (const file of WATCHED_WORKFLOWS) {
+    await check(() => {
+      // The cadence the card prints is the cadence the workflow runs.
+      const crons = [...readFileSync(file, 'utf8').matchAll(/^\s*-\s*cron:\s*'([^']+)'/gm)].map((m) => m[1]);
+      if (crons.length !== 1 || crons[0] !== '0 */4 * * *') {
+        throw new Error(`cadence: ${file} declares ${JSON.stringify(crons)}, but CARD_CADENCES says 4-hourly ('0 */4 * * *')`);
+      }
+    });
+  }
   await check(() => {
     let message = '';
     try {
@@ -1671,7 +1778,7 @@ async function selfTest() {
   });
   await check(() => {
     const lines = measured.card.body.split('\n');
-    if (lines[0] !== OPEN_CI_MARKER_LINE) throw new Error('measured: the refreshed body lost its marker line');
+    if (lines[0] !== CURRENT_CI_MARKER_LINE) throw new Error('measured: the refreshed body lost its marker line');
     if (lines.at(-1) !== CARD_FOOTER) throw new Error('measured: the note was not placed above the footer');
     for (const line of NEW_BODY.split('\n')) {
       if (!lines.includes(line)) throw new Error(`measured: the refreshed body dropped '${line}'`);
@@ -2338,7 +2445,7 @@ function checkConcurrency() {
   if (bad > 0) {
     console.error(
       `scheduled-full-run: ${bad} workflow file(s) carry a concurrency key that lets one main run cancel ` +
-        'another: the hourly full run is the only thing testing the whole workspace on main since push ' +
+        'another: the scheduled full run is the only thing testing the whole workspace on main since push ' +
         "went affected-only, and a push run is the only test of its own merge's affected set, so this is a " +
         'coverage refusal, not a style one.'
     );
