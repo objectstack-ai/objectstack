@@ -478,11 +478,11 @@ how many first-parent commits before the version commit that run's head sits. Th
 gate reads only *completed* runs and never waits (by design: `selectFullBatteryRun`
 in `scripts/ci/scheduled-full-run.mjs`), so a run still in progress is invisible to
 it. Now open **Actions → CI** on `main`: if a run on the version commit, or on any
-commit between it and the one the `CI` line names, is still in progress — normally
-the hourly `schedule` run (`cron: '0 * * * *'` in `ci.yml`), occasionally a `push`
-run — **wait for it to complete before approving**. That is about 25–30 minutes from
-the top of the hour (the 20 hourly runs up to 2026-10-23 00:20Z took 14–39 minutes,
-median 28.7, 14 of them 25–31). Green: approve. Red: do not approve. It is the reading the gate would
+commit between it and the one the `CI` line names, is still in progress — a `push`
+run (every merge to `main` gets its own since #25373, so the version commit's own push
+run is the usual one) or the `schedule` run — **wait for it to complete before
+approving**. A run takes about 25–30 minutes (the 20 hourly scheduled runs up to
+2026-10-23 00:20Z took 14–39 minutes, median 28.7, 14 of them 25–31). Green: approve. Red: do not approve. It is the reading the gate would
 have refused had it been complete, so treat it as that refusal (recovery: the
 `full-battery` job's header in `release.yml`). `CI` is the long battery, so it is the
 window that matters in practice; an in-flight `Lint & Type Check` or `Spec Shape
@@ -495,6 +495,19 @@ still running. That run concluded **failure** at 12:30Z, minutes after the gate 
 (#24879, a stale dogfood fixture), and a later `force: true` dispatch that could see
 it was refused. The gate was right about everything it could see; the gap is only
 the window in which a nearer run is in flight, and only a human can wait it out.
+
+**The scheduled run is every 4 hours** (`cron: '0 */4 * * *'` in `ci.yml` and
+`lint.yml`, hourly until #25771). Two consequences for the reading above. A version
+commit can wait **up to 4 hours** for the first *scheduled* full run on or after it;
+the gate does not wait for one, because a completed `push` run nearer the version
+commit decides first (`FULL_BATTERY_EVENTS` reads both), and no window in the gate
+is a clock — it reads the nearest completed run at or before the version commit,
+however old. And a `push` run's `Test Core` is affected-only (#16467), so when the
+nearest verdict is a push run it is the narrower one. If you want the whole-workspace
+verdict on the version commit itself and `main` has not moved past it, run **Actions →
+CI → Run workflow** on `main` (and the same for **Lint & Type Check**) and wait for it
+rather than for the next scheduled run; once `main` has moved, a dispatched run tests a
+later tree and the gate rightly ignores it.
 
 **This is a wait, not a merge freeze.** `main` keeps moving the whole time: the
 approval publishes the version commit's tree and nothing that landed after it, so

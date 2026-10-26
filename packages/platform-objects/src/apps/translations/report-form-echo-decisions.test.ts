@@ -59,7 +59,7 @@
 //       echoes in two locales TODAY. It is OUT of this population, asserted by
 //       name — a walk that over-reached into the object form would sweep in 32
 //       undecided leaves, and the assertion is what notices. `datasetForm` —
-//       the sibling semantic-layer panel, 38 leaves, 0 echoing — is excluded
+//       the sibling semantic-layer panel, 39 leaves, 0 echoing — is excluded
 //       too, and that exclusion is asserted rather than trusted precisely
 //       because a wrong sweep of it would NOT go red.
 //   (2) INWARD, AUTHORED. 38 of this population's own 44 leaves come back
@@ -889,7 +889,8 @@ describe('#19403 round 9 — the population, DERIVED from `reportForm`', () => {
     // It is fully authored, so a wrong sweep of it would NOT go red — which is
     // exactly why the exclusion is asserted instead of trusted.
     // 38 since #25330: the dimensions repeater offers `nullLabel`.
-    expect(DATASET_LEAVES.length).toBe(38);
+    // 39 since the measures repeater offers `duration`.
+    expect(DATASET_LEAVES.length).toBe(39);
     const datasetEchoes = DATASET_LEAVES.filter((l) =>
       TRANSLATED_LOCALES.some(([, forms]) => forms.dataset?.[l.kind === 'section' ? 'sections' : 'fields']?.[l.path]?.[l.prop] === l.en),
     );
