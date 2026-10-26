@@ -26,14 +26,14 @@ import { SecurityTranslations } from '../translations/index.js';
  * break. Engineering terms stay in the code comments beside each set, so the
  * copy names no permission-set id and no code span.
  *
- * A label: a short noun phrase (at most 60 characters, no line break, no
+ * A label: a short noun phrase (at most 80 characters, no line break, no
  * closing full stop) split by ` — ` exactly as often as the English label, so
  * a translation keeps the "who — what access" shape the list reads by.
  */
 type AnyRec = Record<string, any>;
 
 const MAX_LENGTH = 160;
-const MAX_LABEL_LENGTH = 60;
+const MAX_LABEL_LENGTH = 80;
 const LABEL_SPLIT = ' — ';
 const TRANSLATED_LOCALES = Object.keys(SecurityTranslations).filter((l) => l !== 'en');
 const SET_NAMES = defaultPermissionSets.map((ps) => ps.name);
