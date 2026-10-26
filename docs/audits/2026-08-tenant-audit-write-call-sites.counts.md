@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 243 |
+| Write call sites | 244 |
 | Object name statically decidable | 166 |
-| Object name chosen at run time | 77 |
+| Object name chosen at run time | 78 |
 | Against a tenancy-enabled object | 165 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 184 |
+| Threading a tenant context | 185 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 51 |
 | …and decidably tenancy-enabled | 29 |
-| Threading a decidably elevated context | 140 |
+| Threading a decidably elevated context | 141 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 95 |
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-25 at `85aabb332`.
+Measured on 2026-10-26 at `700904cd5`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 769 |
-| engine-shaped types recognised | 88 |
+| tracked non-test sources scanned | 779 |
+| engine-shaped types recognised | 89 |
 | declared objects in the registry | 117 |
-| same-named calls subtracted as non-engine | 176 |
+| same-named calls subtracted as non-engine | 177 |
 
 ## Every site
 
@@ -119,6 +119,7 @@ Measured on 2026-10-25 at `85aabb332`.
 | `packages/plugins/plugin-audit/src/activity-changed-fields-backfill.ts` | `update` | `sys_activity` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/auth-event-audit.ts` | `insert` | `sys_audit_log` | enabled | options unreadable | 1 |
 | `packages/plugins/plugin-audit/src/comment-parent-pair-backfill.ts` | `update` | `sys_comment` | enabled | elevated | 1 |
+| `packages/plugins/plugin-audit/src/comment-reaction-routes.ts` | `delete` | `COMMENT_REACTION_OBJECT` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-audit/src/mail-log-body-migration.ts` | `update` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-audit/src/mail-log-body-migration.ts` | `update` | `object` | undecidable | options unreadable | 1 |
 | `packages/plugins/plugin-audit/src/read-audit.ts` | `insert` | `sys_audit_log` | enabled | options unreadable | 1 |
