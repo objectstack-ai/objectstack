@@ -832,6 +832,7 @@
     "api/GetRunResponse:success",
     "api/GetTranslationsRequest:locale",
     "api/GetTranslationsResponse:locale",
+    "api/GetTranslationsResponse:requestedLocale",
     "api/GetTranslationsResponse:translations",
     "api/GetUiViewRequest:object",
     "api/GetUiViewRequest:type",

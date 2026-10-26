@@ -48,6 +48,18 @@ describe('#25785 — the served translation face', () => {
     expect(Object.keys(PlatformTranslationDataSchema.shape)).toContain(group);
   });
 
+  it('declares `requestedLocale`, optional, beside the locale it served', () => {
+    const shape = GetTranslationsResponseSchema.shape;
+    expect(Object.keys(shape).sort()).toEqual(['locale', 'requestedLocale', 'translations']);
+    // The fallback exit's body: `zh` asked for, `zh-CN` served (runtime `domains/i18n.ts`).
+    const fallback = { locale: 'zh-CN', requestedLocale: 'zh', translations: { messages: { save: '保存' } } };
+    expect(GetTranslationsResponseSchema.safeParse(fallback).success).toBe(true);
+    // Optional: the exit that serves the locale asked for omits it.
+    expect(GetTranslationsResponseSchema.safeParse({ locale: 'zh-CN', translations: {} }).success).toBe(true);
+    // Declared, so it is typed rather than merely tolerated: a non-string is refused.
+    expect(GetTranslationsResponseSchema.safeParse({ ...fallback, requestedLocale: 7 }).success).toBe(false);
+  });
+
   it('accepts a document carrying the served groups', () => {
     const served = {
       objects: { lead: { label: '潜在客户', fields: { company: { label: '公司' } } } },

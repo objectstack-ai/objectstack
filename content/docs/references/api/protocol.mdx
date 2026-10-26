@@ -1764,6 +1764,7 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **locale** | `string` | ✅ | Locale code |
+| **requestedLocale** | `string` | optional | The locale the caller asked for, when the served locale is a fallback from it |
 | **translations** | `{ objects?: Record<string, object>; picklists?: Record<string, object>; apps?: Record<string, object>; messages?: Record<string, string>; … }` | ✅ | Translation data |
 
 ### Nested Shape: `GetTranslationsResponse.translations`

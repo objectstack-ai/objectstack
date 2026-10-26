@@ -3711,9 +3711,19 @@ export const GetTranslationsRequestSchema = lazySchema(() => z.object({
  * translates Studio's authoring forms from it, and is not part of this answer.
  * `translations` is therefore {@link ServedTranslationDataSchema}, the platform
  * face without those groups, closed so a body that still carries one fails it.
+ *
+ * `requestedLocale` is the code the caller ASKED for, carried only when the
+ * door fell back to another one: `locale` is always the locale the body
+ * translates, and the pair is how a caller learns that `zh` was served as
+ * `zh-CN`. The runtime door has served it since that fallback existed while
+ * this face did not declare it (#25785) — declared ≠ enforced, Prime
+ * Directive #10: an undeclared field is one no generated client can read and
+ * no conformance suite can hold. Optional, because the exit that serves the
+ * locale asked for omits it.
  */
 export const GetTranslationsResponseSchema = lazySchema(() => z.object({
   locale: z.string().describe('Locale code'),
+  requestedLocale: z.string().optional().describe('The locale the caller asked for, when the served locale is a fallback from it'),
   translations: ServedTranslationDataSchema.describe('Translation data'),
 }));
 

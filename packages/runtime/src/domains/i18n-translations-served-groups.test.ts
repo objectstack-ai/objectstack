@@ -113,10 +113,14 @@ describe('#25785 A — the served document leaves the server-resolved groups out
         expect(result.response.body.data.translations).not.toHaveProperty('metadataForms');
     });
 
-    it('the locale fallback exit (zh → zh-CN) leaves it out too', async () => {
+    it('the locale fallback exit (zh → zh-CN) leaves it out too, and its body is declared', async () => {
         const result = await read(makeService({ en: {}, 'zh-CN': zhTree() }), '/translations/zh');
         expect(result.response.status).toBe(200);
         expect(result.response.body.data).toEqual({ locale: 'zh-CN', requestedLocale: 'zh', translations: SERVED_GROUPS });
+        // `requestedLocale` is declared on the response face (#25785), so the
+        // fallback body is read by the schema rather than tolerated by it.
+        expect(GetTranslationsResponseSchema.safeParse(result.response.body.data).success).toBe(true);
+        expect(Object.keys(GetTranslationsResponseSchema.shape)).toContain('requestedLocale');
     });
 
     it('the body satisfies the closed GetTranslationsResponseSchema, which refuses the unserved group', async () => {

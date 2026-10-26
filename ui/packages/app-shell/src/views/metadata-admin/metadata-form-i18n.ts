@@ -31,8 +31,16 @@
  *    (a hand-rolled walker would have had to re-derive `header.showTitle` and
  *    would have got the section names wrong — they are slugged labels, not the
  *    `label` text);
- *  - when the environment's own translation bundle reaches this surface, it
- *    drops in as a higher-precedence source with no call-site change.
+ *  - when the environment's own `metadataForms` translations reach this
+ *    surface, they drop in as a higher-precedence source with no call-site
+ *    change. Their channel is `/api/v1/meta/types`, which serves each form
+ *    already localized from the environment's bundle: the console's own
+ *    translation bundle (`/api/v1/i18n/translations/:locale`) does not carry
+ *    the group at all (objectstack#25785 — it was 75 KB of 221 KB on app-crm
+ *    zh-CN, read by nothing in the browser). So the higher-precedence source
+ *    for a form the SERVER renders is already in place; this overlay is for
+ *    the forms this console renders from its own copy of the spec, which no
+ *    server answer passes through.
  *
  * ## Scope: `en` + `zh`, matching this console's carve-out
  *
