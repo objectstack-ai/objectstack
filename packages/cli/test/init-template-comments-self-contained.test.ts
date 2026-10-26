@@ -266,9 +266,9 @@ const MONOREPO_ONLY = [
   // and `defineTemplate`'s `files` getter — the map `renderAll()` reads below
   // — is `filesFor(DEFAULT_PLACEMENT)`, i.e. `standalone`, whose emitted
   // `tsconfig.json` is self-contained. The one legitimate escaping `../` this
-  // package can produce, `rootTsconfigExtends`, is emitted ONLY on the
+  // package can produce, `baseTsconfigExtends`, is emitted ONLY on the
   // `in-repo` branch and so is never in this sweep. Measured: `filesFor`
-  // `('in-repo')` yields `"../../../tsconfig.json"`; `template.files` and
+  // `('in-repo')` yields `"../../../tsconfig.base.json"`; `template.files` and
   // `filesFor('standalone')` yield no `../` at all.
   //
   // ⚠️ THAT IS THE POPULATION ARGUMENT, NOT A PROPERTY OF THE PATTERN, and the
@@ -282,7 +282,7 @@ const MONOREPO_ONLY = [
   // So there are TWO conditions to re-read this on, not one, and the second is
   // the likelier:
   //   1. the population widens to the `in-repo` placement, which emits
-  //      `rootTsconfigExtends`; or
+  //      `baseTsconfigExtends`; or
   //   2. a template grows an intra-project relative climb — an emitted source
   //      file nested deeply enough to reach back up toward its own project
   //      root. This needs NO placement change at all.

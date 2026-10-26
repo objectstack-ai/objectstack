@@ -222,10 +222,15 @@ type _FaceCarriesStreaming = Expect<
   Equal< Exclude< ListViewExportFace, unknown[] >['streaming'], boolean | undefined >
 >;
 
-/** The array arm's vocabulary is the spec's three formats — `'pdf'` is not among them. */
-type _ArrayArmIsCsvXlsxJson = Expect<
-  Equal< Extract< ListViewExportFace, unknown[] >[number], 'csv' | 'xlsx' | 'json' >
->;
+/**
+ * The array arm's vocabulary carries the spec's three formats — `'pdf'` is not
+ * among them, and it is not `string`. Membership, not a closed list: nothing in
+ * ui is total over the formats, so a format the spec adds is not a red here.
+ */
+type ArrayArmFormat = Extract< ListViewExportFace, unknown[] >[number];
+type _ArrayArmIsCsvXlsxJson = Expect< Equal< Exclude< 'csv' | 'xlsx' | 'json', ArrayArmFormat >, never > >;
+type _ArrayArmHasNoPdf = Expect< Equal< 'pdf' extends ArrayArmFormat ? true : false, false > >;
+type _ArrayArmIsClosed = Expect< Equal< string extends ArrayArmFormat ? true : false, false > >;
 
 /** A minimal, valid `list-view` node — the envelope every parse below rides on. */
 const NODE = { type: 'list-view', objectName: 'accounts' } as const;

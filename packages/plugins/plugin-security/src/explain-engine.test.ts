@@ -679,6 +679,26 @@ describe('explainAccess — record-grained (C2 / ADR-0095)', () => {
       expect(layerRecord(d, 'sharing').outcome).toBe('excluded');
     });
 
+    // [#26188] With no hierarchy resolver the sharing service evaluates 'unit'
+    // as 'own' (an owner-only filter), so the depth cell names the absent
+    // resolver, not the caller's unit. A resolver mounted reads as before.
+    it("unit depth, no hierarchy resolver: the depth cell names the absent resolver, not the depth", async () => {
+      const deps = { ...recDeps({ record: NOT_MINE, shares: [], sharingFilter: { owner_id: { $in: ['u1'] } } }), hierarchyResolverMounted: () => false };
+      const d = await read(deps);
+      expect(d.record).toMatchObject({ visible: false, decidedBy: 'sharing' });
+      const depth = layerRecord(d, 'depth');
+      expect(depth.outcome).toBe('excluded');
+      expect(depth.detail).toMatch(/^Hierarchy resolver absent — requires enterprise; depth evaluated as 'own'\./);
+      expect(depth.detail).not.toContain("outside the caller's");
+    });
+
+    it("unit depth, hierarchy resolver mounted: an owner outside the unit is still blamed on the depth", async () => {
+      const deps = { ...recDeps({ record: NOT_MINE, shares: [], sharingFilter: { owner_id: { $in: ['u1'] } } }), hierarchyResolverMounted: () => true };
+      const depth = layerRecord(await read(deps), 'depth');
+      expect(depth.outcome).toBe('excluded');
+      expect(depth.detail).toContain("owner (u_other) is outside the caller's 'unit' read depth");
+    });
+
     it("a criteria rule's share still explains as 'sharing', with '1 share(s) attached'", async () => {
       // A criteria sharing rule materialises as a `sys_record_share` row with
       // `source: 'rule'` naming the matched user (sharing-rule-service.ts).

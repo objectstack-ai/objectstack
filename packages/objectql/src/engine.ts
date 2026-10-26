@@ -142,6 +142,10 @@ import { getConfigs, introspectDatasource, registerObject, removePackage, syncOb
 // [#25522 cut 9] The hook-context caller-envelope builders; the methods of the
 // same names below call them, and none of the bodies reads a member.
 import { buildEvalUser, buildProvenance, buildSession, buildUser } from './engine-execution-plumbing.js';
+// [#25522 cut 10] The write path's reference check and the caller's read of a
+// master-detail header; the methods of the same names below hand each body the
+// members it reads (`ReferentialIntegrityHost`).
+import { assertReferencesResolve, masterDetailHeadersCallerReads } from './engine-referential-integrity.js';
 import { ExecutionContext, ExecutionContextSchema, type InstalledPackageSource } from '@objectstack/spec/kernel';
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
@@ -320,7 +324,7 @@ import { deriveViewContainerObject } from '@objectstack/metadata/view-container'
 import { viewContainerNameRefusal } from './view-container-name-refusal.js';
 import { bindHooksToEngine, type BindHooksOptions } from './hook-binder.js';
 import { declaredHookCondition } from './hook-wrappers.js';
-import { validateRecord, validateRecordInScope, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError, type FieldValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
+import { validateRecord, validateRecordInScope, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError, type FieldValidationError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
 import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
 import { collectPredicateRelationships, collectReferenceTraversals, referenceTraversalConflicts, evaluateValidationRules, emitValidationAdvisories, optionVisibilityReadsPermissions, readsPermissionPredicate, referentialClearBinding, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
@@ -4327,19 +4331,6 @@ function resolveMetadataItemName(key: string, item: any): string | undefined {
 // on every build, so the seven consumer-local surface declarations the contract
 // replaced can never silently drift from the engine again. IObjectQLEngine
 // extends IDataEngine, so the old claim rides along.
-/**
- * [#4441] "The caller did not name a record here."
- *
- * `null` / `undefined` / `''` mean NO LINK — exactly what
- * `deleteBehavior: 'set_null'` writes — and an empty array is the multi-value
- * spelling of the same thing. None of them is an id to resolve.
- */
-function isEmptyReferenceValue(v: unknown): boolean {
-  if (v === null || v === undefined || v === '') return true;
-  if (Array.isArray(v)) return v.length === 0 || v.every((e) => e === null || e === undefined || e === '');
-  return false;
-}
-
 /**
  * [#4889] The master id a detail row's `parent` binding resolves against:
  * the write's own value for the FK when it carries one (a REPOINT must be
@@ -9929,85 +9920,12 @@ export class ObjectQL implements IObjectQLEngine {
     context: any,
     msgCtx?: { locale?: string; translate?: any; objectName?: string },
   ): Promise<void> {
-    if (context?.isSystem) return;
-    const fields = schema?.fields;
-    if (!fields || !data) return;
-
-    const failures: any[] = [];
-    for (const name of Object.keys(fields)) {
-      // [#4441, narrowing kept by #4743] A `readonly` field is never the
-      // caller's to answer for — BY CONSTRUCTION, not by exemption.
-      //
-      // This check answers for exactly one thing: "the reference the CALLER
-      // named". `stripReadonlyFields` removes a non-system caller's value from
-      // a readonly field before the write — on BOTH write paths since #14147
-      // moved the create-side strip into this engine and deleted the boundary
-      // copy it used to live in. So a value still sitting in one at
-      // this point was minted by the PLATFORM — outside this check's own stated
-      // scope, whatever it happens to hold. That argument stands on its own and
-      // depends on no particular field: deleting the `continue` would start
-      // rejecting the platform's own writes, which is why it is recorded here
-      // (AGENTS.md PD #13) rather than left to be re-derived.
-      //
-      // Historical note, kept because it is how the narrowing was FOUND (the
-      // dogfood gate, not reasoning) and because the audit next door re-scoped
-      // itself on its removal: `sys_metadata_history.recorded_by` is a
-      // `Field.lookup('sys_user', { readonly: true })` that the metadata
-      // repository once filled with `actor ?? 'system'` — a SENTINEL STRING,
-      // not a user id, on a write carrying no `isSystem`; checking it rejected
-      // ordinary metadata authoring (package create / publish / clone). #4556
-      // replaced that sentinel with NULL, so no platform write puts a non-id in
-      // a reference column any more. The narrowing survives it unchanged
-      // because it never rested on it — but #4551's blanket audit skip did, and
-      // #4743/#5719 duly re-scoped that one (see `inspectDanglingReferences`).
-      //
-      // This does NOT weaken #4441: the fields the issue names —
-      // `sys_position_permission_set.permission_set_id` and
-      // `showcase_task.project` — are ordinary author-facing lookups with no
-      // `readonly`, and both stay enforced (pinned in the unit suite).
-      if (fields[name]?.readonly === true) continue;
-      // Only a value the CALLER actually supplied is theirs to answer for.
-      //
-      // Key presence is not enough: a form serializes an unpicked control as
-      // an explicit `null`, and `applyFieldDefaults` then fills it from
-      // `defaultValue` — including the `current_user` token (#2706). The key is
-      // in the payload, but the ID that lands is the PLATFORM's, so validating
-      // it would report a server-derived value as the caller's bad reference
-      // (and reject a perfectly ordinary insert against a driver that has no
-      // `sys_user` row for the acting principal).
-      //
-      // So the value read for the check comes from the post-normalization
-      // `data` (multi-value strings are already split by then), while WHETHER
-      // to check is decided by the caller's own raw value being non-empty.
-      if (!supplied || isEmptyReferenceValue((supplied as Record<string, unknown>)[name])) continue;
-      if (!(name in data)) continue;
-      const def = fields[name];
-      const target = referenceTargetOf(def);
-      if (!target) continue;
-      const raw = (data as Record<string, unknown>)[name];
-      const values = Array.isArray(raw) ? raw : [raw];
-      for (const v of values) {
-        if (v === null || v === undefined || v === '') continue;
-        if (typeof v === 'object') continue;
-        // [#22519] A master-detail header must also be one the caller can read.
-        const resolved = def?.type === 'master_detail'
-          ? await this.masterDetailHeaderExists(target, v, context)
-          : await this.referenceExists(target, v, context);
-        if (resolved === false) {
-          failures.push(buildFieldError(
-            {
-              field: name,
-              code: 'reference_not_found',
-              def,
-              value: String(v),
-              constraint: { target },
-            },
-            msgCtx as any,
-          ));
-        }
-      }
-    }
-    if (failures.length > 0) throw new ValidationError(failures);
+    // [#25522 cut 10] The body moved to `engine-referential-integrity.ts` (see `ReferentialIntegrityHost`).
+    const host: ThisParameterType<typeof assertReferencesResolve> = {
+      masterDetailHeaderExists: (...a) => this.masterDetailHeaderExists(...a),
+      referenceExists: (...a) => this.referenceExists(...a),
+    };
+    return assertReferencesResolve.call(host, schema, data, supplied, context, msgCtx);
   }
 
   /**
@@ -10098,29 +10016,13 @@ export class ObjectQL implements IObjectQLEngine {
     ids: ReadonlyArray<unknown>,
     context: ExecutionContext | undefined,
   ): Promise<ReadonlySet<string>> {
-    const asked = new Map<string, unknown>();
-    for (const id of ids) if (id != null) asked.set(String(id), id);
-    if (context?.isSystem || asked.size === 0) return new Set(asked.keys());
-    // One id is asked by equality, the predicate shape the elevated probe
-    // already sends; a batch by `$in`, as read 2 of the batch reads it.
-    const values = [...asked.values()];
-    try {
-      const rows = await this.find(master, {
-        where: { id: values.length === 1 ? values[0] : { $in: values } },
-        fields: ['id'],
-        context,
-      } as EngineQueryOptions) as Array<Record<string, unknown>>;
-      const served = new Set<string>();
-      for (const row of Array.isArray(rows) ? rows : []) {
-        if (row?.id != null && asked.has(String(row.id))) served.add(String(row.id));
-      }
-      return served;
-    } catch (err) {
-      this.logger?.warn?.('the caller\'s read of the master-detail header failed — the header binds as a missing header', {
-        object: master, error: err,
-      });
-      return new Set();
-    }
+    // [#25522 cut 10] The body moved to `engine-referential-integrity.ts` (see `ReferentialIntegrityHost`).
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof masterDetailHeadersCallerReads> = {
+      find: (...a) => this.find(...a),
+      get logger() { return readLogger(); },
+    };
+    return masterDetailHeadersCallerReads.call(host, master, ids, context);
   }
 
   /**
