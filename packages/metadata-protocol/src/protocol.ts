@@ -59,7 +59,7 @@ import {
     unboundItemDraftAddress,
     type SysMetadataEngine,
 } from './sys-metadata-repository.js';
-import { isOriginGatedType, managedItemSealedSentence, packagedBaseRegimeRow, packagedBaseRegimeSentence } from './packaged-base-regime.js';
+import { managedItemSealedSentence, packagedBaseRegimeRow, packagedBaseRegimeSentence } from './packaged-base-regime.js';
 import {
     resolveArtifactLockLayer,
     resolveItemLock,
@@ -396,6 +396,8 @@ import {
 import { applyPublishBackfill, planPublishBackfill } from './protocol-publish-backfill.js';
 // [#25467 cut 12] The `_drafts` list read and the one-draft discard.
 import { discardDraftInItsScope, listDrafts } from './protocol-drafts.js';
+// [#25467 cut 13] The package door's save refusal and the origin-gated removal verdict.
+import { originGatedRemovalRefusal, refusePackagedBaseOverride } from './protocol-packaged-base-refusal.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -16370,78 +16372,12 @@ export class ObjectStackProtocolImplementation implements
     private refusePackagedBaseOverride(
         request: { type: string; name: string; packageId?: string | null },
     ): void {
-        if (this.isSealedManagedItem(request.type, request.name)) {
-            // [#8184] THE PACKAGE DOOR — the SECOND refusal point for one
-            // condition, and the reason this card exists.
-            //
-            // `SysMetadataRepository.assertAllowed` reads the base the
-            // caller NAMED and answers `ITEM_LOCKED` (`lockSource:
-            // 'package'`) when it is read-only (#7682, then #8146's
-            // hatch ruling). That door is topology-INDEPENDENT — and it
-            // was unreachable here, because this branch throws first on
-            // every kernel with an `environmentId`. So one request
-            // answered `ITEM_LOCKED` on a host-config / CLI-assembled
-            // kernel and the undiscriminated `NOT_OVERRIDABLE` on a
-            // project/cloud per-env one: the refusal VOCABULARY keyed off
-            // a row-scoping key, which is the #5086 / #6710 finding
-            // (see the block comment above) arriving on the error codes.
-            // A client that learns to handle `ITEM_LOCKED` on one
-            // deployment never saw it on the other.
-            //
-            // ⚠️ MIRRORED, NOT RE-INVENTED. Same predicate
-            // ({@link isWritablePackage}, the ADR-0070 rule in one
-            // place), same emitter — `readOnlyBaseOverrideError` is
-            // called, not copied — so the code, the status, the
-            // `lockSource`, the `packageId` and the sentence cannot drift
-            // between the two doors. Two independently-authored refusals
-            // for one condition is how `NOT_OVERRIDABLE`-everywhere
-            // started.
-            //
-            // THE LIMB ORDERING IS THE RULE, and it is the same ordering
-            // the repository states: BELOW every registry limb, and the
-            // hatch is not a limb at all.
-            //   • Below the registry limb — this whole branch is guarded
-            //     by {@link isSealedManagedItem}, whose type half is the
-            //     registry's `allowEnvironmentOverlay` alone, so a regime-O type
-            //     never reaches the door. That is ADR-0005: an overlay of
-            //     a code-shipped item ALWAYS names the read-only package
-            //     it customizes, and a door one limb higher would close
-            //     the overlay model outright. Pinned.
-            //   • [ADR-0131 D6] No hatch limb. `OS_METADATA_WRITABLE` used
-            //     to take an artifact-backed write past this branch, down
-            //     to the repository door, where a package-less write landed
-            //     an overlay of the managed item (#8146 had narrowed that to
-            //     "never a NAMED read-only base"). Managed content is sealed
-            //     now — the broad reading that comment reserved for a
-            //     maintainer decision is the decision ADR-0131 D6 records —
-            //     so the hatch is not consulted here, and the repository
-            //     refuses the same write without it.
-            //
-            // The named-base limb below keeps its own code: a write that
-            // NAMES the read-only base answers `ITEM_LOCKED`, and a
-            // package-less one `NOT_OVERRIDABLE`, with or without the hatch.
-            //
-            // `runtime-only` needs no limb here: this branch is guarded by
-            // `artifactBacked`, so the intent is always
-            // `override-artifact`. The create side of the door is the
-            // ADR-0070 D1 gate further down this method, which is already
-            // topology-independent and already answers
-            // `WRITABLE_PACKAGE_REQUIRED` / 422 on every kernel.
-            const namedBase = typeof request.packageId === 'string' && request.packageId.length > 0;
-            if (namedBase && !this.isWritablePackage(request.packageId)) {
-                throw SysMetadataRepository.readOnlyBaseOverrideError(
-                    request.type, request.packageId as string,
-                );
-            }
-            // [#20819, ADR-0131 D6] The SENTENCE is chosen per ADR-0126 regime,
-            // and names the managed package for every other type; the code and
-            // the status are unchanged. [#23577] Every write reads it, whatever
-            // the write meant to do: the door cannot tell a create from an edit.
-            const err = new Error(managedItemSealedSentence(request.type, request.name, 'save'));
-            (err as any).code = 'NOT_OVERRIDABLE';
-            (err as any).status = 403;
-            throw err;
-        }
+        // [#25467 cut 13] The body moved to `protocol-packaged-base-refusal.ts` (see `PackagedBaseRefusalHost`).
+        const host: ThisParameterType<typeof refusePackagedBaseOverride> = {
+            isSealedManagedItem: (...a) => this.isSealedManagedItem(...a),
+            isWritablePackage: (...a) => this.isWritablePackage(...a),
+        };
+        return refusePackagedBaseOverride.call(host, request);
     }
 
     /**
@@ -16532,8 +16468,11 @@ export class ObjectStackProtocolImplementation implements
      * found a stored row for the delete to remove.
      */
     private originGatedRemovalRefusal(type: string, name: string): Error | null {
-        if (!isOriginGatedType(type)) return null;
-        return this.packagedBaseRefusal({ type, name, operation: 'delete' });
+        // [#25467 cut 13] The body moved to `protocol-packaged-base-refusal.ts` (see `PackagedBaseRefusalHost`).
+        const host: ThisParameterType<typeof originGatedRemovalRefusal> = {
+            packagedBaseRefusal: (...a) => this.packagedBaseRefusal(...a),
+        };
+        return originGatedRemovalRefusal.call(host, type, name);
     }
 
     // ───────────────────────────────────────────────────────────────────

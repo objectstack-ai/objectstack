@@ -16,6 +16,7 @@ import {
   MEASURED_PAYLOAD,
   REGISTRAR,
 } from '../check-docs-route-eager-closure.mjs';
+import { globMatches, jobBlock, repoPath, rootCi, triggerBlock, uiFilterGlobs, uiRun, UI_JOBS, withoutComments } from './helpers/root-ci';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -368,9 +369,16 @@ describe('the real tree -- the properties that keep this gate from being decorat
   // teach readers to fix the test rather than the import.
 });
 
+/**
+ * The home is the repository root's `ci.yml` now (objectstack#25712). GitHub
+ * runs only the root `.github/workflows/`, and objectstack#25902 ported
+ * objectui's `repo-gates.yml`, this gate's old home, into the root `lint-ui`
+ * job, which spells it through its alias. Both pins read that job and the root
+ * triggers, by path.
+ */
 describe('wiring -- the gate is actually reachable and actually runs', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
-  const workflowPath = path.join(repoRoot, '.github/workflows/repo-gates.yml');
+  const ci = rootCi();
 
   it('is exposed as a root package script', () => {
     expect(pkg.scripts['check:docs-route-closure']).toBe(
@@ -378,21 +386,32 @@ describe('wiring -- the gate is actually reachable and actually runs', () => {
     );
   });
 
-  it('has a workflow that gates pull requests and reports on a queue build', () => {
-    expect(fs.existsSync(workflowPath), 'a check nothing runs is not a gate').toBe(true);
-    const workflow = fs.readFileSync(workflowPath, 'utf8');
-    expect(workflow).toMatch(/pull_request:/);
-    expect(workflow).toMatch(/merge_group:/);
-    expect(workflow).toContain('pnpm check:docs-route-closure');
+  it('the root Lint UI job runs it, on pull requests and on a queue build', () => {
+    expect(withoutComments(jobBlock(ci, UI_JOBS.lint)), 'a check nothing runs is not a gate').toContain(
+      `run: ${uiRun('check:docs-route-closure')}`,
+    );
+    const triggers = triggerBlock(ci);
+    expect(triggers).toMatch(/^ {2}pull_request:/m);
+    expect(triggers).toMatch(/^ {2}merge_group:/m);
   });
 
-  it('does NOT filter that workflow by path', () => {
+  it('is filtered by no path its inputs could miss', () => {
     // Its inputs are the whole route graph -- `packages/**`, `apps/site/**`,
-    // `content/docs/**` -- plus its own closure in `scripts/`. A filter listing
-    // all of that is indistinguishable from no filter, and a filter that misses
-    // one of them cannot be exercised by the PR that changes it (objectui#6321).
-    const workflow = fs.readFileSync(workflowPath, 'utf8');
-    expect(workflow).not.toMatch(/paths-ignore:/);
-    expect(workflow).not.toMatch(/^\s+paths:/m);
+    // `content/docs/**` -- plus its own closure in `scripts/`. A filter that
+    // misses one of them cannot be exercised by the PR that changes it
+    // (objectui#6321). The root ci.yml filters no paths at the trigger, and
+    // `lint-ui` runs on the `filter` job's `ui` globs, which must keep matching
+    // every one of those inputs under `ui/`.
+    expect(withoutComments(triggerBlock(ci))).not.toMatch(/^\s+paths(-ignore)?:/m);
+    const globs = uiFilterGlobs(ci);
+    const missed = [
+      'packages/core/src/index.ts',
+      'apps/site/source.config.ts',
+      'content/docs/guide/ci-cd-pipeline.md',
+      'scripts/check-docs-route-eager-closure.mjs',
+    ]
+      .map(repoPath)
+      .filter((file) => !globs.some((glob) => globMatches(glob, file)));
+    expect(missed, 'a change to one of these inputs would skip Lint UI').toEqual([]);
   });
 });

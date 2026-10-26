@@ -254,6 +254,14 @@ export interface ResolvedRef {
    * that predates the annotation.
    */
   source?: RefValueSource;
+  /**
+   * `object-field` only: suggest just the fields whose type is listed
+   * (objectstack#25900 — the notify node's email-field recipient names an
+   * `email`-typed field). The box still takes any typed name.
+   */
+  onlyFieldTypes?: readonly string[];
+  /** `object-field` only: leave the fields whose type is listed out of the suggestions. */
+  exceptFieldTypes?: readonly string[];
 }
 
 /**
@@ -358,7 +366,7 @@ function configString(node: Record<string, unknown> | null | undefined, key: str
 }
 
 /** Resolve the target object name for an `object-field` reference. */
-function resolveObjectName(kind: ReferenceKind, objectSource: string | undefined, ctx: FlowReferenceContext): string | undefined {
+export function resolveObjectName(kind: ReferenceKind, objectSource: string | undefined, ctx: FlowReferenceContext): string | undefined {
   if (kind !== 'object-field') return undefined;
   const src = objectSource || '$trigger';
   if (src === '$trigger') {
@@ -818,8 +826,14 @@ export function ReferenceCombobox({ resolved, value, onCommit, onBlur, onSelect,
       : undefined;
   const { options: listOptions } = useMetadataListOptions(listType);
 
+  // The field-type filters, keyed as text so the options memo reads values, not array identities.
+  const onlyFieldTypes = resolved?.onlyFieldTypes?.join(',');
+  const exceptFieldTypes = resolved?.exceptFieldTypes?.join(',');
+
   const options = React.useMemo<Option[]>(() => {
     if (kind === 'object-field') {
+      const only = onlyFieldTypes ? onlyFieldTypes.split(',') : null;
+      const except = exceptFieldTypes ? exceptFieldTypes.split(',') : [];
       // objectui#13152 — a column the platform injects and hides (the
       // `__search` companion, `owning_business_unit_id`, `organization_id`)
       // is not suggested, judged by the Data rail's own predicate
@@ -827,6 +841,7 @@ export function ReferenceCombobox({ resolved, value, onCommit, onBlur, onSelect,
       // any typed name, and a stored value draws as it was written.
       return objectFields
         .filter((f) => !isStudioHiddenSystemField({ system: f.system, hidden: f.hidden }))
+        .filter((f) => (only === null || only.includes(f.type)) && !except.includes(f.type))
         .map((f) => ({
           value: f.name,
           label: f.label && f.label !== f.name ? `${f.label} (${f.name})` : f.name,
@@ -847,7 +862,7 @@ export function ReferenceCombobox({ resolved, value, onCommit, onBlur, onSelect,
     }
     if (listType) return listOptions;
     return [];
-  }, [kind, listType, objectFields, connectorActionOptions, connectorListOptions, listOptions, ctx.draft, ctx.node]);
+  }, [kind, listType, objectFields, onlyFieldTypes, exceptFieldTypes, connectorActionOptions, connectorListOptions, listOptions, ctx.draft, ctx.node]);
 
   // For an object-field whose object can't be resolved, tell the author why the
   // suggestions are empty — but still let them type a value.

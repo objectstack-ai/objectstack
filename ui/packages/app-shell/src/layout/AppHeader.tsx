@@ -756,6 +756,7 @@ export function AppHeader({
             servedViews,
             viewLabel,
             objectPluralLabel(currentObject),
+            language,
           );
         }
       }
