@@ -219,6 +219,42 @@ function referencingCallerOf(ctx: any): ExecutionContext | null {
 }
 
 /**
+ * [#25692] The copies copy-on-claim minted for one write, so that write's own
+ * claim takes them without asking the read verdict a second time: the verdict
+ * was asked of the SOURCE file before its bytes were copied, and the copy is a
+ * file only this write has ever named.
+ *
+ * Keyed by the write's per-write scratch (`dispatch.scope`, one object shared
+ * by every dispatch of a write across both phases) or, without one, by the hook
+ * context itself (one object for both phases of a single-record write) —
+ * weakly, so an entry lives exactly as long as its write. A write whose two
+ * phases share neither finds no entry, and its claim then judges the copy as
+ * any unclaimed file is judged; a refusal there leaves the copy unclaimed —
+ * retained, never collected — which is the safe direction.
+ */
+const mintedCopies = new WeakMap<object, Set<string>>();
+
+function writeKeyOf(ctx: any): object | null {
+  const scope = ctx?.dispatch?.scope;
+  if (scope && typeof scope === 'object') return scope;
+  return ctx && typeof ctx === 'object' ? ctx : null;
+}
+
+function mintedCopiesFor(ctx: any): Set<string> | null {
+  const key = writeKeyOf(ctx);
+  if (!key) return null;
+  let minted = mintedCopies.get(key);
+  if (!minted) mintedCopies.set(key, (minted = new Set()));
+  return minted;
+}
+
+/** The caller a claim of `fileId` asks about: none for a copy this write minted. */
+function claimingCallerOf(ctx: any, fileId: string, caller: ExecutionContext | null): ExecutionContext | null {
+  const key = writeKeyOf(ctx);
+  return key && mintedCopies.get(key)?.has(fileId) ? null : caller;
+}
+
+/**
  * The `sys_file` row a field's id token names, as THIS write may reference it,
  * or `null`. Both halves of the claim path — copy-on-claim before the write,
  * the claim after it — ask through here, so they cannot disagree about which
@@ -601,6 +637,7 @@ async function applyCopyOnClaim(
   organizationId: string | null,
   caller: ExecutionContext | null,
   authorizeRead: FileReferenceReadAuthorizer | undefined,
+  minted: Set<string> | null,
 ): Promise<void> {
   for (const field of fileFields) {
     if (!(field in data)) continue;
@@ -644,7 +681,9 @@ async function applyCopyOnClaim(
         continue;
       }
       try {
-        replacements.set(token, await copyOwnedFile(engine, storage, row, organizationId));
+        const copyId = await copyOwnedFile(engine, storage, row, organizationId);
+        minted?.add(copyId);
+        replacements.set(token, copyId);
         logger.debug?.(
           `[storage] file reference: copied ${token} for ${object}.${field} (exclusive ownership)`,
         );
@@ -833,7 +872,7 @@ export function installFileReferenceHooks(
       if (fileFields.length === 0) return;
       await applyCopyOnClaim(
         engine, getStorage, logger, object, null, data, fileFields,
-        actingOrganizationOf(ctx), referencingCallerOf(ctx), authorizeRead,
+        actingOrganizationOf(ctx), referencingCallerOf(ctx), authorizeRead, mintedCopiesFor(ctx),
       );
     },
     { packageId: PACKAGE_ID },
@@ -890,7 +929,7 @@ export function installFileReferenceHooks(
       // analysis a later edit has to re-derive.
       await applyCopyOnClaim(
         engine, getStorage, logger, object, recordId, data, fileFields,
-        actingOrganizationOf(ctx), referencingCallerOf(ctx), authorizeRead,
+        actingOrganizationOf(ctx), referencingCallerOf(ctx), authorizeRead, mintedCopiesFor(ctx),
       );
     },
     { packageId: PACKAGE_ID },
@@ -912,7 +951,10 @@ export function installFileReferenceHooks(
       for (const field of fileFields) {
         for (const token of [...new Set(idTokensIn(row[field]))]) {
           try {
-            await claimFile(engine, logger, token, object, String(recordId), field, organizationId, caller, authorizeRead);
+            await claimFile(
+              engine, logger, token, object, String(recordId), field, organizationId,
+              claimingCallerOf(ctx, token, caller), authorizeRead,
+            );
           } catch (err) {
             logger.warn(
               `[storage] file reference: failed to claim ${token} for ${object}/${String(recordId)}.${field} ` +
@@ -973,7 +1015,10 @@ export function installFileReferenceHooks(
           const held = new Set(current.map((r) => String(r.id)));
           for (const token of incoming) {
             if (held.has(token)) continue; // already ours
-            await claimFile(engine, logger, token, object, recordId, field, organizationId, caller, authorizeRead);
+            await claimFile(
+              engine, logger, token, object, recordId, field, organizationId,
+              claimingCallerOf(ctx, token, caller), authorizeRead,
+            );
           }
         } catch (err) {
           logger.warn(
