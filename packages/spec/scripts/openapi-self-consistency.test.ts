@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: the subprocess group runs the real build-openapi.ts once per distinct fixture, the shipped source and each mutation, and cases that share a fixture read its one run; slowest CI reading 10.48 s (run 40204927516, refresh PR #25960's window (hourly runs 40200279306 to 40272142430)) x 1.25, rounded up
 //
 // Pins the self-consistency gate on the generated OpenAPI document (#5168).
 //
