@@ -12,7 +12,34 @@ import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { textSlotTemplateRefusal } from '../automation/flow-text-slot-template';
-export const LocaleSchema = lazySchema(() => z.string().describe('BCP-47 Language Tag (e.g. en-US, zh-CN)'));
+
+/**
+ * The shape a locale tag must have: a 2–8 letter language subtag, then any
+ * number of hyphen-separated 1–8 letter-or-digit subtags (`en`, `zh-CN`,
+ * `zh-Hans-CN`, `es-419`). The same pattern as `SYS_USER_LOCALE_TAG_PATTERN`
+ * (`@objectstack/platform-objects/identity`), the shape a user's own `locale`
+ * column accepts, so a translation is stored only under tags a session can
+ * ask for.
+ *
+ * Shape only, by decision: membership has no registry to check against
+ * (`Intl.getCanonicalLocales('xx-YY')` succeeds, which is why
+ * `shared/value-domain.zod.ts` dropped a `bcp47_locale` domain), and case is
+ * not judged because the resolvers fold it (`zh-cn` resolves to `zh-CN`).
+ * What it refuses is what no resolver ever matches: an underscore separator
+ * (`zh_CN`), whitespace, a language name.
+ */
+const LOCALE_TAG_SHAPE = /^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/;
+
+const LOCALE_TAG_REFUSAL =
+  'must be a BCP-47 language tag such as `en`, `zh-CN` or `zh-Hans-CN`: a 2–8 letter language '
+  + 'subtag, then hyphen-separated subtags. Refused since @objectstack/spec 18, because a translation '
+  + 'stored under any other spelling (`zh_CN`, a trailing space, a language name) is under a locale no '
+  + 'session ever asks for, so its strings never render. Separate subtags with `-`, not `_`.';
+
+export const LocaleSchema = lazySchema(() => z
+  .string()
+  .regex(LOCALE_TAG_SHAPE, LOCALE_TAG_REFUSAL)
+  .describe('BCP-47 Language Tag (e.g. en-US, zh-CN)'));
 export type Locale = z.input<typeof LocaleSchema>;
 
 /**

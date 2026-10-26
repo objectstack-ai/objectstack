@@ -45,6 +45,45 @@ describe('LocaleSchema', () => {
       expect(() => LocaleSchema.parse(locale)).not.toThrow();
     });
   });
+
+  it.each(['zh-Hans-CN', 'es-419', 'yue-HK', 'zh-cn'])('accepts the tag %j (case is not judged)', (locale) => {
+    expect(LocaleSchema.safeParse(locale).success).toBe(true);
+  });
+
+  // #25822: each of these saved green and was stored under a locale no session
+  // ever asks for, so its strings never rendered.
+  it.each(['zh_CN', 'zh-CN ', ' en', 'zh CN', 'Chinese (Simplified)', 'not a locale!!', '', '-CN', '1zh', 'zh-Hansumlaut'])(
+    'refuses %j as a regex-format issue that names the release',
+    (locale) => {
+      const result = LocaleSchema.safeParse(locale);
+      expect(result.success).toBe(false);
+      const issue = result.error!.issues[0]!;
+      expect(issue.code).toBe('invalid_format');
+      expect(issue.message).toMatch(/^must be a BCP-47 language tag/);
+      expect(issue.message).toContain('@objectstack/spec 18');
+    },
+  );
+
+  it('refuses a non-tag locale at both translation doors and on the bundle key', () => {
+    // The item door: `PUT /api/v1/meta/translation/:name` and `defineTranslation`.
+    const item = TranslationItemSchema.safeParse({ name: 'qa_bad_locale', locale: 'not a locale!!', messages: { x: 'y' } });
+    expect(item.success).toBe(false);
+    expect(item.error!.issues.map((i) => i.path.join('.'))).toEqual(['locale']);
+    expect(() => defineTranslation({ name: 'zh_cn', locale: 'zh_CN', messages: { x: 'y' } })).toThrow(/BCP-47 language tag/);
+
+    // The bundle door: the map key itself (`defineTranslationBundle`, `stack.translations`).
+    const bundle = TranslationBundleSchema.safeParse({ zh_CN: { messages: { x: 'y' } } });
+    expect(bundle.success).toBe(false);
+    expect(bundle.error!.issues[0]!.code).toBe('invalid_key');
+    expect(bundle.error!.issues[0]!.path).toEqual(['zh_CN']);
+    expect(PlatformTranslationBundleSchema.safeParse({ 'en ': { messages: { x: 'y' } } }).success).toBe(false);
+    expect(() => defineTranslationBundle({ zh_CN: { messages: { x: 'y' } } })).toThrow();
+
+    // The stack's i18n configuration.
+    const config = TranslationConfigSchema.safeParse({ defaultLocale: 'en', supportedLocales: ['en', 'zh_CN'] });
+    expect(config.success).toBe(false);
+    expect(config.error!.issues.map((i) => i.path.join('.'))).toEqual(['supportedLocales.1']);
+  });
 });
 
 describe('TranslationDataSchema', () => {
