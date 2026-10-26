@@ -161,6 +161,10 @@ describe('[#9967] a sandboxed body that declares a 5xx takes the sanitised 5xx a
 // reverse verification
 // ---------------------------------------------------------------------------
 
+// A long unique marker, not a short word: the whole-body match must not be
+// spellable by chance by a generated id or timestamp.
+const CRASH_WORDS = '__OS_SANDBOX_FAULT_7f3a9c__';
+
 describe('[#9967] the pinned defaults are untouched', () => {
     it('an UNDECLARED body throw keeps the verbatim-message 400 with no code', () => {
         const r = mapDataError(sandboxRefusal(), 'showcase_task');
@@ -175,12 +179,12 @@ describe('[#9967] the pinned defaults are untouched', () => {
         // happens to have a `status` property is still a script fault, never
         // an author-declared refusal.
         const err = sandboxRefusal({ status: 403 });
-        err.innerMessage = 'TypeError: boom';
+        err.innerMessage = `TypeError: ${CRASH_WORDS}`;
         const r = mapDataError(err, 'showcase_task');
 
         expect(r.status).toBe(500);
         expect(r.body.code).toBe('INTERNAL_ERROR');
-        expect(JSON.stringify(r.body)).not.toMatch(/TypeError|boom/);
+        expect(JSON.stringify(r.body)).not.toMatch(new RegExp(`TypeError|${CRASH_WORDS}`));
     });
 });
 

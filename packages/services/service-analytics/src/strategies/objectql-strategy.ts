@@ -53,7 +53,8 @@ import {
 // spec with the three types it named.
 // [#21365] `windowClauseSql` is the same rule for the row window: one spelling
 // of an offset-only window per dialect, shared with the native face.
-import { aggregateOfMeasure, windowClauseSql } from './native-sql-strategy.js';
+// [#25907] `orderClauseSql` likewise for the order and its NULL placement.
+import { aggregateOfMeasure, orderClauseSql, windowClauseSql } from './native-sql-strategy.js';
 
 /**
  * [#10861 / commit 399ecad58] Where a member in the cross-object envelope's inventory
@@ -474,13 +475,17 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * The comparison is the package's one row comparator, `applyOrdering`, which
    * the dataset door's post-pass applies to every grid it assembles; the window
    * is the same door's `applyWindow`. Where the native face answers the same
-   * query, its `ORDER BY` follows the driver's collation and NULL placement
-   * (SQLite sorts NULL lowest, PostgreSQL highest), while `applyOrdering` keeps
-   * NULL and `''` last in both directions, compares numeric text as numbers and
-   * other text with `localeCompare`. The two faces therefore agree on numbers
-   * and on text of single-case ASCII letters, and can differ on a NULL, an
-   * `''`, numeric text, mixed case or punctuation. (A date bucket key is minted
-   * sort-stable, `2026-03`, so it orders chronologically here.)
+   * query, its `ORDER BY` follows the driver's collation, while `applyOrdering`
+   * keeps NULL and `''` last in both directions, compares numeric text as
+   * numbers and other text with `localeCompare`. [#25907] The native face
+   * states the same NULL placement, `NULLS LAST` on SQLite and PostgreSQL
+   * (`orderClauseSql`), and answers an empty `sum` group's `0` in the
+   * statement; on MySQL and an unnamed dialect its NULL placement is the
+   * driver's. The two faces therefore agree on numbers, on NULL where the
+   * dialect is named SQLite or PostgreSQL, and on text of single-case ASCII
+   * letters, and can differ on an `''`, numeric text, mixed case or
+   * punctuation. (A date bucket key is minted sort-stable, `2026-03`, so it
+   * orders chronologically here.)
    */
   private orderAndWindow(query: AnalyticsQuery, rows: Record<string, unknown>[]): Record<string, unknown>[] {
     return applyWindow(applyOrdering(rows, query.order), query.limit, query.offset);
@@ -826,17 +831,18 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     if (groupByParts.length > 0) {
       sql += ` GROUP BY ${groupByParts.join(', ')}`;
     }
-    if (query.order && Object.keys(query.order).length > 0) {
-      const orderClauses = Object.entries(query.order).map(([f, d]) => `"${f}" ${d.toUpperCase()}`);
-      sql += ` ORDER BY ${orderClauses.join(', ')}`;
-    }
     // [#21365] The window renders through the native face's own
     // `windowClauseSql`, for the dialect of the driver the engine aggregate
     // runs on — the same `sqlDialect` read the read scope above makes. An
     // offset with no limit then carries that dialect's no-limit spelling
     // (`LIMIT -1 OFFSET n` on SQLite, whose grammar has no bare `OFFSET`), so
     // the echoed `sql` and `/analytics/sql` print a window the dialect runs.
-    sql += windowClauseSql(query.limit, query.offset, sqlDialectFor(ctx, tableName));
+    // [#25907] The order renders through its `orderClauseSql`, so the echo
+    // states the NULL placement this face applies (`applyOrdering`: last, in
+    // both directions) where the dialect has a spelling for it.
+    const dialect = sqlDialectFor(ctx, tableName);
+    sql += orderClauseSql(query.order, dialect);
+    sql += windowClauseSql(query.limit, query.offset, dialect);
 
     return { sql, params };
   }

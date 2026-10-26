@@ -304,9 +304,12 @@ export function registerAuthzMiddleware(
     }
 
     // [#25251, ruling B] One system context stops short of the bypass: a
-    // flow run's (`isSystem` with a `flowRunId`). Its writes to the four
-    // identity-assignment objects are refused here, because the gates that
-    // judge those writes — the ADR-0090 D12 delegated-administration gate
+    // flow run's (`isSystem` with a `flowRunId`) — and [#25653] the rest of
+    // app-authored automation's, a hook's `runAs: 'system'` and an action
+    // body's (`isSystem` with the app-automation elevation mark). Their
+    // writes to the four identity-assignment objects are refused here,
+    // because the gates that judge those writes — the ADR-0090 D12
+    // delegated-administration gate
     // below, and the identity write guard that keeps invitations and
     // memberships on the organization endpoints — all stand down for
     // `isSystem`. Every other system write, and every read, passes on to the

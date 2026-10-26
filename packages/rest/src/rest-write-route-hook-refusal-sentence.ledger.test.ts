@@ -74,11 +74,21 @@ function sandboxRefusal(): Error {
     return Object.assign(err, { innerMessage: SENTENCE });
 }
 
+/**
+ * The words a crashed body's native error carries. A long unique marker, never
+ * a short word: the leak checks match the WHOLE response body, which also holds
+ * generated ids and timestamps in base36, and a short sentinel such as `boom`
+ * can be spelled by one of those by chance. `TypeError` stays in the pattern
+ * because a lowercase base36 id cannot spell it.
+ */
+const CRASH_WORDS = '__OS_SANDBOX_FAULT_7f3a9c__';
+const CRASH_LEAK = new RegExp(`TypeError|${CRASH_WORDS}`);
+
 /** A body that CRASHED: the runner sets `innerMessage` to the native error text. */
 function sandboxCrash(): Error {
-    const err = new Error("hook 'mz_guard' threw: TypeError: boom");
+    const err = new Error(`hook 'mz_guard' threw: TypeError: ${CRASH_WORDS}`);
     err.name = 'SandboxError';
-    return Object.assign(err, { innerMessage: 'TypeError: boom' });
+    return Object.assign(err, { innerMessage: `TypeError: ${CRASH_WORDS}` });
 }
 
 const WRITE_ROWS = REST_ROUTE_LEDGER.filter((row) => /^(POST|PUT|PATCH|DELETE) /.test(row.route));
@@ -451,7 +461,7 @@ function sandboxDeclared5xx(): Error {
  */
 describe('[#22718] §4 a sandboxed body the doors answer as a fault reads as that fault on both import doors', () => {
     it.each([
-        ['a body that CRASHED', sandboxCrash, /TypeError|boom/],
+        ['a body that CRASHED', sandboxCrash, CRASH_LEAK],
         ['a refusal that declared a 5xx', sandboxDeclared5xx, /ledger/],
     ] as const)('%s', async (_label, error, leak) => {
         const doors: unknown[] = [];
@@ -602,7 +612,7 @@ const OWN_FAULT = { status: 500, code: 'INTERNAL_ERROR' } as const;
  * CONTROL for {@link SANDBOX_OWN_FAULTS}: unchanged by that card.
  */
 const SANDBOX_FAULT_CONTROLS = [
-    ['a body that CRASHED', sandboxCrash, { status: 500, code: 'INTERNAL_ERROR' }, /TypeError|boom/],
+    ['a body that CRASHED', sandboxCrash, { status: 500, code: 'INTERNAL_ERROR' }, CRASH_LEAK],
     ['a refusal that declared a 5xx', sandboxDeclared5xx, { status: 503, code: 'SERVICE_UNAVAILABLE' }, /ledger/],
 ] as const;
 
@@ -627,7 +637,7 @@ const SANDBOX_OWN_FAULTS = [
     ['the sandbox\'s own fault: a missing ctx.api method naming the object',
         sandboxOwnFault(`ctx.api.object('${OBJECT}').find not implemented`), OWN_FAULT, /implemented|ctx\.api/],
     ['the sandbox\'s own fault: a nested body\'s crash relayed one VM hop up',
-        sandboxOwnFault("hook 'mz_inner' threw: TypeError: boom"), OWN_FAULT, /TypeError|boom/],
+        sandboxOwnFault(`hook 'mz_inner' threw: TypeError: ${CRASH_WORDS}`), OWN_FAULT, CRASH_LEAK],
 ] as const;
 
 const SANDBOX_FAULTS = [...SANDBOX_FAULT_CONTROLS, ...SANDBOX_OWN_FAULTS] as const;

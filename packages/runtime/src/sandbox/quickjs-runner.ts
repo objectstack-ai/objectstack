@@ -975,6 +975,35 @@ export class QuickJSScriptRunner implements ScriptRunner {
       graft.value.dispose();
     }
 
+    // [#25905] The declared write provenance, grafted FROZEN for the reason
+    // `ctx.dispatch` is: it is the engine's server-stamped verdict on where the
+    // write came from, so a body must not be able to drift its own copy — not
+    // the members (`ctx.provenance.flowRunId = …`) and not the key itself
+    // (`ctx.provenance = …`). Installed only when the host side carried one
+    // (`buildSandboxContext` leaves it absent on a write with no origin), so
+    // `ctx.provenance?.flowRunId` reads `undefined` there with the spec's own
+    // absence semantics. Same no-caller-data rule as the graft above.
+    if (ctx.provenance !== undefined) {
+      setGlobalJson(vm, '__provenance', ctx.provenance);
+      const graft = vm.evalCode(
+        `(function () {
+           var p = globalThis.__provenance;
+           delete globalThis.__provenance;
+           if (p !== null && typeof p === 'object') {
+             Object.defineProperty(__ctx, 'provenance', {
+               value: Object.freeze(p), enumerable: true, writable: false, configurable: false,
+             });
+           }
+         })();`,
+      );
+      if (graft.error) {
+        const msg = vm.dump(graft.error);
+        graft.error.dispose();
+        throw new SandboxError(`failed to install ctx.provenance: ${formatErr(msg)}`);
+      }
+      graft.value.dispose();
+    }
+
     // VM-side sugar: `ctx.api.transaction(async () => { … })`. Begin runs
     // OUTSIDE the try so a begin failure (e.g. missing capability) propagates
     // without attempting a rollback there is no transaction for. The body's

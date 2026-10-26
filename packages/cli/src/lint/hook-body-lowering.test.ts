@@ -265,6 +265,34 @@ describe('checkHookBodyLowering', () => {
     });
   });
 
+  // [#25905] `ctx.provenance` used to sit in the family above. The body face now
+  // carries it, so a guard telling a flow data node's write from a user's own
+  // write ships as a metadata-only body and lint has nothing to say about it.
+  describe('a body reading the write provenance the sandbox carries (#25905)', () => {
+    const flowOnlyHook = {
+      name: 'account_protection',
+      object: 'account',
+      events: ['beforeInsert', 'beforeUpdate'],
+      handler: (ctx: any) => {
+        if (ctx.input.converted_from_lead && !ctx.provenance?.flowRunId) {
+          throw new Error('converted_from_lead is set by lead conversion only');
+        }
+      },
+    };
+
+    it('reports nothing for it, the bundled-fallback rule included', () => {
+      expect(checkHookBodyLowering({ hooks: [flowOnlyHook] })).toEqual([]);
+    });
+
+    it('and the build lowers it to a body that reads the member', () => {
+      const lowering = lowerCallables({ hooks: [{ ...flowOnlyHook }] });
+      expect(lowering.bodyExtractionWarnings).toEqual([]);
+      expect(lowering.bodyExtracted).toBe(1);
+      const lowered = (lowering.lowered.hooks as Array<Record<string, unknown>>)[0];
+      expect((lowered.body as { source: string }).source).toContain('ctx.provenance?.flowRunId');
+    });
+  });
+
   it('truncates the multi-line offending-source dump to one line', () => {
     const [issue] = checkHookBodyLowering({ hooks: [forbiddenTokenHook] });
     expect(issue.message).not.toContain('--- offending body source ---');
