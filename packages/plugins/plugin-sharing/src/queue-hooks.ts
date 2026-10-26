@@ -38,6 +38,7 @@
  */
 
 import type { SharingRuleRow } from '@objectstack/spec/contracts';
+import type { FieldErrorCode } from '@objectstack/spec/api';
 import type { OptionalSharingLogger } from './logger-shapes.js';
 import { ruleRegrantQueue } from './rule-hooks.js';
 import { METADATA_ACTIVATION_TABLE } from '@objectstack/core';
@@ -71,15 +72,16 @@ interface MinimalEngine {
  * Field-level refusal for a queue row, on the data-API path. The same shape
  * `SharingCriteriaValidationError` uses (`code: 'VALIDATION_FAILED'`, a
  * `fields[]` entry), so REST answers it as a validation failure naming the
- * field.
+ * field. The entry's code is a member of the closed field-level catalog
+ * (`FieldErrorCode`).
  */
 export class QueueValidationError extends Error {
   readonly code = 'VALIDATION_FAILED';
-  readonly fields: Array<{ field: string; code: string; message: string }>;
-  constructor(field: string, code: string, message: string) {
-    super(message);
+  readonly fields: Array<{ field: string; code: FieldErrorCode; message: string }>;
+  constructor(issue: { field: string; code: FieldErrorCode; message: string }) {
+    super(issue.message);
     this.name = 'ValidationError';
-    this.fields = [{ field, code, message }];
+    this.fields = [issue];
   }
 }
 
@@ -104,19 +106,20 @@ export function bindQueueGuards(engine: MinimalEngine, queues: Pick<OwnershipQue
     if (!insert && !Object.prototype.hasOwnProperty.call(data, 'name')) return;
     const name = data.name;
     if (typeof name !== 'string' || !QUEUE_NAME_PATTERN.test(name)) {
-      throw new QueueValidationError(
-        'name',
-        'invalid_format',
-        `A queue name is a machine name — lowercase letters, digits and underscores, starting with a letter (got ${JSON.stringify(name)}). Records, assignment rules, approvals and sharing rules refer to the queue by it.`,
-      );
+      throw new QueueValidationError({
+        field: 'name',
+        code: 'invalid_format',
+        message: `A queue name is a machine name — lowercase letters, digits and underscores, starting with a letter (got ${JSON.stringify(name)}). Records, assignment rules, approvals and sharing rules refer to the queue by it.`,
+      });
     }
     if (queues.isDeclaredQueueName(name)) {
-      throw new QueueValidationError(
-        'name',
-        'duplicate',
-        `'${name}' is the name of a queue an installed app declares, and one name means one queue. ` +
+      throw new QueueValidationError({
+        field: 'name',
+        code: 'invalid_value',
+        message:
+          `'${name}' is the name of a queue an installed app declares, and one name means one queue. ` +
           `To staff that queue, add members to it under its name; for a queue of your own, choose another name.`,
-      );
+      });
     }
   };
 
@@ -126,11 +129,11 @@ export function bindQueueGuards(engine: MinimalEngine, queues: Pick<OwnershipQue
     if (!insert && !Object.prototype.hasOwnProperty.call(data, 'queue')) return;
     const queue = data.queue;
     if (typeof queue !== 'string' || !QUEUE_NAME_PATTERN.test(queue)) {
-      throw new QueueValidationError(
-        'queue',
-        'invalid_format',
-        `Name the queue by its machine name — lowercase letters, digits and underscores (got ${JSON.stringify(queue)}).`,
-      );
+      throw new QueueValidationError({
+        field: 'queue',
+        code: 'invalid_format',
+        message: `Name the queue by its machine name — lowercase letters, digits and underscores (got ${JSON.stringify(queue)}).`,
+      });
     }
   };
 

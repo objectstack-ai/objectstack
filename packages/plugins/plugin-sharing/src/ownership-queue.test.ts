@@ -351,7 +351,7 @@ describe('[ADR-0142 D1] sys_queue / sys_queue_member guards', () => {
     await expect(engine.fire('beforeInsert', 'sys_queue', { input: { data: { name: 'Billing Team' } } })).rejects.toBeInstanceOf(QueueValidationError);
     await expect(engine.fire('beforeInsert', 'sys_queue', { input: { data: { name: 'support_tier1' } } })).rejects.toMatchObject({
       code: 'VALIDATION_FAILED',
-      fields: [{ field: 'name', code: 'duplicate' }],
+      fields: [{ field: 'name', code: 'invalid_value' }],
     });
     await expect(engine.fire('beforeInsert', 'sys_queue', { input: { data: { name: 'billing' } } })).resolves.toBeUndefined();
   });
