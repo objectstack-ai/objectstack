@@ -3537,7 +3537,7 @@ export default class Serve extends Command {
                     `${compiled.stdout ?? ''}${compiled.stderr ?? ''}\n`
                     + chalk.red(`  ✗ Compile failed — fix errors above before starting the dev server.\n`)
                     + chalk.dim(`    A dev boot over ${hmrArtifactPath} compiles ${relativeConfig} into it first, so the`)
-                    + chalk.dim('\n    metadata it serves is the config this boot evaluates (#26242).'),
+                    + chalk.dim('\n    metadata it serves is the config this boot evaluates.'),
                   );
                   process.exit(1);
                 }
