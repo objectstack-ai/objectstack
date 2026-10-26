@@ -154,7 +154,7 @@ async function boot(opts: { locale?: string; i18n?: boolean } = {}) {
     call('PATCH', '/api/v1/data/:object/:id', data, { object: OBJECT, id: 'e1' });
   const create = (data: Record<string, unknown>) => call('POST', '/api/v1/data/:object', data);
   const stored = async () => (await engine.find(OBJECT, { where: { id: 'e1' } }) as any[])[0];
-  return { engine, patch, create, stored };
+  return { engine, patch, create, stored, call };
 }
 
 /** The catalog's sentence for `label`, in `locale` — what the record validator renders. */
@@ -211,6 +211,24 @@ describe('[#24715] a declared `storage.notNull` field\'s refusal names its label
     const door = await create({ id: 'n1', name: 'new', list_price: 1, drift_col: 'd' });
     expectRefusal(door, 'unit_price', 'Sales Price', requiredSentence('Sales Price', 'unit_price'));
     expect(await engine.find(OBJECT, { where: { id: 'n1' } })).toHaveLength(0);
+  });
+});
+
+describe('[#24768] the batch rows answer the same refusal by the same label', () => {
+  it('`POST /data/:object/batch`, a create row with no value: the row\'s error is the validator\'s code and sentence', async () => {
+    const { call, engine } = await boot();
+    const door = await call('POST', '/api/v1/data/:object/batch', {
+      operation: 'create',
+      records: [{ data: { id: 'b1', name: 'new', list_price: 1, drift_col: 'd' } }],
+      options: { atomic: false },
+    });
+    expect(door.status, JSON.stringify(door.body)).toBe(200);
+    expect(door.body).toMatchObject({ succeeded: 0, failed: 1 });
+    expect(door.body.results[0].errors).toEqual([
+      expect.objectContaining({ code: 'VALIDATION_FAILED', message: requiredSentence('Sales Price', 'unit_price') }),
+    ]);
+    expect(JSON.stringify(door.body)).not.toMatch(/constraint failed|unit_price is required/);
+    expect(await engine.find(OBJECT, { where: { id: 'b1' } })).toHaveLength(0);
   });
 });
 
