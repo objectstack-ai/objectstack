@@ -8,6 +8,10 @@
 // Components
 export { AppShell } from './components/AppShell.js';
 
+// The adapter this shell installs into `AdapterCtx`, declared for every
+// reader of `useAdapter` (see the module).
+import './adapter-context-register.js';
+
 // Providers
 export { AdapterProvider, useAdapter } from './providers/AdapterProvider.js';
 export { MetadataProvider, useMetadata, useMetadataItem } from './providers/MetadataProvider.js';

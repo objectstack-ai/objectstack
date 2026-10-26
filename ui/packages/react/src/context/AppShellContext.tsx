@@ -6,18 +6,43 @@ import type { DataSource } from '@object-ui/types';
 // ---------------------------------------------------------------------------
 
 /**
- * The host's data adapter, typed by the protocol-level `DataSource` interface
- * from `@object-ui/types` — never by one concrete adapter (AGENTS #1: inject a
- * `DataSource`, don't hard-code a backend). The runtime therefore installs
- * without any adapter package, and a bring-your-own backend learns at the
- * type level which members it is missing, not at runtime.
+ * Where a host declares the concrete adapter it puts into {@link AdapterCtx}.
  *
- * A host that provides a concrete adapter and reads members beyond
- * `DataSource` narrows in its own package, where it depends on that adapter.
+ * The runtime types the context by the protocol-level `DataSource` interface
+ * from `@object-ui/types`, never by one concrete adapter (AGENTS #1: inject a
+ * `DataSource`, don't hard-code a backend). So `@object-ui/react` installs
+ * without any adapter package, and a bring-your-own backend learns at the type
+ * level which members it lacks instead of at runtime.
+ *
+ * A host whose provider installs a concrete adapter, and whose own code reads
+ * members beyond `DataSource`, declares that adapter here by module
+ * augmentation, in its own package, which already depends on the adapter:
+ *
+ * ```ts
+ * import type { ObjectStackAdapter } from '@object-ui/data-objectstack';
+ * declare module '@object-ui/react' {
+ *   interface AdapterContextRegister { adapter: ObjectStackAdapter }
+ * }
+ * ```
+ *
+ * The augmentation is the host's claim about what its provider installs; the
+ * `AdapterCtx.Provider` value is then checked against the declared type.
  */
-export const AdapterCtx = createContext<DataSource | null>(null);
+// Deliberately empty: an EXTENSION POINT that hosts fill by augmentation.
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type -- see above
+export interface AdapterContextRegister {}
 
-export function useAdapter(): DataSource | null {
+/**
+ * The adapter type {@link AdapterCtx} carries: the host's declared adapter
+ * when {@link AdapterContextRegister} names one, otherwise `DataSource`.
+ */
+export type ContextAdapter = AdapterContextRegister extends { adapter: infer A extends DataSource }
+  ? A
+  : DataSource;
+
+export const AdapterCtx = createContext<ContextAdapter | null>(null);
+
+export function useAdapter(): ContextAdapter | null {
   return useContext(AdapterCtx);
 }
 
