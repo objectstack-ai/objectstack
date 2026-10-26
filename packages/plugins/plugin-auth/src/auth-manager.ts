@@ -1391,12 +1391,17 @@ export const ORGANIZATION_SLUG_LOCKED_CODE: RegisteredErrorCode = 'ORGANIZATION_
  * [#24243] Is this throw out of `assertIssuable` the delegated-administration
  * gate's own refusal? The service's contract is that the gate refuses with its
  * `PermissionDeniedError` (`invitation-placement.ts`), whose ADR-0112 code is
- * `PERMISSION_DENIED`. Read by that code, structurally, because plugin-auth has
- * no runtime dependency on plugin-security (see
+ * `PERMISSION_DENIED`, or, when the reason describes the issuer's own scope (a
+ * unit outside the subtree, a set off the allowlist), its
+ * `DelegationScopeViolationError`, code `DELEGATION_SCOPE_VIOLATION` (#26189).
+ * Both are the gate's verdict. Read by code, structurally, because plugin-auth
+ * has no runtime dependency on plugin-security (see
  * {@link InvitationPlacementServiceLike}).
  */
 export function isInvitationPlacementGateRefusal(err: unknown): boolean {
-  return !!err && typeof err === 'object' && (err as { code?: unknown }).code === 'PERMISSION_DENIED';
+  if (!err || typeof err !== 'object') return false;
+  const code = (err as { code?: unknown }).code;
+  return code === 'PERMISSION_DENIED' || code === 'DELEGATION_SCOPE_VIOLATION';
 }
 
 /**

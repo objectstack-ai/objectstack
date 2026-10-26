@@ -46,7 +46,7 @@ import {
   templates,
   emittedPackageName,
   objectstackDependencySpec,
-  rootTsconfigExtends,
+  baseTsconfigExtends,
   DEFAULT_PLACEMENT,
   type ScaffoldPlacement,
 } from '../src/commands/create.js';
@@ -191,7 +191,7 @@ describe.each(TEMPLATE_KEYS)('os create %s --in-repo — the platform-work emiss
     expect(objectstackDependencySpec('in-repo')).toBe('workspace:*');
   });
 
-  it('extends a tsconfig that resolves to the monorepo ROOT from where it lands', () => {
+  it('extends a tsconfig that resolves to the monorepo root from where it lands', () => {
     const t = templates[key];
     const cfg = tsconfig(key, 'in-repo');
     expect(cfg.extends, `${key}: --in-repo tsconfig extends nothing`).toBeTruthy();
@@ -201,7 +201,19 @@ describe.each(TEMPLATE_KEYS)('os create %s --in-repo — the platform-work emiss
     // arithmetic, not a transcription: a template that moves takes its own
     // `extends` with it.
     const landedIn = `${t.inRepoDir}/${t.dirName(PROJECT)}`;
-    expect(normalizeJoin(landedIn, cfg.extends)).toBe('tsconfig.json');
+    expect(normalizeJoin(landedIn, cfg.extends)).toBe('tsconfig.base.json');
+  });
+
+  it('extends the shared base, never the root scripts/ program, and owns its exclude', () => {
+    const cfg = tsconfig(key, 'in-repo');
+    // The root `tsconfig.json` is the type-check program for `scripts/`; its
+    // `exclude` names `packages`, resolved against the ROOT, so a scaffold
+    // under `packages/plugins/` that inherited it matched none of its own
+    // `src/` and `tsc` stopped with TS18003. The base declares no `exclude`;
+    // the scaffold's own one keeps it that way if the base ever grows one.
+    expect(cfg.extends).toMatch(/(^|\/)tsconfig\.base\.json$/);
+    expect(cfg.exclude, `${key}: --in-repo tsconfig inherits its exclude`).toEqual(['dist', 'node_modules']);
+    expect(cfg.compilerOptions?.types).toEqual(['node']);
   });
 
   it('emits no pnpm-workspace.yaml, which would sever the workspace it joins', () => {
@@ -319,10 +331,10 @@ describe('os create plugin: the emitted package name follows the placement (#155
   });
 });
 
-describe('rootTsconfigExtends derives the ascent from where a template lands', () => {
+describe('baseTsconfigExtends derives the ascent from where a template lands', () => {
   it('counts the project directory itself', () => {
-    expect(rootTsconfigExtends('packages/plugins', 'plugin-x')).toBe('../../../tsconfig.json');
-    expect(rootTsconfigExtends('examples', 'my-app')).toBe('../../tsconfig.json');
+    expect(baseTsconfigExtends('packages/plugins', 'plugin-x')).toBe('../../../tsconfig.base.json');
+    expect(baseTsconfigExtends('examples', 'my-app')).toBe('../../tsconfig.base.json');
   });
 });
 
