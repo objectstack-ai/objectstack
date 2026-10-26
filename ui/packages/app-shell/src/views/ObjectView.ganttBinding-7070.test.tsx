@@ -116,10 +116,11 @@ describe('ganttViewOptions — the object page forwards, it does not invent (obj
 });
 
 describe('no invented gantt date name survives in the source (objectui#7070)', () => {
-  const SOURCE = readFileSync(
-    path.join(path.dirname(fileURLToPath(import.meta.url)), 'ObjectView.tsx'),
-    'utf8',
-  );
+  // This face spans `ObjectView.tsx` and the view-options family it imports
+  // from `objectViewOptions.ts` (objectstack#25992 slice 2), so the scan reads both.
+  const SOURCE = ['ObjectView.tsx', 'objectViewOptions.ts']
+    .map((file) => readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), file), 'utf8'))
+    .join('\n');
 
   /**
    * Executable lines only. The prose above this file's own seams names

@@ -181,14 +181,17 @@ function specEntryArm(): { keys: string[]; strict: boolean } {
 }
 
 describe('objectui#9280 — record:highlights `fields[]` entry against the installed spec', () => {
-  it('PREMISE: the contract declares exactly four entry keys and refuses a fifth', () => {
+  it('PREMISE: the contract declares the entry keys this face reads, not `icon`, and refuses an undeclared one', () => {
     // Read off the schema object rather than transcribed, so a spec that adds
     // or drops a key fails HERE first — before the pins above start asserting
     // a shape the contract no longer has. ⭐ If this ever reports `icon` among
     // the keys, the contract WIDENED and this whole retirement is reversed by
     // a new card, not by loosening the assertions below.
     const arm = specEntryArm();
-    expect(arm.keys).toEqual(['label', 'name', 'readonly', 'type']);
+    // By name (#26238): the keys the entry face declares are present and the
+    // retired `icon` is absent; an unrelated key the spec adds moves neither.
+    expect(arm.keys).toEqual(expect.arrayContaining(['label', 'name', 'readonly', 'type']));
+    expect(arm.keys).not.toContain('icon');
 
     // The load-bearing half. A non-strict arm would STRIP `icon` silently
     // instead of refusing, which is a different defect with a different repair.

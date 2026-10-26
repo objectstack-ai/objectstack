@@ -73,9 +73,7 @@ async function bootWithSchema(schema: Record<string, unknown>, opts: { tenancy?:
     },
   };
   const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await plugin.init(ctx as any);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await plugin.start(ctx as any);
   return plugin;
 }
@@ -102,7 +100,6 @@ const federatedSchema = (extra: Record<string, unknown> = {}) => ({
 describe('[#7835] Layer 0 vs federated (external) objects', () => {
   it('federated object with the INJECTED anchor: no organization_id predicate under `isolated`', async () => {
     const plugin = await bootWithSchema(federatedSchema());
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const filter = await (plugin as any).getReadFilter('ext_customer', MEMBER_CTX);
     // No Layer 1 policies and no Layer 0 contribution → nothing to AND at all.
     expect(filter).toBeUndefined();
@@ -114,7 +111,6 @@ describe('[#7835] Layer 0 vs federated (external) objects', () => {
     // suppression must hold — otherwise the fix would cover one posture and leave
     // the other emitting `organization_id IN (…)` against a table without it.
     const plugin = await bootWithSchema(federatedSchema(), { tenancy: { posture: 'group' } });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const filter = await (plugin as any).getReadFilter('ext_customer', {
       ...MEMBER_CTX,
       accessible_org_ids: ['org-1', 'org-2'],
@@ -135,7 +131,6 @@ describe('[#7835] Layer 0 vs federated (external) objects', () => {
         ...REMOTE_COLUMNS,
       },
     });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const filter = await (plugin as any).getReadFilter('ext_customer', MEMBER_CTX);
     expect(filter).toEqual({ organization_id: 'org-1' });
   });
@@ -147,7 +142,6 @@ describe('[#7835] Layer 0 vs federated (external) objects', () => {
       name: 'task',
       fields: { organization_id: { ...TENANT_SCOPE_FIELD_DEF }, ...REMOTE_COLUMNS },
     });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const filter = await (plugin as any).getReadFilter('task', MEMBER_CTX);
     expect(filter).toEqual({ organization_id: 'org-1' });
   });
@@ -159,7 +153,6 @@ describe('[#7835] Layer 0 vs federated (external) objects', () => {
     // so there was never isolation here to lose. Object-level CRUD is still the
     // gate, and a caller without read permission is refused before this point.
     const plugin = await bootWithSchema(federatedSchema());
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const filter = await (plugin as any).getReadFilter('ext_customer', { ...MEMBER_CTX, tenantId: undefined });
     expect(filter).toBeUndefined();
   });
@@ -196,9 +189,7 @@ describe('[#7835] Layer 0 vs federated (external) objects', () => {
       },
     };
     const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await plugin.init(ctx as any); await plugin.start(ctx as any);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const filter = await (plugin as any).getReadFilter('ext_customer', MEMBER_CTX);
     // Layer 0 gone, Layer 1's authored predicate intact — no `$and`, no org column.
     expect(filter).toEqual({ region: 'org-1' });

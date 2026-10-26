@@ -117,14 +117,11 @@ async function boot(opts: BootOpts = {}) {
     },
   };
   const plugin = new SecurityPlugin({ fallbackPermissionSet: opts.fallback ?? 'member_default' });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await plugin.init(ctx as any);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await plugin.start(ctx as any);
   return {
     plugin,
     warn,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     readFilter: (object: string, context: any) => (plugin as any).getReadFilter(object, context),
     // [#20013] The terminal stands in for the engine, which runs the installed
     // `postHookWriteImageCheck` on an INSERT's rows once its `beforeInsert`
@@ -132,7 +129,6 @@ async function boot(opts: BootOpts = {}) {
     // installs that seam on every insert it walls, and a terminal that skipped
     // it would be refused fail-closed. Only the insert path is modelled: every
     // walled write in this file that reaches the terminal is an insert.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     run: async (opCtx: any) => {
       await middleware!(opCtx, async () => {
         const seam = opCtx.postHookWriteImageCheck;
@@ -156,7 +152,6 @@ const ORG_BOUND = { userId: 'u1', tenantId: 'org-1', positions: [], permissions:
  * not: the sibling forge guard is also `PERMISSION_DENIED`/403, and any 403 at
  * all satisfies the first two.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function expectConformingRefusal(err: any, opts: { principal?: 'session' | 'delegator' } = {}) {
   expect(err, 'the write was not refused at all').toBeDefined();
   expect(err.code).toBe('PERMISSION_DENIED');
@@ -174,10 +169,8 @@ function expectConformingRefusal(err: any, opts: { principal?: 'session' | 'dele
   expect(err.developerMessage).toMatch(/ADR-0123 D2/);
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function refusalFrom(run: (opCtx: any) => Promise<unknown>, opCtx: unknown): Promise<any> {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await run(opCtx as any);
     return undefined;
   } catch (e) {
@@ -399,7 +392,6 @@ describe('[ADR-0123 D2] tenant-scoped READS with no active organization resolve 
     // would be `undefined` (unrestricted) and an ordinary wall would be
     // `organization_id = …`; both are different verdicts from this one.
     expect(filter).toEqual(RLS_DENY_FILTER);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(matchesFilterCondition(ROW as any, filter as any)).toBe(false);
   });
 
@@ -411,7 +403,6 @@ describe('[ADR-0123 D2] tenant-scoped READS with no active organization resolve 
     const h = await boot();
     const filter = await h.readFilter('task', { isSystem: true, userId: 'sys', positions: [], permissions: [] });
     expect(filter).toBeUndefined(); // no scoping imposed at all
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(matchesFilterCondition(ROW as any, (filter ?? {}) as any)).toBe(true);
   });
 
@@ -422,7 +413,6 @@ describe('[ADR-0123 D2] tenant-scoped READS with no active organization resolve 
     const h = await boot();
     const filter = await h.readFilter('task', { ...ORG_BOUND });
     expect(filter).toEqual({ organization_id: 'org-1' });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(matchesFilterCondition(ROW as any, filter as any)).toBe(true);
   });
 

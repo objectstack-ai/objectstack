@@ -217,6 +217,8 @@ const ko = {
     update: "업데이트",
     createSuccess: "{{object}} 생성됨",
     updateSuccess: "{{object}} 업데이트됨",
+    createdNamed: "{{object}} \"{{title}}\" 생성됨",
+    updatedNamed: "{{object}} \"{{title}}\" 업데이트됨",
     created: "생성됨",
     saved: "저장됨",
     savedNamed: "{{title}} 저장됨",

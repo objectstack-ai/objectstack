@@ -194,7 +194,7 @@ async function launchAndSubmit(declared: Record<string, unknown>) {
   expect(doorCalls.map(([url]) => String(url))).toEqual([`/api/v1/actions/${OBJECT_NAME}/escalate_case`]);
 
   // The pause: silent, as ruled — no success toast yet.
-  expect(result).toEqual({ success: true, silent: true });
+  expect(result).toEqual({ success: true, silent: true, handedOff: true });
   expect((toast as any).success).not.toHaveBeenCalled();
 
   const dialog = await screen.findByRole('dialog');

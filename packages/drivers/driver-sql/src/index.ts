@@ -79,6 +79,10 @@ export {
   CROSS_FIELD_OFFSET_OPERAND_NAMES,
   CROSS_FIELD_OFFSET_REFUSALS,
   CROSS_FIELD_OFFSET_ROWS,
+  // [#25808] The `{ $now, addDays }` anchor arm — on the offset fixture.
+  CROSS_FIELD_NOW,
+  CROSS_FIELD_NOW_CASES,
+  CROSS_FIELD_NOW_REFUSALS,
 } from './cross-field-conformance-cases.js';
 export type {
   CrossFieldAuthoredCase,

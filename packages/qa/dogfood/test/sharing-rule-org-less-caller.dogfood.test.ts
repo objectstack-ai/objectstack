@@ -95,7 +95,6 @@ interface RuleRow {
 
 describe('#8158 — a manage_sharing holder with NO active organization cannot read every tenant', () => {
   let stack: VerifyStack;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let ql: any;
   /**
    * A platform operator with no active organization: the Default
@@ -247,7 +246,6 @@ describe('#8158 — a manage_sharing holder with NO active organization cannot r
     expect(Array.isArray(members) ? members : members?.records ?? []).toHaveLength(0);
 
     const sessions = await ql.find('sys_session', { where: { user_id: orgLessUserId }, context: SYS });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const all: any[] = Array.isArray(sessions) ? sessions : sessions?.records ?? [];
     // [ADR-0131 D3] The sign-up session was minted while the reconciler's
     // membership held, and leaving the organization revoked it (#15784); the
@@ -264,7 +262,6 @@ describe('#8158 — a manage_sharing holder with NO active organization cannot r
 
   it('PRECONDITION: the CONTROL persona’s session DOES carry one (so the difference is the membership, not the harness)', async () => {
     const sessions = await ql.find('sys_session', { where: { user_id: orgBoundUserId }, context: SYS });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const rows: any[] = Array.isArray(sessions) ? sessions : sessions?.records ?? [];
     expect(rows.length).toBeGreaterThan(0);
     expect(rows.some((s) => (s.active_organization_id ?? s.activeOrganizationId) === ORG_A)).toBe(true);
@@ -362,7 +359,6 @@ describe('#8158 — a manage_sharing holder with NO active organization cannot r
     const members = await ql.find('sys_member', { where: { user_id: orgScopedOrgLessUserId }, context: SYS });
     expect(Array.isArray(members) ? members : members?.records ?? []).toHaveLength(0);
     const sessions = await ql.find('sys_session', { where: { user_id: orgScopedOrgLessUserId }, context: SYS });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const all: any[] = Array.isArray(sessions) ? sessions : sessions?.records ?? [];
     // The live session only — the sign-up one was revoked on leaving (see above).
     const rows = all.filter((s) => !(s.revoked_at ?? s.revokedAt));

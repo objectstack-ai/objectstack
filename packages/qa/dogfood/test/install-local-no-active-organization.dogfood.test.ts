@@ -60,7 +60,6 @@ const SEED_TOTAL = Object.values(SEEDED).reduce((a, b) => a + b, 0);
 /** The words ADR-0123 D4 requires the refusal to carry. */
 const NAMES_THE_MISSING_ORGANIZATION = 'this session has no active organization';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const rowsOf = (r: any): any[] => (Array.isArray(r) ? r : Array.isArray(r?.records) ? r.records : []);
 
 /** The install body `os package install <artifact>.json` sends. */
@@ -82,7 +81,7 @@ async function countRows(ql: IObjectQLEngine, organizationId?: string): Promise<
   return total;
 }
 
-async function json(res: Response): Promise<{ status: number; body: any }> { // eslint-disable-line @typescript-eslint/no-explicit-any
+async function json(res: Response): Promise<{ status: number; body: any }> {
   return { status: res.status, body: await res.json().catch(() => null) };
 }
 
@@ -95,7 +94,7 @@ describe('dogfood: install-local under an organization wall, with a session that
   let sessionOrgBefore: unknown;
   let sessionOrgAfter: unknown;
   let memberships: number;
-  type Answer = { status: number; body: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
+  type Answer = { status: number; body: any };
   const orgless: Record<'install' | 'reseed' | 'purge', Answer> = {} as never;
   const inOrgB: Record<'reseed' | 'purge' | 'reinstall', Answer> = {} as never;
   let rowsAfterOrgless: number;

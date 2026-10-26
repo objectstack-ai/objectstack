@@ -264,12 +264,10 @@ async function knock(door: Door, token: string, flow: Target): Promise<{ answer:
     ),
   });
   expect(res.status, `the MCP transport itself answered ${res.status}: ${await res.clone().text()}`).toBe(200);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rpc: any = await res.json();
   expect(rpc.error, `run_action JSON-RPC error: ${JSON.stringify(rpc.error)}`).toBeUndefined();
   if (rpc.result?.isError !== true) return { answer: 200 };
   const text = String(rpc.result?.content?.[0]?.text ?? '');
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let parsed: any;
   try {
     parsed = JSON.parse(text);
@@ -302,7 +300,6 @@ describe('control: the member cannot write the ledger directly', () => {
     } catch (e) {
       err = e;
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const refusal = err as any;
     expect(refusal?.code).toBe('PERMISSION_DENIED');
     expect(refusal?.statusCode ?? refusal?.status).toBe(403);
