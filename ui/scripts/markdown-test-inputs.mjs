@@ -844,19 +844,19 @@ export const ADJUDICATED = new Map([
   [
     'scripts/__tests__/check-doc-links.test.ts',
     {
-      reads: ['./*', 'apps/**', 'content/docs/**', 'docs/ARCHITECTURE.md', 'docs/CONSOLE-STREAMLINING-SUMMARY.md', 'docs/adr/**', 'docs/audits/**', 'examples/**', 'packages/**'],
+      reads: ['./*', 'apps/**', 'content/docs/**', 'docs/app-shell-extraction-guide.md', 'docs/adr/**', 'docs/audits/**', 'examples/**', 'packages/**'],
     },
   ],
   [
     'scripts/__tests__/check-doc-snippet-emitted-census.test.ts',
     {
-      reads: ['README.md', 'apps/console/docs/UI_IMPROVEMENT_PROPOSAL.md', 'apps/console/docs/deployment.md', 'apps/console/docs/error-tracking.md', 'content/docs/**', 'docs/ARCHITECTURE.md', 'docs/CONSOLE-STREAMLINING-SUMMARY.md', 'docs/adr/**', 'docs/audits/**', 'packages/**'],
+      reads: ['README.md', 'apps/console/docs/UI_IMPROVEMENT_PROPOSAL.md', 'apps/console/docs/deployment.md', 'apps/console/docs/error-tracking.md', 'content/docs/**', 'docs/app-shell-extraction-guide.md', 'docs/adr/**', 'docs/audits/**', 'packages/**'],
     },
   ],
   [
     'scripts/__tests__/check-doc-snippet-types.test.ts',
     {
-      reads: ['README.md', 'apps/console/docs/UI_IMPROVEMENT_PROPOSAL.md', 'apps/console/docs/deployment.md', 'apps/console/docs/error-tracking.md', 'content/docs/**', 'docs/ARCHITECTURE.md', 'docs/CONSOLE-STREAMLINING-SUMMARY.md', 'docs/adr/**', 'docs/audits/**', 'packages/**'],
+      reads: ['README.md', 'apps/console/docs/UI_IMPROVEMENT_PROPOSAL.md', 'apps/console/docs/deployment.md', 'apps/console/docs/error-tracking.md', 'content/docs/**', 'docs/app-shell-extraction-guide.md', 'docs/adr/**', 'docs/audits/**', 'packages/**'],
       walker: 'markdown-tree',
     },
   ],
@@ -1004,7 +1004,7 @@ export const ADJUDICATED = new Map([
   [
     'scripts/__tests__/dollar-dialect-alias-census.test.ts',
     {
-      reads: ['./*', '.changeset/**', '.claude/skills/**', 'apps/**', 'content/docs/**', 'docs/ARCHITECTURE.md', 'docs/CONSOLE-STREAMLINING-SUMMARY.md', 'docs/adr/**', 'docs/audits/**', 'examples/**', 'packages/**', 'patches/README.md', 'skills/objectui/**'],
+      reads: ['./*', '.changeset/**', '.claude/skills/**', 'apps/**', 'content/docs/**', 'docs/app-shell-extraction-guide.md', 'docs/adr/**', 'docs/audits/**', 'examples/**', 'packages/**', 'patches/README.md', 'skills/objectui/**'],
     },
   ],
   [
