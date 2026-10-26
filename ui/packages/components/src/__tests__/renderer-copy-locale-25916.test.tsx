@@ -55,8 +55,10 @@ function withLanguage(element: React.ReactElement, language: 'zh' | null) {
 
 const ALPHA = { id: 'a', name: 'Alpha', qty: 10 };
 
+/** Resolved once, at module scope: the renderers registered above. */
+const Table = ComponentRegistry.get('data-table')!;
+
 function DataTable({ onRowClick }: { onRowClick?: () => void }) {
-  const Table = ComponentRegistry.get('data-table')!;
   const schema = {
     type: 'data-table',
     editable: true,
