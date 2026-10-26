@@ -353,6 +353,18 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "共有モデル",
         helpText: "社内ユーザー向けの組織既定のレコード可視性（OWD）。カスタムオブジェクトで省略した場合、実行時は private として解決されます（ADR-0090 D1）。"
       },
+      sharing: {
+        label: "共有",
+        helpText: "上の組織全体のデフォルトを細かく調整する、オブジェクト単位の共有オプトインです。デフォルトを置き換えることはありません。未設定: 各オプトインのデフォルトが適用されます。"
+      },
+      "sharing.controlledByParent": {
+        label: "親レコードに従う",
+        helpText: "sharingModel が 'controlled by parent' のときだけ読み取られます。それ以外の共有モデルでは拒否されます。"
+      },
+      "sharing.controlledByParent.ownerMayEdit": {
+        label: "所有者は編集可",
+        helpText: "オン: 子レコードの所有者（その owner_id）は、親レコードの読み取り権限があればその行を id 指定で更新できます。それ以外の人、およびすべての挿入・削除・複数行更新・代理書き込みには、引き続き親レコードの編集権限が必要です。オフ（デフォルト）: 子レコードのすべての書き込みに親レコードの編集権限が必要です。"
+      },
       access: {
         label: "アクセス設定",
         helpText: "ワイルドカード付与の方針（ADR-0066 D2）。省略時は public として解決されます。権限セットの '*' オブジェクト付与がこのオブジェクトに及ぶかどうかを決めます。ユーザー間のレコード可視性は sharingModel が決めます。"

@@ -1217,7 +1217,10 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // authored in all three locales.
       // 679 since the flow form offers `requiredPermissions` (who may start the
       // flow) — one row label, authored in all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(679);
+      // 682 since #25760 (ADR-0055 §3 amendment): the object form's `sharing`
+      // composite — the block, its `controlledByParent` sub-block and the
+      // `ownerMayEdit` toggle — three row labels, authored in all three locales.
+      expect(translated.length, `${locale} positive control`).toBe(682);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

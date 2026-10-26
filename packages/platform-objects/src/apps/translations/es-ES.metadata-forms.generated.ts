@@ -353,6 +353,18 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Modelo de uso compartido",
         helpText: "Visibilidad predeterminada de la organización (OWD) para usuarios internos. Un objeto personalizado que lo omita se resuelve como private en tiempo de ejecución (ADR-0090 D1)."
       },
+      sharing: {
+        label: "Compartición",
+        helpText: "Opciones de compartición por objeto que afinan el valor predeterminado de toda la organización indicado arriba; nunca lo sustituyen. Sin definir: se aplica el valor predeterminado de cada opción."
+      },
+      "sharing.controlledByParent": {
+        label: "Controlado por el registro principal",
+        helpText: "Solo se lee cuando sharingModel es 'controlled by parent'; con cualquier otro modelo de compartición se rechaza."
+      },
+      "sharing.controlledByParent.ownerMayEdit": {
+        label: "El propietario puede editar",
+        helpText: "Activado: el propietario de una fila de detalle (su owner_id) puede actualizar esa fila por id con acceso de lectura al registro principal; todos los demás, y cada inserción, eliminación, actualización de varias filas y escritura en nombre de otro, siguen necesitando acceso de edición al registro principal. Desactivado (el predeterminado): cada escritura de un detalle necesita acceso de edición a su registro principal."
+      },
       access: {
         label: "Acceso",
         helpText: "Postura ante las concesiones comodín (ADR-0066 D2). Si se omite, se resuelve como public. Decide si la concesión de objeto '*' de un conjunto de permisos cubre este objeto; la visibilidad de registros entre usuarios la decide sharingModel."
