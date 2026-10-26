@@ -28,7 +28,7 @@ import type {
 // [#22175] Whether a door's scoped by-id write can reach the row it names —
 // the store's own answer, asked before the write. [#22332] And the chunk
 // door's conditional progress write.
-import { organizationOutOfWriteReach, updateSessionProgressIfUnchanged } from './metadata-store.js';
+import { organizationOutOfWriteReach, releasingRecordOf, updateSessionProgressIfUnchanged } from './metadata-store.js';
 import type { LocalStorageAdapter } from './local-storage-adapter.js';
 // The ONE refusal `verifyToken` throws, recognised by its brand — never by
 // reading the message, which once let a genuine fault whose text said
@@ -362,9 +362,11 @@ export interface StorageRoutesOptions {
    */
   resolveFileHolder?: (file: FileRecord) => Promise<FileHolder>;
   /**
-   * TTL (seconds) for the signed URL minted on a GATED attachments download.
-   * Short by design — the link is followed immediately after an explicit
-   * click. Default 300 (5 min). Non-gated downloads keep `presignedTtl`.
+   * TTL (seconds) for the signed URL minted on a download governed by a
+   * record's rule: an attachments-scope file, a field-owned file, and
+   * [#26046] a file a record let go. Short by design — the link is followed
+   * immediately after an explicit click. Default 300 (5 min). Every other
+   * download keeps `presignedTtl`.
    */
   downloadTtl?: number;
   /** Optional logger for the one-time open-mode notice. */
@@ -601,7 +603,11 @@ export function registerStorageFamily(
       }
       return false;
     }
-    return gated ? downloadTtl : currentLimits().presignedTtl;
+    // [#26046] A file a record let go is judged by that record's rule, so its
+    // link gets the record-governed lifetime too. Who is served stays the
+    // verdict's alone: the session gate above asks it, as for any file no
+    // record owns.
+    return gated || releasingRecordOf(file) ? downloadTtl : currentLimits().presignedTtl;
   };
 
   // ── Download servability (#10246) ────────────────────────────────────

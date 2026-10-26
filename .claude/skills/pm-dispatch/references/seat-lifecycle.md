@@ -18,7 +18,6 @@
 - 异于上一开轮标记即先重读;留开轮标记(session ID + fire 时刻 + 该触碰,注明重读)再跑轮。
 - 同读 harness 载入面 `.claude/**` 的最新触碰与内容是否已在共享检出 HEAD。
 - 否 ⇒ 记座位贴,自然收班时换会话,⛔ 不中断批次;读数走 `scripts/pm/check-harness-current.mjs`。
-- `session-start-fleet.sh` 钩子开会话即印 SKILL.md 触碰 sha 与车道席位贴行,供比对开轮标记。
 
 ## 座位贴协议
 
@@ -70,6 +69,7 @@
 - 项目席轮报 = 卡线程清单,⛔ 不逐轮发聊天表;五项健康指标进总监席的每日摘要。
 - 报告加升级项、呈裁清单、逐 PR 熔断命中项(无则 none),与已落 PR 48h 内开出的跟进 PR 数。
 - 与产品提交占比:已合提交不触 `.claude/` `AGENTS.md` `scripts/pm` 门禁脚本 `.github/workflows` 者。
+- 产品提交占比连续多轮偏低 ⇒ 席位报维护者。
 - 报告含 `UNRECOGNISED` 行:对本轮门禁日志 grep `UNRECOGNISED` 逐行照录,`NOT APPLICABLE` 行也在内。
 - 健康指标五个:可派发库存(open `pm:queue` 未认领及趋势);决策箱(待维护者数)。
 - 决策箱指标还要点名带开放下游依赖的决策卡,从 `Blocked-by:` 反向索引现算。

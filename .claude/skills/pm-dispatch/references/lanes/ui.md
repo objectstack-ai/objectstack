@@ -1,38 +1,23 @@
 # 车道岗位说明:domain:ui
 
-见 cross-repo-coordination.md;本文是本席的岗位说明,现值状态恒在座位贴,⛔ 不迁入本文件。
+范围见 SKILL.md 域车道表 `domain:ui` 行;本文是岗位说明,现值状态恒在座位贴,⛔ 不迁入。
 
 ## 形态
 
-- 本席为姊妹仓执行座位:在 objectui 仓认领、派发、复核、落地。
+- 本席是本仓 `ui/` 树的执行座位:在 objectstack 认领、派发、复核、落地。
 - ⛔ 不产 `domain:*`、type 与定级,中央分诊唯一生产;误标 ⛔ 不自改,挂 `pm:retriage`+异议同笔。
-- 维护者裁决例外于上条与 SKILL.md 无标签禁认领:main/队列 `Spec Main Shape Gate` 红即止血认领。
-
-## 范围
-
-- objectui 全部代码归本席:发布库 `@object-ui/*` 与 `apps/*`;`packages/types`、schema 语料与 spec pin;
-- `.github/`、`scripts/`、构建与发布管线、门禁工具;docs 随所记录的面走。
-- 协议恒归 objectstack `domain:spec`,新 `packages/spec` 工作同此;跨层功能的 objectui 子单归本席。
+- 协议恒归 `domain:spec`,新 `packages/spec` 工作同此;跨层功能的 `ui/` 子单归本席。
 - 落点不明留分诊首触,⛔ 不猜、不代判。
 
 ## 常设承诺
 
-- 构建产物经 `pnpm objectui:refresh` 回流,见 AGENTS.md。
-- 回流后的 console pin bump 是 objectstack 的单张卡,⛔ 永不做本仓 PR 的 rider。
-- `scripts/pm/**` 单写手恒在 objectstack 侧 ⇒ 本席的工具需求走上游卡带 `Blocked-by:` 回链。
-- 本仓标签/assignee 写走 objectstack `label-write.mjs --repo`,⛔ 不 MCP `issue_write`;被拒转有通道席。
-- 受管面五项含仓根发布 `skills/**`,清单、判据与禁令见 objectui AGENTS.md §9 受管面段。
-- ⇒ 命中即停 draft;⛔ 未获授权批准不 ready 不入队不自合、永不批准,获批后认领席落地。
-- 未命中的 PR 按同节走合并队列落地;changeset 与版本纪律见 objectui AGENTS.md §9。
-- 半状态巡查在本仓有载体:定时 workflow 与 sweeper 皆在,自 objectstack 移植。
-- 锚 issue 未配置 ⇒ 写锚步骤 skip,发现只落 run summary,绿不等于已交付读锚腿。
-- ⇒ 手工半边照 `hotcrm.md` 那条办,并每轮实测锚是否已配,⛔ 不沿用本行读数。
+- `ui/` 的规则在 `ui/AGENTS.md`,只补充根 `AGENTS.md`;受管面、合并队列与 changeset 一律按根文件。
+- `scripts/pm/**` 不归本席 ⇒ 工具需求立卡给归属车道并带 `Blocked-by:` 回链,⛔ 不顺手改。
 
 ## 席内判断
 
 - 卡正文是快照不是状态:⛔ 不凭正文单读裁决或派发,读全线程并对 `origin/main` 重测。
-- `pm:queue` 在本仓兼指已分诊与可派发 ⇒ 逐张重验可派性,⛔ 不按标签直派。
-- 零读数恒配点亮的正控,且正控须经被测机制本身生效;本仓 search 假零,查重只引命中。
+- 零读数恒配点亮的正控,且正控须经被测机制本身生效;查重只引命中。
 - 脚本能滚动不证明用户能滚动:可达性断言必须驱动真实输入管道。
 - 落地验证按内容,正控须在合并前证明会响,⛔ 不按 sha 判已落地。
 - 契约三面复核本席适用:按面欠达档记录落 PR 或卡,散文面归 ACCEPT,见 `../contract-review.md`。

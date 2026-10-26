@@ -110,7 +110,6 @@ import { postureEnforcesWall } from '@objectstack/spec/security';
 import { temporalStorageForm } from '@objectstack/core';
 import {
   buildIndexName,
-  describeMissingIndexColumns,
   diffManagedIndexes,
   diffManagedTable,
   diffUnbuildableIndexes,
@@ -195,7 +194,9 @@ import {
 // the methods of the same names below hand each body the members it reads
 // (`SchemaSyncHost`). [#25521 cut 8] The index drift op and its failed-tighten
 // restore (`applyIndexDriftOp`, `restoreBareIndexAfterFailedTighten`) beside them.
-import { applyDriftOpInPlace, applyIndexDriftOp, rebuildSqliteTablePatched, restoreBareIndexAfterFailedTighten } from './sql-driver-schema-sync.js';
+// [#25521 cut 9] The unique pre-flight and the declared-index sync too
+// (`applyNullSafeUniquePreflight`, `syncDeclaredIndexes`, `createNullSafeUniqueIndex`).
+import { applyDriftOpInPlace, applyIndexDriftOp, applyNullSafeUniquePreflight, createNullSafeUniqueIndex, rebuildSqliteTablePatched, restoreBareIndexAfterFailedTighten, syncDeclaredIndexes } from './sql-driver-schema-sync.js';
 import { makeDatabaseDirectory, probeAbsentSqliteDatabaseFile, SqliteDatabaseFileError } from './sqlite-database-file.js';
 import { jsonMembershipPredicate } from '@objectstack/core';
 import knex, { Knex } from 'knex';
@@ -5434,26 +5435,6 @@ interface RowWidthContribution {
   name: string;
   chars: number;
   bytes: number;
-}
-
-/**
- * Render the duplicate groups a unique pre-flight probe found, for an operator
- * message: at most five groups, then a count of the rest.
- *
- * Module-local on purpose (commit 61821e54c). The two sites that report a blocked unique
- * — the drift entry and the boot-time durability log — must name the SAME rows
- * in the SAME shape, and a second hand-rolled `.slice(0, 5).join('; ')` is
- * exactly how the plain and the NULL-safe path drifted apart in the first
- * place. Not a method, and not exported: `SqlDriver`'s `.d.ts` carries its
- * protected members, so a new method there would move a published entry point
- * for a string helper.
- */
-function formatDuplicateGroups(duplicates: ReadonlyArray<{ key: string; rows: number }>): string {
-  const shown = duplicates
-    .slice(0, 5)
-    .map((g) => `(${g.key}) \u00d7 ${g.rows} rows`)
-    .join('; ');
-  return duplicates.length > 5 ? `${shown}; \u2026and ${duplicates.length - 5} more group(s)` : shown;
 }
 
 /** The part of a better-sqlite3 `Database` that {@link reclaimBetterSqlite3} drives. */
@@ -14352,71 +14333,14 @@ export class SqlDriver implements IDataDriver {
    * retires is a platform-wide unique, strictly stronger than the NULL-safe
    * composite, so duplicates in the new key are impossible by construction.
    */
-  protected async applyNullSafeUniquePreflight(entries: ManagedDriftEntry[]): Promise<void> {
-    for (const d of entries) {
-      const op = d.op;
-      if (op.type !== 'recreate_index' && op.type !== 'create_index') continue;
-      if (!op.unique) continue;
-      const nullSafeColumns = op.nullSafeColumns ?? [];
-      const nullSafeKey = nullSafeColumns.length > 0;
-      const tighten = op.type === 'recreate_index' && op.tightenNullSafeOnly === true;
-      // A generic unique recreate (columns differ beyond the key-part form)
-      // keeps its pre-ADR-0120 semantics untouched.
-      if (op.type === 'recreate_index' && !tighten) continue;
-      // …and a PLAIN unique has no tightening shape at all, so only its CREATE
-      // reaches the probe (commit 61821e54c).
-      if (!nullSafeKey && op.type !== 'create_index') continue;
-
-      let duplicates: Array<{ key: string; rows: number }>;
-      try {
-        duplicates = await this.probeNullSafeUniqueDuplicates(op.table, op.columns, nullSafeColumns);
-      } catch (e: any) {
-        // Probe failure must fail SAFE: without evidence the data is clean the
-        // op may not claim eligibility for auto-apply.
-        this.logger.warn(
-          `[schema-drift] duplicate pre-flight for '${op.indexName}' on '${op.table}' failed — leaving the op gated`,
-          e?.message ?? e,
-        );
-        continue;
-      }
-
-      const signature = d.expected;
-      if (duplicates.length === 0) {
-        if (tighten) {
-          d.category = 'safe';
-          d.severity = 'warning';
-          d.message =
-            `${op.table}: index '${op.indexName}' tightens to ${signature} — the organization key part becomes ` +
-            `NULL-safe (ADR-0120 D3), so rows without an organization are constrained too. The duplicate ` +
-            `pre-flight probe found no conflicting rows: pure tightening, applied by "os migrate apply" ` +
-            `(auto-applied at boot under dev autoMigrate: 'safe').`;
-        }
-        continue;
-      }
-
-      const report = formatDuplicateGroups(duplicates);
-      d.category = 'destructive';
-      d.severity = 'error';
-      // The block, declared on the entry: `os migrate plan` / `apply` read it
-      // here and never offer `--allow-destructive` for an op the apply refuses
-      // on this data however it is confirmed.
-      d.applyLimit = `existing rows already violate the unique key: ${report}`;
-      d.message = nullSafeKey
-        ? `${op.table}: cannot ${tighten ? 'tighten' : 'create'} '${op.indexName}' as ${signature} — existing rows ` +
-          `already violate the NULL-safe unique constraint (duplicates the old index wrongly admitted: SQL ` +
-          `UNIQUE is NULL-distinct, so it never constrained rows without an organization): ` +
-          `${report}. The op is BLOCKED: apply re-probes and refuses, and the existing index stays in place ` +
-          `(ADR-0120 D4). Deduplicate the listed rows, then re-run "os migrate plan".`
-        : // Commit 61821e54c: the plain unique has no #5030 history behind it — nothing
-          // ever admitted these rows, the constraint is simply newly declared
-          // over data that does not satisfy it. So the message says what IS
-          // true, and above all withdraws the `safe` claim: this op is not
-          // applied by `os migrate apply` and not auto-applied at boot.
-          `${op.table}: cannot create '${op.indexName}' as ${signature} — existing rows already violate it: ` +
-          `${report}. The op is BLOCKED: neither "os migrate apply" nor dev autoMigrate: 'safe' will create it, ` +
-          `so the constraint is NOT enforced. Deduplicate the listed rows, then re-run "os migrate plan" ` +
-          `(ADR-0120 D4).`;
-    }
+  protected applyNullSafeUniquePreflight(entries: ManagedDriftEntry[]): Promise<void> {
+    // [#25521 cut 9] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof applyNullSafeUniquePreflight> = {
+      get logger() { return readLogger(); },
+      probeNullSafeUniqueDuplicates: (...a) => this.probeNullSafeUniqueDuplicates(...a),
+    };
+    return applyNullSafeUniquePreflight.call(host, entries);
   }
 
   /**
@@ -15205,7 +15129,7 @@ export class SqlDriver implements IDataDriver {
    *   refusal instead of the duplicate rows. Measured on live MySQL 8.0.46 in
    *   `sql-driver-15479-shadow-plain-unique-duplicates.test.ts`.
    */
-  protected async syncDeclaredIndexes(
+  protected syncDeclaredIndexes(
     tableName: string,
     indexes: DeclaredIndexInput[],
     physicalColumns: Set<string>,
@@ -15217,264 +15141,19 @@ export class SqlDriver implements IDataDriver {
      */
     fields?: Record<string, any>,
   ): Promise<void> {
-    const existing = await this.getExistingIndexNames(tableName);
-    const resolvedTenantField = tenantField !== undefined ? tenantField : this.resolveTenantField(tableName);
-
-    for (const idx of indexes) {
-      const norm = normalizeDeclaredIndex(tableName, idx, resolvedTenantField);
-      if (!norm) continue;
-      const { name, columns, unique } = norm;
-      const nullSafe = new Set(norm.nullSafeColumns ?? []);
-
-      const missing = columns.filter((f) => !physicalColumns.has(f));
-      if (missing.length > 0) {
-        // Durability, not function (AGENTS.md "Degradation log levels"): the
-        // sync goes on and the object serves normally, while DDL the metadata
-        // declares did not run. For a UNIQUE index, that means duplicate rows
-        // are accepted. So this goes on the durability channel, like the
-        // duplicate-row arms further down this loop. One line per skipped index
-        // per sync. It states the consequence and the fix, and says whether
-        // the index was UNIQUE (the prose, and `unique` in the meta).
-        this.logDurabilityFailure(
-          `[sql-driver] declared ${unique ? 'UNIQUE ' : ''}index '${name}' on "${tableName}" was NOT created: ` +
-            `no column for ${describeMissingIndexColumns(missing, fields)}. ` +
-            (unique
-              ? `The uniqueness it declares is NOT enforced: duplicate rows are accepted, and the object keeps ` +
-                `working as if the constraint existed. `
-              : `The index does not exist, and the object keeps working as if it did. `) +
-            `Fix the metadata so every column in the index's fields is a stored field of the object, or ` +
-            `remove the index ("os validate" refuses a name that is not a field).`,
-          { tableName, index: name, fields: columns, missing, unique },
-        );
-        continue;
-      }
-
-      if (existing.has(name)) continue;
-
-      try {
-        if (nullSafe.size > 0) {
-          await this.createNullSafeUniqueIndex(tableName, name, columns, nullSafe);
-        } else {
-          await this.knex.schema.alterTable(tableName, (table) => {
-            if (unique) {
-              table.unique(columns, { indexName: name });
-            } else {
-              table.index(columns, name);
-            }
-          });
-        }
-        existing.add(name);
-      } catch (e: any) {
-        const msg = String(e?.message ?? e);
-        // A concurrent creator or a pre-existing equivalent index under a
-        // different name can race us here — both are benign for our intent
-        // (the index exists). Anything else is a real failure.
-        if (/already exists|duplicate key name|exists/i.test(msg)) continue;
-        // The ERROR OBJECT, not `msg` (#6543). This used to be a private
-        // inline regex over the message alone, which is the only channel the
-        // SQLite family reliably fills — but Postgres answers this exact
-        // failure with `could not create unique index "…"` and puts the
-        // verdict on `code` (SQLSTATE 23505) instead, so a message-only read
-        // missed the dialect entirely and took the boot down on the very case
-        // the branch below exists to absorb. The shared predicate reads
-        // `code` / `errno` / `message` / `cause`; see
-        // `@objectstack/types`' `unique-violation.ts` for why it is the one
-        // name for this question.
-        // Commit d0e3a885b: MySQL's refusal of a TEXT key part names a column in a table
-        // that was just created successfully, which reads as an index quirk
-        // rather than what it is — the object is now registered with its
-        // declared uniqueness absent. Re-throw the SAME failure carrying the
-        // field-level fix; the boot still fails loudly, it just says why.
-        const unkeyable = await this.explainUnkeyableTextColumn(tableName, name, columns, e);
-        if (unkeyable) {
-          // #11627: a UNIQUE index MySQL cannot key directly is expressible
-          // after all — over a SHA-256 shadow of the same values. Attempted
-          // only AFTER the server has refused the direct index, deliberately:
-          // the same reasoning `explainRowSizeOverflow` records for the row
-          // budget. A pre-flight would have to reproduce MySQL's 3072-byte key
-          // arithmetic and, wrong in the strict direction, would move an object
-          // to a shadow key on a server that would have taken the real index —
-          // a physical schema decided by our arithmetic rather than by the
-          // server's. Reacting to the refusal cannot over-apply, and it is what
-          // keeps Postgres and SQLite (which never refuse) byte-identical to
-          // before: the dialect divergence is selected BY THE ERROR CODE, never
-          // by a dialect getter.
-          //
-          // ⛔ UNIQUE only. A non-unique index exists for an ACCESS PATH, and an
-          // index over a hash serves no lookup the planner can find on its own
-          // — `WHERE col = ?` cannot use it without rewriting the read side to
-          // filter on the digest too. Silently creating one would turn a loud
-          // refusal into a table that syncs, costs writes, and accelerates
-          // nothing. Those cases stay refused below, and stay tracked.
-          if (unique) {
-            try {
-              // Commit df1c75c4b: the shadow must hash the DECLARED key, so the NULL-safe
-              // organization key parts (ADR-0120 D3) ride along — without them
-              // the generation expression hashed the RAW columns, `CONCAT`
-              // returned NULL for every NULL-organization row, and the rows the
-              // COALESCE bucket exists to constrain were constrained by nothing
-              // (#5030's shape, reintroduced by the fallback while the boot log
-              // reported the constraint as carried).
-              if (await this.createHashShadowUniqueIndex(tableName, name, columns, nullSafe)) {
-                existing.add(name);
-                continue;
-              }
-            } catch (shadowErr: any) {
-              const shadowMsg = String(shadowErr?.message ?? shadowErr);
-              if (/already exists|duplicate key name/i.test(shadowMsg)) {
-                existing.add(name);
-                continue;
-              }
-              if (nullSafe.size > 0 && isUniqueViolationError(shadowErr)) {
-                // Commit df1c75c4b: the shadow ALTER computes the generated column for the
-                // EXISTING rows, so a database that accumulated duplicates under
-                // the NULL-safe key while the constraint was void fails here
-                // with a uniqueness violation — the same data-dependent
-                // #5030-made-visible case the direct route handles below. Same
-                // disposition: do not take the boot down, name what collided
-                // and what fixes it, and let the ADR-0120 D4 drift pre-flight
-                // keep reporting the exact rows.
-                let report = '';
-                try {
-                  const duplicates = await this.probeNullSafeUniqueDuplicates(tableName, columns, [
-                    ...nullSafe,
-                  ]);
-                  if (duplicates.length > 0) {
-                    report = ` Conflicting group(s): ${formatDuplicateGroups(duplicates)}.`;
-                  }
-                } catch {
-                  // The probe is a diagnostic; the refusal below stands without it.
-                }
-                this.logDurabilityFailure(
-                  `[sql-driver] cannot create hash-shadow unique index '${name}' on "${tableName}" — ` +
-                    `existing rows violate the NULL-safe key (duplicates the previous void constraint ` +
-                    `admitted: SQL UNIQUE is NULL-distinct, so it never constrained rows without an organization).${report} The constraint '${columns
-                      .map((c) => (nullSafe.has(c) ? `COALESCE(${c}, '${GLOBAL_TENANT}')` : c))
-                      .join(', ')}' is NOT enforced until the data is deduplicated: run "os migrate plan" ` +
-                    `for the conflicting rows (ADR-0120 D4).`,
-                  shadowMsg,
-                );
-                continue;
-              }
-              if (isUniqueViolationError(shadowErr)) {
-                // #15479 — the PLAIN unique on the SHADOW route: no
-                // organization key part at all (`tenancy: { enabled: false }`
-                // or an explicit `unique: 'global'`), reached here because
-                // MySQL refused to key the column directly. The uniqueness
-                // limb is supplied by the enclosing `if (unique)` a few lines
-                // above, which is why this asks only the violation question --
-                // the same load-bearing role the explicit `unique &&` limb
-                // plays on the direct arm below, where no enclosing block
-                // supplies it.
-                //
-                // This branch used to be part of the NULL-safe one above,
-                // behind `nullSafe.size > 0`, so with no organization key part
-                // NOTHING fired: the code fell through to
-                // `logDurabilityFailure(unkeyable, msg)` + `throw` and the boot
-                // DIED carrying `ER_BLOB_KEY_WITHOUT_LENGTH` -- a message about
-                // an unkeyable TEXT column, telling the operator to declare a
-                // `maxLength` the field already declares, naming NO rows and NO
-                // remedy -- while the actual cause was duplicate rows. Commit 61821e54c
-                // fixed exactly that on the direct arm; the two arms of one
-                // `catch` then disagreed about one question.
-                //
-                // The message is deliberately NOT the NULL-safe one above.
-                // Neither of its clauses is true here: nothing "admitted" these
-                // rows (there was no previous void constraint, #5030), and
-                // there is no NULL-safe key. Widening the guard while keeping
-                // one message would ship a factually FALSE durability log --
-                // worse than the throw it replaces, because it sends the
-                // operator hunting a NULL-distinct index that never existed.
-                // The sentence below is the direct arm's, verbatim; only the
-                // route noun ("hash-shadow") is this arm's own, because it is
-                // what honestly names which physical route was attempted, and
-                // the NULL-safe branch above already spells it that way.
-                let report = '';
-                try {
-                  const duplicates = await this.probeNullSafeUniqueDuplicates(tableName, columns, []);
-                  if (duplicates.length > 0) {
-                    report = ` Conflicting group(s): ${formatDuplicateGroups(duplicates)}.`;
-                  }
-                } catch {
-                  // The probe is a diagnostic; the report below stands without it.
-                }
-                this.logDurabilityFailure(
-                  `[sql-driver] cannot create hash-shadow unique index '${name}' on "${tableName}" — existing ` +
-                    `rows violate it.${report} The constraint '${columns.join(', ')}' is NOT enforced until the ` +
-                    `data is deduplicated: run "os migrate plan" for the conflicting rows.`,
-                  shadowMsg,
-                );
-                continue;
-              }
-              // Fall through to the named refusal, which is still the honest
-              // outcome — but say that the shadow route was tried and why it
-              // did not land, so this does not read as never having been
-              // attempted.
-              this.logDurabilityFailure(
-                `[sql-driver] hash-shadow UNIQUE index '${name}' on "${tableName}" could not be created; ` +
-                  `falling back to the refusal below.`,
-                shadowMsg,
-              );
-            }
-          }
-          this.logDurabilityFailure(unkeyable, msg);
-          throw Object.assign(new Error(`${unkeyable} (server said: ${msg})`), {
-            code: (e as { code?: string }).code,
-            cause: e,
-          });
-        }
-        if (nullSafe.size > 0 && isUniqueViolationError(e)) {
-          // Existing rows violate the NULL-safe unique — the #5030 defect made
-          // visible. Do not take the boot down: the declared constraint is not
-          // enforced yet, say so at `error` (from the outside everything looks
-          // normal), and let the D4 drift pre-flight report the exact rows.
-          this.logDurabilityFailure(
-            `[sql-driver] cannot create NULL-safe unique index '${name}' on "${tableName}" — existing rows ` +
-              `violate it (duplicates the previous NULL-distinct index admitted: it never constrained rows ` +
-              `without an organization). The constraint ` +
-              `'${columns.join(', ')}' is NOT enforced until the data is deduplicated: run "os migrate plan" ` +
-              `for the conflicting rows (ADR-0120 D4).`,
-            msg,
-          );
-          continue;
-        }
-        if (unique && isUniqueViolationError(e)) {
-          // Commit 61821e54c — the PLAIN unique: no organization key part at all, reached
-          // by `tenancy: { enabled: false }` or by an explicit
-          // `unique: 'global'`. It used to fall through to `throw e`, so the
-          // boot DIED carrying the database's own error, which names the index
-          // and the column and NO rows and NO remedy — while the arm above,
-          // one branch away, kept the boot up and told the operator exactly
-          // what to do. Same defect, same disposition: the declared constraint
-          // is not enforced, say so on the durability channel, name the
-          // conflicting groups, and let the boot continue. The D4 pre-flight
-          // reports the same rows in `os migrate plan`.
-          //
-          // ⚠️ The `unique` limb is load-bearing, not decoration. A NON-unique
-          // index cannot raise a uniqueness violation, so a failure that reads
-          // as one while creating a non-unique index is something else
-          // entirely and must keep failing loudly rather than being absorbed
-          // into a log line here.
-          let report = '';
-          try {
-            const duplicates = await this.probeNullSafeUniqueDuplicates(tableName, columns, []);
-            if (duplicates.length > 0) {
-              report = ` Conflicting group(s): ${formatDuplicateGroups(duplicates)}.`;
-            }
-          } catch {
-            // The probe is a diagnostic; the report below stands without it.
-          }
-          this.logDurabilityFailure(
-            `[sql-driver] cannot create unique index '${name}' on "${tableName}" — existing rows violate ` +
-              `it.${report} The constraint '${columns.join(', ')}' is NOT enforced until the data is ` +
-              `deduplicated: run "os migrate plan" for the conflicting rows.`,
-            msg,
-          );
-          continue;
-        }
-        throw e;
-      }
-    }
+    // [#25521 cut 9] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readKnex = () => this.knex;
+    const host: ThisParameterType<typeof syncDeclaredIndexes> = {
+      createHashShadowUniqueIndex: (...a) => this.createHashShadowUniqueIndex(...a),
+      createNullSafeUniqueIndex: (...a) => this.createNullSafeUniqueIndex(...a),
+      explainUnkeyableTextColumn: (...a) => this.explainUnkeyableTextColumn(...a),
+      getExistingIndexNames: (...a) => this.getExistingIndexNames(...a),
+      get knex() { return readKnex(); },
+      logDurabilityFailure: (...a) => this.logDurabilityFailure(...a),
+      probeNullSafeUniqueDuplicates: (...a) => this.probeNullSafeUniqueDuplicates(...a),
+      resolveTenantField: (...a) => this.resolveTenantField(...a),
+    };
+    return syncDeclaredIndexes.call(host, tableName, indexes, physicalColumns, tenantField, fields);
   }
 
   /**
@@ -15491,44 +15170,21 @@ export class SqlDriver implements IDataDriver {
    * such deployment for every unique field. The drift differ keeps reporting
    * the tightening for the day the server is upgraded.
    */
-  protected async createNullSafeUniqueIndex(
+  protected createNullSafeUniqueIndex(
     tableName: string,
     name: string,
     columns: string[],
     nullSafe: ReadonlySet<string>,
   ): Promise<void> {
-    const q = (id: string) => this.knex.ref(id).toQuery();
-    const parts = columns.map((c) => {
-      if (!nullSafe.has(c)) return q(c);
-      const expr = `COALESCE(${q(c)}, '${GLOBAL_TENANT}')`;
-      return this.isMysql ? `(${expr})` : expr;
-    });
-    const sql = `CREATE UNIQUE INDEX ${q(name)} ON ${q(tableName)} (${parts.join(', ')})`;
-    try {
-      await this.knex.raw(sql);
-    } catch (e: any) {
-      const msg = String(e?.message ?? e);
-      // The positive limb is this site's own question — "does this server
-      // reject functional key parts?" — and stays a message test, because
-      // that is the only channel the answer is on. The NEGATIVE limb was a
-      // seventh spelling of the unique-violation vocabulary (`/duplicate/i`)
-      // and is now the shared predicate (#6543): a conflict must never be
-      // read as a syntax rejection and silently degraded to the bare
-      // composite, and on the `errno`-only shape mysql2 can hand back, a
-      // message-only exclusion did not fire.
-      const functionalUnsupported =
-        this.isMysql && /syntax|functional|not supported|near '\(/i.test(msg) && !isUniqueViolationError(e);
-      if (!functionalUnsupported) throw e;
-      this.logDurabilityFailure(
-        `[sql-driver] this MySQL/MariaDB server rejects functional key parts — created '${name}' on ` +
-          `"${tableName}" over the BARE columns instead. Rows without an organization are NOT constrained ` +
-          `by it (SQL UNIQUE is NULL-distinct): upgrade to MySQL >= 8.0.13 and re-run "os migrate plan" to tighten it (ADR-0120 D3).`,
-        msg,
-      );
-      await this.knex.schema.alterTable(tableName, (table) => {
-        table.unique(columns, { indexName: name });
-      });
-    }
+    // [#25521 cut 9] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readIsMysql = () => this.isMysql;
+    const readKnex = () => this.knex;
+    const host: ThisParameterType<typeof createNullSafeUniqueIndex> = {
+      get isMysql() { return readIsMysql(); },
+      get knex() { return readKnex(); },
+      logDurabilityFailure: (...a) => this.logDurabilityFailure(...a),
+    };
+    return createNullSafeUniqueIndex.call(host, tableName, name, columns, nullSafe);
   }
 
   // ===================================

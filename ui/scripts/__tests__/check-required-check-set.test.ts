@@ -346,28 +346,16 @@ describe('check-required-check-set — the wiring', () => {
  * with objectstack#25712: that workflow runs nowhere under the monorepo (row 9
  * of the objectstack#25697 workflow roster, → sub-issue 4), so its prose
  * guides no one.
- * `AGENTS.md` carried a fourth instance and is deliberately NOT in that set.
- * objectui#9502 left it standing — it is governed surface, and its
- * parenthetical also covered who may bypass the ruleset, which the endpoint
- * this gate reads does not carry — and objectui#9520 then split it along that
- * line: its required-checks half points at this gate, and "从仓内读不到" stays
- * on the bypass-actors half alone, where it was measured true. So it still
- * cannot join `REPAIRED` (the "makes no cannot-be-read claim" case would go red
- * on that true half, which is exactly what Leg 2 below asserts it carries), and
- * it is still what makes the control below real: the same detector, run over
- * `AGENTS.md`, must FIRE. A zero from a detector never observed firing is
- * decoration.
+ * `AGENTS.md` carried a fourth instance, split by objectui#9520: its
+ * required-checks half pointed at this gate, and "从仓内读不到" stayed on its
+ * bypass-actors half, where it was true. That bullet left with objectstack#25712,
+ * when `AGENTS.md` stopped restating the root `AGENTS.md`'s merge-queue rules,
+ * and with it went the real-content leg of the control below; the constructed
+ * leg still proves the detector can fire before any zero here is read.
  */
 describe('check-required-check-set — the prose points here instead of answering (#9502)', () => {
   /** The files objectui#9502 repaired, less the workflow the note above retires. */
   const REPAIRED = ['content/docs/guide/ci-cd-pipeline.md', 'scripts/dependabot-merge-gate.mjs'];
-
-  /**
-   * The carrier objectui#9502 left standing and objectui#9520 split: the one
-   * file that still writes "从仓内读不到", on its bypass-actors half, where it is
-   * true — and this block's positive control.
-   */
-  const SPLIT_CARRIER = 'AGENTS.md';
 
   /**
    * The claim being hunted: the ruleset cannot be READ from this repository.
@@ -380,28 +368,12 @@ describe('check-required-check-set — the prose points here instead of answerin
   const flatten = (rel: string): string =>
     fs.readFileSync(path.join(ROOT, rel), 'utf8').replace(/\s+/g, ' ');
 
-  it('CONTROL: the detector fires — on a constructed sentence, and on real tree content', () => {
-    // Leg 1, self-contained: the regex is proven able to return non-zero here,
-    // so the zeros below do not rest on any other file staying as it is.
+  it('CONTROL: the detector fires on a constructed sentence', () => {
+    // Self-contained, so the zeros below do not rest on any other file staying
+    // as it is. The real-content leg (AGENTS.md's bypass-actors half) retired
+    // with that bullet; see the note above this block.
     expect(CANNOT_READ.test('that set is a surface nothing here can read')).toBe(true);
     expect(CANNOT_READ.test('that set is a surface nothing here can change')).toBe(false);
-
-    // Leg 2, the same detector over real content: `AGENTS.md` still carries the
-    // phrase, deliberately, on the bypass-actors half of its ruleset bullet —
-    // the one place in the tree it is true, which is where objectui#9520 kept it
-    // when it split that bullet. ⚠️ Said per AGENTS.md #9 rather than left to be
-    // assumed: this detector cannot tell which half a phrase sits on, so this
-    // leg does NOT hold the bullet's required-checks half to its pointer, and
-    // nothing else in this file does either. If this leg ever goes red the bypass
-    // half was re-worded or ruled on again — a legitimate change, not a bug
-    // here. The remedy is to move the inventory docblock in the gate with it and
-    // retire this leg, NOT to weaken the detector.
-    expect(
-      CANNOT_READ.test(flatten(SPLIT_CARRIER)),
-      `${SPLIT_CARRIER} no longer carries the phrase this detector hunts (its bypass-actors half did, ` +
-        `deliberately). If that half was re-worded, update the inventory docblock in ${GATE} to match ` +
-        'and drop this leg. Leg 1 above keeps the detector honest either way.',
-    ).toBe(true);
   });
 
   it.each(REPAIRED)('%s makes no "cannot be read" claim', (rel) => {
@@ -439,9 +411,9 @@ describe('check-required-check-set — the prose points here instead of answerin
     }
   });
 
-  it("the gate's own docblock inventories every repaired carrier, and the one objectui#9520 split", () => {
+  it("the gate's own docblock inventories every repaired carrier", () => {
     const docblock = fs.readFileSync(path.join(ROOT, GATE), 'utf8').slice(0, 4000);
-    for (const rel of [...REPAIRED, SPLIT_CARRIER]) {
+    for (const rel of REPAIRED) {
       expect(docblock, `${GATE} no longer names ${rel} in its inventory`).toContain(rel);
     }
     // The write half is the reason the sentences were not simply deleted.

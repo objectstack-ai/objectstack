@@ -247,6 +247,48 @@ export function forwardSeedSettledToParent(msg: unknown): boolean {
 }
 
 /**
+ * Whether this `os dev` boot compiles the cwd config into the artifact it is
+ * about to serve, before the server starts (#26130).
+ *
+ * Yes by default whenever the boot serves an artifact this command builds and
+ * there is a config to build it from. The reason is the dev boot's two copies
+ * of one stack. A host config's `os dev` boot serves the stack from TWO places:
+ * the config MODULE, evaluated in the `serve` child (the AppPlugin wrap, whose
+ * registry copy is what a provider-bound connector is materialized from, so
+ * what dispatch calls), and the compiled artifact (the dev artifact door, whose
+ * copy is what `/api/v1/meta/<type>` serves). A config that reads the
+ * environment at module evaluation, as `examples/app-showcase`'s self URL reads
+ * `OS_PORT`, gives the module copy THIS boot's value and the artifact copy the
+ * value of whichever environment last compiled it. Measured on the showcase
+ * with `OS_PORT=41302` over an artifact built without it:
+ * `GET /api/v1/meta/connector/showcase_status_api` served
+ * `http://127.0.0.1:3000` while the materialized connector called 41302.
+ *
+ * Compiling here, in this process's environment (the `serve` child inherits
+ * the same one), makes both copies one evaluation's answer, so nothing has to
+ * restate which variables a config reads or in what order. The watch loop's
+ * recompiles already run in that environment, so the two stay one answer for
+ * the whole session.
+ *
+ * `--no-compile` keeps the old shortcut, booting the artifact as built (and
+ * the startup staleness warning says when it is older than the sources); a
+ * missing artifact is still compiled, since there is nothing else to serve. A
+ * pinned artifact (`--artifact`, `OS_ARTIFACT_URL`, a remote
+ * `OS_ARTIFACT_PATH`) is never rebuilt. With no config and a missing artifact
+ * the answer is yes, so the caller refuses there with the one remedy line.
+ */
+export function devCompilesAtBoot(opts: {
+  compile: boolean;
+  pinned: boolean;
+  configExists: boolean;
+  artifactExists: boolean;
+}): boolean {
+  if (opts.pinned) return false;
+  if (!opts.artifactExists) return true;
+  return opts.compile && opts.configExists;
+}
+
+/**
  * Whether this `os dev` boot runs the watch-recompile loop (#20681).
  *
  * Off when the operator passed `--no-watch`, when the boot serves an artifact
@@ -332,9 +374,11 @@ export default class Dev extends Command {
     preset: Flags.string({
       description: 'Plugin tier preset forwarded to `serve`: minimal | default | full',
     }),
+    // Default ON (#26130): see `devCompilesAtBoot` for why a dev boot over an
+    // artifact it builds always rebuilds it first.
     compile: Flags.boolean({
-      description: 'Compile objectstack.config.ts to dist/objectstack.json before starting (auto if artifact missing). Ignored when --artifact is set.',
-      default: false,
+      description: 'Compile objectstack.config.ts to dist/objectstack.json before starting, under this boot\'s environment (default: on). --no-compile boots the existing artifact as built (still compiled when it is missing). Ignored when --artifact is set.',
+      default: true,
       allowNo: true,
     }),
     restart: Flags.boolean({
@@ -472,9 +516,15 @@ export default class Dev extends Command {
         printKV('Config', configPath, '📂');
       }
 
-      // Auto-compile only when we have a config AND the boot's artifact is one
-      // this command builds. A pinned artifact means "use this, don't rebuild".
-      const needsCompile = !pinnedArtifact && (flags.compile || !fs.existsSync(artifactPath));
+      // Compile only when the boot's artifact is one this command builds — a
+      // pinned artifact means "use this, don't rebuild" — and then by default
+      // (#26130, `devCompilesAtBoot`).
+      const needsCompile = devCompilesAtBoot({
+        compile: flags.compile,
+        pinned: Boolean(pinnedArtifact),
+        configExists,
+        artifactExists: fs.existsSync(artifactPath),
+      });
       if (needsCompile) {
         if (!configExists) {
           printError('No objectstack.config.ts and no --artifact given — nothing to start.');
@@ -531,8 +581,8 @@ export default class Dev extends Command {
       }
 
       // ── Startup staleness warning (#5148 startup variant) ───────────
-      // Without --compile, `os dev` boots whatever dist/objectstack.json
-      // holds. When the sources are NEWER than the artifact (edited while
+      // With --no-compile, `os dev` boots whatever dist/objectstack.json
+      // holds (#26130 made compiling the default). When the sources are NEWER than the artifact (edited while
       // the server was down, stale checkout), the boot silently serves the
       // old build — measured in #5148: the config had gained a capability
       // and dev still printed `Plugins: 38 loaded` until a manual build.
