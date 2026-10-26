@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { SeedSchema, SeedMode, type Seed } from './seed.zod';
+import { SeedSchema, SeedMode, SeedColumnSchema, type Seed } from './seed.zod';
+import { ColumnApplyOnSchema } from './column-apply-on.zod';
+import { FieldMappingEntrySchema } from '../api/export.zod';
 
 describe('SeedMode', () => {
   it('should accept valid dataset modes', () => {
@@ -296,6 +298,58 @@ describe('SeedSchema', () => {
         const message = parsed.success ? '' : JSON.stringify(parsed.error.issues);
         expect(message, `${alias} should be pointed at \`locale\``).toContain('locale');
       }
+    });
+  });
+
+  // ── Column policies (#25761) ─────────────────────────────────────────────
+  //
+  // `columns.<field>.applyOn: 'create'` is the import door's create-only column
+  // (`FieldMappingEntry.applyOn`) on a seed dataset: one vocabulary, one schema.
+
+  describe('column policies (columns.<field>.applyOn)', () => {
+    const withColumns = (columns: unknown) =>
+      SeedSchema.safeParse({ object: 'clm_instalment', columns, records: [] });
+
+    it.each(['create', 'always'] as const)('accepts applyOn %s, the whole parse green', (applyOn) => {
+      const parsed = withColumns({ status: { applyOn } });
+      expect(parsed.success).toBe(true);
+      expect(parsed.success && parsed.data.columns).toEqual({ status: { applyOn } });
+    });
+
+    it('defaults a declared column to always, and leaves the map ABSENT when it is not written', () => {
+      const declared = withColumns({ status: {} });
+      expect(declared.success && declared.data.columns).toEqual({ status: { applyOn: 'always' } });
+      const parsed = SeedSchema.parse({ object: 'clm_instalment', records: [] });
+      expect('columns' in parsed).toBe(false);
+    });
+
+    it('refuses a value outside create / always at the applyOn path', () => {
+      const parsed = withColumns({ status: { applyOn: 'insert' } });
+      expect(parsed.success).toBe(false);
+      expect(parsed.error?.issues[0]).toMatchObject({ code: 'invalid_value', path: ['columns', 'status', 'applyOn'] });
+    });
+
+    it('refuses an unknown key on a column — the policy shape is closed', () => {
+      const parsed = withColumns({ status: { applyOn: 'create', writeOnce: true } });
+      expect(parsed.success).toBe(false);
+      expect(parsed.error?.issues[0]).toMatchObject({ code: 'unrecognized_keys', path: ['columns', 'status'] });
+    });
+
+    it('points a dataset-level applyOn at columns', () => {
+      const parsed = SeedSchema.safeParse({ object: 'clm_instalment', applyOn: 'create', records: [] });
+      expect(parsed.success).toBe(false);
+      expect(parsed.error?.issues[0]).toMatchObject({ code: 'unrecognized_keys' });
+      expect(parsed.error?.issues[0]?.message).toContain('`columns`');
+    });
+
+    it('is the import door\'s vocabulary: one enum, the same values and default on both doors', () => {
+      expect(ColumnApplyOnSchema.options).toEqual(['create', 'always']);
+      for (const value of [...ColumnApplyOnSchema.options, 'insert', 'never', '']) {
+        const seedColumn = SeedColumnSchema.safeParse({ applyOn: value }).success;
+        const importEntry = FieldMappingEntrySchema.safeParse({ sourceField: 'a', targetField: 'b', applyOn: value }).success;
+        expect(seedColumn, `seed column, applyOn ${JSON.stringify(value)}`).toBe(importEntry);
+      }
+      expect(SeedColumnSchema.parse({}).applyOn).toBe(FieldMappingEntrySchema.parse({ sourceField: 'a', targetField: 'b' }).applyOn);
     });
   });
 

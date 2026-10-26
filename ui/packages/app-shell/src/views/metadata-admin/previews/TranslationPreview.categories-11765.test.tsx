@@ -56,6 +56,11 @@ const ONE_ENTRY: Record<string, { data: Record<string, unknown>; key: string; ro
     key: 'revenue',
     row: () => keys(2),
   },
+  reports: {
+    data: { opps_by_stage: { label: 'Opportunités par étape', description: 'Opportunités regroupées par étape' } },
+    key: 'opps_by_stage',
+    row: () => keys(2),
+  },
   pages: { data: { home: { label: 'Accueil' } }, key: 'home', row: () => keys(1) },
   flows: { data: { onboarding: { label: 'Intégration' } }, key: 'onboarding', row: () => keys(1) },
   positions: { data: { legal_counsel: { label: 'Conseiller juridique' } }, key: 'legal_counsel', row: () => keys(1) },

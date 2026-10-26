@@ -99,6 +99,15 @@ export const zhCN: TranslationData = {
       description: '个人任务管理应用',
     },
   },
+  // The app's reports, as its report index lists them and each report page is
+  // headed (`reports.<name>.label` / `.description`).
+  reports: {
+    tasks_by_status: { label: '按状态统计任务', description: '按状态分组的任务汇总' },
+    tasks_by_priority: { label: '按优先级统计任务', description: '按优先级分组的任务汇总' },
+    tasks_by_owner: { label: '按负责人统计任务', description: '按负责人汇总的任务' },
+    completed_tasks: { label: '已完成任务', description: '所有已完成任务及其工时记录' },
+    time_tracking: { label: '工时跟踪报表', description: '预计工时与实际工时分析' },
+  },
   // The quick-add wizard: the flow's name in the runner header and completion
   // toast, each screen's heading and each field label.
   flows: {

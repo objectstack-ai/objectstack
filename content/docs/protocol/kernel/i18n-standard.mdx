@@ -399,7 +399,7 @@ Three rules the shape enforces, all of them closed since #4001:
 
 - **The top level is the declared group set and nothing else** — `objects`,
   `picklists`, `apps`, `messages`, `globalActions`, `dashboards`, `datasets`,
-  `pages`, `flows`, `positions`, `permissions`, `metadataForms`,
+  `reports`, `pages`, `flows`, `positions`, `permissions`, `metadataForms`,
   `settingsCommon`. A group invented beside them
   (`"account"`, `"fields"`, `"list"`, `"industries"`) is rejected **by name**
   at both authoring doors, with the group to use instead named in the
@@ -483,7 +483,7 @@ what the overlay writes back as the node's `title`.
 The contract is `t(key, locale, params?)` — the target locale is always passed
 explicitly, and the key itself is returned when no translation is found (there
 is no `defaultValue` option). The key is a **dot path into `TranslationData`**,
-so it starts at one of the thirteen declared groups.
+so it starts at one of the fourteen declared groups.
 
 ```typescript
 const i18n = kernel.getService('i18n');
@@ -1063,6 +1063,7 @@ beneath an action entry are judged the same way under either.
 | `flows.{flow}` | a flow's machine `name`, declared |
 | `positions.{name}` | a position's `name`, declared, or an audience anchor (`everyone`, `guest`) |
 | `permissions.{name}` | a permission set's `name`, declared |
+| `reports.{name}` | a report's `name`, declared |
 | `flows.{flow}.screens.{node}` | the `id` of a `type: 'screen'` node in that flow, nodes nested in loop, parallel and try/catch regions included |
 | `flows.{flow}.screens.{node}.fields.{field}` | a `config.fields[].name` on that screen — an object-form screen (`config.objectName`) declares none, and its input labels live under `objects.{objectName}.fields` |
 

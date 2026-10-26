@@ -177,6 +177,7 @@ Platform translation data — the per-app groups plus the platform-only `setting
 | **globalActions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Global action translations keyed by action name |
 | **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, object>; widgets?: Record<string, object>; … }>` | optional | Dashboard translations keyed by dashboard name |
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
+| **reports** | `Record<string, { label?: string; description?: string }>` | optional | Report translations keyed by report name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
@@ -246,6 +247,13 @@ Translation data for a single object
 | **description** | `string` | optional | Translated dataset description |
 | **dimensions** | `Record<string, { label?: string }>` | optional | Dimension translations keyed by dimension name (`DatasetDimensionSchema.name`) |
 | **measures** | `Record<string, { label?: string }>` | optional | Measure translations keyed by measure name (`DatasetMeasureSchema.name`) |
+
+### Nested Shape: `PlatformTranslationData.reports[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated report label — overlays the report's own `label` |
+| **description** | `string` | optional | Translated report description — overlays the report's own `description` |
 
 ### Nested Shape: `PlatformTranslationData.pages[string]`
 
@@ -397,6 +405,7 @@ Per-app translation data for objects, apps, and UI messages
 | **globalActions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Global action translations keyed by action name |
 | **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, object>; widgets?: Record<string, object>; … }>` | optional | Dashboard translations keyed by dashboard name |
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
+| **reports** | `Record<string, { label?: string; description?: string }>` | optional | Report translations keyed by report name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
@@ -465,6 +474,13 @@ Translation data for a single object
 | **description** | `string` | optional | Translated dataset description |
 | **dimensions** | `Record<string, { label?: string }>` | optional | Dimension translations keyed by dimension name (`DatasetDimensionSchema.name`) |
 | **measures** | `Record<string, { label?: string }>` | optional | Measure translations keyed by measure name (`DatasetMeasureSchema.name`) |
+
+### Nested Shape: `TranslationData.reports[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated report label — overlays the report's own `label` |
+| **description** | `string` | optional | Translated report description — overlays the report's own `description` |
 
 ### Nested Shape: `TranslationData.pages[string]`
 
@@ -566,6 +582,7 @@ One locale of translations — the `translation` metadata type
 | **globalActions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Global action translations keyed by action name |
 | **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, object>; widgets?: Record<string, object>; … }>` | optional | Dashboard translations keyed by dashboard name |
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
+| **reports** | `Record<string, { label?: string; description?: string }>` | optional | Report translations keyed by report name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
@@ -644,6 +661,13 @@ Translation data for a single object
 | **description** | `string` | optional | Translated dataset description |
 | **dimensions** | `Record<string, { label?: string }>` | optional | Dimension translations keyed by dimension name (`DatasetDimensionSchema.name`) |
 | **measures** | `Record<string, { label?: string }>` | optional | Measure translations keyed by measure name (`DatasetMeasureSchema.name`) |
+
+### Nested Shape: `TranslationItem.reports[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated report label — overlays the report's own `label` |
+| **description** | `string` | optional | Translated report description — overlays the report's own `description` |
 
 ### Nested Shape: `TranslationItem.pages[string]`
 

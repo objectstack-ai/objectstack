@@ -106,6 +106,26 @@
         }
       }
     },
+    "reports": {
+      "status": "live",
+      "verifiedAt": "2026-10-25",
+      "evidence": "packages/spec/src/system/i18n-resolver.ts#translateReport (`reports.<name>.label` / `.description`, registered in METADATA_DOCUMENT_TRANSLATORS); packages/rest/src/meta-item-read-gate.ts#translateMetaList (the /meta list read that applies it per request locale)",
+      "note": "Seeded LIVE with its reader in the same change (the datasets precedent): a served `report` document is localized at the REST boundary, and that list is what the console's report index and report page read (`GET /meta/report`). A report is overlay-editable (ADR-0126 Regime O), so the catalog yields to a label or description an org re-authored on the packaged report (ADR-0029 D9.2a; the packaged base comes from `getPackagedReportBase` on the metadata protocol). The face stops at the two strings the report itself authors.",
+      "children": {
+        "label": {
+          "status": "live",
+          "verifiedAt": "2026-10-25",
+          "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupReportAttr (`reports.<name>.label`, read by translateReport)",
+          "note": "Overlays the served report's own `label`."
+        },
+        "description": {
+          "status": "live",
+          "verifiedAt": "2026-10-25",
+          "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupReportAttr (`reports.<name>.description`, read by translateReport)",
+          "note": "Overlays the served report's own `description`."
+        }
+      }
+    },
     "pages": {
       "status": "live",
       "verifiedAt": "2026-08-28",

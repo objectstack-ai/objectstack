@@ -481,6 +481,22 @@ function seedValuesInStoredForm(record: Record<string, unknown>, definition: unk
 }
 
 /**
+ * [#25761] The columns a dataset writes only when it CREATES the row — those
+ * its `columns` map declares `applyOn: 'create'` — minus the fields of its
+ * `externalId`. A key field is what a matched row was found by, so it stays in
+ * that row's write whatever it declares, as an import's match key stays
+ * (`FieldMappingEntry.applyOn`, the same policy at the import door).
+ */
+function createOnlySeedColumns(dataset: Seed, externalId: string | string[]): ReadonlySet<string> {
+  const keyFields = new Set(Array.isArray(externalId) ? externalId : [externalId]);
+  const createOnly = new Set<string>();
+  for (const [column, policy] of Object.entries(dataset.columns ?? {})) {
+    if (policy?.applyOn === 'create' && !keyFields.has(column)) createOnly.add(column);
+  }
+  return createOnly;
+}
+
+/**
  * [#24562] Field name → storage kind, for every field the definition declares
  * `datetime`, `date` or `time` — the fields a replay compares in their STORED
  * form (see {@link SeedLoaderService.isNoOpReplay}). Same field-type reading
@@ -1080,6 +1096,9 @@ export class SeedLoaderService implements ISeedLoaderService {
     const objectName = dataset.object;
     const mode = dataset.mode || config.defaultMode;
     const externalId = dataset.externalId || 'name';
+    // [#25761] Left out of every write to a row this dataset MATCHED — see
+    // `matchesExistingRow` in the record loop below.
+    const createOnlyColumns = createOnlySeedColumns(dataset, externalId);
 
     let inserted = 0;
     let updated = 0;
@@ -1333,6 +1352,7 @@ export class SeedLoaderService implements ISeedLoaderService {
     // judge, and nothing here refuses a row for an owner it cannot prove.
     const objectDefinition = await this.resolveObjectDefinition(objectName);
     const rowsCarryOrganization = objectDefinition == null || seedRowNeedsOrganization(objectDefinition);
+    this.warnOnUndeclaredSeedColumns(dataset, objectDefinition);
     // How a replay compares each field (`isNoOpReplay`): [#24562] a temporal
     // field in its stored form, [#24624] a field the read path masks never by
     // its set value.
@@ -1572,14 +1592,43 @@ export class SeedLoaderService implements ISeedLoaderService {
         });
       }
 
-      const recordRefs: Array<
+      /**
+       * [#25761] Is this row one the load MATCHED — an existing row this
+       * dataset writes over? The create-only policy is the only thing that
+       * asks. The same lookup {@link SeedLoaderService.decideWriteAction}
+       * makes: the record's natural key, as resolved so far, against the rows
+       * pre-loaded for the modes that match one (`upsert`, `update`,
+       * `ignore`). A dry run and the `insert` / `replace` modes pre-load
+       * nothing, so every row they see is one they create.
+       */
+      const matchesExistingRow = (): boolean =>
+        existingRecords?.has(this.externalIdKey(record, externalId)) === true;
+
+      const allRecordRefs: Array<
         Pick<ReferenceResolutionParsed, 'field' | 'targetObject' | 'targetField'> & { multiple?: boolean }
       > = derivedPointerRefs.length === 0 ? objectRefs : [...objectRefs, ...derivedPointerRefs];
+      // [#25761] Create-only references resolve LAST, so a reference column of
+      // the externalId has been resolved by the time one asks
+      // `matchesExistingRow`. Every other dataset keeps its order.
+      const recordRefs = createOnlyColumns.size === 0
+        ? allRecordRefs
+        : [
+          ...allRecordRefs.filter((ref) => !createOnlyColumns.has(ref.field)),
+          ...allRecordRefs.filter((ref) => createOnlyColumns.has(ref.field)),
+        ];
       for (const ref of recordRefs) {
         // Never re-resolve the tenant stamp we just wrote (see above). A seed
         // that authors `organization_id` ITSELF still goes through resolution,
         // so naming an org by its natural key keeps working.
         if (stampedTenantOrg && ref.field === 'organization_id') continue;
+        // [#25761] A create-only reference on a row the load matched is no
+        // part of that row's write: not resolved, not dropped for failing to
+        // resolve, and not deferred — pass 2's back-fill would write it after
+        // all, the one place the policy could leak.
+        if (createOnlyColumns.has(ref.field) && matchesExistingRow()) {
+          delete record[ref.field];
+          continue;
+        }
         const fieldValue = record[ref.field];
         // A blank reference is NO reference: the engine's blank rule
         // (`isMissing` — `undefined`, `null`, `''`, whitespace-only) is the one
@@ -1807,6 +1856,15 @@ export class SeedLoaderService implements ISeedLoaderService {
       if (unresolvedRefError && !config.dryRun) {
         errored++;
         continue;
+      }
+
+      // [#25761] The create-only columns leave a matched row's write here, so
+      // every write path below sees the same record: the no-op replay check
+      // compares without them (a value a job has changed since is not a
+      // difference the seed means to undo), and the update writes without
+      // them. A row the load creates keeps them all.
+      if (createOnlyColumns.size > 0 && matchesExistingRow()) {
+        for (const column of createOnlyColumns) delete record[column];
       }
 
       // [commit 1cba33f16] EARLY SIGNAL — emitted here, before this row reaches the
@@ -3159,6 +3217,51 @@ export class SeedLoaderService implements ISeedLoaderService {
         `\`config.locale\` (a BCP-47 tag, e.g. the stack's \`i18n.defaultLocale\`) to make ` +
         `\`Seed.locale\` take effect.`,
       { scoped: scoped.map(d => d.object) },
+    );
+  }
+
+  /**
+   * [#25761] Say so, once per dataset, when its `columns` map names a column
+   * the object does not have.
+   *
+   * Such a policy governs nothing, and nothing else reports it: no row writes
+   * the named column, so the engine never refuses it the way it refuses an
+   * unknown record key. The column it was meant for (a misspelt `status`)
+   * keeps `always`, and every replay re-asserts it. `defineSeed` refuses the
+   * key when it runs; this is the same check at load, where a stored `seed`
+   * or a package body arrives without passing through `defineSeed`. Judged
+   * against the set `defineSeed` uses — the declared fields plus the system
+   * columns the platform injects on this object — and only when the
+   * definition resolved with a field map: no opinion without one.
+   *
+   * `error`, not `warn` (AGENTS.md "Degradation log levels"): the load looks
+   * normal and reports success while a job's write to the column the policy
+   * was meant for is overwritten on every replay. The rows themselves are
+   * valid, so they still load: refusing them would turn a policy typo into
+   * missing seed data.
+   *
+   * The log is the one channel, on a dry run too. `result.errors` holds
+   * `ReferenceResolutionError`s, each about one record (`recordIndex`), and a
+   * dataset-level finding has no shape there. Unlike a dry run's possible
+   * reference miss (#4997), nothing about it is simulated: the policy is
+   * wrong whether or not the load writes.
+   */
+  private warnOnUndeclaredSeedColumns(dataset: Seed, definition: unknown): void {
+    const columns = Object.keys(dataset.columns ?? {});
+    if (columns.length === 0) return;
+    const fields = (definition as { fields?: unknown } | null | undefined)?.fields;
+    if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return;
+    const known = new Set<string>([...Object.keys(fields), ...resolveInjectedSystemColumns(definition).names]);
+    const undeclared = columns.filter((column) => !known.has(column));
+    if (undeclared.length === 0) return;
+    this.logger.error(
+      `[SeedLoader] The ${dataset.object} seed declares a write policy for ${undeclared.map((c) => `\`${c}\``).join(', ')}, ` +
+        `which ${undeclared.length === 1 ? 'is not a column' : 'are not columns'} of ${dataset.object}: the policy governs ` +
+        `nothing, and a column it was meant for keeps \`applyOn: 'always'\`, so every replay overwrites what a job ` +
+        `wrote to it while this load still reports success. Name a field ${dataset.object} declares, or a system ` +
+        `column the platform injects on it, as the \`columns\` key.`,
+      undefined,
+      { object: dataset.object, undeclaredColumns: undeclared },
     );
   }
 

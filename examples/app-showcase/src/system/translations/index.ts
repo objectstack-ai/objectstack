@@ -1337,5 +1337,13 @@ export const ShowcaseTranslationBundle = {
       showcase_field_ops_delegate: { label: '现场运营委派管理员' },
       showcase_client_liaison: { label: '示例客户联络人' },
     },
+    // The reports, as the report index lists them and each report page is
+    // headed. Counted by `check-i18n-coverage` like the groups above.
+    reports: {
+      showcase_hours_by_status: { label: '按状态统计工时（汇总）', description: '按任务状态分组的预计工时。' },
+      showcase_status_priority_matrix: { label: '状态 × 优先级（矩阵）', description: '按状态和优先级交叉统计的预计工时。' },
+      showcase_task_overview: { label: '任务概览（联合）', description: '将多个任务子报表堆叠在一个联合视图中。' },
+      showcase_hours_by_status_chart: { label: '按状态统计工时（图表）', description: '以柱状图展示按状态统计的预计工时。' },
+    },
   },
 };

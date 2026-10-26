@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { BaseResponseSchema } from './contract.zod';
 import { ValidateDataIssueSchema } from './protocol.zod';
 import { DroppedFieldsEventSchema } from '../data/data-engine.zod';
+import { ColumnApplyOnSchema } from '../data/column-apply-on.zod';
 
 /**
  * Data Export & Import Protocol
@@ -170,7 +171,7 @@ export const FieldMappingEntrySchema = lazySchema(() => z.object({
     .describe('Default value if source field is null/empty'),
   required: z.boolean().default(false)
     .describe('Whether this field is required (import validation)'),
-  applyOn: z.enum(['create', 'always']).default('always')
+  applyOn: ColumnApplyOnSchema.default('always')
     .describe(
       'When an import writes this column. `always` (default) writes it on every row the import ' +
       'creates or updates. `create` writes it only when the row is created: an `upsert` that ' +

@@ -144,7 +144,21 @@ export class UnscopedRunDataAccessError extends Error {
  * run. A run that resolves no principal is handed no context at all; it is
  * refused ({@link UnscopedRunDataAccessError}).
  */
-export interface RunDataContext extends RunIdentityContext {}
+export interface RunDataContext extends RunIdentityContext {
+  /**
+   * The run's {@link AutomationContext.locale} — the language of the person
+   * who started it — carried as `ExecutionContext.locale`, the field a record
+   * door's write carries. The engine words a refused write in it through its
+   * one translation hook (an authored rule's
+   * `objects.<o>._validations.<rule>.message`, the built-in catalog, a
+   * `DELETE_RESTRICTED` sentence's labels), so a flow's write node meets the
+   * refusal the same request's record save would, and hands it to the run's
+   * caller as `innerRefusal.message`. Nothing here translates: absent on a run
+   * no person started, which keeps the authored text. Presentation, not
+   * identity: no security middleware keys on it, on either `runAs` arm.
+   */
+  locale?: string;
+}
 
 /**
  * A flow run's {@link AutomationContext} as run setup leaves it: the context
@@ -262,6 +276,10 @@ export function runOrgUserIds(context: AutomationContext | undefined): string[] 
  *    deciding user, so approvals cascades resolve here instead of being refused
  *    (#3783). Only its machine-driven sweeps stay user-less.
  *
+ * Both principal arms also carry the run's `locale` when it has one
+ * ({@link RunDataContext.locale}), so a refused write is worded for the
+ * person who started the run, as their own record save would be.
+ *
  * The engine sets {@link AutomationContext.runAs} on the run context at setup;
  * this function is the single place that maps it to an ObjectQL context, shared
  * by every data-touching node so the policy can't drift between node types —
@@ -271,6 +289,9 @@ export function runOrgUserIds(context: AutomationContext | undefined): string[] 
  */
 export function resolveRunDataContext(context: AutomationContext | undefined): RunDataContext | undefined {
   const flowRunId = context?.flowRunId;
+  // The starter's language rides into every write, on both arms — see
+  // RunDataContext.locale.
+  const locale = typeof context?.locale === 'string' && context.locale.length > 0 ? context.locale : undefined;
   if (context?.runAs === 'system') {
     // Name the flow as the acting service principal (`svc:flow:<name>`,
     // ADR-0014 D2) — the audit writer falls back to `session.actor` when
@@ -320,6 +341,7 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
       // refused for want of one.
       ...(context.userId ? {} : { positions: [], permissions: [] }),
       ...(flowRunId ? { flowRunId } : {}),
+      ...(locale ? { locale } : {}),
     };
   }
   if (!context?.userId) {
@@ -340,7 +362,7 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
     throw new UnscopedRunDataAccessError(context);
   }
   // `context` is now narrowed to a defined AutomationContext with a userId.
-  const out: RunIdentityContext = {
+  const out: RunDataContext = {
     isSystem: false,
     userId: context.userId,
     positions: Array.isArray(context.positions) ? context.positions : [],
@@ -351,6 +373,7 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
   if (context.email) out.email = context.email;
   if (context.tenantId) out.tenantId = context.tenantId;
   if (flowRunId) out.flowRunId = flowRunId;
+  if (locale) out.locale = locale;
   return out;
 }
 

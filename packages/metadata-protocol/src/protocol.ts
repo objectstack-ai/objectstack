@@ -9021,12 +9021,39 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * The one body behind {@link getPackagedDashboardBase} and
-     * {@link getPackagedViewBase}: {@link lookupArtifactItem}, and nothing
-     * wider, so only an item whose `_packageId` marks a genuine code package
-     * answers, and an overlay hydrated under the plain registry key never does.
+     * [#25788] The PACKAGED (code-layer) declaration of a REPORT — the report
+     * item a code package ships, before any tenant `sys_metadata` overlay.
+     * The report twin of {@link getPackagedDashboardBase}, answered the same
+     * way, and the fact `translateReport` (`@objectstack/spec/system`)
+     * compares against as its `packagedBase`: the i18n catalog
+     * (`reports.<name>.label` / `.description`) is the packaged translation of
+     * exactly this body, so it may only replace a string the served report
+     * still carries unchanged from it (ADR-0029 D9.2a — an explicit override
+     * beats a packaged default; ADR-0126 Regime O — a packaged report is
+     * overlay-editable, and a published overlay is what every read serves).
+     *
+     * Landed with the report translator itself, so a report was never served
+     * translated without its base: an org's re-authored report label is
+     * never replaced by the catalog's translation of the shipped one.
+     *
+     * A report has no extension fold, so the artifact item IS the packaged
+     * declaration. Returns `undefined` for a runtime/tenant-authored report
+     * (no code package ships it), an unknown or empty name, and a registry
+     * double without the lookup — "no packaged baseline", read by the
+     * translator as the catalog applying unchanged.
      */
-    private packagedArtifactBase(type: 'dashboard' | 'view', name: string): unknown {
+    getPackagedReportBase(name: string): unknown {
+        return this.packagedArtifactBase('report', name);
+    }
+
+    /**
+     * The one body behind {@link getPackagedDashboardBase},
+     * {@link getPackagedViewBase} and {@link getPackagedReportBase}:
+     * {@link lookupArtifactItem}, and nothing wider, so only an item whose
+     * `_packageId` marks a genuine code package answers, and an overlay
+     * hydrated under the plain registry key never does.
+     */
+    private packagedArtifactBase(type: 'dashboard' | 'view' | 'report', name: string): unknown {
         if (typeof name !== 'string' || name === '') return undefined;
         try {
             return this.lookupArtifactItem(type, name);

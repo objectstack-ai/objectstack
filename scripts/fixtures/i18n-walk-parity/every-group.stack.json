@@ -123,6 +123,9 @@
       ]
     }
   ],
+  "reports": [
+    { "name": "parity_report", "label": "Parity Report", "description": "Records by status", "type": "summary", "dataset": "parity_metrics", "rows": ["status"], "values": ["record_count"] }
+  ],
 
   "picklists": [
     {

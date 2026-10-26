@@ -32,6 +32,7 @@
 import * as React from 'react';
 import {
   AppWindow,
+  BarChart3,
   ClipboardList,
   Database,
   FileText,
@@ -94,6 +95,7 @@ const CATEGORY_DEFS = {
   },
   dashboards: { label: 'engine.translationPreview.category.dashboards', icon: LayoutDashboard, flat: false },
   datasets: { label: 'engine.translationPreview.category.datasets', icon: Database, flat: false },
+  reports: { label: 'engine.translationPreview.category.reports', icon: BarChart3, flat: false },
   pages: { label: 'engine.translationPreview.category.pages', icon: PanelsTopLeft, flat: false },
   flows: { label: 'engine.translationPreview.category.flows', icon: Workflow, flat: false },
   positions: { label: 'engine.translationPreview.category.positions', icon: Users, flat: false },
