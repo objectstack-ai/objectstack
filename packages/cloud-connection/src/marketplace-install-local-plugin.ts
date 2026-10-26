@@ -150,6 +150,11 @@ import {
     // branded and quiet, every other rejection is the outage it is.
     classifyAdmissionTenancyPosture,
     type TenancyPostureSource,
+    // [ADR-0141 D5] The rehydrate's dependency order — the sorter, and the
+    // readings of a package's id and its declared dependencies it sorts by.
+    orderHydrationBatch,
+    artifactPackageId,
+    declaredDependencyIds,
 } from '@objectstack/core';
 import {
     resolveTenancyPosture,
@@ -913,7 +918,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             return;
         }
 
-        for (const entry of entries) {
+        for (const entry of this.inDependencyOrder(ctx, entries)) {
             try {
                 // [#21762] ADR-0087 D1: the handshake runs "before loading a
                 // package's metadata", and a rehydrate IS a load. An entry whose
@@ -982,6 +987,39 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }
         }
     };
+
+    /**
+     * [ADR-0141 D5] The ledger's entries in `manifest.dependencies` order, not
+     * the order the directory lists them in: a standalone module read before
+     * the artifact carrying its parent met the namespace gate — and the
+     * `kernel:ready` seals — with that parent absent. Each entry is one node
+     * (an artifact may carry several packages), so a declared id resolves to
+     * the entry that carries that package and an id declared between packages
+     * of one entry is no edge. A cycle between entries keeps listed order for
+     * its members and is reported by name; it never stops the rehydrate.
+     */
+    private inDependencyOrder(ctx: PluginContext, entries: InstalledManifestEntry[]): InstalledManifestEntry[] {
+        const { ordered, cycles } = orderHydrationBatch(entries.map((entry) => {
+            const bodies: unknown[] = Array.isArray(entry.manifest?.packages)
+                ? entry.manifest.packages.map((p: { manifest?: unknown } | null) => p?.manifest)
+                : [entry.manifest];
+            return {
+                item: entry,
+                label: entry.manifestId,
+                packageIds: bodies.map((body) => artifactPackageId(body)).filter((id): id is string => id !== undefined),
+                declaredIds: bodies.flatMap((body) => declaredDependencyIds(body)),
+            };
+        }));
+        for (const members of cycles) {
+            ctx.logger?.error?.(
+                `[MarketplaceInstallLocal] installed apps ${members.map((m) => `'${m}'`).join(', ')} declare each other in a `
+                + 'dependency cycle (manifest.dependencies), so no order puts each after the packages it declares. They '
+                + 'rehydrate in listed order for this boot (ADR-0141 D5); a namespace they share may be refused. Remove the '
+                + 'declaration that closes the cycle and reinstall.',
+            );
+        }
+        return ordered;
+    }
 
     /**
      * Rehydrate-time sample-data healing (the "installed app, empty database"
@@ -1547,8 +1585,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //     nothing. Every package this act delivers is judged on its OWN
         //     `manifest.dependencies`: the entries of `packages[]` for a
         //     multi-package artifact, the manifest itself otherwise. A
-        //     dependency the same artifact delivers (an entry, or the
-        //     artifact's own identity) is judged for presence only; any other
+        //     dependency the same artifact delivers — one of those packages;
+        //     never the wrapper's own id, which names no package unless one of
+        //     them carries it — is judged for presence only; any other
         //     must be installed in this runtime's registry at a version inside
         //     its range. The refusal is the other install doors' answer, from
         //     the one shared helper, 422 on both branches: a dependency this
@@ -1568,7 +1607,6 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             try { registry = ctx.getService<IObjectQLEngine>('objectql')?.registry; } catch { /* no data engine — nothing installed */ }
             const unmet = checkDeclaredDependencies({
                 delivered: entries,
-                deliveredIds: [manifestId],
                 getInstalled: (id) => registry?.getPackage?.(id),
             });
             if (unmet.length > 0) {

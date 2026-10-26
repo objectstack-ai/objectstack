@@ -156,6 +156,7 @@ import {
   type UndeliveredAttribute,
 } from './builtin-column-collision.js';
 import { recoverUnencodedJsonText } from './unencoded-json-text.js';
+import { withUpsertConflictClause } from './upsert-conflict-clause.js';
 // [#25521 cut 1] The catalog-introspection helpers (`introspectColumnOrder`,
 // `introspectColumns` and the foreign-key, primary-key and unique-constraint reads),
 // [cut 4] `introspectSchema`, the whole-schema read built on them, and [cut 5]
@@ -2262,6 +2263,30 @@ function refuseUndeclaredFieldType(column: string): never {
  * matching the twin: the two-argument form needs the ES2022 `ErrorOptions`
  * overload.
  */
+/**
+ * Whether a physical key index covers exactly the conflict target — the same
+ * columns, order-insensitively, which is how both `ON CONFLICT` dialects infer
+ * an arbiter index and the only reading under which a composite key means
+ * anything. Shared by {@link SqlDriver.assertConflictTargetHonoured} and
+ * {@link SqlDriver.assertConflictTargetBackedWithoutClause}.
+ */
+function indexCoversConflictTarget(index: PhysicalIndex, mergeKeys: readonly string[]): boolean {
+  const wanted = new Set(mergeKeys);
+  return index.columns.length === wanted.size && index.columns.every((c) => wanted.has(c));
+}
+
+/**
+ * The `cause` an introspection-based unbacked-target refusal carries, where the
+ * server's own sentence stands on a server-judged one: schema identifiers only,
+ * no row values.
+ */
+function unbackedConflictTargetCause(tableName: string, mergeKeys: readonly string[], keys: PhysicalIndex[]): Error {
+  const found = keys.map((i) => `${i.name}(${i.columns.join(', ')})`).join(', ');
+  return new Error(
+    `no PRIMARY KEY or UNIQUE index on "${tableName}" covers (${mergeKeys.join(', ')}); ` + `keys present: ${found}`,
+  );
+}
+
 function refuseUnbackedConflictTarget(object: string, mergeKeys: string[], cause: unknown): Error {
   const keys = mergeKeys.map((k) => `"${k}"`).join(', ');
   const err = new Error(
@@ -9501,9 +9526,7 @@ export class SqlDriver implements IDataDriver {
     const target = this.rotationWriteTarget(object) ?? object;
     const tableName = this.physicalTableByObject[target] ?? target;
 
-    const wanted = new Set(mergeKeys);
-    const covers = (i: PhysicalIndex): boolean =>
-      i.columns.length === wanted.size && i.columns.every((c) => wanted.has(c));
+    const covers = (i: PhysicalIndex): boolean => indexCoversConflictTarget(i, mergeKeys);
 
     type Verdict =
       | { kind: 'honoured' }
@@ -9594,15 +9617,36 @@ export class SqlDriver implements IDataDriver {
     // `cause` carries the ground truth an operator needs to act. Schema
     // identifiers only — no row values, matching the payload contract the
     // refusal already keeps.
-    const found = keys.map((i) => `${i.name}(${i.columns.join(', ')})`).join(', ');
-    throw refuseUnbackedConflictTarget(
-      object,
-      mergeKeys,
-      new Error(
-        `no PRIMARY KEY or UNIQUE index on "${tableName}" covers (${mergeKeys.join(', ')}); ` +
-          `keys present: ${found}`,
-      ),
-    );
+    throw refuseUnbackedConflictTarget(object, mergeKeys, unbackedConflictTargetCause(tableName, mergeKeys, keys));
+  }
+
+  /**
+   * [#8740] The unbacked-conflict-target refusal for an upsert statement that
+   * carries NO conflict clause — the one {@link upsert} sends when nothing is
+   * left to merge ({@link withUpsertConflictClause}).
+   *
+   * With a conflict clause, SQLite and PostgreSQL refuse an unbacked target
+   * themselves (the planner finds no arbiter index) and MySQL refuses it in
+   * {@link assertConflictTargetHonoured}. A plain INSERT asks the server
+   * nothing about the target, so without this check that path would accept on
+   * two dialects a call every dialect refuses when there is something to merge.
+   * So the answer is the same refusal, on every dialect, read from the same
+   * cached introspection MySQL's pre-flight reads, with the same certainty
+   * rule: a failed read or a table with no keys at all proceeds, and a refusal
+   * is re-read fresh first, so a stale cache can never refuse a backed target.
+   */
+  private async assertConflictTargetBackedWithoutClause(
+    object: string,
+    writeTable: string,
+    mergeKeys: string[],
+  ): Promise<void> {
+    const tableName = this.physicalTableByObject[writeTable] ?? writeTable;
+    const backed = (keys: PhysicalIndex[] | null): boolean =>
+      keys === null || keys.length === 0 || keys.some((i) => indexCoversConflictTarget(i, mergeKeys));
+    if (backed(await this.introspectKeyIndexes(tableName))) return;
+    const fresh = await this.introspectKeyIndexes(tableName, { fresh: true });
+    if (backed(fresh)) return;
+    throw refuseUnbackedConflictTarget(object, mergeKeys, unbackedConflictTargetCause(tableName, mergeKeys, fresh!));
   }
 
   /**
@@ -9980,8 +10024,8 @@ export class SqlDriver implements IDataDriver {
       // never reached it: `stampInsertTimestamps` puts a mergeable `updated_at`
       // in the payload there. [#11176] `stampUpsertUpdatedAt` now does the same
       // on Postgres and MySQL, so a TIMESTAMPED object no longer reaches this
-      // fallback on any dialect either — it is still reachable, and still #8740's
-      // to decide, for an object with no observed `updated_at` column.)
+      // fallback on any dialect either — it is still reachable for an object
+      // with no observed `updated_at` column.)
       //
       // The remedy keeps the emitted SQL byte-identical to what `main` emits
       // for this shape. Falling back to the CONFLICT-TARGET columns present in
@@ -9991,16 +10035,20 @@ export class SqlDriver implements IDataDriver {
       // mergeable column in this case. So this PR's net behavioural delta on the
       // degenerate path is nil rather than a #7011 regression.
       //
-      // The last-ditch `merge()` is left as-is: it needs the conflict target to
-      // be absent from the payload, which means the INSERT never supplies it, so
-      // on every dialect here the target is NULL and cannot collide — the DO
-      // UPDATE clause is unreachable rather than merely unused. Filed separately
-      // rather than widened into: merge-ALL is the wrong shape for "nothing to
-      // merge" on any dialect, and the alternatives are not accept-set-neutral
-      // (knex compiles `.ignore()` to MySQL's `insert ignore`, which swallows
-      // unrelated errors too — measured).
+      // [#8740] When the payload carries no conflict-target column either, there
+      // is nothing the merge leg may write, and the statement is a plain INSERT
+      // with no conflict clause: a collision surfaces as the driver's own
+      // unique-violation error and the stored row is left as it was. This used
+      // to fall back to knex's bare `merge()`, which is merge-ALL on every
+      // dialect: it re-admitted every insert-only column the lines above
+      // exclude. ⛔ Not `ignore()` either: knex lowers it on MySQL to
+      // `insert ignore`, which swallows unrelated errors and drops the conflict
+      // target. See {@link withUpsertConflictClause}.
       const noopMergeColumns = Object.keys(formatted).filter((c) => mergeKeys.includes(c));
       const columnsToMerge = mergeColumns.length > 0 ? mergeColumns : noopMergeColumns;
+      // …and that plain INSERT still refuses a conflict target nothing backs,
+      // as every dialect does when there is something to merge.
+      if (columnsToMerge.length === 0) await this.assertConflictTargetBackedWithoutClause(object, writeTable, mergeKeys);
 
       // [#21185] The fence for THIS attempt: the tenant column, and the value
       // the row is written under in storage form (what the statement sends).
@@ -10023,8 +10071,8 @@ export class SqlDriver implements IDataDriver {
         // is `injectTenantOnInsert`'s job (called above), which is exactly why
         // this one is deliberately not scoped.
         const builder = this.getBuilder(writeTable, writeOptions);
-        const insertion = builder.insert(formatted).onConflict(mergeKeys);
-        const merging = columnsToMerge.length > 0 ? insertion.merge(columnsToMerge) : insertion.merge();
+        const insertion = builder.insert(formatted);
+        const { statement, merges } = withUpsertConflictClause(insertion, mergeKeys, columnsToMerge);
         // [#21185] SQLite and PostgreSQL: the fence is a predicate INSIDE the
         // merge statement — `… DO UPDATE SET … WHERE` the stored tenant column
         // equals the written one — so a conflict on a row of another
@@ -10036,8 +10084,11 @@ export class SqlDriver implements IDataDriver {
         // a platform row with no organization is fenced off too. The target
         // table is named by its bare physical name, which both dialects accept
         // for the INSERT target in this clause, schema-qualified or not.
-        // MySQL takes no `WHERE` here; its fence runs after the statement.
-        await (fence && !this.isMysql ? merging.where(this.mergeLandsInWrittenOrganization(writeTable, fence.column)) : merging);
+        // MySQL takes no `WHERE` here; its fence runs after the statement. A
+        // plain INSERT ([#8740]) has no merge leg to fence.
+        await (merges && fence && !this.isMysql
+          ? statement.where(this.mergeLandsInWrittenOrganization(writeTable, fence.column))
+          : statement);
         if (mysqlFence) {
           // [#21185] One read, under the written tenant exactly; #8807's
           // identity verdict rides on it when a rival key made one owed.
