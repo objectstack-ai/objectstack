@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 180 — spawns the real producer once per single-cause fixture: eight `os start` boots of the tsx source entry across four orders of events, each order its own cwd and home and the four run at once, and five `os package install` runs; slowest of three local runs after the orders ran at once 105.5 s, x 1.35 (this file's CI-over-local ratio before: 270.1 s in hourly full battery run 40290659753 over a 200.5 s local median) x 1.25, rounded up; no CI reading of this shape yet
 
 /**
  * #21490 — an install-local uninstall (`DELETE /api/v1/marketplace/install-local/:id`)

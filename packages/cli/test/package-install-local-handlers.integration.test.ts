@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 100 — spawns the real producer once per single-cause fixture: three `os start` boots of the tsx source entry (install and reinstall, restart on the same home, and the `--artifact` control on its own home, run beside the other two) and two `os package install` runs; slowest of three local runs after the control ran beside them 57.5 s, x 1.35 (this file's CI-over-local ratio before: 97.8 s in hourly full battery run 40290659753 over a 72.7 s local median) x 1.25, rounded up; no CI reading of this shape yet
 
 /**
  * #21321 — an app installed with `os package install <artifact>` runs its
