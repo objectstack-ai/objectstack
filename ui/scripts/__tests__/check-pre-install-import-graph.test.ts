@@ -410,13 +410,15 @@ describe('the gate is wired, not merely present', () => {
     // Deliberate: its input is the workflows themselves, and a workflow edit is
     // the change most likely to break it. A filter would also make the check
     // unrequirable (objectui#3523). The root trigger filters no path; the job
-    // runs on the `filter` job's `ui` globs, which must match the workflow
-    // whose steps are the population today and the gate itself.
+    // runs on the `filter` job's `ui` globs, which must match EVERY root
+    // workflow, not only ci.yml, whose steps are the population today: the scan
+    // reads them all, so a ui step added before an install in any one of them
+    // is this gate's subject (objectstack#25712) — and the gate itself.
     const on = withoutComments(triggerBlock(ci));
     expect(on).not.toMatch(/paths-ignore:/);
     expect(on).not.toMatch(/^\s+paths:/m);
     const globs = uiFilterGlobs(ci);
-    const missed = ['.github/workflows/ci.yml', repoPath(SCRIPT)]
+    const missed = [...rootWorkflowFiles().map((file) => `.github/workflows/${file}`), repoPath(SCRIPT)]
       .filter((file) => !globs.some((glob) => globMatches(glob, file)));
     expect(missed, `a change to these would skip ${WORKFLOW}`).toEqual([]);
   });

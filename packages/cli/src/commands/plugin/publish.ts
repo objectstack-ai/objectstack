@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `os plugin publish` — upload a signed `.osplugin` to ObjectStack Cloud
+ * `os plugin publish` — upload a signed `.osplugin` to ObjectOS Cloud
  * (ADR-0025 §3.4 step 3). Completes the build → sign → publish pipeline.
  *
  * Flow:

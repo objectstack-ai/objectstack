@@ -25,7 +25,7 @@ import type { SettingsActionHandler } from '../settings-service.types.js';
  * on its own version track: `latest` was 6.9.0 (published 2026-05-27) while
  * this repo shipped 17.2.0, and 6.9.0 exact-pins `@objectstack/spec@6.9.0`, so
  * mounting it into an app on this platform version resolves a SECOND spec
- * rather than reusing this one. Its source lives in the ObjectStack Cloud
+ * rather than reusing this one. Its source lives in the ObjectOS Cloud
  * monorepo (see this repo's README). Measured against the registry on
  * 2026-08-23 with `@objectstack/spec` + `@objectstack/cli` as positive
  * controls; re-measure before treating those numbers as current.
@@ -193,7 +193,7 @@ export const knowledgeTestActionHandler: SettingsActionHandler = async ({ values
       severity: 'info',
       message:
         `Turso adapter configured (${u}). ${FORM_CHECK_ONLY} Live calls need @objectstack/knowledge-turso, ` +
-        'which this platform does not ship: it is built in the ObjectStack Cloud monorepo ' +
+        'which this platform does not ship: it is built in the ObjectOS Cloud monorepo ' +
         'and published on its own version track, so check that it offers a release ' +
         'compatible with your platform version before mounting it.',
     };

@@ -26,7 +26,7 @@ docs, adapters, services, plugins, and the bundled console integration.
   `../objectui`.
 - **Cloud publishing:** CLI publish/rollback target
   `/api/v1/cloud/environments/:environment/...` endpoints when pointed at an
-  ObjectStack Cloud control plane.
+  ObjectOS Cloud control plane.
 - **Generated references:** `content/docs/references/` is generated from Zod
   descriptions. Update `packages/spec/src/**/*.zod.ts`, then regenerate.
 

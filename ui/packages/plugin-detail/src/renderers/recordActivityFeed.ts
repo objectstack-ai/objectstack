@@ -7,7 +7,7 @@
  *
  * `record:activity` — the pure half (objectui#3165).
  *
- * Three things live here, all testable without a DOM:
+ * Four things live here, all testable without a DOM:
  *
  *  1. the `sys_activity` row → {@link FeedItem} map the block's self-fetch
  *     uses (the same map `RecordDetailView` applies to the rows it merges
@@ -17,7 +17,10 @@
  *     / `limit`) into observable behaviour;
  *  3. {@link isRefusedFeedRead}, which tells a REFUSED feed read from an empty
  *     or failed one. The block's self-fetch and `RecordDetailView`'s two feed
- *     reads use the same verdict (objectui#11195).
+ *     reads use the same verdict (objectui#11195);
+ *  4. {@link foldFeedItems}, which folds a run of consecutive updates by one
+ *     actor into one timeline row (objectstack#25959). `RecordActivityTimeline`
+ *     renders its answer.
  *
  * (2) exists as its own function on purpose. Before #3165 every one of those
  * inputs was a filter over a feed that was hard-coded empty — declared,
@@ -375,38 +378,70 @@ function isLoggedInteraction(item: FeedItem): boolean {
 }
 
 /**
- * Whether a `sys_activity` row carries the milestone marker,
- * `metadata.kind === 'milestone'` (objectui#12106).
+ * A `sys_activity` row's domain kind, `metadata.kind` (ADR-0052 §5), or
+ * `undefined` when the row carries none. The milestone marker
+ * (objectui#12106) is the kind `'milestone'`; since objectstack#25959 the
+ * timeline's fold reads the kind too.
  *
  * `metadata` is a `textarea` column, declared as "JSON-serialized additional
  * context". plugin-audit writes it with `safeStringify`, the read-side
  * redaction re-serialises it, and the writer's own test reads the served row
- * with `JSON.parse(r.metadata)`. So the marker is read from that JSON string
+ * with `JSON.parse(r.metadata)`. So the kind is read from that JSON string
  * and from nothing else. ⛔ Not from an already-parsed object: no served row
  * carries one, and reading both would be a second dialect (AGENTS.md #0.1).
+ * Only `kind` is read: the recorded `old` / `new` values in the same JSON are
+ * never looked at here.
  *
- * Every other value is "no marker": an absent or non-string `metadata`, a
- * string that is not a JSON object, or a `kind` that is not `'milestone'` (an
- * app may write its own kind, such as `'email'`). Such a row keeps today's
- * reading. That includes every row a runtime from before objectstack#22771
- * serves, and every row the redaction served without the kind because the
- * reader is not served a field the milestone watches.
+ * Every other value is "no kind": an absent or non-string `metadata`, a
+ * string that is not a JSON object, or a `kind` that is not a non-empty
+ * string. An app may write its own kind, such as `'email'`, and a row that is
+ * not a milestone keeps today's reading. That includes every row a runtime
+ * from before objectstack#22771 serves, and every row the redaction served
+ * without the kind because the reader is not served a field the milestone
+ * watches.
  */
-function isMilestoneActivityRow(row: SysActivityRow): boolean {
+function activityKindOf(row: SysActivityRow): string | undefined {
   const raw = row?.metadata;
-  if (typeof raw !== 'string') return false;
+  if (typeof raw !== 'string') return undefined;
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return false;
+    return undefined;
   }
-  return (
-    typeof parsed === 'object'
-    && parsed !== null
-    && !Array.isArray(parsed)
-    && (parsed as { kind?: unknown }).kind === ACTIVITY_MILESTONE_KIND
-  );
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined;
+  const kind = (parsed as { kind?: unknown }).kind;
+  return typeof kind === 'string' && kind ? kind : undefined;
+}
+
+/**
+ * `sys_activity.actor_id` as an id, or `null` when the row names no user
+ * (objectstack#25959). A read that passes `$expand: ['actor_id']` gets the
+ * user's record in place of the id, so the id is that record's `id`; a row
+ * whose actor the engine kept as the bare id answers that id.
+ */
+function activityActorId(row: SysActivityRow): string | number | null {
+  const actor = row?.actor_id;
+  if (actor && typeof actor === 'object') {
+    const id = (actor as { id?: unknown }).id;
+    return typeof id === 'string' || typeof id === 'number' ? id : null;
+  }
+  return typeof actor === 'string' || typeof actor === 'number' ? actor : null;
+}
+
+/**
+ * `sys_activity.changed_fields`, the field names the recorded change touched
+ * (objectstack#25959), or `undefined` when the row does not carry the column.
+ *
+ * It is a `tags` column, served as an array of machine names and already
+ * narrowed to the fields this reader may see (plugin-audit's
+ * `activity-changed-fields.ts`). `null` there means the row is not stamped
+ * yet, which is not the same answer as `[]`, so it is not carried either.
+ */
+function activityChangedFields(row: SysActivityRow): string[] | undefined {
+  const raw = row?.changed_fields;
+  if (!Array.isArray(raw)) return undefined;
+  return raw.filter((f): f is string => typeof f === 'string' && f.length > 0);
 }
 
 /** A row as `sys_activity` returns it. Loose on purpose: the block reads a
@@ -949,11 +984,15 @@ export function activityRowToFeedItem(
   if (!known) warnUnknownActivityType(rawType);
   const mapped = known ? ACTIVITY_TYPE_TO_FEED_TYPE[rawType] : UNMAPPED_ACTIVITY_FEED_TYPE;
   if (!mapped) return null;
-  // The marker is read only for a row that would otherwise be hidden as
-  // completed, so every other row is mapped without parsing its `metadata`.
-  const feedType = COMPLETED_FEED_TYPES.has(mapped) && isMilestoneActivityRow(row)
+  // The kind is read for every row since objectstack#25959: the timeline's
+  // fold needs it to keep a milestone fired as an `updated` row out of a run
+  // of plain updates. The milestone override still applies only to a row that
+  // would otherwise be hidden as completed.
+  const activityKind = activityKindOf(row);
+  const feedType = COMPLETED_FEED_TYPES.has(mapped) && activityKind === ACTIVITY_MILESTONE_KIND
     ? MILESTONE_ACTIVITY_FEED_TYPE
     : mapped;
+  const changedFields = activityChangedFields(row);
   return {
     id: row.id as string | number,
     type: feedType,
@@ -967,6 +1006,13 @@ export function activityRowToFeedItem(
     // source record (a `sys_email` row, a call/meeting task, …).
     sourceObject: row.source_object ?? undefined,
     sourceId: (row.source_id ?? undefined) as string | number | undefined,
+    // What the timeline's fold keys on (objectstack#25959). `type` above is
+    // the presentation, shared by five activity types; these say which row
+    // this is and who wrote it.
+    activityType: rawType,
+    ...(activityKind ? { activityKind } : {}),
+    actorId: activityActorId(row),
+    ...(changedFields ? { changedFields } : {}),
   };
 }
 
@@ -1071,6 +1117,91 @@ export function applyFeedConfig(
   // reads oldest→newest, so a page of `size` is the LAST `size` items.
   const page = total > size ? kept.slice(total - size) : kept;
   return { items: page, total, hasMore: total > size };
+}
+
+/**
+ * The longest gap between two adjacent updates that still folds them into one
+ * row (objectstack#25959). Measured between NEIGHBOURS, not from the first
+ * entry, so a flow that writes the record every few minutes for an hour is one
+ * run, and a gap longer than this starts a new one.
+ */
+export const FOLD_WINDOW_MS = 10 * 60 * 1000;
+
+/** One row of the rendered timeline: a feed item, or a run of folded updates. */
+export type ActivityTimelineEntry =
+  | { kind: 'item'; item: FeedItem }
+  | { kind: 'fold'; id: string; items: FeedItem[] };
+
+/**
+ * Whether a feed item is a plain update that may fold (objectstack#25959).
+ *
+ * Only an `updated` row read from `sys_activity`: `activityType` is set by
+ * `activityRowToFeedItem`, so a host item without it never folds. A row with a
+ * domain kind (`activityKind`, a fired milestone) is an event in its own
+ * right and never folds, and neither does a create, a delete, a comment or a
+ * completed task, whose `activityType` is not `updated`. A row whose summary
+ * is empty still folds and still counts.
+ */
+function isFoldableUpdate(item: FeedItem): boolean {
+  return (
+    item.activityType === 'updated'
+    && item.type === 'field_change'
+    && item.activityKind === undefined
+    && !item.parentId
+  );
+}
+
+function foldTime(item: FeedItem): number {
+  return item.createdAt ? Date.parse(item.createdAt) : Number.NaN;
+}
+
+/**
+ * Whether `next` continues the run `prev` ends: the same actor (`actorId`,
+ * `null` for the system, and the same display name, so two unnamed writers are
+ * never merged into one), and no more than {@link FOLD_WINDOW_MS} apart.
+ */
+function continuesRun(prev: FeedItem, next: FeedItem): boolean {
+  if ((prev.actorId ?? null) !== (next.actorId ?? null)) return false;
+  if (prev.actor !== next.actor) return false;
+  const a = foldTime(prev);
+  const b = foldTime(next);
+  if (Number.isNaN(a) || Number.isNaN(b)) return false;
+  return Math.abs(b - a) <= FOLD_WINDOW_MS;
+}
+
+/**
+ * Fold runs of consecutive updates by one actor into single timeline rows
+ * (objectstack#25959).
+ *
+ * Rendering only. Every item stays in the feed and in its run, in order, so
+ * expanding a fold shows each entry as it was written; nothing is dropped or
+ * merged in the data. A run is adjacent items of the list as the reader sees
+ * it (after the filter), each a foldable update ({@link isFoldableUpdate}) that
+ * continues the one before it ({@link continuesRun}). Any other row between two
+ * updates ends the run. A run of one is an ordinary row.
+ */
+export function foldFeedItems(items: readonly FeedItem[]): ActivityTimelineEntry[] {
+  const entries: ActivityTimelineEntry[] = [];
+  let run: FeedItem[] = [];
+  const flush = () => {
+    if (run.length > 1) {
+      entries.push({ kind: 'fold', id: `fold:${String(run[0].id)}`, items: run });
+    } else if (run.length === 1) {
+      entries.push({ kind: 'item', item: run[0] });
+    }
+    run = [];
+  };
+  for (const item of items) {
+    if (!isFoldableUpdate(item)) {
+      flush();
+      entries.push({ kind: 'item', item });
+      continue;
+    }
+    if (run.length > 0 && !continuesRun(run[run.length - 1], item)) flush();
+    run.push(item);
+  }
+  flush();
+  return entries;
 }
 
 /** Sort a feed chronologically and de-duplicate by id (feeds are append-only). */
