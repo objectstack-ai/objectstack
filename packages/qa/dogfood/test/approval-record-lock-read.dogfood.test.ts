@@ -115,8 +115,9 @@ const editAllSet: PermissionSet = PermissionSetSchema.parse({
   name: 'lockread_edit_all',
   label: 'Lock Read Edit All — every row of both fixture objects',
   objects: {
-    [HELD]: { ...crud, viewAllRecords: true, modifyAllRecords: true },
-    [OPEN]: { ...crud, viewAllRecords: true, modifyAllRecords: true },
+    // `allowDelete` rides the bypass bit (ADR-0049): a `false` beside it is refused.
+    [HELD]: { ...crud, allowDelete: true, viewAllRecords: true, modifyAllRecords: true },
+    [OPEN]: { ...crud, allowDelete: true, viewAllRecords: true, modifyAllRecords: true },
   },
 });
 
