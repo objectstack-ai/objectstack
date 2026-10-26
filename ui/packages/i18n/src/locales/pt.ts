@@ -224,6 +224,8 @@ const pt = {
     update: "Atualizar",
     createSuccess: "{{object}} criado",
     updateSuccess: "{{object}} atualizado",
+    createdNamed: "{{object}} \"{{title}}\" criado",
+    updatedNamed: "{{object}} \"{{title}}\" atualizado",
     deleteSuccess: "{{object}} excluído",
     created: "Criado",
     saved: "Salvo",

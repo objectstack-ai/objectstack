@@ -229,6 +229,8 @@ const es = {
     update: "Actualizar",
     createSuccess: "{{object}} creado",
     updateSuccess: "{{object}} actualizado",
+    createdNamed: "{{object}} \"{{title}}\" creado",
+    updatedNamed: "{{object}} \"{{title}}\" actualizado",
     deleteSuccess: "{{object}} eliminado",
     created: "Creado",
     saved: "Guardado",

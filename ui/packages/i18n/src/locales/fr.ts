@@ -224,6 +224,8 @@ const fr = {
     update: "Mettre à jour",
     createSuccess: "{{object}} créé",
     updateSuccess: "{{object}} mis à jour",
+    createdNamed: "{{object}} \"{{title}}\" créé",
+    updatedNamed: "{{object}} \"{{title}}\" mis à jour",
     deleteSuccess: "{{object}} supprimé",
     created: "Créé",
     saved: "Enregistré",

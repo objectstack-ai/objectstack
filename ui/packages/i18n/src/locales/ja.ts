@@ -222,6 +222,8 @@ const ja = {
     update: "更新",
     createSuccess: "{{object}}が作成されました",
     updateSuccess: "{{object}}が更新されました",
+    createdNamed: "{{object}}「{{title}}」を作成しました",
+    updatedNamed: "{{object}}「{{title}}」を更新しました",
     deleteSuccess: "{{object}}が削除されました",
     created: "作成しました",
     saved: "保存しました",

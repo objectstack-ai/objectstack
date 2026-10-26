@@ -229,6 +229,8 @@ const ru = {
     update: "Обновить",
     createSuccess: "{{object}} создан",
     updateSuccess: "{{object}} обновлён",
+    createdNamed: "{{object}} \"{{title}}\" создан",
+    updatedNamed: "{{object}} \"{{title}}\" обновлён",
     deleteSuccess: "{{object}} удалён",
     created: "Создано",
     saved: "Сохранено",

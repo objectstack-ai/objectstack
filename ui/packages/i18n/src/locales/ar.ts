@@ -236,6 +236,8 @@ const ar = {
     update: "تحديث",
     createSuccess: "تم إنشاء {{object}}",
     updateSuccess: "تم تحديث {{object}}",
+    createdNamed: "تم إنشاء {{object}} \"{{title}}\"",
+    updatedNamed: "تم تحديث {{object}} \"{{title}}\"",
     deleteSuccess: "تم حذف {{object}}",
     created: "تم الإنشاء",
     saved: "تم الحفظ",

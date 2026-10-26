@@ -227,6 +227,8 @@ const zh = {
     update: '更新',
     createSuccess: '{{object}}创建成功',
     updateSuccess: '{{object}}更新成功',
+    createdNamed: '{{object}}“{{title}}”已创建',
+    updatedNamed: '{{object}}“{{title}}”已更新',
     deleteSuccess: '{{object}}删除成功',
     // objectui#11039 — plugin-form feedback chrome; see the `en` pack.
     created: '已创建',
