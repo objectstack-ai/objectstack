@@ -1,0 +1,16 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "defaultValues": {
+    "progress": 0.753
+  },
+  "fields": [
+    {
+      "name": "progress",
+      "label": "Progress",
+      "type": "percent",
+      "scale": 1
+    }
+  ]
+}

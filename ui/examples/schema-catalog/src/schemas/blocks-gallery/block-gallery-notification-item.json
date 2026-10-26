@@ -1,0 +1,36 @@
+{
+  "type": "flex",
+  "properties": {
+    "align": "start",
+    "gap": 3,
+    "children": [
+      {
+        "type": "avatar",
+        "fallback": "JD",
+        "className": "h-10 w-10"
+      },
+      {
+        "type": "stack",
+        "gap": 1,
+        "children": [
+          {
+            "type": "text",
+            "content": "John Doe commented on your post",
+            "className": "text-sm font-medium"
+          },
+          {
+            "type": "text",
+            "content": "Great work on the new design! The color scheme looks amazing.",
+            "className": "text-sm text-muted-foreground"
+          },
+          {
+            "type": "text",
+            "content": "2 minutes ago",
+            "className": "text-xs text-muted-foreground"
+          }
+        ]
+      }
+    ]
+  },
+  "className": "p-4 border rounded-lg max-w-md"
+}

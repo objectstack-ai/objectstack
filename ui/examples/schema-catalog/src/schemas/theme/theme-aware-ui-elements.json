@@ -1,0 +1,111 @@
+{
+  "type": "stack",
+  "gap": 4,
+  "children": [
+    {
+      "type": "flex",
+      "properties": {
+        "gap": 2,
+        "wrap": true,
+        "children": [
+          {
+            "type": "button",
+            "label": "Primary",
+            "variant": "default"
+          },
+          {
+            "type": "button",
+            "label": "Secondary",
+            "variant": "secondary"
+          },
+          {
+            "type": "button",
+            "label": "Outline",
+            "variant": "outline"
+          },
+          {
+            "type": "button",
+            "label": "Ghost",
+            "variant": "ghost"
+          },
+          {
+            "type": "button",
+            "label": "Destructive",
+            "variant": "destructive"
+          }
+        ]
+      }
+    },
+    {
+      "type": "flex",
+      "properties": {
+        "gap": 2,
+        "wrap": true,
+        "children": [
+          {
+            "type": "badge",
+            "label": "Default",
+            "variant": "default"
+          },
+          {
+            "type": "badge",
+            "label": "Secondary",
+            "variant": "secondary"
+          },
+          {
+            "type": "badge",
+            "label": "Outline",
+            "variant": "outline"
+          },
+          {
+            "type": "badge",
+            "label": "Destructive",
+            "variant": "destructive"
+          }
+        ]
+      }
+    },
+    {
+      "type": "grid",
+      "columns": 2,
+      "gap": 3,
+      "children": [
+        {
+          "type": "card",
+          "header": [
+            {
+              "type": "text",
+              "content": "Card Title",
+              "className": "font-semibold"
+            }
+          ],
+          "children": [
+            {
+              "type": "text",
+              "content": "This card uses theme-aware background and foreground colors.",
+              "className": "text-sm text-muted-foreground"
+            }
+          ]
+        },
+        {
+          "type": "card",
+          "className": "bg-muted",
+          "header": [
+            {
+              "type": "text",
+              "content": "Muted Card",
+              "className": "font-semibold"
+            }
+          ],
+          "children": [
+            {
+              "type": "text",
+              "content": "A muted-background variant for subtle content areas.",
+              "className": "text-sm text-muted-foreground"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

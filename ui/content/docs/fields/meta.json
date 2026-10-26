@@ -1,0 +1,32 @@
+{
+  "title": "Fields",
+  "pages": [
+    "text",
+    "textarea",
+    "number",
+    "currency",
+    "percent",
+    "boolean",
+    "select",
+    "date",
+    "datetime",
+    "time",
+    "email",
+    "phone",
+    "url",
+    "password",
+    "file",
+    "image",
+    "location",
+    "lookup",
+    "formula",
+    "summary",
+    "auto-number",
+    "user",
+    "rich-text",
+    "object",
+    "vector",
+    "grid",
+    "widget-props"
+  ]
+}

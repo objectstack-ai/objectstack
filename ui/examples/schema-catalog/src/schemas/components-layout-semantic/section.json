@@ -1,0 +1,15 @@
+{
+  "type": "section",
+  "className": "p-6 border rounded",
+  "children": [
+    {
+      "type": "text",
+      "content": "Section Title",
+      "className": "text-lg font-semibold mb-2"
+    },
+    {
+      "type": "text",
+      "content": "A thematic grouping of content"
+    }
+  ]
+}

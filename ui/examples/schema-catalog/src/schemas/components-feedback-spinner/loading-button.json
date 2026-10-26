@@ -1,0 +1,15 @@
+{
+  "type": "button",
+  "label": "Loading...",
+  "disabled": true,
+  "children": [
+    {
+      "type": "spinner",
+      "size": "sm"
+    },
+    {
+      "type": "text",
+      "content": "Please wait"
+    }
+  ]
+}

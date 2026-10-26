@@ -1,0 +1,29 @@
+{
+  // Type-checks this package's TESTS, which `tsconfig.json` excludes.
+  // See `packages/types/tsconfig.test.json` for why that exclusion was a hole:
+  // the build correctly keeps tests out of `dist`, but nothing else compiled
+  // them, so a test could assert a contract the compiler never checked.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // The package build is `composite` + `declaration`; this project emits
+    // nothing, so it must not inherit those.
+    "composite": false,
+    // `gesture-spec-parity.test.tsx` reads `mock.calls.at(-1)`. ES2022 is the
+    // floor for `Array.prototype.at` — the root config's ES2020 is what the
+    // SOURCE targets, and a test is free to need more than the shipped bundle.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // `spec-gesture-fallback-type-order.test.tsx` reads the hook's own source
+    // with `node:fs` to pin the payload WRITING ORDER, which no runtime
+    // assertion can see at an arm nobody wrote a case for. Naming `types` at
+    // all switches off automatic `@types/*` inclusion, so this is the whole
+    // list: these suites use no ambient matcher package — `@testing-library`'s
+    // `jest-dom` is not among their imports.
+    "types": ["node"],
+    // Drop the root tsconfig's source-tree `paths` so `@object-ui/*` and
+    // `@objectstack/spec` resolve through the workspace dependency's built
+    // `.d.ts` instead of pulling sibling sources in as program inputs (TS6059).
+    "paths": {}
+  },
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+}

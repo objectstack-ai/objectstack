@@ -1,0 +1,41 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    },
+    "noImplicitAny": true,
+    "noEmit": false,
+    "declaration": true,
+    // The incremental build RECORD, pinned OUTSIDE the published build output.
+    // Left unpinned, TypeScript derives it from `outDir`/`rootDir`: a package with
+    // no `rootDir` gets `dist/tsconfig.tsbuildinfo` -- inside what `files: ["dist",
+    // ...]` publishes -- and `pnpm check:published-dist` then reds on a byte-identical
+    // tree as soon as anything runs `tsc` (objectui#9189). Pinned in every composite
+    // package so the location is a decision, not a side effect of an unrelated option.
+    "tsBuildInfoFile": "./tsconfig.tsbuildinfo",
+    "composite": true,
+    "skipLibCheck": true
+  },
+  "include": ["src"],
+  // Tests are excluded from the BUILD program so they stop being emitted into
+  // the published `dist` (objectui#4006 — `dist/index.test.d.ts` shipped from
+  // here). The emitter is vite-plugin-dts, whose own `include: ['src']` in
+  // `vite.config.ts` does NOT displace this `exclude`: measured, the exclude
+  // alone removes `dist/index.test.d.ts`, so no dts-plugin `exclude` is needed.
+  // Their type coverage did not go away with them: it moved to the
+  // `tsconfig.test.json` chained off this package's `type-check` script, which
+  // is what scripts/check-type-check-coverage.mjs verifies.
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/__tests__/**",
+    "**/__mocks__/**",
+    "**/__benchmarks__/**",
+    "**/*.test.ts",
+    "**/*.test.tsx"
+  ]
+}

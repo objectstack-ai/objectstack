@@ -1,0 +1,74 @@
+---
+title: "File Upload"
+description: "Modern file upload component with drag-and-drop support"
+---
+
+import { DemoGrid } from '@/app/components/ComponentDemo';
+
+The File Upload component provides a futuristic interface for uploading files with visual feedback, progress indication, and multiple file support.
+
+## Basic Usage
+
+<SchemaExample id="components-form-file-upload/simple-upload" />
+
+## Single vs Multiple
+
+<DemoGrid>
+  <SchemaExample id="components-form-file-upload/single-file" />
+  <SchemaExample id="components-form-file-upload/multiple-files" />
+</DemoGrid>
+
+## File Type Restrictions
+
+<SchemaExample id="components-form-file-upload/images-only" />
+
+## Schema
+
+```text
+interface FileUploadSchema {
+  type: 'file-upload';
+  
+  // Required
+  id: string;                           // Field identifier
+  
+  // Configuration
+  name?: string;                        // Field name for form submission
+  label?: string;                       // Label text
+  buttonText?: string;                  // Upload button text
+  
+  // File constraints
+  accept?: string;                      // Accepted file types (e.g., 'image/*', '.pdf,.doc')
+  multiple?: boolean;                   // Allow multiple files (default: false)
+  maxSize?: number;                     // Maximum file size in bytes
+  maxFiles?: number;                    // Maximum number of files (for multiple)
+  
+  // States
+  disabled?: boolean | string | { dialect?: string; source: string };          // boolean, predicate expression, or CEL envelope
+  
+  // Help text
+  description?: string;                 // Help text or description
+  error?: string;                       // Error message
+  
+  // Styling
+  className?: string;                   // Tailwind CSS classes
+  wrapperClass?: string;                // Wrapper container classes
+  
+  // Base properties
+  visible?: boolean | string | { dialect?: string; source: string };
+  testId?: string;
+}
+```
+
+## Examples
+
+### Document Upload
+
+<SchemaExample id="components-form-file-upload/document-upload" />
+
+### Profile Picture
+
+<SchemaExample id="components-form-file-upload/avatar-upload" />
+
+### Full Example
+
+<SchemaExample id="components-form-file-upload/form-example" />

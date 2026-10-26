@@ -1,0 +1,7 @@
+{
+  "type": "code-editor",
+  "value": "function greet(name) {\n  console.log('Hello, ' + name + '!');\n  return 'Welcome, ' + name;\n}\n\ngreet('Developer');",
+  "language": "javascript",
+  "theme": "vs-dark",
+  "height": "300px"
+}

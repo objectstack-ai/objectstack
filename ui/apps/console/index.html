@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      Content Security Policy (CSP)
+      - 'unsafe-inline' is required for the process polyfill below and Tailwind/Radix inline styles.
+      - For stricter CSP, serve headers via your web server (see docs/deployment.md) and use
+        nonces or hashes instead of 'unsafe-inline'.
+    -->
+    <link rel="icon" type="image/png" href="" id="favicon" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <link rel="manifest" href="./manifest.json" />
+    <title></title>
+    <!--
+      zod runs without its JIT (objectui#13511).
+
+      zod v4 decides whether it may compile parsers by calling
+      `new Function('')` once, inside a try/catch, the first time an object
+      schema is built. The document's content-security-policy refuses `eval`
+      unless the deployment turns the `kind:'react'` page tier on, so that probe
+      is refused and a browser that reports violations files one report per
+      load, although nothing breaks. With `jitless` set, zod skips the probe and
+      uses its interpreter.
+
+      ⛔ It is set HERE, in a classic script ahead of the module entry, and not
+      with `z.config()` in `src/main.tsx`: the bundle puts zod and the schemas
+      built at load time into vendor chunks that the entry chunk imports, so
+      they run before any line of the entry's own body (measured on the
+      production build: the probe fired from `vendor-objectstack` with the call
+      at the top of main.tsx). zod reads its config from this global, created on
+      first load when absent (`zod/v4/core/core.js`), and every zod copy in the
+      page shares it. `src/__tests__/zod-jitless-13511.test.ts` runs this script
+      before the installed zod and holds both halves.
+    -->
+    <script>
+      window.__zod_globalConfig = window.__zod_globalConfig || {};
+      window.__zod_globalConfig.jitless = true;
+    </script>
+    <!--
+      Pre-React branding, and the page's ONE `GET /api/v1/runtime/config`
+      (objectui#5544).
+
+      This script runs during parse so the title and favicon are the operator's
+      before the bundle is even fetched. `initRuntimeConfig()` in
+      `@object-ui/app-shell` then needs the same payload — and used to fetch it a
+      second time, which is the `runtime/config ×2` the card measured on both
+      prod and staging. It is the expensive kind of duplicate: the console
+      `await`s that second call before `createRoot().render()`, so it sits on the
+      critical path to first paint.
+
+      The fix is a HANDOFF of this page load's answer (objectui#12808). This
+      script leaves its parsed-body promise on `globalThis` under
+      `Symbol.for('objectui.earlyRuntimeConfig')`, together with the URL it
+      asked, and keeps it for the page's lifetime. `initRuntimeConfig()` takes
+      it on its FIRST call when the URL matches: still in flight, it joins;
+      already settled, it reads the body. Hundreds of ms usually separate the
+      two, so an in-flight-only share (the earlier fix, objectui#5544) found
+      nothing to join and the bundle always asked again. A failed early fetch is
+      not reused: app-shell then fetches as it always did. Every later call
+      re-fetches, so the repeat-call contract is unchanged, and the slot holds
+      one answer of this page load, never one from an earlier page.
+
+      `src/__tests__/runtimeConfigBootDedup.test.ts` executes THIS script's text
+      against the real `initRuntimeConfig()`, so a drift between the slot's two
+      spellings fails a test rather than silently restoring the duplicate.
+
+      The ORIGIN is the other half of that contract (objectui#5660). Sharing
+      keys on the full URL, so the two callers must agree on the server origin
+      or they build two different keys, never find each other, and issue two
+      requests to two different servers. This script used to read
+      `window.__CONSOLE_SERVER_URL` — a global NOTHING in this repository ever
+      set — while every module-side consumer reads
+      `import.meta.env.VITE_SERVER_URL`. A dev pointing the console at a
+      separate server therefore got exactly that split, silently, because both
+      spellings collapse to '' in a same-origin production build, which is the
+      only shape the dedup above was ever measured in. Vite's HTML env
+      substitution resolves the SAME variable the modules read, so one value
+      reaches both callers.
+
+      Falls back gracefully on any error (non-blocking).
+    -->
+    <script>
+      (async function applyEarlyBranding() {
+        // Vite's HTML env substitution fills the token below with
+        // `import.meta.env.VITE_SERVER_URL` — the same value `src/main.tsx`
+        // hands `initRuntimeConfig()`. It substitutes only when the variable is
+        // SET and leaves the token verbatim when it is not (`htmlEnvHook`:
+        // `if (key in env) return env[key]; else return text`). Unset is the
+        // ordinary production case — Console SPA and tenant runtime share an
+        // origin — so an unsubstituted token MUST read as same-origin '' and
+        // never as a path segment. No origin can begin with '%'.
+        const injected = '%VITE_SERVER_URL%';
+        const base = (injected.charAt(0) === '%' ? '' : injected).replace(/\/+$/, '');
+        const url = base + '/api/v1/runtime/config';
+        const init = { credentials: 'include', headers: { Accept: 'application/json' } };
+
+        const pending = (async function () {
+          const res = await fetch(url, init);
+          if (!res.ok) throw new Error('runtime/config ' + res.status);
+          return res.json();
+        })();
+        // Kept for the page's lifetime, never dropped on settle — see above.
+        globalThis[Symbol.for('objectui.earlyRuntimeConfig')] = { url: url, body: pending };
+
+        try {
+          const body = await pending;
+          if (body?.branding) {
+            if (body.branding.productName) {
+              document.title = body.branding.productName;
+            }
+            if (body.branding.faviconUrl) {
+              var link = document.getElementById('favicon');
+              if (link) {
+                link.href = body.branding.faviconUrl;
+                link.type = body.branding.faviconUrl.endsWith('.svg') ? 'image/svg+xml' : 'image/png';
+              }
+            }
+          }
+        } catch (_) { /* non-blocking */ }
+      })();
+    </script>
+    <script>
+      window.process = window.process || { env: { NODE_ENV: 'development' }, version: '', platform: 'browser' };
+    </script>
+    <!--
+      crypto.randomUUID fallback for INSECURE ORIGINS (objectui#4563).
+
+      `crypto.randomUUID` is secure-context-only, so on `http://LAN-IP` — the
+      ordinary way a second device reaches a dev box — the browser omits it and
+      every unguarded caller throws "crypto.randomUUID is not a function",
+      taking the console's list views into the ErrorBoundary. The console's own
+      graph carries unguarded calls in five packages, and the report's stack
+      attributes the throwing frame to a VENDORED chunk this repository does not
+      author, so guaranteeing the platform method is the only fix that reaches
+      every caller. `crypto.getRandomValues` is NOT secure-context-gated, so the
+      entropy stays cryptographic; we only rebuild the RFC 4122 formatting.
+
+      WHY THIS IS AN INLINE CLASSIC SCRIPT, and not a module one.
+      A classic inline script runs SYNCHRONOUSLY, during parse, before any
+      module chunk executes. That is the only bundler-independent guarantee, and
+      it is not theoretical: shipping this as a separate module-type entry
+      placed above the app entry was MEASURED to be too late. Vite merges the
+      two HTML module entries into a single chunk, and the merged entry's static
+      imports are hoisted above the shim's body — 16 chunks, vendor-react,
+      ui-components and RecordDetailView among them, evaluated before the shim
+      installed. Document order between module scripts is real but it is not
+      preserved through bundling, so it cannot carry this guarantee.
+
+      Behaviour, pinned by src/__tests__/insecure-origin-crypto.test.ts, which
+      extracts THIS script text and executes it (so the tests grade exactly what
+      ships, with no second copy to drift): guarded on ABSENCE, so a native
+      implementation is never replaced; and with no entropy source it installs
+      NOTHING rather than degrading to Math.random — an id generator that only
+      looks like crypto is worse than the honest absence. Surfacing that state
+      to the user is objectui#4570, deliberately not this shim's job.
+    -->
+    <script>
+      (function installInsecureOriginRandomUuid() {
+        var cryptoRef = typeof globalThis !== 'undefined' ? globalThis.crypto : undefined;
+        if (!cryptoRef || typeof cryptoRef.getRandomValues !== 'function') return;
+        // Never override a working implementation (a real CSPRNG must win).
+        if (typeof cryptoRef.randomUUID === 'function') return;
+
+        var octets = [];
+        for (var i = 0; i < 256; i++) octets.push((i + 0x100).toString(16).slice(1));
+
+        var randomUUID = function () {
+          var b = new Uint8Array(16);
+          cryptoRef.getRandomValues(b);
+          b[6] = (b[6] & 0x0f) | 0x40; // version 4
+          b[8] = (b[8] & 0x3f) | 0x80; // RFC 4122 variant
+          return (
+            octets[b[0]] + octets[b[1]] + octets[b[2]] + octets[b[3]] + '-' +
+            octets[b[4]] + octets[b[5]] + '-' +
+            octets[b[6]] + octets[b[7]] + '-' +
+            octets[b[8]] + octets[b[9]] + '-' +
+            octets[b[10]] + octets[b[11]] + octets[b[12]] + octets[b[13]] +
+            octets[b[14]] + octets[b[15]]
+          );
+        };
+
+        try {
+          Object.defineProperty(cryptoRef, 'randomUUID', {
+            value: randomUUID,
+            writable: true,
+            configurable: true,
+          });
+        } catch (_defineFailed) {
+          try {
+            cryptoRef.randomUUID = randomUUID;
+          } catch (_assignFailed) {
+            /* Nothing installable here — refuse rather than pretend. */
+          }
+        }
+      })();
+    </script>
+    <!--
+      BOOT SPLASH — the console's FIRST PAINT (objectui#2628).
+
+      Everything above this point is invisible: `<body>` held `<div id="root">`
+      and nothing else, so the browser had nothing to paint until the module
+      graph had downloaded, evaluated, and resolved the two network round trips
+      `src/main.tsx` awaits before `createRoot().render()`. Measured on this
+      repository's own production build (Playwright + CDP `Page.startScreencast`,
+      frames classified pixel-by-pixel, corroborated by the Paint Timing API):
+
+        localhost, no throttling      1224-2016 ms of PURE WHITE
+        20 Mbps / 80 ms RTT           2289-2297 ms
+        Fast 4G (4 Mbps / 70 ms)      5808-6167 ms
+
+      — 2.21 MB over 64 requests before one pixel of content. The card reported
+      3-6 s from staging; the Fast-4G column is that band.
+
+      WHY IT IS HERE AND NOT IN A COMPONENT. The gap being filled IS the load of
+      the JavaScript, so an indicator that ships inside that JavaScript cannot
+      paint during it — it becomes visible at exactly the moment it is no longer
+      needed. This markup is in the HTML document, so it paints from the parser,
+      before the first chunk is even requested. `LoadingScreen`
+      (`@object-ui/app-shell`) is NOT a second copy of this and must not be
+      confused with it: it renders AFTER React mounts and owns the init screen's
+      ten-language step copy. This one covers the window before that.
+
+      NO TEXT, deliberately. A string here could not be translated — the i18n
+      packs live in the bundle this is waiting for — so shipping copy would mean
+      shipping English into a ten-language product, and shipping the product
+      name would mean waiting for `GET /api/v1/runtime/config`. The mark is the
+      same gradient tile + pulsing halo `LoadingScreen` opens with, so the
+      handoff reads as the same screen filling in rather than two loaders. It is
+      `aria-hidden` for the same reason there is no text: it carries nothing a
+      screen reader could use, and `LoadingScreen` brings the accessible copy
+      with it a moment later.
+
+      The colours are the app's OWN canvas and accent tokens
+      (`apps/console/src/index.css`: `--background`, `--primary`), inlined
+      because that stylesheet is also in the bundle. That is what makes the
+      window non-white rather than merely non-empty: the first frame is already
+      the surface `LoadingScreen` then draws on.
+    -->
+    <style>
+      #boot-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        /* `--background`, light. */
+        background: hsl(240 24% 97%);
+      }
+      :root[data-boot-theme='dark'] #boot-splash {
+        /* `--background`, dark. */
+        background: hsl(240 6% 6%);
+      }
+      #boot-splash .boot-splash-mark {
+        position: relative;
+        width: 72px;
+        height: 72px;
+      }
+      /* `bg-primary/20 rounded-2xl blur-xl animate-pulse` */
+      #boot-splash .boot-splash-halo {
+        position: absolute;
+        inset: 0;
+        border-radius: 1rem;
+        background: hsl(211 100% 50% / 0.2);
+        filter: blur(24px);
+        animation: boot-splash-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+      }
+      /* `bg-linear-to-br from-primary to-primary/80 p-4 rounded-2xl shadow-lg` */
+      #boot-splash .boot-splash-tile {
+        position: relative;
+        width: 72px;
+        height: 72px;
+        box-sizing: border-box;
+        padding: 16px;
+        border-radius: 1rem;
+        background-image: linear-gradient(
+          to bottom right,
+          hsl(211 100% 50%),
+          hsl(211 100% 50% / 0.8)
+        );
+        box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        color: #fff;
+      }
+      :root[data-boot-theme='dark'] #boot-splash .boot-splash-halo {
+        background: hsl(211 100% 60% / 0.2);
+      }
+      :root[data-boot-theme='dark'] #boot-splash .boot-splash-tile {
+        background-image: linear-gradient(
+          to bottom right,
+          hsl(211 100% 60%),
+          hsl(211 100% 60% / 0.8)
+        );
+      }
+      #boot-splash svg {
+        display: block;
+        width: 40px;
+        height: 40px;
+      }
+      @keyframes boot-splash-pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.4;
+        }
+      }
+      /* Motion is the only moving part; without it the tile still paints, so
+         the window stays non-white for readers who ask for no animation. */
+      @media (prefers-reduced-motion: reduce) {
+        #boot-splash .boot-splash-halo {
+          animation: none;
+        }
+      }
+    </style>
+    <!--
+      Theme + handoff for the splash above. A CLASSIC inline script for the same
+      reason the shim above is one: it must have run before the parser reaches
+      `<div id="boot-splash">`, so the very first painted frame already carries
+      the right canvas colour instead of flashing light and then correcting.
+
+      THEME. `ThemeProvider` (@object-ui/app-shell) stores the user's choice
+      under `vite-ui-theme` and defaults to following the OS; this reads the same
+      key and the same `prefers-color-scheme` so a dark-theme user never sees a
+      light frame. It writes `data-boot-theme` rather than the `light`/`dark`
+      CLASS that provider toggles, because those two must not collide: the
+      provider does `classList.remove('light','dark')` on mount and would be
+      undoing a decision it did not make. The attribute is removed with the
+      splash, so it exists only inside the boot window.
+
+      HANDOFF. The splash goes the moment React's first commit puts anything in
+      `#root` — not on a timer, and not after some fixed delay. A timer would
+      either uncover the white page again or sit on top of a rendered app. The
+      observer watches the document rather than `#root` because it runs from
+      `<head>`, before `#root` has been parsed. The mutation callback is a
+      microtask checkpoint on React's commit task, so removal lands in the same
+      frame the app first paints: no gap, and never two indicators at once.
+
+      If the bundle never evaluates at all, the splash stays up rather than
+      reverting to white. That is a deliberately unchanged failure MODE — a
+      boot that never mounts was a permanently blank page before this and is a
+      permanently pending one now — and it stays detectable: the
+      `#root`-content assertion in `e2e/console-rendering.spec.ts` reads the
+      React root, which this does not touch.
+    -->
+    <script>
+      (function installBootSplash() {
+        var stored = null;
+        try {
+          stored = localStorage.getItem('vite-ui-theme');
+        } catch (_) {
+          /* storage blocked — fall through to the OS preference */
+        }
+        var followsOs = !stored || stored === 'system' || stored === 'auto';
+        var prefersDark =
+          typeof matchMedia === 'function' &&
+          matchMedia('(prefers-color-scheme: dark)').matches;
+        var dark = stored === 'dark' || (followsOs && prefersDark);
+        document.documentElement.setAttribute('data-boot-theme', dark ? 'dark' : 'light');
+
+        if (typeof MutationObserver !== 'function') return;
+        var observer = new MutationObserver(function () {
+          var root = document.getElementById('root');
+          if (!root || !root.firstChild) return;
+          observer.disconnect();
+          var splash = document.getElementById('boot-splash');
+          if (splash && splash.parentNode) splash.parentNode.removeChild(splash);
+          document.documentElement.removeAttribute('data-boot-theme');
+        });
+        observer.observe(document.documentElement, { childList: true, subtree: true });
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="boot-splash" aria-hidden="true">
+      <div class="boot-splash-mark">
+        <div class="boot-splash-halo"></div>
+        <div class="boot-splash-tile">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+            <path d="M3 5V19A9 3 0 0 0 21 19V5"></path>
+            <path d="M3 12A9 3 0 0 0 21 12"></path>
+          </svg>
+        </div>
+      </div>
+    </div>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

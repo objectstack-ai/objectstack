@@ -164,3 +164,52 @@ describe('the `id_field` retirement is reached, not merely declared', () => {
     expect(shapeKeys(InlineGridColumnSchema)).toContain('idField');
   });
 });
+
+/**
+ * An object-level `composite` / `repeater` is untyped JSON by ruling
+ * 6386744473, and a typed list is a child object. The parse already refused
+ * these keys before the rows existed; what the rows add is the ROUTE, so that
+ * is what is pinned — on the same channel as the `id_field` block above.
+ */
+describe('a typed list declared on an embedded-JSON field is refused with the child-object route', () => {
+  const unrecognized = (value: unknown) => {
+    const r = FieldSchema.safeParse(value);
+    expect(r.success).toBe(false);
+    if (r.success) throw new Error('unreachable');
+    const issue = r.error.issues.find((i) => i.code === 'unrecognized_keys');
+    expect(issue, 'the field parse did not refuse the unknown key at all').toBeTruthy();
+    return issue!;
+  };
+  const SUB_ROWS = [{ name: 'item', label: 'Item', type: 'text' }];
+  const CASES: Array<[string, unknown]> = [
+    ['fields', SUB_ROWS],
+    ['subFields', SUB_ROWS],
+    ['columns', ['item', 'score']],
+  ];
+
+  for (const type of ['repeater', 'composite'] as const) {
+    for (const [key, value] of CASES) {
+      it(`${type} + \`${key}\`: refused by name, answered with this table's sentence`, () => {
+        const issue = unrecognized({ name: 'checklist', label: 'Checklist', type, [key]: value });
+        expect((issue as { keys?: string[] }).keys).toEqual([key]);
+        expect(issue.message).toContain(FIELD_KEY_GUIDANCE[key]!.why!);
+        expect(issue.message).toContain('`master_detail`');
+        expect(issue.message).not.toContain('Did you mean');
+      });
+    }
+  }
+
+  it('the field itself, with no sub-field key, still parses — the type is untyped, not refused', () => {
+    for (const type of ['repeater', 'composite'] as const) {
+      expect(FieldSchema.safeParse({ name: 'checklist', label: 'Checklist', type }).success).toBe(true);
+    }
+  });
+
+  it('`columns` names the three live column keys, and each really is declared', () => {
+    const why = FIELD_KEY_GUIDANCE.columns!.why!;
+    for (const live of ['lookupColumns', 'relatedListColumns', 'inlineColumns']) {
+      expect(why).toContain(`\`${live}\``);
+      expect(shapeKeys(FieldSchema)).toContain(live);
+    }
+  });
+});

@@ -1,0 +1,67 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__chrome-devtools__take_snapshot",
+      "mcp__chrome-devtools__take_screenshot",
+      "mcp__chrome-devtools__list_pages",
+      "mcp__chrome-devtools__list_console_messages",
+      "mcp__chrome-devtools__list_network_requests",
+      "mcp__chrome-devtools__get_network_request",
+      "mcp__Claude_Preview__preview_screenshot",
+      "mcp__Claude_Preview__preview_snapshot",
+      "mcp__Claude_Preview__preview_console_logs",
+      "mcp__Claude_Preview__preview_network",
+      "Bash(curl -sS -X POST https://api.github.com/repos/objectstack-ai/objectui/pulls/*/ccr/ready_for_review *)",
+      "Bash(curl -sS -X PUT https://api.github.com/repos/objectstack-ai/objectui/pulls/*/ccr/auto_merge *)"
+    ],
+    "deny": [
+      "mcp__github__issue_write",
+      "mcp__github__create_pull_request",
+      "mcp__github__update_pull_request",
+      "mcp__github__add_issue_comment",
+      "mcp__github__add_comment_to_pending_review",
+      "mcp__github__add_reply_to_pull_request_comment",
+      "mcp__github__pull_request_review_write",
+      "mcp__github__push_files",
+      "mcp__github__create_or_update_file",
+      "mcp__github__delete_file",
+      "mcp__github__create_branch",
+      "mcp__github__sub_issue_write",
+      "mcp__github__merge_pull_request",
+      "mcp__github__create_repository",
+      "mcp__github__fork_repository",
+      "mcp__github__enable_pr_auto_merge",
+      "mcp__github__disable_pr_auto_merge"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-main-checkout.sh\""
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-shared-stash.sh\""
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-main-checkout-bash.sh\""
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-tree-enum.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}

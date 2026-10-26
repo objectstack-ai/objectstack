@@ -1,0 +1,19 @@
+{
+  "type": "flex",
+  "properties": {
+    "direction": "col",
+    "gap": 2,
+    "children": [
+      {
+        "type": "label",
+        "text": "Email",
+        "htmlFor": "email"
+      },
+      {
+        "type": "input",
+        "id": "email",
+        "placeholder": "Enter your email"
+      }
+    ]
+  }
+}

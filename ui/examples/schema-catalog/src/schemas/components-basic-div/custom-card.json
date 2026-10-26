@@ -1,0 +1,22 @@
+{
+  "type": "div",
+  "className": "max-w-sm rounded-lg border bg-card text-card-foreground shadow-sm",
+  "children": [
+    {
+      "type": "div",
+      "className": "p-6 space-y-2",
+      "children": [
+        {
+          "type": "text",
+          "content": "Card Title",
+          "className": "text-2xl font-semibold"
+        },
+        {
+          "type": "text",
+          "content": "Card description goes here. This is a basic card layout using div containers.",
+          "className": "text-sm text-muted-foreground"
+        }
+      ]
+    }
+  ]
+}

@@ -485,7 +485,17 @@ export function selfTest() {
   ok(`the live tree yields occurrences (found ${live.occurrences.length})`, live.occurrences.length > 50);
   ok(`and judges a real share of them (judged ${live.judged.length})`, live.judged.length > 30);
   ok(`and the checked-in tree is clean (dead: ${live.dead.map((d) => d.value).join(', ') || 'none'})`, live.dead.length === 0);
-  ok('and the foreign scope is present and unjudged, not silently missing', (live.unjudgedByKind.foreign ?? 0) > 0);
+  // The foreign scope's live population is objectui's own scripts under `ui/`. Its
+  // first one, scripts/build-console.sh, left with the objectui pin (objectstack#25711),
+  // so a tree without `ui/` names no `@object-ui/` filter at all and the zero there is the
+  // reading, not a blind scan; a tree with `ui/` must still show them unjudged.
+  const holdsUi = existsSync(join(root, 'ui', 'package.json'));
+  ok(
+    holdsUi
+      ? 'and the foreign scope is present and unjudged, not silently missing'
+      : 'and, with no ui/ in this tree, no committed filter names the foreign scope',
+    holdsUi ? (live.unjudgedByKind.foreign ?? 0) > 0 : (live.unjudgedByKind.foreign ?? 0) === 0,
+  );
   ok(
     'the self-exemption is exactly the three files that own the rule — never a fourth',
     RULE_OWNING_FILES.length === 3

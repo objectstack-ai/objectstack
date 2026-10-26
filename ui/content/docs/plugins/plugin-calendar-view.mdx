@@ -1,0 +1,48 @@
+---
+title: "Plugin Calendar View"
+---
+
+<Callout type="info" title="Merged into Plugin Calendar">
+  The `@object-ui/plugin-calendar-view` package has been merged into `@object-ui/plugin-calendar`. 
+  
+  Please use `@object-ui/plugin-calendar` instead, which now includes both the `CalendarView` component and the `ObjectCalendar` component.
+  
+  See the [Plugin Calendar](/docs/plugins/plugin-calendar) documentation for details.
+</Callout>
+
+## Migration Guide
+
+### Before (plugin-calendar-view)
+
+```bash
+npm install @object-ui/plugin-calendar-view
+```
+
+{/* doc-snippet: fragment — the RETIRED `@object-ui/plugin-calendar-view` specifier is quoted on purpose: this is the "Before" half of a migration guide, and the package it names was merged away, so it resolves nowhere (measured: TS2882 x1 on the side-effect import, TS2307 x1 on the named import). Repairing it would delete the very thing the section documents. The "After" block below names `@object-ui/plugin-calendar` and IS compiled. */}
+```tsx
+import '@object-ui/plugin-calendar-view'
+
+// Or direct import
+import { CalendarView } from '@object-ui/plugin-calendar-view'
+```
+
+### After (plugin-calendar)
+
+```bash
+npm install @object-ui/plugin-calendar
+```
+
+```tsx
+import '@object-ui/plugin-calendar'
+
+// Or direct import
+import { CalendarView } from '@object-ui/plugin-calendar'
+```
+
+## What Changed?
+
+- The `CalendarView` component is now exported from `@object-ui/plugin-calendar`
+- The `calendar-view` schema type is still registered and works the same way
+- All functionality remains the same - just the package name changed
+
+For full documentation, see [Plugin Calendar](/docs/plugins/plugin-calendar).

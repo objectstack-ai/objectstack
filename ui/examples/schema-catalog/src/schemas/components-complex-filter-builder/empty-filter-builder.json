@@ -1,0 +1,32 @@
+{
+  "type": "filter-builder",
+  "name": "filters",
+  "label": "Build Filter",
+  "fields": [
+    {
+      "value": "name",
+      "label": "Name",
+      "type": "text"
+    },
+    {
+      "value": "email",
+      "label": "Email",
+      "type": "text"
+    },
+    {
+      "value": "age",
+      "label": "Age",
+      "type": "number"
+    },
+    {
+      "value": "status",
+      "label": "Status",
+      "type": "text"
+    }
+  ],
+  "value": {
+    "id": "root",
+    "logic": "and",
+    "conditions": []
+  }
+}

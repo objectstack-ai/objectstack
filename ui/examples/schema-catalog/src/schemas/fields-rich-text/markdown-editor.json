@@ -1,0 +1,14 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "fields": [
+    {
+      "name": "content",
+      "label": "Content",
+      "type": "markdown",
+      "placeholder": "Enter your content here...",
+      "rows": 6
+    }
+  ]
+}

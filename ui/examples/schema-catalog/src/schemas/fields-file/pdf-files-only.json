@@ -1,0 +1,16 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "fields": [
+    {
+      "name": "pdf_upload",
+      "label": "PDF Documents",
+      "type": "file",
+      "accept": [
+        "application/pdf"
+      ],
+      "multiple": true
+    }
+  ]
+}

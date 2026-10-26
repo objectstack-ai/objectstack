@@ -1,0 +1,28 @@
+{
+  "type": "grid",
+  "columns": 3,
+  "gap": 4,
+  "children": [
+    {
+      "type": "statistic",
+      "label": "Total Revenue",
+      "value": "$45,231.89",
+      "trend": "up",
+      "description": "+20.1% from last month"
+    },
+    {
+      "type": "statistic",
+      "label": "Subscriptions",
+      "value": "2,350",
+      "trend": "up",
+      "description": "+180 this month"
+    },
+    {
+      "type": "statistic",
+      "label": "Active Now",
+      "value": "573",
+      "trend": "up",
+      "description": "+201 since last hour"
+    }
+  ]
+}

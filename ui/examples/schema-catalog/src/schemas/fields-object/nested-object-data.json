@@ -1,0 +1,24 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "defaultValues": {
+    "settings": {
+      "theme": "dark",
+      "notifications": {
+        "email": true,
+        "push": false
+      },
+      "privacy": {
+        "public": false
+      }
+    }
+  },
+  "fields": [
+    {
+      "name": "settings",
+      "label": "Settings",
+      "type": "object"
+    }
+  ]
+}

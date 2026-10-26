@@ -1,0 +1,32 @@
+---
+title: "Navigation Menu"
+description: "Accessible navigation menu with dropdown support"
+---
+
+The Navigation Menu component provides an accessible menu for site navigation.
+
+## Basic Usage
+
+<SchemaExample id="components-basic-navigation-menu/site-navigation" />
+
+## With Descriptions
+
+<SchemaExample id="components-basic-navigation-menu/documentation-nav" />
+
+## Schema
+
+```ts
+interface NavigationMenuItem {
+  label: string;
+  href?: string;
+  description?: string;
+  icon?: string;
+  items?: NavigationMenuItem[];   // Submenu items
+}
+
+interface NavigationMenuSchema {
+  type: 'navigation-menu';
+  items: NavigationMenuItem[];    // Menu items
+  className?: string;
+}
+```

@@ -1,0 +1,44 @@
+{
+  "type": "form",
+  "fields": [
+    {
+      "name": "name",
+      "type": "input",
+      "label": "Full Name",
+      "placeholder": "Enter your name",
+      "required": true
+    },
+    {
+      "name": "email",
+      "type": "input",
+      "inputType": "email",
+      "label": "Email Address",
+      "required": true
+    },
+    {
+      "name": "country",
+      "type": "select",
+      "label": "Country",
+      "options": [
+        {
+          "label": "United States",
+          "value": "us"
+        },
+        {
+          "label": "Canada",
+          "value": "ca"
+        },
+        {
+          "label": "United Kingdom",
+          "value": "uk"
+        }
+      ]
+    },
+    {
+      "name": "subscribe",
+      "type": "checkbox",
+      "label": "Subscribe to newsletter"
+    }
+  ],
+  "submitLabel": "Register"
+}

@@ -1,0 +1,12 @@
+{
+  "type": "hover-card",
+  "trigger": {
+    "type": "button",
+    "variant": "link",
+    "label": "Hover over me"
+  },
+  "content": {
+    "type": "text",
+    "content": "This is the hover card content"
+  }
+}

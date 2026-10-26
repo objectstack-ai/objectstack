@@ -1,0 +1,263 @@
+{
+  "type": "card",
+  "className": "w-full max-w-2xl",
+  "children": [
+    {
+      "type": "container",
+      "padding": 6,
+      "children": [
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "justify": "between",
+            "children": [
+              {
+                "type": "text",
+                "content": "Recent Transactions",
+                "className": "text-lg font-semibold"
+              },
+              {
+                "type": "button",
+                "label": "View All",
+                "variant": "ghost",
+                "size": "sm"
+              }
+            ]
+          },
+          "className": "mb-4"
+        },
+        {
+          "type": "stack",
+          "gap": 4,
+          "children": [
+            {
+              "type": "flex",
+              "properties": {
+                "align": "center",
+                "justify": "between",
+                "children": [
+                  {
+                    "type": "flex",
+                    "properties": {
+                      "align": "center",
+                      "gap": 4,
+                      "children": [
+                        {
+                          "type": "avatar",
+                          "fallback": "OM",
+                          "className": "h-9 w-9"
+                        },
+                        {
+                          "type": "stack",
+                          "gap": 2,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Olivia Martin",
+                              "className": "text-sm font-medium"
+                            },
+                            {
+                              "type": "text",
+                              "content": "olivia.martin@email.com",
+                              "className": "text-xs text-muted-foreground"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": "text",
+                    "content": "+$1,999.00",
+                    "className": "text-sm font-medium"
+                  }
+                ]
+              },
+              "className": "pb-4 border-b"
+            },
+            {
+              "type": "flex",
+              "properties": {
+                "align": "center",
+                "justify": "between",
+                "children": [
+                  {
+                    "type": "flex",
+                    "properties": {
+                      "align": "center",
+                      "gap": 4,
+                      "children": [
+                        {
+                          "type": "avatar",
+                          "fallback": "JL",
+                          "className": "h-9 w-9"
+                        },
+                        {
+                          "type": "stack",
+                          "gap": 2,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Jackson Lee",
+                              "className": "text-sm font-medium"
+                            },
+                            {
+                              "type": "text",
+                              "content": "jackson.lee@email.com",
+                              "className": "text-xs text-muted-foreground"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": "text",
+                    "content": "+$39.00",
+                    "className": "text-sm font-medium"
+                  }
+                ]
+              },
+              "className": "pb-4 border-b"
+            },
+            {
+              "type": "flex",
+              "properties": {
+                "align": "center",
+                "justify": "between",
+                "children": [
+                  {
+                    "type": "flex",
+                    "properties": {
+                      "align": "center",
+                      "gap": 4,
+                      "children": [
+                        {
+                          "type": "avatar",
+                          "fallback": "IN",
+                          "className": "h-9 w-9"
+                        },
+                        {
+                          "type": "stack",
+                          "gap": 2,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Isabella Nguyen",
+                              "className": "text-sm font-medium"
+                            },
+                            {
+                              "type": "text",
+                              "content": "isabella.nguyen@email.com",
+                              "className": "text-xs text-muted-foreground"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": "text",
+                    "content": "+$299.00",
+                    "className": "text-sm font-medium"
+                  }
+                ]
+              },
+              "className": "pb-4 border-b"
+            },
+            {
+              "type": "flex",
+              "properties": {
+                "align": "center",
+                "justify": "between",
+                "children": [
+                  {
+                    "type": "flex",
+                    "properties": {
+                      "align": "center",
+                      "gap": 4,
+                      "children": [
+                        {
+                          "type": "avatar",
+                          "fallback": "WK",
+                          "className": "h-9 w-9"
+                        },
+                        {
+                          "type": "stack",
+                          "gap": 2,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "William Kim",
+                              "className": "text-sm font-medium"
+                            },
+                            {
+                              "type": "text",
+                              "content": "will@email.com",
+                              "className": "text-xs text-muted-foreground"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": "text",
+                    "content": "+$99.00",
+                    "className": "text-sm font-medium"
+                  }
+                ]
+              },
+              "className": "pb-4 border-b"
+            },
+            {
+              "type": "flex",
+              "properties": {
+                "align": "center",
+                "justify": "between",
+                "children": [
+                  {
+                    "type": "flex",
+                    "properties": {
+                      "align": "center",
+                      "gap": 4,
+                      "children": [
+                        {
+                          "type": "avatar",
+                          "fallback": "SD",
+                          "className": "h-9 w-9"
+                        },
+                        {
+                          "type": "stack",
+                          "gap": 2,
+                          "children": [
+                            {
+                              "type": "text",
+                              "content": "Sofia Davis",
+                              "className": "text-sm font-medium"
+                            },
+                            {
+                              "type": "text",
+                              "content": "sofia.davis@email.com",
+                              "className": "text-xs text-muted-foreground"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": "text",
+                    "content": "+$39.00",
+                    "className": "text-sm font-medium"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

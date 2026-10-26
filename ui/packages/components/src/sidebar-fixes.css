@@ -1,0 +1,38 @@
+/**
+ * ObjectUI — Shadcn Sidebar custom-class overrides.
+ *
+ * Plain CSS (no `@import 'tailwindcss'` / `@theme`), safely importable from
+ * `src/index.ts` without re-injecting a second Tailwind stylesheet.
+ *
+ * The ONLY overrides retained here target the bespoke classes attached to
+ * SidebarMenuButton in `sidebar.tsx`:
+ *   - `.sidebar-menu-button-icon-mode`
+ *   - `.sidebar-menu-button-icon-mode-lg`
+ *
+ * They control collapsed-icon button sizing in a way that would conflict
+ * with the per-item content sizing if expressed as a stacked group-data
+ * variant. All other shadcn-sidebar v3 escape overrides have been removed:
+ * the component source now uses `w-(--sidebar-width)` etc. (Tailwind v4
+ * CSS-variable shorthand) and stacks `group-data-[state=collapsed]:` so
+ * Tailwind v4 emits the correct CSS natively.
+ */
+
+.group[data-collapsible="icon"][data-state="collapsed"] .sidebar-menu-button-icon-mode {
+  width: 2rem !important;
+  height: 2rem !important;
+  padding: 0.5rem !important;
+}
+
+.group[data-collapsible="icon"][data-state="expanded"] .sidebar-menu-button-icon-mode {
+  width: 100%;
+  height: auto;
+  padding: 0.5rem;
+}
+
+.group[data-collapsible="icon"][data-state="collapsed"] .sidebar-menu-button-icon-mode-lg {
+  padding: 0 !important;
+}
+
+.group[data-collapsible="icon"][data-state="expanded"] .sidebar-menu-button-icon-mode-lg {
+  padding: 0.5rem;
+}

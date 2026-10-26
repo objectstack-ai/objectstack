@@ -21,6 +21,7 @@
     "node_modules",
     "packages",
     "apps",
-    "examples"
+    "examples",
+    "ui"
   ]
 }

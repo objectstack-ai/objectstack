@@ -1,0 +1,15 @@
+{
+  "type": "button-group",
+  "variant": "outline",
+  "buttons": [
+    {
+      "label": "Day"
+    },
+    {
+      "label": "Week"
+    },
+    {
+      "label": "Month"
+    }
+  ]
+}

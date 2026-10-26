@@ -1,0 +1,8 @@
+# Third-party skills installed via `npx skills add` are tracked in skills-lock.json.
+# Run `npx skills experimental_install` to restore them.
+# ObjectUI skills are symlinks to /skills/ (auto-committed).
+
+# Ignore all third-party skills (restore via skills-lock.json)
+frontend-design/
+shadcn/
+skill-creator/

@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { readFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative, sep } from 'node:path';
 import ts from 'typescript';
 import { defineConfig, type Options } from 'tsup';
 
@@ -161,9 +161,9 @@ const entries = [
   'src/identity/index.ts',
   'src/shared/index.ts',
   // [#10096] Schema-free fine-grained entry for the `/meta` URL-spelling
-  // contract — per-entry self-contained bundling is unchanged (#8133 stays on
-  // hold); this entry's whole graph is two pure modules, so "self-contained"
-  // costs a few hundred bytes here by construction.
+  // contract: its whole graph is two pure modules, so the chunks it links are
+  // a few hundred bytes by construction (`check:browser-reachable-entries`
+  // holds it zod-free across every chunk it reaches).
   'src/meta-spelling/index.ts',
   // The ADR-0087 migration chain + change manifest, off the root entry: its
   // registry is mostly `os migrate meta` guidance text, and its import-time work
@@ -208,24 +208,174 @@ const browserConditionedEntries = [
 ];
 
 /**
- * [#11072] Resolve the pg-grammar arm to its browser twin — the whole
- * mechanism by which the `browser`-conditioned bundles exclude the
- * driver-config validators' Node-only dependency.
+ * [#11072] The one audited import whose target differs between the Node and
+ * the browser builds: the pg-grammar arm, resolved to its browser twin
+ * (`pg-url-grammar.browser.ts`) everywhere except on the Node side of the
+ * `browser`-conditioned entries.
  *
  * Keyed to the seam module's specifier, NOT to `pg-connection-string`
  * itself, on purpose: a blanket alias of the package would silently degrade
  * any FUTURE import site nobody audited, whereas this swap covers exactly
- * the one audited seam and a new direct import lands in the browser bundles
- * where `check:browser-reachable-entries` refuses it at this producer.
+ * the one audited seam and a new direct import lands in the browser-reachable
+ * bundles where `check:browser-reachable-entries` refuses it at this producer.
  */
-const swapServerOnlyGrammarArm: Plugin = {
-  name: 'swap-server-only-grammar-arm',
-  setup(build) {
-    build.onResolve({ filter: /[\\/]pg-url-grammar\.server$/ }, (args) => ({
-      path: join(dirname(args.importer), 'pg-url-grammar.browser.ts'),
-    }));
+const SERVER_ONLY_GRAMMAR_ARM = /[\\/]pg-url-grammar\.server$/;
+
+/** The esbuild namespace of the Node-side copies, and the entry-point spelling that selects it. */
+const NODE_SIDE = 'node-side';
+const NODE_SIDE_ENTRY = `${NODE_SIDE}:`;
+
+/** Marks a resolution asked on behalf of a Node-side module, so the browser swap stands aside for it. */
+const NODE_SIDE_RESOLVE = { nodeSide: true };
+
+/** The output name of an entry: `src/data/index.ts` → `data/index`. */
+const outName = (entry: string): string => entry.replace(/^src\//, '').replace(/\.ts$/, '');
+
+/**
+ * [#8133] Every JS output of this package, as ONE esbuild module graph, so
+ * that a module two entries reach is ONE module in ONE shared chunk, and the
+ * symbol it defines is the same object through either entry
+ * (`@objectstack/spec`'s `defineConnector` IS `@objectstack/spec/integration`'s).
+ *
+ * The per-entry layout this replaced inlined each entry's whole graph into its
+ * own bundle, so a consumer importing several subpaths bundled several copies
+ * of every schema they share: measured on `@objectstack/spec@18.0.0`, the
+ * symbols objectui's console imports cost 1,542 KB gzipped from that layout and
+ * 452 KB from one graph, and `FieldSchema` was defined in 14 published files.
+ * `sideEffects: false` and `pureSchemaConstruction` (#10031) let a bundler drop
+ * what one entry never reaches; they cannot merge copies across entries. Only
+ * shared chunks can.
+ *
+ * ## Why one graph needs two copies of a few modules
+ *
+ * A browser bundler loads the ordinary bundles of every entry outside
+ * `browserConditionedEntries`, so those must never link the pg-grammar arm's
+ * Node-only dependency (`check:browser-reachable-entries`, rule 2). With
+ * per-entry bundles, tree-shaking kept it out. With shared chunks it cannot:
+ * esbuild assigns a module to a chunk by FILE-LEVEL reachability, so an entry
+ * links every chunk its import graph touches, used or not — measured with a
+ * bare `splitting: true`, `./shared` and `./migrations` linked the chunk that
+ * imports `pg-connection-string`, the #11072 breakage. So the browser swap
+ * above applies to the whole graph, and the Node outputs of the
+ * `browser`-conditioned entries are built from a NODE-SIDE copy of exactly the
+ * modules that reach the seam (measured: 28 of 459 at the time of writing; the
+ * entry files themselves, the barrels above the driver configs, the conversion
+ * and migration registries) — every other module is shared by every output,
+ * Node and browser alike.
+ *
+ * Which modules reach the seam is not a list kept here. It is measured on each
+ * build, by a metafile pre-pass over the Node graph of those entries, and the
+ * pre-pass refuses when the seam is no longer in it — in which case the
+ * `browser` conditions are moot and withdrawing them is a decision, not
+ * something this plugin should paper over.
+ *
+ * Behaviour is unchanged for every output: the Node outputs of the conditioned
+ * entries still run the pg grammar; every other output still never runs it
+ * (the per-entry bundles of those entries linked no pg grammar at all, which
+ * `check:browser-reachable-entries` held), and now carries its browser twin
+ * where a chunk it shares reaches the driver configs. The same symbol is the
+ * same object across all outputs except the exports of the node-side modules,
+ * which keep one object per side.
+ */
+const oneModuleGraph: Plugin = {
+  name: 'one-module-graph',
+  async setup(build) {
+    const cwd = build.initialOptions.absWorkingDir ?? process.cwd();
+    // A copy, never an edit in place: tsup hands the SAME entry object to the
+    // ESM and the CJS run, so an in-place edit would hide these entries from
+    // whichever run starts second.
+    const points = { ...(build.initialOptions.entryPoints as Record<string, string>) };
+    const nodeSideSources: string[] = [];
+    for (const [out, source] of Object.entries(points)) {
+      if (out.startsWith('browser/') || !browserConditionedEntries.includes(source)) continue;
+      points[out] = NODE_SIDE_ENTRY + source;
+      nodeSideSources.push(source);
+    }
+    build.initialOptions.entryPoints = points;
+    const nodeSide = nodeSideSources.length > 0 ? await modulesReachingTheSeam(build, cwd, nodeSideSources) : new Set();
+    const toKey = (path: string): string => relative(cwd, path).split(sep).join('/');
+
+    build.onResolve({ filter: new RegExp(`^${NODE_SIDE_ENTRY}`) }, (args) =>
+      args.kind === 'entry-point' ? { path: args.path.slice(NODE_SIDE_ENTRY.length), namespace: NODE_SIDE } : undefined,
+    );
+    build.onResolve({ filter: SERVER_ONLY_GRAMMAR_ARM, namespace: 'file' }, (args) =>
+      args.pluginData?.nodeSide === true ? undefined : { path: join(dirname(args.importer), 'pg-url-grammar.browser.ts') },
+    );
+    // An import made by a node-side module: resolved as usual, minus the swap,
+    // then kept on the node side only when its target reaches the seam.
+    build.onResolve({ filter: /.*/, namespace: NODE_SIDE }, async (args) => {
+      const resolved = await build.resolve(args.path, {
+        kind: args.kind,
+        importer: args.importer,
+        resolveDir: args.resolveDir,
+        namespace: 'file',
+        pluginData: NODE_SIDE_RESOLVE,
+      });
+      if (resolved.errors.length > 0) return { errors: resolved.errors };
+      if (!resolved.external && resolved.namespace === 'file' && nodeSide.has(toKey(resolved.path))) {
+        return { path: toKey(resolved.path), namespace: NODE_SIDE };
+      }
+      const { path, external, namespace, sideEffects, suffix } = resolved;
+      return { path, external, namespace, sideEffects, suffix };
+    });
+    build.onLoad({ filter: /.*/, namespace: NODE_SIDE }, async (args) => {
+      const file = join(cwd, args.path);
+      const source = await readFile(file, 'utf8');
+      return { contents: annotatePureCalls(source, file) ?? source, loader: 'ts', resolveDir: dirname(file) };
+    });
   },
 };
+
+/**
+ * The source modules, keyed by their path relative to `cwd`, from which the
+ * seam is reachable in the Node graph of `sources` — the set that needs a
+ * node-side copy. Refuses when the seam is not in that graph.
+ */
+async function modulesReachingTheSeam(
+  build: Parameters<Plugin['setup']>[0],
+  cwd: string,
+  sources: readonly string[],
+): Promise<ReadonlySet<string>> {
+  const { metafile } = await build.esbuild.build({
+    entryPoints: [...sources],
+    absWorkingDir: cwd,
+    bundle: true,
+    write: false,
+    metafile: true,
+    format: 'esm',
+    platform: 'node',
+    packages: 'external',
+    outdir: 'node-side-probe',
+    logLevel: 'silent',
+  });
+  const importers = new Map<string, string[]>();
+  const reached = new Set<string>();
+  for (const [file, input] of Object.entries(metafile.inputs)) {
+    for (const imported of input.imports) {
+      if (imported.external) continue;
+      if (imported.original !== undefined && SERVER_ONLY_GRAMMAR_ARM.test(imported.original)) reached.add(imported.path);
+      importers.set(imported.path, [...(importers.get(imported.path) ?? []), file]);
+    }
+  }
+  if (reached.size === 0) {
+    throw new Error(
+      `one-module-graph: no module of the Node graph of ${sources.join(', ')} imports the pg-grammar arm ` +
+        `(${SERVER_ONLY_GRAMMAR_ARM}). Either the seam moved — update SERVER_ONLY_GRAMMAR_ARM — or these ` +
+        'entries no longer reach the driver-config validators, and their `browser` conditions are moot: ' +
+        'withdrawing them is a decision, not something this build should paper over.',
+    );
+  }
+  const pending = [...reached];
+  for (let file = pending.pop(); file !== undefined; file = pending.pop()) {
+    for (const importer of importers.get(file) ?? []) {
+      if (!reached.has(importer)) {
+        reached.add(importer);
+        pending.push(importer);
+      }
+    }
+  }
+  return reached;
+}
 
 /**
  * Generate DTS separately to avoid memory issues — this pass is by far the
@@ -313,8 +463,10 @@ const swapServerOnlyGrammarArm: Plugin = {
  */
 const isDts = process.env.BUILD_DTS === 'true';
 
-// Exported for `scripts/pure-schema-construction.test.ts`, which builds the
-// `./migrations` entry with these options; tsup itself reads only the default.
+// The per-entry options. The DTS pass reads exactly these (declarations once
+// per entry, one program — the docblock above). Exported for
+// `scripts/pure-schema-construction.test.ts`, which builds single entries with
+// them; the published JS is `jsConfig` below, which derives from them.
 export const mainConfig: Options = {
   entry: entries,
   splitting: false,
@@ -330,27 +482,29 @@ export const mainConfig: Options = {
 };
 
 /**
- * The `browser`-conditioned outputs (#11072) — same entry shapes, same
- * formats, same target as the main pass, differing ONLY in the grammar-arm
- * swap and the `dist/browser/` outDir. No DTS pass of its own: the browser
- * build's public API is identical by construction (the swapped module keeps
- * the contract), so the exports map points its `browser.types` at the main
- * build's declarations.
+ * Every JS output, as one module graph with shared chunks (`oneModuleGraph`,
+ * #8133): each entry at `dist/<entry>`, and the `browser`-conditioned outputs
+ * (#11072) at `dist/browser/<entry>` — the same entry shapes, formats and
+ * target, differing only in the grammar-arm swap. No DTS of their own: the
+ * browser build's public API is identical by construction (the swapped module
+ * keeps the contract), so the exports map points `browser.types` at the main
+ * declarations. Chunks land at the `dist/` root, `chunk-<hash>.mjs` and
+ * `chunk-<hash>.js`; nothing outside this package may name one — the exports
+ * map is the only contract, and it is unchanged.
+ *
+ * `oneModuleGraph` goes FIRST: its node-side modules must be loaded by its own
+ * `onLoad`, not by `pureSchemaConstruction`'s file-namespace reading, and it
+ * annotates them the same way.
  */
-const browserConfig: Options = {
-  entry: browserConditionedEntries,
-  outDir: 'dist/browser',
-  splitting: false,
-  sourcemap: true,
-  clean: false, // dist was cleaned (or preserved) by the main pass
-  dts: false,
-  format: ['esm', 'cjs'],
-  target: 'es2020',
-  treeshake: true,
-  esbuildPlugins: [pureSchemaConstruction, swapServerOnlyGrammarArm],
-  esbuildOptions: dropSourcesContent,
+const jsConfig: Options = {
+  ...mainConfig,
+  entry: Object.fromEntries([
+    ...entries.map((entry) => [outName(entry), entry]),
+    ...browserConditionedEntries.map((entry) => [`browser/${outName(entry)}`, entry]),
+  ]),
+  splitting: true,
+  esbuildPlugins: [oneModuleGraph, pureSchemaConstruction],
 };
 
-// The DTS pass re-runs only the main config (declarations once, per entry);
-// the JS pass emits the Node outputs and then the browser-conditioned ones.
-export default defineConfig(isDts ? mainConfig : [mainConfig, browserConfig]);
+// The DTS pass re-runs only the per-entry config; the JS pass is the one graph.
+export default defineConfig(isDts ? mainConfig : jsConfig);

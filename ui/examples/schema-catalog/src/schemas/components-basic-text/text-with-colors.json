@@ -1,0 +1,23 @@
+{
+  "type": "flex",
+  "properties": {
+    "gap": 4,
+    "children": [
+      {
+        "type": "text",
+        "content": "Primary Text",
+        "className": "text-primary"
+      },
+      {
+        "type": "text",
+        "content": "Destructive Text",
+        "className": "text-destructive"
+      },
+      {
+        "type": "text",
+        "content": "Muted Text",
+        "className": "text-muted-foreground"
+      }
+    ]
+  }
+}

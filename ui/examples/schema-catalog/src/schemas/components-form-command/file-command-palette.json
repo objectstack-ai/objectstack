@@ -1,0 +1,26 @@
+{
+  "type": "command",
+  "placeholder": "Search commands...",
+  "groups": [
+    {
+      "heading": "File",
+      "items": [
+        {
+          "value": "new",
+          "label": "New File",
+          "icon": "file-plus"
+        },
+        {
+          "value": "open",
+          "label": "Open File",
+          "icon": "folder-open"
+        },
+        {
+          "value": "save",
+          "label": "Save",
+          "icon": "save"
+        }
+      ]
+    }
+  ]
+}

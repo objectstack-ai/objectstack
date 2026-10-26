@@ -1,0 +1,7 @@
+{
+  "type": "file-upload",
+  "id": "multi-upload",
+  "label": "Multiple files",
+  "multiple": true,
+  "buttonText": "Select multiple files"
+}

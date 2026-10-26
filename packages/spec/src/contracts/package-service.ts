@@ -7,7 +7,6 @@
  * - Package installation with dependency resolution
  * - Platform compatibility enforcement
  * - Namespace conflict detection
- * - Package upgrade lifecycle (plan → snapshot → execute → validate → rollback)
  *
  * Follows Dependency Inversion Principle - consumers depend on this interface,
  * not on concrete package manager implementations.
@@ -15,18 +14,12 @@
  * ## Architecture Alignment
  * - **Salesforce**: PackageInstallHandler with dependency validation
  * - **npm**: pacote + arborist for install/resolve
- * - **Helm**: helm install/upgrade/rollback lifecycle
+ * - **Helm**: helm install lifecycle
  * - **Kubernetes**: controller-runtime reconcile loop
  */
 
 import type { InstalledPackage, NamespaceConflictError } from '../kernel/package-registry.zod';
 import type { DependencyResolutionResult } from '../kernel/dependency-resolution.zod';
-import type {
-  UpgradePlan,
-  UpgradeSnapshot,
-  UpgradePackageResponse,
-  RollbackPackageResponse,
-} from '../kernel/package-upgrade.zod';
 import type { PackageArtifact } from '../kernel/package-artifact.zod';
 import type { ObjectStackManifest } from '../kernel/manifest.zod';
 
@@ -100,51 +93,10 @@ export interface CheckNamespaceResult {
   conflicts: NamespaceConflictError[];
 }
 
-// ==========================================
-// Upgrade Types
-// ==========================================
-
-/**
- * Input for generating an upgrade plan.
- */
-export interface PlanUpgradeInput {
-  /** Package ID to upgrade */
-  packageId: string;
-  /** Target version to upgrade to */
-  targetVersion?: string;
-  /** New manifest for the target version */
-  manifest?: ObjectStackManifest;
-}
-
-/**
- * Input for executing an upgrade.
- */
-export interface ExecuteUpgradeInput {
-  /** Package ID to upgrade */
-  packageId: string;
-  /** Target version */
-  targetVersion?: string;
-  /** New manifest */
-  manifest?: ObjectStackManifest;
-  /** Whether to create a pre-upgrade snapshot */
-  createSnapshot?: boolean;
-  /** Merge strategy for customizations */
-  mergeStrategy?: 'keep-custom' | 'accept-incoming' | 'three-way-merge';
-  /** Whether to run in dry-run mode */
-  dryRun?: boolean;
-}
-
-/**
- * Input for rolling back a package.
- */
-export interface RollbackInput {
-  /** Package ID to rollback */
-  packageId: string;
-  /** Snapshot ID to restore from */
-  snapshotId: string;
-  /** Whether to also rollback customizations */
-  rollbackCustomizations?: boolean;
-}
+// The upgrade types (`PlanUpgradeInput`, `ExecuteUpgradeInput`,
+// `RollbackInput`) were RETIRED with `kernel/package-upgrade.zod.ts` (#25608,
+// ADR-0049 enforce-or-remove) together with the four `IPackageService`
+// members that took them: no provider ever implemented any of them.
 
 // ==========================================
 // Artifact Upload Types
@@ -274,37 +226,11 @@ export interface IPackageService {
    */
   checkNamespaces(input: CheckNamespaceInput): Promise<CheckNamespaceResult>;
 
-  // ---- Upgrade Lifecycle ----
-
-  /**
-   * Generate an upgrade plan (preview without executing).
-   * Analyzes metadata diff, impact level, migration requirements,
-   * and dependency cascades.
-   * @param input - Upgrade planning parameters
-   * @returns Upgrade plan with impact analysis
-   */
-  planUpgrade(input: PlanUpgradeInput): Promise<UpgradePlan>;
-
-  /**
-   * Execute a package upgrade with optional snapshot and rollback support.
-   * @param input - Upgrade execution parameters
-   * @returns Upgrade response with phase, plan, and conflicts
-   */
-  upgrade(input: ExecuteUpgradeInput): Promise<UpgradePackageResponse>;
-
-  /**
-   * Rollback a package to a previous snapshot.
-   * @param input - Rollback parameters
-   * @returns Rollback result
-   */
-  rollback(input: RollbackInput): Promise<RollbackPackageResponse>;
-
-  /**
-   * Get an upgrade snapshot by ID.
-   * @param snapshotId - Snapshot identifier
-   * @returns Snapshot or null
-   */
-  getSnapshot?(snapshotId: string): Promise<UpgradeSnapshot | null>;
+  // ---- Upgrade Lifecycle ---- RETIRED (#25608): `planUpgrade`, `upgrade`,
+  // `rollback` and `getSnapshot` left with the zero-consumer upgrade model.
+  // The rollback the platform serves is the ADR-0067 commit rollback
+  // (`POST /api/v1/packages/:id/rollback`, `RollbackToPackageCommitResponseSchema`);
+  // an upgrade is a re-install with `overwrite: true`.
 
   // ---- Artifact Management ----
 

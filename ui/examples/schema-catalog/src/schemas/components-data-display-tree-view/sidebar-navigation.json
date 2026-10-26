@@ -1,0 +1,55 @@
+{
+  "type": "tree-view",
+  "title": "Navigation",
+  "nodes": [
+    {
+      "id": "dashboard",
+      "label": "Dashboard",
+      "icon": "folder"
+    },
+    {
+      "id": "products",
+      "label": "Products",
+      "icon": "folder",
+      "children": [
+        {
+          "id": "all-products",
+          "label": "All Products",
+          "icon": "file"
+        },
+        {
+          "id": "categories",
+          "label": "Categories",
+          "icon": "file"
+        },
+        {
+          "id": "inventory",
+          "label": "Inventory",
+          "icon": "file"
+        }
+      ]
+    },
+    {
+      "id": "orders",
+      "label": "Orders",
+      "icon": "folder",
+      "children": [
+        {
+          "id": "pending",
+          "label": "Pending",
+          "icon": "file"
+        },
+        {
+          "id": "completed",
+          "label": "Completed",
+          "icon": "file"
+        }
+      ]
+    },
+    {
+      "id": "settings",
+      "label": "Settings",
+      "icon": "folder"
+    }
+  ]
+}

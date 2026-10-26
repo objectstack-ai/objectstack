@@ -2978,6 +2978,32 @@ const ROLLUP_NON_NUMERIC_AGGREGAND_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const FIELD_EMBEDDED_SUB_FIELDS_EXPLANATION: RuleExplanation = {
+  rule: 'field/embedded-sub-fields',
+  covers: 'why a composite or repeater field has no sub-fields',
+  paragraphs: [
+    'On an object field, `composite` and `repeater` are untyped JSON containers of CMS lineage (a ' +
+      'Strapi component, an ACF group or repeater): the value is stored as JSON on the parent row, ' +
+      'and `FieldSchema` has no member that declares its inner keys. So nothing gives a row its ' +
+      'labels, per-column types, options, required flags or translations, nothing validates one, ' +
+      'and nothing — a flow included — can address a single row. Declaring `fields`, `subFields` ' +
+      'or `columns` on one promises a typed list the platform does not build.',
+    'A list that needs typed columns is a child object: its own fields carry the types, labels, ' +
+      'options and validation, and a `master_detail` field on it points back at the parent. The ' +
+      'parent\'s record page lists the children as a related list, and `inlineEdit: \'grid\'` on that ' +
+      'field edits them as an inline grid on the parent\'s form. Each row then has a record identity ' +
+      'that a lookup, a roll-up or a flow can reach. Keep a `composite` / `repeater` only for JSON ' +
+      'whose shape the platform does not need to know.',
+    'Not judged: a form view\'s `fields` sub-rows and the metadata forms Studio renders — those are ' +
+      'other schemas that do declare sub-rows.',
+    'Reach: the strict field schema refuses all three keys at the parse with this same route, so ' +
+      '`defineStack`, `os validate`, `os build` and the metadata save door never hand such a field ' +
+      'to this rule. It fires only on the doors that never parse — `os lint` on a raw object-literal ' +
+      'config, `defineStack(x, { strict: false })`, and the metadata-generation rubric beside its own ' +
+      'schema verdict — where without it the key would ride unnamed to `os build`.',
+  ],
+};
+
 const RELATIONSHIP_DELETE_BEHAVIOR_EXPLANATION: RuleExplanation = {
   rule: 'relationship/delete-behavior',
   covers: 'what deleting a master does to its details',
@@ -3298,14 +3324,15 @@ const LIST_VIEW_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
     // The positions are held to `listViewWalkedPositions()` by the rule's test.
     'Every field a list view names must be a field of its bound object: its `columns` (and a ' +
       'column\'s `summary` and `prefix`), `hiddenFields`, `fieldOrder`, ' +
-      '`grouping`, `rowColor` and `userFilters`, the keys of its `filter` and of each ' +
+      '`grouping` (and a grouping level\'s `orderBy`), `rowColor` and `userFilters`, the keys of its `filter` and of each ' +
       '`userFilters.tabs[].filter`, and every binding inside a `kanban`, `calendar`, `gantt`, ' +
       '`timeline`, `gallery`, `map` or `tree` block. Nothing resolves the name at render time: the ' +
       'view renders successfully with a blank, empty or wrong result, and nothing else reports the ' +
       'miss. The verdict\'s "Did you mean" names the nearest field the object declares.',
     'An error where the miss changes what the view returns or collapses what it lays out — for ' +
       'example, a filter key, user filter or gantt quick filter matches no record; a column is sent as the ' +
-      'projection, where the REST ingress answers `400 INVALID_FIELD`; a `kanban.groupByField` ' +
+      'projection, where the REST ingress answers `400 INVALID_FIELD`; a grouping level\'s `orderBy` ' +
+      'is an operand of the group header query, which the data door refuses the same way; a `kanban.groupByField` ' +
       'collapses every card into one lane; a required date field of a `gantt`, `calendar` or ' +
       '`timeline` leaves nothing to place; a map with no coordinate field plots no marker; a ' +
       '`tree.parentField` flattens the tree; a `gantt.lockField` unfreezes every row and a ' +
@@ -3343,6 +3370,10 @@ const LIST_VIEW_FIELD_DOTTED_EXPLANATION: RuleExplanation = {
       '(`assertFilterIsMaterializable` and the REST ingress, `400 INVALID_FIELD`) rather than ' +
       'answered with an empty list. A structured or JSON head, an array (`multiple: true`) head, a ' +
       'file head and an unreadable head are served by the door, so they are not reported.',
+    'Aggregate: a grouping level\'s `orderBy` is the operand of the `min` / `max` node the group ' +
+      'header query orders its groups by. The header query compiles no join, so the data door\'s ' +
+      'ingress refuses every dotted operand whatever its head (`assertAggregationFieldsExist`, ' +
+      '`400 INVALID_FIELD`), and the grouped view renders no group.',
     'The ways out are the doors\' own. At a projection position, name the whole column and read ' +
       'into its value in the client, or read the related record with `expand`; at a filter position, ' +
       'filter on a column of the bound object itself. At either, denormalise the value onto the bound ' +
@@ -3351,6 +3382,27 @@ const LIST_VIEW_FIELD_DOTTED_EXPLANATION: RuleExplanation = {
       'walks an embedded record: `gantt.quickFilters[].field`, `gantt.tooltipFields[]` and every ' +
       'renderer binding. `sort` keeps its own rule. Always an error: every judged position is ' +
       'refused outright by its door.',
+  ],
+};
+
+const LIST_VIEW_GROUP_ORDER_UNORDERABLE_EXPLANATION: RuleExplanation = {
+  rule: 'list-view-group-order-unorderable',
+  covers: 'which fields a grouping level can order its groups by',
+  paragraphs: [
+    'A grouping level\'s `orderBy` orders its groups by another field\'s value — a period label in time ' +
+      'order by its period start. The group header query carries that value per group: the smallest ' +
+      '(`min`) for `order: asc`, the largest (`max`) for `desc`. So the field must be one `min` and `max` ' +
+      'order the same way on every backend: the aggregate × field-type table (`AGGREGATE_FIELD_TYPE_COMPATIBILITY` ' +
+      'in `@objectstack/spec/data`) accepts the numeric, temporal and boolean classes.',
+    'It refuses every other type, among them the string classes — text, option values, references and ' +
+      '`autonumber` — because two backends order strings by two collations, the virtual `formula`, which ' +
+      'stores no column, and the file, structured and vector types. The engine\'s aggregate door (`engine.aggregate`) asks ' +
+      'the same table, so such an `orderBy` gets the grouped view\'s header query refused ' +
+      '(`400 INVALID_FIELD`) and no group renders. To order text labels, store each label\'s rank in a ' +
+      'number field and order by that.',
+    'Not judged: a level whose `orderBy` names its own grouping field (it compiles no node), a field with no ' +
+      'declared type, and a declared type outside `FieldType` — the aggregate door judges neither. A name ' +
+      'that resolves to nothing is `list-view-field-unknown`; a dotted one is `list-view-field-dotted`.',
   ],
 };
 
@@ -5018,6 +5070,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [RELATIONSHIP_MASTER_DETAIL_REQUIRED_EXPLANATION.rule]: RELATIONSHIP_MASTER_DETAIL_REQUIRED_EXPLANATION,
   [ROLLUP_NON_NUMERIC_AGGREGAND_EXPLANATION.rule]: ROLLUP_NON_NUMERIC_AGGREGAND_EXPLANATION,
   [RELATIONSHIP_DELETE_BEHAVIOR_EXPLANATION.rule]: RELATIONSHIP_DELETE_BEHAVIOR_EXPLANATION,
+  [FIELD_EMBEDDED_SUB_FIELDS_EXPLANATION.rule]: FIELD_EMBEDDED_SUB_FIELDS_EXPLANATION,
   [DEFAULT_AGENT_LEGACY_ALIAS_EXPLANATION.rule]: DEFAULT_AGENT_LEGACY_ALIAS_EXPLANATION,
   [DEFAULT_AGENT_OUTSIDE_ROSTER_EXPLANATION.rule]: DEFAULT_AGENT_OUTSIDE_ROSTER_EXPLANATION,
   [AGENT_AUTHORING_WITHDRAWN_EXPLANATION.rule]: AGENT_AUTHORING_WITHDRAWN_EXPLANATION,
@@ -5031,6 +5084,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [FILTER_EMPTY_NODE_EXPLANATION.rule]: FILTER_EMPTY_NODE_EXPLANATION,
   [LIST_VIEW_FIELD_UNKNOWN_EXPLANATION.rule]: LIST_VIEW_FIELD_UNKNOWN_EXPLANATION,
   [LIST_VIEW_FIELD_DOTTED_EXPLANATION.rule]: LIST_VIEW_FIELD_DOTTED_EXPLANATION,
+  [LIST_VIEW_GROUP_ORDER_UNORDERABLE_EXPLANATION.rule]: LIST_VIEW_GROUP_ORDER_UNORDERABLE_EXPLANATION,
   [LIST_VIEW_OBJECT_OUTSIDE_CLOSURE_EXPLANATION.rule]: LIST_VIEW_OBJECT_OUTSIDE_CLOSURE_EXPLANATION,
   [LIST_VIEW_OBJECT_UNKNOWN_EXPLANATION.rule]: LIST_VIEW_OBJECT_UNKNOWN_EXPLANATION,
   [TRANSLATION_TARGET_UNKNOWN_EXPLANATION.rule]: TRANSLATION_TARGET_UNKNOWN_EXPLANATION,

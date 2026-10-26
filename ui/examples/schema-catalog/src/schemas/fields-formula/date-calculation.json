@@ -1,0 +1,14 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "fields": [
+    {
+      "name": "due_date",
+      "label": "Due Date",
+      "type": "formula",
+      "returnType": "date",
+      "readonly": true
+    }
+  ]
+}

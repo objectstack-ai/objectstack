@@ -47,7 +47,7 @@ const NOT_INSTALLED_HEADLINE =
   'The ObjectStack Console is not installed, so this server has no Console to serve at /_console/.';
 
 /** The framework repo's remedy. */
-const BUILD_REMEDY = 'pnpm objectui:build';
+const BUILD_REMEDY = 'pnpm console:build';
 
 /** The prefix the terminal warning carries and the HTTP answer does not. */
 const WARNING_PREFIX = '  ⚠ ';
@@ -84,7 +84,7 @@ function frameworkTree(): { root: string; consoleDir: string } {
   writeJson(path.join(root, 'package.json'), {
     name: 'framework-root',
     private: true,
-    scripts: { build: 'turbo run build', 'objectui:build': 'bash scripts/build-console.sh' },
+    scripts: { build: 'turbo run build', 'console:build': 'turbo run build:dist --filter=@objectstack/console' },
   });
   return { root, consoleDir: writeUnbuiltConsole(path.join(root, 'packages', 'console')) };
 }
@@ -124,7 +124,7 @@ describe('a framework checkout with no built Console', () => {
     request = await serve(createConsoleNotBuiltPlugin(consoleDir));
   });
 
-  it.each(CONSOLE_REQUESTS)('GET %s answers 503 naming `pnpm objectui:build`', async (p) => {
+  it.each(CONSOLE_REQUESTS)('GET %s answers 503 naming `pnpm console:build`', async (p) => {
     const res = await request(p);
     expect(res.status).toBe(503);
     expect(res.headers.get('content-type')).toMatch(/^text\/plain/);

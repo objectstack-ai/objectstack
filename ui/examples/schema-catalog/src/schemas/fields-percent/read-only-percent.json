@@ -1,0 +1,16 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "defaultValues": {
+    "success_rate": 0.875
+  },
+  "fields": [
+    {
+      "name": "success_rate",
+      "label": "Success Rate",
+      "type": "percent",
+      "readonly": true
+    }
+  ]
+}

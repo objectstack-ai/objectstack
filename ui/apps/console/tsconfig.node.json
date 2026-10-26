@@ -1,0 +1,75 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    /* This project exists to be type-checked, not to ship anything: its output
+       is thrown away. It cannot say `noEmit` — `tsconfig.json` references it,
+       and a referenced project that disables emit is TS6310 — so instead the
+       emit is aimed at a gitignored cache directory. Left at the default it
+       writes .js/.d.ts next to every input (apps/console/vite.config.js,
+       scripts/vite-*.d.ts, …), and that untracked litter is a large part of why
+       this project was never wired into a gate (objectui#3305). */
+    "outDir": "../../node_modules/.cache/tsc/console-node",
+    /* `composite` defaults `rootDir` to this file's own directory, which would
+       put `../../scripts/vite-*.ts` outside it (TS6059). The project genuinely
+       spans both, so name the repo root explicitly. */
+    "rootDir": "../..",
+    "skipLibCheck": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowSyntheticDefaultImports": true,
+    /* `vite.config.ts` imports `../../scripts/vite-*.ts` with explicit `.ts`
+       extensions, because Vite's `configLoader: 'native'` hands the config to
+       Node's ESM loader, which does no extension guessing (objectui#3384).
+       TypeScript needs `allowImportingTsExtensions` to accept that spelling —
+       `moduleResolution: bundler` takes `./x` and `./x.js`, but NOT `./x.ts`.
+       That option demands one of `noEmit` / `emitDeclarationOnly` /
+       `rewriteRelativeImportExtensions`. `noEmit` is barred here for the reason
+       spelled out above (TS6310, referenced by `tsconfig.json`), and rewriting
+       extensions in output nobody reads would be pointless — so declarations
+       only. They still land in the cache `outDir`; the `.js` was never used. */
+    "allowImportingTsExtensions": true,
+    "emitDeclarationOnly": true,
+    "strict": true
+  },
+  /* `../../scripts/vite-*.ts` are the repo-level Vite plugins vite.config.ts
+     imports. They must be listed here or each one is a TS6307 ("not listed
+     within the file list of project") — the error that kept this project red,
+     and therefore ungated.
+
+     `vitest.config.ts` is listed for the same reason `vite.config.ts` is, and
+     until objectui#3476 it was in ZERO tsc programs. CI runs
+     `turbo run type-check`, i.e. per PACKAGE; the root `tsconfig.json` does
+     list `apps` in its `include`, but no script ever runs it — it is the
+     editor config. So the one console config that merges two config objects
+     (`rootConfig` and `viteConfig`), which is precisely the shape a
+     type-checker catches drift in, was the one an agent could break with no
+     gate noticing.
+
+     `../../vitest.config.mts` follows it in by necessity, not by wish:
+     `vitest.config.ts` imports it, and a composite project must list every
+     file in its program or that import is a TS6307 as well. Covering the
+     importer is impossible without it — and it is a bonus, since the root
+     Vitest config was in no gated program either. One caveat that comes with
+     it: its `@ts-expect-error` on the plain-JS `vitest-invocation-guard.mjs`
+     import stays CORRECT here only because this project leaves `allowJs` at
+     its default `false`. Turning `allowJs` on would make that directive unused
+     and this project red with TS2578 — see `tsconfig.scripts.json`, which
+     chose `allowJs: true` for `scripts/` and deliberately paid that price.
+
+     There is deliberately NO `vitest.setup.ts` entry. No such file has ever
+     existed in this directory, and a literal, glob-less `include` entry that
+     matches nothing is silently ignored by TypeScript — so it read as coverage
+     that was never there (objectui#3476). Repointing it at the setup file
+     `vitest.config.ts` actually uses (the repo-root `vitest.setup.dom.tsx`)
+     was measured and rejected: that file is handed to Vitest as a RUNTIME PATH
+     STRING, never imported, so this program has no type edge to it, and naming
+     it here drags `vitest.setup.base.ts` plus four `@object-ui` side-effect
+     imports into a Node build-config project that cannot resolve them
+     (one TS6307 + four TS2882). It belongs to a test-oriented program. */
+  "include": [
+    "vite.config.ts",
+    "vitest.config.ts",
+    "../../vitest.config.mts",
+    "../../scripts/vite-*.ts"
+  ]
+}

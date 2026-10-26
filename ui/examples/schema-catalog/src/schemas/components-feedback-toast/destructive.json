@@ -1,0 +1,6 @@
+{
+  "type": "toast",
+  "variant": "error",
+  "title": "Error",
+  "description": "Something went wrong."
+}

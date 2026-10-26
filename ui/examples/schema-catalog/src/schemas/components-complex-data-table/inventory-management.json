@@ -1,0 +1,77 @@
+{
+  "type": "data-table",
+  "caption": "Product Inventory",
+  "pagination": true,
+  "searchable": true,
+  "sortable": true,
+  "pageSize": 5,
+  "columns": [
+    {
+      "header": "SKU",
+      "accessorKey": "sku",
+      "width": "100px"
+    },
+    {
+      "header": "Product",
+      "accessorKey": "name"
+    },
+    {
+      "header": "Category",
+      "accessorKey": "category"
+    },
+    {
+      "header": "Stock",
+      "accessorKey": "stock",
+      "width": "80px"
+    },
+    {
+      "header": "Price",
+      "accessorKey": "price",
+      "width": "100px"
+    }
+  ],
+  "data": [
+    {
+      "sku": "PRD-001",
+      "name": "Laptop Pro",
+      "category": "Electronics",
+      "stock": 45,
+      "price": "$1,299"
+    },
+    {
+      "sku": "PRD-002",
+      "name": "Wireless Mouse",
+      "category": "Accessories",
+      "stock": 120,
+      "price": "$29"
+    },
+    {
+      "sku": "PRD-003",
+      "name": "USB-C Cable",
+      "category": "Accessories",
+      "stock": 200,
+      "price": "$15"
+    },
+    {
+      "sku": "PRD-004",
+      "name": "Monitor 27\"",
+      "category": "Electronics",
+      "stock": 30,
+      "price": "$399"
+    },
+    {
+      "sku": "PRD-005",
+      "name": "Keyboard",
+      "category": "Accessories",
+      "stock": 80,
+      "price": "$79"
+    },
+    {
+      "sku": "PRD-006",
+      "name": "Webcam HD",
+      "category": "Electronics",
+      "stock": 50,
+      "price": "$99"
+    }
+  ]
+}

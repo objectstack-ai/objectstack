@@ -1,0 +1,70 @@
+{
+  "name": "@object-ui/permissions",
+  "version": "18.1.0",
+  "type": "module",
+  "license": "MIT",
+  "description": "RBAC permission system for Object UI with object/field/row-level access control, permission guards, and hooks.",
+  "homepage": "https://www.objectui.org/docs/packages/permissions",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
+    "directory": "ui/packages/permissions"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc && node ../../scripts/check-dist-completeness.mjs",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "test": "vitest run --root ../.. packages/permissions/",
+    "type-check": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "lint": "eslint ."
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "dependencies": {
+    "@object-ui/types": "workspace:*",
+    "@objectstack/spec": "workspace:^"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "react": "19.3.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  },
+  "keywords": [
+    "objectui",
+    "sdui",
+    "schema-driven-ui",
+    "react",
+    "tailwind",
+    "shadcn",
+    "objectstack",
+    "permissions",
+    "rbac",
+    "access-control",
+    "authorization"
+  ],
+  "author": "ObjectStack Team <team@objectstack.ai>",
+  "bugs": {
+    "url": "https://github.com/objectstack-ai/objectui/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

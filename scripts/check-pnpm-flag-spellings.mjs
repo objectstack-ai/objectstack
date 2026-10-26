@@ -189,6 +189,8 @@ const DECLARED_WATCH_HINTS = [
   'packages/**/package.json',
   'apps/**/package.json',
   'examples/**/package.json',
+  // The objectui tree under `ui/` (objectstack#25677), as git-merge-regen.mjs spells it.
+  'ui/**/package.json',
 ];
 
 /** The file that owns this rule, and so is not judged by it (see the header). */

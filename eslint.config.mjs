@@ -912,6 +912,30 @@ const NEVER_LINTED = Object.freeze([
   '**/.turbo/**',
 ]);
 
+// ───────────────────────────────────────────────────────────────────────────
+// Source trees linted by THEIR OWN flat config, not by this one. Global-only:
+// unlike NEVER_LINTED this is authored source, so it is not spread into the
+// per-object `ignores` below — the one global object removes it from this
+// config's population, and nothing here may ever start matching it by accident
+// of a `files` glob.
+//
+// `ui/**` is the objectui tree imported at the cutover (decision G1 on #25752,
+// verbatim 「17e · 17f · 17g · 同意」): `ui/eslint.config.js` lints it, the
+// `Lint UI` CI job runs that config, and the two configs converge in the
+// aftercare card #25753. Census of what this one line stops, measured over the
+// merged tree on the verify branch (9e37acd126, `pnpm lint` exactly as
+// package.json spells it): 121 errors and 16,511 warnings, every one of them
+// under `ui/**` (dominant rule `react-hooks/static-components`, then
+// `react-hooks/purity`, `no-restricted-imports`,
+// `@typescript-eslint/no-empty-object-type`, `no-console`). Outside `ui/` the
+// population this config lints is byte-for-byte the pre-import one, so its
+// verdict there does not move. Delete the entry in the PR that adopts this
+// config across `ui/` — never by widening a per-object `ignores` instead.
+// ───────────────────────────────────────────────────────────────────────────
+const LINTED_BY_OWN_CONFIG = Object.freeze([
+  'ui/**',
+]);
+
 export default [
   // ───────────────────────────────────────────────────────────────────────────
   // GLOBAL ignore. This is the ONLY object in this array with no `files` key,
@@ -965,7 +989,7 @@ export default [
   // either of them becoming the next `.next`. See #12334 / #12304.
   // ───────────────────────────────────────────────────────────────────────────
   {
-    ignores: [...NEVER_LINTED],
+    ignores: [...NEVER_LINTED, ...LINTED_BY_OWN_CONFIG],
   },
   {
     files: ['**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}'],

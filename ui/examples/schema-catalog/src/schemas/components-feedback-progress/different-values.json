@@ -1,0 +1,18 @@
+{
+  "type": "stack",
+  "gap": 3,
+  "children": [
+    {
+      "type": "progress",
+      "value": 25
+    },
+    {
+      "type": "progress",
+      "value": 50
+    },
+    {
+      "type": "progress",
+      "value": 75
+    }
+  ]
+}

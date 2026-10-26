@@ -1,0 +1,23 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "defaultValues": {
+    "embedding": [
+      0.1234,
+      -0.5678,
+      0.9012,
+      0.3456,
+      -0.789
+    ]
+  },
+  "fields": [
+    {
+      "name": "embedding",
+      "label": "Text Embedding",
+      "type": "vector",
+      "dimensions": 768,
+      "readonly": true
+    }
+  ]
+}

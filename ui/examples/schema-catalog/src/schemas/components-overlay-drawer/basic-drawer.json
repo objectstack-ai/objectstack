@@ -1,0 +1,14 @@
+{
+  "type": "drawer",
+  "trigger": {
+    "type": "button",
+    "label": "Open Drawer"
+  },
+  "title": "Drawer Title",
+  "content": [
+    {
+      "type": "text",
+      "content": "Drawer content"
+    }
+  ]
+}

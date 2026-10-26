@@ -1,0 +1,59 @@
+{
+  "type": "menubar",
+  "menus": [
+    {
+      "label": "File",
+      "items": [
+        {
+          "label": "New Tab"
+        },
+        {
+          "label": "New Window"
+        },
+        {
+          "separator": true
+        },
+        {
+          "label": "Exit"
+        }
+      ]
+    },
+    {
+      "label": "Edit",
+      "items": [
+        {
+          "label": "Undo"
+        },
+        {
+          "label": "Redo"
+        },
+        {
+          "separator": true
+        },
+        {
+          "label": "Cut"
+        },
+        {
+          "label": "Copy"
+        },
+        {
+          "label": "Paste"
+        }
+      ]
+    },
+    {
+      "label": "View",
+      "items": [
+        {
+          "label": "Zoom In"
+        },
+        {
+          "label": "Zoom Out"
+        },
+        {
+          "label": "Reset Zoom"
+        }
+      ]
+    }
+  ]
+}

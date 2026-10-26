@@ -1,0 +1,807 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Accordion snapshots > renders accordion with first item expanded 1`] = `
+<div
+  data-orientation="vertical"
+>
+  <div
+    class="border-b"
+    data-orientation="vertical"
+    data-state="open"
+  >
+    <h3
+      class="flex"
+      data-orientation="vertical"
+      data-state="open"
+    >
+      <button
+        aria-controls="radix-_r_h_"
+        aria-disabled="true"
+        aria-expanded="true"
+        class="flex flex-1 items-center justify-between py-4 font-medium transition-all hover:underline [&[data-state=open]>svg]:rotate-180"
+        data-orientation="vertical"
+        data-radix-collection-item=""
+        data-state="open"
+        id="radix-_r_g_"
+        type="button"
+      >
+        Section One
+        <svg
+          aria-hidden="true"
+          class="lucide lucide-chevron-down h-4 w-4 shrink-0 transition-transform duration-200"
+          fill="none"
+          height="24"
+          stroke="currentColor"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          viewBox="0 0 24 24"
+          width="24"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path
+            d="m6 9 6 6 6-6"
+          />
+        </svg>
+      </button>
+    </h3>
+    <div
+      aria-labelledby="radix-_r_g_"
+      class="overflow-hidden text-sm transition-all data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down"
+      data-orientation="vertical"
+      data-state="open"
+      id="radix-_r_h_"
+      role="region"
+      style="--radix-accordion-content-height: var(--radix-collapsible-content-height); --radix-accordion-content-width: var(--radix-collapsible-content-width); transition-duration: 0s; animation-name: none;"
+    >
+      <div
+        class="pb-4 pt-0"
+      >
+        Content for section one.
+      </div>
+    </div>
+  </div>
+  <div
+    class="border-b"
+    data-orientation="vertical"
+    data-state="closed"
+  >
+    <h3
+      class="flex"
+      data-orientation="vertical"
+      data-state="closed"
+    >
+      <button
+        aria-expanded="false"
+        class="flex flex-1 items-center justify-between py-4 font-medium transition-all hover:underline [&[data-state=open]>svg]:rotate-180"
+        data-orientation="vertical"
+        data-radix-collection-item=""
+        data-state="closed"
+        id="radix-_r_i_"
+        type="button"
+      >
+        Section Two
+        <svg
+          aria-hidden="true"
+          class="lucide lucide-chevron-down h-4 w-4 shrink-0 transition-transform duration-200"
+          fill="none"
+          height="24"
+          stroke="currentColor"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          viewBox="0 0 24 24"
+          width="24"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path
+            d="m6 9 6 6 6-6"
+          />
+        </svg>
+      </button>
+    </h3>
+    <div
+      aria-labelledby="radix-_r_i_"
+      class="overflow-hidden text-sm transition-all data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down"
+      data-orientation="vertical"
+      data-state="closed"
+      hidden=""
+      id="radix-_r_j_"
+      role="region"
+      style="--radix-accordion-content-height: var(--radix-collapsible-content-height); --radix-accordion-content-width: var(--radix-collapsible-content-width);"
+    />
+  </div>
+</div>
+`;
+
+exports[`Accordion snapshots > renders accordion with multiple items 1`] = `
+<div
+  data-orientation="vertical"
+>
+  <div
+    class="border-b"
+    data-orientation="vertical"
+    data-state="closed"
+  >
+    <h3
+      class="flex"
+      data-orientation="vertical"
+      data-state="closed"
+    >
+      <button
+        aria-expanded="false"
+        class="flex flex-1 items-center justify-between py-4 font-medium transition-all hover:underline [&[data-state=open]>svg]:rotate-180"
+        data-orientation="vertical"
+        data-radix-collection-item=""
+        data-state="closed"
+        id="radix-_r_a_"
+        type="button"
+      >
+        Is it accessible?
+        <svg
+          aria-hidden="true"
+          class="lucide lucide-chevron-down h-4 w-4 shrink-0 transition-transform duration-200"
+          fill="none"
+          height="24"
+          stroke="currentColor"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          viewBox="0 0 24 24"
+          width="24"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path
+            d="m6 9 6 6 6-6"
+          />
+        </svg>
+      </button>
+    </h3>
+    <div
+      aria-labelledby="radix-_r_a_"
+      class="overflow-hidden text-sm transition-all data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down"
+      data-orientation="vertical"
+      data-state="closed"
+      hidden=""
+      id="radix-_r_b_"
+      role="region"
+      style="--radix-accordion-content-height: var(--radix-collapsible-content-height); --radix-accordion-content-width: var(--radix-collapsible-content-width);"
+    />
+  </div>
+  <div
+    class="border-b"
+    data-orientation="vertical"
+    data-state="closed"
+  >
+    <h3
+      class="flex"
+      data-orientation="vertical"
+      data-state="closed"
+    >
+      <button
+        aria-expanded="false"
+        class="flex flex-1 items-center justify-between py-4 font-medium transition-all hover:underline [&[data-state=open]>svg]:rotate-180"
+        data-orientation="vertical"
+        data-radix-collection-item=""
+        data-state="closed"
+        id="radix-_r_c_"
+        type="button"
+      >
+        Is it styled?
+        <svg
+          aria-hidden="true"
+          class="lucide lucide-chevron-down h-4 w-4 shrink-0 transition-transform duration-200"
+          fill="none"
+          height="24"
+          stroke="currentColor"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          viewBox="0 0 24 24"
+          width="24"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path
+            d="m6 9 6 6 6-6"
+          />
+        </svg>
+      </button>
+    </h3>
+    <div
+      aria-labelledby="radix-_r_c_"
+      class="overflow-hidden text-sm transition-all data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down"
+      data-orientation="vertical"
+      data-state="closed"
+      hidden=""
+      id="radix-_r_d_"
+      role="region"
+      style="--radix-accordion-content-height: var(--radix-collapsible-content-height); --radix-accordion-content-width: var(--radix-collapsible-content-width);"
+    />
+  </div>
+  <div
+    class="border-b"
+    data-orientation="vertical"
+    data-state="closed"
+  >
+    <h3
+      class="flex"
+      data-orientation="vertical"
+      data-state="closed"
+    >
+      <button
+        aria-expanded="false"
+        class="flex flex-1 items-center justify-between py-4 font-medium transition-all hover:underline [&[data-state=open]>svg]:rotate-180"
+        data-orientation="vertical"
+        data-radix-collection-item=""
+        data-state="closed"
+        id="radix-_r_e_"
+        type="button"
+      >
+        Is it animated?
+        <svg
+          aria-hidden="true"
+          class="lucide lucide-chevron-down h-4 w-4 shrink-0 transition-transform duration-200"
+          fill="none"
+          height="24"
+          stroke="currentColor"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          viewBox="0 0 24 24"
+          width="24"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path
+            d="m6 9 6 6 6-6"
+          />
+        </svg>
+      </button>
+    </h3>
+    <div
+      aria-labelledby="radix-_r_e_"
+      class="overflow-hidden text-sm transition-all data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down"
+      data-orientation="vertical"
+      data-state="closed"
+      hidden=""
+      id="radix-_r_f_"
+      role="region"
+      style="--radix-accordion-content-height: var(--radix-collapsible-content-height); --radix-accordion-content-width: var(--radix-collapsible-content-width);"
+    />
+  </div>
+</div>
+`;
+
+exports[`Alert snapshots > renders default alert with title and description 1`] = `
+<div
+  class="relative w-full rounded-lg border p-4 [&>svg~*]:pl-7 [&>svg+div]:translate-y-[-3px] [&>svg]:absolute [&>svg]:left-4 [&>svg]:top-4 [&>svg]:text-foreground bg-background text-foreground"
+  role="alert"
+>
+  <h5
+    class="mb-1 font-medium leading-none tracking-tight"
+  >
+    Heads up!
+  </h5>
+  <div
+    class="text-sm [&_p]:leading-relaxed"
+  >
+    You can add components to your app using the CLI.
+  </div>
+</div>
+`;
+
+exports[`Alert snapshots > renders destructive alert with title and description 1`] = `
+<div
+  class="relative w-full rounded-lg border p-4 [&>svg~*]:pl-7 [&>svg+div]:translate-y-[-3px] [&>svg]:absolute [&>svg]:left-4 [&>svg]:top-4 border-destructive/50 text-destructive dark:border-destructive [&>svg]:text-destructive"
+  role="alert"
+>
+  <h5
+    class="mb-1 font-medium leading-none tracking-tight"
+  >
+    Error
+  </h5>
+  <div
+    class="text-sm [&_p]:leading-relaxed"
+  >
+    Your session has expired. Please log in again.
+  </div>
+</div>
+`;
+
+exports[`Avatar snapshots > renders avatar with fallback only 1`] = `
+<span
+  class="relative flex h-10 w-10 shrink-0 overflow-hidden rounded-full"
+>
+  <span
+    class="flex h-full w-full items-center justify-center rounded-full bg-muted"
+  >
+    AB
+  </span>
+</span>
+`;
+
+exports[`Avatar snapshots > renders avatar with image and fallback 1`] = `
+<span
+  class="relative flex h-10 w-10 shrink-0 overflow-hidden rounded-full"
+>
+  <span
+    class="flex h-full w-full items-center justify-center rounded-full bg-muted"
+  >
+    JD
+  </span>
+</span>
+`;
+
+exports[`Breadcrumb snapshots > renders multi-level breadcrumb 1`] = `
+<nav
+  aria-label="breadcrumb"
+>
+  <ol
+    class="flex flex-wrap items-center gap-1.5 break-words text-sm text-muted-foreground sm:gap-2.5"
+  >
+    <li
+      class="inline-flex items-center gap-1.5"
+    >
+      <a
+        class="transition-colors hover:text-foreground"
+        href="/"
+      >
+        Home
+      </a>
+    </li>
+    <li
+      aria-hidden="true"
+      class="[&>svg]:w-3.5 [&>svg]:h-3.5"
+      role="presentation"
+    >
+      <svg
+        aria-hidden="true"
+        class="lucide lucide-chevron-right"
+        fill="none"
+        height="24"
+        stroke="currentColor"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        stroke-width="2"
+        viewBox="0 0 24 24"
+        width="24"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <path
+          d="m9 18 6-6-6-6"
+        />
+      </svg>
+    </li>
+    <li
+      class="inline-flex items-center gap-1.5"
+    >
+      <a
+        class="transition-colors hover:text-foreground"
+        href="/products"
+      >
+        Products
+      </a>
+    </li>
+    <li
+      aria-hidden="true"
+      class="[&>svg]:w-3.5 [&>svg]:h-3.5"
+      role="presentation"
+    >
+      <svg
+        aria-hidden="true"
+        class="lucide lucide-chevron-right"
+        fill="none"
+        height="24"
+        stroke="currentColor"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        stroke-width="2"
+        viewBox="0 0 24 24"
+        width="24"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <path
+          d="m9 18 6-6-6-6"
+        />
+      </svg>
+    </li>
+    <li
+      class="inline-flex items-center gap-1.5"
+    >
+      <span
+        aria-current="page"
+        aria-disabled="true"
+        class="font-normal text-foreground"
+        role="link"
+      >
+        Current Page
+      </span>
+    </li>
+  </ol>
+</nav>
+`;
+
+exports[`Dialog snapshots > renders open dialog structure 1`] = `
+<body
+  data-scroll-locked="1"
+  style="pointer-events: none;"
+>
+  <span
+    aria-hidden="true"
+    data-aria-hidden="true"
+    data-radix-focus-guard=""
+    style="opacity: 0; position: fixed; pointer-events: none; outline-color: none; outline-style: none; outline-width: initial;"
+    tabindex="0"
+  />
+  <div
+    aria-hidden="true"
+    data-aria-hidden="true"
+  >
+    <button
+      aria-controls="radix-_r_0_"
+      aria-expanded="true"
+      aria-haspopup="dialog"
+      data-state="open"
+      type="button"
+    >
+      Open
+    </button>
+  </div>
+  <div
+    aria-hidden="true"
+    class="fixed inset-0 z-50 bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
+    data-aria-hidden="true"
+    data-state="open"
+    style="pointer-events: auto;"
+  />
+  <div
+    aria-describedby="radix-_r_2_"
+    aria-labelledby="radix-_r_1_"
+    class="fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg"
+    data-state="open"
+    id="radix-_r_0_"
+    role="dialog"
+    style="pointer-events: auto;"
+    tabindex="-1"
+  >
+    <div
+      class="flex flex-col space-y-1.5 text-center sm:text-left"
+    >
+      <h2
+        class="text-lg font-semibold leading-none tracking-tight"
+        id="radix-_r_1_"
+      >
+        Edit Profile
+      </h2>
+      <p
+        class="text-sm text-muted-foreground"
+        id="radix-_r_2_"
+      >
+        Make changes to your profile here.
+      </p>
+    </div>
+    <p>
+      Dialog body content
+    </p>
+    <div
+      class="flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2"
+    >
+      <button
+        type="submit"
+      >
+        Save changes
+      </button>
+    </div>
+    <button
+      class="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground"
+      type="button"
+    >
+      <svg
+        aria-hidden="true"
+        class="lucide lucide-x h-4 w-4"
+        fill="none"
+        height="24"
+        stroke="currentColor"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        stroke-width="2"
+        viewBox="0 0 24 24"
+        width="24"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <path
+          d="M18 6 6 18"
+        />
+        <path
+          d="m6 6 12 12"
+        />
+      </svg>
+      <span
+        class="sr-only"
+      >
+        Close
+      </span>
+    </button>
+  </div>
+  <span
+    aria-hidden="true"
+    data-aria-hidden="true"
+    data-radix-focus-guard=""
+    style="opacity: 0; position: fixed; pointer-events: none; outline-color: none; outline-style: none; outline-width: initial;"
+    tabindex="0"
+  />
+</body>
+`;
+
+exports[`Progress snapshots > renders progress at 0% 1`] = `
+<div
+  aria-valuemax="100"
+  aria-valuemin="0"
+  class="relative h-4 w-full overflow-hidden rounded-full bg-secondary"
+  data-max="100"
+  data-state="indeterminate"
+  role="progressbar"
+>
+  <div
+    class="h-full w-full flex-1 bg-primary transition-all"
+    data-max="100"
+    data-state="indeterminate"
+    style="transform: translateX(-100%);"
+  />
+</div>
+`;
+
+exports[`Progress snapshots > renders progress at 50% 1`] = `
+<div
+  aria-valuemax="100"
+  aria-valuemin="0"
+  class="relative h-4 w-full overflow-hidden rounded-full bg-secondary"
+  data-max="100"
+  data-state="indeterminate"
+  role="progressbar"
+>
+  <div
+    class="h-full w-full flex-1 bg-primary transition-all"
+    data-max="100"
+    data-state="indeterminate"
+    style="transform: translateX(-50%);"
+  />
+</div>
+`;
+
+exports[`Progress snapshots > renders progress at 100% 1`] = `
+<div
+  aria-valuemax="100"
+  aria-valuemin="0"
+  class="relative h-4 w-full overflow-hidden rounded-full bg-secondary"
+  data-max="100"
+  data-state="indeterminate"
+  role="progressbar"
+>
+  <div
+    class="h-full w-full flex-1 bg-primary transition-all"
+    data-max="100"
+    data-state="indeterminate"
+    style="transform: translateX(-0%);"
+  />
+</div>
+`;
+
+exports[`Separator snapshots > renders horizontal separator 1`] = `
+<div
+  class="shrink-0 bg-border h-[1px] w-full"
+  data-orientation="horizontal"
+  role="none"
+/>
+`;
+
+exports[`Separator snapshots > renders vertical separator 1`] = `
+<div
+  class="shrink-0 bg-border h-full w-[1px]"
+  data-orientation="vertical"
+  role="none"
+/>
+`;
+
+exports[`Skeleton snapshots > renders default skeleton 1`] = `
+<div
+  class="animate-pulse rounded-md bg-muted"
+/>
+`;
+
+exports[`Skeleton snapshots > renders skeleton loading card layout 1`] = `
+<div
+  class="flex flex-col space-y-3"
+>
+  <div
+    class="animate-pulse bg-muted h-[125px] w-[250px] rounded-xl"
+  />
+  <div
+    class="space-y-2"
+  >
+    <div
+      class="animate-pulse rounded-md bg-muted h-4 w-[250px]"
+    />
+    <div
+      class="animate-pulse rounded-md bg-muted h-4 w-[200px]"
+    />
+  </div>
+</div>
+`;
+
+exports[`Skeleton snapshots > renders skeleton with circular avatar dimensions 1`] = `
+<div
+  class="animate-pulse bg-muted h-12 w-12 rounded-full"
+/>
+`;
+
+exports[`Skeleton snapshots > renders skeleton with text line dimensions 1`] = `
+<div
+  class="animate-pulse rounded-md bg-muted h-4 w-[250px]"
+/>
+`;
+
+exports[`Tabs snapshots > renders tabs with multiple panels 1`] = `
+<div
+  data-orientation="horizontal"
+  dir="ltr"
+>
+  <div
+    aria-orientation="horizontal"
+    class="inline-flex h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground"
+    data-orientation="horizontal"
+    role="tablist"
+    style="outline-color: none; outline-style: none; outline-width: initial;"
+    tabindex="0"
+  >
+    <button
+      aria-controls="radix-_r_3_-content-account"
+      aria-selected="true"
+      class="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+      data-orientation="horizontal"
+      data-radix-collection-item=""
+      data-state="active"
+      id="radix-_r_3_-trigger-account"
+      role="tab"
+      tabindex="-1"
+      type="button"
+    >
+      Account
+    </button>
+    <button
+      aria-controls="radix-_r_3_-content-password"
+      aria-selected="false"
+      class="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+      data-orientation="horizontal"
+      data-radix-collection-item=""
+      data-state="inactive"
+      id="radix-_r_3_-trigger-password"
+      role="tab"
+      tabindex="-1"
+      type="button"
+    >
+      Password
+    </button>
+    <button
+      aria-controls="radix-_r_3_-content-settings"
+      aria-selected="false"
+      class="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+      data-orientation="horizontal"
+      data-radix-collection-item=""
+      data-state="inactive"
+      id="radix-_r_3_-trigger-settings"
+      role="tab"
+      tabindex="-1"
+      type="button"
+    >
+      Settings
+    </button>
+  </div>
+  <div
+    aria-labelledby="radix-_r_3_-trigger-account"
+    class="mt-2 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+    data-orientation="horizontal"
+    data-state="active"
+    id="radix-_r_3_-content-account"
+    role="tabpanel"
+    style="animation-duration: 0s;"
+    tabindex="0"
+  >
+    Account settings here.
+  </div>
+  <div
+    aria-labelledby="radix-_r_3_-trigger-password"
+    class="mt-2 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+    data-orientation="horizontal"
+    data-state="inactive"
+    hidden=""
+    id="radix-_r_3_-content-password"
+    role="tabpanel"
+    tabindex="0"
+  />
+  <div
+    aria-labelledby="radix-_r_3_-trigger-settings"
+    class="mt-2 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+    data-orientation="horizontal"
+    data-state="inactive"
+    hidden=""
+    id="radix-_r_3_-content-settings"
+    role="tabpanel"
+    tabindex="0"
+  />
+</div>
+`;
+
+exports[`Tabs snapshots > renders tabs with second tab active 1`] = `
+<div
+  data-orientation="horizontal"
+  dir="ltr"
+>
+  <div
+    aria-orientation="horizontal"
+    class="inline-flex h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground"
+    data-orientation="horizontal"
+    role="tablist"
+    style="outline-color: none; outline-style: none; outline-width: initial;"
+    tabindex="0"
+  >
+    <button
+      aria-controls="radix-_r_7_-content-account"
+      aria-selected="false"
+      class="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+      data-orientation="horizontal"
+      data-radix-collection-item=""
+      data-state="inactive"
+      id="radix-_r_7_-trigger-account"
+      role="tab"
+      tabindex="-1"
+      type="button"
+    >
+      Account
+    </button>
+    <button
+      aria-controls="radix-_r_7_-content-password"
+      aria-selected="true"
+      class="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+      data-orientation="horizontal"
+      data-radix-collection-item=""
+      data-state="active"
+      id="radix-_r_7_-trigger-password"
+      role="tab"
+      tabindex="-1"
+      type="button"
+    >
+      Password
+    </button>
+  </div>
+  <div
+    aria-labelledby="radix-_r_7_-trigger-account"
+    class="mt-2 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+    data-orientation="horizontal"
+    data-state="inactive"
+    hidden=""
+    id="radix-_r_7_-content-account"
+    role="tabpanel"
+    tabindex="0"
+  />
+  <div
+    aria-labelledby="radix-_r_7_-trigger-password"
+    class="mt-2 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+    data-orientation="horizontal"
+    data-state="active"
+    id="radix-_r_7_-content-password"
+    role="tabpanel"
+    style="animation-duration: 0s;"
+    tabindex="0"
+  >
+    Password settings.
+  </div>
+</div>
+`;
+
+exports[`Tooltip snapshots > renders tooltip trigger 1`] = `
+<button
+  data-state="closed"
+>
+  Hover me
+</button>
+`;

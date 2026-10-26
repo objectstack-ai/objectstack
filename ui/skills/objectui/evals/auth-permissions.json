@@ -1,0 +1,42 @@
+{
+  "skill_name": "objectui",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Add login authentication to my ObjectUI app. I need a login page, route protection, and the user's role to control which dashboard cards are visible via schema expressions.",
+      "expected_output": "Provides AuthProvider setup, LoginForm usage, AuthGuard for routes, and pattern for injecting user role into SchemaRendererProvider dataSource for expression-based visibility.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "AuthProvider",
+          "AuthGuard",
+          "LoginForm",
+          "SchemaRendererProvider",
+          "role"
+        ],
+        "must_not_contain": [
+          "localStorage.setItem('token'",
+          "document.cookie ="
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "prompt": "I need RBAC for my CRM: admins can do everything, sales reps can only edit their own contacts, and viewers are read-only. How do I set this up with ObjectUI permissions?",
+      "expected_output": "Provides PermissionProvider config with three roles, row-level permissions with owner filter, and usePermissions usage for conditional UI rendering.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "PermissionProvider",
+          "usePermissions",
+          "row",
+          "owner"
+        ],
+        "must_not_contain": [
+          "if (user.role ===",
+          "// TODO"
+        ]
+      }
+    }
+  ]
+}

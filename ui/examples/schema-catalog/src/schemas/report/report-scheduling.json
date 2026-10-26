@@ -1,0 +1,151 @@
+{
+  "type": "card",
+  "className": "max-w-lg mx-auto",
+  "header": [
+    {
+      "type": "flex",
+      "properties": {
+        "align": "center",
+        "gap": 2,
+        "children": [
+          {
+            "type": "icon",
+            "icon": "clock",
+            "className": "h-5 w-5 text-primary"
+          },
+          {
+            "type": "text",
+            "content": "Schedule Settings",
+            "className": "font-semibold"
+          }
+        ]
+      }
+    }
+  ],
+  "children": [
+    {
+      "type": "stack",
+      "gap": 4,
+      "children": [
+        {
+          "type": "stack",
+          "gap": 2,
+          "children": [
+            {
+              "type": "label",
+              "label": "Frequency"
+            },
+            {
+              "type": "select",
+              "options": [
+                {
+                  "label": "Monthly",
+                  "value": "monthly"
+                },
+                {
+                  "label": "Weekly",
+                  "value": "weekly"
+                },
+                {
+                  "label": "Daily",
+                  "value": "daily"
+                }
+              ],
+              "defaultValue": "monthly"
+            }
+          ]
+        },
+        {
+          "type": "stack",
+          "gap": 2,
+          "children": [
+            {
+              "type": "label",
+              "label": "Day of Month"
+            },
+            {
+              "type": "input",
+              "inputType": "number",
+              "placeholder": "1",
+              "defaultValue": "1"
+            }
+          ]
+        },
+        {
+          "type": "stack",
+          "gap": 2,
+          "children": [
+            {
+              "type": "label",
+              "label": "Recipients"
+            },
+            {
+              "type": "input",
+              "placeholder": "sales-team@company.com"
+            }
+          ]
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "gap": 2,
+            "children": [
+              {
+                "type": "checkbox",
+                "id": "pdf",
+                "name": "pdf",
+                "defaultChecked": true
+              },
+              {
+                "type": "label",
+                "htmlFor": "pdf",
+                "label": "PDF"
+              },
+              {
+                "type": "checkbox",
+                "id": "excel",
+                "name": "excel"
+              },
+              {
+                "type": "label",
+                "htmlFor": "excel",
+                "label": "Excel"
+              },
+              {
+                "type": "checkbox",
+                "id": "csv",
+                "name": "csv"
+              },
+              {
+                "type": "label",
+                "htmlFor": "csv",
+                "label": "CSV"
+              }
+            ]
+          }
+        },
+        {
+          "type": "flex",
+          "properties": {
+            "justify": "end",
+            "gap": 2,
+            "children": [
+              {
+                "type": "button",
+                "label": "Cancel",
+                "variant": "outline"
+              },
+              {
+                "type": "button",
+                "label": "Save Schedule",
+                "variant": "default",
+                "icon": "save"
+              }
+            ]
+          },
+          "className": "pt-2"
+        }
+      ]
+    }
+  ]
+}

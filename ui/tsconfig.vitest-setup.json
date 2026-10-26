@@ -1,0 +1,168 @@
+// Type-checks the repo-ROOT Vitest setup files:
+//
+//   vitest.setup.base.ts        vitest.setup.dom.tsx
+//   vitest.setup.dom-light.tsx  vitest.setup.tsx
+//
+// objectui#3515: nothing compiled them. They sit at the repo root, outside every
+// workspace package (`pnpm-workspace.yaml`: packages/*, examples/*, apps/*,
+// docs), so `turbo run type-check` — which is driven by package.json `scripts` —
+// structurally cannot reach them; the root `tsconfig.json` includes only
+// packages/examples/apps; `tsconfig.scripts.json` includes only `scripts/**`.
+// Nor are they pulled in transitively: every consumer names them as a Vitest
+// `setupFiles` RUNTIME PATH STRING (`setupFiles: ['../../vitest.setup.tsx']`),
+// never as an import, so no gated program has a type edge to them. The one
+// program that does contain them, the root `tsconfig.node.json`, has no
+// `include` (so it defaults to the whole repository) and no script anywhere runs
+// it — it is not a gate.
+//
+// That is objectui#3494's shape one directory over and objectui#3476's one
+// directory up: a checked-in `.ts`/`.tsx` file that reads as ordinary maintained
+// source while no `tsc` invocation has ever looked at it. It matters here
+// because `vitest.setup.dom.tsx` decides which package graphs are registered
+// before the `dom-heavy` project runs, and drift there does not surface as a
+// type error — it surfaces as a confusing "component not registered" in whatever
+// test happened to depend on the registration.
+//
+// Run it with `pnpm type-check:vitest-setup`; ci.yml's `type-check` job runs the
+// same command. `scripts/__tests__/vitest-setup-type-check.test.ts` pins the
+// behaviour below — which files the project really resolves, and that CI really
+// runs it — rather than the spelling of this file, because a config that
+// compiles nothing satisfies every spelling assertion.
+//
+// Comments here are `//`, not `/* */`, for the reason recorded in
+// `tsconfig.scripts.json`: a glob containing `**` immediately followed by `/`
+// closes a block comment early, and a tsconfig that silently fails to parse
+// falls back to compiling the entire repository.
+{
+  "compilerOptions": {
+    // Node 22 (`engines.node: ">=22"`) runs Vitest, and Vitest hands these files
+    // to esbuild, so ES2022 is both available and what actually executes.
+    "target": "ES2022",
+
+    // DOM is load-bearing, not decoration — measured. Dropping it from `lib`
+    // costs 14 errors in `vitest.setup.base.ts` alone: `Storage` (the
+    // `createMemoryStorage(): Storage` return type), `document`,
+    // `Element`/`HTMLCanvasElement` in the maplibre mock. These files exist to
+    // polyfill a DOM, so they must be checked against one.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+
+    // Also load-bearing, and not for the obvious reason: none of the three
+    // `.tsx` files currently contains any JSX. Without `jsx`, `vitest.setup.tsx`
+    // fails with TS6142 — importing a module that resolves to a `.tsx` file
+    // requires `--jsx` whether or not that file uses JSX. `react-jsx` matches
+    // what Vitest/esbuild transform them with.
+    "jsx": "react-jsx",
+
+    "strict": true,
+
+    // `esModuleInterop` + `allowSyntheticDefaultImports` are set for RUNTIME
+    // FIDELITY, not to silence anything (measured: 0 errors either way today).
+    // Vitest loads these files through esbuild, which already behaves this way,
+    // so a stricter setting here would produce false reds on a default import
+    // the runtime accepts. The point of this gate is to predict what the test
+    // run does, not to be stricter than it.
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+
+    // Vitest transpiles per file with no cross-file type information, so
+    // constructs `isolatedModules` rejects (a `const enum`, a non-`type`
+    // re-export of a type) break at RUNTIME here rather than being caught.
+    // Produces no error today; it is a constraint the loader genuinely imposes.
+    "isolatedModules": true,
+
+    // Measured: without it, 12 errors, every one inside a third-party `.d.ts`
+    // under node_modules (`@ai-sdk/provider-utils`, `@objectstack/client` — all
+    // `Cannot find name 'Buffer'`, because this project deliberately does not
+    // pull in `@types/node`; the four files use no Node globals). This does NOT
+    // weaken the gate on its own subject: `skipLibCheck` skips declaration
+    // files, and all four subject files are `.ts`/`.tsx`, checked in full.
+    "skipLibCheck": true,
+
+    // No `allowJs`, and that is a measured choice rather than an omission. None
+    // of the four files imports a `.js`/`.mjs` module and none carries a
+    // `@ts-expect-error`, so `allowJs` would buy nothing — while walking
+    // straight into the TS2578 interaction documented in
+    // `apps/console/tsconfig.node.json` (objectui#3513) and paid for in
+    // `tsconfig.scripts.json`: turning `allowJs` on makes a `@ts-expect-error`
+    // over a plain-JS import unused, and therefore an error of its own.
+
+    // Legal only because this project is standalone: TS6310 forbids `noEmit` on
+    // a project that is `composite` or referenced by another. Keeping it
+    // standalone is also what keeps stray `.js`/`.d.ts` from landing next to the
+    // sources — a large part of why `apps/console`'s node project went unwired
+    // for so long (objectui#3305).
+    "noEmit": true,
+
+    // `vitest.setup.dom.tsx` side-effect-imports four workspace packages for
+    // their ComponentRegistry registrations. Resolving them needed measuring;
+    // all three routes were run against this exact file set:
+    //
+    //   Plain node resolution -> IMPOSSIBLE. The root package.json declares no
+    //     `@object-ui/*` dependency, so pnpm creates no root
+    //     `node_modules/@object-ui/` links at all; `--traceResolution` shows the
+    //     lookup walking to `/node_modules` and giving up. Four TS2882. Building
+    //     the workspace does not help, because there is nothing to resolve
+    //     THROUGH. (Adding four root devDependencies would fix that, at the cost
+    //     of changing the install graph to serve a type-check.)
+    //
+    //   Mapping them to `src/`, mirroring vitest.config.mts's `resolve.alias` ->
+    //     484 errors and 318 foreign source files with these four entries alone;
+    //     mirroring the full 42-entry alias map still leaves 30 errors across
+    //     563 foreign files. The residue cannot be fixed from here: 24 of the 30
+    //     are TS7006/TS7031 implicit-any inside `packages/components/src`, which
+    //     is green in its own gate only because
+    //     `packages/components/tsconfig.json` sets `noImplicitAny: false`.
+    //     Matching that would mean turning `noImplicitAny` off for the four
+    //     files this project exists to check — and re-checking 563 files that
+    //     already have their own gates, under a different option set, is exactly
+    //     the "green in one project, red in the other" hazard
+    //     `tsconfig.scripts.json` documents.
+    //
+    //   Mapping them to the PACKAGE DIRECTORY, below -> 0 errors, 4.5s, and the
+    //     only workspace files this program checks are the four subject files.
+    //     What the mapping drags in is declarations, which `skipLibCheck` skips —
+    //     with exactly one measured exception, `@reduxjs/toolkit`'s vendored
+    //     `dist/uncheckedindexed.ts`, which a dependency declaration references
+    //     and which is therefore checked (cleanly today). TypeScript reads each
+    //     package's own package.json and follows its `exports.types`, so the
+    //     mapping tracks the package's declared entry point instead of hardcoding
+    //     `dist/index.d.ts`.
+    //
+    // The consequence of the chosen route is a real dependency and is wired for
+    // accordingly: this project needs those four packages BUILT. Hence the
+    // ci.yml step sits after `pnpm type-check` (turbo's `type-check` task
+    // `dependsOn: ["^build"]`, so the declarations exist by then) — the exact
+    // opposite of `tsconfig.scripts.json`, whose pin test asserts its program
+    // imports no workspace package. Ours pins the ordering instead.
+    //
+    // The fifth entry is a SUBPATH, and it is spelled differently because it has
+    // to be (objectui#7479). `vitest.setup.i18n-catalogues.ts` imports
+    // `@object-ui/i18n/locales` — the all-ten catalogue door, deliberately NOT
+    // reachable from that package's entry, since reaching it from there is the
+    // eager payload that card removed. A `paths` key matches the WHOLE
+    // specifier, so the package-directory form above cannot answer for a
+    // subpath; the wildcard mirrors the package's own `./locales/*` export
+    // instead of hardcoding one declaration file, so `@object-ui/i18n/locales`
+    // and `@object-ui/i18n/locales/en` both resolve the way a consumer's
+    // bundler resolves them. Same BUILT-package dependency as the four above,
+    // already satisfied by the ci.yml ordering their comment describes.
+    "paths": {
+      "@object-ui/components": ["./packages/components"],
+      "@object-ui/fields": ["./packages/fields"],
+      "@object-ui/plugin-dashboard": ["./packages/plugin-dashboard"],
+      "@object-ui/plugin-grid": ["./packages/plugin-grid"],
+      "@object-ui/i18n/*": ["./packages/i18n/dist/*"]
+    }
+  },
+
+  // By glob, not by file list — a list is a thing to forget, and the whole point
+  // of objectui#3515 is that a root `vitest.setup.*` file must not be able to
+  // land outside every program again. `vitest-setup-type-check.test.ts` pins
+  // that these globs really do reach every `vitest.setup*` source on disk at the
+  // repo root.
+  "include": ["./vitest.setup*.ts", "./vitest.setup*.tsx"]
+}

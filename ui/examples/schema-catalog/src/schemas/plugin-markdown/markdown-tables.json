@@ -1,0 +1,4 @@
+{
+  "type": "markdown",
+  "content": "| Feature | Supported | Notes |\n|---------|-----------|-------|\n| Tables | ✅ | GitHub Flavored |\n| Task Lists | ✅ | Interactive |\n| Code Highlight | ✅ | Auto-detect |\n| XSS Protection | ✅ | Sanitized |"
+}

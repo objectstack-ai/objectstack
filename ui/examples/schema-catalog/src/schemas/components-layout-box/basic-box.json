@@ -1,0 +1,16 @@
+{
+  "type": "box",
+  "className": "p-6 border rounded-lg bg-muted/50",
+  "children": [
+    {
+      "type": "text",
+      "content": "Neutral Box",
+      "className": "text-lg font-semibold"
+    },
+    {
+      "type": "text",
+      "content": "A box renders exactly the classes you author — nothing is injected. Use it for styled wrappers and grouping where card, flex, stack or grid would add layout you did not ask for.",
+      "className": "text-sm text-muted-foreground"
+    }
+  ]
+}

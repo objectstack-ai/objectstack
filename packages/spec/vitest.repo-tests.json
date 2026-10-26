@@ -1,5 +1,4 @@
 [
-  "scripts/build-console-objectstack-root.test.ts",
   "scripts/build-schemas-check-mode.anchor.test.ts",
   "scripts/build-schemas-check-mode.deleted-baseline.test.ts",
   "scripts/build-schemas-check-mode.deletion-proofs.test.ts",
@@ -52,6 +51,7 @@
   "src/integration/connector-sync-retirement.test.ts",
   "src/integration/connector-triggers-retirement.test.ts",
   "src/kernel/metadata-type-registry-allow-org-override-absence.test.ts",
+  "src/kernel/package-upgrade-family-retirement.test.ts",
   "src/qa/requires-plugins-retirement.test.ts",
   "src/security/admin-scope-binding-authoring-retirement.test.ts",
   "src/security/permission-set-managed-by-retirement.test.ts",

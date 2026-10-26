@@ -73,6 +73,16 @@ export interface UnknownAuthoringKeyFinding {
 }
 
 /**
+ * The route for a typed list, shared by the sub-field rows below. Module-private:
+ * the rows are the published face, and `@objectstack/lint` words its own finding.
+ */
+const EMBEDDED_JSON_TYPED_LIST =
+  'An object-level `composite` / `repeater` stores untyped JSON — no per-column labels, types, '
+  + 'options or required flags. A list that needs typed columns is a child object whose '
+  + '`master_detail` field points back at this object; `inlineEdit: \'grid\'` on that field edits '
+  + 'its rows as an inline grid on this object\'s form.';
+
+/**
  * Semantic near-misses on `FieldSchema` — a different **word** for the same
  * intent, or a key that was retired outright.
  *
@@ -144,6 +154,18 @@ export const FIELD_KEY_GUIDANCE: Readonly<
   // ⛔ Do not "normalise" this to `idField` to match its neighbours; the
   // reachability test in `authoring-key-lint.test.ts` fails if you do.
   id_field: { why: '`id_field` was never a FieldSchema key: a lookup stores the referenced record\'s id, and which field holds that value is not an authored per-field choice — the picker resolves record identity itself. Use `displayField` to change which field is SHOWN as a candidate\'s label, and a seed dataset\'s `externalId` to author references by a portable natural key. The live `idField` is the one on an `inlineColumns` entry — the GridColumn mirror in `field.zod.ts`, which is a DIFFERENT schema.' },
+  // ── A typed list declared on an embedded-JSON field (ruling 6386744473) ──
+  // An object-level `composite` / `repeater` is untyped JSON BY RULING: no
+  // sub-field member is added, and a list that needs typed columns is a child
+  // object. These are the spellings an author reaches for when they expect one
+  // (the three the ruling names; objectui's structured cell documents `fields` /
+  // `subFields` as refused). Without a row the parse names the key and nothing
+  // else, so the author learns the key is wrong but not where the list goes.
+  // `@objectstack/lint`'s `field/embedded-sub-fields` says the same on the doors
+  // that never parse. A form view's `fields` sub-rows are a different schema.
+  fields: { why: `\`fields\` is not a field key: a field declares no sub-fields. ${EMBEDDED_JSON_TYPED_LIST}` },
+  subFields: { why: `\`subFields\` is not a field key: a field declares no sub-fields. ${EMBEDDED_JSON_TYPED_LIST}` },
+  columns: { why: `\`columns\` is not a field key. A lookup's picker columns are \`lookupColumns\`; a \`master_detail\` field's related-list columns are \`relatedListColumns\` and its inline-grid columns \`inlineColumns\`. ${EMBEDDED_JSON_TYPED_LIST}` },
 });
 
 /**
