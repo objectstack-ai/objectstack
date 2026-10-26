@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 // `tsconfig.scripts.json` (`allowJs`), so no `@ts-expect-error` here.
 import { findings, isPendingDeclaration } from '../check-pending-changeset-literals.mjs';
 import { markdownTestInputsAmong } from '../markdown-test-inputs.mjs';
+import { globMatches, jobBlock, repoPath, rootCi, uiFilterGlobs, UI_JOBS } from './helpers/root-ci';
 
 /**
  * Pins for `scripts/check-pending-changeset-literals.mjs` (objectui#9583).
@@ -187,16 +188,21 @@ describe('4. the wiring — both shapes that can break the rule reach this suite
   });
 
   it('a change to a TEST SOURCE is not excluded from the full run', () => {
-    // `ci.yml`'s `Decide whether this change needs a full run` step drops paths
-    // with `:(exclude,glob)` pathspecs. None of the scan roots a test can live
-    // under may be among them, or a pull request could add a naming literal
-    // while this suite never runs.
-    const ci = fs.readFileSync(path.join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
-    const excluded = [...ci.matchAll(/':\(exclude,glob\)([^']+)'/g)].map((m) => m[1]);
-
-    expect(excluded.length, 'the exclusion list must still be readable, or this pin asserts nothing').toBeGreaterThan(0);
-    expect(excluded).not.toContain('scripts/**');
-    expect(excluded).not.toContain('packages/**');
+    // objectstack's root ci.yml runs this suite in `test-ui` (objectui's `Test`,
+    // objectstack#25697), whole, whenever the `filter` job's `ui:` paths filter
+    // matched; its triggers carry no path filter. Every scan root a test can
+    // live under must match one of those globs, or a pull request could add a
+    // naming literal while this suite never runs. (Until objectstack#25712 this
+    // read the `:(exclude,glob)` pathspecs of objectui's own `Decide whether
+    // this change needs a full run` step, in a ci.yml nothing runs.)
+    const ci = rootCi();
+    expect(jobBlock(ci, UI_JOBS.test), '`test-ui` no longer reads the `ui` filter output').toContain(
+      "needs.filter.outputs.ui != 'false'",
+    );
+    const globs = uiFilterGlobs(ci);
+    for (const file of ['scripts/__tests__/fixture.test.ts', 'packages/fixture/src/fixture.test.ts'].map(repoPath)) {
+      expect(globs.some((glob) => globMatches(glob, file)), `no \`ui:\` filter glob covers ${file}`).toBe(true);
+    }
   });
 
   it('a change that ADDS a declaration is rescued into the full run', () => {

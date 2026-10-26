@@ -13,6 +13,7 @@ import {
   readDesignerPairs,
   ZH_ONLY_FAMILIES,
 } from '../check-i18n-designer-table-parity.mjs';
+import { globMatches, jobBlock, repoPath, rootCi, triggerBlock, uiFilterGlobs, uiRun, UI_JOBS, withoutComments } from './helpers/root-ci';
 import { DESIGNER_TABLE_CONSTS } from '../check-i18n-dead-keys.mjs';
 
 /**
@@ -322,7 +323,11 @@ describe('the CLI, end to end', () => {
 
 describe('the gate is wired to run', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
-  const ci = fs.readFileSync(path.join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
+  // The workflow GitHub runs: objectstack's root ci.yml, whose `type-check-ui`
+  // job is objectui's `Type Check` (objectstack#25697). objectui's own ci.yml
+  // under `ui/.github/` runs nowhere (objectstack#25712).
+  const ci = rootCi();
+  const job = jobBlock(ci, UI_JOBS.typeCheck);
 
   it('package.json exposes it as a named script', () => {
     expect(pkg.scripts['check:i18n-designer-parity']).toBe('node scripts/check-i18n-designer-table-parity.mjs');
@@ -333,18 +338,26 @@ describe('the gate is wired to run', () => {
     // check-i18n-dead-keys.mjs: that one is invoked in no workflow at all, by
     // design ("This is a REPORT, not a gate"), so a leg there could never be
     // observed red in CI — the disease objectui#8834 exists to cure.
-    const install = ci.indexOf('pnpm install --frozen-lockfile');
-    const step = ci.indexOf('run: pnpm check:i18n-designer-parity');
-    expect(step, 'ci.yml does not run `pnpm check:i18n-designer-parity`').toBeGreaterThan(-1);
+    const install = job.indexOf('pnpm install --frozen-lockfile');
+    const step = job.indexOf(`run: ${uiRun('check:i18n-designer-parity')}`);
+    expect(step, '`type-check-ui` does not run `pnpm --dir ui run check:i18n-designer-parity`').toBeGreaterThan(-1);
+    expect(install, '`type-check-ui` no longer installs dependencies').toBeGreaterThan(-1);
     expect(step, 'the check runs before dependencies are installed').toBeGreaterThan(install);
   });
 
   it('is not hidden from the designer table by ci.yml path filters', () => {
-    // Same reasoning as check-i18n-en-drift.test.ts's twin assertion: an ignore
-    // entry that covered `packages/` would make this gate unreachable for
-    // exactly the PRs it judges.
-    const ignored = ci.slice(0, ci.indexOf('jobs:')).match(/^\s+- '.*'$/gm) ?? [];
-    for (const pattern of ignored) expect(pattern).not.toMatch(/packages|scripts/);
-    expect(ignored.length).toBeGreaterThan(0);
+    // Same reasoning as check-i18n-en-drift.test.ts's twin assertion: the root
+    // ci.yml's triggers carry no path filter, and the `filter` job's `ui:` globs
+    // decide whether `type-check-ui` runs, so a glob set that missed the
+    // designer table or this gate would make it unreachable for exactly the
+    // PRs it judges.
+    expect(withoutComments(triggerBlock(ci)), 'a trigger grew a path filter').not.toMatch(/^\s+paths(-ignore)?:/m);
+    expect(job, '`type-check-ui` no longer reads the `ui` filter output').toContain(
+      "needs.filter.outputs.ui != 'false'",
+    );
+    const globs = uiFilterGlobs(ci);
+    for (const file of [DESIGNER_TABLE, 'scripts/check-i18n-designer-table-parity.mjs'].map(repoPath)) {
+      expect(globs.some((glob) => globMatches(glob, file)), `no \`ui:\` filter glob covers ${file}`).toBe(true);
+    }
   });
 });

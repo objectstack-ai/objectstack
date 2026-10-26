@@ -18,6 +18,7 @@ import {
   missingDirectories,
   stripJsonComments,
 } from '../check-published-tsconfig-tooling-exclude.mjs';
+import { jobBlock, rootCi, uiRun, UI_JOBS } from './helpers/root-ci';
 
 /**
  * objectui#7212 — every published package's build tsconfig must exclude tooling
@@ -373,15 +374,20 @@ describe('wiring', () => {
     // The artifact-level sibling needs a full-repo build and therefore runs on
     // the publish path and nightly. This one reads config text, so it can run
     // where the defect is authored.
-    const ci = fs.readFileSync(path.join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
-    expect(ci).toContain('run: pnpm check:published-tsconfig-exclude');
+    // objectstack's root ci.yml: `type-check-ui` is objectui's `Type Check`
+    // (objectstack#25697) and runs on every pull request; the ci.yml under
+    // `ui/.github/` runs nowhere (objectstack#25712).
+    expect(jobBlock(rootCi(), UI_JOBS.typeCheck)).toContain(`run: ${uiRun('check:published-tsconfig-exclude')}`);
   });
 
-  it('leaves the artifact-level gate in place as the second line of defence', () => {
+  it('keeps the artifact-level gate as the second line of defence', () => {
     const manifest = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
     expect(manifest.scripts['check:published-dist']).toBe('node scripts/check-published-dist-tooling.mjs');
-    const publishGate = fs.readFileSync(path.join(repoRoot, '.github/workflows/published-dist-gate.yml'), 'utf8');
-    expect(publishGate).toContain('check:published-dist');
+    // The workflow half retired with objectstack#25712. objectui's
+    // `published-dist-gate.yml` ran it on push and schedule; that file is row 23
+    // of the objectstack#25697 workflow roster, "kept, follow-up port", and no
+    // root workflow runs `check:published-dist` until the port lands. The port
+    // brings the workflow assertion back against the root file.
   });
 
   it('is GREEN on this repository — the ratchet landed with its red set converted', () => {

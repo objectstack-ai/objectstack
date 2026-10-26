@@ -13,6 +13,7 @@ import {
   registrationsIn,
   parseSource,
 } from '../check-handler-key-read-sites.mjs';
+import { jobBlock, rootCi, uiRun, UI_JOBS } from './helpers/root-ci';
 
 /**
  * objectui#7753 — every `on*` key a registered renderer READS off the authored
@@ -1148,10 +1149,13 @@ describe('check-handler-key-read-sites — this repository', () => {
     const manifest = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
     expect(manifest.scripts['check:handler-key-reads']).toBe('node scripts/check-handler-key-read-sites.mjs');
 
-    const ci = fs.readFileSync(path.join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
-    expect(ci, 'the gate must run in CI, next to the other source-parsing gates').toContain(
-      'run: pnpm check:handler-key-reads',
-    );
+    // objectstack's root ci.yml runs objectui's gates: its `type-check-ui` job is
+    // objectui's `Type Check`, where the source-parsing gates run (objectstack#25697).
+    // The ci.yml under `ui/.github/` runs nowhere (objectstack#25712).
+    expect(
+      jobBlock(rootCi(), UI_JOBS.typeCheck),
+      'the gate must run in CI, next to the other source-parsing gates',
+    ).toContain(`run: ${uiRun('check:handler-key-reads')}`);
 
     // The page that inventories the gates is pinned by command (objectui#3653), so
     // this would fail there too — asserted here as well because a reader looking
