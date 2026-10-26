@@ -69,6 +69,7 @@ import { checkViewCompleteness } from '../kernel/functional-completeness';
 // [#19088] The object-field `scale` site #18972 bounded — read only, to pin
 // that this row's refusal text and that one's are the same platform fact.
 import { FieldSchema } from '../data/field.zod';
+import { RETIRED_KEY_UPGRADE_GUIDE_SENTENCE } from '../shared/protocol-upgrade-guide';
 describe('HttpMethodSubsetSchema', () => {
   it('should accept valid HTTP methods', () => {
     const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
@@ -3203,7 +3204,10 @@ describe('Airtable-style ListView enhancements', () => {
 // ============================================================================
 
 describe('FormViewSchema — retired defaultSort (audit close-out: nothing read it)', () => {
-  it('REJECTS the retired `defaultSort` and points at the related list view', () => {
+  // The ≤16.x kit aged out on #25767: `defaultSort` is a strict unknown key
+  // whose refusal names the upgrade guide; the audit close-out prescription
+  // lives in the release that carried it.
+  it('refuses the retired `defaultSort` as a strict unknown key, pointing at the upgrade guide (#25767)', () => {
     let message = '';
     try {
       FormViewSchema.parse({
@@ -3211,8 +3215,9 @@ describe('FormViewSchema — retired defaultSort (audit close-out: nothing read 
         defaultSort: [{ field: 'created_at', order: 'desc' }],
       });
     } catch (e) { message = String((e as Error).message); }
-    expect(message).toMatch(/list view/);
-    expect(message).toMatch(/audit close-out/);
+    expect(message).toMatch(/Unrecognized key\(s\) on this form view: `defaultSort`/);
+    expect(message).toContain('https://objectstack.ai/docs/protocol-upgrade');
+    expect(message).not.toMatch(/audit close-out/);
   });
   it('a form without it still parses', () => {
     expect(() => FormViewSchema.parse({ type: 'simple', sections: [{ fields: ['name'] }] })).not.toThrow();
@@ -3916,17 +3921,19 @@ describe('ListViewSchema filter field', () => {
 // Issue #7: ListView responsive and performance config
 // ============================================================================
 describe('ListViewSchema — retired responsive/performance (audit close-out: no renderer read them)', () => {
-  it('REJECTS the retired `responsive` with the prescription', () => {
-    expect(() => ListViewSchema.parse({
-      type: 'grid', columns: ['name'], responsive: { hiddenOn: ['xs'] },
-    })).toThrow(/responsive.*removed|removed.*responsive/s);
-  });
-  it('REJECTS the retired `performance` with the prescription', () => {
+  // The ≤16.x kits aged out on #25767: both keys are strict unknown keys whose
+  // refusal names the upgrade guide, not the audit close-out prescription.
+  it.each([
+    ['responsive', { hiddenOn: ['xs'] }],
+    ['performance', { lazyLoad: true }],
+  ] as const)('refuses the retired `%s` as a strict unknown key, pointing at the upgrade guide (#25767)', (key, value) => {
     let message = '';
     try {
-      ListViewSchema.parse({ type: 'grid', columns: ['name'], performance: { lazyLoad: true } });
+      ListViewSchema.parse({ type: 'grid', columns: ['name'], [key]: value });
     } catch (e) { message = String((e as Error).message); }
-    expect(message).toMatch(/audit close-out/);
+    expect(message).toMatch(new RegExp(`Unrecognized key\\(s\\) on this list view: \`${key}\``));
+    expect(message).toContain('https://objectstack.ai/docs/protocol-upgrade');
+    expect(message).not.toMatch(/audit close-out|was removed/);
   });
 });
 
@@ -3937,31 +3944,22 @@ describe('ListViewSchema — retired responsive/performance (audit close-out: no
 // end, never spells any of the three.
 // ============================================================================
 describe('ListViewSchema — retired striped/bordered/virtualScroll (every reader only passed them through)', () => {
-  it('REJECTS the retired `striped` with the prescription', () => {
-    expect(() => ListViewSchema.parse({
-      type: 'grid', columns: ['name'], striped: true,
-    })).toThrow(/`view\.striped`.*removed.*no renderer ever applied it.*delete the key/s);
-  });
-  it('REJECTS the retired `bordered` with the prescription', () => {
-    expect(() => ListViewSchema.parse({
-      type: 'grid', columns: ['name'], bordered: true,
-    })).toThrow(/`view\.bordered`.*removed.*Delete the key/s);
-  });
-  it('REJECTS the retired `virtualScroll` with the prescription, naming the live mechanism', () => {
-    expect(() => ListViewSchema.parse({
-      type: 'grid', columns: ['name'], virtualScroll: true,
-    })).toThrow(/`view\.virtualScroll`.*removed.*large datasets page via `pagination`/s);
-  });
-  it('the prescriptions carry the pinned migrate sentence (the retirement rides the protocol-17 conversion)', () => {
-    for (const key of ['striped', 'bordered', 'virtualScroll'] as const) {
+  // The #7176 kit rode the protocol-17 conversion and aged out on #25767: the
+  // three keys are strict unknown keys whose refusal names the upgrade guide.
+  // The prescriptions (and the `--from 16` sentence) live in the release that
+  // carried them.
+  it.each(['striped', 'bordered', 'virtualScroll'] as const)(
+    'refuses the retired `%s` as a strict unknown key, pointing at the upgrade guide (#25767)',
+    (key) => {
       let message = '';
       try {
         ListViewSchema.parse({ type: 'grid', columns: ['name'], [key]: true });
       } catch (e) { message = String((e as Error).message); }
-      expect(message).toMatch(new RegExp(`view\\.${key}\` was removed`));
-      expect(message).toMatch(/Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand\./);
-    }
-  });
+      expect(message).toMatch(new RegExp(`Unrecognized key\\(s\\) on this list view: \`${key}\``));
+      expect(message).toContain('https://objectstack.ai/docs/protocol-upgrade');
+      expect(message).not.toMatch(/was removed|os migrate meta/);
+    },
+  );
   it('accepts the live grid siblings byte-identically (rowHeight/selection/pagination/resizable)', () => {
     const siblings = {
       resizable: true,
@@ -3981,13 +3979,13 @@ describe('ListViewSchema — retired striped/bordered/virtualScroll (every reade
     expect(parsed).not.toHaveProperty('bordered');
     expect(parsed).not.toHaveProperty('virtualScroll');
   });
-  it('ObjectListViewSchema (the .extend copy) rejects the keys with the same prescription', () => {
+  it('ObjectListViewSchema (the .extend copy) refuses the keys the same way', () => {
     expect(() => ObjectListViewSchema.parse({
       type: 'grid', columns: ['name'], striped: true,
-    })).toThrow(/`view\.striped`.*removed/s);
+    })).toThrow(/Unrecognized key\(s\) on [^:]+: `striped`[\s\S]*https:\/\/objectstack\.ai\/docs\/protocol-upgrade/);
     expect(() => ObjectListViewSchema.parse({
       type: 'grid', columns: ['name'], virtualScroll: true,
-    })).toThrow(/`view\.virtualScroll`.*removed/s);
+    })).toThrow(/Unrecognized key\(s\) on [^:]+: `virtualScroll`[\s\S]*https:\/\/objectstack\.ai\/docs\/protocol-upgrade/);
   });
 });
 
@@ -4037,7 +4035,10 @@ describe('ListViewSchema.exportOptions — object form + array lift + pdf retire
     expect(message).toMatch(/a printable document \(an invoice, a delivery order, a letter\) is a page that declares\s+`print`/);
     expect(message).not.toMatch(/#\d{3,5}\b/);
     expect(message).toMatch(/'csv', 'xlsx' and 'json'/);
-    expect(message).toMatch(/Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand\./);
+    // [#25767] The protocol-16.x step aged out (support floor 17): the sentence
+    // says so instead of naming a `--from 16` run the tool refuses.
+    expect(message).toMatch(/left `os migrate meta` with the protocol-16\.x step \(support floor 17\)/);
+    expect(message).not.toMatch(/--from 16/);
   });
 
   it("REJECTS 'pdf' in the object form's `formats` with the same prescription", () => {
@@ -4387,7 +4388,7 @@ describe('visibility unknown-key message order — fix before history', () => {
     const res = FormSectionSchema.safeParse({ label: 'S', fields: [], bogusKey: true });
     expect(res.success).toBe(false);
     const m = res.error!.issues.find((i) => i.code === 'unrecognized_keys')!.message;
-    expect(m).toBe(`Unrecognized key(s) on this form section: \`bogusKey\`. ${HISTORY}`);
+    expect(m).toBe(`Unrecognized key(s) on this form section: \`bogusKey\`. ${RETIRED_KEY_UPGRADE_GUIDE_SENTENCE} ${HISTORY}`);
   });
 
   it('emits the history exactly once, whatever the key count', () => {

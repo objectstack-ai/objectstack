@@ -14,13 +14,13 @@ import MigrateMeta, { storedOnlyFlagsIn } from './meta.js';
 
 describe('storedOnlyFlagsIn (#4327)', () => {
   it('reports the stored-only flags the operator typed', () => {
-    expect(storedOnlyFlagsIn(['--from', '16', '--apply'])).toEqual(['apply']);
+    expect(storedOnlyFlagsIn(['--from', '17', '--apply'])).toEqual(['apply']);
     expect(storedOnlyFlagsIn(['--from=16', '--type=view', '--force'])).toEqual(['force', 'type']);
-    expect(storedOnlyFlagsIn(['--from', '16', '-y'])).toEqual(['yes']);
+    expect(storedOnlyFlagsIn(['--from', '17', '-y'])).toEqual(['yes']);
   });
 
   it('says nothing about a run that typed none of them', () => {
-    expect(storedOnlyFlagsIn(['--from', '16', '--step', '--json'])).toEqual([]);
+    expect(storedOnlyFlagsIn(['--from', '17', '--step', '--json'])).toEqual([]);
     expect(storedOnlyFlagsIn([])).toEqual([]);
   });
 
@@ -33,7 +33,7 @@ describe('storedOnlyFlagsIn (#4327)', () => {
     // from `OS_DATABASE_URL`, so a merely-exported env var would have counted
     // as "provided" and broken `os migrate meta --from N` for anyone who has
     // one set. Provenance comes from argv precisely so it cannot.
-    expect(storedOnlyFlagsIn(['--from', '16'])).toEqual([]);
+    expect(storedOnlyFlagsIn(['--from', '17'])).toEqual([]);
     expect(storedOnlyFlagsIn(['--stored', '--database-url', 'sqlite://x.db'])).toEqual(['database-url']);
   });
 });

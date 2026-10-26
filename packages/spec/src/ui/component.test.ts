@@ -421,7 +421,8 @@ describe('PageCardProps', () => {
     const result = PageCardProps.parse({});
     expect(result.bordered).toBe(true);
     expect(result.title).toBeUndefined();
-    expect(result.actions).toBeUndefined();
+    // [#25767] `actions` left the shape with its ≤16.x tombstone.
+    expect(result).not.toHaveProperty('actions');
     expect(result.children).toBeUndefined();
     expect(result.footer).toBeUndefined();
   });
@@ -848,11 +849,11 @@ describe('RecordDetailsProps', () => {
   // refusal names the upgrade guide, not the old prescription.
   it('refuses the retired `layout` as a strict unknown key, pointing at the upgrade guide (#25767)', () => {
     expect(() => RecordDetailsProps.parse({ layout: 'custom' }))
-      .toThrow(/Unrecognized key\(s\) on [^:]+: `layout`[\s\S]*https:\/\/objectstack\.ai\/docs\/protocol-upgrade/);
+      .toThrow(/Unrecognized key\(s\) on this `record:details`: `layout`[\s\S]*https:\/\/objectstack\.ai\/docs\/protocol-upgrade/);
     // The declared default is refused too — `auto` was never distinguishable
     // from `custom` or from omitting the key.
     expect(() => RecordDetailsProps.parse({ layout: 'auto' }))
-      .toThrow(/Unrecognized key\(s\) on [^:]+: `layout`/);
+      .toThrow(/Unrecognized key\(s\) on this `record:details`: `layout`/);
   });
 
   it('does not materialize the retired `layout` on a clean parse', () => {
@@ -2166,7 +2167,7 @@ describe('Interactive Elements — element:record_picker', () => {
       const r = ElementRecordPickerPropsSchema.safeParse({ [key]: key === 'multiple' ? true : key === 'searchFields' ? ['name'] : 'title' });
       expect(r.success).toBe(false);
       const message = r.success ? '' : r.error.issues[0]!.message;
-      expect(message).toMatch(new RegExp(`Unrecognized key\\(s\\) on [^:]+: \`${key}\``));
+      expect(message).toMatch(new RegExp(`Unrecognized key\\(s\\) on this \`element:record_picker\`: \`${key}\``));
       expect(message).toContain('https://objectstack.ai/docs/protocol-upgrade');
       expect(message).not.toMatch(/was removed/);
     },

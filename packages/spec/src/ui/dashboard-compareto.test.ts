@@ -122,11 +122,14 @@ describe('compareTo — every retired spelling is rejected WITH its upgrade', ()
     expect(period).not.toMatch(/#\d{3,5}\b/);
     expect(period).toContain("kind: ");
     expect(period).toContain('previousPeriod');
-    expect(period).toContain('os migrate meta --from 16');
+    // The protocol-16.x step aged out on #25767 (support floor 17): the sentence
+    // says so instead of naming a `--from 16` run the tool refuses.
+    expect(period).toContain('support floor 17');
+    expect(period).not.toContain('--from 16');
 
     const year = reject('previousYear');
     expect(year).toContain('previousYear');
-    expect(year).toContain('os migrate meta --from 16');
+    expect(year).toContain('support floor 17');
   });
 
   /**

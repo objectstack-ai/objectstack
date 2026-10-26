@@ -59,6 +59,7 @@ import {
   MIGRATIONS_BY_MAJOR,
   MIGRATION_MAJORS,
   MIGRATION_SUPPORT_FLOOR,
+  type MigrationApplication,
   type MigrationChainResult,
   type MigrationTodo,
 } from '@objectstack/spec/migrations';
@@ -284,9 +285,11 @@ describe('no notice, edit or refusal is dropped, merged or reworded (SET)', () =
   it('prints every semantic notice of every hop crossed, byte-identical and in chain order', () => {
     const { result, lines } = run(FINDINGS_STACK, MIGRATION_SUPPORT_FLOOR, TERMINUS);
     const expected = noticeLines(result);
-    // Anti-vacuity: more than one hop's catalogue, and at least one notice
-    // whose prose spans several terminal lines.
-    expect(new Set(listedOf(result).map((t) => t.toMajor)).size).toBeGreaterThan(1);
+    // Anti-vacuity: every hop's catalogue (one hop since #25767 — the support
+    // floor sits one major below the terminus), and at least one notice whose
+    // prose spans several terminal lines.
+    expect(new Set(listedOf(result).map((t) => t.toMajor)).size)
+      .toBe(MIGRATION_MAJORS.filter((m) => m > MIGRATION_SUPPORT_FLOOR).length);
     expect(expected.length).toBeGreaterThan(listedOf(result).length * 3);
     const header = indexOf(lines, SEMANTIC_HEADER_RE);
     const printedNotices = lines.slice(header + 1, header + 1 + expected.length);
@@ -487,6 +490,16 @@ describe('an applied edit a semantic entry judges prints that entry beside it, m
     expect(lines.filter((l) => l.trim() !== '').sort()).toEqual(accounted.sort());
   });
 
+  it('[#25767] every declared link names a conversion a step above the floor replays', () => {
+    // A link to a conversion whose step the floor no longer reaches could never
+    // be paired: the chain stages no edit by it. Such an entry carries no
+    // `conversionIds` and names the hand edit (the #23543 F4/F5 shape).
+    for (const link of declaredLinks()) {
+      const conversion = ALL_CONVERSIONS.find((c) => c.id === link.conversionId);
+      expect(conversion?.toMajor, `${link.entry} → ${link.conversionId}`).toBeGreaterThan(MIGRATION_SUPPORT_FLOOR);
+    }
+  });
+
   it('pairs every link the registry declares, replayed over the linked conversion\'s own fixture', () => {
     const links = declaredLinks();
     // Anti-vacuity, and the two links authored when the printer learned to pair.
@@ -514,15 +527,31 @@ describe('an applied edit a semantic entry judges prints that entry beside it, m
   it('pairs across hops: a link to a conversion an earlier step replays', () => {
     // No authored link crosses a hop yet, though `SemanticMigration.conversionIds`
     // allows one, so this pin adds it: a protocol-18 entry made to judge a
-    // protocol-17 conversion. Everything else is the chain's own result.
-    const earlier = 'action-execute-to-target';
+    // protocol-17 conversion. [#25767] The support floor is 17, so the chain
+    // replays no protocol-17 step any more and cannot stage that edit itself:
+    // `amend` stages it too, from the conversion's own row. What is measured
+    // is the PRINTER — it pairs a review with a run by `conversionId`, never
+    // by hop — and everything else is the chain's own result.
+    const earlier = 'sharing-rule-access-level-full-to-edit';
     const conversion = ALL_CONVERSIONS.find((c) => c.id === earlier)!;
     const judgeId = DECISION_JUDGE;
+    const earlierEdit: MigrationApplication = {
+      toMajor: conversion.toMajor,
+      conversionId: earlier,
+      surface: conversion.surface,
+      from: "accessLevel: 'full'",
+      to: "accessLevel: 'edit'",
+      path: 'sharingRules[0].accessLevel',
+    };
     const { result, lines } = run(
       conversion.fixture.before as Record<string, unknown>,
       MIGRATION_SUPPORT_FLOOR,
       TERMINUS,
-      (r) => ({ ...r, todos: r.todos.map((t) => (t.id === judgeId ? { ...t, conversionIds: [earlier] } : t)) }),
+      (r) => ({
+        ...r,
+        applied: [...r.applied, earlierEdit],
+        todos: r.todos.map((t) => (t.id === judgeId ? { ...t, conversionIds: [earlier] } : t)),
+      }),
     );
     const judge = todoOf(result, judgeId);
     const edit = result.applied.find((a) => a.conversionId === earlier);

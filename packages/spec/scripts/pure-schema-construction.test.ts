@@ -133,7 +133,9 @@ describe('a consumer of the built ./shared entry keeps the conversion table only
       return ids.filter((id) => text.includes(`'${id}'`) || text.includes(`"${id}"`));
     };
 
-    expect(ids.length).toBeGreaterThan(100);
+    // Anti-vacuity floor, not a count: 100 measured after #25767 retired the
+    // ≤16.x kits (the table shrinks by one major's worth each protocol major).
+    expect(ids.length).toBeGreaterThan(50);
     expect(await kept('normalizeStackInput', 'shared-reader')).toEqual(ids);
     expect(
       await kept(

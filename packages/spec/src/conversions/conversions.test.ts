@@ -5,7 +5,6 @@ import { describe, expect, it } from 'vitest';
 import { CreateRecordConfigSchema } from '../automation/builtin-node-config.zod.js';
 import { FlowSchema } from '../automation/flow.zod.js';
 import { FLOW_RESERVED_NODE_TYPES } from '../automation/flow-reserved-node-types.js';
-import { ScriptConfigSchema } from '../automation/schemaless-node-config.zod.js';
 import { DatasourceSchema } from '../data/datasource.zod.js';
 import {
   getDriverConfigSchema,

@@ -266,10 +266,11 @@ describe('os migrate meta — an empty range answers as an empty range (#17134)'
    * todos on every hop it replays, whatever the stack holds, so an empty
    * `todos` needs a hop whose own `semantic` list is empty. `13 → 14` was that
    * hop: step 14 carried none. Raising `MIGRATION_SUPPORT_FLOOR` to 16 retired
-   * steps 11–16, and both hops the chain still reaches carry semantic entries —
-   * so on this build no `--from` / `--to` reaches the sentence at all. Measured:
-   * `--from 16 --to 17` on the canonical stack prints 77 manual changes and
-   * `Migrated stack is schema-valid` at exit 0.
+   * steps 11–16, and raising it to 17 (#25767) retired step 17; the one hop
+   * the chain still reaches carries semantic entries — so on this build no
+   * `--from` / `--to` reaches the sentence at all. Measured before the second
+   * move: `--from 16 --to 17` on the canonical stack printed 77 manual changes
+   * and `Migrated stack is schema-valid` at exit 0.
    *
    * ⛔ Re-pointing `13` to `16` would NOT have pinned this behaviour — it would
    * have pinned the OTHER branch of the same `if` under this branch's name,

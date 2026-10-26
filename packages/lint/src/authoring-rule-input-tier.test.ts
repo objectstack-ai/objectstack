@@ -472,12 +472,13 @@ describe('security-owd-alias reaches the rule only through the unparsed doors (#
     expect(aliasFindings(result.errors)).toEqual(['objects.tier_owd.sharingModel']);
   });
 
-  it('CONTROL — a pre-D4 stored sibling does not surface: read/read_write fold on rehydration, and the gate diff cancels the rest', () => {
-    // The stored-row chain replays retired conversions, so `read` / `read_write`
-    // come back canonical…
-    expect((applyConversionsToStoredItem('object', owdObject('read')) as AnyRec).sharingModel).toBe('public_read');
-    expect((applyConversionsToStoredItem('object', owdObject('read_write')) as AnyRec).sharingModel).toBe('public_read_write');
-    // …`full` / `public` have no conversion and come back as authored…
+  it('CONTROL — a pre-D4 stored sibling does not surface: no alias folds on rehydration any more, and the gate diff cancels the rest', () => {
+    // [#25767] `owd-legacy-read-aliases` was a ≤16.x retirement kit and left
+    // the registry, so the stored-row chain no longer folds `read` /
+    // `read_write`: a pre-D4 row comes back as authored, like `full`…
+    expect((applyConversionsToStoredItem('object', owdObject('read')) as AnyRec).sharingModel).toBe('read');
+    expect((applyConversionsToStoredItem('object', owdObject('read_write')) as AnyRec).sharingModel).toBe('read_write');
+    // …as `full` / `public` always did, having no conversion…
     const storedFull = applyConversionsToStoredItem('object', owdObject('full')) as AnyRec;
     expect(storedFull.sharingModel).toBe('full');
     // …and even so, a sibling in the gate's universe produces the finding in

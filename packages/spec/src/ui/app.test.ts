@@ -736,8 +736,8 @@ describe('AppSchema retired sharing/embed keys', () => {
       ],
     });
 
-    expect(app.sharing).toBeUndefined();
-    expect(app.embed).toBeUndefined();
+    expect(app).not.toHaveProperty('sharing');
+    expect(app).not.toHaveProperty('embed');
     expect(app.navigation).toHaveLength(1);
   });
 });

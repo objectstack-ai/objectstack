@@ -47,14 +47,6 @@ import { ManifestSchema, PluginRuntimeSchema } from './manifest.zod';
 const SAYS_PUBLISH_GATE_ENFORCED = /publish gate/i;
 const SAYS_422 = /422/;
 const SAYS_LOAD_SIDE_NOT_ENFORCED = /load-side enforcement is NOT implemented/i;
-/**
- * [commit aaacf1d5c] The permissions half of the same sentence, under the same rule: the
- * granted set is REGISTERED at load and queried by nothing. Probes the two
- * load-bearing words rather than a whole clause, so a rewording that keeps the
- * fact keeps the pin.
- */
-const SAYS_GRANT_REGISTERED_NOT_ENFORCED = /REGISTERED on the PluginPermissionEnforcer at load and queried by\s+nothing/i;
-
 describe('manifest.runtime trust-tier text is truthful', () => {
   const baseManifest = {
     id: 'com.example.plugin',

@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
+import { RETIRED_KEY_UPGRADE_GUIDE_SENTENCE } from '../shared/protocol-upgrade-guide';
 import {
   DashboardSchema,
   DashboardWidgetSchema,
@@ -218,10 +219,11 @@ describe('widget unknown-key message order — fix before history', () => {
   });
 
   it('is unchanged in SHAPE when no fix matches — full-message pin', () => {
-    // A key with no family, no guidance and no near-declared-key: the history
-    // follows the key statement directly. Any stray separator fails here.
+    // A key with no family, no guidance and no near-declared-key: the upgrade
+    // guide sentence (#25767, the last fix channel) and then the history follow
+    // the key statement directly. Any stray separator fails here.
     expect(messageFor({ zzWrongKey: 'blue' }))
-      .toBe(`Unrecognized key(s) on this dashboard widget: \`zzWrongKey\`. ${HISTORY}`);
+      .toBe(`Unrecognized key(s) on this dashboard widget: \`zzWrongKey\`. ${RETIRED_KEY_UPGRADE_GUIDE_SENTENCE} ${HISTORY}`);
   });
 
   it('a near-miss of a DECLARED key now gets the rename the bespoke map never offered', () => {
@@ -233,7 +235,7 @@ describe('widget unknown-key message order — fix before history', () => {
     const m = messageFor({ colourVariant: 'blue' });
     expect(m).toBe(
       'Unrecognized key(s) on this dashboard widget: `colourVariant`. '
-      + `Did you mean \`colourVariant\` → \`colorVariant\`? ${HISTORY}`,
+      + `Did you mean \`colourVariant\` → \`colorVariant\`? ${RETIRED_KEY_UPGRADE_GUIDE_SENTENCE} ${HISTORY}`,
     );
   });
 
@@ -747,11 +749,14 @@ describe('DashboardHeaderAction fields carry an item-level `title`', () => {
   const RETIRED_DESCRIPTION_PREFIX = '[REMOVED] ';
 
   /**
-   * Every `retiredKey()` tombstone on the `widgets[]` row, BY NAME, derived
-   * from `z.toJSONSchema(DashboardSchema)` on this tree — the same five under
-   * `io: 'input'` and `io: 'output'`, out of 22 row properties.
+   * Every `retiredKey()` tombstone on the dashboard ROOT, BY NAME, derived
+   * from `z.toJSONSchema(DashboardSchema)` on this tree — the same set under
+   * `io: 'input'` and `io: 'output'`. The five on the `widgets[]` row
+   * (`actionIcon`/`actionType`/`actionUrl`/`aria`/`responsive`) were ≤16.x
+   * kits and aged out on #25767: the row carries no tombstone now, so the
+   * root's 17.x tombstone carries the rule and the row is the control.
    */
-  const WIDGET_ROW_TOMBSTONES = ['actionIcon', 'actionType', 'actionUrl', 'aria', 'responsive'] as const;
+  const ROOT_TOMBSTONES = ['refreshInterval'] as const;
 
   // The console derives the panel schema with `io: 'input'`; `GET /meta`
   // derives it in output mode. The name must survive both.
@@ -775,21 +780,23 @@ describe('DashboardHeaderAction fields carry an item-level `title`', () => {
       // could each be titled with this file still green — so the set is
       // DERIVED from the served schema and every member is asserted.
       // (`widgets[].id` held this role until its carrier was titled.)
-      const widgetProps = js.properties.widgets.items.properties;
-      const tombstones = Object.keys(widgetProps).filter(
-        (k) =>
-          typeof widgetProps[k]?.description === 'string' &&
-          widgetProps[k].description.startsWith(RETIRED_DESCRIPTION_PREFIX),
-      );
+      const isTombstone = (props: any, k: string) =>
+        typeof props[k]?.description === 'string' && props[k].description.startsWith(RETIRED_DESCRIPTION_PREFIX);
+      const rootProps = js.properties;
+      const tombstones = Object.keys(rootProps).filter((k) => isTombstone(rootProps, k));
       // Floor, BY NAME — the loop below is vacuously green over an EMPTY set,
       // and the `'Widget ID'` leg guards only that the node resolved, not that
       // the predicate still selects anything. A floor rather than an equality:
-      // a sixth tombstone is covered by the loop on the day it lands, which is
+      // a second tombstone is covered by the loop on the day it lands, which is
       // the reason for deriving the set instead of listing it.
-      expect(tombstones.slice().sort()).toEqual(expect.arrayContaining([...WIDGET_ROW_TOMBSTONES]));
+      expect(tombstones.slice().sort()).toEqual(expect.arrayContaining([...ROOT_TOMBSTONES]));
       for (const key of tombstones) {
-        expect(widgetProps[key].title, `widgets.items.properties.${key}.title`).toBeUndefined();
+        expect(rootProps[key].title, `properties.${key}.title`).toBeUndefined();
       }
+      // CONTROL (#25767): the `widgets[]` row's five ≤16.x tombstones aged out
+      // — they are strict unknown keys now, not rows, so the row derives EMPTY.
+      const widgetProps = js.properties.widgets.items.properties;
+      expect(Object.keys(widgetProps).filter((k) => isTombstone(widgetProps, k))).toEqual([]);
       // Lit — the authorable sibling really does carry one, so the lines above
       // measure the tombstone rule, not an emitter that never writes titles.
       expect(widgetProps.id.title).toBe('Widget ID');

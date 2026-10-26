@@ -633,16 +633,17 @@ describe('lintLivenessProperties', () => {
     //
     // #25767: the four #5010 keys were ≤16.x retirements, so their tombstones
     // aged out and their rows left the ledger — the rule grades nothing for
-    // them now, and the strict widget parse refuses them as unknown keys. The
-    // 17.x `chartConfig` tombstones (#6888) still carry `dead` rows, so the
-    // per-key pin moves to them; the four are pinned ABSENT below.
-    it.each(['type', 'xAxis', 'yAxis', 'series'])(
-      'grades the retired `chartConfig.%s` dead when handed an unparsed stack (#6888, #16094)',
-      (key) => {
-        const findings = lintLivenessProperties(dash({ chartConfig: { [key]: 'x' } }));
-        expect(ruleOf(findings, `widgets.chartConfig.${key}`)).toBe(LIVENESS_DEAD_PROPERTY);
-      },
-    );
+    // them now, and the strict widget parse refuses them as unknown keys. No
+    // widget-level `dead` row remains one `children` level down (the depth the
+    // ledger read walks; the `chartConfig.*` rows sit two down and were never
+    // graded), so the per-key pin moves to the dashboard's own `refreshInterval`
+    // row — a 17.x tombstone still `dead` in the ledger; the four are pinned
+    // ABSENT below.
+    it('grades the retired dashboard `refreshInterval` dead when handed an unparsed stack (#16094)', () => {
+      const [dashboard] = dash({}).dashboards;
+      const findings = lintLivenessProperties({ dashboards: [{ ...dashboard, refreshInterval: 60 }] });
+      expect(ruleOf(findings, 'refreshInterval')).toBe(LIVENESS_DEAD_PROPERTY);
+    });
 
     it.each(['actionUrl', 'actionType', 'actionIcon', 'aria'])(
       'no longer grades `%s` — a ≤16.x retirement whose row left with its tombstone (#25767)',
@@ -666,20 +667,20 @@ describe('lintLivenessProperties', () => {
     // warning and not six.
     // Since #16094 the retired keys warn, so this one call also proves the
     // dashboard walk is registered and running: the `colorVariant` silence sits
-    // beside four findings from the same walk, same widget, same ledger load.
+    // beside the `refreshInterval` finding from the same walk, same dashboard,
+    // same ledger load (#25767: the widget-level retired keys aged out).
     it('the dashboard silence is a real verdict, not a lint that stopped loading ledgers', () => {
+      const [dashboard] = dash({
+        chartConfig: { type: 'bar', xAxis: 'region', yAxis: 'total', series: ['total'] },
+        colorVariant: 'teal',
+      }).dashboards;
       const findings = lintLivenessProperties({
         objects: [{ name: 'widget', externalSharingModel: 'read' }],
-        ...dash({
-          chartConfig: { type: 'bar', xAxis: 'region', yAxis: 'total', series: ['total'] },
-          colorVariant: 'teal',
-        }),
+        dashboards: [{ ...dashboard, refreshInterval: 60 }],
       });
       const messages = findings.map((f) => f.message);
       expect(messages.some((m) => m.includes('externalSharingModel'))).toBe(true);
-      for (const retired of ['type', 'xAxis', 'yAxis', 'series']) {
-        expect(ruleOf(findings, `widgets.chartConfig.${retired}`), retired).toBe(LIVENESS_DEAD_PROPERTY);
-      }
+      expect(ruleOf(findings, 'refreshInterval')).toBe(LIVENESS_DEAD_PROPERTY);
       expect(messages.some((m) => m.includes('widgets.colorVariant'))).toBe(false);
     });
 

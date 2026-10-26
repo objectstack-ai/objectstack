@@ -805,10 +805,10 @@ function rulePredicates(rule: AnyRec, path: string, depth = 0): RulePredicate[] 
  *    VISIBLE" was not merely imprecise here, it named the wrong property of
  *    the field.
  *
- * `conditionalRequired` also reaches this helper (the field walk still passes
- * it). It is a `retiredKey` in `FieldSchema` — the strict schema rejects it by
- * name — so the branch is inert on the parsed compile path, and it gets a
- * slot-agnostic clause rather than a fabricated fourth measurement.
+ * `conditionalRequired` reached this helper until #25767: its `FieldSchema`
+ * tombstone was a ≤16.x retirement kit and aged out, so the schema no longer
+ * declares the key and the field walk no longer passes it (the strict parse
+ * refuses it as an unknown key, naming the upgrade guide).
  *
  * ### Axis 2 — the prescription, by ROOT (#6713)
  *
@@ -973,12 +973,6 @@ const FIELD_RULE_SLOT_CONSEQUENCE: Record<string, string> = {
     'whose requirement it cannot evaluate (ADR-0137 D2: the refusal names the field and the ' +
     'rule) — while the form does not mark the field required, so nothing on screen says why the ' +
     'save failed',
-  // Listed rather than left to the `??` below, so the map covers every slot
-  // the field walk passes and the default stays unreachable. `FieldSchema`
-  // declares this key only as a `retiredKey`, which rejects it by name, so
-  // there is no fourth runtime to measure — the honest clause is the generic
-  // one, not a fabricated fourth cell (#6716).
-  conditionalRequired: FIELD_RULE_SLOT_CONSEQUENCE_GENERIC,
   // [#22227] The deadline's settle predicate (objectui#11815 ruling D) joins
   // the family on the `visibleWhen` side: display only, nothing on the write
   // path reads it. Its one consumer — objectui's date cells, the host
@@ -1965,8 +1959,8 @@ export interface StackExpressionOptions {
    *    `condition` called `sqrt` or read a bare `amount` saved with a 200 and
    *    then faulted on every write the rule judged;
    *  - [#22032, pass 2] the field-rule-slot pass over `fields[]` — each of
-   *    `requiredWhen` / `readonlyWhen` / `conditionalRequired` / `visibleWhen`
-   *    (and, since #22227, a deadline's `settledWhen`)
+   *    `requiredWhen` / `readonlyWhen` / `visibleWhen` (and, since #22227, a
+   *    deadline's `settledWhen`; `conditionalRequired` left with its tombstone, #25767)
    *    as a `record`-scoped predicate with its root verdict, plus the `parent`
    *    gate (a `readonlyWhen` / `requiredWhen` reading `parent` on an object
    *    without exactly one `master_detail`), the #4811 null-guard gate over
@@ -3132,7 +3126,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // root verdict over FIELD_RULE_BOUND_ROOTS. Like `visibleWhen` it is
       // display only, so the server-side gates further down (the `parent`
       // gate, the null guard, the traversal refusal) do not apply to it.
-      for (const key of ['requiredWhen', 'readonlyWhen', 'conditionalRequired', 'visibleWhen', 'settledWhen'] as const) {
+      for (const key of ['requiredWhen', 'readonlyWhen', 'visibleWhen', 'settledWhen'] as const) {
         const where = `object '${objectName}' · field '${fname}' ${key}`;
         const raw = (f as AnyRec)[key];
         // [#13935] Verdict FIRST, emitted second. `check` needs to know which
@@ -3257,9 +3251,8 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // unusable, and this gate is where the author meets it instead of the
       // first write in production.
       //
-      // `conditionalRequired` (retired alias) and `visibleWhen` (no
-      // server-enforced `parent` binding of its own) keep their verdicts
-      // untouched.
+      // `visibleWhen` (no server-enforced `parent` binding of its own) keeps
+      // its verdict untouched.
       // Destructured in the loop head on purpose: both predicate slots stay
       // LITERAL member reads (`f.readonlyWhen` / `f.requiredWhen`) rather than a
       // computed `f[key]`, so the #5017 meta-test's source scan still sees every
@@ -3303,8 +3296,8 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // (both server-side seams first — the flow trigger-record half is
       // outstanding). When it is wired it needs `'fail-closed'`, like
       // `requiredWhen` above: a faulting `readonlyWhen` refuses the write since
-      // ADR-0137 D2 too. `conditionalRequired` / `visibleWhen` have no record-scoped
-      // total binding of their own. See the surface ledger in
+      // ADR-0137 D2 too. `visibleWhen` has no record-scoped total binding of
+      // its own. See the surface ledger in
       // `validate-null-guards.ts`.
       checkNullGuards(
         `object '${objectName}' · field '${fname}' requiredWhen`,

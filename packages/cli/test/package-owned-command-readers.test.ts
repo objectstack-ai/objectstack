@@ -17,6 +17,11 @@
  *     os migrate meta    dataMigrations []           adr-0104-file-references
  *       --from 16 --json
  *
+ * [#25767] The data-migration listing that row measured is unreachable from the
+ * command since the support floor rose to 17 (ADR-0104 keys on a run crossing
+ * into 17), so the `migrate meta` pin reads `applied` instead: a retired key on
+ * the service package's object, listed at its path inside that package's body.
+ *
  * Each now folds its stack with `authoringRuleUnionStack` where it loads it. The
  * pairs make these pins: a fold that broke every stack would fail the control,
  * and the control holds the one-package answer unchanged. The enumeration of
@@ -33,8 +38,6 @@ import { execFile } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
-import { FILE_REFERENCES_MIGRATION_ID } from '@objectstack/spec/system';
-
 import { CLI, TSX, childEnv } from './helpers/serve-process.js';
 import { linkSpec } from './helpers/define-stack-fixture.js';
 
@@ -127,11 +130,18 @@ const one = (svcObjects: string) => `${PIECES}
 export default defineStack({ manifest: appManifest, objects: [${svcObjects}, ticket] } as any);
 `;
 
+/** The service object `os migrate meta` reads: a protocol-17 spelling the chain converts at 18. */
+const scanWithRetiredKey = "{ ...scan, externalSharingModel: 'private' }";
+
 const CONFIGS: Record<string, string> = {
   two: two('note'),
   twoAfter: two('note, scan'),
   one: one('note'),
   oneAfter: one('note, scan'),
+  // `diff` loads its after-side config, which the retired key would refuse, so
+  // `migrate meta` reads a pair of its own.
+  twoMeta: two(`note, ${scanWithRetiredKey}`),
+  oneMeta: one(`note, ${scanWithRetiredKey}`),
 };
 
 const dirs: Record<string, string> = {};
@@ -155,7 +165,7 @@ beforeAll(async () => {
     jobs.push([`diff:${shape}`, shape, [
       'diff', join(dirs[shape], 'objectstack.config.ts'), join(dirs[`${shape}After`], 'objectstack.config.ts'), '--json',
     ]]);
-    jobs.push([`meta:${shape}`, `${shape}After`, ['migrate', 'meta', '--from', '16', '--json']]);
+    jobs.push([`meta:${shape}`, `${shape}Meta`, ['migrate', 'meta', '--from', '17', '--json']]);
   }
   const queue = [...jobs];
   const worker = async () => {
@@ -202,13 +212,18 @@ describe('#22288 — os diff compares every package', () => {
   }
 });
 
-describe('#22288 — os migrate meta lists the data migration a package\'s fields need', () => {
+describe('#22288 — os migrate meta lists the mechanical edit a package\'s object needs', () => {
   for (const shape of ['two', 'one'] as const) {
-    it(`${shape === 'two' ? 'two packages' : 'control, one package'}: a file field in the service package lists it`, () => {
+    it(`${shape === 'two' ? 'two packages' : 'control, one package'}: a retired key on the service package's object is listed at its path`, () => {
       const run = r[`meta:${shape}`];
       expect(run.code, run.stderr).toBe(0);
-      const ids = (payloadOf(run).dataMigrations as Array<{ id: string }>).map((m) => m.id);
-      expect(ids).toContain(FILE_REFERENCES_MIGRATION_ID);
+      const payload = payloadOf(run);
+      expect(payload.applied).toContainEqual(expect.objectContaining({
+        conversionId: 'object-external-sharing-model-removed',
+        path: shape === 'two' ? 'packages[0].manifest.objects[1].externalSharingModel' : 'objects[1].externalSharingModel',
+      }));
+      // [#25767] No run crosses into 17 any more, so ADR-0104 lists nothing.
+      expect(payload.dataMigrations).toEqual([]);
     });
   }
 });

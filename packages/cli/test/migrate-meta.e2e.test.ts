@@ -9,9 +9,11 @@
  * chain attributable, the schema-validity verdict, the machine JSON shape,
  * `--out` snapshots, and the support-floor refusal — had no test at all.
  * This spawns `bin/run-dev.js` against a temp project authored in the
- * PRE-protocol-17 dialect, exercising one key from every v17 conversion
- * family in a single pass, exactly the cross-major "consumer upgrades"
- * scenario the command exists for.
+ * protocol-17 dialect, exercising one key from each family of the protocol-18
+ * step in a single pass, exactly the cross-major "consumer upgrades"
+ * scenario the command exists for. [#25767] It was authored in the
+ * protocol-16 dialect until the support floor rose to 17: that dialect's
+ * keys are strict unknown keys now, and `--from 16` is refused (pinned below).
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -32,13 +34,14 @@ const CLI = resolve(HERE, '../bin/run-dev.js');
 const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 /**
- * A stack authored against protocol 16: every line marked `// 16:` is a shape
- * the v17 chain must rewrite, spanning each conversion family — renames
- * (action execute→target, sharing full→edit) and the #3896 close-out removals (rls.priority, the four
- * tool keys, flow active/template/outputSchema/fallbackNodeId, view/dashboard
- * inert keys, agent.knowledge, skill.triggerPhrases).
+ * A stack authored against protocol 17: every line marked `// 17:` is a shape
+ * the protocol-18 step must rewrite, spanning the step's families — renames
+ * (dashboard refreshInterval → refreshIntervalSeconds, job/hook timeout →
+ * timeoutMs, api cacheTtl → cacheTtlSeconds) and the ADR-0049 close-out
+ * removals (object externalSharingModel, action aria, list filterableFields,
+ * agent lifecycle, permission managedBy and allowRestore).
  */
-const PRE17_CONFIG = `
+const PRE18_CONFIG = `
 export default {
   // #8687: top-level name/label were never stack keys (silently stripped
   // before the strict close, refused now) — the identity lives in manifest.
@@ -47,106 +50,77 @@ export default {
     name: 'e2e_ticket',
     label: 'Ticket',
     fields: {
-      title: { type: 'text', label: 'Title', required: true },      // 16: required implied NOT NULL — v17 does NOT write that down (#16693)
+      title: { type: 'text', label: 'Title', required: true },      // required once implied NOT NULL — the chain does NOT write that down (#16693)
       notes: { type: 'textarea', label: 'Notes' },
     },
+    externalSharingModel: 'private',  // 17: removed (external access is the portal's)
   }],
   actions: [{
     name: 'close_ticket',
     label: 'Close',
     type: 'script',
-    execute: 'closeHandler',        // 16: renamed to target
-    shortcut: 'Ctrl+K',             // 16: removed (never dispatched)
-    bulkEnabled: true,              // 16: removed (toolbar reads view bulkActions)
-  }],
-  flows: [{
-    name: 'e2e_flow',
-    label: 'E2E Flow',
-    type: 'autolaunched',
-    active: false,                  // 16: removed (status is the lifecycle)
-    template: true,                 // 16: removed (no reader)
-    // 16: fallbackNodeId removed (fault edges own this). maxRetries is stated
-    // because #4247 refuses a zero-attempt 'retry' — the count is the one v17
-    // flow change the chain surfaces as a semantic TODO instead of rewriting.
-    errorHandling: { strategy: 'retry', maxRetries: 2, fallbackNodeId: 'n9' },
-    nodes: [
-      { id: 'n1', type: 'start', label: 'Start', outputSchema: { ok: { type: 'boolean' } } },  // 16: removed
-      { id: 'n2', type: 'delete_record', label: 'Purge', config: { objectName: 'e2e_ticket', filter: { done: true } } },  // canonical since protocol 11 — must pass through untouched
-    ],
-    edges: [],
+    target: 'closeHandler',
+    aria: { ariaLabel: 'Close this ticket' },  // 17: removed (the placing node's aria block carries it)
   }],
   views: [{
     object: 'e2e_ticket',
-    list: { type: 'grid', columns: ['title'], responsive: { hiddenOn: ['xs'] }, performance: { lazyLoad: true } },  // 16: removed
-    form: { type: 'simple', sections: [{ fields: ['title'] }], defaultSort: [{ field: 'title' }], aria: { label: 'Ticket' } },  // 16: removed
+    list: { type: 'grid', columns: ['title'], filterableFields: ['title'] },  // 17: removed (no Filter-panel whitelist)
   }],
   dashboards: [{
     name: 'e2e_kpis',
     label: 'E2E KPIs',
-    aria: { label: 'KPIs' },        // 16: removed
-    performance: { prefetch: true },// 16: removed
     widgets: [],
+    refreshInterval: 300,           // 17: renamed to refreshIntervalSeconds
   }],
   agents: [{
     name: 'e2e_agent',
     label: 'Agent',
     role: 'Helper',
     instructions: 'help',
-    knowledge: { sources: ['faq'] },  // 16: removed (never scoped retrieval)
+    lifecycle: 'draft',             // 17: removed (no runtime read it)
   }],
-  skills: [{
-    name: 'e2e_skill',
-    label: 'Skill',
-    tools: ['query_records'],
-    triggerPhrases: ['do the thing'],  // 16: removed (never matched)
+  jobs: [{
+    name: 'e2e_sweep',
+    schedule: { type: 'cron', expression: '0 1 * * *' },
+    handler: 'sweepTickets',
+    timeout: 300000,                // 17: renamed to timeoutMs
   }],
-  tools: [{
-    name: 'e2e_tool',
-    label: 'Tool',
-    description: 'A tool',
-    parameters: { type: 'object' },
-    category: 'action',             // 16: removed
-    permissions: ['x.y'],           // 16: removed (gated nothing)
-    active: true,                   // 16: removed (withdrew nothing)
-    builtIn: false,                 // 16: removed
+  hooks: [{
+    name: 'e2e_audit',
+    object: 'e2e_ticket',
+    events: ['afterInsert'],
+    handler: 'auditTicket',
+    timeout: 5000,                  // 17: renamed to timeoutMs
+  }],
+  apis: [{
+    name: 'list_tickets',
+    path: '/api/v1/apps/e2e/tickets',
+    method: 'GET',
+    type: 'object_operation',
+    objectParams: { object: 'e2e_ticket', operation: 'find' },
+    cacheTtl: 30,                   // 17: renamed to cacheTtlSeconds
   }],
   permissions: [{
     name: 'e2e_set',
     label: 'Set',
-    objects: { e2e_ticket: { allowRead: true } },
-    rowLevelSecurity: [{
-      name: 'own_rows',
-      object: 'e2e_ticket',
-      operation: 'select',
-      using: 'owner = current_user.id',
-      enabled: true,
-      priority: 10,                 // 16: removed (no conflict to order)
-    }],
-  }],
-  sharingRules: [{
-    name: 'share_hot',
-    type: 'criteria',
-    object: 'e2e_ticket',
-    label: 'Hot tickets',
-    condition: "record.hot == true",
-    sharedWith: { type: 'team', value: 'support' },
-    accessLevel: 'full',             // 16: full→edit (walked at the TOP-LEVEL collection)
+    objects: { e2e_ticket: { allowRead: true, allowRestore: true } },  // 17: allowRestore removed
+    managedBy: 'user',              // 17: removed
   }],
 };
 `;
 
 /** Conversion ids the run MUST attribute at least one rewrite to. */
 const EXPECTED_CONVERSIONS = [
-  'action-execute-to-target',
-  'action-inert-keys-removed',
-  'flow-inert-keys-removed',
-  'view-inert-keys-removed',
-  'dashboard-inert-keys-removed',
-  'agent-knowledge-removed',
-  'skill-trigger-phrases-removed',
-  'tool-inert-authoring-keys-removed',
-  'permission-rls-priority-removed',
-  'sharing-rule-access-level-full-to-edit',
+  'object-external-sharing-model-removed',
+  'action-aria-removed',
+  'view-list-filterable-fields-removed',
+  'dashboard-refresh-interval-to-refresh-interval-seconds',
+  'agent-lifecycle-removed',
+  'job-timeout-to-timeout-ms',
+  'hook-timeout-to-timeout-ms',
+  'api-endpoint-cache-ttl-to-cache-ttl-seconds',
+  'permission-set-managed-by-removed',
+  'permission-allow-restore-purge-removed',
 ];
 
 let dir: string;
@@ -163,8 +137,8 @@ async function runMeta(args: string[], cwd: string) {
 
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'os-migrate-meta-e2e-'));
-  writeFileSync(join(dir, 'objectstack.config.ts'), PRE17_CONFIG);
-  const stdout = await runMeta(['--from', '16', '--json', '--out', join(dir, 'migrated.json')], dir);
+  writeFileSync(join(dir, 'objectstack.config.ts'), PRE18_CONFIG);
+  const stdout = await runMeta(['--from', '17', '--json', '--out', join(dir, 'migrated.json')], dir);
   out = { stdout, parsed: JSON.parse(stdout) };
 }, 120_000);
 
@@ -172,13 +146,13 @@ afterAll(() => {
   try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
-describe('os migrate meta --from 16 (e2e over the real CLI)', () => {
-  it('replays the v17 chain and reports schema-valid output', () => {
-    expect(out.parsed.from).toBe(16);
+describe('os migrate meta --from 17 (e2e over the real CLI)', () => {
+  it('replays the protocol-18 step and reports schema-valid output', () => {
+    expect(out.parsed.from).toBe(17);
     expect(out.parsed.schemaValid).toBe(true);
   });
 
-  it('attributes at least one rewrite to every expected v17 conversion family', () => {
+  it('attributes at least one rewrite to every expected protocol-18 conversion family', () => {
     const ids = new Set(out.parsed.applied.map((a: any) => a.conversionId));
     for (const id of EXPECTED_CONVERSIONS) {
       expect(ids.has(id), `expected a rewrite from ${id}; got ${[...ids].join(', ')}`).toBe(true);
@@ -215,23 +189,25 @@ describe('os migrate meta --from 16 (e2e over the real CLI)', () => {
     expect(parsed.success, JSON.stringify(parsed.success ? '' : parsed.error.issues.slice(0, 3))).toBe(true);
 
     // Spot-check one rewrite per family on the snapshot itself.
-    expect(snap.actions[0].target).toBe('closeHandler');
-    expect(snap.actions[0].execute).toBeUndefined();
-    expect(snap.actions[0].shortcut).toBeUndefined();
-    expect(snap.flows[0].active).toBeUndefined();
-    expect(snap.flows[0].errorHandling.fallbackNodeId).toBeUndefined();
-    expect(snap.flows[0].nodes[0].outputSchema).toBeUndefined();
-    expect(snap.flows[0].nodes[1].config.filter, 'canonical key passes through untouched').toEqual({ done: true });
-    expect(snap.views[0].list.responsive).toBeUndefined();
-    expect(snap.views[0].form.defaultSort).toBeUndefined();
-    expect(snap.dashboards[0].aria).toBeUndefined();
-    expect(snap.agents[0].knowledge).toBeUndefined();
-    expect(snap.skills[0].triggerPhrases).toBeUndefined();
-    expect(snap.tools[0].category).toBeUndefined();
-    expect(snap.permissions[0].rowLevelSecurity[0].priority).toBeUndefined();
-    expect(snap.sharingRules[0].accessLevel).toBe('edit');
+    expect(snap.objects[0].externalSharingModel).toBeUndefined();
+    expect(snap.actions[0].target, 'canonical key passes through untouched').toBe('closeHandler');
+    expect(snap.actions[0].aria).toBeUndefined();
+    expect(snap.views[0].list.filterableFields).toBeUndefined();
+    expect(snap.views[0].list.columns, 'canonical key passes through untouched').toEqual(['title']);
+    expect(snap.dashboards[0].refreshIntervalSeconds).toBe(300);
+    expect(snap.dashboards[0].refreshInterval).toBeUndefined();
+    expect(snap.agents[0].lifecycle).toBeUndefined();
+    expect(snap.jobs[0].timeoutMs).toBe(300000);
+    expect(snap.jobs[0].timeout).toBeUndefined();
+    expect(snap.hooks[0].timeoutMs).toBe(5000);
+    expect(snap.hooks[0].timeout).toBeUndefined();
+    expect(snap.apis[0].cacheTtlSeconds).toBe(30);
+    expect(snap.apis[0].cacheTtl).toBeUndefined();
+    expect(snap.permissions[0].managedBy).toBeUndefined();
+    expect(snap.permissions[0].objects.e2e_ticket.allowRestore).toBeUndefined();
+    expect(snap.permissions[0].objects.e2e_ticket.allowRead).toBe(true);
     // ⛔ ADR-0113, #16693: the chain does NOT write a column constraint for the
-    // author. `required: true` crosses 16→17 as the write-time contract and
+    // author. `required: true` crosses a major as the write-time contract and
     // nothing else, so `title` comes out with NO `storage` block — exactly like
     // the optional field beside it. The withdrawn `field-required-notnull-
     // explicit` conversion used to make this line read `{ notNull: true }`, and
@@ -248,7 +224,7 @@ describe('os migrate meta --from 16 (e2e over the real CLI)', () => {
     try {
       const snap = readFileSync(join(dir, 'migrated.json'), 'utf-8');
       writeFileSync(join(dir2, 'objectstack.config.ts'), `export default ${snap};`);
-      const stdout = await runMeta(['--from', '16', '--json'], dir2);
+      const stdout = await runMeta(['--from', '17', '--json'], dir2);
       const again = JSON.parse(stdout);
       expect(again.applied).toEqual([]);
       expect(again.schemaValid).toBe(true);
@@ -258,10 +234,13 @@ describe('os migrate meta --from 16 (e2e over the real CLI)', () => {
   }, 120_000);
 
   /**
-   * ADR-0104 / #3438. The metadata half of a 16→17 upgrade is only half of it:
-   * two DATA migrations gate enforcement per deployment, and a gate nobody is
-   * told about is served by nobody. The advice is scoped to the field classes
-   * the author actually declares, so it is never noise.
+   * ADR-0104 / #3438. The metadata half of a 16→17 upgrade was only half of
+   * it: two DATA migrations gate enforcement per deployment, and the command
+   * named them for the field classes the author declares. [#25767] The support
+   * floor is 17, so no run of this command crosses into 17 any more: the
+   * advice is unreachable from the command (its positive cases left with the
+   * ≤16.x kit, and `pendingDataMigrations` is reported as a residual on the
+   * card) and only the silence is pinned.
    */
   describe('per-deployment data migrations (#3438)', () => {
     const withFields = (fields: string) => `
@@ -271,61 +250,31 @@ describe('os migrate meta --from 16 (e2e over the real CLI)', () => {
       };
     `;
 
-    async function runJson(fields: string, args: string[] = ['--from', '16', '--json']) {
+    it('says nothing on a chain that starts at the floor — no run crosses into 17 any more', async () => {
       const d = mkdtempSync(join(tmpdir(), 'os-migrate-meta-dm-'));
       try {
-        writeFileSync(join(d, 'objectstack.config.ts'), withFields(fields));
-        return JSON.parse(await runMeta(args, d));
-      } finally {
-        try { rmSync(d, { recursive: true, force: true }); } catch { /* ignore */ }
-      }
-    }
-
-    it('names the file migration when the metadata declares a media field', async () => {
-      const res = await runJson(`cover: { type: 'image', label: 'Cover' }`);
-      expect(res.dataMigrations.map((m: any) => m.id)).toEqual(['adr-0104-file-references']);
-    }, 120_000);
-
-    it('names the value-shape scan when the metadata declares a covered field', async () => {
-      const res = await runJson(`spot: { type: 'location', label: 'Spot' }`);
-      expect(res.dataMigrations.map((m: any) => m.id)).toEqual(['adr-0104-value-shapes']);
-    }, 120_000);
-
-    it('names both when both classes are declared', async () => {
-      const res = await runJson(
-        `cover: { type: 'image', label: 'Cover' }, spot: { type: 'location', label: 'Spot' }`,
-      );
-      expect(res.dataMigrations.map((m: any) => m.id).sort()).toEqual([
-        'adr-0104-file-references',
-        'adr-0104-value-shapes',
-      ]);
-    }, 120_000);
-
-    it('stays silent for metadata that declares neither class', async () => {
-      const res = await runJson(`title: { type: 'text', label: 'Title' }`);
-      expect(res.dataMigrations).toEqual([]);
-    }, 120_000);
-
-    it('says nothing on a chain that does not cross into 17', async () => {
-      const res = await runJson(`cover: { type: 'image', label: 'Cover' }`, ['--from', '17', '--json']);
-      expect(res.dataMigrations).toEqual([]);
-    }, 120_000);
-
-    it('ends the human-readable upgrade with the advice, not just the JSON', async () => {
-      // Where an operator actually reads it. The advice names the command and
-      // says the run is dry by default, so nothing here reads as "do this and
-      // something irreversible happens".
-      const d = mkdtempSync(join(tmpdir(), 'os-migrate-meta-dm-h-'));
-      try {
-        writeFileSync(join(d, 'objectstack.config.ts'), withFields(`cover: { type: 'image', label: 'Cover' }`));
-        const stdout = await runMeta(['--from', '16'], d);
-        expect(stdout).toMatch(/os migrate files-to-references/);
-        expect(stdout).toMatch(/dry-run by default/);
+        writeFileSync(join(d, 'objectstack.config.ts'), withFields(`cover: { type: 'image', label: 'Cover' }, spot: { type: 'location', label: 'Spot' }`));
+        const res = JSON.parse(await runMeta(['--from', '17', '--json'], d));
+        expect(res.dataMigrations).toEqual([]);
       } finally {
         try { rmSync(d, { recursive: true, force: true }); } catch { /* ignore */ }
       }
     }, 120_000);
   });
+
+  it('refuses --from 16 — the boundary the ≤16.x kit left (#25767) — naming the floor and the upgrade guide', async () => {
+    let failed = false;
+    try {
+      await runMeta(['--from', '16', '--json'], dir);
+    } catch (e: any) {
+      failed = true;
+      const body = JSON.parse(String(e.stdout || '{}'));
+      expect(body.error).toBe('unsupported_from_major');
+      expect(body.message).toContain('support floor is 17');
+      expect(body.message).toContain('https://objectstack.ai/docs/protocol-upgrade');
+    }
+    expect(failed, 'expected a non-zero exit at the floor boundary').toBe(true);
+  }, 120_000);
 
   it('refuses a --from below the support floor with the structured error', async () => {
     let failed = false;
@@ -393,13 +342,12 @@ export default defineStack({
     label: 'Agent',
     role: 'Helper',
     instructions: 'help',
-    knowledge: { sources: ['faq'] },     // RETIRED in protocol 17 — the whole point
+    lifecycle: 'draft',                  // RETIRED in protocol 17.7 — the whole point
   })],
   skills: [defineSkill({
     name: 'rk_skill',
     label: 'Skill',
-    tools: ['query_records'],
-    triggerPhrases: ['do the thing'],    // RETIRED in protocol 17
+    tools: ['query_records'],            // nothing retired: the control that the helper's output survives
   })],
 });
 `;
@@ -424,23 +372,20 @@ export default defineStack({
   });
 
   it('loads it, converts it, and reports the migrated stack schema-valid', async () => {
-    const stdout = await runMeta(['--from', '16', '--json', '--out', join(rkDir, 'migrated.json')], rkDir);
+    const stdout = await runMeta(['--from', '17', '--json', '--out', join(rkDir, 'migrated.json')], rkDir);
     const parsed = JSON.parse(stdout);
 
     const appliedAt = new Map<string, string>(
       parsed.applied.map((a: any) => [a.conversionId, a.path] as [string, string]),
     );
-    // Authored through `defineStack`'s own inline literal…
-    expect(parsed.from).toBe(16);
-    // …and through helpers imported from a spec subpath, which is where a
+    expect(parsed.from).toBe(17);
+    // Authored through a helper imported from a spec subpath, which is where a
     // tolerance scoped to `defineStack` alone would still have refused.
-    expect(appliedAt.get('agent-knowledge-removed')).toBe('agents[0].knowledge');
-    expect(appliedAt.get('skill-trigger-phrases-removed')).toBe('skills[0].triggerPhrases');
+    expect(appliedAt.get('agent-lifecycle-removed')).toBe('agents[0].lifecycle');
     expect(parsed.schemaValid).toBe(true);
 
     const snap = JSON.parse(readFileSync(join(rkDir, 'migrated.json'), 'utf-8'));
-    expect(snap.agents[0].knowledge).toBeUndefined();
-    expect(snap.skills[0].triggerPhrases).toBeUndefined();
+    expect(snap.agents[0].lifecycle).toBeUndefined();
     // The rest of the artifact survives the tolerant load intact — the codemod
     // removes what retired, not what it could not parse.
     expect(snap.agents[0].name).toBe('rk_agent');
@@ -458,8 +403,8 @@ export default defineStack({
     } catch (e: any) {
       refused = true;
       const output = `${String(e.stdout ?? '')}${String(e.stderr ?? '')}`;
-      expect(output).toMatch(/`agent\.knowledge` was removed/);
-      expect(output).toMatch(/os migrate meta --from 16/);
+      expect(output).toMatch(/`agent\.lifecycle` was removed/);
+      expect(output).toMatch(/os migrate meta --from 17/);
     }
     expect(refused, '`os validate` must still reject a retired key').toBe(true);
   }, 180_000);
