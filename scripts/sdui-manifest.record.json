@@ -48,7 +48,7 @@
       "ui/packages/sdui-parser",
       "ui/packages/types"
     ],
-    "registrySources": 922,
-    "registrySourcesSha256": "7734fe6bc3763fe8318db624b9e0dd4c48b2dc7b15bf2a3fb1f78e46bb8d959e"
+    "registrySources": 924,
+    "registrySourcesSha256": "776036aea18c3cdbcc9068f2fb3a16955f82bcf68ae340b31f9275d7234ad30b"
   }
 }
