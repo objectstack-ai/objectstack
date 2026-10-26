@@ -44,7 +44,6 @@ interface Probe {
 describe('showcase: withdrawing the public contact form closes every intake door', () => {
   let stack: VerifyStack;
   let admin: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let ql: any;
   let published: Record<string, any>;
   let probeSeq = 0;

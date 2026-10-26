@@ -107,7 +107,6 @@ describe('dogfood: the object-existence gates are actually WIRED (#3770, #3867, 
     // Ground truth through the DRIVER, the declared internal path a body
     // cannot reach (host code holding the engine). Without this, every 404
     // below could be passing for the wrong reason.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ql = await stack.kernel.getServiceAsync<any>('objectql');
     const driver = ql.getDriverForObject(UNREGISTERED_BUT_REAL);
     expect(driver, 'the default driver answers the name').toBeDefined();

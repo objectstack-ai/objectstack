@@ -99,7 +99,6 @@ function expectCertified(file: string): void {
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const rowsOf = (body: any): any[] => (Array.isArray(body) ? body : (body?.records ?? body?.data ?? []));
 
 describe(`[#24522] an 18.0 database (fixture from ${manifest.ref} @ ${manifest.sha.slice(0, 12)}) takes the ceremony, upgrades to HEAD and keeps its data`, () => {

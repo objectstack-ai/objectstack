@@ -113,9 +113,7 @@ async function boot(opts: {
     },
   };
   const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await plugin.init(ctx as any);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await plugin.start(ctx as any);
   return { plugin, findOne, warn };
 }
@@ -131,7 +129,6 @@ const sessionCtx = (over: Record<string, unknown> = {}) => ({
 });
 
 const readFilter = (plugin: unknown, ctx: unknown) =>
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (plugin as any).getReadFilter('task', ctx);
 
 const OLD_OWNER = process.env.OS_PLATFORM_OWNER_EMAIL;
@@ -266,12 +263,10 @@ describe('[#12974] the bypass lifts ONLY Layer 0', () => {
       users: { u_owner: { id: 'u_owner', email: OWNER_EMAIL, email_verified: true } },
     });
     // Org-carrying owner write: the equality wall stands.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const owner = await (plugin as any).computeWriteTenantCheckFilter([PLAIN_MEMBER], 'task', 'update', sessionCtx());
     expect(owner).toEqual({ organization_id: 'org-1' });
     // Org-LESS owner write: the deny sentinel stands — this is the exact
     // verdict the ADR-0123 D2 refusal derives its 403 from.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ownerOrgless = await (plugin as any).computeWriteTenantCheckFilter(
       [PLAIN_MEMBER],
       'task',
@@ -280,7 +275,6 @@ describe('[#12974] the bypass lifts ONLY Layer 0', () => {
     );
     expect(ownerOrgless).toEqual({ ...RLS_DENY_FILTER });
     // Everyone else: unchanged, same wall.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const member = await (plugin as any).computeWriteTenantCheckFilter(
       [PLAIN_MEMBER],
       'task',
@@ -302,7 +296,6 @@ describe('[#12974] audit — the ruled floor', () => {
     await readFilter(plugin, sessionCtx({ userId: 'u_m', email: 'member@corp.example' }));
     expect(bypassEvents()).toHaveLength(0);
     // Owner WRITE: no bypass happens, so no event may claim one did.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (plugin as any).computeWriteTenantCheckFilter([PLAIN_MEMBER], 'task', 'update', sessionCtx());
     expect(bypassEvents()).toHaveLength(0);
     await readFilter(plugin, sessionCtx());

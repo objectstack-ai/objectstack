@@ -54,17 +54,13 @@ const PUBLIC_FIELDS = ['title', 'summary'];
 /** The three figures `showcase_client_liaison` withholds. */
 const MASKED_FIELDS = ['budget', 'spent', 'budget_remaining'];
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const rowsOf = (b: any): any[] => b?.records ?? b?.data ?? (Array.isArray(b) ? b : []);
 /** Unwrap a by-id read — same shape helper the sibling FLS proof uses. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const recordOf = (b: any): Record<string, unknown> => b?.record ?? b?.data ?? b;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const idOf = (b: any) => b?.id ?? b?.record?.id ?? b?.data?.id;
 
 describe('showcase client-liaison fixtures (#9308 fixtures 2 + 4)', () => {
   let stack: VerifyStack;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let ql: any;
   let adminTok = '';
   let liaisonTok = '';

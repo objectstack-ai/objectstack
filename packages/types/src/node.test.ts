@@ -507,7 +507,7 @@ describe('the undeclared fallback resolves from the CALLER (#10943)', () => {
   /** A framework package that calls the helper, with its own `node_modules`. */
   let callerRoot: string;
   /** `(s) => import(s)` evaluated INSIDE `callerRoot` — a real caller base. */
-  let fallbackImport: (specifier: string) => Promise<any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+  let fallbackImport: (specifier: string) => Promise<any>;
 
   beforeAll(async () => {
     callerRoot = mkdtempSync(join(tmpdir(), 'os-import-caller-pkg-'));

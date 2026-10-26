@@ -13,8 +13,35 @@ import { singlePostureTenancy } from './__tests__/single-posture-tenancy.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 
 /**
- * [#24235] A summary line is stored ONCE, at write time, so the writer's held
- * locale must not outlive a language change. Pinned on `ObjectKernel` +
+ * [#26167] What the held write locale localizes is the @mention notification
+ * title: `sys_activity.summary` is stored in English and served in each
+ * READER's locale. So the title is what this pin reads. The plugin's real
+ * recipient gate needs a sharing model this harness does not boot, so the
+ * writers are handed a messaging double and an admitting gate; every other
+ * option — the locale composition included — is the plugin's own.
+ */
+const mentionTitles = vi.hoisted(() => [] as string[]);
+vi.mock('./audit-writers.js', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('./audit-writers.js')>();
+  return {
+    ...mod,
+    installAuditWriters: (engine: any, packageId: string, opts: any) =>
+      mod.installAuditWriters(engine, packageId, {
+        ...opts,
+        getMessaging: () => ({
+          emit: async (e: any) => {
+            if (e.topic === 'collab.mention') mentionTitles.push(String(e.payload?.title));
+            return {};
+          },
+        }),
+        admitMentionRecipients: async ({ mentions }: { mentions: string[] }) => [...mentions],
+      }),
+  };
+});
+
+/**
+ * [#24235] A notification title is written ONCE, at write time, so the
+ * writer's held locale must not outlive a language change. Pinned on `ObjectKernel` +
  * `ObjectQLPlugin` + `AuditPlugin` over a real SQLite driver: the plugin's own
  * locale composition, the core resolver beneath it (which caches here, since
  * this engine carries the write epoch) and the engine's real hook dispatch.
@@ -28,7 +55,7 @@ import { installDefaultOrganization } from './default-organization.testkit.js';
  * the TTL running out: what retires the held locale here is the write, or
  * nothing does.
  */
-describe('audit writers — a localization change reaches the very next audited write (#24235)', () => {
+describe('audit writers — a localization change reaches the very next @mention title (#24235)', () => {
   const HARNESS_PACKAGE = 'com.objectstack.audit.test.write-locale-seam';
   /** A stand-in under the real name: service-settings owns the definition, and the name is what the seam reads. */
   const sysSetting = {
@@ -65,6 +92,28 @@ describe('audit writers — a localization change reaches the very next audited 
     ]);
     expect(rows).toHaveLength(1);
     return String(rows[0].summary);
+  }
+
+  let taskId = '';
+  let comments = 0;
+  /** Mention one user in a comment on the task, as the admin; answer the title the mention was given. */
+  async function mentionTitle(): Promise<string> {
+    if (!taskId) taskId = String(((await engine.insert('biz_task', { name: 'thread' }, asAdmin)) as any).id);
+    comments += 1;
+    const before = mentionTitles.length;
+    await engine.insert(
+      'sys_comment',
+      {
+        thread_id: `biz_task:${taskId}`,
+        author_id: 'u_admin',
+        author_name: 'Ada',
+        body: `note ${comments}`,
+        mentions: '["u_bob"]',
+      },
+      asAdmin,
+    );
+    expect(mentionTitles.length - before).toBe(1);
+    return mentionTitles[mentionTitles.length - 1];
   }
 
   beforeAll(async () => {
@@ -107,7 +156,7 @@ describe('audit writers — a localization change reaches the very next audited 
     }
   }, 30_000);
 
-  it('pin: a settings-store write between two audited writes; the second stores the new language', async () => {
+  it('pin: a settings-store write between two mentions; the second is titled in the new language', async () => {
     // The precondition the whole case leans on: this engine carries the write
     // epoch, so the core resolver beneath the writer caches as it does in a
     // stock boot rather than declining to.
@@ -116,12 +165,12 @@ describe('audit writers — a localization change reaches the very next audited 
     vi.setSystemTime(new Date('2026-10-18T00:00:00Z'));
 
     // No row yet: the built-in default (`en-US`), read once and held.
-    expect(await auditedWrite('T1')).toBe('Created Task "T1"');
+    expect(await mentionTitle()).toBe('Ada mentioned you');
 
     // CONTROL: a write with no settings change between is answered from the
     // held locale — not one settings read.
     const beforeControl = settingsReads();
-    expect(await auditedWrite('T2')).toBe('Created Task "T2"');
+    expect(await mentionTitle()).toBe('Ada mentioned you');
     expect(settingsReads() - beforeControl).toBe(0);
 
     // The change: an insert into the settings store…
@@ -130,15 +179,19 @@ describe('audit writers — a localization change reaches the very next audited 
       { namespace: 'localization', key: 'locale', scope: 'tenant', value: 'zh-CN' },
       SYSTEM as any,
     );
-    expect(await auditedWrite('T3')).toBe('创建了 Task "T3"');
+    expect(await mentionTitle()).toBe('Ada 提到了你');
 
     // …and an update of it, the shape a settings write takes once the row exists.
     await engine.update('sys_setting', { value: 'ja-JP' }, { where: { key: 'locale' }, multi: true, ...SYSTEM } as any);
-    expect(await auditedWrite('T4')).toBe('Task「T4」を作成しました');
+    expect(await mentionTitle()).toBe('Adaさんがあなたをメンションしました');
 
     // The new answer is held in turn: the next unchanged write reads nothing.
     const beforeHeld = settingsReads();
-    expect(await auditedWrite('T5')).toBe('Task「T5」を作成しました');
+    expect(await mentionTitle()).toBe('Adaさんがあなたをメンションしました');
     expect(settingsReads() - beforeHeld).toBe(0);
+
+    // [#26167] The audited write itself stores the English sentence under any
+    // workspace language: it is served in each reader's own.
+    expect(await auditedWrite('T6')).toBe('Created Task "T6"');
   });
 });
