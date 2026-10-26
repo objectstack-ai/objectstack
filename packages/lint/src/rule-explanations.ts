@@ -696,6 +696,34 @@ const SECURITY_CBP_NO_RELATION_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN_EXPLANATION: RuleExplanation = {
+  rule: 'security-controlled-by-parent-owner-policy-without-opt-in',
+  covers: 'why a detail policy keyed on the caller cannot admit',
+  paragraphs: [
+    'A `controlled_by_parent` detail derives its record access from its master (ADR-0055). On a write, ' +
+      'the master gate asks for EDIT access to the master row, and the detail\'s own row-level policies ' +
+      'compose with that answer as an AND: they can take rows away from a caller the master gate admits, ' +
+      'and they can never add one. So an `update` policy that keys a field on the caller — ' +
+      '`owner_id == current_user.id` — narrows the callers who may edit the master to the row\'s owner, ' +
+      'and admits nobody who merely reads the master. For a row whose owner is not a master editor ' +
+      '(the common case: the person a task or an obligation is assigned to reads the account or the ' +
+      'contract) the policy is dead, and the write is refused by the master gate as if it were absent.',
+    'The opt-in `sharing: { controlledByParent: { ownerMayEdit: true } }` on the detail is what changes ' +
+      'the gate\'s answer (ADR-0055 §3 as amended): the owner of a detail row — its `owner_id`, the ' +
+      'platform\'s injected per-record owner — updates that row by id with READ access to the master, ' +
+      'and the detail\'s own policies then decide as authored. Everyone else, and every insert, delete, ' +
+      'multi-row update and on-behalf-of write, still needs edit access to the master. The opt-in ' +
+      'reads `owner_id` and nothing else: a policy keyed on another field stays a narrowing even ' +
+      'after it, so key the policy on `owner_id` or declare what the other field means in prose.',
+    'This is a warning, not an error: a narrowing can be meant (only the owner among the master\'s ' +
+      'editors may update), and no runtime door refuses the shape. To fix it, declare the opt-in on ' +
+      'the detail when the owner is meant to write with read on the master, or drop the policy when ' +
+      'the master gate alone is the intended rule. The opt-in is refused by the parse on an object ' +
+      'whose `sharingModel` is not `controlled_by_parent`, so it cannot be declared where nothing ' +
+      'reads it.',
+  ],
+};
+
 const SECURITY_FLS_UNKNOWN_FIELD_EXPLANATION: RuleExplanation = {
   rule: 'security-fls-unknown-field',
   covers: 'how the runtime resolves a field-permission key',
@@ -4987,6 +5015,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [DATASET_FILTER_FIELD_UNKNOWN_EXPLANATION.rule]: DATASET_FILTER_FIELD_UNKNOWN_EXPLANATION,
   [SECURITY_CBP_AMBIGUOUS_RELATION_EXPLANATION.rule]: SECURITY_CBP_AMBIGUOUS_RELATION_EXPLANATION,
   [SECURITY_CBP_NO_RELATION_EXPLANATION.rule]: SECURITY_CBP_NO_RELATION_EXPLANATION,
+  [SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN_EXPLANATION.rule]: SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN_EXPLANATION,
   [SECURITY_FLS_UNKNOWN_FIELD_EXPLANATION.rule]: SECURITY_FLS_UNKNOWN_FIELD_EXPLANATION,
   [SECURITY_MASTER_DETAIL_UNGRANTED_EXPLANATION.rule]: SECURITY_MASTER_DETAIL_UNGRANTED_EXPLANATION,
   [SECURITY_WILDCARD_VAMA_EXPLANATION.rule]: SECURITY_WILDCARD_VAMA_EXPLANATION,

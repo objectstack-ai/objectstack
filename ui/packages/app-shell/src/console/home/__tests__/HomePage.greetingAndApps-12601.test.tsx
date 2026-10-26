@@ -107,6 +107,7 @@ vi.mock('../../../context/NavigationContext', () => ({
 }));
 vi.mock('../../../hooks/useCanAuthorMetadata', () => ({
   useCanAuthorMetadata: () => state.canAuthorMetadata,
+  useCanReadPendingDrafts: () => true,
 }));
 // The page's one inbox seam: the approvals count AND whether it is an answer.
 vi.mock('../../../hooks/useHomeInbox', () => ({

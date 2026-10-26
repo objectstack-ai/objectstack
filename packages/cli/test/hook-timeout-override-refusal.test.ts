@@ -79,8 +79,9 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { childEnv } from './helpers/serve-process.js';
@@ -165,11 +166,32 @@ function runVitestList(...flags: string[]): ChildRun {
   }
 }
 
+/** How much of a child's output a failed status assertion carries. */
+const REPORTED_OUTPUT_CHARS = 2_000;
+
+/**
+ * The message every status assertion here carries: the child's exit status and
+ * the head of what it printed (#26047).
+ *
+ * Each case asserts a child's exit code, so any death of the child reads as
+ * `expected 1 to be +0` and nothing else. Three merge-queue builds failed the
+ * no-override control with exactly that line and no way to tell a refusal, a
+ * config-load crash and a timeout apart. The head is kept because a config-load
+ * failure prints its cause first (`failed to load config from …` and the
+ * thrown error), and the length is bounded so a listing of the whole package
+ * cannot flood the report.
+ */
+function describeRun(run: ChildRun): string {
+  const head = run.output.slice(0, REPORTED_OUTPUT_CHARS);
+  const cut = run.output.length > head.length ? `\n… (${run.output.length - head.length} more chars)` : '';
+  return `vitest list exited ${run.status}; its output began:\n${head}${cut}`;
+}
+
 describe('#18788 a CLI timeout override that cannot reach a project is refused, not passed', () => {
   it('refuses `--hookTimeout`, naming the package and a spelling that does bite', () => {
     const run = runVitestList('--hookTimeout=1');
 
-    expect(run.status).not.toBe(0);
+    expect(run.status, describeRun(run)).not.toBe(0);
     expect(run.output).toContain(REFUSAL);
     expect(run.output).toContain('--hookTimeout');
     // The #17978 finding against the sibling preflight, held here too: a shared
@@ -185,7 +207,7 @@ describe('#18788 a CLI timeout override that cannot reach a project is refused, 
   it('refuses `--teardownTimeout` — the other knob the same allowlist drops', () => {
     const run = runVitestList('--teardownTimeout=1');
 
-    expect(run.status).not.toBe(0);
+    expect(run.status, describeRun(run)).not.toBe(0);
     expect(run.output).toContain(REFUSAL);
     expect(run.output).toContain('--teardownTimeout');
   }, VITEST_LIST_BUDGET_MS);
@@ -193,12 +215,27 @@ describe('#18788 a CLI timeout override that cannot reach a project is refused, 
   it('⭐ CONTROL — a run naming no override passes and says nothing', () => {
     // Without this leg the three above are satisfied by a config that refuses
     // everything, which would be a worse defect than the one being fixed.
-    const run = runVitestList();
+    //
+    // #26047: the walk that builds this run's population must not read the
+    // package's git-ignored `tmp/`. Sibling tests render whole scaffolds there,
+    // test files included, and delete them mid-run; a delete that landed inside
+    // the walk threw `ENOENT` out of the config load and this child exited 1. A
+    // test file planted there is in no tier, so the listing must not name it.
+    mkdirSync(join(PKG, 'tmp'), { recursive: true });
+    const scratch = mkdtempSync(join(PKG, 'tmp', 'hook-timeout-control-'));
+    writeFileSync(join(scratch, 'planted.test.ts'), 'export {};\n');
+    let run: ChildRun;
+    try {
+      run = runVitestList();
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
 
-    expect(run.status).toBe(0);
+    expect(run.status, describeRun(run)).toBe(0);
     expect(run.output).not.toContain(REFUSAL);
     // It really listed something, so the zero is a reading and not an empty run.
     expect(run.output).toMatch(/\.test\.ts/);
+    expect(run.output).not.toContain('planted.test.ts');
   }, VITEST_LIST_BUDGET_MS);
 
   it('⭐ CONTROL — `--testTimeout` is on vitest’s allowlist, reaches the projects, and is NOT refused', () => {
@@ -209,7 +246,7 @@ describe('#18788 a CLI timeout override that cannot reach a project is refused, 
     // question.
     const run = runVitestList('--testTimeout=1');
 
-    expect(run.status).toBe(0);
+    expect(run.status, describeRun(run)).toBe(0);
     expect(run.output).not.toContain(REFUSAL);
   }, VITEST_LIST_BUDGET_MS);
 });

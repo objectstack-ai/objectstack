@@ -82,6 +82,14 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Referencing Field",
         help: "Field name on the owning record that holds this file id"
       },
+      released_ref_object: {
+        label: "Released From Object",
+        help: "Short object name of the record that last owned this file, after it let the file go"
+      },
+      released_ref_id: {
+        label: "Released From Record",
+        help: "Primary key of the record that last owned this file, after it let the file go"
+      },
       metadata: {
         label: "Metadata (JSON)"
       },

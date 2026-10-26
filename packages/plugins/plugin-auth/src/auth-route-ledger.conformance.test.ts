@@ -215,6 +215,12 @@ describe('auth route ledger hygiene', () => {
     expect(own).toEqual([
       'GET /api/v1/auth/bootstrap-status',
       'GET /api/v1/auth/config',
+      // [#26020] On this pin's own terms: `auth-plugin.ts` mounts it itself (a
+      // `rawApp.get` on the `${basePath}/organization/invitation-preview`
+      // template, ahead of the catch-all), and the `live.has(route)` loop below
+      // holds it to the same proof — better-auth's own read is
+      // `/organization/get-invitation`, a different path.
+      'GET /api/v1/auth/organization/invitation-preview',
       'POST /api/v1/auth/admin/import-users',
       'POST /api/v1/auth/admin/oauth2/toggle-disabled',
       // [#16678] The thirteenth, added on this pin's own terms exactly as the

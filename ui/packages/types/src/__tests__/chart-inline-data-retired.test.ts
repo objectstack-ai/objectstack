@@ -210,9 +210,11 @@ describe('objectui#6896 — the counter-probe: a deletion would restore the sile
   });
 
   it('an UNDECLARED key still rides through — the silence a tombstone is measured against', () => {
+    // It rides through UNREFUSED; since objectstack#25923 the mirror is
+    // `.passthrough()`, so the key is kept in the output rather than dropped.
     const result = ChartDataSeriesSchema.safeParse({ ...LIVE_SERIES, notAKeyAtAll: 'anything' });
     expect(result.success).toBe(true);
-    if (result.success) expect(result.data).not.toHaveProperty('notAKeyAtAll');
+    if (result.success) expect(result.data).toHaveProperty('notAKeyAtAll', 'anything');
   });
 });
 

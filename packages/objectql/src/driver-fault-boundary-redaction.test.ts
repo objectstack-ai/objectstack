@@ -45,6 +45,7 @@ import {
 } from '@objectstack/types';
 import { ObjectQL } from './engine.js';
 import { DuplicateRecordError } from './duplicate-record-error.js';
+import { NotNullRefusalError } from './not-null-refusal-error.js';
 import { SummaryRecomputeError } from './summary-errors.js';
 import { redactBoundStatement, redactPropagatedDriverFault } from '@objectstack/types';
 
@@ -489,9 +490,20 @@ const DOORS: ReadonlyArray<readonly [string, Failing, (e: ObjectQL) => Promise<u
 /** One representative per dialect for the door sweep. */
 const DOOR_SHAPES = [SHAPES[1], SHAPES[6], SHAPES[11]];
 
+/**
+ * [#24768] The NOT NULL shapes, one per dialect. On a field the object declares
+ * (`title` here) the insert and update doors refuse them as the record
+ * validator's `ValidationError` (`NotNullRefusalError`) with the driver's error
+ * on `cause`, so those door × shape pairs are pinned in their own block below
+ * rather than by the sweep's same-prototype assertion.
+ */
+const NOT_NULL_SHAPES = [SHAPES[2], SHAPES[6], SHAPES[14]];
+const NOT_NULL_DOORS = new Set(['insert', 'insert (batch)', 'update by id', 'update by predicate']);
+
 describe('[#21274] every engine door that reaches a driver exits through the cut', () => {
   for (const shape of DOOR_SHAPES) {
     for (const [door, failing, run] of DOORS) {
+      if (NOT_NULL_SHAPES.includes(shape) && NOT_NULL_DOORS.has(door)) continue;
       it(`${door} — ${shape.id}`, async () => {
         const { engine, state } = await bootEngine(shape.make, failing);
         const error = await caught(run(engine));
@@ -523,6 +535,23 @@ describe('[#21274] every engine door that reaches a driver exits through the cut
         const cause = error.cause as Error & { code?: unknown };
         expect(Object.getPrototypeOf(cause)).toBe(Object.getPrototypeOf(state.lastRaw));
         expect(cause.code).toBe((state.lastRaw as Error & { code?: unknown }).code);
+      });
+    }
+  }
+
+  for (const shape of NOT_NULL_SHAPES) {
+    for (const [door, failing, run] of DOORS.filter(([name]) => NOT_NULL_DOORS.has(name))) {
+      it(`${door}: a NOT NULL refusal on a declared field leaves as the validator's ValidationError, and a cut cause — ${shape.id}`, async () => {
+        const { engine, state } = await bootEngine(shape.make, failing);
+        const error = (await caught(run(engine))) as NotNullRefusalError;
+        expectNoSentinel(error);
+        expect(error).toBeInstanceOf(NotNullRefusalError);
+        expect(error.code).toBe('VALIDATION_FAILED');
+        expect(error.fields.map((f) => [f.field, f.code])).toEqual([['title', 'required']]);
+        const cause = error.cause as Error & { code?: unknown };
+        expect(Object.getPrototypeOf(cause)).toBe(Object.getPrototypeOf(state.lastRaw));
+        expect(cause.code).toBe((state.lastRaw as Error & { code?: unknown }).code);
+        expect(cause.message).toContain(shape.diagnostic);
       });
     }
   }

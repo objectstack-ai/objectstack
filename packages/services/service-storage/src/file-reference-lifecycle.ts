@@ -65,6 +65,17 @@ import { callerContext } from './attachment-access-hooks.js';
  * and keep any other id as written; neither is a file the anonymous caller
  * may provide. An empty or absent file field is written as before.
  *
+ * ### A released file keeps its record's rule
+ *
+ * [#26046] Releasing a file clears its ownership columns, and the download
+ * door reads a file no record owns by the organization's rule. That rule is
+ * for a file no record ever held; a file a record let go is still the one that
+ * record held. So release keeps the record ({@link releaseOwnership}), the
+ * door's verdict judges the file by that record's read access until it is
+ * claimed again or collected, and a claim, which asks the same verdict, is
+ * open only to a writer who may read that record. A deleted record is read by
+ * nobody, so its released files are left to their uploader.
+ *
  * ### The one write that cannot honour it, and is refused
  *
  * [#7102] A predicate (`multi: true`) update has ONE payload for N matched
@@ -803,6 +814,12 @@ async function claimFile(
     patch.status = 'committed';
     patch.deleted_at = null;
   }
+  // [#26046] The claiming record's rule replaces the one the file kept from
+  // the record that let it go.
+  if (row.released_ref_object != null || row.released_ref_id != null) {
+    patch.released_ref_object = null;
+    patch.released_ref_id = null;
+  }
   await engine.update('sys_file', patch, { context: { ...SYSTEM_CTX } });
 }
 
@@ -848,6 +865,13 @@ async function collectionOpen(engine: FileReferenceEngine): Promise<boolean> {
  * Only a `committed` file is tombstoned: `pending` rows already carry their
  * own never-completed reap policy, and re-tombstoning a `deleted` row would
  * reset its grace clock.
+ *
+ * [#26046] Every release keeps the record that let the file go
+ * (`released_ref_object` / `released_ref_id`), whether or not it tombstones:
+ * the file is read by that record's rule until a writer who may read it
+ * claims it again ({@link claimFile} clears them), or it is collected. Without
+ * them a released file would read as one no record ever held, whose rule is
+ * the organization's, which is weaker than the record's was.
  */
 export async function releaseOwnership(
   engine: FileReferenceEngine,
@@ -861,7 +885,14 @@ export async function releaseOwnership(
     if (id == null) continue;
     const tombstone = collect && row.status === 'committed';
     try {
-      const patch: Record<string, unknown> = { id, ref_object: null, ref_id: null, ref_field: null };
+      const patch: Record<string, unknown> = {
+        id,
+        ref_object: null,
+        ref_id: null,
+        ref_field: null,
+        released_ref_object: row.ref_object ?? null,
+        released_ref_id: row.ref_id ?? null,
+      };
       if (tombstone) {
         patch.status = 'deleted';
         patch.deleted_at = new Date().toISOString();

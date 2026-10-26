@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 90 — spawns the real producer once per single-cause fixture: five spawns of the source CLI, `os build` over the divergent container in both faces, the `packages[]` stack and the two controls; each spawn's floor is the source entry loading all 72 commands (about 8.5 s, `os --version` included); slowest CI reading 66.67 s (run 40204927516) in the window of shard-timings refresh run 40275747937 (PR #25960), over 10 s in 4 of 4 runs that executed it, x 1.25, rounded up
 
 /**
  * [#20393] `os build` refuses a `views:` container whose own `name` disagrees

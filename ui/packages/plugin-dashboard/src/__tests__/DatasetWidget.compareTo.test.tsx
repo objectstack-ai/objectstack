@@ -29,7 +29,7 @@ vi.mock('@object-ui/react', async (importOriginal) => ({
   },
 }));
 
-import { DatasetWidget, extractDateWindows } from '../DatasetWidget';
+import { DatasetWidget, extractDateWindows, filterDatesField } from '../DatasetWidget';
 
 afterEach(() => {
   cleanup();
@@ -201,6 +201,112 @@ describe('DatasetWidget — lowering the comparison window (#3337 point 5)', () 
     );
     expect(await screen.findByRole('alert')).toHaveTextContent(/ambiguous/);
     expect(screen.getByRole('alert')).toHaveTextContent(/"close_date", "created_at"/);
+  });
+});
+
+describe('filterDatesField', () => {
+  it('finds a date condition at the top level, under $and, $or and $not', () => {
+    expect(filterDatesField(Q2)).toBe(true);
+    expect(filterDatesField({ $and: [{ stage: 'won' }, { close_date: { $gte: '2026-01-01' } }] })).toBe(true);
+    expect(filterDatesField({ $or: [{ stage: 'won' }, { close_date: '2026-04-01' }] })).toBe(true);
+    expect(filterDatesField({ close_date: { $not: { $lt: '2026-04-01T00:00:00Z' } } })).toBe(true);
+  });
+
+  it('finds nothing in a filter that dates no field', () => {
+    expect(filterDatesField(undefined)).toBe(false);
+    expect(filterDatesField({ stage: 'won', amount: { $gte: 1000, $lte: 5000 } })).toBe(false);
+    expect(filterDatesField({ stage: { $in: ['won', 'lost'] } })).toBe(false);
+  });
+
+  it('with a dimension named, reads that field alone', () => {
+    const filter = { created_at: { $gte: '2026-01-01', $lte: '2026-12-31' } };
+    expect(filterDatesField(filter, 'created_at')).toBe(true);
+    expect(filterDatesField(filter, 'close_date')).toBe(false);
+  });
+});
+
+// objectstack#25970 — the reader picked All time on the dashboard date filter,
+// so the widget's resolved filter dates nothing: there is no window to compare
+// against, and the tile shows its number instead of the executor's refusal.
+describe('DatasetWidget — a filter that dates nothing asks for no comparison (#25970)', () => {
+  // Answers the way the executor does: `compareTo` with no shiftable window is
+  // refused (`resolveCompareDimension`), anything else answers a row.
+  const executorLike = () => makeSource(async (_d, s) => {
+    if (s.compareTo && !(s.timeDimensions ?? []).some((t: any) => t.dateRange)) {
+      throw new Error(
+        'Dataset query failed: 400 Bad Request — [dataset-executor] compareTo needs a dated window to shift',
+      );
+    }
+    return { rows: [{ revenue: 120 }] };
+  });
+
+  it('sends no compareTo for a widget with no filter and renders the number with no badge', async () => {
+    const src = executorLike();
+    render(
+      <DatasetWidget
+        widget={{ type: 'metric', dataset: 'sales', values: ['revenue'], compareTo: { kind: 'previousPeriod' } }}
+        dataSource={src}
+      />,
+    );
+    await waitFor(() => expect(src.queryDataset).toHaveBeenCalled());
+    // The same query a widget without `compareTo` sends.
+    expect(selectionOf(src)).toEqual({ dimensions: [], measures: ['revenue'] });
+    expect(await screen.findByText('120')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('dataset-compare-trend')).not.toBeInTheDocument();
+  });
+
+  it('keeps a non-date filter as it is and sends no compareTo', async () => {
+    const src = executorLike();
+    render(
+      <DatasetWidget
+        widget={{
+          type: 'metric', dataset: 'sales', values: ['revenue'],
+          filter: { stage: 'won' }, compareTo: { kind: 'previousYear' },
+        }}
+        dataSource={src}
+      />,
+    );
+    await waitFor(() => expect(src.queryDataset).toHaveBeenCalled());
+    expect(selectionOf(src)).toEqual({ dimensions: [], measures: ['revenue'], runtimeFilter: { stage: 'won' } });
+    expect(await screen.findByText('120')).toBeInTheDocument();
+  });
+
+  it('sends no compareTo when the named dimension is the one left undated', async () => {
+    const src = executorLike();
+    const filter = { created_at: { $gte: '2026-01-01', $lte: '2026-12-31' } };
+    render(
+      <DatasetWidget
+        widget={{
+          type: 'metric', dataset: 'sales', values: ['revenue'],
+          filter, compareTo: { kind: 'previousYear', dimension: 'close_date' },
+        }}
+        dataSource={src}
+      />,
+    );
+    await waitFor(() => expect(src.queryDataset).toHaveBeenCalled());
+    // Nothing lowered either: the window stays in the filter, as without compareTo.
+    expect(selectionOf(src)).toEqual({ dimensions: [], measures: ['revenue'], runtimeFilter: filter });
+  });
+
+  // The ruling: an author-declared one-bound window (YTD) STAYS an error. The
+  // executor and the spec define a comparison only against a two-bound window,
+  // and this one was written by the author, not removed by the reader.
+  it('still sends compareTo for a one-bound `$gte` window, and shows the executor’s refusal', async () => {
+    const src = executorLike();
+    render(
+      <DatasetWidget
+        widget={{
+          type: 'metric', dataset: 'sales', values: ['revenue'],
+          filter: { close_date: { $gte: '2026-01-01' } }, compareTo: { kind: 'previousPeriod' },
+        }}
+        dataSource={src}
+      />,
+    );
+    await waitFor(() => expect(src.queryDataset).toHaveBeenCalled());
+    expect(selectionOf(src).compareTo).toEqual({ kind: 'previousPeriod' });
+    expect(selectionOf(src).timeDimensions).toBeUndefined();
+    expect(await screen.findByRole('alert')).toHaveTextContent(/compareTo needs a dated window to shift/);
   });
 });
 

@@ -1617,6 +1617,16 @@ async function judgeFileRead(
     return readable.has(ownerId) ? 'allow' : 'deny';
   }
 
+  // [#26046] Released: a record let this file go, and no record has claimed
+  // it since. It is still the file that record held, so it keeps that
+  // record's read rule, asked exactly as the arm above asks it. A record that
+  // no longer exists is read by nobody, so only the uploader reads the file.
+  if (file.released_ref_object && file.released_ref_id != null && file.released_ref_id !== '') {
+    const formerId = String(file.released_ref_id);
+    const readable = await readableFieldOwners(registry, engine, String(file.released_ref_object), [formerId], context);
+    return readable.has(formerId) ? 'allow' : 'deny';
+  }
+
   // [#25693] Unclaimed (neither an attachments scope nor a field owner):
   // no parent record to derive access from, so the file is read as every
   // other organization-scoped row is — within the caller's organization,

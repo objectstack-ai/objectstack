@@ -11,7 +11,7 @@
     "label": {
       "status": "live",
       "verifiedAt": "2026-08-01",
-      "evidence": "objectui @940ba24: packages/plugin-grid/src/ImportWizard.tsx:979",
+      "evidence": "ui/packages/plugin-grid/src/ImportWizard.tsx (:979 at objectui @940ba24)",
       "note": "saved-mapping picker option text (`label || name`) and the applied-mapping hint. Display metadata with a real selection surface — the datasource.label treatment, not authorWarn'd."
     },
     "sourceFormat": {

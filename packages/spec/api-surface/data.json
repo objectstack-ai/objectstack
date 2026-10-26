@@ -852,6 +852,7 @@
     "classifyFilterToken (function)",
     "containsUnresolvedPlaceholder (function)",
     "controlledByParentMasterRefusal (function)",
+    "controlledByParentOwnerMayEdit (function)",
     "countAuthorableFields (function)",
     "credentialFreeMongoOptions (function)",
     "credentialFreeUrl (function)",

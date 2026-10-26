@@ -1,0 +1,370 @@
+# UI coverage, nightly (#25924). objectui's coverage lane, ported to the root.
+#
+# objectui's `ci.yml` ran this lane (`Test (coverage shard n/8)` and the merge
+# job `Test (coverage)`) on every push to `main` and on its hourly schedule:
+# 8 legs of ~22 min, about 31 % of that repository's CI minutes (#25924's
+# measurement, 2026-10-17..24), to enforce four thresholds. The ui/ cutover
+# (#25752) did not port it: it is row 7 "kept, follow-up port" of the
+# objectstack#25697 workflow roster, and the nested `ui/.github/workflows/`
+# copy runs nowhere, so from the cutover until this file the thresholds were
+# evaluated by nothing.
+#
+# It comes back here on `schedule` plus `workflow_dispatch` only, beside
+# `coverage-nightly.yml` (spec's coverage report), with the thresholds
+# unchanged: `ui/vitest.config.mts` `coverage.thresholds` (lines 40,
+# functions 33, branches 30, statements 40). The cost accepted with it, stated
+# on #25924: a change that drops coverage under a threshold is reported the
+# night after it merged, not on the merge. `scheduled-full-run-card.yml`
+# watches this workflow, so a red night files or refreshes one card
+# (`nightly full run: red on main (UI Coverage)`); without that reader a red
+# scheduled run is seen by nobody (objectui#5402: four dark days).
+#
+# ⛔ Not a merge gate and not a release gate: no pull request or queue build
+# runs it, branch protection reads none of its contexts, and
+# `scripts/ci/scheduled-full-run.mjs`'s RELEASE_GATE_WORKFLOWS is `CI` and
+# `Lint & Type Check` only.
+#
+# The pins: `ui/scripts/__tests__/coverage-shard-width.test.ts` (the width,
+# said once), `coverage-shard-reporter-readability.test.ts` (the shard leg's
+# reporter set) and `shard-headroom.test.ts` (the headroom reading's matrix
+# and cap). They read this file through `ui/scripts/__tests__/helpers/root-ci.ts`.
+name: UI Coverage
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 06:13 UTC: off the `:00` minute every other repository's cron queues
+    # on, after the 04:00 four-hourly full run and the 05:xx nightlies.
+    - cron: '13 6 * * *'
+
+permissions:
+  contents: read
+
+# One run at a time per ref; a dispatch while the nightly runs waits rather
+# than cancelling a run that has already paid for its shards.
+concurrency:
+  group: ui-coverage-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ui-coverage:
+    name: Test UI (coverage shard ${{ matrix.shard }}/8)
+    runs-on: ubuntu-latest
+    # objectui#12256 measured the 40-minute margin gone at four shards, which
+    # is why the lane is eight wide; the report job prints the longest shard's
+    # headroom against this cap on every run.
+    timeout-minutes: 40
+    permissions:
+      contents: read
+
+    strategy:
+      # Report every shard's failures, not just the first one to break; the
+      # merge below refuses to publish anything unless every shard is green.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      # Restore-only, here and below: a nightly reads `main`'s caches and the
+      # per-push workflows own saving them.
+      - name: Restore pnpm cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      # ci.yml's Build UI Deps saves its turbo entries for exactly the build
+      # below on every `main` push, so the build replays them.
+      - name: Restore Turbo cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .turbo/cache
+          key: ${{ runner.os }}-turbo-ui-deps-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-ui-deps-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The same command as the step of this name in ci.yml's ui jobs:
+      # objectui's suite resolves the seven @objectstack packages from their
+      # built dist.
+      - name: Build the @objectstack packages objectui consumes
+        run: |
+          pnpm exec turbo run build --concurrency=4 \
+            --filter=@objectstack/spec... \
+            --filter=@objectstack/client... \
+            --filter=@objectstack/core... \
+            --filter=@objectstack/formula... \
+            --filter=@objectstack/lint... \
+            --filter=@objectstack/sdui-parser... \
+            --filter=@objectstack/types...
+
+      # `--reporter=blob` writes `ui/.vitest-reports/blob-N-8.json` (the shard
+      # index is in the FILE NAME, so every shard's artifact downloads into one
+      # directory below without colliding). The blob carries this shard's raw
+      # coverage and test results; the report itself is produced once, by the
+      # merge.
+      #
+      # `--reporter=default --reporter=github-actions` because a CLI
+      # `--reporter` REPLACES the reporter set rather than adding to it: with
+      # the blob alone a red shard's log ends at `blob report written to …` with
+      # no failing test name, and the failure lives only in the download-only
+      # artifact (objectui#9177; objectui#8545 priced it at 84 and 87 pushes of
+      # an unevaluated gate). ⛔ Drop neither half: without the blob the merge
+      # has nothing to enforce the thresholds over.
+      #
+      # `--testTimeout=60000` (objectui#9271): `testTimeout: 15000` is
+      # calibrated for the uninstrumented Test UI lane, and the repo-sweeping
+      # rows under `ui/scripts/__tests__/` take several times longer under v8
+      # instrumentation. A timed-out row kills the shard, and a dead shard is
+      # NO gate: the report job merges only when every shard is green. This is
+      # a hung-test detector for this lane, not a performance budget; Test UI's
+      # 15 s one is unchanged.
+      #
+      # The legs zero the thresholds: they are enforced once, by the merge,
+      # over the whole map.
+      - name: Run the ui tests with coverage (shard ${{ matrix.shard }}/8)
+        run: >-
+          pnpm --dir ui run test:coverage --reporter=blob --reporter=default
+          --reporter=github-actions --shard=${{ matrix.shard }}/8
+          --testTimeout=60000
+          --coverage.thresholds.lines=0 --coverage.thresholds.functions=0
+          --coverage.thresholds.branches=0 --coverage.thresholds.statements=0
+
+      # `always()`: a red shard is exactly when someone wants its blob.
+      # `retention-days: 7`: a Monday question about a Friday-night red run
+      # stays answerable. `if-no-files-found: error`: "the reporter wrote
+      # nothing" is a finding.
+      - name: Upload this shard's blob report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ui-coverage-blob-${{ matrix.shard }}
+          path: ui/.vitest-reports/*
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: error
+
+  # Merges every shard's blob into ONE coverage report, enforces the
+  # configured thresholds over it, publishes it, and -- whatever happens --
+  # says whether the coverage gate ran (objectui#5403, objectui#5436).
+  #
+  # Green ONLY when every shard passed, every blob arrived, they merged into
+  # one report, the thresholds held over the whole merged map and the report
+  # was published. Red, with an annotation naming which of those did not
+  # happen, every other time. ⛔ The merge is NOT unconditional: a report
+  # built from fewer than every shard understates coverage on every file the
+  # missing shard exercised, and a wrong number is worse than a missing one.
+  ui-coverage-report:
+    name: Test UI (coverage)
+    needs: ui-coverage
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # The matrix width, said once for this job: the blob count the merge
+    # refuses to go below and the verdict's wording both read it.
+    # `ui/scripts/__tests__/coverage-shard-width.test.ts` pins it to the
+    # `ui-coverage` matrix above.
+    env:
+      COVERAGE_SHARDS: '8'
+    # `actions: read` for the headroom reading's jobs API call; nothing here
+    # writes.
+    permissions:
+      contents: read
+      actions: read
+
+    steps:
+      # Every step up to the verdict is gated on the shards having passed: on
+      # a red run this job checks out `ui/scripts` alone and reports.
+      - name: Checkout repository
+        if: needs.ui-coverage.result == 'success'
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        if: needs.ui-coverage.result == 'success'
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        if: needs.ui-coverage.result == 'success'
+        uses: ./.github/actions/setup-pnpm
+
+      - name: Get pnpm store directory
+        if: needs.ui-coverage.result == 'success'
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Restore pnpm cache
+        if: needs.ui-coverage.result == 'success'
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      # No build: `--merge-reports` runs no test file, and the vitest config
+      # imports nothing from the @objectstack packages.
+      - name: Install dependencies
+        if: needs.ui-coverage.result == 'success'
+        run: pnpm install --frozen-lockfile
+
+      - name: Download every shard's blob report
+        if: needs.ui-coverage.result == 'success'
+        uses: actions/download-artifact@v8
+        with:
+          pattern: ui-coverage-blob-*
+          path: ui/.vitest-reports
+          merge-multiple: true
+
+      # A zero is not a reading: `--merge-reports` happily merges three blobs
+      # and prints a confident, wrong total. Count them first.
+      - name: Refuse to merge a partial set of shard reports
+        id: blobs
+        if: needs.ui-coverage.result == 'success'
+        run: |
+          # `mkdir -p` first, and no `2>/dev/null`: a missing directory must
+          # not abort this step before it prints the annotation below.
+          mkdir -p ui/.vitest-reports
+          ls -la ui/.vitest-reports/
+          blobs=$(find ui/.vitest-reports -maxdepth 1 -type f -name "blob-*-${COVERAGE_SHARDS}.json" | wc -l)
+          if [ "$blobs" -ne "$COVERAGE_SHARDS" ]; then
+            echo "::error title=Coverage merge::expected $COVERAGE_SHARDS shard blob reports, found $blobs — a merged report built from a partial set understates coverage, refusing to merge"
+            exit 1
+          fi
+          echo "all $COVERAGE_SHARDS shard blob reports present"
+
+      # No tests run here. `--merge-reports` reads the blobs, writes the one
+      # complete report and is ALSO the gate: the configured
+      # `coverage.thresholds` are enforced over the whole merged map, and a
+      # breach exits this step non-zero (`mergeReports()` ends in
+      # `generateReports(coverageMap, true)`, which calls `reportThresholds`;
+      # measured on objectui#5436: same blob set at 38.4 % lines,
+      # `--coverage.thresholds.lines=38` exits 0 and `=39` exits 1).
+      # `generateReports()` writes the json reporter BEFORE it evaluates the
+      # thresholds, which is what lets the publish step below still capture a
+      # report that breached.
+      - name: Merge the shard reports into one coverage report
+        id: merge
+        if: needs.ui-coverage.result == 'success'
+        run: pnpm --dir ui run test:coverage --merge-reports --coverage.reporter=json --coverage.reporter=text
+
+      # `!cancelled()` plus `outcome != 'skipped'`: when the merge fails on the
+      # THRESHOLDS the report exists and is precisely what someone wants to
+      # open, so a red gate still publishes its evidence. Kept as long as the
+      # blobs it was derived from.
+      - name: Publish the merged coverage report
+        id: report
+        if: ${{ !cancelled() && needs.ui-coverage.result == 'success' && steps.merge.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ui-coverage-report
+          path: ui/coverage/
+          retention-days: 7
+          if-no-files-found: error
+
+      # ⛔ REPORT-ONLY, not a gate (objectui#12208, ruling 6121816480): the
+      # longest coverage shard's wall against `ui-coverage`'s
+      # `timeout-minutes`, and the width this run's measured total implies at
+      # 20 minutes per shard. Before the verdict, so the verdict stays this
+      # job's last word; `always()` so a red lane still gets its reading;
+      # `continue-on-error` so the reading cannot change the verdict. On a red
+      # lane the checkout above was skipped, so this reads `ui/scripts` through
+      # a sparse checkout of its own. Pinned by
+      # `ui/scripts/__tests__/shard-headroom.test.ts`.
+      - name: Check out the headroom reading's script
+        if: always() && needs.ui-coverage.result != 'success'
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: ui/scripts
+
+      - name: The longest coverage shard's headroom against the cap (report-only)
+        if: always()
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node ui/scripts/shard-headroom.mjs --job 'Test UI (coverage shard {n}/8)' --shards 8 --cap-minutes 40 --target-minutes 20
+
+      # Runs on every path, including the one where every step above was
+      # skipped, which without this step would leave the job GREEN while the
+      # coverage gate never ran.
+      - name: Say out loud whether the coverage gate ran on this commit
+        if: always()
+        env:
+          SHARDS: ${{ needs.ui-coverage.result }}
+          BLOBS: ${{ steps.blobs.outcome }}
+          MERGE: ${{ steps.merge.outcome }}
+          REPORT: ${{ steps.report.outcome }}
+        run: |
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+          if [ "$SHARDS" = 'success' ] && [ "$BLOBS" = 'success' ] && [ "$MERGE" = 'success' ] && [ "$REPORT" = 'success' ]; then
+            echo "::notice title=Coverage gate ran::the merged $COVERAGE_SHARDS-shard report was produced for $GITHUB_SHA, the thresholds passed over the whole map, and the report is attached as the ui-coverage-report artifact"
+            {
+              echo "### UI coverage: the gate ran on the complete merged report"
+              echo
+              echo "- commit: \`$GITHUB_SHA\`"
+              echo "- shards: all $COVERAGE_SHARDS green, all $COVERAGE_SHARDS blob reports merged"
+              echo "- thresholds: enforced over the whole merged map, passed"
+              echo "- report: the \`ui-coverage-report\` artifact on [this run]($run_url), kept 7 days"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # The gate RAN and said no: a coverage regression to fix, the
+          # opposite action from the broken lane below. `report=success`
+          # separates them: a threshold breach leaves a complete report behind,
+          # a merge that dies earlier writes none and the publish step reds.
+          if [ "$MERGE" = 'failure' ] && [ "$REPORT" = 'success' ]; then
+            echo "::error title=Coverage thresholds breached::shards=$SHARDS blobs=$BLOBS merge=failure report=$REPORT — the merged report for $GITHUB_SHA was produced and the configured thresholds were enforced over it, and they FAILED"
+            {
+              echo "### UI coverage: the thresholds were enforced and BREACHED"
+              echo
+              echo "- commit: \`$GITHUB_SHA\`"
+              echo "- shards: all $COVERAGE_SHARDS green, all $COVERAGE_SHARDS blob reports merged"
+              echo "- thresholds: enforced over the whole merged map, **failed**"
+              echo "- report published: \`$REPORT\`"
+              echo
+              echo "This is a coverage regression, not a broken lane. The merged"
+              echo "report is the \`ui-coverage-report\` artifact on [this run]($run_url);"
+              echo "the merge step's log names the metric and the numbers."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          echo "::error title=Coverage gate did NOT run::shards=$SHARDS blobs=$BLOBS merge=$MERGE report=$REPORT — no complete merged report was produced for $GITHUB_SHA, so the coverage thresholds were never evaluated on this commit"
+          {
+            echo "### UI coverage: the gate did NOT run on this commit"
+            echo
+            echo "- commit: \`$GITHUB_SHA\`"
+            echo "- shard jobs: \`$SHARDS\`"
+            echo "- all $COVERAGE_SHARDS blobs present: \`$BLOBS\`"
+            echo "- merge + thresholds: \`$MERGE\`"
+            echo "- report published: \`$REPORT\`"
+            echo
+            echo "The thresholds are enforced on the MERGED report and nowhere"
+            echo "else; the shard legs override them to zero."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1

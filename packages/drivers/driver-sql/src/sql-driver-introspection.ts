@@ -28,6 +28,15 @@
  * `schema-drift.ts`, where they live; `sql-driver.ts` no longer reads the two
  * functions and dropped them from its import.
  *
+ * [#25521 cut 7] `resolveHashShadowKeys` moved here too, beside its only
+ * caller. `introspectIndexes`' body still reaches it through the host
+ * closure above, which calls the class method on the driver, which hands this
+ * body its host; so a subclass override or a test spy on the instance is
+ * still the one reached. It reads only `knex`. `isHashShadowCarrier` and
+ * `parseHashShadowKeyParts` are imported from `schema-drift.ts`, where they
+ * live; `sql-driver.ts` still reads `parseHashShadowKeyParts` and dropped
+ * `isHashShadowCarrier` from its import.
+ *
  * A MOVE, not a redesign. Each function below is the body of the `SqlDriver`
  * method of the same name as it stood, re-indented one level and otherwise
  * unedited: the same catalog statements, the same dialect arms, the same
@@ -81,7 +90,13 @@ import type {
   UniqueConstraintMember,
 } from './sql-driver.js';
 import { postgresTableNameCollisionError, singleColumnUniqueColumns } from './sql-driver.js';
-import { applyIndexKeyParts, parseIndexDdl, type PhysicalIndex } from './schema-drift.js';
+import {
+  applyIndexKeyParts,
+  isHashShadowCarrier,
+  parseHashShadowKeyParts,
+  parseIndexDdl,
+  type PhysicalIndex,
+} from './schema-drift.js';
 
 /**
  * The `SqlDriver` members the functions below read — every one of them, and
@@ -924,4 +939,37 @@ export async function introspectIndexes(
     if (opts.onFailure !== 'partial') throw e;
   }
   return [...byName.values()];
+}
+
+/** The body of `SqlDriver#resolveHashShadowKeys`; the method's docblock there is its contract. */
+export async function resolveHashShadowKeys(
+  this: Pick<IntrospectionHost, 'knex'>,
+  tableName: string,
+  indexes: PhysicalIndex[],
+): Promise<void> {
+  const carriers = indexes.filter((i) => isHashShadowCarrier(i));
+  if (carriers.length === 0) return;
+  try {
+    const rows: Array<Record<string, unknown>> = await this.knex
+      .select('COLUMN_NAME', 'GENERATION_EXPRESSION')
+      .from('information_schema.COLUMNS')
+      .where({ TABLE_SCHEMA: this.knex.client.database(), TABLE_NAME: tableName })
+      .whereIn(
+        'COLUMN_NAME',
+        carriers.map((i) => i.columns[0]!),
+      );
+    const exprByColumn = new Map<string, string>();
+    for (const r of rows) {
+      const column = String(r.COLUMN_NAME ?? r.column_name ?? '');
+      if (column) {
+        exprByColumn.set(column, String(r.GENERATION_EXPRESSION ?? r.generation_expression ?? ''));
+      }
+    }
+    for (const i of carriers) {
+      const parts = parseHashShadowKeyParts(exprByColumn.get(i.columns[0]!) ?? '');
+      if (parts.length > 0) i.shadowKey = parts;
+    }
+  } catch {
+    /* see the head note: an unresolved carrier degrades to "no finding". */
+  }
 }

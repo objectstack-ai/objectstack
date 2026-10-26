@@ -38,6 +38,8 @@ import {
   RECORD_POINTER_CARD_TYPE,
   coerceToSafeValue,
   TextAreaField,
+  TextCellRenderer,
+  TextField,
 } from '@object-ui/fields';
 import type { DetailViewSection as DetailViewSectionType, DetailViewField, FieldMetadata } from '@object-ui/types';
 import { applyDetailAutoLayout } from './autoLayout';
@@ -102,8 +104,9 @@ export function getResponsiveSpanClass(span: number | undefined, columns: number
 }
 
 /**
- * The `onChange` a read display is handed. `TextAreaField`'s `readonly` branch
- * renders no control and never calls it; the widget contract requires the slot.
+ * The `onChange` a read display is handed. The `readonly` branches of
+ * `TextAreaField` and `TextField` render no control and never call it; the
+ * widget contract requires the slot.
  */
 const ignoreReadOnlyChange = (): void => {};
 
@@ -579,6 +582,28 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
         // so `toggle` reads the same and a host's own boolean face is kept.
         if (CellRenderer === BooleanCellRenderer && !fieldEditable && typeof value === 'boolean') {
           return booleanLabel(value);
+        }
+        // A value the table draws with the GRID's one-line text cell reads
+        // through `TextField`'s own read display instead (objectstack#25897),
+        // the same move the `textarea` branch above makes. `TextCellRenderer`
+        // is `TruncatedText` — `truncate`, one line and an ellipsis — which
+        // cut a case subject to "Data export timing out for large…" in a
+        // two-column section with room to spare. Read mode wraps a text-like
+        // value; truncation belongs to layouts that declare it, the grid row
+        // and the highlights strip, and both keep it. Matched by renderer
+        // identity, as the boolean above is, so every type the table maps to
+        // the text cell (`text`, `code`, `time`, `auto_number`, …) wraps and a
+        // host that registered its own face for one of them keeps that face.
+        // The value is coerced exactly as `TextCellRenderer` coerced it.
+        if (CellRenderer === TextCellRenderer) {
+          return (
+            <TextField
+              field={enrichedField as unknown as FieldMetadata}
+              value={String(coerceToSafeValue(value))}
+              onChange={ignoreReadOnlyChange}
+              readonly
+            />
+          );
         }
         if (CellRenderer) {
           return (

@@ -21,7 +21,6 @@
     // not inherit `composite` / `declaration` from the build config.
     "composite": false,
     "declaration": false,
-    "jsx": "react-jsx",
     // Deliberately NOT raised, unlike plugin-list / plugin-grid / app-shell,
     // whose suites needed ES2022 for `Array.prototype.at`. Measured: this
     // package's 47 test files compile clean against the root's ES2020 baseline,
