@@ -48,6 +48,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
+import type { WithoutCatchall } from './zod-catchall-type';
 
 import {
   AIConfigSchema,
@@ -79,8 +80,9 @@ type Expect<T extends true> = T;
 
 /** The mirror's own shape. */
 type ShapeOf<M> = M extends { shape: infer S } ? S : never;
-/** What a shape entry ACCEPTS (input side, so `.optional()` shows). */
-type InputOf<T> = T extends z.ZodType ? z.input<T> : never;
+/** What a shape entry ACCEPTS (input side, so `.optional()` shows), read without the
+ * `.passthrough()` catchall every mirror object carries since objectstack#25923 (`./zod-catchall-type`). */
+type InputOf<T> = T extends z.ZodType ? WithoutCatchall<z.input<T>> : never;
 /** The declaration's DECLARED keys — any index signature dropped (`BaseSchema` carried one until objectui#8347). */
 type DeclaredKeys<D> = Extract<
   keyof { [K in keyof D as string extends K ? never : number extends K ? never : K]: D[K] },

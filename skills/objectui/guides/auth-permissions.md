@@ -72,8 +72,15 @@ function isTenantAdmin(user: AuthUser): boolean {
 
 `AuthUser` extends the spec's `IAuthService` principal — `id`, `email`, `name`,
 plus the `positions` / `tenantId` an authorization decision reads — and adds the
-display-only fields better-auth returns to the client: `image`, `role`,
-`emailVerified`. The index signature (`[key: string]: unknown`) is deliberate:
+display-only fields better-auth returns to the client, spelled as better-auth
+spells them:
+
+<!-- os:vendor-wire better-auth -->
+```typescript
+image?: string; role?: string; emailVerified?: boolean;
+```
+
+The index signature (`[key: string]: unknown`) is deliberate:
 better-auth projects an app's own user columns onto this object, and no local
 type can enumerate them.
 
@@ -110,7 +117,7 @@ import { LoginForm, RegisterForm, ForgotPasswordForm, UserMenu } from '@object-u
 // LoginForm includes email/password fields, social login buttons, forgot password link
 <LoginForm onSuccess={() => navigate('/dashboard')} />
 
-// UserMenu shows user avatar, name, role with dropdown for profile/settings/logout
+// UserMenu shows user avatar and name with a dropdown for profile/settings/logout
 <UserMenu />
 ```
 
@@ -142,12 +149,12 @@ import { useAuth } from '@object-ui/auth';
 import type { ObjectPermissionConfig, RoleDefinition } from '@object-ui/types';
 declare function AppContent(): null; // stands in for your own app tree
 
-// A role definition carries identity and inheritance only. Its grants live in
+// A `RoleDefinition` carries identity and inheritance only. Its grants live in
 // `ObjectPermissionConfig.roles` below, keyed by object — that is the single
-// wired home for "what may this role do".
-const roles: RoleDefinition[] = [
+// wired home for "what may this grant key do".
+const definitions: RoleDefinition[] = [
   { name: 'admin', label: 'Administrator' },
-  { name: 'viewer', label: 'Viewer', inherits: ['base'] },  // Role inheritance
+  { name: 'viewer', label: 'Viewer', inherits: ['base'] },  // inherits another definition
 ];
 
 const permissions: ObjectPermissionConfig[] = [
@@ -155,7 +162,7 @@ const permissions: ObjectPermissionConfig[] = [
     object: 'contacts',
     publicAccess: ['read'],  // Public actions (no auth needed)
     // `roles` is required, and it is the level that decides *who* a rule
-    // applies to. Field and row rules nest under the role name; they carry
+    // applies to. Field and row rules nest under the grant key; they carry
     // no `roles` member of their own.
     roles: {
       admin: {
@@ -163,7 +170,7 @@ const permissions: ObjectPermissionConfig[] = [
       },
       viewer: {
         actions: ['read'],
-        // Only admin sees salary: the restriction is declared on the role
+        // Only admin sees salary: the restriction is declared on the key
         // it restricts, and admin simply has no entry for the field.
         fieldPermissions: [{ field: 'salary', read: false, mask: '****' }],
       },
@@ -189,7 +196,7 @@ function App() {
   const { user } = useAuth();
   return (
     <PermissionProvider
-      roles={roles}
+      roles={definitions}
       permissions={permissions}
       userRoles={user?.positions || ['viewer']}
       user={user ?? undefined}
@@ -201,7 +208,7 @@ function App() {
 ```
 
 The keys under `roles` are matched against the `userRoles` you pass to the
-provider (after inheritance is expanded through the `roles` array), so a grant
+provider (after each key's `inherits` chain is expanded), so a grant
 key such as `owner` above works whether or not it also has a `RoleDefinition`
 entry — the definitions array is read only to expand `inherits`.
 
@@ -252,8 +259,8 @@ function ContactActions({ contact }: { contact: { salary?: number } }) {
 When `check(object, action, record?)` is called:
 
 1. Check `publicAccess` — if action is public, allow immediately
-2. Resolve effective roles (with inheritance chain)
-3. Check role-based action permissions
+2. Resolve the effective grant keys (`userRoles` expanded through `inherits`)
+3. Check the action grants under each key
 4. If record provided + row permissions exist: evaluate row-level filter
 5. Return `{ allowed, fieldRestrictions?, rowFilter?, reason? }`
 
@@ -387,7 +394,7 @@ Here's the typical nesting order for a full-featured app:
 ```typescript
 <BrowserRouter>
   <AuthProvider authUrl="/api/v1/auth" client={authClient}>
-    <PermissionProvider roles={roles} permissions={perms} userRoles={userRoles}>
+    <PermissionProvider roles={definitions} permissions={perms} userRoles={userRoles}>
       <SchemaRendererProvider dataSource={authenticatedDataSource}>
         <AuthGuard fallback={<LoginPage />}>
           <AppShell>
@@ -405,5 +412,5 @@ Here's the typical nesting order for a full-featured app:
 - Nesting PermissionProvider outside AuthProvider — userRoles can't be resolved from auth state.
 - Using `hidden` expressions for security — they only hide UI elements. Always enforce permissions server-side.
 - Forgetting `createAuthenticatedFetch` — API calls go without Bearer token, getting 401 errors.
-- Hardcoding role checks in JSX instead of using PermissionGuard or usePermissions.
+- Hardcoding permission checks in JSX instead of using PermissionGuard or usePermissions.
 - Not providing fallback UI for AuthGuard/PermissionGuard — users see blank screens.

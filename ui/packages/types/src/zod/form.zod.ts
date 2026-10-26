@@ -178,7 +178,7 @@ function objectFieldOnlyOptionRefusals() {
  * survived. The same reason is why `default` and `kind` are REFUSED rather than
  * left out.
  */
-export const SelectOptionSchema = z.object({
+export const SelectOptionSchema = z.looseObject({
   ...stripImportedDefaults(SpecFormSelectOptionSchema).shape,
   // Deliberate divergence: the spec requires a lowercase machine identifier;
   // standalone UI forms legitimately bind numeric/boolean values. The parity
@@ -202,7 +202,7 @@ export const SelectOptionSchema = z.object({
 /**
  * Radio Option Schema
  */
-export const RadioOptionSchema = z.object({
+export const RadioOptionSchema = z.looseObject({
   label: z.string().describe('Option label'),
   value: z.union([z.string(), z.number()]).describe('Option value'),
   disabled: z.boolean().optional().describe('Whether option is disabled'),
@@ -212,7 +212,7 @@ export const RadioOptionSchema = z.object({
 /**
  * Combobox Option Schema
  */
-export const ComboboxOptionSchema = z.object({
+export const ComboboxOptionSchema = z.looseObject({
   value: z.string().describe('Option value'),
   label: z.string().describe('Option label'),
   disabled: z.boolean().optional().describe('Whether option is disabled'),
@@ -221,7 +221,7 @@ export const ComboboxOptionSchema = z.object({
 /**
  * Command Item Schema
  */
-export const CommandItemSchema = z.object({
+export const CommandItemSchema = z.looseObject({
   value: z.string().describe('Item value'),
   label: z.string().describe('Item label'),
   icon: z.string().optional().describe('Item icon'),
@@ -230,7 +230,7 @@ export const CommandItemSchema = z.object({
 /**
  * Command Group Schema
  */
-export const CommandGroupSchema = z.object({
+export const CommandGroupSchema = z.looseObject({
   heading: z.string().optional().describe('Group heading'),
   items: z.array(CommandItemSchema).describe('Group items'),
 });
@@ -240,7 +240,7 @@ export const CommandGroupSchema = z.object({
  * consumes for `minLength` / `maxLength` / `min` / `max`.
  */
 const BoundedRuleSchema = (valueDescription: string) =>
-  z.object({
+  z.looseObject({
     value: z.number().describe(valueDescription),
     message: z.string().describe('Error message shown when the rule fails'),
   });
@@ -268,14 +268,14 @@ const BoundedRuleSchema = (valueDescription: string) =>
  * Deliberately NOT a string→RegExp coercion here — consumer-side tolerance
  * would re-open exactly what #5099 closed (AGENTS.md #0.1).
  */
-export const FieldConstraintsSchema = z.object({
+export const FieldConstraintsSchema = z.looseObject({
   required: z.union([z.boolean(), z.string()]).optional()
     .describe('Required rule — boolean flag, or the error message itself (string implies required)'),
   minLength: BoundedRuleSchema('Minimum length').optional().describe('Minimum length rule'),
   maxLength: BoundedRuleSchema('Maximum length').optional().describe('Maximum length rule'),
   min: BoundedRuleSchema('Minimum value').optional().describe('Minimum value rule (numbers)'),
   max: BoundedRuleSchema('Maximum value').optional().describe('Maximum value rule (numbers)'),
-  pattern: z.object({
+  pattern: z.looseObject({
     value: z.custom<RegExp>((v) => v instanceof RegExp, {
       message:
         'pattern.value must be a compiled RegExp — react-hook-form runs `pattern` only when ' +
@@ -296,7 +296,7 @@ export const FieldConstraintsSchema = z.object({
 /**
  * Field Condition Schema
  */
-export const FieldConditionSchema = z.object({
+export const FieldConditionSchema = z.looseObject({
   field: z.string().describe('Field name to check'),
   equals: z.any().optional().describe('Value must equal'),
   notEquals: z.any().optional().describe('Value must not equal'),
@@ -1094,7 +1094,7 @@ const CURRENCY_FIELD_SCALE_REFUSAL =
   + 'was on a currency field that declared no `scale`. The key\'s one enforced effect was refusing '
   + 'writes with more decimals, which this field type no longer does.';
 
-export const FormFieldSchema = z.object({
+export const FormFieldSchema = z.looseObject({
   id: z.string().optional().describe('Field ID'),
   name: z.string().describe('Field name (form data path)'),
   label: z.string().optional().describe('Field label'),
@@ -1112,7 +1112,7 @@ export const FormFieldSchema = z.object({
     z.string(),
     z.array(z.union([
       z.string(),
-      z.object({ field: z.string(), param: z.string().optional() }),
+      z.looseObject({ field: z.string(), param: z.string().optional() }),
     ])),
   ]).nullish().describe('Parent field(s) for cascading/dependent fields'),
   hidden: z.boolean().optional().describe('Whether the field is hidden'),
@@ -1276,7 +1276,7 @@ export const FormFieldSchema = z.object({
  * restated member for member from the interface's `FormFieldTab`. Module-private: it
  * is a nested shape of the `form` arm, not a registered pair of its own.
  */
-const FormFieldTabEntrySchema = z.object({
+const FormFieldTabEntrySchema = z.looseObject({
   key: z.string().describe('Stable tab key (the Radix Tabs value)'),
   label: z.string().optional().describe('Tab trigger text; falls back to key'),
   description: z.string().optional().describe('Blurb rendered above the tab fields'),
@@ -1294,7 +1294,7 @@ const FormFieldTabEntrySchema = z.object({
  * restated member for member from the interface's `FormFieldPane`. Module-private,
  * like `FormFieldTabEntrySchema` above.
  */
-const FormFieldPaneEntrySchema = z.object({
+const FormFieldPaneEntrySchema = z.looseObject({
   key: z.string().describe('Stable pane key'),
   fields: z.array(z.string()).describe('Names of the fields (from FormSchema.fields) this pane renders, in order'),
   defaultSize: z.number().optional().describe('Initial pane size as a percentage of the group (1-99)'),

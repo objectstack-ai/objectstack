@@ -126,6 +126,7 @@ const DATA: Record<TemplateName, Record<string, unknown>> = {
     role: 'admin',
     acceptUrl: 'https://acme.test/accept/INV1',
     appName: 'Acme',
+    expiresAt: '2031-03-04T05:06:07.000Z',
   },
   'auth.two_factor_otp': {
     otp: '482915',
@@ -315,14 +316,20 @@ describe('#8195 — a zh-CN send renders NO en-US text', () => {
 // ── #24154 — the invitation's role clause, in both faces ───────────────────
 
 /** The invitation's two bodies, apart: the card is about what EACH one says. */
-async function renderInvitationFaces(locale: Locale, data: Record<string, unknown>) {
+async function renderInvitationFaces(locale: Locale, data: Record<string, unknown>, timezone?: string) {
   const transport = new CaptureTransport();
   const svc = new EmailService({
     transport,
     defaultFrom: { address: 'no-reply@acme.test' },
     templateLoader: seededLoader,
   });
-  await svc.sendTemplate({ template: 'auth.invitation', to: 'recipient@acme.test', locale, data });
+  await svc.sendTemplate({
+    template: 'auth.invitation',
+    to: 'recipient@acme.test',
+    locale,
+    data,
+    ...(timezone ? { timezone } : {}),
+  });
   const sent = transport.sent[0];
   expect(sent, `auth.invitation @ ${locale} was never handed to the transport`).toBeDefined();
   return { html: sent!.html ?? '', text: sent!.text ?? '' };
@@ -331,6 +338,8 @@ async function renderInvitationFaces(locale: Locale, data: Record<string, unknow
 /**
  * One distinct value per declared variable of `auth.invitation`, none a
  * substring of another, so "this face names that fact" is a plain `includes`.
+ * `expiresAt` is rendered through a date formatter, so its fact is the year
+ * every locale's rendering of that instant carries, and no other fact does.
  */
 const INVITATION_FACT_BY_VARIABLE: Record<string, string> = {
   'inviter.name': 'INVITER_NAME_X',
@@ -339,6 +348,7 @@ const INVITATION_FACT_BY_VARIABLE: Record<string, string> = {
   role: 'ROLE_LABEL_X',
   acceptUrl: 'https://acme.test/accept/ACCEPT_X',
   appName: 'APP_NAME_X',
+  expiresAt: '2031',
 };
 const INVITATION_FACTS = {
   inviter: { name: 'INVITER_NAME_X', email: 'inviter-email-x@acme.test' },
@@ -346,6 +356,7 @@ const INVITATION_FACTS = {
   role: 'ROLE_LABEL_X',
   acceptUrl: 'https://acme.test/accept/ACCEPT_X',
   appName: 'APP_NAME_X',
+  expiresAt: '2031-03-04T05:06:07.000Z',
 };
 
 describe('#24154 — the invitation names the role label, and both faces say the same thing', () => {
@@ -367,6 +378,77 @@ describe('#24154 — the invitation names the role label, and both faces say the
     const named = (face: string) => declared.filter((v) => face.includes(INVITATION_FACT_BY_VARIABLE[v]!));
     expect(named(html), `${locale} HTML body`).toEqual(declared);
     expect(named(text), `${locale} text body`).toEqual(declared);
+  });
+});
+
+// ── #25802 — the invitation says when it expires, in the mail's locale ─────
+
+/**
+ * The expiry sentence FRAME each locale's bodies wrap around the date, written
+ * out by hand: `[before, after]` the formatted instant.
+ */
+const EXPIRY_FRAME: Record<Locale, [string, string]> = {
+  'en-US': ['This invitation expires on ', '.'],
+  'zh-CN': ['此邀请将于 ', ' 过期。'],
+  'ja-JP': ['この招待の有効期限は ', ' です。'],
+  'es-ES': ['Esta invitación caduca el ', '.'],
+};
+
+/**
+ * The instant as the `datetime:long` formatter must render it: the long date
+ * and time in that locale and zone, computed HERE with the running Node's own
+ * `Intl`, never copied from a render. The wording inside it is ICU locale
+ * data and moves between releases (es-ES reads `2031, 5:06:07` on ICU 77 and
+ * `2031 a las 5:06:07` on ICU 78), so a literal would pin the ICU build, not
+ * the template. What does not move is pinned beside it: the year and the
+ * zone's name are in it, because a date with no zone is the ambiguity the
+ * long style exists to remove.
+ */
+function longInstant(locale: Locale, timeZone: string): string {
+  return new Intl.DateTimeFormat(locale, { dateStyle: 'long', timeStyle: 'long', timeZone }).format(
+    new Date(INVITATION_FACTS.expiresAt),
+  );
+}
+
+describe('#25802 — the invitation states its expiry in the mail locale', () => {
+  it.each(SUPPORTED_LOCALES)('%s: both faces carry the expiry sentence, in the send timezone', async (locale) => {
+    const { html, text } = await renderInvitationFaces(locale, INVITATION_FACTS, 'UTC');
+    const instant = longInstant(locale, 'UTC');
+    expect(instant).toContain('2031');
+    expect(instant).toContain('UTC');
+    const [before, after] = EXPIRY_FRAME[locale];
+    expect(text, `${locale} text body`).toContain(`${before}${instant}${after}`);
+    // The HTML face escapes the hole; no locale's long date carries a character it escapes.
+    expect(html, `${locale} HTML body`).toContain(`${before}${instant}${after}`);
+  });
+
+  it('the reference timezone the send names moves the wall-clock, and the zone is named', async () => {
+    const { text } = await renderInvitationFaces('zh-CN', INVITATION_FACTS, 'Asia/Shanghai');
+    const shanghai = longInstant('zh-CN', 'Asia/Shanghai');
+    expect(shanghai).not.toBe(longInstant('zh-CN', 'UTC'));
+    expect(shanghai).toContain('13:06:07');
+    expect(text).toContain(`此邀请将于 ${shanghai} 过期。`);
+  });
+
+  it.each(SUPPORTED_LOCALES)('%s: a send without expiresAt is refused (MISSING_VARIABLES), never sent with a dangling sentence', async (locale) => {
+    // The engine has no conditionals, so every body states the expiry; the
+    // row declares the variable required and the service refuses the send.
+    const transport = new CaptureTransport();
+    const svc = new EmailService({
+      transport,
+      defaultFrom: { address: 'no-reply@acme.test' },
+      templateLoader: seededLoader,
+    });
+    const { expiresAt: _omitted, ...withoutExpiry } = INVITATION_FACTS;
+    await expect(
+      svc.sendTemplate({ template: 'auth.invitation', to: 'recipient@acme.test', locale, data: withoutExpiry }),
+    ).rejects.toThrow(/^MISSING_VARIABLES: expiresAt$/);
+    expect(transport.sent).toHaveLength(0);
+  });
+
+  it('a zh-CN invitation carries no English expiry sentence', async () => {
+    const { html, text } = await renderInvitationFaces('zh-CN', INVITATION_FACTS, 'UTC');
+    for (const face of [html, text]) expect(face).not.toContain('expires');
   });
 });
 
