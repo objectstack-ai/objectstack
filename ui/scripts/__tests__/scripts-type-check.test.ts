@@ -4,6 +4,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
+import { jobBlock, rootCi, uiRun, UI_JOBS } from './helpers/root-ci';
+
 /**
  * objectui#3494 — the pin tests in this directory had no type gate of their own.
  *
@@ -35,7 +37,6 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 const configPath = path.join(repoRoot, 'tsconfig.scripts.json');
 const consoleNodeConfigPath = path.join(repoRoot, 'apps/console/tsconfig.node.json');
 const scriptsDir = path.join(repoRoot, 'scripts');
-const ciWorkflowPath = path.join(repoRoot, '.github/workflows/ci.yml');
 
 /** The root script CI invokes, and the one a contributor can run locally. */
 const SCRIPT_NAME = 'type-check:scripts';
@@ -290,15 +291,14 @@ describe('the gate is actually wired up (objectui#3494)', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {
     scripts?: Record<string, string>;
   };
-  const ciWorkflow = fs.readFileSync(ciWorkflowPath, 'utf8');
 
-  /** The `type-check:` job body, from its key up to the next job at the same indent. */
+  /**
+   * The `type-check-ui:` job body of objectstack's root ci.yml, which is
+   * objectui's `Type Check` (objectstack#25697). The ci.yml under `ui/.github/`
+   * runs nowhere (objectstack#25712).
+   */
   function typeCheckJob(): string {
-    const start = ciWorkflow.search(/^ {2}type-check:[ \t]*$/m);
-    expect(start, 'ci.yml must still have a `type-check:` job').toBeGreaterThan(-1);
-    const rest = ciWorkflow.slice(start + 1);
-    const next = rest.search(/^ {2}[a-z0-9][a-z0-9-]*:[ \t]*$/m);
-    return next === -1 ? rest : rest.slice(0, next);
+    return jobBlock(rootCi(), UI_JOBS.typeCheck);
   }
 
   it('is runnable locally, not CI-only', () => {
@@ -313,10 +313,10 @@ describe('the gate is actually wired up (objectui#3494)', () => {
   it('runs in ci.yml’s type-check job', () => {
     expect(
       typeCheckJob(),
-      `ci.yml’s type-check job must run \`pnpm ${SCRIPT_NAME}\`. Without it, tsconfig.scripts.json ` +
+      `ci.yml’s \`type-check-ui\` job must run \`pnpm --dir ui run ${SCRIPT_NAME}\`. Without it, tsconfig.scripts.json ` +
         'is a file that looks like a gate while no CI job reads it — the same shape as the ' +
         'unchecked tests it was added to fix.',
-    ).toContain(`pnpm ${SCRIPT_NAME}`);
+    ).toContain(uiRun(SCRIPT_NAME));
   });
 
   it('runs AFTER dependencies are installed', () => {
@@ -325,7 +325,7 @@ describe('the gate is actually wired up (objectui#3494)', () => {
     // a resolution error that looks nothing like its real cause.
     const job = typeCheckJob();
     const install = job.indexOf('pnpm install --frozen-lockfile');
-    const check = job.indexOf(`pnpm ${SCRIPT_NAME}`);
+    const check = job.indexOf(uiRun(SCRIPT_NAME));
 
     expect(install, 'the type-check job must still install dependencies').toBeGreaterThan(-1);
     expect(check, 'the type-check job must run the scripts type-check').toBeGreaterThan(-1);
