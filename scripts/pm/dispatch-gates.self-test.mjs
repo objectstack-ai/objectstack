@@ -1496,7 +1496,12 @@ export function selfTest({ tier = 'full' } = {}) {
   //    resolve.
   const rootScriptsMap = JSON.parse(readFileSync(nodePath.join(ROOT, 'package.json'), 'utf8')).scripts ?? {};
   const zeroFile = tsLiveFamilies.filter(([, e]) => (e.files ?? []).length === 0);
+  // `typecheck:root` is the one other zero-file family, by construction: it is a
+  // tsc program over the root config, not a script file, and the cards it owes
+  // are named by the root-program change kind (`root-ts-program`), never by a
+  // path read out of a script.
   const unexplained = zeroFile
+    .filter(([check]) => check !== 'typecheck:root')
     .map(([check]) => [check, rootScriptsMap[check] ?? ''])
     .filter(([, cmd]) => !/\bpnpm\b[^&|]*?(?:--filter|--recursive|-r)\b[^&|]*?\brun\b/.test(cmd))
     .map(([check, cmd]) => `${check} (${cmd || 'no root script'})`);
