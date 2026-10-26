@@ -3532,6 +3532,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/explain-self-direct-grant.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/explain-write-verdict-inputs.test.ts",
       "verb": "delete",
       "pinned": 1
