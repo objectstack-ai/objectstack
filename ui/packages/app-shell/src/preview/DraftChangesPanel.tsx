@@ -580,13 +580,22 @@ function FieldRow({
  * answer carries a numeric `total`: with none, the choice names no number
  * rather than a guessed one. What the publish actually wrote is the door's
  * receipt, which the host reports.
+ *
+ * `classifying` (objectstack-ai/objectstack#25894): the panel's new-vs-update
+ * reads are still in flight. A NEW entry has no published body, so its
+ * published read is not sent: it could only answer 404, logged as a failed
+ * request on the console for every draft-only item. The drill-in waits while
+ * the entry is unclassified and the reads are pending; one whose read failed
+ * (still unclassified once they settle) is read both ways, as before.
  */
 function EntryDetail({
   entry,
+  classifying = false,
   onCompared,
   backfill,
 }: {
   entry: DraftChangeEntry;
+  classifying?: boolean;
   onCompared?: (unchanged: boolean) => void;
   backfill?: EntryBackfillControl;
 }) {
@@ -611,13 +620,21 @@ function EntryDetail({
     onComparedRef.current = onCompared;
   });
 
+  const isNew = entry.kind === 'new';
+  const awaitingKind = entry.kind === undefined && classifying;
   useEffect(() => {
+    if (awaitingKind) return;
     let cancelled = false;
     (async () => {
       try {
         const [published, draft] = await Promise.all([
-          // A NEW item 404s on the published read — that's data, not an error.
-          fetchItemBody(entry.type, entry.name, { packageId: entry.packageId, member: entry.member }),
+          // A NEW item has no published body: not asked
+          // (objectstack-ai/objectstack#25894). An item the
+          // classification could not answer still 404s here when it is new —
+          // that's data, not an error.
+          isNew
+            ? null
+            : fetchItemBody(entry.type, entry.name, { packageId: entry.packageId, member: entry.member }),
           fetchItemBody(entry.type, entry.name, {
             draft: true,
             packageId: entry.packageId,
@@ -639,7 +656,7 @@ function EntryDetail({
     return () => {
       cancelled = true;
     };
-  }, [entry.type, entry.name, entry.packageId, entry.member]);
+  }, [entry.type, entry.name, entry.packageId, entry.member, isNew, awaitingKind]);
 
   // objectui#12929 — how many records the choice would reach: asked once per
   // object, and only where a choice is offered.
@@ -818,6 +835,14 @@ export function DraftChangesPanel({
   const [entries, setEntries] = useState<DraftChangeEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   /**
+   * The new-vs-update reads of the latest load are in flight
+   * (objectstack-ai/objectstack#25894): a drill-in holds its published read
+   * until its entry is classified or they settle. Keyed by load generation, so
+   * an earlier load settling late does not end a later one's.
+   */
+  const [classifying, setClassifying] = useState(false);
+  const loadGenRef = useRef(0);
+  /**
    * Author-time security findings that the publish door would REFUSE
    * (`7a90afdf9`). Surfaced here, next to the button, so the refusal is
    * something the author reads before committing rather than a toast that
@@ -906,6 +931,8 @@ export function DraftChangesPanel({
   };
 
   const load = useCallback(async () => {
+    const gen = ++loadGenRef.current;
+    setClassifying(true);
     setEntries(null);
     setError(null);
     setProblems([]);
@@ -983,6 +1010,8 @@ export function DraftChangesPanel({
       ]);
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      if (loadGenRef.current === gen) setClassifying(false);
     }
   }, [packageId, include]);
 
@@ -1183,6 +1212,7 @@ export function DraftChangesPanel({
                           <div className="border-t bg-muted/20">
                             <EntryDetail
                               entry={entry}
+                              classifying={classifying}
                               onCompared={(same) => markCompared(key, same)}
                               backfill={backfillControl}
                             />
