@@ -298,9 +298,8 @@ export interface EntryChangeDetail {
   generated: Array<{ name: string; kind: 'added' | 'changed' | 'removed'; scope: 'field' | 'key' }>;
   /**
    * True when there is no published body, so publishing ADDS the item
-   * (objectstack#25890). Its identity keys — `name`, and the `label` the row
-   * already leads with — are then not listed as keys at all: they are the
-   * row, not something the item changes.
+   * (objectstack#25890). Every key it lists is then something the new item
+   * includes, not something else that changed, and the drill-in heads them so.
    */
   isNew: boolean;
 }
@@ -316,13 +315,6 @@ function isEmptyChangeDetail(detail: EntryChangeDetail): boolean {
   const fieldRows = fields ? fields.added.length + fields.changed.length + fields.removed.length : 0;
   return fieldRows + keys.added.length + keys.changed.length + keys.removed.length + generated.length === 0;
 }
-
-/**
- * The keys a NEW item's row already shows (objectstack#25890): its machine name,
- * and the label the row leads with (both read off the same draft body). Listed
- * again under the drill-in they read as two more things the author changed.
- */
-const NEW_ITEM_ROW_KEYS: ReadonlySet<string> = new Set(['name', 'label']);
 
 /**
  * Did the platform write this field definition (objectstack#25890)? The spec's own
@@ -419,8 +411,7 @@ function fieldLabelOf(def: Record<string, unknown> | undefined): string | undefi
  * top-level key whose value is the platform's derivation (`nameField`, see
  * {@link isDerivedNameField}). A system field CHANGED between two bodies stays
  * an author row: the platform injects the same definition on both reads, so a
- * difference there is an edit someone made. And a NEW item lists neither its
- * `name` nor its `label` as a key: its row already shows both.
+ * difference there is an edit someone made.
  *
  * Why not `computeDiffRows` from `LayeredDiff.tsx`, which splits top-level keys
  * the same way: that module imports the metadata-admin string table
@@ -477,7 +468,6 @@ export function computeChangeDetail(
   const isNew = published === null;
   const names = new Set([...Object.keys(pub), ...Object.keys(cur)]);
   names.delete('fields');
-  if (isNew) for (const k of NEW_ITEM_ROW_KEYS) names.delete(k);
   const keys: EntryChangeDetail['keys'] = { added: [], changed: [], removed: [] };
   const generatedKeys: EntryChangeDetail['generated'] = [];
   for (const k of [...names].sort()) {
@@ -769,14 +759,9 @@ function EntryDetail({
   if (isEmptyChangeDetail(detail)) {
     return (
       <p className="px-2 py-1 text-xs text-muted-foreground">
-        {isNew
-          ? // objectstack#25890 — a NEW item with nothing beyond the name and label its row shows.
-            t('preview.changes.detailNewNone', {
-              defaultValue: 'Publishing adds it. It declares nothing beyond its name and label.',
-            })
-          : t('preview.changes.detailNone', {
-              defaultValue: 'No differences detected — the draft matches the published version.',
-            })}
+        {t('preview.changes.detailNone', {
+          defaultValue: 'No differences detected — the draft matches the published version.',
+        })}
       </p>
     );
   }

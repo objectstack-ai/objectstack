@@ -4335,7 +4335,6 @@ const de = {
       detailLoadFailed: 'Änderungsdetails konnten nicht geladen werden:',
       detailNone: 'Keine Unterschiede erkannt — der Entwurf entspricht der veröffentlichten Version.',
       detailChangedKeys: 'Ebenfalls geändert:',
-      detailNewNone: 'Die Veröffentlichung fügt es hinzu. Es deklariert nichts außer Namen und Bezeichnung.',
       detailNewKeys: 'Enthält:',
       generatedGroup: 'Von der Plattform erzeugt ({{n}})',
       confirmNote: 'Beim Veröffentlichen werden alle {{count}} ausstehenden Entwürfe dieses Pakets atomar freigegeben.',

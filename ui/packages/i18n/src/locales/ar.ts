@@ -4692,7 +4692,6 @@ const ar = {
       detailLoadFailed: 'تعذر تحميل تفاصيل التغيير:',
       detailNone: 'لم يتم اكتشاف اختلافات — المسودة مطابقة للنسخة المنشورة.',
       detailChangedKeys: 'تغييرات أخرى:',
-      detailNewNone: 'سيضيفه النشر. لا يعلن شيئًا سوى اسمه وتسميته.',
       detailNewKeys: 'يتضمن:',
       generatedGroup: 'أنشأتها المنصة ({{n}})',
       confirmNote: 'النشر يُصدر كل المسودات المعلقة ({{count}}) لهذه الحزمة دفعة واحدة.',

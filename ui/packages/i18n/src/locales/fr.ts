@@ -4421,7 +4421,6 @@ const fr = {
       detailLoadFailed: 'Impossible de charger les détails de la modification :',
       detailNone: 'Aucune différence détectée — le brouillon correspond à la version publiée.',
       detailChangedKeys: 'Également modifié :',
-      detailNewNone: 'La publication l’ajoute. Il ne déclare rien d’autre que son nom et son libellé.',
       detailNewKeys: 'Inclut :',
       generatedGroup: 'Généré par la plateforme ({{n}})',
       confirmNote: 'La publication libère atomiquement les {{count}} brouillons en attente de ce paquet.',

@@ -30,9 +30,13 @@
  *
  * - `internal_note` — an author field with `hidden: true` and no `system`:
  *   listed.
- * - `owner_id` — `system: true` without `hidden`: listed.
- * - `created_at` — an audit column, `system` without `hidden`: listed. The
- *   rule does not hide it, and this card does not widen the rule.
+ * - `owner_id` — `system: true` without `hidden`: not dropped.
+ * - `created_at` — an audit column, `system` without `hidden`: not dropped.
+ *   The rule does not hide it, and this card does not widen the rule. Both are
+ *   rows of the collapsed group of what the platform wrote, not the author's
+ *   field rows (objectstack#25890, pinned in the generatedGroup test beside
+ *   this one); here they are the controls that the drop rule leaves them in
+ *   the detail at all.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -95,9 +99,9 @@ const VISIT_DRAFT = {
     code: { type: 'text', label: 'code' },
     // Control: author-hidden, not system — listed.
     internal_note: { type: 'text', label: 'Internal Note', hidden: true },
-    // Control: system, not hidden — listed.
+    // Control: system, not hidden — not dropped (a generated row, objectstack#25890).
     owner_id: { type: 'lookup', reference: 'sys_user', label: 'Owner', required: false, readonly: false, system: true },
-    // Control: audit column — listed; the rule does not hide it.
+    // Control: audit column — not dropped; the rule does not hide it (a generated row).
     created_at: CREATED_AT_DEF,
     owning_business_unit_id: OWNING_BUSINESS_UNIT_DEF,
     __search: SEARCH_COMPANION_DEF,
@@ -105,7 +109,9 @@ const VISIT_DRAFT = {
 };
 
 const HIDDEN_SYSTEM = ['__search', 'owning_business_unit_id'] as const;
-const VISIT_LISTED = ['bare', 'code', 'created_at', 'internal_note', 'owner_id', 'visit_date'];
+const VISIT_LISTED = ['bare', 'code', 'internal_note', 'visit_date'];
+/** The system columns the drop rule keeps: rows of the generated group (objectstack#25890). */
+const VISIT_GENERATED = ['created_at', 'owner_id'];
 
 afterEach(() => {
   cleanup();
@@ -116,6 +122,7 @@ describe('computeChangeDetail — a column the platform injected and hides is no
   it("a NEW object's added fields leave out the injected-and-hidden columns, and keep every control", () => {
     const d = computeChangeDetail(null, VISIT_DRAFT);
     expect(d.fields?.added).toEqual(VISIT_LISTED);
+    expect(d.generated.filter((g) => g.scope === 'field').map((g) => g.name)).toEqual(VISIT_GENERATED);
   });
 
   it('an UPDATE lists no changed or removed row for one either, and lists the author rows beside it', () => {
@@ -254,7 +261,11 @@ describe('the drill-in of a NEW object (objectui#13125)', () => {
     for (const name of HIDDEN_SYSTEM) expect(text).not.toContain(name);
     expect(text).not.toContain(SEARCH_COMPANION_DEF.label);
     expect(text).not.toContain(OWNING_BUSINESS_UNIT_DEF.label);
-    for (const label of ['Internal Note', 'Owner', 'Created At']) fieldRow(detail, `+ ${label}`);
+    fieldRow(detail, '+ Internal Note');
+    // The two system controls are in the detail, behind the generated group's toggle.
+    fireEvent.click(within(detail).getByTestId('draft-generated-toggle'));
+    for (const label of ['Owner', 'Created At']) fieldRow(detail, `+ ${label}`);
+    for (const name of HIDDEN_SYSTEM) expect(detail.textContent ?? '').not.toContain(name);
   });
 
   it('CONTROL: a field with no label reads as its name alone, once, in monospace', async () => {
