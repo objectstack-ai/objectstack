@@ -1174,6 +1174,24 @@ describe('audit writers — localized activity summaries (framework#3039)', () =
     expect(activity!.row.summary).toBe('更新了 人员资质 "OC-00001"：status');
   });
 
+  it('keeps a locale\'s field-less frame when its bundle has no named-field frame', async () => {
+    // An app-shipped locale that predates `activityUpdatedFields` gets its own
+    // localized sentence, never an English one with its field names.
+    const i18n = createMemoryI18n();
+    i18n.loadTranslations('fr-FR', {
+      objects: { person_qualification: { label: 'Qualification' } },
+      messages: { activityUpdated: 'A mis à jour {{object}} « {{label}} »' },
+    });
+    const { fire, created } = setup('fr-FR', i18n);
+    await fire('afterUpdate', {
+      ...insertCtx(),
+      previous: { id: 'q-1', name: 'OC-00001', status: 'draft' },
+      result: { id: 'q-1', name: 'OC-00001', status: 'active' },
+    });
+    const activity = created.find((c) => c.object === 'sys_activity');
+    expect(activity!.row.summary).toBe('A mis à jour Qualification « OC-00001 »');
+  });
+
   it('localizes the named-field list and its "more" item (zh-CN)', async () => {
     const fields: Record<string, any> = { id: { type: 'text' }, name: { type: 'text' } };
     const previous: Record<string, any> = { id: 'q-1', name: 'OC-00001' };

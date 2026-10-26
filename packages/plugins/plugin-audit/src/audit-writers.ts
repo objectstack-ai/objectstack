@@ -858,7 +858,8 @@ const MAX_NAMED_CHANGED_FIELDS = 5;
  * rest. When `sys_activity.summary` declares `maxLength` (the SQL driver sizes
  * the column `varchar(n)` from it, so an over-long text fails the whole
  * activity insert), fewer fields are named until the text fits. Returns null
- * when nothing changed or not even one name fits, and the caller writes the
+ * when nothing changed, when not even one name fits, or when the locale has a
+ * field-less frame but no named-field one, and the caller writes the
  * field-less frame.
  *
  * Returns the fields it COUNTED as well as named in `fields`: the read side
@@ -883,8 +884,11 @@ function renderChangedFieldsSummary(
   ];
   const labels = ordered.map((key) => fieldLabelForSummary(objectName, key, fields?.[key], translate));
   // The list joins in the locale whose frame is used, so an English fallback
-  // frame never carries a zh-CN "、" list.
+  // frame never carries a zh-CN "、" list. A locale whose bundle answers only
+  // the field-less `activityUpdated` (an app's own locale, written before this
+  // key existed) keeps that localized frame rather than an English one.
   const localized = translate('messages.activityUpdatedFields', { ...frame, fields: '' }) !== undefined;
+  if (!localized && translate('messages.activityUpdated', frame) !== undefined) return null;
   const joinList = listJoinerFor(localized ? locale : undefined);
   const compose = (shown: number): string => {
     const items = labels.slice(0, shown);
