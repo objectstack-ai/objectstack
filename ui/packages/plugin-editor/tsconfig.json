@@ -8,9 +8,6 @@
       "@/*": ["src/*"]
     },
     "noImplicitAny": true,
-    // `bundledMonaco.ts` imports Monaco's language workers through Vite's
-    // `?worker`; `vite/client` declares that module shape.
-    "types": ["vite/client"],
     "noEmit": false,
     "declaration": true,
     // The incremental build RECORD, pinned OUTSIDE the published build output.

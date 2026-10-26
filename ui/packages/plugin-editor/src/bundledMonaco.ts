@@ -35,6 +35,10 @@
  * fallback for it.
  */
 
+// The `?worker` module shape. Declaration emit does not carry this reference
+// into `dist/*.d.ts`, so consumers of the typings never need `vite`.
+/// <reference types="vite/client" />
+
 import type * as MonacoApi from 'monaco-editor';
 
 export type BundledMonaco = typeof MonacoApi;
@@ -44,55 +48,45 @@ export interface MonacoLoaderConfig {
   config(options: { monaco: BundledMonaco }): void;
 }
 
-type WorkerConstructor = new (options?: { name?: string }) => Worker;
+type WorkerModule = { default: new (options?: { name?: string }) => Worker };
 
 let pending: Promise<BundledMonaco> | null = null;
 let loaded: BundledMonaco | null = null;
 
-/** The worker Monaco asks for, by the label its language service names. */
-function workerFor(
-  label: string,
-  workers: Record<'editor' | 'json' | 'css' | 'html' | 'ts', WorkerConstructor>,
-): WorkerConstructor {
+/**
+ * The worker Monaco asks for, by the label its language service names. Each is
+ * imported when first asked for, so a page that edits JSON never loads the
+ * TypeScript worker.
+ */
+function importWorker(label: string): Promise<WorkerModule> {
   switch (label) {
     case 'json':
-      return workers.json;
+      return import('monaco-editor/esm/vs/language/json/json.worker?worker');
     case 'css':
     case 'scss':
     case 'less':
-      return workers.css;
+      return import('monaco-editor/esm/vs/language/css/css.worker?worker');
     case 'html':
     case 'handlebars':
     case 'razor':
-      return workers.html;
+      return import('monaco-editor/esm/vs/language/html/html.worker?worker');
     case 'typescript':
     case 'javascript':
-      return workers.ts;
+      return import('monaco-editor/esm/vs/language/typescript/ts.worker?worker');
     default:
-      return workers.editor;
+      return import('monaco-editor/esm/vs/editor/editor.worker?worker');
   }
 }
 
 function importBundledMonaco(): Promise<BundledMonaco> {
   if (!pending) {
-    pending = Promise.all([
-      import('monaco-editor'),
-      import('monaco-editor/esm/vs/editor/editor.worker?worker'),
-      import('monaco-editor/esm/vs/language/json/json.worker?worker'),
-      import('monaco-editor/esm/vs/language/css/css.worker?worker'),
-      import('monaco-editor/esm/vs/language/html/html.worker?worker'),
-      import('monaco-editor/esm/vs/language/typescript/ts.worker?worker'),
-    ]).then(
-      ([monaco, editor, json, css, html, ts]) => {
-        const workers = {
-          editor: editor.default,
-          json: json.default,
-          css: css.default,
-          html: html.default,
-          ts: ts.default,
-        };
+    pending = import('monaco-editor').then(
+      (monaco) => {
         self.MonacoEnvironment = {
-          getWorker: (_workerId: string, label: string) => new (workerFor(label, workers))(),
+          getWorker: async (_workerId: string, label: string) => {
+            const { default: LanguageWorker } = await importWorker(label);
+            return new LanguageWorker();
+          },
         };
         loaded = monaco;
         return monaco;
