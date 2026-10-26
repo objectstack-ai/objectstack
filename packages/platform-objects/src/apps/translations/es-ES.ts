@@ -166,6 +166,17 @@ export const esES: TranslationData = {
     },
   },
 
+  datasets: {
+    sys_user_metrics: { measures: { user_count: { label: 'Usuarios' } } },
+    sys_organization_metrics: { measures: { org_count: { label: 'Organizaciones' } } },
+    sys_session_metrics: { measures: { session_count: { label: 'Sesiones' } } },
+    sys_package_installation_metrics: { measures: { package_count: { label: 'Instalaciones' } } },
+    sys_audit_log_metrics: {
+      dimensions: { action: { label: 'Acción' }, user_id: { label: 'Usuario' } },
+      measures: { event_count: { label: 'Eventos' } },
+    },
+  },
+
   pages: {
     cloud_connection_settings: {
       label: 'Conexión a la nube',

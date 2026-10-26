@@ -78,6 +78,7 @@ import {
   buildTwoFactorPluginSchema,
 } from './auth-schema-config.js';
 import { isPlaceholderEmail } from './placeholder-email.js';
+import { userInfoLocaleClaim } from './oidc-userinfo-locale-claim.js';
 
 /**
  * The `AuthManager` members the function below reads — every one of them, and
@@ -641,6 +642,20 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
       // `IAuthService.verifyMcpAccessToken` contract names.
       customAccessTokenClaims: ({ referenceId }) =>
         referenceId ? { [OAUTH_ORGANIZATION_CLAIM]: referenceId } : {},
+      // ── The standard `locale` claim at userinfo (OIDC Core §5.1) ──
+      // `sys_user.locale` under the `profile` scope, so an environment that
+      // signs in through this OP follows the user's language; the rule and
+      // its failure posture live in `oidc-userinfo-locale-claim.ts`. Userinfo
+      // only: the provider keeps profile claims out of the ID token, and the
+      // platform RP reads userinfo.
+      customUserInfoClaims: ({ user, scopes }) =>
+        userInfoLocaleClaim(
+          {
+            getEngine: () => this.getDataEngine(),
+            warn: (message, meta) => this.config.logger?.warn?.(message, meta),
+          },
+          { user, scopes },
+        ),
     })];
     });
   }

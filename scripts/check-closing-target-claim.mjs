@@ -59,6 +59,14 @@
  * one names another: H46 calls that claimed and so does this gate. That is the
  * permissive direction — a blocking gate erring toward not-blocking on an
  * ambiguous thread — and it is the no-fork property, not an accident.
+ *
+ * Both readings skip a `Claim:` its OWN session later yielded, through the one
+ * recogniser `yieldedClaimIndexes` exports beside them (its header carries the
+ * three conditions). The race re-read rule makes the loser yield in a comment,
+ * never by deleting its claim, so the loser's claim is always the NEWER one;
+ * read as current, it made this gate red on the WINNER's PR, which went green
+ * only after the winner re-posted its claim by hand. Skipped, the loser's
+ * branch is no longer claimed and the winner's claim is the one judged.
  *   - the merge-queue ref reading is `pullNumberFromQueueRef`, the governed
  *     queue guard's, which already carries the `release/v5`-style base-branch
  *     lesson its own header records.
@@ -281,7 +289,7 @@ import { maskCommentsAndLiterals } from './js-comment-mask.mjs';
 // about whether this container's fetch reaches GitHub at all. Only the guard
 // VARIABLE below is this file's own, and the block above `rearmThroughProxy`
 // says why.
-import { claimGovernance, closingKeywordTargets, EXIT_PREREQUISITE_NOT_MET, h46ClaimNamesBranch, PROXY_FLAG, PROXY_REARM_GUARD, proxyRearmPlan } from './pm/check-half-states.mjs';
+import { claimGovernance, closingKeywordTargets, EXIT_PREREQUISITE_NOT_MET, h46ClaimNamesBranch, PROXY_FLAG, PROXY_REARM_GUARD, proxyRearmPlan, yieldedClaimIndexes } from './pm/check-half-states.mjs';
 import { pullNumberFromQueueRef } from './pm/check-governed-queue-guard.mjs';
 
 /** This file, resolved once, so the re-exec below hands off to THIS script and not to an argv guess. */
@@ -314,11 +322,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'A transport failure SPEAKS, and is held apart from UNDETERMINED. Both used': 16,
   'The wiring itself. A gate whose workflow step is deleted or whose': 10,
   'The predicate sources this gate reuses must still be there to reuse.': 3,
+  'A claim its own session later YIELDED is not the card\'s claim. The': 16,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 12;
+const SELF_TEST_BATTERY_FLOOR = 13;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -618,8 +627,9 @@ export function judge(ctx) {
 
   const rows = unclaimed.map((t) =>
     (t.names ?? []).length === 0
-      ? `  - \`${t.keyword} #${t.number}\` — no comment on #${t.number} is a \`Claim:\` at all, so the card ` +
-        `records no owner and nothing on it would have stopped a second seat.`
+      ? `  - \`${t.keyword} #${t.number}\` — no comment on #${t.number} is a \`Claim:\` at all (a claim its own ` +
+        `session later yielded does not count), so the card records no owner and nothing on it would have ` +
+        `stopped a second seat.`
       : `  - \`${t.keyword} #${t.number}\` — the governing \`Claim:\` on #${t.number} names ` +
         `${(t.names ?? []).map((b) => `\`${b}\``).join(', ')}, not \`${ctx.head}\`.`,
   );
@@ -1244,6 +1254,66 @@ async function selfTest() {
   t('everything reaches the script through `env:`, never through shell interpolation', /env:[\s\S]{0,400}?PR_BODY:/.test(wiring), true);
   const wiringCommands = wiring.split('\n').filter((line) => !/^\s*#/.test(line)).join('\n');
   t('the guard job invokes no package manager (it needs node and nothing else)', /\b(pnpm|corepack|yarn|npm)\b/.test(wiringCommands), false);
+
+  // --- A claim its own session later YIELDED is not the card's claim. The
+  // measured race: seat 1 claims, seat 2 claims the same card minutes later,
+  // re-reads the thread and yields in a comment, so the loser's claim is the
+  // NEWER one. Read as current it made this gate red on the winner's PR.
+  battery('A claim its own session later YIELDED is not the card\'s claim. The');
+  const WIN = `session_01${'W'.repeat(22)}`;
+  const LOSE = `session_01${'L'.repeat(22)}`;
+  const THREAD_BRANCH = 'claude/project-thread-fixture';
+  const claimBy = (session, ref, iso) => ({
+    body: `Claim: race fixture\nSession: \`${session}\` (seat)\nBranch: \`${ref}\``,
+    created_at: iso,
+  });
+  // The yield's BODY names the winner and its session, as the measured one
+  // does; only its first line may say who stepped back.
+  const yieldBy = (firstLine, iso) => ({
+    body: `${firstLine}\n\nClaim (\`${WIN}\`) precedes this seat's claim; the earlier claim decides.`,
+    created_at: iso,
+  });
+  const lostBy = (session) => yieldBy(`already claimed — yielding · seat 2 · \`${session}\` · 10:00Z`, '2026-01-01T10:01:00Z');
+  const claimA = (ref = HEAD) => claimBy(WIN, ref, '2026-01-01T09:47:00Z');
+  const claimB = claimBy(LOSE, OTHER, '2026-01-01T09:54:00Z');
+  const RACE = [claimA(), claimB, lostBy(LOSE)];
+  const raceRoutes = (rows) => ({
+    '/repos/o/r/issues/15845/comments': rows,
+    '/repos/o/r/issues/15845': { number: 15845, state: 'open' },
+  });
+  const raced = (rows, head) => run('Closes #15845', raceRoutes(rows), { head });
+  const winner = await raced(RACE, HEAD);
+  t('the WINNER\'s PR is CLEAN on a thread whose newest claim was yielded', winner.verdict.exit, EXIT_CLEAN);
+  t('…and costs one comment page, the clean path\'s bound', winner.calls.length, 1);
+  const loser = await raced(RACE, OTHER);
+  t('the LOSER\'s PR is a FINDING — a yielded claim names no branch', loser.verdict.exit, EXIT_UNCLAIMED);
+  t('…and the failure names the WINNER\'s branch as the governing claim', text(loser.verdict).includes(`names \`${HEAD}\``), true);
+  const threadRace = [claimA(THREAD_BRANCH), claimB, lostBy(LOSE)];
+  const threadWinner = await raced(threadRace, THREAD_BRANCH);
+  t('a winner on a card-thread branch is no longer RED (the measured specimen)', threadWinner.verdict.exit, EXIT_CLEAN);
+  t('…it reads UNDETERMINED, warned about, because its branch is not one the reader parses', text(threadWinner.verdict).includes('::warning::UNDETERMINED'), true);
+  t('…and the loser\'s PR on that thread is no longer read as CLAIMED', (await raced(threadRace, OTHER)).collected.targets[0].verdict !== TARGET_CLAIMED, true);
+  const noSession = [claimA(), claimB, yieldBy('already claimed — yielding · seat 2', '2026-01-01T10:01:00Z')];
+  t('a yield naming NO session withdraws nothing — today\'s reading holds', (await raced(noSession, OTHER)).verdict.exit, EXIT_CLEAN);
+  const twoSessions = [claimA(), claimB, yieldBy(`already claimed — yielding · \`${LOSE}\` to \`${WIN}\``, '2026-01-01T10:01:00Z')];
+  t('a yield naming TWO sessions says nobody in particular stepped back — today\'s reading holds', (await raced(twoSessions, OTHER)).verdict.exit, EXIT_CLEAN);
+  t('a yield by ANOTHER session does not withdraw this session\'s claim', (await raced([claimA(), claimB, lostBy(WIN)], OTHER)).verdict.exit, EXIT_CLEAN);
+  const reclaimed = [...RACE, claimBy(LOSE, OTHER, '2026-01-01T11:00:00Z')];
+  t('a `Claim:` the yielding session posts AFTER its yield stands', (await raced(reclaimed, OTHER)).verdict.exit, EXIT_CLEAN);
+  const yieldFirst = [lostBy(LOSE), claimBy(LOSE, OTHER, '2026-01-01T11:00:00Z')];
+  t('a yield withdraws only claims that PRECEDE it', (await raced(yieldFirst, OTHER)).verdict.exit, EXIT_CLEAN);
+  const hyphen = [claimA(), claimB, yieldBy(`already claimed - yielding · \`${LOSE}\``, '2026-01-01T10:01:00Z')];
+  t('a hyphen-written yield is no dialect — today\'s reading holds', (await raced(hyphen, OTHER)).verdict.exit, EXIT_CLEAN);
+  t('the recogniser is the shipped one, and over the race it withdraws the loser\'s claim alone', [...yieldedClaimIndexes(RACE)], [1]);
+  t('…not the winner\'s, whose session only the yield\'s BODY names', yieldedClaimIndexes(RACE).has(0), false);
+  const yieldFixtures = [[RACE, HEAD], [RACE, OTHER], [threadRace, OTHER], [noSession, OTHER], [reclaimed, OTHER], [yieldFirst, OTHER]];
+  const yieldDelegated = [];
+  for (const [rows, head] of yieldFixtures) yieldDelegated.push((await raced(rows, head)).collected.targets[0].verdict === TARGET_CLAIMED);
+  t(
+    'over every yield fixture, CLAIMED is exactly the shipped `h46ClaimNamesBranch` (no forked predicate)',
+    yieldDelegated,
+    yieldFixtures.map(([rows, head]) => h46ClaimNamesBranch(rows.map((row) => row.body), head)),
+  );
 
   // --- The predicate sources this gate reuses must still be there to reuse.
   battery('The predicate sources this gate reuses must still be there to reuse.');

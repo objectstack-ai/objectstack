@@ -1490,7 +1490,7 @@ function isNestedRelationSpec(spec: unknown): spec is Record<string, unknown> {
  * #5240's zero-operator refusal in {@link fieldLeaves}, the answer the engine
  * gives it too (a condition naming no field of the related object).
  */
-function isNestedRelationCondition(spec: unknown): spec is Record<string, unknown> {
+export function isNestedRelationCondition(spec: unknown): spec is Record<string, unknown> {
   return isNestedRelationSpec(spec) && Object.keys(spec).length > 0;
 }
 

@@ -188,6 +188,11 @@ import {
   rollback,
   rollbackTransaction,
 } from './sql-driver-transactions.js';
+// [#25521 cut 6] The two in-place drift reconcilers of schema sync
+// (`applyDriftOpInPlace` and the SQLite table rebuild `rebuildSqliteTablePatched`);
+// the methods of the same names below hand each body the members it reads
+// (`SchemaSyncHost`).
+import { applyDriftOpInPlace, rebuildSqliteTablePatched } from './sql-driver-schema-sync.js';
 import { makeDatabaseDirectory, probeAbsentSqliteDatabaseFile, SqliteDatabaseFileError } from './sqlite-database-file.js';
 import { jsonMembershipPredicate } from '@objectstack/core';
 import knex, { Knex } from 'knex';
@@ -14857,65 +14862,22 @@ export class SqlDriver implements IDataDriver {
   }
 
   /** Apply a single drift op in place (Postgres / MySQL). Returns false if unsupported. */
-  protected async applyDriftOpInPlace(op: DriftOp): Promise<boolean> {
-    // Index ops need no dialect-specific ALTER — route them to the portable path.
-    if (isIndexDriftOp(op)) return this.applyIndexDriftOp(op);
-    const { table, column } = op;
-    if (this.isPostgres) {
-      switch (op.type) {
-        case 'relax_not_null':
-          await this.knex.raw('ALTER TABLE ?? ALTER COLUMN ?? DROP NOT NULL', [table, column]);
-          return true;
-        case 'tighten_not_null':
-          await this.knex.raw('ALTER TABLE ?? ALTER COLUMN ?? SET NOT NULL', [table, column]);
-          return true;
-        case 'widen_varchar':
-        case 'narrow_varchar':
-          await this.knex.raw(`ALTER TABLE ?? ALTER COLUMN ?? TYPE varchar(${op.to})`, [table, column]);
-          return true;
-        case 'drop_column':
-          await this.knex.raw('ALTER TABLE ?? DROP COLUMN ??', [table, column]);
-          return true;
-        case 'drop_column_default':
-          await this.knex.raw('ALTER TABLE ?? ALTER COLUMN ?? DROP DEFAULT', [table, column]);
-          return true;
-      }
-    }
-    if (this.isMysql) {
-      // MySQL MODIFY restates the FULL column definition — reconstruct the
-      // type (with length for char types, so a nullability change never
-      // silently drops a varchar's declared length) from columnInfo.
-      const info: any = await this.knex(table).columnInfo();
-      const ci: any = info?.[column];
-      const colType: string | undefined = ci?.type
-        ? (/char/i.test(ci.type) && ci.maxLength ? `${ci.type}(${ci.maxLength})` : ci.type)
-        : undefined;
-      switch (op.type) {
-        case 'relax_not_null':
-          if (!colType) return false;
-          await this.knex.raw(`ALTER TABLE ?? MODIFY ?? ${colType} NULL`, [table, column]);
-          return true;
-        case 'tighten_not_null':
-          if (!colType) return false;
-          await this.knex.raw(`ALTER TABLE ?? MODIFY ?? ${colType} NOT NULL`, [table, column]);
-          return true;
-        case 'widen_varchar':
-        case 'narrow_varchar':
-          await this.knex.raw(`ALTER TABLE ?? MODIFY ?? varchar(${op.to})`, [table, column]);
-          return true;
-        case 'drop_column':
-          await this.knex.raw('ALTER TABLE ?? DROP COLUMN ??', [table, column]);
-          return true;
-        case 'drop_column_default':
-          // `ALTER … ALTER COLUMN … DROP DEFAULT` — the one ALTER COLUMN form
-          // MySQL accepts without restating the type, so it cannot lose a
-          // varchar length the way MODIFY can.
-          await this.knex.raw('ALTER TABLE ?? ALTER COLUMN ?? DROP DEFAULT', [table, column]);
-          return true;
-      }
-    }
-    this.logger.warn(`[schema-drift] ${op.type} on ${table}.${column} is unsupported on dialect '${this.dialectName}' — skipped`);
-    return false;
+  protected applyDriftOpInPlace(op: DriftOp): Promise<boolean> {
+    // [#25521 cut 6] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readDialectName = () => this.dialectName;
+    const readIsMysql = () => this.isMysql;
+    const readIsPostgres = () => this.isPostgres;
+    const readKnex = () => this.knex;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof applyDriftOpInPlace> = {
+      applyIndexDriftOp: (...a) => this.applyIndexDriftOp(...a),
+      get dialectName() { return readDialectName(); },
+      get isMysql() { return readIsMysql(); },
+      get isPostgres() { return readIsPostgres(); },
+      get knex() { return readKnex(); },
+      get logger() { return readLogger(); },
+    };
+    return applyDriftOpInPlace.call(host, op);
   }
 
   /**
@@ -14951,101 +14913,25 @@ export class SqlDriver implements IDataDriver {
    * by `lookup` fields are not re-added (ObjectStack enforces relationships at
    * the application layer, not via SQLite FK constraints).
    */
-  protected async rebuildSqliteTablePatched(table: string, ents: ManagedDriftEntry[]): Promise<ManagedDriftEntry[]> {
-    const relax = new Set<string>();
-    const tighten = new Set<string>();
-    const drop = new Set<string>();
-    const dropDefault = new Set<string>();
-    // The entries this rebuild ACTS on, filled by the same pass that fills the
-    // four sets — deliberately not a second list of op types to keep in sync
-    // with the branches below. An entry is honoured if and only if one of those
-    // branches took it, so the returned set cannot drift from the work done.
-    const honoured: ManagedDriftEntry[] = [];
-    for (const e of ents) {
-      if (e.op.type === 'relax_not_null') relax.add(e.op.column);
-      else if (e.op.type === 'tighten_not_null') tighten.add(e.op.column);
-      else if (e.op.type === 'drop_column') drop.add(e.op.column);
-      else if (e.op.type === 'drop_column_default') dropDefault.add(e.op.column);
-      // Everything else is IGNORED here and must be reported as such (#11722):
-      // widen/narrow varchar (SQLite ignores declared length — nothing to do),
-      // `manual_column_type_change` (no reconciler arm on ANY dialect, by
-      // decision), and any column op added later, which lands in this branch by
-      // default rather than being silently absorbed into `honoured`.
-      else continue;
-      honoured.push(e);
-    }
-
-    const physical = await this.introspectColumns(table);
-    const kept = physical.filter((c) => !drop.has(c.name));
-    const keptNames = kept.map((c) => c.name);
-    const fields = this.managedObjectFields.get(table) ?? {};
-    const tmp = `__os_mig_${table}`;
-
-    // FK enforcement must be toggled OUTSIDE the transaction (SQLite ignores
-    // the PRAGMA inside one). Off during the swap so the rename doesn't trip
-    // any dangling references mid-flight.
-    await this.knex.raw('PRAGMA foreign_keys = OFF');
-    try {
-      await this.knex.transaction(async (trx) => {
-        await trx.schema.dropTableIfExists(tmp);
-        await trx.schema.createTable(tmp, (t) => {
-          for (const c of kept) {
-            const col = this.buildRebuiltColumn(t, c);
-            if (!col) continue;
-            const nullable = relax.has(c.name) ? true : tighten.has(c.name) ? false : c.nullable;
-            if (!nullable && c.name !== 'id') col.notNullable();
-            if (c.name === 'created_at' || c.name === 'updated_at') {
-              // #11321: the SAME canonical default {@link createAuditTimestampColumn}
-              // emits, not `knex.fn.now()`. This method is SQLite-only (see the
-              // `isSqlite` branch in `applyMigrationEntries`), where
-              // `knex.fn.now()` is the zone-naive `CURRENT_TIMESTAMP` — so
-              // re-emitting it here would silently REVERT a table that was
-              // created with the canonical default the moment any unrelated
-              // drift (a relaxed NOT NULL, a dropped column) triggered a
-              // rebuild. A rebuild must hand back the column `initObjects`
-              // would have built.
-              col.defaultTo(this.nowColumnDefault('datetime'));
-            } else if (!dropDefault.has(c.name)) {
-              // Re-emit the METADATA-declared default. The rebuild dropped the
-              // original table, so a column whose default is not restated here
-              // comes back without one — which is precisely what a
-              // `drop_column_default` op wants, and precisely what a
-              // `defaultValue: 'NOW()'` sibling must not suffer.
-              const f = (fields as Record<string, any>)[c.name];
-              if (f) this.applyDeclaredColumnDefault(col, f, f.type || 'string');
-            }
-          }
-        });
-        const colList = keptNames.map((n) => `"${n}"`).join(', ');
-        await trx.raw(`INSERT INTO "${tmp}" (${colList}) SELECT ${colList} FROM "${table}"`);
-        await trx.schema.dropTable(table);
-        await trx.schema.renameTable(tmp, table);
-      });
-    } finally {
-      await this.knex.raw('PRAGMA foreign_keys = ON');
-    }
-
-    // Recreate unique constraints + declared indexes from metadata. The rebuild
-    // dropped the original table, so every index went with it — this is a fresh
-    // materialization, and it must produce the SAME constraints as
-    // `initObjects` would. It used to inline its own `uniq_<table>_<col>`
-    // single-column DDL, which is how a tenant-scoped field could silently
-    // regain a global unique index after any drift rebuild (#3696); both paths
-    // now share {@link syncTableIndexes}.
-    try {
-      const keptSet = new Set(keptNames);
-      await this.syncTableIndexes(
-        table,
-        fields,
-        this.managedObjectIndexes.get(table),
-        this.resolveTenantField(table),
-        keptSet,
-      );
-    } catch (e: any) {
-      this.logger.warn(`[schema-drift] could not fully recreate indexes for '${table}' after rebuild`, e?.message ?? e);
-    }
-
-    return honoured;
+  protected rebuildSqliteTablePatched(table: string, ents: ManagedDriftEntry[]): Promise<ManagedDriftEntry[]> {
+    // [#25521 cut 6] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readKnex = () => this.knex;
+    const readLogger = () => this.logger;
+    const readManagedObjectFields = () => this.managedObjectFields;
+    const readManagedObjectIndexes = () => this.managedObjectIndexes;
+    const host: ThisParameterType<typeof rebuildSqliteTablePatched> = {
+      applyDeclaredColumnDefault: (...a) => this.applyDeclaredColumnDefault(...a),
+      buildRebuiltColumn: (...a) => this.buildRebuiltColumn(...a),
+      introspectColumns: (...a) => this.introspectColumns(...a),
+      get knex() { return readKnex(); },
+      get logger() { return readLogger(); },
+      get managedObjectFields() { return readManagedObjectFields(); },
+      get managedObjectIndexes() { return readManagedObjectIndexes(); },
+      nowColumnDefault: (...a) => this.nowColumnDefault(...a),
+      resolveTenantField: (...a) => this.resolveTenantField(...a),
+      syncTableIndexes: (...a) => this.syncTableIndexes(...a),
+    };
+    return rebuildSqliteTablePatched.call(host, table, ents);
   }
 
   /**
