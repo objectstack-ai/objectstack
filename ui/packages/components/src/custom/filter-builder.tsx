@@ -1112,7 +1112,7 @@ export function isFilterValueComplete(
 /** The two bounds a `pair` row edits, with the gaps filled in for rendering. */
 function toPairBounds(
   value: FilterBuilderRow["value"],
-): [string | number | boolean, string | number | boolean] {
+): [string | number, string | number] {
   const [min = "", max = ""] = normalizeToArray(value)
   return [min, max]
 }
@@ -1835,7 +1835,7 @@ function FilterBuilder({
       // refusal. `|| undefined` so a complete pair carries NO attribute at all.
       const boundInvalid = (index: 0 | 1) => (missingBound === index ? true : undefined)
       const setBound = (index: 0 | 1, raw: string) => {
-        const next: [string | number | boolean, string | number | boolean] = [bounds[0], bounds[1]]
+        const next: [string | number, string | number] = [bounds[0], bounds[1]]
         // The same one reading as the field-switch path (objectui#4875), in
         // place of `parseFloat(raw) || 0`: a bound is a clean number or it is
         // not filled in (`""`). A half-read bound (`"42abc"` → 42) or an
@@ -1843,7 +1843,7 @@ function FilterBuilder({
         // silently narrows a RANGE, and `0` is a plausible-looking bound.
         // `convertScalarToFamily("", "number")` is `""`, so the old
         // `raw !== ""` guard is subsumed rather than dropped.
-        next[index] = numeric ? (convertScalarToFamily(raw, "number") ?? "") : raw
+        next[index] = numeric ? toListEntry(convertScalarToFamily(raw, "number") ?? "") : raw
         // Both bounds cleared → back to the "nothing filled in yet" shape the
         // write path drops, rather than persisting an empty range.
         updateCondition(condition.id, {
@@ -2305,13 +2305,13 @@ function TemporalValueEditor({
 // ============================================================================
 
 interface MultiValueInputProps {
-  values: (string | number | boolean)[]
+  values: (string | number)[]
   /** The `<input type>` the field's own type asks for (`text` / `number` / …). */
   inputType: string
   /** Numeric field → committed tokens are numbers, so the wire carries numbers. */
   numeric: boolean
   testId: string
-  onChange: (next: (string | number | boolean)[]) => void
+  onChange: (next: (string | number)[]) => void
 }
 
 /**
@@ -2346,7 +2346,7 @@ function MultiValueInput({ values, inputType, numeric, testId, onChange }: Multi
     if (next === undefined || next === "") return
     setDraft("")
     if (values.some((v) => String(v) === String(next))) return
-    onChange([...values, next])
+    onChange([...values, toListEntry(next)])
   }
 
   const removeAt = (index: number) => {

@@ -122,7 +122,8 @@ interface Field {
 The schema's `value` is `FilterGroup` from `@object-ui/types`, the authored group.
 The React component's `value` / `onChange` use `FilterBuilderRowGroup` from
 `@object-ui/components`: the same group, derived from `FilterGroup`, whose rows
-are `FilterBuilderRow` (the builder's own operator ids and a required value).
+are `FilterBuilderRow` (the builder's own operator ids and the spec rule's value),
+so an authored group passes to the component as it is.
 
 ```typescript
 interface FilterBuilderRowGroup {
@@ -135,7 +136,9 @@ interface FilterBuilderRow {
   id: string;                    // Row identifier (required)
   field: string;                 // Field value
   operator: FilterBuilderOperator; // Operator id (see below)
-  value: string | number | boolean | (string | number | boolean)[]; // Filter value
+  value?: ViewFilterRule['value']; // `@objectstack/spec/ui`: optional (value-less
+                                   // operators carry none), may be null; a list or
+                                   // pair holds strings and numbers
 }
 ```
 
