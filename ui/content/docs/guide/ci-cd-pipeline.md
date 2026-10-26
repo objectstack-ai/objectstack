@@ -37,13 +37,11 @@ one has its own section below.
 | `labeler.yml` | Auto Label PRs | PR `opened`, `synchronize`, `reopened` | No |
 | `dependabot-auto-merge.yml` | Dependabot Auto-merge | PR to `main`/`develop` authored by `dependabot[bot]` | No — but it gates *its own* merge, and goes red instead of merging when the check set is not green |
 | `cross-repo-issue-closer.yml` | Cross-repo Issue Closer | PR `closed` (acts only when merged) | No — runs after merge |
-| `changeset-release.yml` | Changeset Release | Push to `main` (publish half); 6-hourly cron `0 */6 * * *`; manual (version-PR refresh half) | n/a |
 | `changelog.yml` | Auto Changelog | Manual dispatch only — nothing triggers it automatically | n/a |
 | `shadcn-check.yml` | Check Shadcn Components | Weekly cron `0 9 * * 1`; manual | n/a |
 | `check-links.yml` | Check Links | Weekly cron `17 4 * * 0`; manual | n/a — reports, never gates |
 | `docs-deploy.yml` | Docs Deploy | 6-hourly cron `43 5,11,17,23 * * *`; manual | n/a — it deploys objectui.org and gates nothing. It goes **red** whenever the docs did not ship |
 | `published-dist-gate.yml` | Published Dist Tooling Scan | Nightly cron `41 3 * * *`; push to `main` touching the gate; manual | No — the blocking copy runs on the publish path, not here |
-| `spec-range-floors.yml` | Spec Range Floor Scan | Nightly cron `11 4 * * *`; push to `main` touching the gate; manual | No — the blocking copy runs on the publish path, not here |
 | `node-esm-load-gate.yml` | Node ESM Load Scan | Nightly cron `17 4 * * *`; push to `main` touching the gate; manual | No — the per-PR half is `pnpm check:esm-specifiers` in **Type Check** |
 | `half-state-patrol.yml` | Half-State Patrol | 6-hourly cron `37 1,7,13,19 * * *`; manual; PR touching the workflow | No — **report-only**; it fails only when the sweep could not run, or a *configured* anchor could not be written |
 | `board-snapshot.yml` | Snapshot the board to the archive branch | 6-hourly cron `14 2,8,14,20 * * *`; manual; PR touching the workflow | No — it is path-filtered, so it does not report on most PRs; **blocking when it does run** |
@@ -1486,7 +1484,7 @@ install, which is exactly the edit that needs catching. Two anchoring decisions 
 depends on, each with a case in this repository: `pnpm exec playwright install chromium` installs a
 browser rather than the workspace, and `git config merge.pnpm-merge.driver "pnpm install …"`
 *configures* a driver — the `pnpm install` there is a quoted argument, not an install. That second
-case was formerly live in `changeset-release.yml`; it was removed with the dead CI half of the
+case was formerly live in the Changeset Release workflow; it was removed with the dead CI half of the
 lockfile merge driver ([#6436](https://github.com/objectstack-ai/objectui/issues/6436)), so the
 repository no longer contains a real instance and the gate keeps it as a synthetic fixture instead.
 Reading either shape as an install would move a boundary and silently drop a script out of the
@@ -2182,181 +2180,10 @@ those cards and in git history.
 
 ## Release Workflows
 
-### Changeset Release (`changeset-release.yml`)
-
-Before its install, the job restores the pinned `@objectstack/*` build from the cache keyed by `.objectstack-sha`, or builds it on a miss with `scripts/objectstack-pin.mjs` — every `@objectstack/*` package resolves to that build, not to npm (objectui#12957; the mechanism is that script's header).
-
-**Trigger:** Push to `main` — the **publish** half. Cron `0 */6 * * *` and manual dispatch with
-`refresh_version_pr` — the **version-PR refresh** half.
-
-Uses [Changesets](https://github.com/changesets/changesets) for automated versioning and npm
-publishing, in **two lanes that cannot do each other's job**:
-
-| Event | Predicate | What runs |
-|---|---|---|
-| Push to `main` | declared version **not** on npm | **Publish to npm.** Normally the version-PR merge, which is the release act; also the retry for a release whose own run failed. |
-| Push to `main` | declared version already on npm | **Nothing.** Every ordinary landing — a merge that is not a release does not move the version. |
-| Cron `0 */6 * * *` | n/a | **Refresh the version PR** ([#5400](https://github.com/objectstack-ai/objectui/pull/5400)) — never publishes. |
-| Manual, `refresh_version_pr` checked | n/a | The same refresh, on demand. |
-| Manual, unchecked | n/a | Nothing; the run says so with a `::notice::`. |
-
-The refresh used to run on **every** push to `main`, which force-pushed the version PR ~18 times
-a working day while releases are weekly — so its branch CI never converged, and every refresh
-was a CI run spent on bookkeeping nobody reads until release day
-([objectstack#10850](https://github.com/objectstack-ai/objectstack/issues/10850)). A cheap `lane`
-job answers the questions the split turns on from a sparse checkout of `.changeset/` and
-`packages/core/`, before anything installs or builds.
-
-#### The publish lane is keyed on npm, not on `.changeset/`
-
-The publish half asks **"is the version this commit declares already on npm?"** — not "are
-changesets pending?" ([#5442](https://github.com/objectstack-ai/objectui/issues/5442)). The two
-read as interchangeable and come apart exactly where it costs a release: the version PR is cut
-from `main` at T and merged at T+n, `main` takes ~18 merges a working day, and the merge does not
-remove the changesets that landed in between. Those belong to the *next* version — but keyed on
-them, the version this commit just bumped to is skipped, and the next version PR bumps straight
-past it. Measured when #5442 was fixed: of the 90 versions `packages/core/CHANGELOG.md` declared,
-**16 had never reached npm**, and the repository said `17.6.0` while `dist-tags.latest` said
-`17.5.0`.
-
-The npm predicate is also **cheaper** than the one it replaced, rather than a trade against it. An
-ordinary landing does not move the manifest version, so it answers "already published" and the
-expensive job is skipped — where "no changesets pending" ran the job in full on every landing that
-happened to find `.changeset/` empty, only to publish nothing.
-
-`@object-ui/core` is the version anchor because every package in the `fixed` group of
-`.changeset/config.json` moves as one version, so any member answers for the whole release. The
-lane **asserts** that membership instead of assuming it, and it refuses to guess a lane if the
-registry cannot be read: 200 is published, 404 is not, and anything else fails the run.
-
-`changesets/action@v1` chooses publish-vs-version from repository state rather than from an input,
-so the predicate cannot reach it on its own — with changesets present it would take its version
-branch and publish nothing. The publish lane therefore clears the pending `.changeset/*.md` from
-the **runner's working tree** before invoking it. Nothing is committed and no branch is pushed
-(`runPublish` never commits), so `.changeset/` on `main` is untouched and those changesets are
-still owed to the next version PR.
-
-#### The loud check
-
-#5442's defect was never a red run — it was a green one: run 3370 on `cfeb378b5` completed
-`success` having published nothing, and only a CHANGELOG-against-registry audit noticed, 16
-versions later. So the publish lane now reads the registry back afterwards and **fails** if the
-version it exists to ship is still absent. A repo/npm divergence is a failing run, not a finding.
-
-#### Tags and GitHub Releases
-
-`changesets/action@v1` pushes a package's git tag and creates its GitHub Release only for the
-packages whose `New tag: <pkg>@<version>` line it parses out of the publish script's stdout. Since
-[#5296](https://github.com/objectstack-ai/objectui/issues/5296) moved this repository to
-`@changesets/cli` v3, `changeset publish` prints no such line, so the action pushed nothing and
-created nothing: **17.6.0 and 17.7.0 reached npm with no tag and no Release**, while every step
-stayed green ([#11596](https://github.com/objectstack-ai/objectui/issues/11596)). `changeset
-publish` still creates the tags on the runner, so the publish lane now finishes the job itself,
-after the npm check:
-
-| Step | What it does |
-|---|---|
-| Push the release tags | Pushes exactly the `<pkg>@<version>` tags the release owes — the list `--print-tags` prints — in **one** push, and fails naming any tag `changeset publish` did not create. |
-| Create GitHub Releases | `node scripts/release-github-releases.mjs`, ported from objectstack: one Release per public package from its CHANGELOG entry, idempotent (an existing Release is updated, never re-created), and every body **truncated to the Releases API's 125,000-character limit** with a link to the complete entry. |
-
-The truncation is not hypothetical here: `@object-ui/app-shell@17.5.0` has a tag but no Release,
-because its entry was over that limit when the action tried to post it, and many 17.7.0 entries
-are larger still. Run the script with `--dry-run` to see the planned tag → Release list and each
-body's size without calling the API.
-
-Both steps run on the **publish lane only** — `push`, gated on the publish step and the npm check
-having succeeded, so a `schedule` or `workflow_dispatch` run can never reach them — and under
-`!cancelled()`, so a version that is already public still gets its record if a step between them
-fails. The tags go first because a Release created for a tag the remote does not have makes the
-API create that tag itself, as a lightweight tag. `scripts/__tests__/release-github-releases.test.ts`
-runs the script's `--self-test` and pins both steps' lane scoping and order.
-
-The refresh lane is invoked **without** a `publish:` script and **without** npm credentials, so
-it cannot publish by construction rather than by a condition — the release act in this
-repository stays the human merge of the version PR.
-
-Before either lane's changesets step, the release job runs `pnpm build` — the publish lane ships
-what that build produced, and the gates below judge the built `dist/`, so there is nothing for them
-to read until it has run.
-
-Last in the job, after every release step, `scripts/report-turbo-cache.mjs` posts the restored
-cache key and what that build replayed as one notice, then prunes the cache to what the build used
-before it is saved under this job's own key prefix
-([#12276](https://github.com/objectstack-ai/objectui/issues/12276)).
-
-The publish lane then runs `pnpm changeset:publish`, and that script is
-`node scripts/objectstack-floor.mjs && node scripts/check-published-dist-tooling.mjs && node scripts/check-spec-range-floors.mjs && changeset publish`.
-Its first step computes every `@objectstack/*` floor from `.objectstack-sha` — the earliest
-published release whose tag contains the pinned commit — writes it into the published manifests
-and their CHANGELOG entries, and stops the publish when no release contains the pin
-([#12958](https://github.com/objectstack-ai/objectui/issues/12958); the rules are that script's
-header). The other two are the **blocking** copies of the Published Dist Gate and the Spec Range
-Floors gate above. A published package whose `dist/` carries tooling material, or one whose declared
-`@objectstack/spec` floor is missing a symbol its own artifact uses, stops the publish before a
-single tarball reaches npm, which is where those defects actually cost anything
-([#4846](https://github.com/objectstack-ai/objectui/issues/4846)).
-
-> ⚠️ **`pnpm changeset:publish` and `pnpm check:published-dist` are named above on purpose, and a
-> `run:`-only reading of this workflow will not find them.** They reach the runner through
-> `changesets/action@v1`'s `publish:` **input**, not through a `run:` step, so a tool — or a person
-> — scanning the YAML for `run:` lines sees a section naming two commands the job appears not to
-> run. It runs them. ⛔ Do not "fix" them out of this section; the parity pin in
-> `scripts/__tests__/ci-cd-pipeline-doc.test.ts` declares them as expected and fails if either the
-> declaration or the prose goes away.
-
-#### The release PR runs no CI, so the refresh lane validates the tree itself
-
-The version PR gets **no checks of its own, and cannot be given any**. Measured 2026-08-25:
-`ci.yml` has **849** runs on `changeset-release/main` and every recent one is `action_required`
-with `created_at == run_started_at == updated_at` — created and immediately parked, nothing
-executed. GitHub does not start workflow runs from events raised by `GITHUB_TOKEN`, and the
-refresh force-pushes that branch, so there is no stable head to re-run against either. On the
-17.6.0 release PR the check-runs endpoint returned `total_count: 1`: one job, started **7 seconds
-after the merge**. The release commit is therefore the only commit that reaches `main` without
-passing the merge queue ([#5397](https://github.com/objectstack-ai/objectui/issues/5397)).
-
-So the refresh lane renders `pnpm changeset:version` into the runner's working tree, validates it,
-restores the tree, and only then invokes the action — which does its own versioning and owns the
-commit and the push.
-
-**What it validates, and why that is not `pnpm test`.** The version step cannot move a source
-byte. Measured against the real tree (328 pending changesets, 17.6.0 → 17.7.0) it touches 411
-paths: 330 `.changeset/*.md` deleted, 40 `package.json` (the `"version"` key and nothing else), 40
-generated `CHANGELOG.md`, and `QUICK_REFERENCE.md`. The source in the post-version tree is
-byte-identical to the `main` commit `ci.yml`'s push lane just tested under coverage across its
-coverage shards, so a suite run here would re-test tested bytes at ~40 minutes a go, four times a day —
-~2.7 h of daily runner time for a PR nobody reads until release day, which is the cost
-[objectstack#10850](https://github.com/objectstack-ai/objectstack/issues/10850) was closed to
-remove. The validation is scoped to the surfaces the diff can move instead:
-
-| Command | Covers | Measured |
-|---|---|---|
-| `pnpm quick-reference:check` | `QUICK_REFERENCE.md` | ~1 s |
-| `pnpm check:control-bytes` | the 40 generated `CHANGELOG.md` | ~4 s |
-| `pnpm test scripts/__tests__` | 112 test files / 3360 tests on `main@59a3a233d` — every test that reads a manifest version, `QUICK_REFERENCE.md` or a `CHANGELOG.md` | ~50 s |
-
-`check:spec-floors` and `check:published-dist` are deliberately **not** here: they read dependency
-ranges and built `dist/`, neither of which the version step moves, and `pnpm changeset:publish`
-runs both first on the publish lane anyway.
-
-There is also **no "only when the PR content changed" condition**, for a measured reason: across
-the seven consecutive 6-hourly windows from 2026-08-23T06:08Z to 2026-08-25T00:10Z, six carried
-new changeset files (median 18). Such a predicate would skip about one refresh in seven while
-adding a local prediction of another project's state that can be wrong silently — the shape
-[#6081](https://github.com/objectstack-ai/objectui/issues/6081) just deleted from this file.
-
-**Failure semantics.** A red validation fails the job and the refresh never runs, so the standing
-PR keeps its last validated content rather than being force-pushed to a broken one. Nothing here
-can touch the publish lane: all three steps are scoped to `schedule` / `workflow_dispatch`. The
-restore step is load-bearing — with `.changeset/` left consumed the action would find nothing
-pending, take its no-op branch and return, and the PR would fossilise with nothing failing
-anywhere — so the restoration is asserted, not assumed.
-
-Neither lane configures a lockfile merge driver. This job performs no local merge — the version
-branch is updated by `reset --hard` plus a force-push inside `changesets/action` — so there is
-nothing for a driver to resolve. It configured one until
-[#6436](https://github.com/objectstack-ai/objectui/issues/6436); see **Lockfile Merge Driver**
-below for the half of that mechanism which is still live.
+The Changeset Release and Spec Range Floors workflows were deleted by
+[objectstack#25745](https://github.com/objectstack-ai/objectstack/pull/25745) when this tree became
+the `ui/` workspace of objectstack: `@object-ui/*` now publishes in objectstack's one release lane,
+with `@objectstack/*` in the same fixed version group.
 
 ### Published Dist Gate (`published-dist-gate.yml`)
 
@@ -2395,56 +2222,6 @@ Three things about it are easy to get wrong and are written down in the script's
   config shape, never emit semantics, so a package can satisfy it and still ship tooling
   material for some other reason. This gate stays the second line of defence and the only
   criterion that cannot be wrong about what actually ships.
-
-### Spec Range Floors (`spec-range-floors.yml`)
-
-Before its install, the job restores the pinned `@objectstack/*` build from the cache keyed by `.objectstack-sha`, or builds it on a miss with `scripts/objectstack-pin.mjs` — every `@objectstack/*` package resolves to that build, not to npm (objectui#12957; the mechanism is that script's header).
-
-**Trigger:** Nightly cron `11 4 * * *`; push to `main` that touches the gate script or this
-workflow; manual. **It carries no `pull_request` trigger, on purpose.**
-
-A package's declared `@objectstack/spec` floor must carry every symbol that package's own
-build output references. The gate is `scripts/check-spec-range-floors.mjs`
-(`pnpm check:spec-floors`); the workflow builds every published package with `turbo run build`
-(filtered only to exclude the docs site), then the gate compares
-each one's `dist` imports of `@objectstack/spec/*` against the export set of the version that
-package's own range admits at its lowest.
-
-Between the build and the scan, the job runs `scripts/objectstack-floor.mjs`, the step the publish
-path runs first, so the gate judges the floors a publish would ship. Its exit 2 — no published
-objectstack release contains the pin yet — leaves nothing to judge, and the scan is skipped with a
-notice ([#12958](https://github.com/objectstack-ai/objectui/issues/12958)).
-
-The defect it closes, repaired in the gate's own landing commit `111741454`:
-`@object-ui/plugin-detail` shipped `dist/renderers/record-reference-rail.d.ts` re-exporting
-`ReferenceRailEntry` from `@objectstack/spec/ui` — a symbol that arrived in spec 17.1.0 — while
-its own `dependencies` still named a floor a minor lower. A declared range is a public claim,
-and that one admitted a spec without the symbol. (No range literal is quoted here on purpose:
-the live answer is `packages/plugin-detail/package.json`, and this gate's output.) Normal installs resolve the newest 17.x and never see it,
-which is exactly why nothing found it: it is a floor-honesty defect, and the lockfile hides it
-from every other check in this repository.
-
-Two ways of building this check return a confident green, and both are avoided by construction
-rather than by care — the script's header carries the long version:
-
-- **Resolution answers the wrong question.** The root `package.json` declares
-  `@objectstack/spec`, so pnpm hoists it to the workspace root and every resolution succeeds
-  from every package directory regardless of that package's own manifest. A green type-check
-  therefore proves nothing about a floor: it type-checks against the *installed* version. The
-  gate resolves nothing through `node_modules` — it fetches the declared minimum from the
-  registry and reads that tarball's own `exports` map. It is the same trap
-  `check-phantom-dependencies.mjs` records for `react`.
-- **The spec is dual-package.** `require` reaches `dist/<entry>/index.js` and `import` reaches
-  `dist/<entry>/index.mjs`, with separate type entries. Reading it through `createRequire` judges
-  a build no bundler ever puts in an application. The gate walks the fetched manifest's `exports`
-  map under the **`import`** condition and prints the entry it landed on, and `--cross-check`
-  re-reads the `require` half and compares.
-
-Like the two gates above it, the criterion is artifact-level and therefore needs a full build,
-so the blocking copy runs on the publish path and this workflow is the nightly alarm. Reading
-`src/` instead would be cheaper and wrong in the expensive direction: an `import type` used only
-inside a function body is erased and never reaches `dist/`, so a source-level version would
-demand floor bumps nothing published justifies.
 
 ### Node ESM Load Gate (`node-esm-load-gate.yml`)
 
@@ -2530,14 +2307,14 @@ the second copy, in `check-i18n-en-drift.mjs`, inherited a real defect from that
 draft and had to be fixed to match under
 [#3766](https://github.com/objectstack-ai/objectui/issues/3766); the root vitest suite exercises it
 on any PR touching `scripts/**`), `scripts/invoked-as.mjs` (a dependency the gate scripts import, but a
-widely shared one — 40+ importers under `scripts/` — that `published-dist-gate.yml`,
-`spec-range-floors.yml` and `node-esm-load-gate.yml` also import without listing;
+widely shared one — 40+ importers under `scripts/` — that `published-dist-gate.yml`
+and `node-esm-load-gate.yml` also import without listing;
 `half-state-patrol.yml` listed it as a documented one-off until
 [#10208](https://github.com/objectstack-ai/objectui/issues/10208) moved that sweeper to an objectstack
 checkout) and the script's own
 `__tests__/check-changeset-no-major.test.ts` (it already runs in the root vitest suite on any PR
-that touches `scripts/**`, the same `~ partial` reasoning `published-dist-gate.yml` and
-`spec-range-floors.yml` apply to their own gate scripts' `__tests__` files).
+that touches `scripts/**`, the same `~ partial` reasoning `published-dist-gate.yml` applies to its own gate
+script's `__tests__` files).
 
 Runs `scripts/check-changeset-no-major.mjs`, which fails if any pending changeset declares a
 `major` bump. Every publishable package is in one `fixed` group (39 packages), so a single
@@ -2731,10 +2508,10 @@ belongs to, and there is no other owner.
 The lane also declared `release: types: [published]` until
 [#5409](https://github.com/objectstack-ai/objectui/issues/5409), and that half never fired once.
 Every release here is authored by `github-actions[bot]`, created by the Changesets action in
-`changeset-release.yml` using `secrets.GITHUB_TOKEN`, and GitHub does not start workflow runs from
+the Changeset Release workflow using `secrets.GITHUB_TOKEN`, and GitHub does not start workflow runs from
 events raised with that token — so the automated release path structurally cannot wake this
 workflow. Measured before the trigger came off: 0 runs across the repository's whole life, against
-`changeset-release.yml`'s 4049 through the identical API call. It was removed rather than left
+the Changeset Release workflow's 4049 through the identical API call. It was removed rather than left
 implying an automation that cannot happen.
 
 What follows for readers: the root `CHANGELOG.md` is a **periodically hand-curated summary**, not
@@ -3007,7 +2784,7 @@ workflow files `main` changed since the last refresh), and revokes it when the j
 own token only reads. ⛔ No personal access token ([#5397](https://github.com/objectstack-ai/objectui/issues/5397)),
 and ⛔ no fallback to `GITHUB_TOKEN`: when the credential is not visible to this repository the run
 goes red and says so. The branch, `ci/test-shard-timings-refresh`, is this workflow's own and is
-overwritten by each refresh, as `changeset-release.yml` does with its version branch.
+overwritten by each refresh, as the Changeset Release workflow did with its version branch.
 
 **A pull-request run writes nothing**, and neither does a manual dispatch on any branch but `main`.
 It runs the selection, the downloads and the regeneration, and skips the mint, the push and the
@@ -3276,7 +3053,7 @@ uploads the analysis artifacts for reference.
 ## Lockfile Merge Driver
 
 ⭐ **Contributor-facing, with zero CI consumers.** It had exactly one CI consumer,
-`changeset-release.yml`, and that one was measured dead before it was removed
+the Changeset Release workflow, and that one was measured dead before it was removed
 ([#6436](https://github.com/objectstack-ai/objectui/issues/6436), ruled 2026-08-27). What is left
 is live, repository-wide, and takes place entirely on contributors' machines — CI has no part in
 it.
@@ -3321,9 +3098,9 @@ out **on the runner**:
 `scripts/__tests__/ci-cd-pipeline-doc.test.ts` pins that table against the workflows that
 actually configure the driver, in both directions — a workflow that gains the step without a row
 is as red as a row whose workflow lost it. It is pinned because the claim had already drifted two
-ways at once, and neither copy was checked by anything: this page named `changeset-release.yml`
+ways at once, and neither copy was checked by anything: this page named the Changeset Release workflow
 and `dependabot-auto-merge.yml`, while the deleted `.github/WORKFLOWS.md` named
-`changeset-release.yml` and `changelog.yml`. Each was missing a different one
+the Changeset Release workflow and `changelog.yml`. Each was missing a different one
 ([#3724](https://github.com/objectstack-ai/objectui/issues/3724)).
 
 ⚠️ **That pin no longer proves the mechanism is alive, so something else has to.** While a
@@ -3354,7 +3131,7 @@ needs no driver, and giving it one buys nothing while implying a lockfile hazard
 — `gh pr merge`. But GitHub executes that one itself, not on the runner, so no local git config
 takes part in it.
 
-⛔ **A rewrite is not a merge, and a force-push resolves none.** `changeset-release.yml` carried
+⛔ **A rewrite is not a merge, and a force-push resolves none.** The Changeset Release workflow carried
 the step on the strength of "version bumps rewrite the lockfile"
 ([#6391](https://github.com/objectstack-ai/objectui/issues/6391)), and was the last workflow to
 carry it. Regenerating a file is not reconciling two versions of it, and the version branch is
@@ -3461,7 +3238,6 @@ on:
 | Secret / Variable | Used By | Purpose |
 |-------------------|---------|---------|
 | `GITHUB_TOKEN` | All workflows | GitHub API access (automatic) |
-| `NPM_TOKEN` | `changeset-release.yml` | npm package publishing |
 | `OS_FLEET_APP_ID` (variable), `OS_FLEET_PRIVATE_KEY` (secret) | `test-shard-timings-refresh.yml` | Mint the fleet App token the refresh pushes its branch and opens its pull request with, so that pull request runs CI. Both are **organization**-level. If either is not visible to this repository, the run fails red. |
 | `CROSS_REPO_ISSUE_TOKEN` | `cross-repo-issue-closer.yml` | Closing issues in sibling repositories. `GITHUB_TOKEN` cannot do this — it is scoped to the repository running the workflow. When absent the workflow reports instead of closing. |
 | `VERCEL_TOKEN` | `docs-deploy.yml` | Vercel API token for the Object Stack team, used by `vercel pull` and `vercel deploy`. It is stored as an **organization** secret. If it is missing, the run fails red. |

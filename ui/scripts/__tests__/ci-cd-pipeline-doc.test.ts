@@ -2733,29 +2733,6 @@ const DECLARED_NON_RUN_COMMANDS = new Map<string, string>([
       'workflow: the section says the 350 KB figure is pinned to the YAML and "fails `pnpm test` ' +
       'if this page disagrees with it". That suite runs in `ci.yml`.',
   ],
-  [
-    'changeset-release.yml `release`: pnpm changeset:publish',
-    "Really run by the release job, through `changesets/action@v1`'s `publish:` INPUT rather " +
-      'than a `run:` step — so this rule cannot see it on the workflow side. Deleting it from ' +
-      'the page would remove the only description of how a release actually reaches npm.',
-  ],
-  [
-    'changeset-release.yml `release`: pnpm check:published-dist',
-    'The blocking copy of the Published Dist Gate, reached the same way: it is the second leg of ' +
-      '`pnpm changeset:publish`, which runs through the action input. The section names it to ' +
-      'explain why the refresh lane deliberately does NOT run it.',
-  ],
-  [
-    'changeset-release.yml `release`: pnpm check:spec-floors',
-    'The third leg of `pnpm changeset:publish`, same action input, same invisibility. The ' +
-      'section quotes that script body verbatim and names this gate to explain why the nightly ' +
-      '`spec-range-floors.yml` is an alarm rather than the blocking copy.',
-  ],
-  [
-    'changeset-release.yml `release`: scripts/objectstack-floor.mjs',
-    'The first leg of `pnpm changeset:publish` (objectui#12958), same action input. The section ' +
-      'quotes that script body verbatim and names this step to say what it computes before a publish.',
-  ],
 ]);
 
 /**
@@ -2805,31 +2782,33 @@ const DECLARED_NON_RUN_COMMANDS = new Map<string, string>([
  * name: `turbo run build` in `skill-examples.yml` and `spec-range-floors.yml`,
  * `pnpm build` in `changeset-release.yml`'s release job.
  *
+ * ## Two of the four retired with their workflows (objectstack#25712)
+ *
+ * objectstack#25745 deleted `changeset-release.yml` and `spec-range-floors.yml`
+ * when this tree became the `ui/` workspace of objectstack and took that
+ * repository's one release lane for both scopes. Their two units, their two
+ * sections on the page and the four declarations below that explained the
+ * release job's `publish:` input went with them. The units left are the
+ * Performance Budget section and the Skill Example Check steps.
+ *
  * ## ⚠️ The blind spot this set makes explicit
  *
  * `commandParity` reads `run:` steps and nothing else. A command a job really runs
- * through an **action input** is invisible to it, and `changeset-release.yml` runs
- * two that way through `changesets/action@v1`'s `publish:`. Reading those as
+ * through an **action input** is invisible to it — `changeset-release.yml` ran
+ * four that way through `changesets/action@v1`'s `publish:`. Reading those as
  * phantoms and deleting them from the page would be the instrument editing the
- * truth to match itself. They are declared below instead, with the reason, and the
- * declaration is asserted in BOTH directions so it cannot rot into an allowlist.
+ * truth to match itself. Such commands are declared below instead, with the reason,
+ * and the declaration is asserted in BOTH directions so it cannot rot into an allowlist.
  */
 describe('ci-cd-pipeline.md — the four sections measured as parity defects', () => {
   const PERF_HEADING = '## Performance Budget (`performance-budget.yml`)';
   const SKILL_EXAMPLES_HEADING = '### Skill Examples — the Skill Example Check step';
-  const CHANGESET_RELEASE_HEADING = '### Changeset Release (`changeset-release.yml`)';
-  const SPEC_RANGE_FLOORS_HEADING = '### Spec Range Floors (`spec-range-floors.yml`)';
 
   /**
    * The one job per workflow that these sections document, and the label a failure
-   * names it by. `changeset-release.yml` has two jobs; only `release` runs anything
-   * first-party, and the test below holds `lane` to that.
+   * names it by.
    */
-  const PINNED = [
-    ['performance-budget.yml', 'bundle-analysis', PERF_HEADING],
-    ['changeset-release.yml', 'release', CHANGESET_RELEASE_HEADING],
-    ['spec-range-floors.yml', 'spec-range-floors', SPEC_RANGE_FLOORS_HEADING],
-  ] as const;
+  const PINNED = [['performance-budget.yml', 'bundle-analysis', PERF_HEADING]] as const;
 
   function units(): CommandParity[] {
     return [
@@ -2852,8 +2831,6 @@ describe('ci-cd-pipeline.md — the four sections measured as parity defects', (
     for (const [file, keys] of [
       ['performance-budget.yml', ['bundle-analysis']],
       ['repo-gates.yml', ['repo-gates']],
-      ['changeset-release.yml', ['lane', 'release']],
-      ['spec-range-floors.yml', ['spec-range-floors']],
     ] as const) {
       expect(
         jobKeys(fs.readFileSync(path.join(workflowDir, file), 'utf8'), file),
@@ -2863,18 +2840,6 @@ describe('ci-cd-pipeline.md — the four sections measured as parity defects', (
       ).toEqual([...keys]);
     }
 
-    // `changeset-release.yml`'s `lane` job is pinned by exclusion: it answers the
-    // publish-vs-refresh question from a sparse checkout and runs no first-party
-    // command at all, which is the only reason one unit covers this workflow. If it
-    // grows one, that gate is undocumented and unpinned until someone notices here.
-    const laneYaml = fs.readFileSync(path.join(workflowDir, 'changeset-release.yml'), 'utf8');
-    expect(
-      [...firstPartyCommands(runSteps(jobBlock(laneYaml, 'lane', 'changeset-release.yml')).join('\n'))],
-      "changeset-release.yml's `lane` job now runs a first-party command. Only its `release` job " +
-        'is paired against the Changeset Release section, so this one is invisible to the parity ' +
-        'pins below — give `lane` its own unit, or document the command in that section and widen ' +
-        'the unit to cover both jobs.',
-    ).toEqual([]);
   });
 
   it('resolves the eager-closure alias to exactly one gate', () => {
@@ -3666,13 +3631,7 @@ describe('ci-cd-pipeline.md — command parity, every workflow section', () => {
       'the per-job declarations above no longer re-key onto this block\'s labels, so the ' +
         'phantoms they explain are about to be reported as undeclared. Check the key format of ' +
         'DECLARED_NON_RUN_COMMANDS against the regex in `inheritedDeclarations`.',
-    ).toEqual([
-      'changeset-release.yml: pnpm changeset:publish',
-      'changeset-release.yml: pnpm check:published-dist',
-      'changeset-release.yml: pnpm check:spec-floors',
-      'changeset-release.yml: scripts/objectstack-floor.mjs',
-      'performance-budget.yml: pnpm test',
-    ]);
+    ).toEqual(['performance-budget.yml: pnpm test']);
   });
 
   it('names every first-party command every workflow job actually runs', () => {

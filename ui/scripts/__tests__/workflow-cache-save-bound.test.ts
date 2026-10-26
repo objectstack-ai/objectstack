@@ -336,10 +336,15 @@ describe('every workflow cache save is bounded and non-fatal (objectui#7048)', (
     // values here are not a shared constant and two of them being equal is a
     // coincidence of the arithmetic. Pinning them means a future change to one
     // has to move the derivation beside it in the same commit.
+    //
+    // The third was `changeset-release.yml::release` (40). objectstack#25745
+    // deleted that workflow when this tree became the `ui/` workspace of
+    // objectstack and took that repository's one release lane, which is why this
+    // table lists two keys and not three. ⛔ Re-adding it does not restore a pin —
+    // the lookup below would fail on a workflow that is gone.
     const derived: Record<string, number> = {
       'lint.yml::lint': 25,
       'performance-budget.yml::bundle-analysis': 25,
-      'changeset-release.yml::release': 40,
     };
 
     const missing: string[] = [];
@@ -401,8 +406,12 @@ describe('every workflow cache save is bounded and non-fatal (objectui#7048)', (
     // ceilings coincide. The derivation beside each key is what makes that
     // checkable, and moving any one of these numbers means rewriting the
     // derivation beside it in the same commit.
+    //
+    // The fourth was `changeset-release.yml::lane` (20), deleted with its
+    // workflow by objectstack#25745, which is why this table lists three keys. ⛔
+    // Re-adding it does not restore a pin — the lookup below would fail on a
+    // workflow that is gone.
     const derived: Record<string, number> = {
-      'changeset-release.yml::lane': 20,
       'check-links.yml::check-links': 20,
       'cross-repo-issue-closer.yml::close-foreign-issues': 20,
       'labeler.yml::label': 20,
