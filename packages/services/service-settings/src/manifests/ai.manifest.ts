@@ -355,7 +355,7 @@ const AI_RUNTIME_HINT = (() => {
   const note = ai.note ? ` (${ai.note})` : '';
   return (
     `Live calls need ${ai.package}${note}, which this platform does not ship: it is ` +
-    'realized only by an ObjectStack Cloud tier, so there is no open-edition version to ' +
+    'realized only by an ObjectOS Cloud tier, so there is no open-edition version to ' +
     'install. The name does still resolve on the public npm registry, but only at ' +
     'versions from before that cut — installing it pins a pre-cloud AI runtime and a ' +
     'second @objectstack/spec beside this one instead of enabling AI here.'

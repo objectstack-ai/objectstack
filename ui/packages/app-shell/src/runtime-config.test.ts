@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { initRuntimeConfig, getRuntimeConfig, getPlatformStage, isAiStudioEnabled, isMarketplaceEnabled, isStorageUsageServed, isSingleAppSwitcherHidden, getClientErrorReporting, resetRuntimeConfigForTesting } from './runtime-config.js';
+import { initRuntimeConfig, getRuntimeConfig, getPlatformStage, getProductName, isDefaultProductName, isAiStudioEnabled, isMarketplaceEnabled, isStorageUsageServed, isSingleAppSwitcherHidden, getClientErrorReporting, resetRuntimeConfigForTesting } from './runtime-config.js';
 
 function mockConfig(features: Record<string, unknown>) {
     vi.stubGlobal('fetch', vi.fn(async () => ({
@@ -533,5 +533,43 @@ describe('runtime-config client error-reporting sink', () => {
         mockBody({ telemetry: {} });
         await initRuntimeConfig();
         expect(getClientErrorReporting()).toBeNull();
+    });
+});
+
+/**
+ * `isDefaultProductName()` — the one reading behind the Community Console's
+ * "Powered by ObjectStack" mark on the sign-in page. True while the deployment
+ * carries the open-source default wordmark; false once a runtime has pushed
+ * its own `branding.productName` (Cloud, Enterprise, a cloud-connected
+ * workspace). The negative legs are the ones that matter: a mark that also
+ * shows on a branded deployment is a second brand line nobody asked for.
+ */
+describe('runtime-config default product name', () => {
+    it('is the default before init, and after a payload that carries no branding', async () => {
+        resetRuntimeConfigForTesting();
+        expect(isDefaultProductName()).toBe(true);
+        mockBranding({});
+        await initRuntimeConfig();
+        expect(isDefaultProductName()).toBe(true);
+    });
+
+    it('is not the default once the runtime pushes its own product name', async () => {
+        mockBranding({ productName: 'ObjectOS Cloud' });
+        await initRuntimeConfig();
+        expect(isDefaultProductName()).toBe(false);
+        expect(getProductName()).toBe('ObjectOS Cloud');
+    });
+
+    it('stays the default when the runtime pushes the same name the default already has', async () => {
+        mockBranding({ productName: 'ObjectOS', logoUrl: '/custom-logo.svg' });
+        await initRuntimeConfig();
+        expect(isDefaultProductName()).toBe(true);
+    });
+
+    it('ignores a blank product name the way the product-name accessor does', async () => {
+        mockBranding({ productName: '   ' });
+        await initRuntimeConfig();
+        expect(getProductName()).toBe('ObjectOS');
+        expect(isDefaultProductName()).toBe(true);
     });
 });

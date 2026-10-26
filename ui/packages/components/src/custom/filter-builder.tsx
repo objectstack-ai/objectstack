@@ -14,6 +14,7 @@ import {
   VIEW_FILTER_LIST_VALUE_OPERATORS,
   VIEW_FILTER_PAIR_VALUE_OPERATORS,
   normalizeFilterOperator,
+  type ViewFilterRule,
 } from "@objectstack/spec/ui"
 import { expandEmptyOperator } from "@objectstack/spec/data"
 import { SchemaRendererContext } from "@object-ui/react"
@@ -64,11 +65,19 @@ import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover"
  *     protocol has no member for (objectui#9559 ruling B keeps them opt-in and
  *     unfolded). It was `string`, which let a caller hand the builder an id no
  *     dropdown entry can hold.
- *   - `value` — REQUIRED and narrowed to the scalar-or-list union this builder
- *     edits, where the authority declares `value?: any`. Every exported helper
- *     below that takes a row's value (`reshapeFilterValue`, `retypeFilterValue`,
+ *   - `value` — the SPEC's rule value, taken BY REFERENCE
+ *     (`ViewFilterRule["value"]`, `@objectstack/spec/ui`), where the authority
+ *     declares `value?: any`. Every exported helper below that takes a row's
+ *     value (`reshapeFilterValue`, `retypeFilterValue`,
  *     `narrowFilterValueToOptions`, …) is typed on this member, so `any` here
- *     would switch their checking off in silence.
+ *     would switch their checking off in silence. OPTIONAL and admitting
+ *     `null`, as the spec's is: a value-less operator (`is_null`, `is_empty`,
+ *     …) is authored with no `value`, and a required member refused the
+ *     authored `FilterGroup` the `filter-builder` renderer hands over. One
+ *     member is the builder's own and WIDER than the spec's: a list entry may
+ *     be a boolean, because a boolean scalar carried into a list operator
+ *     (`reshapeFilterValue`, `normalizeToArray`) stays a boolean. The spec's
+ *     list holds strings and numbers only.
  *
  * Its own NAME, not the authority's (objectui#6349, batch 12). Under the
  * authority's name this was a second declaration of `FilterBuilderCondition`
@@ -81,7 +90,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover"
 export interface FilterBuilderRow
   extends Omit<AuthoredFilterBuilderCondition, "operator" | "value"> {
   operator: FilterBuilderOperator
-  value: string | number | boolean | (string | number | boolean)[]
+  value?: ViewFilterRule["value"] | (string | number | boolean)[]
 }
 
 /**
@@ -874,6 +883,11 @@ export function retypeFilterValue(
     }
     default: {
       const scalar = Array.isArray(value) ? (value[0] ?? "") : value
+      // A row with no value — the spec's value-less operators are authored
+      // without one — keeps having none. Converting the absence instead read
+      // it as a value: the text family spelled `undefined` as the string
+      // `"undefined"`, and the number family threw on `.trim()`.
+      if (isValueUnset(scalar)) return scalar
       return convertScalarToFamily(scalar, family) ?? ""
     }
   }
@@ -1340,7 +1354,7 @@ function offeredOperatorsForRow(
  */
 function isValueUnset(
   value: FilterBuilderRow["value"] | undefined | null,
-): boolean {
+): value is undefined | null | "" {
   return value === undefined || value === null || value === ""
 }
 
@@ -1361,7 +1375,7 @@ function displayScalarValue(value: FilterBuilderRow["value"]): string {
 /** Normalize a filter value into an array for multi-select scenarios */
 function normalizeToArray(value: FilterBuilderRow["value"]): (string | number | boolean)[] {
   if (Array.isArray(value)) return value
-  if (!isValueUnset(value)) return [value as string | number | boolean]
+  if (!isValueUnset(value)) return [value]
   return []
 }
 

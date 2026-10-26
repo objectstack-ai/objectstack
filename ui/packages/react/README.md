@@ -180,6 +180,30 @@ function MyComponent() {
 }
 ```
 
+### useAdapter / AdapterCtx / AdapterContextRegister
+
+`useAdapter()` reads the host's data adapter from `AdapterCtx`. Both are typed
+by the protocol-level `DataSource` from `@object-ui/types`, so this package
+depends on no adapter package, and a bring-your-own backend learns at the type
+level which members it lacks.
+
+A host whose provider installs a concrete adapter, and whose code reads members
+beyond `DataSource`, declares that adapter once, in its own package:
+
+```ts
+import type { ObjectStackAdapter } from '@object-ui/data-objectstack'
+
+declare module '@object-ui/react' {
+  interface AdapterContextRegister {
+    adapter: ObjectStackAdapter
+  }
+}
+```
+
+`useAdapter()` then returns `ObjectStackAdapter | null`, and an
+`AdapterCtx.Provider` value is checked against it. `@object-ui/app-shell` ships
+this declaration, so a host that mounts its `AdapterProvider` already has it.
+
 ### useElementDataSourceSchema / ElementDataSourceGate
 
 Consume `PageComponentSchema.dataSource` — the spec's per-element data binding

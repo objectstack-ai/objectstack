@@ -40,6 +40,9 @@ export * from './utils/non-grid-row-ceiling.js';
 // the floor itself never grows past the four.
 export * from './utils/emptiness.js';
 export * from './utils/expand-fields.js';
+// The `enable`-block API denial predicate, read by `@object-ui/react` and
+// re-exported by `@object-ui/data-objectstack` (objectstack#25917).
+export * from './utils/api-access-denied.js';
 // The RETIREMENT gate (objectui#4914, maintainer ruling B). Homed here rather
 // than in `@object-ui/fields` because `@object-ui/components` is one of its six
 // consumers and `fields` depends on `components` — see the module's docblock

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { appRouteSegment, matchAppBySegment, filterActiveApps, resolveHostAppSegment, appStudioDesignPath, appStudioSurfacePath, appStudioObjectPath, appStudioRoutePath } from '../appRoute';
+import { appRouteSegment, matchAppBySegment, appAddressSegment, canonicalAppPathname, filterActiveApps, resolveHostAppSegment, appStudioDesignPath, appStudioSurfacePath, appStudioObjectPath, appStudioRoutePath } from '../appRoute';
 
 /**
  * ADR-0048 (option A) — package-id route segment.
@@ -45,6 +45,73 @@ describe('matchAppBySegment', () => {
  * consume this are pinned end-to-end in `HomePage.inboxLinksTarget.test.tsx` and
  * `InboxPopover.viewAllTarget.test.tsx`; these cases pin the resolution itself.
  */
+/**
+ * objectstack-ai/objectstack#26183 — one app, one address. A route that reached
+ * its app through the name alias is rewritten onto the package id, so the
+ * page's own links and the sidebar's agree.
+ */
+describe('appAddressSegment', () => {
+  const CLM = { name: 'clm', _packageId: 'app.objectstack.hotclm' };
+
+  it('answers the package id when it resolves back to the same app', () => {
+    expect(appAddressSegment([CLM], CLM)).toBe('app.objectstack.hotclm');
+  });
+
+  it('answers the name for a package-less (runtime/DB) app', () => {
+    const app = { name: 'scratch' };
+    expect(appAddressSegment([app], app)).toBe('scratch');
+  });
+
+  it('answers the name when the package id opens a DIFFERENT app of the same package', () => {
+    const crm = { name: 'crm', _packageId: 'com.acme.suite' };
+    const ops = { name: 'ops', _packageId: 'com.acme.suite' };
+    expect(appAddressSegment([crm, ops], crm)).toBe('com.acme.suite');
+    expect(appAddressSegment([crm, ops], ops)).toBe('ops');
+  });
+
+  it('answers undefined for no app', () => {
+    expect(appAddressSegment([CLM], undefined)).toBeUndefined();
+  });
+});
+
+describe('canonicalAppPathname', () => {
+  const CLM = { name: 'clm', _packageId: 'app.objectstack.hotclm' };
+
+  it('moves a name-alias route onto the package id, the rest of the path kept', () => {
+    expect(canonicalAppPathname([CLM], 'clm', '/apps/clm/clm_contract/view/my_contracts')).toBe(
+      '/apps/app.objectstack.hotclm/clm_contract/view/my_contracts',
+    );
+    expect(canonicalAppPathname([CLM], 'clm', '/apps/clm')).toBe('/apps/app.objectstack.hotclm');
+    expect(canonicalAppPathname([CLM], 'clm', '/apps/clm/')).toBe('/apps/app.objectstack.hotclm/');
+  });
+
+  it('leaves the package-id route alone — the rewrite can never loop', () => {
+    const once = canonicalAppPathname([CLM], 'clm', '/apps/clm/clm_contract');
+    expect(once).toBe('/apps/app.objectstack.hotclm/clm_contract');
+    expect(canonicalAppPathname([CLM], 'app.objectstack.hotclm', once!)).toBeNull();
+  });
+
+  it('leaves an app whose name IS its package id alone', () => {
+    const app = { name: 'crm', _packageId: 'crm' };
+    expect(canonicalAppPathname([app], 'crm', '/apps/crm/account')).toBeNull();
+  });
+
+  it('leaves a package-less app on its name, and the later app of a shared package on its name', () => {
+    expect(canonicalAppPathname([{ name: 'scratch' }], 'scratch', '/apps/scratch/x')).toBeNull();
+    const crm = { name: 'crm', _packageId: 'com.acme.suite' };
+    const ops = { name: 'ops', _packageId: 'com.acme.suite' };
+    expect(canonicalAppPathname([crm, ops], 'ops', '/apps/ops/ticket')).toBeNull();
+    expect(canonicalAppPathname([crm, ops], 'crm', '/apps/crm/account')).toBe('/apps/com.acme.suite/account');
+  });
+
+  it('answers null for a segment no app answers to, or a pathname outside /apps', () => {
+    expect(canonicalAppPathname([CLM], 'nope', '/apps/nope/x')).toBeNull();
+    expect(canonicalAppPathname([CLM], undefined, '/apps')).toBeNull();
+    expect(canonicalAppPathname([CLM], 'clm', '/home')).toBeNull();
+    expect(canonicalAppPathname(undefined, 'clm', '/apps/clm')).toBeNull();
+  });
+});
+
 describe('filterActiveApps', () => {
   it('keeps apps that declare neither flag (the common case)', () => {
     expect(filterActiveApps([{ name: 'crm' }])).toEqual([{ name: 'crm' }]);

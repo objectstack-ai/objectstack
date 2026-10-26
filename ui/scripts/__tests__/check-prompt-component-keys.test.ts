@@ -45,6 +45,7 @@ import {
   scanPromptSections,
 } from '../check-prompt-component-keys.mjs';
 import { INDIRECT_REGISTRATIONS, deriveRegistryKeys } from '../check-doc-component-types.mjs';
+import { globMatches, jobBlock, rootCi, uiFilterGlobs, uiRun, UI_JOBS } from './helpers/root-ci';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 /** The repository root, whose `.github/prompts/` the live prompts sit in (objectstack#25712). */
@@ -312,13 +313,30 @@ describe('wiring', () => {
   // this gate. objectstack#25880 ports the `repo-gates.yml` gates (row 24 of
   // the objectstack#25697 workflow roster) into the root `Lint UI` job and
   // brings these pins back against that job, by path. That case's import-graph
-  // walk reads no workflow and stays below.
+  // walk reads no workflow and stays below. The Lint UI home and the filter that
+  // starts it on a prompts-only change are pinned by the second case below.
 
   it('is exposed as a root package script', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {
       scripts: Record<string, string>;
     };
     expect(pkg.scripts['check:prompt-keys']).toBe(`node ${SCRIPT}`);
+  });
+
+  it('runs in Lint UI, which a prompts-only change starts: the root `ui` filter covers the prompt surface', () => {
+    // The prompts left `ui/` for the repository root's `PROMPT_DIR`
+    // (objectstack#25957), where `ui/**` does not reach them, so a prompts-only
+    // pull request started no ui job until the filter named that root
+    // (objectstack#25712).
+    const ci = rootCi();
+    const lint = jobBlock(ci, UI_JOBS.lint);
+    expect(lint).toContain(uiRun('check:prompt-keys'));
+    expect(lint).toContain("needs.filter.outputs.ui != 'false'");
+    const probe = `${PROMPT_DIR}/any.prompt`;
+    expect(
+      uiFilterGlobs(ci).some((glob) => globMatches(glob, probe)),
+      `no \`ui:\` filter glob covers ${PROMPT_DIR}/`,
+    ).toBe(true);
   });
 
   it('needs no install: its import graph reaches no package', () => {

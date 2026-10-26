@@ -13,6 +13,7 @@
     "test": "VITEST_MAX_WORKERS=$(node scripts/vitest-worker-cap.mjs) turbo run test test:repo --concurrency=50%",
     "test:smoke": "turbo run test:smoke",
     "typecheck": "turbo run typecheck",
+    "typecheck:root": "tsc --noEmit -p tsconfig.json",
     "clean": "turbo run clean && rm -rf dist",
     "setup": "pnpm install && pnpm --filter @objectstack/spec build",
     "prepare": "node scripts/setup-git-hooks.mjs",

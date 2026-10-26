@@ -44,6 +44,8 @@
  * @module
  */
 
+import { appAddressSegment } from './appRoute.js';
+
 /**
  * The multi-app workspace launcher — the environment layer's own home
  * (ObjectUI ADR-0075). The fallback whenever no App declares a landing, which is every
@@ -51,12 +53,18 @@
  */
 export const HOME_LAUNCHER_PATH = '/home';
 
-/** Minimal shape this resolver needs off each App metadata record. */
-export interface DeclaredHomeApp {
+/**
+ * Minimal shape this resolver needs off each App metadata record. A type alias,
+ * not an interface, so it carries the implicit index signature the route
+ * helpers in `./appRoute` read apps through.
+ */
+export type DeclaredHomeApp = {
   name?: string;
   /** ADR-0049: `isDefault` ROUTES (it used to be a display-only badge). */
   isDefault?: boolean;
-}
+  /** ADR-0048 owning package — the app's canonical route segment. */
+  _packageId?: string;
+};
 
 /**
  * The path the product DECLARED as its landing, or `null` when it declared
@@ -68,13 +76,16 @@ export interface DeclaredHomeApp {
  * app open" into a second place and drift the moment the app's nav is
  * re-ordered.
  *
- * The segment is the app's `name` — byte-identical to what `/` has been
- * redirecting to, so the logo and the post-login landing cannot disagree.
- * (`matchAppBySegment()` accepts the name as a per-tenant alias.)
+ * The segment is the app's one address (`appAddressSegment()` — its package
+ * id, ADR-0048 option A), byte-identical to what `/` redirects to, so the logo
+ * and the post-login landing cannot disagree. It used to be the `name`, which
+ * `AppContent` now rewrites to the package id on arrival
+ * (objectstack-ai/objectstack#26183): naming the address directly saves that
+ * hop.
  */
 export function resolveDeclaredHomePath(
   apps: readonly DeclaredHomeApp[] | null | undefined,
 ): string | null {
   const declared = (apps ?? []).find((a) => a?.isDefault === true && Boolean(a?.name));
-  return declared ? `/apps/${declared.name}` : null;
+  return declared ? `/apps/${appAddressSegment(apps, declared)}` : null;
 }

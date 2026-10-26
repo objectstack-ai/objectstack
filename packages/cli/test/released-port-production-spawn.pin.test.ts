@@ -83,6 +83,12 @@ const HARNESS_MODULE = /(?:^|\/)serve-process(?:\.[cm]?[jt]s)?$/;
  * closed alternative (a port read back afterwards, or one held for the whole boot).
  */
 const RELEASED_DRAW_LEDGER: Readonly<Record<string, { draws: number; why: string }>> = {
+  'dev-connector-env-parity.integration.test.ts': {
+    draws: 2,
+    why: 'each boot (`os serve --port N`, `os dev -p N`) is about the config reading the port the flag '
+      + 'names BEFORE the boot; a kernel-assigned port read back afterwards is unknown to the config, '
+      + 'and a lost race is read out of the child\'s own drift or in-use diagnostic instead of failing on it',
+  },
   'serve-port-drift-notice.e2e.test.ts': {
     draws: 1,
     why: 'the NEGATIVE arm is a boot that binds exactly the non-zero port it asked for and says '

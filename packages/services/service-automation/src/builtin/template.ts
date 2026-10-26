@@ -102,8 +102,10 @@ export function textTemplateScope(variables: VariableMap): Record<string, unknow
  * Value→string is the engine's, defined per value (ADR-0032 §3): `null` /
  * absent renders nothing, an object or array renders as JSON, a `Date` as its
  * ISO text, and a formatter makes the rest explicit (`{{ amount | currency }}`,
- * `{{ due | date:iso }}`). A flow variable named `locale` is also the
- * formatters' locale — the engine reads its scope's `locale` for that.
+ * `{{ due | date:iso }}`). The formatters render in the engine's default
+ * `en-US`: a flow variable named `locale` is a value like any other, never the
+ * formatters' locale (#26232 — the engine reads that from its own reserved
+ * channel, not from a root).
  *
  * Absent in, absent out: a slot the author left unset — or one that renders
  * no text at all — returns `undefined`, so a screen falls back to its node

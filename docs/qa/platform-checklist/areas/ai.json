@@ -568,7 +568,7 @@
       "title": "Open-framework /ai/** degrades honestly: GET /ai/agents answers the empty-catalog courtesy, every other /ai/* answers 501 with the Cloud/EE remedy sentence that discovery also reports",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": ["admin"],
@@ -596,7 +596,7 @@
           "evidence": "the response"
         },
         {
-          "clause": "every other /ai/* route answers 501 (route mounted, implementation absent — NOT 404, NOT 503) with the exact remedy: 'Provided by @objectstack/service-ai in ObjectStack Cloud/Enterprise — no implementation ships in the open framework'",
+          "clause": "every other /ai/* route answers 501 (route mounted, implementation absent — NOT 404, NOT 503) with the exact remedy: 'Provided by @objectstack/service-ai in ObjectOS Cloud/Enterprise — no implementation ships in the open framework'",
           "oracle": "api",
           "verify": "/ai/models, /ai/conversations, /ai/chat all 501 with that message (REMEDY_DETAIL, packages/spec/src/system/core-services.zod.ts)",
           "evidence": "the three responses"
@@ -627,7 +627,8 @@
         "packages/spec/src/ai/model-registry.zod.ts + conversation.zod.ts (schemas exist; no in-repo runtime consumer — the knownGaps basis)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new item: pins the open/cloud AI boundary as testable behavior (courtesy list + 501 remedy + discovery parity) instead of leaving /ai/** unswept; model-registry & conversation runtime behavior recorded as knownGaps rather than invented", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "new item: pins the open/cloud AI boundary as testable behavior (courtesy list + 501 remedy + discovery parity) instead of leaving /ai/** unswept; model-registry & conversation runtime behavior recorded as knownGaps rather than invented", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-10-26", "change": "the every-other-/ai/*-route-answers-501 clause: its exact remedy now names the hosted product 'ObjectOS Cloud/Enterprise' (was the retired product name), following the ObjectOS product-name ruling; REMEDY_DETAIL['ai'] in core-services.zod.ts, the runtime deny-ordering pin and the http-protocol.mdx example move in the same commit", "ref": "#26228" }
       ]
     },
     {
@@ -635,7 +636,7 @@
       "title": "Console AI affordances gate on the access-filtered agent catalog: an agent-less boot hides FAB / chat dock / ⌘⇧I / top-bar link and redirects a stale /ai bookmark without flash — and the ungated bare system/ai-approvals route degrades honestly: one 501 read stops the poll, and the error replaces the empty queue (objectui#11736)",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "browser",
       "personas": ["admin (form sign-in — the pending-actions poll sends the COOKIE half only, credentials:'include' with no bearer header, so an injected-token session reads as anonymous there)"],
@@ -691,7 +692,7 @@
         {
           "clause": "the landing page degrades with the REMEDY, not a fault: the poll's 501 body message (the single-sourced Cloud/EE sentence — see ai.open-edition-honest-degradation clause 2) surfaces verbatim in the page's destructive alert (usePendingActions call() throws body.error.message; AiPendingActionsInbox renders error.message)",
           "oracle": "screenshot",
-          "verify": "the alert text string-equals the 501 body's message ('Provided by @objectstack/service-ai in ObjectStack Cloud/Enterprise — no implementation ships in the open framework'); diff alert text vs a captured 501 body",
+          "verify": "the alert text string-equals the 501 body's message ('Provided by @objectstack/service-ai in ObjectOS Cloud/Enterprise — no implementation ships in the open framework'); diff alert text vs a captured 501 body",
           "evidence": "the alert screenshot + one captured 501 response"
         },
         {
@@ -724,7 +725,8 @@
         { "revision": 3, "date": "2026-10-06", "change": "partial-coverage gap of QA run #21782 parked on #22017 (row 9). A2's entitled side was blocked(fixture) as the clause prescribed. Disposition: recorded knownGap. The side cannot be reached in the open framework by design (service-ai is Cloud/Enterprise). The knownGap names the environment it needs, says CI lacks it, and reclassifies the verdict blocked(environment); A2's clause follows. It also names the objectui hook pins as mechanism-only", "ref": "#22017" },
         { "revision": 4, "date": "2026-10-13", "change": "acceptance[5] (clause and verify) flipped from expected-fail K2 to the positive contract, with steps[6] and [7], negative[2], the title and source[4] and [5] (stale spec, #23163 C5; parked on #23121, carried by #23169). objectui#11736 made the poll follow its last answer (a refused read stops it, a transient one backs off within a ceiling) and made the inbox draw its empty state only when the read answered. QA run #23163 read one 501, no re-arm, and no empty state under the alert, at objectstack 36b2889c with objectui 1fb1ced36243. Re-read from objectui source at that pin, still this repo's .objectui-sha, including the two pins now named in the clause", "ref": "#23169" },
         { "revision": 5, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). source[0] cited lines 71-88 of objectui useAiSurface.ts in the comma-range spelling, the second range of the list 45397edf53 authored (9-40 and 71-88). At the objectui pin that commit shipped, 9602dc820450, and still at the shipped pin 12dc7b47c340, those lines are the useAiSurfaceEnabled hook, so source[0] now names it. objectui is read at the shipped pin 12dc7b47c340 and cited in prose, because no objectui anchor resolves in this gate. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#24752" },
-        { "revision": 6, "date": "2026-10-26", "change": "acceptance[5].verify re-pointed off the retired objectui pin (#26035): the .objectui-sha file is gone (#25745) and the two objectui pins it named now live in this tree under ui/packages/plugin-chatbot. Found while applying the 18.2.0 sweep's ai findings (#25836, wave anchor #25807). No clause changed, no status changed", "ref": "#25836" }
+        { "revision": 6, "date": "2026-10-26", "change": "acceptance[5].verify re-pointed off the retired objectui pin (#26035): the .objectui-sha file is gone (#25745) and the two objectui pins it named now live in this tree under ui/packages/plugin-chatbot. Found while applying the 18.2.0 sweep's ai findings (#25836, wave anchor #25807). No clause changed, no status changed", "ref": "#25836" },
+        { "revision": 7, "date": "2026-10-26", "change": "the landing-page REMEDY clause's verify: the 501 message the alert string-equals now reads 'ObjectOS Cloud/Enterprise' (was the retired product name), following the ObjectOS product-name ruling and moving with REMEDY_DETAIL['ai']", "ref": "#26228" }
       ]
     },
     {

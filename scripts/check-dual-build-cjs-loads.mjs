@@ -440,23 +440,15 @@ const DUAL_FORMAT_BEHAVIOUR_PROBES = [
  * the type axis, and it is a property of the DEPENDENCY, never of the consumer
  * that trips over it.
  *
- * `@objectstack/core` is where the repo actually meets it. `ObjectKernel`
- * carries `private plugins` and travels through `PluginContext.getKernel()`
- * into every plugin's `init`, so the moment core ships two declarations, any
- * compilation that reaches core through BOTH resolution modes sees two
- * `ObjectKernel`s. Measured on this branch, whole-repo `pnpm build`:
- *
- *   28 packages split (core included)      RED — @objectstack/verify, 5 × TS2345
- *   27 packages split (core held back)     GREEN — 71/71 tasks
- *   28 + the 37-package ESM mirror         RED — @objectstack/plugin-dev, TS2345
- *
- * The mirror round is the informative one: it moves the failure rather than
- * removing it. Splitting `@objectstack/objectql` is what fixes `verify` and
- * what breaks `plugin-dev`, because a split dependency resolves core one way
- * from its `.d.mts` and the other from its `.d.ts`. So the exemption is not
- * "core is hard", it is: **core cannot be split until `ObjectKernel`'s
- * identity stops being nominal**, and that is a decision about core's public
- * types, not about an exports map.
+ * `@objectstack/core` is where the repo met it: `ObjectKernel` carries
+ * `private plugins` and travels through `PluginContext.getKernel()` into every
+ * plugin's `init`, so twin declarations of core broke any compilation that
+ * reaches core through BOTH resolution modes (`@objectstack/plugin-dev`'s
+ * CommonJS build, TS2345). The cure is at the dependency, not in this table:
+ * core's declaration pass runs once and its other-format declaration is a
+ * one-line re-export of it (`packages/core/tsup.config.ts`), so both
+ * conditions hand out the SAME classes. A package that meets the hazard again
+ * takes that cure first; a row here is for an entry that cannot.
  *
  * ⛔ An exemption here is NOT a quieter red. It is a declaration that the
  * entry's `.d.cts` ships unreachable ON PURPOSE, with the measurement that
@@ -466,14 +458,7 @@ const DUAL_FORMAT_BEHAVIOUR_PROBES = [
  *
  * @type {Record<string, {reason: string}>}
  */
-const TYPED_EXEMPTIONS = Object.freeze({
-  '@objectstack/core#.': {
-    reason: 'Splitting core\'s declarations gives `ObjectKernel` (which carries `private plugins`) two nominal identities, and it crosses every plugin boundary via `PluginContext.getKernel()`. Measured: with core split, `pnpm build` fails in @objectstack/verify with 5 × TS2345; with core held back and the other 27 packages split, 71/71 tasks pass. Blocked on a decision about core\'s public types, not on this exports map (#13112).',
-  },
-  '@objectstack/core#./logger': {
-    reason: 'Same declaration set as `@objectstack/core#.` — the subpath is emitted from the same tsup pass and splits the same identities. Held back with its sibling so core has one resolution story rather than two (#13112).',
-  },
-});
+const TYPED_EXEMPTIONS = Object.freeze({});
 
 const EXIT_OK = 0;
 const EXIT_FINDINGS = 1;

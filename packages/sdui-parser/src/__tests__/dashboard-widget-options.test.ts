@@ -345,3 +345,29 @@ describe('what draws NOTHING — every accepted key, and every out-of-scope shap
     expect(d.filter((x) => x.code === UNCONSUMED_WIDGET_OPTION)).toEqual([]);
   });
 });
+
+describe('the retired metric sub-caption draws the warning (objectui#11389, ruling C)', () => {
+  // `options.description` was the metric tile's sub-caption, accepted on its
+  // read sites. Both ends retired it (objectstack first, `@objectstack/spec`
+  // 17.7.0; then every reader in `plugin-dashboard`), so it reaches no renderer
+  // and is reported like any other unconsumed key. The verdict before this
+  // change was no diagnostic at all; it is now one warning, never an error.
+  const metric = { id: 'won_revenue', type: 'metric', dataset: 'sales', values: ['revenue'] };
+
+  it.each([
+    ['a plain string', 'Won this quarter'],
+    ['an inline per-locale map', { en: 'Won this quarter', 'zh-CN': '本季度已赢单' }],
+  ])('an authored options.description as %s draws one unconsumed-widget-option warning', (_label, description) => {
+    const found = unconsumed(dash({ ...metric, options: { description } }));
+    expect(found).toHaveLength(1);
+    expect(found[0]!.severity).toBe('warning');
+    expect(found[0]!.code).toBe(UNCONSUMED_WIDGET_OPTION);
+    // The subject is named: the key, and the widget it sits on.
+    expect(found[0]!.message).toContain('options.description');
+    expect(found[0]!.message).toContain('"won_revenue"');
+  });
+
+  it('control: the widget-level `description` (the card-header subtitle) and a declared option draw nothing', () => {
+    expect(unconsumed(dash({ ...metric, description: 'Card header subtitle', options: { limit: 5 } }))).toEqual([]);
+  });
+});

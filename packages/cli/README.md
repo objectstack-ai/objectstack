@@ -80,13 +80,13 @@ and keep loading through their barrel `index.ts`.
 
 ### Cloud — publish & install
 
-Push a locally-built package to ObjectStack Cloud and (optionally) install it
+Push a locally-built package to ObjectOS Cloud and (optionally) install it
 into one of your environments in a single command. The commands below do not
 share one session or one flag spelling — see [Credentials and server URL](#credentials-and-server-url).
 
 | Command | Description |
 |---------|-------------|
-| `os cloud login` | Authenticate to ObjectStack Cloud (browser or `--email/--password`); writes `~/.objectstack/cloud.json` |
+| `os cloud login` | Authenticate to ObjectOS Cloud (browser or `--email/--password`); writes `~/.objectstack/cloud.json` |
 | `os cloud whoami` / `os cloud logout` | Inspect / clear the stored cloud session |
 | `os environments create --org <id> --name <n>` | Provision a new environment (was `os projects create` before the v5.0 project → environment rename; ADR-0006, no aliases) |
 | `os environments list` / `show <id>` | List / inspect your environments |
@@ -146,7 +146,7 @@ A code-bearing plugin — a directory carrying an `objectstack.plugin.json` mani
 |---------|-------------|
 | `os plugin build [dir]` | Compile a plugin into a signed-ready `.osplugin` artifact (`--entry`, `--out`, `--minify`) |
 | `os plugin sign <artifact> --key <pem>` | Sign a built `.osplugin` with a publisher Ed25519 key, writing a detached `<artifact>.sig` |
-| `os plugin publish [artifact]` | Publish a signed `.osplugin` to ObjectStack Cloud |
+| `os plugin publish [artifact]` | Publish a signed `.osplugin` to ObjectOS Cloud |
 
 The group has no `install`: ADR-0025 records the code-plugin install half (download, verify, materialize, load) as not yet implemented. `os plugin` (singular) is unrelated to `os plugins` (plural), oclif's plugin manager, which this package does not ship — see [`os plugins` and `os help`](#os-plugins-and-os-help-not-commands).
 
@@ -376,6 +376,8 @@ resolve is exactly this map — a subpath is added here on purpose, with a
 | `@objectstack/cli/console` | Exactly three Console SPA mounting helpers — `resolveConsolePath`, `hasConsoleDist`, `createConsoleStaticPlugin` — consumed by cloud's `objectos-runtime` node server to mount the Console. The drift guards and the rest of `utils/console.ts` are **not** on this subpath (#16046). |
 | `@objectstack/cli/hook-body` | The hook-body extractor `os build` and `os lint` apply, for an app harness that must run the **same** body-only lowering the build ships (below). |
 | `@objectstack/cli/package.json` | The manifest itself, for the ordinary tooling idiom of reading a dependency's own version. |
+
+The three code subpaths (`.`, `./console`, `./hook-body`) are **ESM**: the package is `"type": "module"` and each maps to an ES module. Load them with `import`. A CommonJS caller reaches them through `import()`, or through `require()` only on a Node that loads ES modules synchronously (22.12 and later).
 
 ### `@objectstack/cli/hook-body`
 

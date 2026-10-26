@@ -248,7 +248,7 @@ const READERS: Record<string, Row> = {
   },
 
   // ── Seams that are not a storage read of a federated object's column ─────
-  'engine.ts#assertReferencesResolve :: referenceTargetOf()': {
+  'engine-referential-integrity.ts#assertReferencesResolve :: referenceTargetOf()': {
     disposition: 'target-by-id',
     why: "the id a caller wrote into a reference field is looked up on the TARGET object",
   },

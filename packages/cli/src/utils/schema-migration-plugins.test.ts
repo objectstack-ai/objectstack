@@ -598,7 +598,7 @@ describe('describeUnloadableHostConfig — the no-DDL notice (#13118)', () => {
 /**
  * #13028 — the plan reports its own BOUNDARY.
  *
- * The card's measurement: 36 host plugins composed on ObjectStack Cloud's
+ * The card's measurement: 36 host plugins composed on ObjectOS Cloud's
  * staging control plane, ~80 `sys_*` tables declared, **8** examined, and every
  * consumer-visible signal green — the config loaded, the composition printed a
  * healthy note, the plan named real tables. A coverage gate reading
