@@ -904,9 +904,11 @@ export const ScreenFieldConfigSchema = lazySchema(() => strictObject({
    * owns yet, and the resume carries that file's id — ADR-0104 D3's stored
    * form, and nothing else. A later node writes the id into an object's `file`
    * field (`create_record` / `update_record` `fields`), and that write claims
-   * the file for the record it writes, after the same read verdict the download
-   * door asks. So a wizard collects its file before the record that will own
-   * it exists, and writes everything after its last screen.
+   * the file for the record it writes. Under the default `runAs: 'user'` the
+   * claim first asks, as the run's user, the read verdict the download door
+   * asks (#25692); a `runAs: 'system'` run's write is not judged, as no system
+   * write is. So a wizard collects its file before the record that will own it
+   * exists, and writes everything after its last screen.
    */
   type: z.string().optional().describe(
     'Input type — an open widget hint (text, number, select, …); `file` renders the platform upload widget and '
