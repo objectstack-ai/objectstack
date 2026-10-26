@@ -224,7 +224,7 @@ describe('resolveLocalizationContext — batched fallback read (#2409)', () => {
         { namespace: 'localization', key: 'currency', scope: 'tenant', organization_id: 'o1', value: 'JPY' },
       ],
     });
-    const loc = await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    const loc = await resolveLocalizationContext({ ql, organizationId: 'o1' });
     expect(loc).toEqual({ timezone: 'Asia/Tokyo', locale: 'ja-JP', currency: 'JPY' });
     expect(ql.counts.sys_setting).toBe(1);
   });
@@ -256,7 +256,7 @@ describe('resolveLocalizationContext — batched fallback read (#2409)', () => {
       },
     };
     const ql = makeCountingQl({ sys_setting: [] });
-    const loc = await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    const loc = await resolveLocalizationContext({ ql, settings, organizationId: 'o1' });
     expect(loc).toEqual({ timezone: 'Asia/Tokyo', locale: 'ja-JP', currency: 'JPY' });
     expect(getMany.calls).toBe(1);
     expect(ql.counts.sys_setting ?? 0).toBe(0); // service answered — no direct read
@@ -271,7 +271,7 @@ describe('resolveLocalizationContext — batched fallback read (#2409)', () => {
       },
     };
     const ql = makeCountingQl({ sys_setting: [] });
-    const loc = await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    const loc = await resolveLocalizationContext({ ql, settings, organizationId: 'o1' });
     expect(loc).toEqual({ timezone: 'Asia/Tokyo', locale: 'ja-JP', currency: 'JPY' });
     expect(gets).toBe(3);
   });
@@ -286,7 +286,7 @@ describe('resolveLocalizationContext — batched fallback read (#2409)', () => {
         { namespace: 'localization', key: 'timezone', scope: 'tenant', organization_id: 'o1', value: 'Europe/Paris' },
       ],
     });
-    const loc = await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    const loc = await resolveLocalizationContext({ ql, settings, organizationId: 'o1' });
     expect(loc.timezone).toBe('Europe/Paris');
     expect(ql.counts.sys_setting).toBe(1); // the batched $in fallback ran once
   });
@@ -372,7 +372,7 @@ describe('resolveLocalizationContext — batched fallback read (#2409)', () => {
   it('a per-key occupant issues three namespace reads in ONE leg (the pre-#10826 cost)', async () => {
     const settings = makeSettingsRig(VALUES, { batched: false });
     const ql = makeCountingQl({ sys_setting: [] });
-    const loc = await resolveLocalizationContext({ ql, settings, tenantId: 'o1', userId: 'u1' });
+    const loc = await resolveLocalizationContext({ ql, settings, organizationId: 'o1', userId: 'u1' });
     expect(loc).toEqual(EXPECTED);
     expect(settings.stats).toEqual({ queries: 3, legs: 1 });
     // The settings path answered, so the direct `sys_setting` fallback is not
@@ -383,7 +383,7 @@ describe('resolveLocalizationContext — batched fallback read (#2409)', () => {
   it('the batched occupant issues ONE namespace read, in the same ONE leg', async () => {
     const settings = makeSettingsRig(VALUES, { batched: true });
     const ql = makeCountingQl({ sys_setting: [] });
-    const loc = await resolveLocalizationContext({ ql, settings, tenantId: 'o1', userId: 'u1' });
+    const loc = await resolveLocalizationContext({ ql, settings, organizationId: 'o1', userId: 'u1' });
     expect(loc).toEqual(EXPECTED);
     // queries 3 -> 1, legs 1 -> 1. #10826 was correctly scheduled as a
     // query-count fix; the `legs` half is what a sequential-loop regression
@@ -397,7 +397,7 @@ describe('resolveLocalizationContext — batched fallback read (#2409)', () => {
     await resolveLocalizationContext({
       ql: makeCountingQl({ sys_setting: [] }),
       settings,
-      tenantId: 'o1',
+      organizationId: 'o1',
       userId: 'u1',
     });
     expect(settings.calls).toEqual([
@@ -451,8 +451,8 @@ describe('resolveLocalizationContext — failure-only cross-request cache (#1022
 
   it('does not re-query on a second call within the TTL window when the read fails (same tenant)', async () => {
     const ql = makeMissingTableQl();
-    const first = await resolveLocalizationContext({ ql, tenantId: 'o1' });
-    const second = await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    const first = await resolveLocalizationContext({ ql, organizationId: 'o1' });
+    const second = await resolveLocalizationContext({ ql, organizationId: 'o1' });
     // Functional behavior is unchanged — still the built-in defaults — the
     // second call just doesn't repeat the failing query (and its log line).
     expect(first).toEqual({ timezone: 'UTC', locale: 'en-US', currency: undefined });
@@ -462,32 +462,32 @@ describe('resolveLocalizationContext — failure-only cross-request cache (#1022
 
   it('re-queries once the TTL expires, so the cache self-heals once the table/migration lands', async () => {
     const ql = makeMissingTableQl();
-    await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    await resolveLocalizationContext({ ql, organizationId: 'o1' });
     expect(ql.counts.sys_setting).toBe(1);
     await vi.advanceTimersByTimeAsync(30_001);
-    await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    await resolveLocalizationContext({ ql, organizationId: 'o1' });
     expect(ql.counts.sys_setting).toBe(2);
   });
 
   it('keys the failure cache per tenant, so a lookup for one tenant never reuses another tenant\'s entry', async () => {
     const qlA = makeMissingTableQl();
     // Reuse the SAME underlying table state across two tenant-scoped calls by
-    // routing both through one `ql`, distinguished only by `tenantId` in the
+    // routing both through one `ql`, distinguished only by `organizationId` in the
     // cache key (the direct-read fallback query itself is not tenant-scoped
     // in its `where`, matching the real resolver's existing behavior).
-    await resolveLocalizationContext({ ql: qlA, tenantId: 'tenant-a' });
-    await resolveLocalizationContext({ ql: qlA, tenantId: 'tenant-b' });
+    await resolveLocalizationContext({ ql: qlA, organizationId: 'tenant-a' });
+    await resolveLocalizationContext({ ql: qlA, organizationId: 'tenant-b' });
     expect(qlA.counts.sys_setting).toBe(2);
     // A repeat for the first tenant hits its own cache entry, not tenant-b's.
-    await resolveLocalizationContext({ ql: qlA, tenantId: 'tenant-a' });
+    await resolveLocalizationContext({ ql: qlA, organizationId: 'tenant-a' });
     expect(qlA.counts.sys_setting).toBe(2);
   });
 
   it('keys the failure cache per `ql` instance, so two environments in one process never share a cached outcome', async () => {
     const qlA = makeMissingTableQl();
     const qlB = makeMissingTableQl();
-    await resolveLocalizationContext({ ql: qlA, tenantId: 'o1' });
-    await resolveLocalizationContext({ ql: qlB, tenantId: 'o1' });
+    await resolveLocalizationContext({ ql: qlA, organizationId: 'o1' });
+    await resolveLocalizationContext({ ql: qlB, organizationId: 'o1' });
     expect(qlA.counts.sys_setting).toBe(1);
     expect(qlB.counts.sys_setting).toBe(1);
   });
@@ -507,12 +507,12 @@ describe('resolveLocalizationContext — failure-only cross-request cache (#1022
   it('without an engine write-epoch seam, a successful read is never cached: a value change between two calls is visible on the very next call', async () => {
     const rows = [{ namespace: 'localization', key: 'timezone', scope: 'tenant', organization_id: 'o1', value: 'UTC' }];
     const ql = makeCountingQl({ sys_setting: rows });
-    const first = await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    const first = await resolveLocalizationContext({ ql, organizationId: 'o1' });
     expect(first.timezone).toBe('UTC');
     // Simulate a settings write landing between the two calls — no TTL
     // advance, so a cache would still be "fresh" if one existed.
     rows[0].value = 'America/Los_Angeles';
-    const second = await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    const second = await resolveLocalizationContext({ ql, organizationId: 'o1' });
     expect(second.timezone).toBe('America/Los_Angeles');
     expect(ql.counts.sys_setting).toBe(2);
   });
@@ -525,10 +525,10 @@ describe('resolveLocalizationContext — failure-only cross-request cache (#1022
   it('without a seam, a legitimate empty result is not cached either: the first write for a previously-unconfigured tenant is visible immediately', async () => {
     const rows: Array<{ namespace: string; key: string; scope: string; organization_id: string; value: string }> = [];
     const ql = makeCountingQl({ sys_setting: rows });
-    const first = await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    const first = await resolveLocalizationContext({ ql, organizationId: 'o1' });
     expect(first).toEqual({ timezone: 'UTC', locale: 'en-US', currency: undefined });
     rows.push({ namespace: 'localization', key: 'timezone', scope: 'tenant', organization_id: 'o1', value: 'Asia/Tokyo' });
-    const second = await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    const second = await resolveLocalizationContext({ ql, organizationId: 'o1' });
     expect(second.timezone).toBe('Asia/Tokyo');
     expect(ql.counts.sys_setting).toBe(2);
   });
@@ -608,14 +608,14 @@ describe('resolveLocalizationContext — only a backend fault populates the memo
     const settings = makeBindWindowSettings();
     const ql = makeCountingQl({ sys_setting: [] });
 
-    const preBind = await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    const preBind = await resolveLocalizationContext({ ql, settings, organizationId: 'o1' });
     expect(preBind).toEqual({ timezone: 'UTC', locale: 'en-US', currency: undefined });
     expect(settings.state.getManyCalls).toBe(1);
 
     settings.state.bound = true; // the settings engine binds
     await vi.advanceTimersByTimeAsync(1_000); // still deep inside the 30s window
 
-    const postBind = await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    const postBind = await resolveLocalizationContext({ ql, settings, organizationId: 'o1' });
     // The re-read must REACH the service (a memo hit would never call it) and
     // must carry the configured values, which exist only behind the bind.
     expect(settings.state.getManyCalls).toBe(2);
@@ -630,11 +630,11 @@ describe('resolveLocalizationContext — only a backend fault populates the memo
     const rows = [{ namespace: 'localization', key: 'timezone', scope: 'tenant', organization_id: 'o1', value: 'UTC' }];
     const ql = makeCountingQl({ sys_setting: rows });
 
-    const first = await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    const first = await resolveLocalizationContext({ ql, settings, organizationId: 'o1' });
     expect(first.timezone).toBe('UTC');
 
     rows[0].value = 'America/Los_Angeles'; // a settings write lands, no TTL advance
-    const second = await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    const second = await resolveLocalizationContext({ ql, settings, organizationId: 'o1' });
     expect(second.timezone).toBe('America/Los_Angeles');
     expect(ql.counts.sys_setting).toBe(2);
   });
@@ -652,7 +652,7 @@ describe('resolveLocalizationContext — only a backend fault populates the memo
     };
     const ql = makeCountingQl({ sys_setting: [] });
 
-    expect(await resolveLocalizationContext({ ql, settings, tenantId: 'o1' })).toEqual({
+    expect(await resolveLocalizationContext({ ql, settings, organizationId: 'o1' })).toEqual({
       timezone: 'UTC',
       locale: 'en-US',
       currency: undefined,
@@ -661,7 +661,7 @@ describe('resolveLocalizationContext — only a backend fault populates the memo
 
     state.bound = true;
     await vi.advanceTimersByTimeAsync(1_000);
-    expect(await resolveLocalizationContext({ ql, settings, tenantId: 'o1' })).toEqual({
+    expect(await resolveLocalizationContext({ ql, settings, organizationId: 'o1' })).toEqual({
       timezone: 'Asia/Shanghai',
       locale: 'zh-CN',
       currency: 'CNY',
@@ -684,7 +684,7 @@ describe('resolveLocalizationContext — only a backend fault populates the memo
     };
     const ql = makeCountingQl({ sys_setting: [] });
 
-    expect(await resolveLocalizationContext({ ql, settings, tenantId: 'o1' })).toEqual({
+    expect(await resolveLocalizationContext({ ql, settings, organizationId: 'o1' })).toEqual({
       timezone: 'UTC',
       locale: 'en-US',
       currency: undefined,
@@ -692,7 +692,7 @@ describe('resolveLocalizationContext — only a backend fault populates the memo
 
     state.bound = true;
     await vi.advanceTimersByTimeAsync(1_000);
-    expect((await resolveLocalizationContext({ ql, settings, tenantId: 'o1' })).timezone).toBe('Asia/Shanghai');
+    expect((await resolveLocalizationContext({ ql, settings, organizationId: 'o1' })).timezone).toBe('Asia/Shanghai');
   });
 
   // ── the half that must be PRESERVED (#10221) ────────────────────────────
@@ -705,18 +705,18 @@ describe('resolveLocalizationContext — only a backend fault populates the memo
     const settings = makeBindWindowSettings(); // unbound → refuses
     const ql = makeMissingTableQl(); // and the direct read throws
 
-    await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    await resolveLocalizationContext({ ql, settings, organizationId: 'o1' });
     expect(ql.counts.sys_setting).toBe(1);
 
     await vi.advanceTimersByTimeAsync(1_000);
-    await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    await resolveLocalizationContext({ ql, settings, organizationId: 'o1' });
     // Memo hit: the failing query — and the driver's log line for it — did not
     // repeat. The settings refusal is re-attempted (it is free), but that is
     // not what #10221 was protecting.
     expect(ql.counts.sys_setting).toBe(1);
 
     await vi.advanceTimersByTimeAsync(30_001);
-    await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    await resolveLocalizationContext({ ql, settings, organizationId: 'o1' });
     expect(ql.counts.sys_setting).toBe(2); // and it still self-heals on expiry
   });
 });
