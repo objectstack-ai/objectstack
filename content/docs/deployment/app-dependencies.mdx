@@ -40,9 +40,12 @@ The declaration does two things:
   reference, not the data: users still see the other app's records under that
   app's own permission sets and sharing rules.
 - **It is checked before install** — below.
+- **It lets your package share the depended-on app's namespace** — below.
 
 Every entry is required; there is no optional arm. Declare only the packages
-your app actually references.
+your app actually references. Two modules of one app need not declare each
+other: each declares the app, and that is enough for both to install, in either
+order, and to share the app's namespace.
 
 ## The version-range grammar
 
@@ -125,7 +128,11 @@ The check runs at those install acts only. It does not run:
 
 - **at boot.** A restart re-registers what an install already admitted, while
   the registry is still filling; it never refuses a package for a dependency it
-  has not seen yet.
+  has not seen yet. It does register them in dependency order: the stored
+  packages, and the apps installed through `os package install`, are each sorted
+  so a package registers after the packages it declares. Two packages that
+  declare each other are a cycle: they register in stored order for that boot,
+  and the server logs an error naming them.
 - **at `PATCH /api/v1/packages/:id`.** Editing an authored package's
   `dependencies` after install is applied as given; an entry added there is
   judged when the package is next installed.
@@ -134,12 +141,35 @@ The check runs at those install acts only. It does not run:
 
 ## Sharing a namespace with the app you depend on
 
-Each package's namespace must still be its own across artifacts: a package that
-uses the namespace of the app it depends on is refused at install with
-`NAMESPACE_CONFLICT`, exactly as before. Inside one artifact, packages may share
-a namespace ([ADR-0130](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0130-release-artifact-as-co-ownership-boundary.md)).
-Dependency-declared namespace co-ownership across artifacts (ADR-0141 D5) is
-not delivered yet.
+A namespace is otherwise one package's: a package using a namespace another
+installed package holds is refused at install with `NAMESPACE_CONFLICT`. Two
+relations make packages co-owners of one namespace instead:
+
+- **the same artifact** delivers them ([ADR-0130](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0130-release-artifact-as-co-ownership-boundary.md)); or
+- **a declared dependency**: your package declares an installed app that uses the
+  same namespace — or another installed package that declares that same app
+  uses it too (two modules of one app).
+
+So a module that ships as its own artifact, declares `app.objectstack.hotcrm`
+and uses `crm` installs beside HotCRM, and a second such module installs beside
+both. The relation is one-way — the app declares nothing — and it is read from
+either side, so upgrading or reinstalling the app beside its modules is
+admitted too. A package that shares the namespace without declaring the app is
+still refused, and the fix the error names is the declaration.
+
+Sharing a namespace never means sharing an object name. A package defining an
+object another co-owner already defines — your module redefining
+`crm_account`, two modules both defining `crm_invoice`, or an app upgrade newly
+defining a name one of its modules owns — is refused at install, before any
+table is touched, with `422 DUPLICATE_ARTIFACT_OBJECT_NAME` naming both
+packages and the object. Rename the object, or `extend` the other package's
+object instead of owning a second one.
+
+Every package of the depended-on app's own artifact that uses the namespace
+should declare the app too (inside the artifact it costs nothing: it is judged
+for presence only). The platform does not record which artifact an installed
+package came from, so an undeclared companion is a sitting owner your module
+cannot co-own with.
 
 ## Build-time validation cannot see a dependency's objects
 

@@ -196,6 +196,18 @@ describe('POST install-local: a multi-package artifact judges each entry, presen
         expect(res.payload?.error?.code).not.toBe('DEPENDENCY_MISSING');
     });
 
+    it('does not count the artifact wrapper\'s own id as delivered when it names no package', async () => {
+        // `com.example.multi` is the wrapper's id, not a package the artifact
+        // carries: a module declaring it would pass here and be `absent` on a
+        // later standalone install, so it is judged like any other entry.
+        const h = await mount(dir);
+        expectDependencyRefusal(
+            await h.install({ manifest: artifact({ 'com.example.multi': '^1.0.0' }) }),
+            [{ packageId: 'com.example.multi.orders', dependency: 'com.example.multi', range: '^1.0.0', found: 'absent' }],
+        );
+        expectNothingWritten(h);
+    });
+
     it('still judges an entry naming a package outside the artifact', async () => {
         const h = await mount(dir);
         expectDependencyRefusal(

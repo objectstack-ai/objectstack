@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-// This config exists for two settings; everything else stays on vitest's
+// This config exists for three settings; everything else stays on vitest's
 // defaults, deliberately — a key added here re-specifies behaviour for every
 // test file in the package (packages/cli/vitest.config.ts's header records the
 // incident that taught that).
@@ -16,6 +16,10 @@ export default defineConfig({
     // Mechanism + measured costs: examples/app-showcase/vitest.config.ts.
     // Enforced repo-wide by scripts/check-console-intercept-disarm.mjs.
     disableConsoleIntercept: true,
+    // #13517: quiet the registry's per-item registration chatter — the
+    // engine's own `OS_REGISTRY_LOG` seam, not a change to its shipped
+    // default. Enforced by scripts/check-registry-log-declared.mjs.
+    env: { OS_REGISTRY_LOG: 'warn' },
   },
   resolve: {
     // `hydration-convert-forward.test.ts` boots the REAL engine, protocol and

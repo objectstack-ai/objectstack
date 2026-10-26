@@ -429,8 +429,8 @@ contradicts it, and correct it here when it does.
   them.
 
 - **A cold tree cannot boot the app from the console-build recipe alone.**
-  `pnpm objectui:build` runs `scripts/build-console.sh`, which builds the **console**, not
-  the framework CLI. On a fresh tree `packages/cli` has no `dist`, and the bare binary
+  `pnpm console:build` builds the **console** and the packages it depends on, not the
+  framework CLI. On a fresh tree `packages/cli` has no `dist`, and the bare binary
   then answers `Error: command dev not found` (exit 2) — a message that names neither the
   cause nor the fix. **Check:** `node scripts/check-dev-prereqs.mjs`; it reports every
   package whose declared `dist/` entry point is missing, and exits non-zero. **Fix:
@@ -619,22 +619,22 @@ contradicts it, and correct it here when it does.
   passed at `bfc1539fe0`.
 
 - **One container builds one tree at a time: never run `pnpm build` and
-  `pnpm objectui:build` together, and give the heavy steps a concurrency the shell's memory
-  can hold.** `pnpm objectui:build` (`scripts/build-console.sh`) runs `turbo run build` in
-  THIS checkout as well — `@objectstack/spec` when its dist is absent or incomplete,
-  `@objectstack/client`, and every `@objectstack/*` package the objectui pin overrides,
-  declarations included — so a `pnpm build` beside it writes the same `packages/spec/dist`
-  from a second turbo process nothing serialises, and the spec's DTS pass races (the 18.0
-  sweep, #24579 §6). The shell's cgroup is capped near 13.4 GiB (`memory.limit_in_bytes`
-  read `14343688192` on the cgroup `/proc/self/cgroup` names, at `bfc1539fe0`), and the
-  console's dependency build is `turbo run build --filter=@object-ui/console^...` at turbo's
-  default concurrency unless overridden. The 18.0 sweep's runner held both under that cap
+  `pnpm console:build` together, and give the heavy steps a concurrency the shell's memory
+  can hold.** `pnpm console:build` (`turbo run build:dist --filter=@objectstack/console`)
+  runs `turbo run build` for `@object-ui/console` and everything it depends on in THIS
+  checkout — `@objectstack/spec` and `@objectstack/client` among them, declarations
+  included — so a `pnpm build` beside it writes the same `packages/spec/dist` from a second
+  turbo process nothing serialises, and the spec's DTS pass races (the 18.0 sweep, #24579 §6,
+  met it with the retired pin script, which built the same packages). The shell's cgroup is
+  capped near 13.4 GiB (`memory.limit_in_bytes` read `14343688192` on the cgroup
+  `/proc/self/cgroup` names, at `bfc1539fe0`), and the console build runs at turbo's default
+  concurrency unless overridden. The 18.0 sweep's runner held both under that cap
   only at `--concurrency=2`, and the Tier 1 vitest pins only at `--maxWorkers=1`, and was
   killed with exit **137** otherwise (#24579 §6; QA run #24598's environment fingerprint
   records the settings that held; the OOM itself is not re-run here). **Fix:**
-  `pnpm build --concurrency=2` first; then
-  `OBJECTUI_DEPS_BUILD_CMD='pnpm exec turbo run build --concurrency=2 --filter=@object-ui/console^...' pnpm objectui:build`
-  (the override the script's header documents); vitest one package at a time with
+  `pnpm build --concurrency=2` first (it builds the console too); then
+  `pnpm console:build --concurrency=2` (pnpm appends it to the turbo command), which after that
+  build is a cache hit plus a copy; vitest one package at a time with
   `--maxWorkers=1`. ⛔ An exit 137 is the container's memory limit, not a failing test or a
   broken build — re-run narrower before reading anything into it.
 
@@ -686,7 +686,7 @@ contradicts it, and correct it here when it does.
 | trap | what it fakes | counter |
 |---|---|---|
 | `hydration-race` | empty nav/list right after navigation | screenshot first; settle; then read DOM |
-| `stale-console-bundle` | UI bug already fixed upstream in objectui | check against objectui HMR console / fresh build (skill §2). `os dev` refuses to mount a console whose stamp ≠ the `.objectui-sha` pin, so a 404 `/_console/` reads "rebuild with `pnpm objectui:build`", never "console broken" |
+| `stale-console-bundle` | UI bug already fixed upstream in objectui | check against objectui HMR console / fresh build (skill §2). `packages/console/dist` is a gitignored copy that `pnpm build` never refreshes, so a console older than the tree, or a 404 `/_console/`, reads "rebuild with `pnpm console:build`", never "console broken" |
 | `stale-dist` | src edits with no runtime effect | rebuild package + restart before judging |
 | `automation-input` | dead buttons / empty submits caused by the driver | ref-targeted clicks; native setter + input/change events |
 | `shared-browser-tab` | drifting origin, foreign drafts | pin absolute origin; own port/DB (skill §0) |
@@ -736,8 +736,7 @@ The in-environment JSON scratch (RUNNER shape, never committed):
   "scope": "since:v17 + P0",            // the filter that selected items
   "app": "showcase",
   "env": {
-    "framework": "<commit sha>",
-    "objectuiPin": "<.objectui-sha>",   // stale-bundle honesty: record what the console was
+    "framework": "<commit sha>",        // also the console's source: it builds from ui/ in this tree
     "port": 3456, "db": "file:/tmp/<run>/data.db"
   },
   "runner": "<agent/session identifier>",
