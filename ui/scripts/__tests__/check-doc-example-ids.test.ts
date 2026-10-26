@@ -315,23 +315,17 @@ describe('this repository', () => {
   });
 });
 
-describe('wiring — the gate is reachable and a docs-only PR starts it', () => {
-  const workflowDir = path.join(repoRoot, '.github/workflows');
-  const workflowFile = 'repo-gates.yml';
-  const workflowPath = path.join(workflowDir, workflowFile);
-  const workflowFiles = fs.readdirSync(workflowDir).filter((f) => f.endsWith('.yml'));
-
-  /**
-   * A workflow's YAML with whole-line comments removed — these headers name each
-   * other's scripts in prose, and a scan that counted comments would report
-   * duplicate homes that no file has.
-   */
-  const yamlOf = (file: string) =>
-    fs
-      .readFileSync(path.join(workflowDir, file), 'utf8')
-      .split('\n')
-      .filter((line) => !/^\s*#/.test(line))
-      .join('\n');
+describe('wiring — the gate is reachable by name', () => {
+  // Retired with objectstack#25712: `has a workflow that gates pull requests,
+  // not just pushes`, `runs it in NO path-filtered workflow — the change that
+  // breaks it is docs-only`, `has exactly one home`, `needs no install, so it
+  // can afford to run unfiltered`, and `carries no population count in its
+  // header`. Each read objectui's `repo-gates.yml`, this gate's only home, and
+  // that file runs nowhere under the monorepo: GitHub runs the root
+  // `.github/workflows/` alone, and no workflow there runs this gate.
+  // objectstack#25880 ports the `repo-gates.yml` gates (row 24 of the
+  // objectstack#25697 workflow roster) into the root `Lint UI` job and brings
+  // these pins back against that job, by path.
 
   it('is exposed as a root package script', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {
@@ -348,59 +342,5 @@ describe('wiring — the gate is reachable and a docs-only PR starts it', () => 
     expect(pkg.scripts['check:doc-examples']).toBe('node scripts/check-doc-example-types.mjs');
     expect(pkg.scripts['check:doc-example-readers']).toBe('node scripts/check-doc-example-shared-reader.mjs');
     expect(pkg.scripts['check:doc-types']).toBe('node scripts/check-doc-component-types.mjs');
-  });
-
-  it('has a workflow that gates pull requests, not just pushes', () => {
-    expect(fs.existsSync(workflowPath), 'a check nothing runs is not a gate').toBe(true);
-    const yaml = yamlOf(workflowFile);
-    expect(yaml).toMatch(new RegExp(`run:\\s*node\\s+${SCRIPT.replace(/[.]/g, '\\.')}`));
-    expect(yaml).toMatch(/^\s*pull_request:/m);
-    expect(yaml).toMatch(/^\s*push:/m);
-    expect(yaml).toMatch(/^\s*merge_group:/m);
-  });
-
-  it('runs it in NO path-filtered workflow — the change that breaks it is docs-only', () => {
-    expect(workflowFiles.length, 'the workflow directory scan returned implausibly few files').toBeGreaterThan(5);
-    for (const file of workflowFiles) {
-      const yaml = yamlOf(file);
-      if (!yaml.includes(SCRIPT)) continue;
-      expect(yaml, `${file} runs ${SCRIPT} behind a paths-ignore — a docs-only change would not start it`).not.toMatch(
-        /paths-ignore:/,
-      );
-      expect(yaml, `${file} runs ${SCRIPT} behind a paths filter`).not.toMatch(/^\s+paths:/m);
-    }
-  });
-
-  it('has exactly one home', () => {
-    expect(workflowFiles.filter((f) => yamlOf(f).includes(SCRIPT))).toEqual([workflowFile]);
-  });
-
-  it('needs no install, so it can afford to run unfiltered', () => {
-    // Since objectui#12214 the home is `repo-gates.yml`, ONE job that installs
-    // after its install-free gates: the property is now an ORDER -- this gate's
-    // step sits before the job's `pnpm install` -- and no longer an absence.
-    const yaml = yamlOf(workflowFile);
-    const gateAt = yaml.indexOf('scripts/check-doc-example-ids.mjs');
-    const installAt = yaml.indexOf('pnpm install');
-    expect(gateAt).toBeGreaterThan(-1);
-    expect(installAt === -1 || gateAt < installAt, 'the gate step moved below the install step').toBe(true);
-  });
-
-  it('carries no population count in its header — a number in a comment has nothing that fails when it drifts', () => {
-    const header = fs
-      .readFileSync(workflowPath, 'utf8')
-      .split('\n')
-      .filter((line) => /^\s*#/.test(line))
-      .map((line) => line.replace(/^\s*#\s?/, ''))
-      .join('\n');
-
-    // The floor is what makes "no counts here" a reading rather than the absence
-    // of one: an extraction that has stopped reading returns '' and passes.
-    expect(header.length, 'the header extraction read nothing, so the pin below is vacuous').toBeGreaterThan(400);
-
-    const counts = [
-      ...header.matchAll(/(?<![#\w.])\d+(?:,\d{3})*\s+(?:[A-Za-z][\w-]*\s+){0,2}`?(?:\.mdx|\.md|documents?|pages?|docs?|files?|ids?|references?)\b/gi),
-    ].map((m) => m[0].replace(/\s+/g, ' ').trim());
-    expect(counts).toEqual([]);
   });
 });

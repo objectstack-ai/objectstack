@@ -506,60 +506,21 @@ describe('objectui#3713 / #3730 — the guide those two rounds corrected by hand
   });
 });
 
-describe('wiring — the gate is reachable and a markdown-only PR starts it', () => {
+describe('wiring — the gate is reachable by name, beside its baseline', () => {
   const SCRIPT = 'scripts/check-skills-paths.mjs';
-  const workflowDir = path.join(repoRoot, '.github/workflows');
-  const workflowPath = path.join(workflowDir, 'repo-gates.yml');
-  const workflowFiles = fs.readdirSync(workflowDir).filter((f) => f.endsWith('.yml'));
 
-  /**
-   * A workflow's YAML with whole-line comments removed — this file's own header
-   * discusses `paths` and `paths-ignore` in prose, and `docs-links.yml` /
-   * `control-bytes.yml` name each other's scripts in theirs. A scan that counted
-   * comments would report filters and duplicate homes that no file has.
-   */
-  const yamlOf = (file: string) =>
-    fs
-      .readFileSync(path.join(workflowDir, file), 'utf8')
-      .split('\n')
-      .filter((line) => !/^\s*#/.test(line))
-      .join('\n');
+  // Retired with objectstack#25712: `has a workflow that gates pull requests,
+  // not just pushes`, `runs it in NO path-filtered workflow — the scan surface
+  // is entirely markdown`, and `has exactly one home`. Each read objectui's
+  // `repo-gates.yml`, this gate's only home, and that file runs nowhere under
+  // the monorepo: GitHub runs the root `.github/workflows/` alone, and no
+  // workflow there runs this gate. objectstack#25880 ports the `repo-gates.yml`
+  // gates (row 24 of the objectstack#25697 workflow roster) into the root `Lint
+  // UI` job and brings these pins back against that job, by path.
 
   it('is exposed as a root package script', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
     expect(pkg.scripts['check:skills-paths']).toBe(`node ${SCRIPT}`);
-  });
-
-  it('has a workflow that gates pull requests, not just pushes', () => {
-    expect(fs.existsSync(workflowPath), 'a check nothing runs is not a gate').toBe(true);
-    const yaml = yamlOf('repo-gates.yml');
-    expect(yaml).toMatch(new RegExp(`run:\\s*node\\s+${SCRIPT.replace(/[.]/g, '\\.')}`));
-    expect(yaml).toMatch(/^\s*pull_request:/m);
-    expect(yaml).toMatch(/^\s*push:/m);
-  });
-
-  it('runs it in NO path-filtered workflow — the scan surface is entirely markdown', () => {
-    // The whole reason this is its own workflow. `ci.yml` lists `'**/*.md'` under
-    // the `paths-ignore` of its `push` trigger and GitHub has no per-job path
-    // filter, so a push that only edits guides would never start it. That is
-    // exactly the hole #3448 (docs links) and control-bytes.yml were split out
-    // to close; a gate whose entire surface is markdown cannot afford to
-    // rebuild it.
-    expect(workflowFiles.length, 'the workflow directory scan returned implausibly few files').toBeGreaterThan(5);
-    for (const file of workflowFiles) {
-      const yaml = yamlOf(file);
-      if (!yaml.includes(SCRIPT)) continue;
-      expect(yaml, `${file} runs ${SCRIPT} behind a paths-ignore — a guide-only change would not start it`).not.toMatch(
-        /paths-ignore:/,
-      );
-      expect(yaml, `${file} runs ${SCRIPT} behind a paths filter — see objectui#3448`).not.toMatch(/^\s+paths:/m);
-    }
-  });
-
-  it('has exactly one home', () => {
-    // A second copy in a path-filtered workflow is how a gate ends up looking
-    // covered while the change it exists for still slips past.
-    expect(workflowFiles.filter((f) => yamlOf(f).includes(SCRIPT))).toEqual(['repo-gates.yml']);
   });
 
   it('ships its baseline next to the script', () => {

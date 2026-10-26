@@ -18,6 +18,7 @@ import {
   textFootprint,
 } from '../check-i18n-dead-keys.mjs';
 import { analyze, collectEnKeys, readVocabulary } from '../check-i18n-call-site-keys.mjs';
+import { rootWorkflow, rootWorkflowFiles } from './helpers/root-ci';
 
 /**
  * objectui#4658 — the behaviour test for `scripts/check-i18n-dead-keys.mjs`,
@@ -572,10 +573,10 @@ describe('the script is wired for discovery, not for enforcement', () => {
   });
 
   it('is NOT invoked by any GitHub workflow — report-only, per its own header', () => {
-    const workflowsDir = path.join(repoRoot, '.github/workflows');
-    for (const file of fs.readdirSync(workflowsDir)) {
-      if (!file.endsWith('.yml') && !file.endsWith('.yaml')) continue;
-      const contents = fs.readFileSync(path.join(workflowsDir, file), 'utf8');
+    // Asked of the root `.github/workflows/`, the only workflows GitHub runs under
+    // the monorepo (objectstack#25712); `ui/.github/` runs nowhere.
+    for (const file of rootWorkflowFiles()) {
+      const contents = rootWorkflow(file);
       expect(contents, `${file} must not run check:i18n-dead-keys`).not.toMatch(/check:i18n-dead-keys/);
       expect(contents, `${file} must not run check-i18n-dead-keys.mjs directly`).not.toMatch(
         /check-i18n-dead-keys\.mjs/,

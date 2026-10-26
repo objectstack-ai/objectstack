@@ -513,40 +513,18 @@ describe('main — exit codes', () => {
  * Wired like its two siblings, and pinned the way they pin theirs: a check no
  * workflow runs is not a gate (objectui#8757).
  */
-describe('wiring — the gate runs in CI, after the build and after its siblings', () => {
+describe('wiring — the gate is reachable by name, and documented', () => {
   const GATE = 'scripts/check-doc-json-fences.mjs';
-  const SIBLINGS = ['scripts/check-doc-snippet-types.mjs', 'scripts/check-doc-example-types.mjs'];
-  const HOME = 'repo-gates.yml';
-  const workflowDir = path.join(repoRoot, '.github/workflows');
-  const workflowFiles = fs.readdirSync(workflowDir).filter((f) => f.endsWith('.yml'));
-  const yamlOf = (file: string): string =>
-    fs
-      .readFileSync(path.join(workflowDir, file), 'utf8')
-      .split('\n')
-      .filter((line) => !/^\s*#/.test(line))
-      .join('\n');
-  const invocation = (yaml: string, script: string) => yaml.search(new RegExp(`run: node ${script.replace(/[.\\/]/g, '\\$&')}\\s*$`, 'm'));
 
-  it('lives in exactly one workflow, which gates pull requests and filters no path', () => {
-    expect(workflowFiles.length, 'the workflow directory scan returned implausibly few files').toBeGreaterThan(5);
-    expect(workflowFiles.filter((f) => yamlOf(f).includes(GATE))).toEqual([HOME]);
-    const yaml = yamlOf(HOME);
-    expect(yaml).toContain('pull_request:');
-    expect(yaml).not.toMatch(/^\s*paths(-ignore)?:/m);
-  });
-
-  it('is invoked after the build that produces @object-ui/types, and after both sibling gates', () => {
-    const yaml = yamlOf(HOME);
-    const build = yaml.indexOf('turbo run build');
-    const invoke = invocation(yaml, GATE);
-    expect(build).toBeGreaterThan(-1);
-    expect(invoke, 'the workflow must invoke the gate itself').toBeGreaterThan(build);
-    for (const sibling of SIBLINGS) {
-      const at = invocation(yaml, sibling);
-      expect(at, `${sibling} must still be invoked`).toBeGreaterThan(-1);
-      expect(invoke, `a newly wired gate must not mask ${sibling}`).toBeGreaterThan(at);
-    }
-  });
+  // Retired with objectstack#25712: `lives in exactly one workflow, which gates
+  // pull requests and filters no path` and `is invoked after the build that
+  // produces @object-ui/types, and after both sibling gates`. Each read
+  // objectui's `repo-gates.yml`, this gate's only home, and that file runs
+  // nowhere under the monorepo: GitHub runs the root `.github/workflows/`
+  // alone, and no workflow there runs this gate. objectstack#25880 ports the
+  // `repo-gates.yml` gates (row 24 of the objectstack#25697 workflow roster)
+  // into the root `Lint UI` job and brings these pins back against that job, by
+  // path.
 
   it('has a root script and is documented on the page that inventories the gates', () => {
     const manifest = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
