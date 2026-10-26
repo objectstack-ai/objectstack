@@ -158,7 +158,6 @@ const ko = {
     email: "유효한 이메일 주소를 입력해주세요",
     url: "유효한 URL을 입력해주세요",
     pattern: "{{field}} 형식이 올바르지 않습니다",
-    formInvalid: "표시된 필드를 확인해 주세요: {{fields}}",
     formInvalidJoiner: ", ",
     unique: "{{field}}은(는) 고유해야 합니다",
     type: "{{field}}은(는) 유효한 {{type}}이어야 합니다",

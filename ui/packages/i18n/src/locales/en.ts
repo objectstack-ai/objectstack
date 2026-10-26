@@ -202,12 +202,14 @@ const en = {
     email: 'Please enter a valid email address',
     url: 'Please enter a valid URL',
     pattern: '{{field}} format is invalid',
-    formInvalid: 'Please check the highlighted fields: {{fields}}',
-    // Separator between the field names interpolated into `formInvalid`.
+    // Separator between the field labels a form names in one sentence: the
+    // record form's clear-on-hide notice (`form.clearedOnHide`) and
+    // faulted-`visibleWhen` refusal (`form.visibleWhenFaulted`), and the
+    // option-group "select the parent first" hint (`fields.options.selectFirst`).
     // Per-locale because list punctuation is a locale property, not a code
     // constant: CJK enumerates with U+3001, Latin scripts with a comma+space,
     // Arabic with U+060C. Hardcoding one of them in the renderer put the CJK
-    // comma into the English toast (objectstack#5407).
+    // comma into the English invalid-submit toast (objectstack#5407).
     formInvalidJoiner: ', ',
     unique: '{{field}} must be unique',
     type: '{{field}} must be a valid {{type}}',

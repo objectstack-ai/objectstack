@@ -472,12 +472,12 @@ const useSafeFormTranslation = createSafeTranslation(
     'validation.pattern': '{{field}} format is invalid',
     'validation.email': 'Please enter a valid email address',
     'validation.url': 'Please enter a valid URL',
-    'validation.formInvalid': 'Please check the highlighted fields: {{fields}}',
     // objectstack#5407 — the joiner between the field names is a LOCALE
     // property, not a code constant. It used to be a hardcoded `、` (U+3001),
     // which is right for zh/ja and wrong everywhere else — including `en`,
-    // where the toast read "Subject、Account、Status". A locale that ships no
-    // entry falls back through i18next to `en`'s ", ".
+    // where the invalid-submit toast (since removed, objectstack#25874) read
+    // "Subject、Account、Status". A locale that ships no entry falls back
+    // through i18next to `en`'s ", ".
     'validation.formInvalidJoiner': ', ',
     'errors.forbidden': 'Access denied.',
     'form.noPermissionToSave': "You don't have permission to save this record.",
@@ -2484,11 +2484,13 @@ ComponentRegistry.register('form',
     // ruling on objectui#8070 (letter A) ports the naming half of the
     // objectui#6499 ruling to this surface: the user is told WHICH fields were
     // cleared and WHY. So a pass that empties anything raises one notice naming
-    // the cleared fields by the label the form draws (the source
-    // `validation.formInvalid` names them from), joined by the locale's own
-    // `validation.formInvalidJoiner`, under `outcomeToastId`. Sharing that id
-    // is what makes it retire like the form's other outcome messages: a later
-    // submit refusal replaces it, and the next accepted attempt dismisses it.
+    // the cleared fields by the label the form draws (`fieldLabelByName`),
+    // joined by the locale's own `validation.formInvalidJoiner`, under
+    // `outcomeToastId`. Sharing that id is what makes it retire like the form's
+    // other outcome messages: every later submit attempt takes it down. One
+    // that clears validation and a client-side refusal (whose report is the
+    // inline field messages, objectstack#25874) both dismiss the id, and the
+    // faulted-`visibleWhen` refusal dismisses it before raising its own.
     //
     // Only a field that held something is named. An empty list is rewritten
     // as itself, and `false` on a two-state control is that control's EMPTY

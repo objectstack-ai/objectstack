@@ -172,7 +172,6 @@ const ar = {
     email: "يرجى إدخال بريد إلكتروني صالح",
     url: "يرجى إدخال رابط صالح",
     pattern: "صيغة {{field}} غير صالحة",
-    formInvalid: "يرجى التحقق من الحقول المميزة: {{fields}}",
     formInvalidJoiner: "، ",
     unique: "{{field}} يجب أن يكون فريداً",
     type: "{{field}} يجب أن يكون {{type}} صالحاً",
