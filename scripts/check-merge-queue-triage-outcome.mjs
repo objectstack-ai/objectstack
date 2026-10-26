@@ -122,8 +122,10 @@
 // announcement, create an anchor without having established one does not exist,
 // revert the anchor lookup to the `open` + `finding` selection that made a
 // GRADED anchor invisible, stop recognising a closed-as-duplicate chain, drop
-// the link a regression anchor owes the anchor it regressed from,
-// and move the redelivery guard below the aggregation -- and requires the
+// the link a regression anchor owes the anchor it regressed from, stop the
+// stack walk at its first hop so a green group between two victims splits
+// their stack again, and move the redelivery guard below the aggregation --
+// and requires the
 // battery to go RED for each, naming the scenario it expects. Each mutation
 // also asserts its own anchor was PRESENT before substituting: a mutation that
 // silently matched nothing would leave the battery green and read exactly like
@@ -567,8 +569,9 @@ const sightingComment = (key, pr, runId) =>
  *
  * `base` is the sha the queue branch NAME carries (the commit this build was
  * stacked on); `head` is the commit the build actually produced. Limb ②'s stack
- * test is `one victim's base === another victim's head`, so a fixture that let
- * these two default to the same shape could not tell the test from a tautology.
+ * test walks `base === head` from a victim's base, through any indexed run, to
+ * another victim's head, so a fixture that let these two default to the same
+ * shape could not tell the test from a tautology.
  */
 const queueRun = (id, pr, base, head, conclusion = 'failure') => ({
   id,
@@ -1723,8 +1726,8 @@ const MUTATIONS = [
   {
     id: 'M16',
     what: 'same-stack is inferred from CO-OCCURRENCE instead of base === head, so unrelated victims fuse into one stack and a real cross-PR signal is under-reported',
-    from: '      for (const upstream of producers.get(e.base) ?? []) {',
-    to: '      for (const upstream of [...producers.values()].flatMap((s) => [...s])) {',
+    from: '        for (const upstream of producers.get(sha) ?? []) {',
+    to: '        for (const upstream of [...producers.values()].flatMap((s) => [...s])) {',
     // The mirror of M15, and the reason both exist. M15 removes the evidence and
     // the count goes UP; M16 stops requiring it and the count goes DOWN. A stack
     // rule can be wrong in either direction, and a battery that only catches one
@@ -1742,6 +1745,18 @@ const MUTATIONS = [
     // A1 carries no stack of its own, so it is the control that this mutation
     // does not simply red the battery.
     keepGreen: ['A1'],
+  },
+  {
+    id: 'M29',
+    what: 'the stack walk stops at the first hop, so a victim stacked on another THROUGH green, non-victim groups reads as an independent hit again',
+    from: '        for (const b of basesOf.get(sha) ?? []) frontier.push(b);',
+    to: '',
+    expect: ['A18'],
+    // ⚠️ A12 must NOT move: its stack is victim-on-victim, one hop each, so it is
+    // the control that proves A18's red comes from the walk and not from the
+    // stack test as a whole. A13 holds the other direction: a stopped walk can
+    // only fuse less, never invent a stack.
+    keepGreen: ['A12', 'A13'],
   },
   {
     id: 'M17',
