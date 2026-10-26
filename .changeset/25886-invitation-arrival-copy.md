@@ -6,7 +6,7 @@
 
 fix(app-shell,console): an invitee who opens the invitation link signed out is greeted for the invitation, offered "Create an account and join" first, and the accept page names the inviter
 
-Clause-②: no
+Clause-②: yes
 Metadata-protocol: none
 
 - **Login page.** A signed-out visitor arriving at `/login?redirect=/accept-invitation/ID` used to see the returning-user card ("Welcome back · Sign in to continue your work") with a small "Sign up" link under the form. Both login pages (the console's own and `DefaultLoginPage`) now title the card "Accept your invitation · Use the email address the invitation was sent to." Where the server offers sign-up to this visitor, a full-width "Create an account and join" link (the new `InvitationSignUpPrompt` export) sits above the sign-in form in place of the small link. With sign-up switched off, the visitor gets the invitation header and the sign-in form only.
