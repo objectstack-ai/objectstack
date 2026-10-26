@@ -4,7 +4,7 @@
 
 fix(driver-sql): an `upsert` with nothing left to merge is a plain INSERT, so a collision surfaces as the driver's unique violation instead of merging every column
 
-Clause-②: yes (narrowing)
+Clause-②: no (narrowing)
 Metadata-protocol: none
 
 <!-- adr-0087: not-required (no-migration-prescription) No key of any metadata schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. What changes is the statement `SqlDriver.upsert` sends when its merge set is empty. -->
@@ -15,6 +15,6 @@ Metadata-protocol: none
 
 Unchanged: a payload with a column to merge, or one that carries its conflict target, upserts exactly as before, and a payload that collides with nothing is inserted and answered as before.
 
-Also changed, on SQLite and PostgreSQL only: a conflict target that no unique index backs is no longer refused when the payload carries nothing to merge and none of the target's columns. There is no conflict clause left for the database to judge, so the row is inserted. MySQL still refuses it before the statement, and every call with something to merge is still refused on all three dialects.
+A conflict target that no PRIMARY KEY or UNIQUE index backs is still refused on that path, with the same `VALIDATION_ERROR` / 400 every dialect answers when there is something to merge. A plain INSERT asks the database nothing about the target, so the driver checks it against the table's keys before the statement, on every dialect.
 
 **What changes for you.** If you upsert a payload made only of insert-only columns under a business conflict key the payload omits, catch the unique-violation error on a collision, or use `update()` to change a stored row.
