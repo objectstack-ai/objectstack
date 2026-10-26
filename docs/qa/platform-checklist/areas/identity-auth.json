@@ -156,7 +156,7 @@
       "title": "Every supported auth method signs in when enabled, is absent when disabled, and is advertised exactly as configured",
       "since": "v16",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["anonymous visitor", "provisioned user per method", "admin (for env configuration)"],
@@ -208,7 +208,7 @@
         {
           "clause": "phone OTP without a deliverable SMS service fails LOUDLY (400 SMS_SERVICE_REQUIRED) — the capability degrades to a named error, never a silent success, a hang or a bare 500",
           "oracle": "api",
-          "verify": "on a NODE_ENV=production boot, the send-otp response is 400 with a JSON body whose code is SMS_SERVICE_REQUIRED (pinned by packages/plugins/plugin-auth/src/phone-otp-no-sms-service-refusal.test.ts); features.phoneNumberOtp is NOT advertised in /auth/config (only advertised when SMS is deliverable, #2780)",
+          "verify": "on a NODE_ENV=production boot, the send-otp response is 400 with a JSON body whose code is SMS_SERVICE_REQUIRED (pinned at unit layer only by packages/plugins/plugin-auth/src/phone-otp-no-sms-service-refusal.test.ts, which drives AuthManager, not the NODE_ENV=production boot's send-otp door — it scores this clause partial, so the live call on that boot is still driven); features.phoneNumberOtp is NOT advertised in /auth/config (only advertised when SMS is deliverable, #2780)",
           "evidence": "the rejection + the /auth/config read"
         },
         {
@@ -244,7 +244,7 @@
         {
           "clause": "POST /auth/change-email succeeds for the signed-in user and answers 401 to the anonymous forge; POST /auth/delete-user is deliberately unwired (ledger disposition 'disabled') and is never 2xx: the signed-in caller gets 404 (the capability switch — user.deleteUser is unconfigured) and the anonymous forge gets 401 UNAUTHORIZED (the route is mounted and session-guarded, so the session check answers first).",
           "oracle": "api",
-          "verify": "the authed change-email returns 2xx (and, if verification is required, does not flip the address until the confirmation link is followed) and the anonymous forge answers 401; delete-user answers 404 to the signed-in caller (an empty body — better-auth's disabled branch carries no code) and 401 to the anonymous forge, and the account survives; its GET /delete-user/callback half answers 404 NOT_FOUND to a signed-in caller. The anonymous 401 beside the authed 404 is what tells the capability switch apart from an unmounted route. Pinned by packages/plugins/plugin-auth/src/change-email-delete-user-wiring.test.ts (the '#7735 — POST /delete-user stays unwired, and the ledger says so' block: anonymous 401, authed 404, callback 404, nothing deleted) — cite the pin per rule 6. The ledger books the route 'disabled' because user.deleteUser is deliberately unconfigured. A 2xx from delete-user, for anyone, is the FAIL",
+          "verify": "the authed change-email returns 2xx (and, if verification is required, does not flip the address until the confirmation link is followed) and the anonymous forge answers 401; delete-user answers 404 to the signed-in caller (an empty body — better-auth's disabled branch carries no code) and 401 to the anonymous forge, and the account survives; its GET /delete-user/callback half answers 404 NOT_FOUND to a signed-in caller. The anonymous 401 beside the authed 404 is what tells the capability switch apart from an unmounted route. Pinned by packages/plugins/plugin-auth/src/change-email-delete-user-wiring.test.ts (the '#7735 — POST /delete-user stays unwired, and the ledger says so' block: anonymous 401, authed 404, callback 404, nothing deleted) — cite the pin per rule 6, at its layer: it drives AuthManager at unit layer, not a booted server's door, so it scores the delete-user half partial and the live calls are still driven. The ledger books the route 'disabled' because user.deleteUser is deliberately unconfigured. A 2xx from delete-user, for anyone, is the FAIL",
           "evidence": "the change-email responses (authed + anonymous) + the delete-user responses (authed 404, anonymous 401) + the callback 404, or the cited pin output"
         }
       ],
@@ -266,7 +266,7 @@
         "magic link (off on a stock boot — the routes answer 404 unless plugins.magicLink is enabled; no login UI and no advertised flag since #7481 — blocked, objectui#4179)",
         "passkeys (plugin flag accepted but nothing wired; no advertised flag since #7481 — blocked, objectui#4179)"
       ],
-      "automated": { "kind": "e2e", "ref": "packages/qa/dogfood/test/oidc-authorization-code-flow.dogfood.test.ts" },
+      "automated": { "kind": "dogfood", "ref": "packages/qa/dogfood/test/oidc-authorization-code-flow.dogfood.test.ts + packages/qa/dogfood/test/two-factor-lockout.dogfood.test.ts + packages/plugins/plugin-auth/src/phone-otp-no-sms-service-refusal.test.ts + packages/plugins/plugin-auth/src/change-email-delete-user-wiring.test.ts (these pin 4 of the 10 clauses, at two layers: the two dogfood files drive a booted server — acceptance[7]'s OIDC round trip and acceptance[6]'s cookie-lane completion; the two plugin-auth files drive AuthManager at unit layer — acceptance[3]'s refusal and acceptance[9]'s change-email / delete-user wiring — so those two score partial and their live legs are driven. acceptance[0]–[2], [4], [5] and [8] have no pin and are driven live)" },
       "traps": ["hydration-race", "dispatcher-vs-hono-route", "wrong-persona"],
       "source": [
         "packages/spec/src/system/auth-config.zod.ts#AuthPluginConfigSchema (AuthPluginConfigSchema: phoneNumber/twoFactor/deviceAuthorization/magicLink/passkeys; socialProviders; oidcProviders; EmailAndPasswordConfigSchema)",
@@ -284,7 +284,8 @@
         { "revision": 5, "date": "2026-10-05", "change": "clause 4, its negative, step 4, the fixtures row and the phone-OTP variant re-pointed from NOT_SUPPORTED to the shipped refusal: with no deliverable SMS service, send-otp answers 400 with code SMS_SERVICE_REQUIRED (registered for @objectstack/plugin-auth in the ADR-0112 ledger) instead of a 500 with an empty body (#21784 A4). A bare 500 is now named a FAIL. The clause verify cites the door pin", "ref": "#21793" },
         { "revision": 6, "date": "2026-10-06", "change": "partial-coverage gap of QA run #21784 parked on #22017 (row 20). A1's SSO / device variants were blocked (no switch on the dev → serve path) and N3 was blocked(dependency, objectui#4179). Disposition: recorded knownGap. Verified: serve.ts injects AuthPlugin with four env-mapped plugins and no deviceAuthorization or oidcProviders; SSO has the OS_SSO_ENABLED boot switch but needs a registered provider behind a reachable IdP. A knownGap names that environment, and that CI and the QA container lack it. objectui#4179 closed not_planned on 2026-09-24, so the magic-link / passkey knownGap and negative 3 now say so", "ref": "#22017" },
         { "revision": 7, "date": "2026-10-13", "change": "clause 10, acceptance[9] (the delete-user half) and step 9 re-worded (assertion defect, #23104 A9). Revision 4 said delete-user answers 404 to every caller, authed or not. The route is mounted and session-guarded, so the anonymous forge answers 401 UNAUTHORIZED and only a signed-in caller reaches the capability switch's 404. No caller gets 2xx, and the disposition 'disabled' is unchanged. The oracle is packages/plugins/plugin-auth/src/change-email-delete-user-wiring.test.ts, whose '#7735' delete-user block pins anonymous 401, authed 404 and the callback 404, and says the 401-beside-404 pair is how the switch is told apart from an unmounted route. The change-email half is unchanged", "ref": "#23121" },
-        { "revision": 8, "date": "2026-10-17", "change": "knownGaps[3], steps[3] and [4], acceptance[3].verify and variants[3] and [7] corrected (checklist-accuracy findings of the identity-auth slice report on #23878 (6216631966)). The no-SMS state needs NODE_ENV=production: in development the SMS log transport delivers, so send-otp succeeds. A generic oidcProviders entry surfaces as a socialProviders[] entry of type 'oidc', while features.sso tracks only the @better-auth/sso plugin, so the SSO step's 'features.sso refined to usable' check could never see a generic provider. Magic-link is off on stock (404), not 'server endpoints live'. Generic OIDC is drivable against a localhost IdP, so only the device and enterprise-SSO halves stay blocked(environment). Not loosened: a phone OTP without SMS that succeeds, hangs or 500s on a production boot still FAILS", "ref": "#24036" }
+        { "revision": 8, "date": "2026-10-17", "change": "knownGaps[3], steps[3] and [4], acceptance[3].verify and variants[3] and [7] corrected (checklist-accuracy findings of the identity-auth slice report on #23878 (6216631966)). The no-SMS state needs NODE_ENV=production: in development the SMS log transport delivers, so send-otp succeeds. A generic oidcProviders entry surfaces as a socialProviders[] entry of type 'oidc', while features.sso tracks only the @better-auth/sso plugin, so the SSO step's 'features.sso refined to usable' check could never see a generic provider. Magic-link is off on stock (404), not 'server endpoints live'. Generic OIDC is drivable against a localhost IdP, so only the device and enterprise-SSO halves stay blocked(environment). Not loosened: a phone OTP without SMS that succeeds, hangs or 500s on a production boot still FAILS", "ref": "#24036" },
+        { "revision": 9, "date": "2026-10-26", "change": "checklist-accuracy findings of the 18.2.0 sweep (QA run #25815, identity-auth.auth-method-matrix a3, a6, a9 and ref; wave anchor #25807; card #25843). acceptance[3], [6] and [9] each named a pin that exists but was not in automated.ref (phone-otp-no-sms-service-refusal.test.ts, two-factor-lockout.dogfood.test.ts, change-email-delete-user-wiring.test.ts), and the ref held a single OIDC pin (acceptance[7]) under kind 'e2e', over-implying coverage of a 10-clause item. automated.ref now lists all four pins with the clause and layer each scores, and kind reads 'dogfood'; acceptance[3].verify and acceptance[9].verify say their pins drive AuthManager at unit layer, not the production boot's send-otp door or a booted server, so they score partial and the live calls are still driven. No clause's assertion changed", "ref": "#25843" }
       ]
     },
     {
@@ -292,7 +293,7 @@
       "title": "Invitation issuance honors role-scope gates: delegated_admin can invite members but cannot mint admins; a plain member cannot invite at all",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["delegated_admin org member", "plain member", "tenant admin (setup only)"],
@@ -359,7 +360,7 @@
       ],
       "negative": [
         "an admin-role invitation that returns success, or that leaves ANY row behind, is a FAIL of privilege-escalation severity — file immediately, P0-verify per RUNNER rule 7",
-        "UI-only enforcement (affordance hidden but the forged request succeeds) is a FAIL — the server is the authority (ADR-0124 D1)",
+        "UI-only enforcement (affordance hidden but the forged request succeeds) is a FAIL — the server is the authority (ADR-0124 D1). The two halves are scored apart: the server-side denial of the forged request is pinned (the dogfood test's 'a plain member still cannot invite at all' case, acceptance[3]); the affordance-hidden half is browser-lane work, acceptance[4], scored only from its screenshots",
         "my-delegable-scope OVER-reporting is a FAIL — a position, permission set or BU subtree the caller cannot actually delegate, or (were the shape ever to grow one) a role the caller cannot mint: a client that trusts the scope would offer what the endpoint then refuses. UNDER-reporting is NOT a FAIL and must not be filed as one: the endpoint answering an empty scope while the delegate can still mint a member invitation is the safe direction and the expected state on stock fixtures (run #7663 — DelegableScope has no invitation-role field at all)"
       ],
       "automated": { "kind": "e2e", "ref": "packages/qa/dogfood/test/delegated-admin-invite.dogfood.test.ts (its first case asserts the invitation row and its role, not `status: 'pending'` — acceptance[0]'s pending half is scored live)" },
@@ -381,6 +382,12 @@
           "date": "2026-10-19",
           "change": "fixtures.requires[0]–[1] and automated.ref corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24538, identity-auth.invitation-scope-gates; wave anchor #24579 §3). The item required a multi-org boot; every clause runs on the stock single-tenancy showcase's Default Organization, which is what its own pin boots (delegated-admin-invite.dogfood.test.ts: bootShowcase({}), reading the slug-default organization rather than minting one). automated.ref now says the pin's first case asserts the row and its role but not status pending, which the run proved live. No clause changed",
           "ref": "#24632"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-26",
+          "change": "checklist-accuracy findings of the 18.2.0 sweep (QA run #25815, identity-auth.invitation-scope-gates a0 and n1; wave anchor #25807; card #25843). a0: automated.ref already says its pending half is scored live — consistent, no edit. n1: the server-side denial of the forged request is pinned, while the UI-hidden half is acceptance[4]'s browser work; negative[1] now names which half each scores. No clause changed",
+          "ref": "#25843"
         }
       ]
     },
@@ -1536,7 +1543,7 @@
       "title": "Backup codes: revealed once at enable, spendable exactly once at the sign-in challenge, and regeneration kills the prior set — and the navigable regenerate surface reveals the new set in a one-shot dialog",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": ["a user with a VERIFIED enrollment (run identity-auth.two-factor-verify-to-activate's path first)", "the same user at the sign-in challenge spending a code"],
@@ -1545,7 +1552,7 @@
         "requires": [
           "2FA armed BEFORE boot + a VERIFIED enrollment — this item's challenge lane only exists after identity-auth.two-factor-verify-to-activate's walk completes; run the three enrollment items as one sequence on one boot",
           "the backup codes captured from the enable response (they are never legitimately retrievable later — that unretrievability is itself under test)",
-          "in-process system reads for the storage-shape observation (sys_two_factor REST is get-by-id only)"
+          "an out-of-band DB read for the storage-shape observation: sys_two_factor.backup_codes is declared internal: true, so REST never returns the column (and sys_two_factor REST is get-by-id only). Read the row straight from the boot's DB file with a SQLite client while the server runs — on a --fresh boot, FRESH_HOME/data/objectstack.db, where FRESH_HOME is the path its 'Fresh OS_HOME' line prints"
         ],
         "knownGaps": [
           "browser lane: the reveal is DECLARED on the navigable surface — sys_user.generate_backup_codes carries a one-shot resultDialog {path:'backupCodes', format:'code-list'} + acknowledge (sys-user.object.ts), alongside the still-unmounted sys_two_factor.regenerate_backup_codes variant; the pixels are objectui's ActionResultDialog, so a browser-lane clause is scored only from what that dialog draws on the sys_user record page, never from the declaration"
@@ -1559,7 +1566,7 @@
         "as the signed-in user, POST /two-factor/generate-backup-codes { password }; capture the NEW set from the response",
         "begin a fresh challenge and attempt an UNSPENT code from the OLD set; capture the refusal — regeneration invalidated the prior set wholesale",
         "spend one NEW code to prove the new set is live",
-        "storage-shape observation: read sys_two_factor.backup_codes via the system-context read and record what the column actually carries (the declaration says JSON-serialized — sys-two-factor.object.ts; record whether the stored form is plaintext codes or an encrypted/hashed blob, without publishing either)",
+        "storage-shape observation: read sys_two_factor.backup_codes out of band, from the DB file (REST never returns the internal column), and record what the column actually carries (the declaration says encrypted at rest, a single opaque ciphertext — sys-two-factor.object.ts; record whether the stored form is plaintext codes or an encrypted/hashed blob, without publishing either)",
         "read the navigable surface's declaration: sys_user.generate_backup_codes (sys-user.object.ts) declares a resultDialog — backupCodes as code-list + acknowledge, no successMessage — so on the surface a user can reach, regenerating kills the old set AND reveals the new one once; resolve its backupCodes path against the steps[4] regenerate response (the sys_two_factor.regenerate_backup_codes variant carries the same reveal and is mounted nowhere)",
         "negative: generate-backup-codes with a wrong password refused (old set must survive the refused attempt); anonymous call 401"
       ],
@@ -1589,9 +1596,9 @@
           "evidence": "the regenerate response shape + the two spend traces"
         },
         {
-          "clause": "OBSERVE-AND-RECORD — the storage shape: what sys_two_factor.backup_codes actually holds (declared 'JSON-serialized backup recovery codes'). Plaintext codes at rest would be an authentication finding (publishable only under RUNNER rule 2's carve-out); an encrypted/hashed blob is the healthy reading. The clause is satisfied by the accurate record",
+          "clause": "OBSERVE-AND-RECORD — the storage shape: what sys_two_factor.backup_codes actually holds (declared 'Backup recovery codes, encrypted at rest (a single opaque ciphertext, not readable JSON)'). Plaintext codes at rest would be an authentication finding (publishable only under RUNNER rule 2's carve-out); an encrypted/hashed blob is the healthy reading. The clause is satisfied by the accurate record",
           "oracle": "api",
-          "verify": "the system-context row read; describe the stored form (length/shape), never the value",
+          "verify": "an out-of-band read of the row from the DB file (fixtures.requires[2]) — REST never returns the column, which is internal: true, so no API read can score this clause; describe the stored form (length/shape), never the value",
           "evidence": "the described (not quoted) column content"
         },
         {
@@ -1633,6 +1640,12 @@
           "date": "2026-10-20",
           "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). acceptance[3].clause cited line 120 of sys-two-factor.object.ts in the comma-range spelling (authored in 8d74a57487 as the list 113 and 120). At that commit 120 was the resultDialog description of the regenerate_backup_codes action, the quoted copy; at this base it has moved. The clause now anchors that action by its name, sys-two-factor.object.ts#regenerate_backup_codes. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed",
           "ref": "#24752"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-26",
+          "change": "checklist-accuracy finding of the 18.2.0 sweep (QA run #25817, identity-auth.two-factor-backup-codes A4; wave anchor #25807; card #25843). A4's at-rest check needs an out-of-band DB read, because REST never returns sys_two_factor.backup_codes (declared internal: true). fixtures.requires[2], steps[7] and acceptance[4].verify now say to read the row from the DB file, not through a system-context read. The same three places quoted the column's old 'JSON-serialized' description; sys-two-factor.object.ts now declares it encrypted at rest, a single opaque ciphertext, and the text quotes that. No clause's assertion changed",
+          "ref": "#25843"
         }
       ]
     },
@@ -2120,7 +2133,7 @@
       "title": "Implicit account linking on external sign-in: no implicit link to an unverified local user; after an unlink, implicit sign-in does not re-link; an explicit, signed-in link still works and lifts the refusal; the platform identity provider's exception holds only on its OAuth path",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2151,7 +2164,7 @@
         "as U, signed in: unlink the provider (POST /api/v1/auth/unlink-account { accountId: the sys_account row id }) and confirm the row is gone. Sign out, then repeat the implicit sign-in from a fresh context",
         "as U, signed in: link the provider EXPLICITLY (POST /api/v1/auth/link-social { provider, callbackURL } with U's session, then navigate to the returned URL). Confirm the sys_account row is back. Sign out and repeat the implicit sign-in once more",
         "explicit link for an unverified user: sign up a second unverified local user W, give the fixture provider an identity for W's email, sign in as W and link the provider explicitly through link-social; then re-read W's emailVerified. The local fixture IdP derives its `sub` from the email, so W's identity is a DISTINCT provider account: W's explicit link writes W's own sys_account row and does not re-point or touch U's (QA run #23166)",
-        "run the pin: pnpm --filter @objectstack/plugin-auth exec vitest run src/implicit-account-linking.test.ts"
+        "run the pin: pnpm --filter @objectstack/plugin-auth exec vitest run --maxWorkers=1 src/implicit-account-linking.test.ts — it scores acceptance[4] only; its end-to-end cases run over a fake data engine, so acceptance[0]–[3] are scored by steps[0]–[6] against the booted server"
       ],
       "acceptance": [
         {
@@ -2200,7 +2213,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/plugins/plugin-auth/src/implicit-account-linking.test.ts (the decision table under 'implicit link decision', the vendor configuration pins, and the end-to-end cases under 'implicit link on external sign-in, end to end': unverified refused with no link and no verification flip, verified links, platform exception, operator opt-out, unlink then explicit link, id-token path, generic OIDC by discovery, unlink record durability)"
+        "ref": "packages/plugins/plugin-auth/src/implicit-account-linking.test.ts (the decision table under 'implicit link decision', the vendor configuration pins, and the end-to-end cases under 'implicit link on external sign-in, end to end': unverified refused with no link and no verification flip, verified links, platform exception, operator opt-out, unlink then explicit link, id-token path, generic OIDC by discovery, unlink record durability). Those 'end to end' cases drive the real better-auth handler (AuthManager.handleRequest) over a hand-rolled in-memory data engine and read sys_account off that fake, not through an admin read against a booted server, so they assert acceptance[0]–[3]'s facts at unit layer only: those four clauses are scored by the live steps, and the pin scores acceptance[4]"
       },
       "source": [
         "packages/plugins/plugin-auth/src/implicit-account-linking.ts#decideImplicitLink (rule 1: the local row must be verified; rule 2: the platform IdP exception, bound to the provider id AND the oauth sign-in method; rule 3: an unlink is honoured for every provider; the operator override)",
@@ -2230,6 +2243,12 @@
           "date": "2026-10-17",
           "change": "fixtures.requires[2] names where the verification mail is read (checklist-accuracy finding of the identity-auth slice report on #23878 (6216631966)): the dev log transport logs no body or link, so the link comes from the mail's sys_email row. Wording only: no step, request or oracle changed",
           "ref": "#24036"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-26",
+          "change": "checklist-accuracy finding of the 18.2.0 sweep (QA run #25815, identity-auth.implicit-account-linking-ownership a0–a3; wave anchor #25807; card #25843). The ref's 'end to end' cases drive the real better-auth handler (AuthManager.handleRequest) but over a hand-rolled in-memory data engine, with sys_account read off that fake rather than by an admin read through a booted server, so they assert each clause's facts at unit layer only. automated.ref and steps[7] now say so and that acceptance[0]–[3] are scored live; steps[7] also carries --maxWorkers=1, RUNNER.md's memory fact. No clause changed",
+          "ref": "#25843"
         }
       ]
     },
