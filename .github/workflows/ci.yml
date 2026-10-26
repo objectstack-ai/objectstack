@@ -137,18 +137,24 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      # On merge_group — and on the `schedule` / `workflow_dispatch` full runs
-      # (#16467) — everything counts as changed: dorny/paths-filter resolves a
-      # diff only on `pull_request` and `push`, and each of these three events
-      # is a place a skipped job can never be the right answer (the queue build
-      # is the last validation before main; the hourly run IS the full battery).
-      # A skipped step's output is the empty string (falsy), so `|| 'true'`
-      # supplies their value without touching PR/push behavior.
-      docs: ${{ steps.changes.outputs.docs || 'true' }}
-      core: ${{ steps.changes.outputs.core || 'true' }}
+      # On the `schedule` / `workflow_dispatch` full runs (#16467) everything
+      # counts as changed: dorny/paths-filter is skipped there (no diff to
+      # resolve), a skipped step's output is the empty string (falsy), and
+      # `|| 'true'` supplies the value without touching PR/push behavior.
+      #
+      # On merge_group the step RUNS (the diff is the queue base_sha against
+      # the group head, see the step below), but only the three ui outputs
+      # read it. `docs`, `core` and `crosspkg` stay 'true' there through the
+      # `github.event_name != 'merge_group' &&` guard: the queue build is the
+      # last validation before main, and those jobs run on every entry, as
+      # they did before the step ran on this event. On any other event the
+      # guard is true and the expression reads exactly as `<output> ||
+      # 'true'` did.
+      docs: ${{ github.event_name != 'merge_group' && steps.changes.outputs.docs || 'true' }}
+      core: ${{ github.event_name != 'merge_group' && steps.changes.outputs.core || 'true' }}
       # Gates the `test` job ONLY, ORed with `core` — see the `crosspkg`
       # filter below and the `test` job's `if:` (#9829, #10015).
-      crosspkg: ${{ steps.changes.outputs.crosspkg || 'true' }}
+      crosspkg: ${{ github.event_name != 'merge_group' && steps.changes.outputs.crosspkg || 'true' }}
       # The objectui tree under `ui/` (objectstack#25677). Three outputs, read
       # together by the four `* UI` jobs at the bottom of this file:
       #   ui            — a path under ui/, or a root file the ui jobs build
@@ -158,13 +164,21 @@ jobs:
       #                   UI) and built (Build & E2E UI) against the new shape in
       #                   the PR that moves it;
       #   ui_tree       — `ui/package.json` exists in this checkout.
+      # On merge_group `ui` and `ui_consumers` come from the queue diff
+      # (objectstack#25867): an entry whose merged diff against
+      # `merge_group.base_sha` touches no ui path and none of the seven
+      # packages skips the four ui jobs, exactly as the same diff does on its
+      # PR head; an entry that touches one runs them. If the step fails (the
+      # base cannot be fetched, the diff errors), it is `continue-on-error`
+      # there, its outputs are empty and `|| 'true'` runs every ui job.
+      #
       # `ui_tree` is what keeps the ui jobs SKIPPED, not failed, on a tree that
       # does not carry ui/ yet: `ui` and `ui_consumers` fall back to 'true' on
-      # merge_group / schedule / dispatch (half 1 below), and on push to main a
-      # spec change sets `ui_consumers`, so neither path output alone can tell a
-      # job there is nothing to build. Its step runs on every event, so the
-      # `|| 'true'` fallback is reached only when this job died before it — and
-      # then THE FILTER CONTRACT's "run everything" is the intended reading.
+      # schedule / dispatch (half 1 below), and on push to main a spec change
+      # sets `ui_consumers`, so neither path output alone can tell a job there
+      # is nothing to build. Its step runs on every event, so the `|| 'true'`
+      # fallback is reached only when this job died before it — and then THE
+      # FILTER CONTRACT's "run everything" is the intended reading.
       ui: ${{ steps.changes.outputs.ui || 'true' }}
       ui_consumers: ${{ steps.changes.outputs.ui_consumers || 'true' }}
       ui_tree: ${{ steps.ui-tree.outputs.present || 'true' }}
@@ -216,13 +230,15 @@ jobs:
             echo 'ui/package.json is absent: every ui job skips on this run.'
           fi
 
-      # ⭐ SPELLED AS AN ALLOW-LIST, not as `!= 'merge_group'` (#16467). This
-      # action reads a diff, and the only two events that hand it one it can
-      # resolve unaided are `pull_request` (base vs head) and `push`
-      # (`event.before` vs `after`). `merge_group` was the first event with
-      # neither, and the exclusion was written as its name; `schedule` and
-      # `workflow_dispatch` are the second and third, and under the old
-      # spelling they would have RUN the action with no resolvable base.
+      # ⭐ SPELLED AS AN ALLOW-LIST, never as a deny-list (#16467). This
+      # action reads a diff, and only three events hand it one it can resolve
+      # unaided: `pull_request` (base vs head), `push` (`event.before` vs
+      # `after`) and `merge_group` (the payload's `base_sha` vs `head_sha`; at
+      # the pinned v4.0.3, src/main.ts reads both when `base` / `ref` are
+      # unset, and src/git.ts fetches the base sha at depth 1 and diffs the two
+      # trees, `base..head`). `schedule` and `workflow_dispatch` hand it
+      # neither, and under a deny-list spelling they would RUN the action with
+      # no resolvable base.
       #
       # That failure direction is the dangerous one: every filter output would
       # come back `false`, `|| 'true'` supplies nothing (the output exists and
@@ -231,9 +247,16 @@ jobs:
       # of nothing at all. An allow-list makes each new event fail toward
       # THE FILTER CONTRACT's half 1 instead: the step is skipped, its outputs
       # are the empty string, `|| 'true'` fills them in, and everything runs.
+      #
+      # `merge_group` joined the list for the ui outputs alone (#25867; the
+      # three core-side outputs above ignore the step on that event). Its
+      # `continue-on-error` is the fail-open half there: a queue build whose
+      # base cannot be fetched reads as "run every ui job", never as a red
+      # `filter` job. On pull_request and push a failure stays red, as before.
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: changes
-        if: github.event_name == 'pull_request' || github.event_name == 'push'
+        if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'merge_group'
+        continue-on-error: ${{ github.event_name == 'merge_group' }}
         with:
           filters: |
             docs:
@@ -3292,11 +3315,16 @@ jobs:
   # vitest root, so the suite must run with cwd = ui/ (it does, below); run
   # from this repo's root every key misses and every file weighs the median.
   #
-  # Every event runs the whole suite. objectui's affected-test selector
-  # (ui/scripts/select-affected-tests.mjs) reads `git diff --name-only`, which
-  # prints paths relative to the GIT root — `ui/packages/...` here — against a
-  # package graph spelled relative to the objectui root, so it is not wired
-  # until objectui's repo-root lookups are migrated (sub-issue 2 of the epic).
+  # ── Test UI: the two speeds (#25868) ────────────────────────────────────
+  # `push`, `schedule` and `workflow_dispatch` run the whole suite: the full
+  # battery. `pull_request` and `merge_group` run the files
+  # ui/scripts/select-affected-tests.mjs selects -- the ui packages the change
+  # sits in and their dependents, plus the tests the package graph cannot
+  # place, which run on every change -- or the whole suite when the change
+  # reaches something every ui test runs through, outside ui/ included (a
+  # non-documentation root file, `patches/`, one of the seven packages the
+  # `ui_consumers` filter names). The selector's header states the rules and
+  # what it does not see; the full battery on `main` is the backstop.
   test-ui:
     name: Test UI (${{ matrix.shard }}/16)
     needs: filter
@@ -3313,6 +3341,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          # The select step below diffs against the base commit, which needs
+          # the base's history in the clone.
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -3363,13 +3395,85 @@ jobs:
             --filter=@objectstack/sdui-parser... \
             --filter=@objectstack/types...
 
+      # Fails OPEN: a selector that exits non-zero, prints no verdict, or has
+      # no base to diff against means the whole suite, never a skip. The exit
+      # status is captured beside the output, not through a command
+      # substitution. A pull request diffs from merge-base(origin/<base ref>,
+      # HEAD), never the payload's `base.sha`, which is frozen when the PR is
+      # opened: everything `main` gained since would be charged to this PR,
+      # and a lockfile change among it would make every long-open PR a full
+      # run (Test Core's "WHERE THE AFFECTED DIFF STARTS" above is the same
+      # fact). A merge group diffs from its `base_sha`. Every shard computes
+      # the same selection from the same checkout, so `--shard` partitions
+      # one set.
+      - name: Select the tests this change affects
+        id: select
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          QUEUE_BASE: ${{ github.event.merge_group.base_sha }}
+        run: |
+          base=''
+          case "$EVENT" in
+            pull_request)
+              if [ -n "$PR_BASE_REF" ]; then
+                base=$(git merge-base "refs/remotes/origin/$PR_BASE_REF" HEAD) || base=''
+              fi
+              ;;
+            merge_group) base="$QUEUE_BASE" ;;
+            *)
+              echo 'mode=full' >> "$GITHUB_OUTPUT"
+              echo "A $EVENT run is the full battery: every ui test file, sixteen shards."
+              exit 0
+              ;;
+          esac
+          status=0
+          if [ -z "$base" ]; then
+            echo "::warning::no diff base on this $EVENT event; running the full suite rather than guessing."
+            status=2
+          else
+            echo "Diff base: $base"
+            node ui/scripts/select-affected-tests.mjs --base "$base" --out "$RUNNER_TEMP/affected-tests.txt" \
+              > "$RUNNER_TEMP/select.out" || status=$?
+            cat "$RUNNER_TEMP/select.out"
+          fi
+          verdict=''
+          if [ "$status" -eq 0 ]; then
+            verdict=$(tail -n 1 "$RUNNER_TEMP/select.out")
+          fi
+          case "$verdict" in
+            mode=affected | mode=full) ;;
+            *)
+              echo "::warning::the affected-test selector reached no verdict (exit $status); running the full suite rather than skipping silently."
+              verdict='mode=full'
+              ;;
+          esac
+          echo "$verdict" >> "$GITHUB_OUTPUT"
+
+      # `$MODE` is the VALUE of the select step's output `mode`: its
+      # `mode=affected` line is GitHub's `key=value` form, so what arrives here
+      # is `affected` or `full`, never the line itself.
+      # ui/scripts/__tests__/select-affected-tests-wiring.test.ts runs both
+      # steps as written, so neither end can be renamed alone. The filters are
+      # paths relative to ui/, the vitest root, passed as positionals with no
+      # `--`, the only spelling ui/scripts/vitest-invocation-guard.mjs admits.
+      #
       # objectui's full-battery runs also pass its per-file timings reporter
       # and upload the result for the weekly dataset refresh. Both belong to
       # that refresh workflow, which is in the governance-workflow audit
       # (sub-issue 4 of the epic); until it is ported the committed dataset
       # is what the sequencer reads.
       - name: Run the ui tests (shard ${{ matrix.shard }}/16)
-        run: pnpm --dir ui run test --shard=${{ matrix.shard }}/16 --reporter=default --reporter=github-actions
+        env:
+          MODE: ${{ steps.select.outputs.mode }}
+        run: |
+          if [ "$MODE" = 'affected' ]; then
+            mapfile -t filters < "$RUNNER_TEMP/affected-tests.txt"
+            echo "Affected speed: ${#filters[@]} vitest filter(s), shard ${{ matrix.shard }} of 16."
+            pnpm --dir ui exec vitest run --shard=${{ matrix.shard }}/16 --reporter=default --reporter=github-actions "${filters[@]}"
+          else
+            pnpm --dir ui run test --shard=${{ matrix.shard }}/16 --reporter=default --reporter=github-actions
+          fi
 
       - name: Save Turbo cache (main only)
         if: always() && github.event_name == 'push' && matrix.shard == 1

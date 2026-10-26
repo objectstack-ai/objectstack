@@ -85,7 +85,7 @@ here is verifiable from the installed package.
 
 | Domain | Count | Key Schemas |
 |--------|-------|-------------|
-| system | 36 | Auth, Cache, Dev Login, Email / SMS Config, Encryption, Fate Supplement (organization ownership), HTTP Server, License, Logging, Metrics |
+| system | 37 | Auth, Cache, Demo Staff, Dev Login, Email / SMS Config, Encryption, Fate Supplement (organization ownership), HTTP Server, License, Logging, Metrics |
 | kernel | 30 | Plugin, Manifest, Events (6 sub-modules), Feature, Context, Package Registry |
 | data | 31 | Object, Field, Picklist, Query, Filter, Driver (SQL/NoSQL/Memory/Mongo/Postgres), Cube |
 | api | 31 | Endpoint, REST Server, Discovery, OData, Batch, WebSocket, Response Envelope, Package Lifecycle, Package API (assembled stage) |

@@ -42,12 +42,16 @@
  *
  * It does NOT answer the DIFF question — "should this ROSTERED job have run on
  * THIS diff?" — and the boundary is deliberate. For ci.yml's `filter`-gated
- * family the merge-queue build answers it: on `merge_group` every filter output
- * widens to `'true'` and the family runs on the merged tree before anything
- * reaches `main` (the `|| 'true'` half of ci.yml's filter contract, pinned by
- * `--self-test`) — except the full-battery-only jobs (ci.yml's THE TWO SPEEDS),
- * which skip on every PR head and queue build and are answered by `main`'s
- * push and hourly runs instead. For the event- and label-conditional advisory jobs the reason
+ * family the merge-queue build answers it: on `merge_group` the `docs`, `core`
+ * and `crosspkg` outputs widen to `'true'` and those jobs run on the merged
+ * tree before anything reaches `main` (the `|| 'true'` half of ci.yml's filter
+ * contract, pinned by `--self-test`). Two exceptions. The four ui jobs: on
+ * `merge_group` their outputs are the same paths filter read against the
+ * queue's `base_sha`, so a queue build skips them exactly when the merged diff
+ * touches no ui path, and main's hourly run widens them. And the
+ * full-battery-only jobs (ci.yml's THE TWO SPEEDS), which skip on every PR
+ * head and queue build and are answered by `main`'s push and hourly runs
+ * instead. For the event- and label-conditional advisory jobs the reason
  * column names the condition a reader checks by hand. Deriving expectedness
  * live from the workflows' `paths` filters would answer the diff question, at
  * the cost of a SECOND evaluator of the platform's own semantics — the
@@ -184,7 +188,9 @@ export const OWN_PROXY_REARM_GUARD = 'OS_EXPECTED_SKIPS_PROXY_REARMED';
  *
  *   filter-output  ci.yml's `filter` job said `false` for every named output —
  *                  the job's `if:` spells `needs.filter.outputs.<o> != 'false'`
- *                  and the filter widens each output with `|| 'true'` off PRs.
+ *                  and the filter widens each output with `|| 'true'` where
+ *                  its paths filter did not run (the ui outputs read it on
+ *                  merge_group too).
  *   event          the job's `if:` excludes `github.event.action` values, so a
  *                  `labeled` / `unlabeled` / `edited` run of the same head skips.
  *   label          the job's `if:` reads a label literal — an opt-out (skip when
@@ -216,6 +222,8 @@ const UI_GATE = Object.freeze({ kind: 'filter-output', outputs: ['ui_tree', 'ui'
 const UI_CONSUMERS_GATE = Object.freeze({ kind: 'filter-output', outputs: ['ui_tree', 'ui', 'ui_consumers'] });
 const UI_TREE_REASON =
   "gated on ci.yml's `filter` job `ui_tree` output: it skips on every event while `ui/package.json` is absent (before the objectui import), and is not a required context";
+const UI_QUEUE_REASON =
+  "the merge-queue build reads the same paths filter against the queue's `base_sha`, so a queue entry whose merged diff touches none of those paths skips it too; main's hourly run widens it to 'true'";
 const FULL_BATTERY_REASON =
   "full battery only (ci.yml's THE TWO SPEEDS): its `if:` excludes `pull_request` and `merge_group`, so it skips on every PR head and every queue build and runs on main's push, hourly schedule and dispatch runs";
 
@@ -335,28 +343,28 @@ export const EXPECTED_SKIPS = Object.freeze([
     workflow: 'ci.yml',
     job: 'type-check-ui',
     gate: UI_CONSUMERS_GATE,
-    reason: `${UI_TREE_REASON}; with ui/ present it runs on a ui/ path or one of the seven packages objectui consumes (the \`ui_consumers\` output)`,
+    reason: `${UI_TREE_REASON}; with ui/ present it runs on a ui/ path or one of the seven packages objectui consumes (the \`ui_consumers\` output); ${UI_QUEUE_REASON}`,
   },
   {
     name: 'Test UI (${{ matrix.shard }}/16)',
     workflow: 'ci.yml',
     job: 'test-ui',
     gate: UI_GATE,
-    reason: `${UI_TREE_REASON}; with ui/ present it runs on a ui/ path; the raw matrix template is the pre-expansion name`,
+    reason: `${UI_TREE_REASON}; with ui/ present it runs on a ui/ path; ${UI_QUEUE_REASON}; the raw matrix template is the pre-expansion name`,
   },
   {
     name: 'Lint UI',
     workflow: 'ci.yml',
     job: 'lint-ui',
     gate: UI_GATE,
-    reason: `${UI_TREE_REASON}; with ui/ present it runs on a ui/ path`,
+    reason: `${UI_TREE_REASON}; with ui/ present it runs on a ui/ path; ${UI_QUEUE_REASON}`,
   },
   {
     name: 'Build & E2E UI',
     workflow: 'ci.yml',
     job: 'build-e2e-ui',
     gate: UI_CONSUMERS_GATE,
-    reason: `${UI_TREE_REASON}; with ui/ present it runs on a ui/ path or one of the seven packages objectui consumes (the \`ui_consumers\` output)`,
+    reason: `${UI_TREE_REASON}; with ui/ present it runs on a ui/ path or one of the seven packages objectui consumes (the \`ui_consumers\` output); ${UI_QUEUE_REASON}`,
   },
 ]);
 
@@ -373,8 +381,9 @@ export const FAILED_CONCLUSIONS = Object.freeze(['failure', 'cancelled', 'timed_
  * exists in its workflow, carries the row's name, carries an `if:`, and that
  * `if:` spells the gate the row declares. For `filter-output` rows the
  * `filter` job's output must carry the `|| 'true'` widening, because the
- * reason column promises the queue build runs the job — a promise that is only
- * true while that half of the filter contract stands.
+ * reason column promises the job runs whenever the filter could not answer —
+ * the queue build for the core-side outputs, the hourly run for every output —
+ * a promise that is only true while that half of the filter contract stands.
  *
  * @param {readonly object[]} roster
  * @param {(file: string) => object|null} readWorkflow  parsed YAML, or null when unreadable

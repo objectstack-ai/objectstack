@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { analyze } from '../check-object-metadata-write-doors.mjs';
+import { jobBlock, rootCi, uiRun, UI_JOBS } from './helpers/root-ci';
 
 /**
  * objectui#8676 — every in-repo DOOR that can PUT an object-metadata document
@@ -290,7 +291,8 @@ describe('wiring', () => {
   });
 
   it('runs in CI, beside the sibling gates that parse sources with `typescript`', () => {
-    const workflow = fs.readFileSync(path.join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
-    expect(workflow).toContain('run: pnpm check:metadata-write-doors');
+    // objectstack's root ci.yml: `type-check-ui` is objectui's `Type Check`
+    // (objectstack#25697); the ci.yml under `ui/.github/` runs nowhere (#25712).
+    expect(jobBlock(rootCi(), UI_JOBS.typeCheck)).toContain(`run: ${uiRun('check:metadata-write-doors')}`);
   });
 });
