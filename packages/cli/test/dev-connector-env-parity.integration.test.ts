@@ -62,7 +62,8 @@
  * now runs the child's walk before it compiles and exports the port it lands
  * on (`portFlagEnv`).
  *
- * So the third boot here holds a port for its whole life (`holdPort`), asks
+ * So the third boot here holds a port for its whole life (an HTTP neighbour
+ * answering 503, see {@link holdPortWithNeighbour}), asks
  * `os dev -p` for it, and reads the shifted port out of the child's own
  * banner. The served and the materialized `baseUrl` must both name that port,
  * and a flow pinging the app through the connector (`fxp_ping`, the fixture's
@@ -73,7 +74,8 @@
  * `bin/run.js` with `NODE_ENV` unset, the shipped entry resolving commands from
  * `dist/` (`requireBuiltCli`), in its own process group (`dev` supervises a
  * `serve` grandchild). Each boot asks for a NON-ZERO port drawn with
- * `reservePort()` (the busy-port boot holds its own with `holdPort()`), because that number is the subject: the config must read
+ * `reservePort()` (the busy-port boot holds its own instead), because that
+ * number is the subject: the config must read
  * the port the flag names, before the boot, and a kernel-assigned `-p 0` read
  * back afterwards cannot be known to the config (the draw is ledgered in
  * `released-port-production-spawn.pin.test.ts`). A lost race on that draw is
@@ -84,6 +86,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { createServer as createHttpServer } from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -93,7 +96,6 @@ import {
   childEnv,
   E2E_AUTH_SECRET,
   E2E_SECRET_KEY,
-  holdPort,
   portContentionError,
   portDriftError,
   probeThroughChild,
@@ -302,6 +304,38 @@ function boot(
   });
 }
 
+/**
+ * Hold a port for a whole boot with a neighbour that ANSWERS: an HTTP server
+ * replying 503 to everything, as another app on that port would.
+ *
+ * ⛔ Not `holdPort()` from the shared helper. Its bare socket never answers, so
+ * a ping dialing it waits out the handler's timeout, and its `release()` then
+ * waits forever on the connection the ping left behind (measured: the socket
+ * sat in CLOSE_WAIT and the hook timed out at 600 s).
+ */
+function holdPortWithNeighbour(): Promise<{ port: number; release: () => Promise<void> }> {
+  return new Promise((resolveHold, rejectHold) => {
+    const server = createHttpServer((_req, res) => {
+      res.writeHead(503, { connection: 'close' }).end('not this app');
+    });
+    server.on('error', rejectHold);
+    server.listen(0, '0.0.0.0', () => {
+      const address = server.address();
+      if (address === null || typeof address === 'string') {
+        rejectHold(new Error(`listen(0) produced no numeric address: ${String(address)}`));
+        return;
+      }
+      resolveHold({
+        port: address.port,
+        release: () => new Promise<void>((done) => {
+          server.closeAllConnections();
+          server.close(() => done());
+        }),
+      });
+    });
+  });
+}
+
 async function stopGroup(child: ChildProcess): Promise<void> {
   if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
   await new Promise<void>((done) => {
@@ -415,7 +449,7 @@ beforeAll(async () => {
   }
 
   // `os dev -p N` with N held for the whole boot: the server shifts off it.
-  const held = await holdPort();
+  const held = await holdPortWithNeighbour();
   try {
     live = await boot(
       'os dev -p (held)',
