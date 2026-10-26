@@ -8,7 +8,7 @@
  *
  * After #12938 the pair composes the deployment's own object set. One shape
  * still slipped through: a config that EXISTS and throws while loading — a
- * missing environment variable is the ordinary cause, and ObjectStack Cloud's
+ * missing environment variable is the ordinary cause, and ObjectOS Cloud's
  * own control-plane config throws without `AUTH_SECRET`. On that path the
  * commands warned loudly, carried `composition.hostConfigLoaded: false` in
  * `--json`, and **exited 0** over a metadata set that was the data stack plus

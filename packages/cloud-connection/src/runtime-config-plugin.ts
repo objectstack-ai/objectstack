@@ -393,7 +393,7 @@ function isMarketplaceBrowsePattern(pattern: string): boolean {
  *    `resolveMountedRoute` filters the live router's verdict back through that
  *    same ledger. The proxy mounts through `getRawApp()`, so the adapter
  *    ledger reports nothing for it.
- *  - **A proxy-specific signal would under-report.** The ObjectStack Cloud
+ *  - **A proxy-specific signal would under-report.** The ObjectOS Cloud
  *    control plane serves `/api/v1/marketplace/packages*` NATIVELY (its own
  *    route module), with no proxy anywhere; the flag's documented meaning in
  *    that distribution is already "`/api/v1/marketplace/*` is reachable

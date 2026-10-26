@@ -62,30 +62,39 @@ jobs:
       # green at all: 1286 root-relative links fail as "Cannot resolve
       # root-relative link ... provide a root dir".
       #
-      # ⛔ Do NOT add `docs/adr/**/*.md` here. It looks like the one-line fix
-      # for #6592 and it is not: measured on the pinned lychee 0.24.2, that
-      # glob reports 8 broken links today, every one a pre-existing ADR →
-      # source-tree link whose target moved out of this repo. This job would
-      # be red on every PR from the moment it merged, which is how an
-      # advisory lane becomes a lane nobody reads (#6028 landed it
-      # advisory-first specifically to earn a green streak). `docs/adr/` is
-      # checked by the `Check ADR cross-links` step below instead, which can
-      # freeze those 8 on a shrink-only baseline and fail on a NEW one --
-      # something neither `exclude` nor `.lycheeignore` can express, because
-      # neither ever tells you an entry stopped being needed.
-      # `ARCHITECTURE.md` joined this glob in #6867: unlike `docs/adr/**`, it
-      # carried no pre-existing rot once its 10 dead links + 2 stale path
-      # references were fixed in the same PR, so -- unlike the ADR directory
-      # above -- it needs no KNOWN_DEAD_TARGETS-style baseline to land clean.
+      # ⛔ `docs/adr/` stays OUT of lychee's reach: `'docs/**/*.md'` below
+      # would sweep it in, so `--exclude-path '^docs/adr/'` takes it back out
+      # (a regex over the input path as globbed, measured to drop exactly that
+      # directory on the pinned 0.24.2 while `lychee.toml`'s own `exclude_path`
+      # entries keep applying -- the CLI flag adds to them, it does not replace
+      # them). The decision registry has ONE link owner, the `Check ADR
+      # cross-links` step below, which can freeze a pre-existing break on a
+      # shrink-only baseline and fail on a NEW one -- something neither
+      # `exclude` nor `.lycheeignore` can express, because neither ever tells
+      # you an entry stopped being needed. Checking the same files twice, under
+      # two rule sets, would put two verdicts on one link.
+      # `ARCHITECTURE.md` joined this glob in #6867; `docs/**` and the root
+      # history/governance pages (CHANGELOG, RELEASE_NOTES, CONTRIBUTING,
+      # ROADMAP, LICENSING, CODE_OF_CONDUCT) joined in #26087, each landing
+      # clean once its dead links were fixed in the same PR, so none needs a
+      # KNOWN_DEAD_TARGETS-style baseline.
       LYCHEE_ARGS: >-
         --offline
         --root-dir ${{ github.workspace }}/content
         --fallback-extensions mdx,md
         --config lychee.toml
+        --exclude-path '^docs/adr/'
         'content/**/*.md'
         'content/**/*.mdx'
         'README.md'
         'ARCHITECTURE.md'
+        'docs/**/*.md'
+        'CHANGELOG.md'
+        'RELEASE_NOTES.md'
+        'CONTRIBUTING.md'
+        'ROADMAP.md'
+        'LICENSING.md'
+        'CODE_OF_CONDUCT.md'
 
       # ⛔ Pin the lychee binary explicitly rather than inheriting the action's
       # default (#8238). Three comments in this file already reason about "the

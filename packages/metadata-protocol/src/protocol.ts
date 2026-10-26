@@ -402,6 +402,8 @@ import { namesWithOwnStoredRow, readActiveOverlayRows, readItemActiveRows, store
 import { classifyObjectContribution, releaseAdoptedObjectOwner } from './protocol-object-owner.js';
 // [#25467 cut 18] The flow save's retired-spelling replay verdict (#23903 ruling B′): does a save newly introduce a retired spelling no stored row carries.
 import { flowSaveReplaysRetired } from './protocol-flow-save-replay.js';
+// [#25467 cut 19] A package write's validation scope: the written package and its declared dependency closure, from the registry.
+import { resolveWritePackageScope } from './protocol-write-package-scope.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -7361,44 +7363,12 @@ export class ObjectStackProtocolImplementation implements
     private resolveWritePackageScope(
         packageId: string | null | undefined,
     ): { packageId: string; dependencies: string[] } | undefined {
-        if (typeof packageId !== 'string' || packageId === '' || packageId === 'sys_metadata') return undefined;
-        try {
-            const registry = this.engine.registry as
-                | { getPackage?: (id: string) => { manifest?: unknown } | undefined }
-                | undefined;
-            if (typeof registry?.getPackage !== 'function') return undefined;
-            // The written package itself must be readable: its manifest is the
-            // ONLY declaration of what it may reference, and narrowing without
-            // it would be narrowing on nothing.
-            if (!registry.getPackage(packageId)) return undefined;
-
-            const dependencies = new Set<string>();
-            const frontier = [packageId];
-            while (frontier.length > 0) {
-                const current = frontier.pop() as string;
-                const manifest = registry.getPackage(current)?.manifest as
-                    | { dependencies?: Record<string, unknown> }
-                    | undefined;
-                const declared = manifest?.dependencies;
-                if (!declared || typeof declared !== 'object') continue;
-                for (const dep of Object.keys(declared)) {
-                    // A dependency the registry cannot resolve is still IN the
-                    // closure: the package declared it, so an object stamped
-                    // with it is reachable by declaration. Only the transitive
-                    // walk stops there — `getPackage` returns undefined and the
-                    // loop above simply contributes nothing further.
-                    if (dep === packageId || dependencies.has(dep)) continue;
-                    dependencies.add(dep);
-                    frontier.push(dep);
-                }
-            }
-            return { packageId, dependencies: [...dependencies] };
-        } catch {
-            // Context gathering must never fail a write (the same contract
-            // `listCollection` above holds). An unreadable registry means an
-            // unnarrowed gate, not a refused publish.
-            return undefined;
-        }
+        // [#25467 cut 19] The body moved to `protocol-write-package-scope.ts` (see `WritePackageScopeHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof resolveWritePackageScope> = {
+            get engine() { return readEngine(); },
+        };
+        return resolveWritePackageScope.call(host, packageId);
     }
 
     /**

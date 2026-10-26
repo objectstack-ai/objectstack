@@ -173,7 +173,7 @@ const REMEDY_DETAIL: Readonly<Record<string, string>> = {
   // there is nothing to install and no name that belongs in an "Install X"
   // sentence. Without this entry the `null` above reads as "nothing ships",
   // which is what a Cloud/Enterprise deployment is NOT looking at.
-  'ai': 'Provided by @objectstack/service-ai in ObjectStack Cloud/Enterprise — no implementation ships in the open framework',
+  'ai': 'Provided by @objectstack/service-ai in ObjectOS Cloud/Enterprise — no implementation ships in the open framework',
 };
 
 /**

@@ -2,7 +2,7 @@
 
 /**
  * `objectstack package publish` — upload a compiled artifact as a versioned
- * package into the caller's organization on ObjectStack Cloud.
+ * package into the caller's organization on ObjectOS Cloud.
  *
  * Flow (ADR-0006 v4 Phase B):
  *   1. POST /cloud/packages                  — ensure a sys_package row exists
