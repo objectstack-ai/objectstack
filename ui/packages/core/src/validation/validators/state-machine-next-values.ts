@@ -1,0 +1,102 @@
+/**
+ * ObjectUI
+ * Copyright (c) 2024-present ObjectStack Inc.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+/**
+ * @object-ui/core - State-machine next values
+ *
+ * Which values a `state_machine`-governed field may move to from its persisted
+ * value, read from the object's served `validations`. A choice control (the
+ * grid's inline editor, the record form's select, the board's columns) offers
+ * only these, so it does not stage a move the server is bound to refuse.
+ *
+ * This is a PRESENTATION read of the declared transition map, not a client-side
+ * enforcement path: it never judges a write, and the server's rule validator
+ * stays the one authority that refuses an invalid transition. The deprecated
+ * object-level rule engine next door is a different thing and stays unwired
+ * (#3110); this module neither imports nor mirrors it.
+ *
+ * It narrows exactly where the server would refuse, and nowhere else:
+ *
+ *  - only `severity: 'error'` rules (the spec default) — a `warning` / `info`
+ *    machine never blocks the write, so every option stays offered;
+ *  - only rules that are `active` (default `true`) and whose `events` cover
+ *    `update` (default `['insert', 'update']`) — a move is an update;
+ *  - a from-state the transition map does not declare is unconstrained, as
+ *    the server is lenient there;
+ *  - several applicable rules on one field all have to pass, so their allowed
+ *    sets intersect.
+ *
+ * `active`, `events` and `severity` arrive ABSENT from `/meta` when the author
+ * left them at the spec default, so an absent key reads as the default, never
+ * as JavaScript falsiness.
+ *
+ * @module state-machine-next-values
+ * @packageDocumentation
+ */
+
+/** The spec's `events` default for a validation rule. */
+const DEFAULT_EVENTS: readonly string[] = ['insert', 'update'];
+
+/** A `state_machine` rule that refuses an invalid move on update. */
+function isBlockingUpdateMachine(
+  rule: unknown,
+  fieldName: string,
+): rule is { transitions: Record<string, unknown> } {
+  if (!rule || typeof rule !== 'object') return false;
+  const r = rule as {
+    type?: unknown;
+    field?: unknown;
+    transitions?: unknown;
+    active?: unknown;
+    events?: unknown;
+    severity?: unknown;
+  };
+  if (r.type !== 'state_machine' || r.field !== fieldName) return false;
+  if (!r.transitions || typeof r.transitions !== 'object') return false;
+  if (r.active === false) return false;
+  if ((r.severity ?? 'error') !== 'error') return false;
+  const events = Array.isArray(r.events) && r.events.length > 0 ? r.events : DEFAULT_EVENTS;
+  return events.includes('update');
+}
+
+/**
+ * For a field governed by a blocking `state_machine` validation, the set of
+ * values reachable from `currentValue` — the current value itself plus its
+ * declared allowed transitions.
+ *
+ * `currentValue` is the PERSISTED value (the row as the server last stored
+ * it), because that is the from-state the server judges a move against — never
+ * a value the user has staged but not saved.
+ *
+ * Returns `null` (= "don't constrain the options") when:
+ *  - the object has no applicable `state_machine` validation for the field
+ *    (none at all, or only warning / inactive / insert-only ones), or
+ *  - the current value is empty, or no applicable rule declares it as a
+ *    from-state.
+ */
+export function stateMachineNextValues(
+  objectSchema: unknown,
+  fieldName: string,
+  currentValue: unknown,
+): Set<string> | null {
+  const rules = (objectSchema as { validations?: unknown } | null | undefined)?.validations;
+  if (!Array.isArray(rules)) return null;
+  if (currentValue === undefined || currentValue === null) return null;
+  const from = String(currentValue);
+
+  let reachable: Set<string> | null = null;
+  for (const rule of rules) {
+    if (!isBlockingUpdateMachine(rule, fieldName)) continue;
+    const allowed = rule.transitions[from];
+    // An undeclared from-state is not policed by this rule.
+    if (!Array.isArray(allowed)) continue;
+    const next = new Set<string>([from, ...allowed.map((s) => String(s))]);
+    reachable = reachable === null ? next : new Set([...reachable].filter((v) => next.has(v)));
+  }
+  return reachable;
+}
