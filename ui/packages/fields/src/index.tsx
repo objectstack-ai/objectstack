@@ -1161,7 +1161,7 @@ function isOverdueInstant(date: Date, dueLike: boolean): boolean {
 /**
  * Date field cell renderer
  */
-export function DateCellRenderer({ value, field, deadlineSettled, alwaysShowYear }: CellRendererProps): React.ReactElement {
+export function DateCellRenderer({ value, field, deadlineSettled, alwaysShowYear, inGridColumn }: CellRendererProps): React.ReactElement {
   // `useDisplayLocale()`, NOT `useLocalization().locale` (objectui#4468). The
   // raw tenant locale is `undefined` on any workspace that never configured
   // one, and `Intl` reads the MACHINE's locale from `undefined` — so a `zh`
