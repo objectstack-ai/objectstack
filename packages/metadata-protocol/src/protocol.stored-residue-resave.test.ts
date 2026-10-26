@@ -185,7 +185,9 @@ describe('#8421 — `migrate meta --stored` and a residue row', () => {
                 name: 'crm_invoice',
                 label: 'Invoice',
                 fields: {
-                    amount: { type: 'currency', label: 'Amount', conditionalRequired: "record.status == 'sent'" },
+                    amount: { type: 'currency', label: 'Amount' },
+                    // `field-reference-to-alias` (17.2.0): the stored seam still lowers it (#25767 retired the ≤16.x kits).
+                    account_id: { type: 'lookup', label: 'Account', reference_to: 'crm_account' },
                 },
             },
         }]);
@@ -195,7 +197,7 @@ describe('#8421 — `migrate meta --stored` and a residue row', () => {
 
         expect(report).toMatchObject({ scanned: 2, rewritten: 1, failed: 0 });
         const invoice = metaRows(tables).find((r) => r.name === 'crm_invoice')!;
-        expect(JSON.parse(invoice.metadata).fields.amount.requiredWhen).toBe("record.status == 'sent'");
+        expect(JSON.parse(invoice.metadata).fields.account_id.reference).toBe('crm_account');
     });
 });
 

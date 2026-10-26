@@ -95,9 +95,11 @@ function makeStubEngine(
     return { engine, rows, registered };
 }
 
-// A protocol-≤16 object row: the `conditionalRequired` alias was removed from
-// the spec in 17 (#3855) and its conversion is `retiredFromLoadPath` — the
-// authored load seam refuses it, but the stored seam must keep lowering it.
+// A protocol-17 object row: the `reference_to` alias was renamed in 17 and its
+// conversion (`field-reference-to-alias`, retired from the load path after
+// 17.2.0) is `retiredFromLoadPath` — the authored load seam refuses it, but
+// the stored seam must keep lowering it. (Until #25767 this row rode the
+// ≤16.x `conditionalRequired` kit, aged out of the registry since.)
 const legacyObjectRow = {
     type: 'object',
     name: 'crm_invoice',
@@ -106,12 +108,18 @@ const legacyObjectRow = {
         label: 'Invoice',
         fields: {
             status: { type: 'select', label: 'Status', options: [{ label: 'Sent', value: 'sent' }] },
-            amount: { type: 'currency', label: 'Amount', conditionalRequired: "record.status == 'sent'" },
+            amount: { type: 'currency', label: 'Amount' },
+            account_id: { type: 'lookup', label: 'Account', reference_to: 'crm_account' },
         },
     },
 };
 
-// A pre-17 standalone action row still carrying the removed `execute` alias.
+// The retired `aria` block the legacy action row still carries
+// (`action-aria-removed`, 17.4.0; the ≤16.x `execute` alias it rode until
+// #25767 aged out of the registry).
+const RETIRED_ACTION_ARIA = { label: 'Convert the invoice' };
+
+// A protocol-17 standalone action row still carrying the removed `aria` block.
 // NOTE: this once wrote `object: 'crm_invoice'`. `ActionSchema` has never
 // declared `object` — the key is `objectName` — and `.strip` ate it, so the
 // fixture read as a claim about real legacy data while being a typo. Closing
@@ -120,26 +128,29 @@ const legacyObjectRow = {
 const legacyActionRow = {
     type: 'action',
     name: 'convert',
-    metadata: { name: 'convert', label: 'Convert', type: 'script', objectName: 'crm_invoice', execute: 'convertHandler' },
+    metadata: {
+        name: 'convert', label: 'Convert', type: 'script', objectName: 'crm_invoice', target: 'convertHandler',
+        aria: RETIRED_ACTION_ARIA,
+    },
 };
 
 describe('getMetaItems — stored rows are served canonical (#3903)', () => {
-    it('lowers the retired conditionalRequired alias on a stored object row', async () => {
+    it('lowers the retired reference_to alias on a stored object row', async () => {
         const { engine } = makeStubEngine([legacyObjectRow]);
         const protocol = new ObjectStackProtocolImplementation(engine);
         const res = await protocol.getMetaItems({ type: 'object' });
         const obj = (res.items as any[]).find((i) => i.name === 'crm_invoice');
-        expect(obj.fields.amount.requiredWhen).toBe("record.status == 'sent'");
-        expect('conditionalRequired' in obj.fields.amount).toBe(false);
+        expect(obj.fields.account_id.reference).toBe('crm_account');
+        expect('reference_to' in obj.fields.account_id).toBe(false);
     });
 
-    it('lowers the retired execute alias on a stored action row', async () => {
+    it('strips the retired aria block on a stored action row', async () => {
         const { engine } = makeStubEngine([legacyActionRow]);
         const protocol = new ObjectStackProtocolImplementation(engine);
         const res = await protocol.getMetaItems({ type: 'action' });
         const action = (res.items as any[]).find((i) => i.name === 'convert');
         expect(action.target).toBe('convertHandler');
-        expect('execute' in action).toBe(false);
+        expect('aria' in action).toBe(false);
     });
 
     it('deliberately does NOT convert flow rows — that seam is registerFlow (the engine canonicalizes flows)', async () => {
@@ -221,7 +232,7 @@ describe('getMetaItem — single stored read is canonical (#3903)', () => {
         const { engine } = makeStubEngine([legacyObjectRow]);
         const protocol = new ObjectStackProtocolImplementation(engine);
         const res: any = await protocol.getMetaItem({ type: 'object', name: 'crm_invoice' });
-        expect(res.item.fields.amount.requiredWhen).toBe("record.status == 'sent'");
+        expect(res.item.fields.account_id.reference).toBe('crm_account');
         // Pre-#3903 this row validated RAW: the tombstoned alias made every
         // legacy row read as invalid metadata. Converted first, it is valid.
         expect(res.item._diagnostics?.valid).toBe(true);
@@ -239,8 +250,8 @@ describe('loadMetaFromDb — boot hydration converts, diagnoses, never drops (#3
         expect(res).toEqual({ loaded: 2, errors: 0, invalid: 0, storeUnavailable: false });
 
         const obj = registered.find((r) => r.kind === 'object')!;
-        expect(obj.body.fields.amount.requiredWhen).toBe("record.status == 'sent'");
-        expect('conditionalRequired' in obj.body.fields.amount).toBe(false);
+        expect(obj.body.fields.account_id.reference).toBe('crm_account');
+        expect('reference_to' in obj.body.fields.account_id).toBe(false);
 
         const action = registered.find((r) => r.kind === 'item' && r.type === 'action')!;
         expect(action.body.target).toBe('convertHandler');
