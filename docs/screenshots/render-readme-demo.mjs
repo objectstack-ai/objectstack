@@ -8,7 +8,7 @@
 //   node docs/screenshots/render-readme-demo.mjs --out <dir>  # preview: GIF + every frame into <dir>, touch nothing committed
 //
 // Prerequisites are the ones `pnpm dev` itself has, and it checks them itself:
-// a built workspace (`pnpm build`) and a built Console (`pnpm objectui:build`).
+// a built workspace (`pnpm build`) and a built Console (`pnpm console:build`).
 // Plus `ffmpeg` on PATH, which assembles the GIF.
 //
 // ## What it records — three beats and a closing frame

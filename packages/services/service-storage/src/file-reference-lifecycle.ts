@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { FILE_REFERENCE_TYPES, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY } from '@objectstack/spec/data';
 import type { IStorageService } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import { isEmptyForRequired } from '@objectstack/core';
+import { validationFailure } from '@objectstack/types';
 import { callerContext } from './attachment-access-hooks.js';
 
 /**
@@ -50,6 +52,18 @@ import { callerContext } from './attachment-access-hooks.js';
  * nothing is claimed or copied, and constraint verdicts do not run ahead of
  * the read check. System writes and context-less programmatic calls carry no
  * caller to ask, and reference files as before.
+ *
+ * ### An anonymous write carries no file
+ *
+ * [#25694] Ruling C (record 6384525042), held at every anonymous write door
+ * rather than at the public form door alone: a write whose caller has no user
+ * (ADR-0138 D2's anonymous write doors: the guest envelope of an
+ * `authRequired: false` endpoint, under whatever grants a deployment binds to
+ * the guest) may not put a value in a file field. It is refused before the driver runs, naming each
+ * field, with the form door's envelope ({@link assertAnonymousWriteCarriesNoFile}).
+ * The read verdict above would admit a `public_read` file to such a caller,
+ * and keep any other id as written; neither is a file the anonymous caller
+ * may provide. An empty or absent file field is written as before.
  *
  * ### The one write that cannot honour it, and is refused
  *
@@ -275,6 +289,50 @@ async function findReferenceableFile(
   if (!row) return null;
   if (!caller || !authorizeRead) return row;
   return (await authorizeRead(row, caller)) ? row : null;
+}
+
+/**
+ * [#25694] Ruling C at every anonymous write door: an anonymous write carries
+ * no file. A file is provided by a signed-in caller, through the authenticated
+ * upload doors; a caller with no user has none to provide, so a value in a
+ * file field of its write is refused, whether it names a platform file (one it
+ * may download or not) or anything else. Judged before the driver runs and
+ * before any file is looked up, so a refused write leaves nothing behind.
+ *
+ * The form door's own judgement (`form-routes.ts`, #25572), held at the
+ * engine: the same emptiness rule (`isEmptyForRequired`), and the same
+ * envelope — one `400 VALIDATION_FAILED` naming every refused field by its
+ * label with the closed ADR-0114 field code `invalid_value`. The form door
+ * keeps its own judgement, which answers before anything reaches the engine.
+ *
+ * `caller` is {@link referencingCallerOf}'s answer, the caller the read
+ * verdict is asked about: a system write and a context-less programmatic
+ * write have none, and are not judged; a caller with no user is anonymous.
+ */
+function assertAnonymousWriteCarriesNoFile(
+  engine: FileReferenceEngine,
+  object: string,
+  data: Record<string, unknown>,
+  fileFields: string[],
+  caller: ExecutionContext | null,
+): void {
+  if (!caller || caller.userId) return;
+  const refused: Array<{ field: string; code: 'invalid_value'; message: string; label: string }> = [];
+  for (const field of fileFields) {
+    if (!Object.prototype.hasOwnProperty.call(data, field)) continue;
+    const def = fieldDefOf(engine, object, field);
+    if (isEmptyForRequired(def, data[field])) continue;
+    const declared = typeof def?.label === 'string' ? def.label.trim() : '';
+    const label = declared.length > 0 ? declared : field;
+    refused.push({
+      field,
+      code: 'invalid_value',
+      message: `${label} cannot take a file here: an anonymous write carries no file. `
+        + 'Leave it empty, or sign in and provide the file from your account.',
+      label,
+    });
+  }
+  if (refused.length > 0) throw validationFailure(refused.map((f) => f.message).join('; '), refused);
 }
 
 /** Bound on owned files released per record delete. */
@@ -869,9 +927,11 @@ export function installFileReferenceHooks(
       if (!object || !data || typeof data !== 'object') return;
       const fileFields = activeFileFields(engine, object);
       if (fileFields.length === 0) return;
+      const caller = referencingCallerOf(ctx);
+      assertAnonymousWriteCarriesNoFile(engine, object, data, fileFields, caller);
       await applyCopyOnClaim(
         engine, getStorage, logger, object, null, data, fileFields,
-        actingOrganizationOf(ctx), referencingCallerOf(ctx), authorizeRead, mintedCopiesFor(ctx),
+        actingOrganizationOf(ctx), caller, authorizeRead, mintedCopiesFor(ctx),
       );
     },
     { packageId: PACKAGE_ID },
@@ -885,6 +945,10 @@ export function installFileReferenceHooks(
       if (!object || !data || typeof data !== 'object') return;
       const fileFields = activeFileFields(engine, object);
       if (fileFields.length === 0) return;
+      // [#25694] Before the predicate refusal below: an anonymous write is
+      // refused for what it carries, whichever shape the write takes.
+      const caller = referencingCallerOf(ctx);
+      assertAnonymousWriteCarriesNoFile(engine, object, data, fileFields, caller);
       // [#6966] "Is this a multi-update?" is the engine's marker, not the shape
       // of `input.id`. A per-row context names ITS row, so the old
       // `ids.length === 1` test answered "single update" on every row of a
@@ -928,7 +992,7 @@ export function installFileReferenceHooks(
       // analysis a later edit has to re-derive.
       await applyCopyOnClaim(
         engine, getStorage, logger, object, recordId, data, fileFields,
-        actingOrganizationOf(ctx), referencingCallerOf(ctx), authorizeRead, mintedCopiesFor(ctx),
+        actingOrganizationOf(ctx), caller, authorizeRead, mintedCopiesFor(ctx),
       );
     },
     { packageId: PACKAGE_ID },

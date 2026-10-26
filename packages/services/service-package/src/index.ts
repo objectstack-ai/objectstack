@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
+import { declaredDependencyIds, orderHydrationBatch } from '@objectstack/core';
 import { createHash } from 'node:crypto';
 import { checkProtocolCompat } from '@objectstack/metadata-core';
 import type { ObjectStackManifest } from '@objectstack/spec/kernel';
@@ -698,7 +699,32 @@ export class PackageServicePlugin implements Plugin {
         // the handshake below refuses, not the ones already registered, and
         // not the ones the registry refuses (each of those is reported by name).
         let hydrated = 0;
-        for (const rec of await packageService.list()) {
+        // [ADR-0141 D5] The batch registers in `manifest.dependencies` order,
+        // not list order: a module sharing its parent's namespace that came
+        // back before the parent met the gate with that namespace unreadable,
+        // and a second such module was refused and absent for the process
+        // lifetime. A dependency cycle costs nothing but its own order — its
+        // members keep list order and the cycle is reported by name; nothing
+        // throws out of the hydrate.
+        const rows = await packageService.list();
+        const { ordered, cycles } = orderHydrationBatch(rows.map((rec) => {
+          const id = rec?.manifest?.id;
+          return {
+            item: rec,
+            label: String(id),
+            packageIds: typeof id === 'string' ? [id] : [],
+            declaredIds: declaredDependencyIds(rec?.manifest),
+          };
+        }));
+        for (const members of cycles) {
+          logger.error(
+            `Packages ${members.map((m) => `'${m}'`).join(', ')} in sys_packages declare each other in a dependency `
+              + `cycle (manifest.dependencies), so no order puts each after the packages it declares. They hydrate `
+              + `in stored order for this boot (ADR-0141 D5); a namespace they share may be refused below. Remove `
+              + `the declaration that closes the cycle.`,
+          );
+        }
+        for (const rec of ordered) {
           const id = rec?.manifest?.id;
           if (id && !registry.getPackage(id)) {
             // ADR-0087 D1 — protocol handshake on the boot-time rehydration
