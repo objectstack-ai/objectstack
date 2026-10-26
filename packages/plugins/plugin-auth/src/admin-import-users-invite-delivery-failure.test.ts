@@ -251,6 +251,7 @@ describe('[#23598] the import reports an invitation the email transport did not 
     const res = await runAdminImportUsers(
       {
         getAuthApi: () => manager.getApi(),
+        getAuthContext: () => manager.getAuthContext(),
         getDataEngine: () => manager.getDataEngine() as never,
         phoneNumberEnabled: () => false,
         emailServiceAvailable: () => manager.isEmailServiceAvailable(),

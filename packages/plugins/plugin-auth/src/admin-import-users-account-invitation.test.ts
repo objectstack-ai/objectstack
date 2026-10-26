@@ -188,6 +188,7 @@ async function importThroughMount(app: Hono, email: string): Promise<void> {
 /** Deps for calling the import directly (no mount), as the invite-link file's ② does. */
 const directDeps = (manager: AuthManager, logger?: IdentityImportDeps['logger']): IdentityImportDeps => ({
   getAuthApi: () => manager.getApi(),
+  getAuthContext: () => manager.getAuthContext(),
   getDataEngine: () => manager.getDataEngine() as never,
   phoneNumberEnabled: () => manager.isPhoneNumberEnabled(),
   emailServiceAvailable: () => manager.isEmailServiceAvailable(),
