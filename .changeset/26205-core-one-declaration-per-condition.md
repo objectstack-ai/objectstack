@@ -11,4 +11,4 @@ Metadata-protocol: none
 
 Core's declaration build now runs once, for the ESM format. `dist/index.d.ts` and `dist/logger.d.ts` carry the declarations, as before, and `dist/index.d.cts` and `dist/logger.d.cts` are one-line re-exports of them, so both conditions hand out the same classes. `exports` now gives types per condition, `{ import: { types, default }, require: { types, default } }`, on both subpaths. No subpath is added or removed, no JavaScript file changes, and the `dist` file names are unchanged.
 
-A CommonJS consumer compiling with `module: node16` (or with TypeScript older than 6 under `nodenext`) used to get TS1479 at its own `import ... from '@objectstack/core'`. That diagnostic now sits inside core's `.d.cts`, where `skipLibCheck` silences it. Nothing else for a consumer to do.
+A CommonJS consumer compiling with `module: node16` (or, measured on TypeScript 5.6, under `nodenext` too) used to get TS1479 at its own `import ... from '@objectstack/core'`. That diagnostic now sits inside core's `.d.cts`, where `skipLibCheck` silences it. Nothing else for a consumer to do.
