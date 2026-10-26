@@ -41,7 +41,15 @@ import { readEffectiveTenancyPosture } from './activation-gate.js';
 // and its no-protocol fallback runs the same handshake.
 // [#21762] The refusal's answer is the shared one, which the install-local door
 // (`@objectstack/cloud-connection`) gives too: imported, never restated.
-import { assertProtocolCompat, isProtocolIncompatibleError, protocolIncompatibleAnswer } from '@objectstack/metadata-core';
+import {
+    assertDeclaredDependencies,
+    assertProtocolCompat,
+    dependencyMissingAnswer,
+    isDependencyMissingError,
+    isProtocolIncompatibleError,
+    protocolIncompatibleAnswer,
+    type InstalledDependencyRecord,
+} from '@objectstack/metadata-core';
 // [#7560] ADR-0070's read-only-package rule — the SAME predicate the metadata
 // authoring path asks before refusing a write INTO a platform package
 // (`saveMetaItem` → `WRITABLE_PACKAGE_REQUIRED`). Imported, never re-spelled:
@@ -1462,6 +1470,13 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     // the primitive's, so no-range and unparsed ranges warn the
                     // same way on both arms.
                     assertProtocolCompat(manifest);
+                    // ADR-0141 D2 — and the SAME pre-install dependency check,
+                    // through the one predicate, before the registry write:
+                    // this arm is an install act exactly as the primitive is.
+                    assertDeclaredDependencies({
+                        delivered: [manifest],
+                        getInstalled: (id) => registry.getPackage(id) as InstalledDependencyRecord | undefined,
+                    });
                     // [#23972] The same origin the protocol primitive stamps:
                     // a package installed through this door is authored.
                     pkg = registry.installPackage(manifest, 'authored', settings);
@@ -1481,6 +1496,18 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     // lands in `error.code` (ADR-0112 D5) and `error.details`
                     // carries the answer's five members and nothing else.
                     const refusal = protocolIncompatibleAnswer(err);
+                    return {
+                        handled: true,
+                        response: deps.error(refusal.message, refusal.status, { code: refusal.code, ...refusal.details }),
+                    };
+                }
+                // ADR-0141 D2's refusal, recognised the same way and for the
+                // same reason: the shared resolver would pass its `issues`
+                // through but drop the per-entry facts (`unmet`) a Console
+                // renders its text from. Both arms above reach it — the
+                // primitive throws it, and the fallback runs the same check.
+                if (isDependencyMissingError(err)) {
+                    const refusal = dependencyMissingAnswer(err);
                     return {
                         handled: true,
                         response: deps.error(refusal.message, refusal.status, { code: refusal.code, ...refusal.details }),

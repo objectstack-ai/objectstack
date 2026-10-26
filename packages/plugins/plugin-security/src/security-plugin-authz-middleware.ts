@@ -1182,12 +1182,27 @@ export function registerAuthzMiddleware(
     // capability-gated field it names — "deny on write" — and its evaluator
     // map is empty, so nothing else is refused. The verdict is
     // computeForbiddenFieldWrites, which `canWriteObject` asks too.
+    //
+    // [#25866 / ruling of record 6408558941] An entry that carries a `when`
+    // is judged on a ROW: the incoming row of an insert, or the stored row of
+    // a by-id update read BEFORE the write as the caller reads it — the same
+    // memoised pre-image 2.7 and 2.8 read (`getCallerPreImage`), fetched only
+    // when some set carries a `when` for the object (the thunk). A predicate
+    // update has no single row (`extractSingleId` → null) and a row the
+    // caller cannot read comes back `null`: both apply the entry as its lock.
     if (
       (opCtx.operation === 'insert' || opCtx.operation === 'update') &&
       opCtx.data
     ) {
-      const forbidden = this.computeForbiddenFieldWrites(
+      const forbidden = await this.computeForbiddenFieldWrites(
         opCtx.object, opCtx.data, secMeta, permissionSets, delegatorSets,
+        {
+          operation: opCtx.operation,
+          context: opCtx.context,
+          preImage: opCtx.operation === 'update'
+            ? () => this.getCallerPreImage(opCtx, this.extractSingleId(opCtx))
+            : undefined,
+        },
       );
       if (forbidden.length > 0) {
         throw new PermissionDeniedError(

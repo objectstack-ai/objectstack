@@ -19,6 +19,10 @@ vi.mock('@monaco-editor/react', () => {
   return { Editor, default: Editor, loader: { init: () => Promise.resolve({}) } };
 });
 
+// The bundled Monaco loads: the page's probe awaits plugin-editor's
+// `configureBundledMonaco` before `loader.init()` (its own suite drives it).
+vi.mock('@object-ui/plugin-editor', () => ({ configureBundledMonaco: () => Promise.resolve() }));
+
 import { JsonSourceEditor } from './JsonSourceEditor';
 
 describe('JsonSourceEditor — F5 textarea fallback', () => {

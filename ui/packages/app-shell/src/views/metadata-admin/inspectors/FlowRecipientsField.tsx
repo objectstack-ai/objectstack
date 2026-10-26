@@ -10,6 +10,7 @@
  * | Type          | Picked with                                   | Stored as                                  |
  * |---------------|-----------------------------------------------|--------------------------------------------|
  * | Record field  | the trigger object's fields                   | `{ dialect: 'cel', source: 'record.FIELD' }` |
+ * | Email field   | the trigger object's `email`-typed fields     | `{ emailField: 'FIELD' }`, the whole value |
  * | User          | a `sys_user` lookup                           | the user id                                |
  * | Team          | a `sys_team` lookup                           | `team:ID`                                  |
  * | Email address | free text, checked for an email's shape       | the address                                |
@@ -18,7 +19,8 @@
  *
  * The spellings are the ones `NotifyConfigSchema.recipients` (in
  * `@objectstack/spec/automation`) accepts: a recipient string, a list of them,
- * each a string or a CEL value envelope evaluated per run, or one envelope.
+ * each a string or a CEL value envelope evaluated per run, one envelope, or an
+ * email-field recipient as the whole value.
  * `recipients` is a VALUE slot: a string is the literal text it spells, and a
  * `{…}` template token in one is refused (objectui#11824, the ADR-0032 §3
  * cutover; the spec prescribes `{ dialect: 'cel', source: 'record.owner' }`
@@ -29,11 +31,23 @@
  * already use, so the committed column is the spec's `APPROVER_VALUE_SOURCES`
  * binding (`sys_user.id`, `sys_team.id`).
  *
+ * The Email field row (objectstack#25900) mails a person who is not a user: the
+ * address in an `email`-typed field of the trigger record. The spec takes it
+ * only as the whole `recipients` value, on a node whose one channel is `email`,
+ * so the row is offered only while it is the sole row, no row is added beside
+ * it, and the commit that first stores it writes `channels: ['email']` in the
+ * same patch when the node does not already name email alone. On a node that
+ * sends email the runtime refuses a computed address no user holds, which is
+ * what a Record field row over an `email`-typed field evaluates to: there the
+ * Record field row suggests no such field, and a stored one says why it may
+ * fail.
+ *
  * "Other" keeps every stored string editable that is none of the four — a
  * `role:NAME` or `owner_of:OBJECT:ID` selector, a `user:ID`, or a stored
  * single-brace token such as `{ownerId}` — byte for byte, and an unedited
- * envelope is written back as it was read: reading a flow and saving it again
- * never rewrites a recipient. A stored `{record.FIELD}` string is NOT read as a
+ * envelope or email-field recipient is written back as it was read: reading a
+ * flow and saving it again never rewrites a recipient. A stored
+ * `{record.FIELD}` string is NOT read as a
  * Record field row: the spec refuses it, and the platform ships no conversion
  * for it (an absent key wrote nothing under the template and fails under CEL),
  * so the rewrite is the author's call. A stored single value stays single while
@@ -53,17 +67,32 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@object-ui/components';
+import { isExpressionEnvelopeShaped } from '@objectstack/spec/automation';
 import { RequiredMarker, uniqueId } from './_shared.js';
-import { ReferenceCombobox, type FlowReferenceContext, type ResolvedRef } from './FlowReferenceField.js';
+import {
+  ReferenceCombobox,
+  resolveObjectName,
+  type FlowReferenceContext,
+  type ResolvedRef,
+} from './FlowReferenceField.js';
 import { VariableTextInput } from './VariableTextInput.js';
 import { FlowExprIssue } from './FlowExprIssue.js';
 import type { ScopeGroup } from './useFlowScope.js';
+import { useObjectFields } from '../previews/useObjectFields.js';
 import { t, type SupportedLocale } from '../i18n.js';
 
 /** The recipient types a row can hold. `custom` is "Other": stored as typed. */
-export type RecipientKind = 'field' | 'user' | 'team' | 'email' | 'expression' | 'custom';
+export type RecipientKind = 'field' | 'emailField' | 'user' | 'team' | 'email' | 'expression' | 'custom';
 
-export const RECIPIENT_KINDS: readonly RecipientKind[] = ['field', 'user', 'team', 'email', 'expression', 'custom'];
+export const RECIPIENT_KINDS: readonly RecipientKind[] = [
+  'field',
+  'emailField',
+  'user',
+  'team',
+  'email',
+  'expression',
+  'custom',
+];
 
 /** A CEL value envelope, the computed form of a recipient (spec `NotifyRecipientsSlotSchema`). */
 export interface CelValueEnvelope {
@@ -72,22 +101,41 @@ export interface CelValueEnvelope {
   [key: string]: unknown;
 }
 
-/** One stored recipient: a literal string, or a CEL value envelope. */
-export type StoredRecipient = string | CelValueEnvelope;
+/** An email-field recipient (spec `NotifyEmailFieldRecipientSchema`): the whole `recipients` value. */
+export interface EmailFieldRecipient {
+  emailField: string;
+  [key: string]: unknown;
+}
+
+/** One stored recipient: a literal string, a CEL value envelope, or an email-field recipient. */
+export type StoredRecipient = string | CelValueEnvelope | EmailFieldRecipient;
 
 export interface RecipientEntry {
   kind: RecipientKind;
   /** The field name, user id, team id, address or CEL source — or the raw text for `custom`. */
   value: string;
-  /** The envelope as read, written back while the row is unedited (it may carry `ast` / `meta`). */
-  stored?: CelValueEnvelope;
+  /** The object as read, written back while the row is unedited (an envelope may carry `ast` / `meta`). */
+  stored?: CelValueEnvelope | EmailFieldRecipient;
 }
+
+/**
+ * Config keys a commit writes beside `recipients`, in the same patch — today
+ * only `channels`, which an email-field recipient needs to be `email` alone.
+ */
+export type RecipientsAlongside = Readonly<Record<string, unknown>>;
 
 /** The `team:` audience prefix `RecipientResolver` expands to the team's members. */
 const TEAM_PREFIX = 'team:';
 
 /** `record.FIELD` — one field of the trigger record, as a CEL source. */
 const RECORD_FIELD_SOURCE = /^record\.([A-Za-z_][A-Za-z0-9_]*)$/;
+
+/** The field type an email-field recipient names (the lint rule `validateNotifyEmailFieldRecipients` judges the same). */
+const EMAIL_FIELD_TYPE = 'email';
+const EMAIL_FIELD_TYPES: readonly string[] = [EMAIL_FIELD_TYPE];
+
+/** The one channel that can deliver to an email-field recipient, as the node stores it. */
+const EMAIL_ONLY_CHANNELS: readonly string[] = ['email'];
 
 export function isCelValueEnvelope(v: unknown): v is CelValueEnvelope {
   return (
@@ -97,6 +145,29 @@ export function isCelValueEnvelope(v: unknown): v is CelValueEnvelope {
     (v as { dialect?: unknown }).dialect === 'cel' &&
     typeof (v as { source?: unknown }).source === 'string'
   );
+}
+
+/** Whether `v` is written as an email-field recipient — a plain object with an `emailField` key. */
+export function isEmailFieldRecipient(v: unknown): v is EmailFieldRecipient {
+  return (
+    v !== null &&
+    typeof v === 'object' &&
+    !Array.isArray(v) &&
+    Object.prototype.hasOwnProperty.call(v, 'emailField') &&
+    !isExpressionEnvelopeShaped(v)
+  );
+}
+
+/** A notify node's `channels`, a string or a list, as a list. */
+export function readChannels(channels: unknown): string[] {
+  if (typeof channels === 'string') return [channels];
+  return Array.isArray(channels) ? channels.filter((c): c is string => typeof c === 'string') : [];
+}
+
+/** Whether `channels` names `email` and nothing else — what an email-field recipient needs. */
+export function isEmailOnlyChannels(channels: unknown): boolean {
+  const list = readChannels(channels);
+  return list.length === 1 && list[0] === 'email';
 }
 
 /**
@@ -117,6 +188,9 @@ export function looksLikeEmail(s: string): boolean {
 
 /** Classify one stored recipient. Never rewrites it: see {@link writeRecipient}. */
 export function readRecipient(raw: StoredRecipient): RecipientEntry {
+  if (isEmailFieldRecipient(raw)) {
+    return { kind: 'emailField', value: typeof raw.emailField === 'string' ? raw.emailField : String(raw.emailField), stored: raw };
+  }
   if (typeof raw !== 'string') {
     const field = RECORD_FIELD_SOURCE.exec(raw.source.trim());
     return field ? { kind: 'field', value: field[1], stored: raw } : { kind: 'expression', value: raw.source, stored: raw };
@@ -139,6 +213,8 @@ export function writeRecipient(entry: RecipientEntry): StoredRecipient {
   switch (entry.kind) {
     case 'field':
       return { dialect: 'cel', source: `record.${v}` };
+    case 'emailField':
+      return { emailField: v };
     case 'expression':
       return { dialect: 'cel', source: v };
     case 'team':
@@ -150,20 +226,25 @@ export function writeRecipient(entry: RecipientEntry): StoredRecipient {
 
 /** Whether the stored `recipients` value is one recipient rather than a list. */
 export function isSingleRecipient(value: unknown): boolean {
-  return typeof value === 'string' || isCelValueEnvelope(value);
+  return typeof value === 'string' || isCelValueEnvelope(value) || isEmailFieldRecipient(value);
 }
 
 /** Read the stored `recipients` value (one recipient, or a list of them) as entries. */
 export function readRecipients(value: unknown): RecipientEntry[] {
   const list: unknown[] = Array.isArray(value) ? value : isSingleRecipient(value) ? [value] : [];
   return list
-    .filter((v): v is StoredRecipient => (typeof v === 'string' && v.trim() !== '') || isCelValueEnvelope(v))
+    .filter(
+      (v): v is StoredRecipient =>
+        (typeof v === 'string' && v.trim() !== '') || isCelValueEnvelope(v) || isEmailFieldRecipient(v),
+    )
     .map((v) => readRecipient(v));
 }
 
 /**
  * The value to store for `entries`: `undefined` for none, a single value when
- * the stored value was one and still holds one recipient, else a list.
+ * the stored value was one and still holds one recipient, else a list. A sole
+ * email-field recipient is always the single value: the spec takes it only as
+ * the whole `recipients` value.
  */
 export function writeRecipients(
   entries: RecipientEntry[],
@@ -171,6 +252,7 @@ export function writeRecipients(
 ): StoredRecipient | StoredRecipient[] | undefined {
   const list = entries.map(writeRecipient).filter((s) => s !== '');
   if (list.length === 0) return undefined;
+  if (list.length === 1 && isEmailFieldRecipient(list[0])) return list[0];
   return storedAsSingle && list.length === 1 ? list[0] : list;
 }
 
@@ -178,13 +260,26 @@ export function writeRecipients(
 const KIND_REF: Partial<Record<RecipientKind, ResolvedRef>> = {
   // `$trigger`: the Start node's object, the record `record.*` names.
   field: { kind: 'object-field', objectSource: '$trigger' },
+  emailField: { kind: 'object-field', objectSource: '$trigger', onlyFieldTypes: EMAIL_FIELD_TYPES },
   user: { kind: 'user' },
   team: { kind: 'team' },
+};
+
+/**
+ * The Record field reference on a node that sends email: an `email`-typed field
+ * is the Email field row's, since the runtime refuses the address a
+ * `record.FIELD` envelope evaluates to there unless a user holds it.
+ */
+const FIELD_REF_ON_EMAIL_NODE: ResolvedRef = {
+  kind: 'object-field',
+  objectSource: '$trigger',
+  exceptFieldTypes: EMAIL_FIELD_TYPES,
 };
 
 /** The designer-table rows naming each type, and the hint inside its value control. */
 const KIND_LABEL_KEYS: Record<RecipientKind, string> = {
   field: 'engine.inspector.recipients.kind.field',
+  emailField: 'engine.inspector.recipients.kind.emailField',
   user: 'engine.inspector.recipients.kind.user',
   team: 'engine.inspector.recipients.kind.team',
   email: 'engine.inspector.recipients.kind.email',
@@ -193,6 +288,7 @@ const KIND_LABEL_KEYS: Record<RecipientKind, string> = {
 };
 const KIND_PLACEHOLDER_KEYS: Record<RecipientKind, string> = {
   field: 'engine.inspector.recipients.placeholder.field',
+  emailField: 'engine.inspector.recipients.placeholder.emailField',
   user: 'engine.inspector.recipients.placeholder.user',
   team: 'engine.inspector.recipients.placeholder.team',
   email: 'engine.inspector.recipients.placeholder.email',
@@ -216,10 +312,14 @@ function toRows(entries: RecipientEntry[]): Row[] {
 export interface FlowRecipientsFieldProps {
   label: string;
   value: unknown;
-  onCommit: (value: StoredRecipient | StoredRecipient[] | undefined) => void;
+  /**
+   * Commits `recipients`; `alongside` names sibling config keys written in the
+   * same patch (`channels` for an email-field recipient).
+   */
+  onCommit: (value: StoredRecipient | StoredRecipient[] | undefined, alongside?: RecipientsAlongside) => void;
   disabled?: boolean;
   locale?: SupportedLocale | string;
-  /** Draft + node, so a Record field row can read the trigger object. */
+  /** Draft + node, so a Record field row can read the trigger object and the node's `channels`. */
   context?: FlowReferenceContext;
   /** In-scope references for an Expression row's picker. */
   scopeGroups?: ScopeGroup[];
@@ -245,6 +345,20 @@ export function FlowRecipientsField({
   const [rows, setRows] = React.useState<Row[]>(() => toRows(readRecipients(value)));
   const lastCommitted = React.useRef(external);
 
+  // The node's channels decide what an email-typed field may be used as.
+  const nodeConfig = context?.node?.config;
+  const channels =
+    nodeConfig && typeof nodeConfig === 'object' && !Array.isArray(nodeConfig)
+      ? (nodeConfig as Record<string, unknown>).channels
+      : undefined;
+  const sendsEmail = readChannels(channels).includes('email');
+  const emailOnly = isEmailOnlyChannels(channels);
+
+  // The trigger object's field types, for the notes below.
+  const triggerObject = context ? resolveObjectName('object-field', '$trigger', context) : undefined;
+  const { fields: triggerFields } = useObjectFields(triggerObject);
+  const fieldType = (name: string) => triggerFields.find((f) => f.name === name)?.type;
+
   // An EXTERNAL change (another node selected, an undo) resyncs the rows; our
   // own commits do not, so a half-edited row keeps its focus.
   React.useEffect(() => {
@@ -256,13 +370,19 @@ export function FlowRecipientsField({
 
   const flush = (next: Row[]) => {
     const out = writeRecipients(next, storedAsSingle);
-    lastCommitted.current = JSON.stringify(out ?? null);
-    onCommit(out);
+    const committed = JSON.stringify(out ?? null);
+    // The commit that first stores an email-field recipient also makes the
+    // node's channels the one that can deliver to it; a blur that changes
+    // nothing writes no channel.
+    const setsEmailField = isEmailFieldRecipient(out) && committed !== lastCommitted.current;
+    lastCommitted.current = committed;
+    if (setsEmailField && !emailOnly) onCommit(out, { channels: [...EMAIL_ONLY_CHANNELS] });
+    else onCommit(out);
   };
 
   // Each handler derives the next rows from the rows on screen and commits
   // outside the state updater, so a commit runs once per gesture. An edited
-  // row is written from its type and value: the envelope it was read from is
+  // row is written from its type and value: the object it was read from is
   // dropped.
   const patchRow = (id: string, patch: Partial<RecipientEntry>, commit: boolean) => {
     const next = rows.map((r) => (r.id === id ? { ...r, ...patch, stored: undefined } : r));
@@ -280,6 +400,15 @@ export function FlowRecipientsField({
     flush(next);
   };
 
+  // A stored email-field recipient on a node that names another channel: the
+  // author's explicit fix, the recipients committed as they stand.
+  const setEmailOnly = () => {
+    const out = writeRecipients(rows, storedAsSingle);
+    lastCommitted.current = JSON.stringify(out ?? null);
+    onCommit(out, { channels: [...EMAIL_ONLY_CHANNELS] });
+  };
+
+  const hasEmailField = rows.some((r) => r.kind === 'emailField');
   const kindLabel = (k: RecipientKind) => t(KIND_LABEL_KEYS[k], locale);
   const placeholder = (k: RecipientKind) => t(KIND_PLACEHOLDER_KEYS[k], locale);
 
@@ -294,8 +423,17 @@ export function FlowRecipientsField({
           <p className="text-[11px] italic text-muted-foreground">{t('engine.inspector.recipients.empty', locale)}</p>
         )}
         {rows.map((row, index) => {
-          const ref = KIND_REF[row.kind];
-          const notEmail = row.kind === 'email' && row.value.trim() !== '' && !looksLikeEmail(row.value.trim());
+          const ref = row.kind === 'field' && sendsEmail ? FIELD_REF_ON_EMAIL_NODE : KIND_REF[row.kind];
+          const picked = row.value.trim();
+          const notEmail = row.kind === 'email' && picked !== '' && !looksLikeEmail(picked);
+          // A Record field row over an email-typed field, on a node that sends email.
+          const fieldIsEmail = row.kind === 'field' && sendsEmail && picked !== '' && fieldType(picked) === EMAIL_FIELD_TYPE;
+          // An Email field row naming a field the catalog types otherwise.
+          const pickedType = row.kind === 'emailField' && picked !== '' ? fieldType(picked) : undefined;
+          const emailFieldNotEmail = pickedType !== undefined && pickedType !== EMAIL_FIELD_TYPE;
+          const needsEmailOnly = row.kind === 'emailField' && picked !== '' && !emailOnly;
+          // The Email field type is the whole value: offered only on the sole row.
+          const kinds = RECIPIENT_KINDS.filter((k) => k !== 'emailField' || rows.length === 1 || row.kind === 'emailField');
           return (
             <div key={row.id} className="space-y-1" data-recipient-row={index}>
               <div className="flex items-center gap-1.5">
@@ -312,7 +450,7 @@ export function FlowRecipientsField({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {RECIPIENT_KINDS.map((k) => (
+                    {kinds.map((k) => (
                       <SelectItem key={k} value={k}>
                         {kindLabel(k)}
                       </SelectItem>
@@ -397,6 +535,38 @@ export function FlowRecipientsField({
                   {t('engine.inspector.recipients.notEmail', locale)}
                 </p>
               )}
+              {fieldIsEmail && (
+                <p className="text-[11px] leading-snug text-amber-700 dark:text-amber-400" role="note">
+                  {t('engine.inspector.recipients.fieldOnEmailNode', locale)}
+                </p>
+              )}
+              {row.kind === 'emailField' && (
+                <p className="text-[11px] leading-snug text-muted-foreground">
+                  {t('engine.inspector.recipients.emailFieldHint', locale)}
+                </p>
+              )}
+              {emailFieldNotEmail && (
+                <p className="text-[11px] leading-snug text-amber-700 dark:text-amber-400" role="note">
+                  {t('engine.inspector.recipients.emailFieldNotEmail', locale)}
+                </p>
+              )}
+              {needsEmailOnly && (
+                <div className="flex items-start gap-2">
+                  <p className="flex-1 text-[11px] leading-snug text-amber-700 dark:text-amber-400" role="note">
+                    {t('engine.inspector.recipients.emailFieldChannels', locale)}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-6 shrink-0 px-2 text-[11px]"
+                    onClick={setEmailOnly}
+                    disabled={disabled}
+                  >
+                    {t('engine.inspector.recipients.emailFieldChannelsFix', locale)}
+                  </Button>
+                </div>
+              )}
             </div>
           );
         })}
@@ -407,7 +577,7 @@ export function FlowRecipientsField({
         size="sm"
         className="h-7 w-full text-xs"
         onClick={addRow}
-        disabled={disabled}
+        disabled={disabled || hasEmailField}
       >
         <Plus className="mr-1 h-3.5 w-3.5" />
         {t('engine.inspector.recipients.add', locale)}

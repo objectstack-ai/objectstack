@@ -294,6 +294,13 @@ export {
   annotateEffectiveApiOperations,
   type ManagedSchemaLike,
   type ApiExposureSchemaLike,
+  // [Ruling of record 6408558941] The `fields` slot and the one reading of a
+  // field-permission entry's vote under its row condition (`when`).
+  buildEffectiveFieldPermissions,
+  fieldPermissionVote,
+  type FieldConditionVerdict,
+  type FieldPermissionEntryLike,
+  type EffectiveFieldPermissionsInputSet,
 } from './effective-object-permissions.js';
 
 // Commit f586f1a89 (maintainer ruling 2026-08-08, Option A) — the SINGLE ExecutionContext

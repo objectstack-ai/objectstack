@@ -44,7 +44,7 @@
  * The editor mounts only once the page's Monaco loader probe has resolved
  * (objectui#11858), so the loader is stubbed to resolve, and the sink paints
  * one `.view-line` row as a loaded Monaco does: this file is the
- * reachable-CDN page. The failing page is
+ * reachable-loader page. The failing page is
  * `CodeWidget.loaderFallback-11858.test.tsx`.
  */
 
@@ -55,6 +55,8 @@ import { render, screen, fireEvent, cleanup, act } from '@testing-library/react'
 import { FieldSchema, hookForm, objectForm } from '@objectstack/spec/data';
 
 vi.mock('@object-ui/plugin-editor', () => ({
+  // The bundled Monaco loads: the probe goes on to `loader.init()`.
+  configureBundledMonaco: () => Promise.resolve(),
   CodeEditorRenderer: ({
     value,
     onChange,
@@ -76,7 +78,7 @@ vi.mock('@object-ui/plugin-editor', () => ({
   ),
 }));
 
-// The CDN is reachable: the page's one `loader.init()` resolves.
+// The loader is reachable: the page's one `loader.init()` resolves.
 vi.mock('@monaco-editor/react', () => {
   const Editor = () => null;
   return { Editor, default: Editor, loader: { init: () => Promise.resolve({}) } };

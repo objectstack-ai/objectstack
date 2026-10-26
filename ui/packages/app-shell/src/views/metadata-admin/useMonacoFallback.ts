@@ -11,15 +11,16 @@
  * fallback for the metadata designer's code surfaces (JSON source tab,
  * html/react page source).
  *
- * Monaco's core is fetched lazily from a public CDN (jsdelivr) and spins up
- * web workers. On offline / air-gapped / CSP-restricted installs — and the
- * console is explicitly meant to embed in ANY ObjectStack server, many of
- * which ship a strict CSP — that fetch fails. We detect it two ways:
+ * Monaco ships in the host's own build: `@object-ui/plugin-editor`'s
+ * `configureBundledMonaco` loads it as a lazy chunk (its language workers as
+ * same-origin files) and hands it to the loader, so `loader.init()` never
+ * reaches for the loader's default CDN — which an offline / air-gapped install
+ * cannot reach and the Console's content-security-policy refuses. What can
+ * still fail is loading that chunk. We detect it two ways:
  *
- *  - **Fast path:** `loader.init()` rejects the moment the CDN loader script
- *    fails to load, so we flip to the textarea immediately instead of making
- *    the user stare at a loading state for the full grace period
- *    (previously a hard-coded 4s of dead air on every CSP-blocked install).
+ *  - **Fast path:** the probe rejects the moment the editor chunk (or the
+ *    loader) fails, so we flip to the textarea immediately instead of making
+ *    the user stare at a loading state for the full grace period.
  *  - **Backstop:** some failures still resolve the loader but paint nothing
  *    (e.g. blocked workers). A one-shot DOM poll after `fallbackDelayMs`
  *    checks for a rendered `.view-line` row and falls back if the editor
@@ -51,7 +52,8 @@
  *    rejection carrying the loader's own failure (compared by identity), and
  *    nothing else.
  *  - The failure is reported once per page, as one console line that names the
- *    cause — for the CDN case, the loader URL that could not be fetched.
+ *    cause — for a chunk that could not be fetched, the browser's error names
+ *    its URL.
  *
  * Returns `[status, containerRef]`: render the textarea when `status` is
  * `'unavailable'`, the editor when it is `'ready'`, and a loading placeholder
@@ -71,9 +73,11 @@ let loaderProbe: Promise<LoaderOutcome> | null = null;
 let loaderOutcome: LoaderOutcome | null = null;
 
 /**
- * Name what failed. The CDN case rejects with the loader `<script>`'s `error`
- * Event, whose target carries the URL that could not be fetched; the later
- * AMD stage (`vs/editor/editor.main`) rejects with an Error.
+ * Name what failed. A bundled chunk that could not be fetched rejects with the
+ * browser's Error naming its URL. A loader left to its CDN default (a copy of
+ * `@monaco-editor/react` nothing configured) rejects with the loader
+ * `<script>`'s `error` Event, whose target carries the URL; its later AMD stage
+ * (`vs/editor/editor.main`) rejects with an Error.
  */
 function describeLoaderFailure(reason: unknown): string {
   const target = (reason as { target?: { tagName?: unknown; src?: unknown } } | null)?.target;
@@ -108,10 +112,18 @@ function hasLoader(): boolean {
   return typeof loader?.init === 'function';
 }
 
-/** Call `loader.init()` once for the page; every caller reads that one outcome. */
+/**
+ * Hand the loader the bundled Monaco, then call `loader.init()`, once for the
+ * page; every caller reads that one outcome. The config lands before the first
+ * `init()`, so `init()` answers with the bundled instance and injects no CDN
+ * script.
+ */
 function probeMonacoLoader(): Promise<LoaderOutcome> {
   if (!loaderProbe) {
-    loaderProbe = Promise.resolve(loader.init()).then(
+    loaderProbe = import('@object-ui/plugin-editor')
+      .then((editor) => editor.configureBundledMonaco(loader))
+      .then(() => loader.init())
+      .then(
       (): LoaderOutcome => (loaderOutcome = { ok: true }),
       (reason: unknown): LoaderOutcome => {
         loaderOutcome = { ok: false, reason };

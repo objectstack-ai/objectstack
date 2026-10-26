@@ -468,17 +468,21 @@ Use for large dependencies (React, Vue) that should be shared across plugins.
 ### Version Constraints
 
 <Callout type="warn">
-**The kernel does not check these range strings at plugin load.** `manifest.dependencies`
-has exactly two consumers today and both read `Object.keys(...)` only — the ids, never the
-ranges: `resolveArtifactPackageOrder` (`packages/core/src/artifact-packages.ts`) hands the
-ids to `resolvePluginOrder` as `optionalDependencies`, so an id naming a sibling package in
-the same artifact orders ahead of it and an id naming anything else is skipped; and
-`resolveWritePackageScope` (`packages/metadata-protocol/src/protocol.ts`) walks the ids
-transitively for the write-scope gate. `SemanticVersionManager` and `DependencyResolver`
-below are exported from `@objectstack/core` but have no call site outside their own unit
-test. So a range here is a **declaration for the installer and for human readers** — a
-stale or malformed one fails nothing at load. The forms below are the ones the parser in
-`dependency-resolver.ts` accepts, not a set the kernel enforces on you.
+**The kernel does not check these range strings at plugin load — installing a package
+does.** `manifest.dependencies` has three consumers. Two read `Object.keys(...)` only — the
+ids, never the ranges: `resolveArtifactPackageOrder` (`packages/core/src/artifact-packages.ts`)
+hands the ids to `resolvePluginOrder` as `optionalDependencies`, so an id naming a sibling
+package in the same artifact orders ahead of it and an id naming anything else is skipped;
+and `resolveWritePackageScope` (`packages/metadata-protocol/src/protocol.ts`) walks the ids
+transitively for the write-scope gate. The third is the pre-install dependency check every
+install door runs (ADR-0141 D2): each entry must name a package installed inside its range,
+or one the same artifact delivers, or the install is refused `422 DEPENDENCY_MISSING`. That
+check reads ranges with `rangeAdmitsVersion` (`packages/metadata-core/src/protocol-handshake.ts`),
+whose grammar is on [App dependencies](/docs/deployment/app-dependencies) — not with
+`SemanticVersionManager`. `SemanticVersionManager` and `DependencyResolver` below are
+exported from `@objectstack/core` but have no call site outside their own unit test; the
+forms below are the ones the parser in `dependency-resolver.ts` accepts, not the grammar an
+install enforces.
 </Callout>
 
 ObjectStack uses **semantic versioning (semver)**. `SemanticVersionManager.satisfies()`
