@@ -4,7 +4,7 @@ import { templateEngine, TEMPLATE_FORMATTERS, formatValue } from './template-eng
 function render(source: string, record: Record<string, unknown>, timezone?: string): string {
   const r = templateEngine.evaluate<string>(
     { dialect: 'template', source },
-    { record, extra: { locale: 'en-US' }, ...(timezone ? { timezone } : {}) },
+    { record, locale: 'en-US', ...(timezone ? { timezone } : {}) },
   );
   if (!r.ok) throw new Error(r.error.message);
   return r.value;

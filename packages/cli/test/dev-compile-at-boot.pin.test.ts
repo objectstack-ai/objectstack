@@ -15,7 +15,8 @@
 
 import { describe, it, expect } from 'vitest';
 import { Parser } from '@oclif/core';
-import Dev, { devCompilesAtBoot } from '../src/commands/dev.js';
+import Dev from '../src/commands/dev.js';
+import { devCompilesAtBoot } from '../src/utils/dev-compile-at-boot.js';
 
 const parseDev = (argv: string[]) =>
   Parser.parse(argv, { flags: Dev.flags, args: Dev.args, strict: true });

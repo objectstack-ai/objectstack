@@ -91,6 +91,9 @@ export interface RegisterFormProps {
   hideIcon?: boolean;
 }
 
+/** The confirm field's own error line, named by its `aria-describedby`. */
+const CONFIRM_ERROR_ID = 'register-confirm-password-error';
+
 const DefaultLink = ({ href, className, children }: AuthLinkComponentProps) => (
   <a href={href} className={className}>{children}</a>
 );
@@ -146,6 +149,9 @@ export function RegisterForm({
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // #25885 — the mismatch belongs to the confirm field, under it, not to the
+  // top banner above the first field; the banner keeps the server's refusals.
+  const [confirmError, setConfirmError] = useState<string | null>(null);
 
   const l = {
     nameLabel: labels.nameLabel ?? 'Name',
@@ -167,9 +173,10 @@ export function RegisterForm({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setConfirmError(null);
 
     if (password !== confirmPassword) {
-      setError(l.passwordMismatchError);
+      setConfirmError(l.passwordMismatchError);
       return;
     }
 
@@ -263,7 +270,10 @@ export function RegisterForm({
               type="password"
               placeholder={l.passwordPlaceholder}
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                setConfirmError(null);
+              }}
               required
               minLength={8}
               autoComplete="new-password"
@@ -281,13 +291,27 @@ export function RegisterForm({
               type="password"
               placeholder={l.confirmPasswordPlaceholder}
               value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
+              onChange={(e) => {
+                setConfirmPassword(e.target.value);
+                setConfirmError(null);
+              }}
               required
               minLength={8}
               autoComplete="new-password"
               disabled={isLoading}
-              className={AUTH_INPUT_CLASS}
+              aria-invalid={confirmError ? true : undefined}
+              aria-describedby={confirmError ? CONFIRM_ERROR_ID : undefined}
+              className={
+                confirmError
+                  ? `${AUTH_INPUT_CLASS} border-destructive focus-visible:border-destructive focus-visible:ring-destructive/30`
+                  : AUTH_INPUT_CLASS
+              }
             />
+            {confirmError && (
+              <p id={CONFIRM_ERROR_ID} role="alert" className="text-[13px] font-medium text-destructive">
+                {confirmError}
+              </p>
+            )}
           </div>
 
           <button
