@@ -53,9 +53,10 @@ const envelope = (item: unknown) => ({ type: 'object', name: 'crmext_visit', ite
 
 describe('extractDraftBody — the hoisted draft-envelope reader (objectui#8181)', () => {
   it('is the spec list that gets removed, not a local one', () => {
-    // The control for every "was it stripped?" assertion below: if the spec
-    // ever adds a third decoration, this file must be read again.
-    expect([...METADATA_READ_DECORATIONS]).toEqual(['_diagnostics', '_draft']);
+    // The control for every "was it stripped?" assertion below, which name
+    // these two. Membership (#26238): a third decoration the spec adds is
+    // stripped by the same spec list without an edit here.
+    expect([...METADATA_READ_DECORATIONS]).toEqual(expect.arrayContaining(['_diagnostics', '_draft']));
   });
 
   it('removes the read decorations and leaves the authored body untouched', () => {

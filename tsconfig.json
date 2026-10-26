@@ -5,6 +5,10 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
+    // The scripts run on the Node that the root `engines` field pins (>=22),
+    // which ships all of ES2022 (`Object.hasOwn` among it). The shared base
+    // stays at ES2020.
+    "lib": ["ES2022"],
     "types": ["node"]
   },
   "exclude": [

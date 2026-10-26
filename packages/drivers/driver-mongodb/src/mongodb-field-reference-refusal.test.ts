@@ -143,6 +143,38 @@ describe('[#19949] every position a reference can reach is refused', () => {
   }
 });
 
+describe('[#25808] a now-anchored comparand is refused in every position a reference is', () => {
+  const NOW = { $now: true, addDays: { $field: 'n' } };
+  const PINNED = { $now: '2026-03-03T12:00:00.000Z', addDays: -3 };
+  const POSITIONS: Array<[string, Record<string, unknown>]> = [
+    ['$lt, the ruled shape (a column offset)', { t: { $lt: NOW } }],
+    ['$gte, pinned by the resolver, with a literal offset', { t: { $gte: PINNED } }],
+    ['$eq', { t: { $eq: NOW } }],
+    ['$ne', { t: { $ne: PINNED } }],
+    ['an $in member', { t: { $in: ['x', NOW] } }],
+    ['the $between upper endpoint', { t: { $between: ['a', PINNED] } }],
+    ['the bare form, with no operator', { t: NOW }],
+    ['a malformed anchor (no addDays)', { t: { $lt: { $now: true } } }],
+    ['inside $and', { $and: [{ id: 'r1' }, { t: { $lt: NOW } }] }],
+    ['inside $not (lowered to $nor)', { $not: { t: { $lt: PINNED } } }],
+  ];
+
+  for (const [label, where] of POSITIONS) {
+    it(`${label}: INVALID_FILTER / 400, the anchor refusal`, () => {
+      const err = refusalOf(where);
+      expect(err.code).toBe('INVALID_FILTER');
+      expect(err.status).toBe(400);
+      expect(err.message).toContain('does not support a now-anchored comparand');
+      // The ADR-0112 withholding: the field and the operator are not in the message.
+      expect(err.message).not.toMatch(/"t"|\$lt|\$gte/);
+    });
+  }
+
+  it('the pinned date macro the message points at still translates', () => {
+    expect(translateFilter({ t: { $lt: '2026-03-01T00:00:00.000Z' } })).toEqual({ t: { $lt: '2026-03-01T00:00:00.000Z' } });
+  });
+});
+
 describe('[#19949] every neighbouring literal shape translates exactly as before', () => {
   it('literal $in / $nin / $between', () => {
     expect(translateFilter({ t: { $in: ['b'] } })).toEqual({ t: { $in: ['b'] } });
