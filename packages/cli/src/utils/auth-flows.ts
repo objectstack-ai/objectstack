@@ -5,7 +5,7 @@
  *
  * Two commands consume this module:
  *   - `os login`         — log in to a runtime ObjectOS instance.
- *   - `os cloud login`   — log in to the hosted ObjectStack Cloud control plane.
+ *   - `os cloud login`   — log in to the hosted ObjectOS Cloud control plane.
  *
  * The flows themselves are identical (both target ObjectStack servers
  * speaking the same plugin-auth endpoints); only the credential storage

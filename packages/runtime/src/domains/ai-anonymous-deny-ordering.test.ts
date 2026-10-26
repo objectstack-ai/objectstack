@@ -213,7 +213,7 @@ describe('#7653 B — the honest degradation is untouched for an authenticated c
         const result: any = await dispatch(makeDeps(), authed(), '/ai/models');
         expect(result.response.body.error.message).toBe(serviceUnavailableMessage('ai'));
         expect(result.response.body.error.message).toBe(
-            'Provided by @objectstack/service-ai in ObjectStack Cloud/Enterprise'
+            'Provided by @objectstack/service-ai in ObjectOS Cloud/Enterprise'
             + ' — no implementation ships in the open framework',
         );
     });

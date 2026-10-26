@@ -1581,6 +1581,16 @@ const en = {
     edited: '(edited)',
     via: 'via {{source}}',
     viewSource: 'View source',
+    // objectstack#25959 — a run of consecutive updates folded into one feed row.
+    foldedUpdates: 'Updated {{fields}}',
+    foldedUpdateCount: '{{count}} updates',
+    foldedUpdateCount_one: '{{count}} update',
+    foldedUpdateCount_other: '{{count}} updates',
+    foldedMoreFields: '{{count}} more',
+    foldedMoreFields_one: '{{count}} more',
+    foldedMoreFields_other: '{{count}} more',
+    expandFolded: 'Show each update',
+    collapseFolded: 'Hide updates',
     // Replies
     replyCount: '{{count}} reply',
     replyCount_one: '{{count}} reply',

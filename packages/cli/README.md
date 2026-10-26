@@ -377,6 +377,8 @@ resolve is exactly this map — a subpath is added here on purpose, with a
 | `@objectstack/cli/hook-body` | The hook-body extractor `os build` and `os lint` apply, for an app harness that must run the **same** body-only lowering the build ships (below). |
 | `@objectstack/cli/package.json` | The manifest itself, for the ordinary tooling idiom of reading a dependency's own version. |
 
+The three code subpaths (`.`, `./console`, `./hook-body`) are **ESM**: the package is `"type": "module"` and each maps to an ES module. Load them with `import`. A CommonJS caller reaches them through `import()`, or through `require()` only on a Node that loads ES modules synchronously (22.12 and later).
+
 ### `@objectstack/cli/hook-body`
 
 ```typescript

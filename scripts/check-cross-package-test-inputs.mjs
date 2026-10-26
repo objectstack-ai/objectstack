@@ -1454,8 +1454,12 @@ export const TOP_LEVEL_DIRECTORIES_PENDING = Object.freeze({
  */
 export const TOP_LEVEL_DIRECTORIES_AWAITING_IMPORT = Object.freeze({});
 
-/** Repo-root FILES declared as `$TURBO_ROOT$` inputs -- the fourth shape, pinned, not collected. */
-export const TURBO_ROOT_FILE_INPUTS = Object.freeze(['sdui.manifest.json']);
+/**
+ * Repo-root FILES declared as `$TURBO_ROOT$` inputs -- the fourth shape, pinned, not collected.
+ * `vitest.preset.mts` is the shared vitest preset the package configs re-export by
+ * relative import; it is the `test` task's input so an edit to it reruns their suites.
+ */
+export const TURBO_ROOT_FILE_INPUTS = Object.freeze(['sdui.manifest.json', 'vitest.preset.mts']);
 
 /** `.` is the only regex metacharacter these names carry today; escape the class anyway. */
 const TOP_LEVEL_ALTERNATION = RECOGNISED_TOP_LEVEL_DIRECTORIES

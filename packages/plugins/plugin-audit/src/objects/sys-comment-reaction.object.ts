@@ -32,7 +32,12 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *   like any other: the engine stamps `created_by` with the reactor, the
  *   object declares no `sharingModel` that would yield the floor, and no
  *   alternate match relieves it. So a member deletes their own reaction and
- *   not another member's.
+ *   not another member's. That floor narrows a `delete` the member already
+ *   holds, and no every-member set may hold one (ADR-0090 D5), so the member
+ *   who reacts on the every-member grants alone removes the reaction through
+ *   the unreact door instead (`DELETE /api/v1/comments/reactions/:id`,
+ *   `comment-reaction-routes.ts`): it removes the caller's own row, by the
+ *   same `created_by` the floor reads, and refuses any other.
  * - **Update** — not offered. `apiMethods` lists no `update` and
  *   `userActions` hides the edit affordance: a reaction is not edited, it is
  *   deleted and made again.

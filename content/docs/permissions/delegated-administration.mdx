@@ -28,6 +28,8 @@ export const FieldOpsDelegate = definePermissionSet({
     manageAssignments: true,            // user ↔ position rows (sys_user_position)
     assignablePermissionSets: ['showcase_contributor', 'showcase_manager'],
   },
+  // …the delegate has to be able to open Setup, where the assignment screens live…
+  systemPermissions: ['setup.access'],
   // …and plain CRUD on the RBAC link tables lets the requests through at all.
   // Both are required: table CRUD with NO scope is refused outright.
   objects: {
@@ -42,6 +44,17 @@ export const FieldOpsDelegate = definePermissionSet({
 `businessUnit` names the subtree root by `sys_business_unit.name`; a
 misconfigured name resolves to an empty subtree and **approves nothing**
 (fail-closed).
+
+The scope says *what* a delegate may administer; it does not let them in. Five
+companion grants do that, and the example carries all of them: the
+`setup.access` capability, without which the delegate is turned away at the
+Setup app ("You don't have access to this app"); read on `sys_user`,
+`sys_business_unit` and `sys_business_unit_member`, so the lookups can pick
+people and units; and CRUD on `sys_user_position`, the assignment rows
+themselves. They may sit on the scope's own set or on any other set the
+delegate holds. In Setup's permission set editor, the Delegated Admin Scope
+block lists the five, marks which ones the set already grants, and adds the
+missing ones to the set in one click.
 
 ## What the runtime gate enforces
 
