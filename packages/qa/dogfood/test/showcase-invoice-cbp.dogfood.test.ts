@@ -37,7 +37,6 @@ const memberSet = PermissionSetSchema.parse({
 describe('showcase: invoice-line controlled-by-parent (ADR-0055)', () => {
   let stack: VerifyStack;
   let memberToken: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let ql: any;
   let adminInvoiceId: string;
   let adminLineId: string;
@@ -53,7 +52,6 @@ describe('showcase: invoice-line controlled-by-parent (ADR-0055)', () => {
     await stack.signIn(); // seed dev admin
     memberToken = await stack.signUp(MEMBER_EMAIL);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ql = await stack.kernel.getServiceAsync<any>('objectql');
     const sys = { context: { isSystem: true } };
     const idOf = (r: any) => r?.id ?? r?.record?.id ?? r;

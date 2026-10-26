@@ -265,7 +265,6 @@ const controlApp = {
       name: 'nc_target_rewrites_dependents',
       object: 'nc_target',
       events: ['beforeDelete'],
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       handler: async (ctx: { input: { id?: unknown }; api: any }) => {
         const id = ctx.input.id;
         const holders = ctx.api.object('nc_holder');
