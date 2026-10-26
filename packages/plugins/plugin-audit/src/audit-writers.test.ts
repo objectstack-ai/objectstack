@@ -562,7 +562,7 @@ describe('audit writers — declarative trackHistory activity (ADR-0052 §5b)', 
     expect(activity?.row.summary).toBe('Stage: Proposal → Closed Won');
   });
 
-  it('falls back to the generic summary when only untracked fields change', async () => {
+  it('falls back to the generic summary, naming the untracked field that changed', async () => {
     const { engine, fire, created } = makeEngine(SCHEMA);
     installAuditWriters(engine as any, 'test.audit');
 
@@ -575,7 +575,129 @@ describe('audit writers — declarative trackHistory activity (ADR-0052 §5b)', 
     });
 
     const activity = created.find((c) => c.object === 'sys_activity');
-    expect(activity?.row.summary).toBe('Updated crm_opportunity "Acme Renewal"');
+    // The label, never the value: `amount` is not `trackHistory`'d.
+    expect(activity?.row.summary).toBe('Updated crm_opportunity "Acme Renewal": Amount');
+  });
+});
+
+describe('audit writers — the generic update summary names the changed fields (#25787)', () => {
+  // A campaign whose roll-up counters a hook bumps once per enrolled member —
+  // plain number fields, none `trackHistory`'d (the measured HotCRM shape).
+  const CAMPAIGN_FIELDS: Record<string, any> = {
+    id: { type: 'text' },
+    name: { type: 'text', label: 'Name' },
+    num_sent: { type: 'number', label: 'Number Sent' },
+    num_responses: { type: 'number', label: 'Responses' },
+    num_leads: { type: 'number', label: 'Leads' },
+    budget_code: { type: 'text', label: 'Budget Code' },
+    api_token: { type: 'secret', label: 'API Token' },
+  };
+  const schemaWith = (fields: Record<string, any>, summary: Record<string, any> = { type: 'text' }) => ({
+    sys_audit_log: SINGLE_TENANT.sys_audit_log,
+    sys_activity: {
+      ...Object.fromEntries(SINGLE_TENANT.sys_activity.map((f) => [f, { type: 'text' }])),
+      summary,
+    },
+    campaign: fields,
+  });
+
+  async function updateCampaign(
+    schema: Record<string, any>,
+    previous: Record<string, any>,
+    result: Record<string, any>,
+  ) {
+    const { engine, fire, created } = makeEngine(schema, { campaign: { label: 'Campaign' } });
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterUpdate', {
+      object: 'campaign',
+      input: { id: 'cpg-1' },
+      result: { id: 'cpg-1', name: 'CPG-0001', ...result },
+      previous: { id: 'cpg-1', name: 'CPG-0001', ...previous },
+      session: {},
+    });
+    const activity = created.find((c) => c.object === 'sys_activity');
+    expect(activity).toBeDefined();
+    return { summary: activity!.row.summary as string, metadata: JSON.parse(activity!.row.metadata) };
+  }
+
+  it('names every changed field, in declaration order, as a list', async () => {
+    const { summary } = await updateCampaign(
+      schemaWith(CAMPAIGN_FIELDS),
+      { num_leads: 3, num_responses: 1, num_sent: 12 },
+      { num_leads: 4, num_responses: 2, num_sent: 13 },
+    );
+    expect(summary).toBe('Updated Campaign "CPG-0001": Number Sent, Responses, and Leads');
+  });
+
+  it('never carries a value: neither an untracked one nor a credential', async () => {
+    const { summary } = await updateCampaign(
+      schemaWith(CAMPAIGN_FIELDS),
+      { budget_code: 'BC-OLD-7731', api_token: 'tok-before-5512' },
+      { budget_code: 'BC-NEW-9924', api_token: 'tok-after-8843' },
+    );
+    expect(summary).toBe('Updated Campaign "CPG-0001": Budget Code and API Token');
+    for (const value of ['BC-OLD-7731', 'BC-NEW-9924', 'tok-before-5512', 'tok-after-8843']) {
+      expect(summary).not.toContain(value);
+    }
+  });
+
+  it('declares each named field as a summary source, so the read-side redaction drops the text for a reader not served one', async () => {
+    const { metadata } = await updateCampaign(
+      schemaWith(CAMPAIGN_FIELDS),
+      { num_sent: 12, budget_code: 'A' },
+      { num_sent: 13, budget_code: 'B' },
+    );
+    expect(metadata.text_sources.summary).toEqual(['name', 'num_sent', 'budget_code']);
+    expect(metadata.text_sources.record_label).toEqual(['name']);
+  });
+
+  it('names at most five fields and counts the rest, and declares the counted ones too', async () => {
+    const fields: Record<string, any> = { id: { type: 'text' }, name: { type: 'text', label: 'Name' } };
+    const previous: Record<string, any> = {};
+    const result: Record<string, any> = {};
+    for (let i = 1; i <= 8; i += 1) {
+      fields[`f${i}`] = { type: 'number', label: `Field ${i}` };
+      previous[`f${i}`] = 0;
+      result[`f${i}`] = 1;
+    }
+    const { summary, metadata } = await updateCampaign(schemaWith(fields), previous, result);
+    expect(summary).toBe(
+      'Updated Campaign "CPG-0001": Field 1, Field 2, Field 3, Field 4, Field 5, and 3 more',
+    );
+    expect(metadata.text_sources.summary).toEqual(['name', 'f1', 'f2', 'f3', 'f4', 'f5', 'f6', 'f7', 'f8']);
+  });
+
+  it('keeps a wide update of long labels inside the declared sys_activity.summary bound (500)', async () => {
+    const fields: Record<string, any> = { id: { type: 'text' }, name: { type: 'text', label: 'Name' } };
+    const previous: Record<string, any> = {};
+    const result: Record<string, any> = {};
+    for (let i = 1; i <= 40; i += 1) {
+      fields[`f${i}`] = { type: 'number', label: `A Very Long Field Label Number ${i} `.repeat(4).trim() };
+      previous[`f${i}`] = 0;
+      result[`f${i}`] = 1;
+    }
+    const { summary } = await updateCampaign(
+      schemaWith(fields, { type: 'text', maxLength: 500 }),
+      previous,
+      result,
+    );
+    expect(summary.length).toBeLessThanOrEqual(500);
+    // Fewer than five names fit, and the rest is still counted, not dropped.
+    expect(summary).toMatch(/^Updated Campaign "CPG-0001": A Very Long Field Label Number 1 /);
+    expect(summary).toMatch(/, and 3[6-9] more$/);
+  });
+
+  it('falls back to the field-less frame when not even one name fits the bound', async () => {
+    const { summary, metadata } = await updateCampaign(
+      schemaWith({ ...CAMPAIGN_FIELDS, num_sent: { type: 'number', label: 'N'.repeat(60) } }, {
+        type: 'text',
+        maxLength: 40,
+      }),
+      { num_sent: 1 },
+      { num_sent: 2 },
+    );
+    expect(summary).toBe('Updated Campaign "CPG-0001"');
+    expect(metadata.text_sources.summary).toEqual(['name']);
   });
 });
 
@@ -1047,7 +1169,24 @@ describe('audit writers — localized activity summaries (framework#3039)', () =
       result: { id: 'q-1', name: 'OC-00001', status: 'active' },
     });
     const activity = created.find((c) => c.object === 'sys_activity');
-    expect(activity!.row.summary).toBe('更新了 人员资质 "OC-00001"');
+    // [#25787] `status` is undeclared here, so it is named by its key; the
+    // list and its frame are both the zh-CN bundle's.
+    expect(activity!.row.summary).toBe('更新了 人员资质 "OC-00001"：status');
+  });
+
+  it('localizes the named-field list and its "more" item (zh-CN)', async () => {
+    const fields: Record<string, any> = { id: { type: 'text' }, name: { type: 'text' } };
+    const previous: Record<string, any> = { id: 'q-1', name: 'OC-00001' };
+    const result: Record<string, any> = { id: 'q-1', name: 'OC-00001' };
+    for (let i = 1; i <= 7; i += 1) {
+      fields[`f${i}`] = { type: 'number', label: `F${i}` };
+      previous[`f${i}`] = 0;
+      result[`f${i}`] = 1;
+    }
+    const { fire, created } = setup('zh-CN', makeI18n(), {}, { ...SINGLE_TENANT, person_qualification: fields });
+    await fire('afterUpdate', { ...insertCtx(), previous, result });
+    const activity = created.find((c) => c.object === 'sys_activity');
+    expect(activity!.row.summary).toBe('更新了 人员资质 "OC-00001"：F1、F2、F3、F4、F5和另外 2 个字段');
   });
 
   it('falls back to the object def label, then English, when a translation misses', async () => {
