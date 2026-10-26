@@ -11,6 +11,7 @@ import { mergeBootConfig } from '../utils/merge-boot-config.js';
 import { provisionTelemetryDatasource, standaloneTelemetryPrimary } from '../utils/telemetry-datasource.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
 import { readInternalArtifactPath, readInternalConfigOutputPath } from '../utils/internal-artifact-channel.js';
+import { compileForDevBoot, devCompilesAtBoot } from '../utils/dev-compile-at-boot.js';
 import { makeDirectorySync } from '../utils/make-directory.js';
 // The precedence's last rung — whether the cwd config takes part — decided by
 // the SAME predicate the supervisors print their `Config:` row by (#21501).
@@ -2174,6 +2175,9 @@ export default class Serve extends Command {
     // An operator who never exported NODE_ENV is booting a real deployment,
     // not asking to be treated as development — this is `os serve` agreeing
     // with `os start` on that, one line, for the whole gate family at once.
+    // #26242 — the value before this command sets its own, for the one child a
+    // dev boot may start (`compileForDevBoot`), which must not inherit the write.
+    const launchNodeEnv = process.env.NODE_ENV;
     if (flags.dev) {
       if (!process.env.NODE_ENV) process.env.NODE_ENV = 'development';
     } else if (!process.env.NODE_ENV) {
@@ -3512,6 +3516,41 @@ export default class Serve extends Command {
                 + '\n    boot without a door.',
               ));
             } else {
+              // #26242 — the door is about to serve THIS file's copy of the
+              // stack while the wrap below serves the config module's, so a
+              // config that reads the environment at module evaluation (the
+              // showcase's `OS_PORT` self URL) gives `/meta` the value of
+              // whichever environment last compiled the file. `os dev` closed
+              // that by compiling before it boots (#26130); a direct dev boot
+              // reads the same decision, `devCompilesAtBoot`. Under a
+              // supervising `os dev` (its channel answered) the parent already
+              // made it, `--no-compile` included, so the child never compiles
+              // again. Only an artifact on disk reaches this branch: with none,
+              // no door composes and the wrap is the one copy.
+              //
+              // The compile runs in THIS process's environment, the one the
+              // module above was evaluated in, with the launch `NODE_ENV` put
+              // back (`compileForDevBoot` says why), so both copies are one
+              // evaluation's answer exactly as under `os dev`. A failed compile
+              // refuses the boot, as it does there.
+              if (!supervisorArtifact && devCompilesAtBoot({
+                compile: true,
+                pinned: Boolean(pinnedArtifact),
+                configExists,
+                artifactExists: true,
+              })) {
+                printDiagnostic(chalk.dim(`  Compiling ${relativeConfig} → ${path.relative(process.cwd(), hmrArtifactPath) || hmrArtifactPath}...`));
+                const compiled = compileForDevBoot({ configPath: absolutePath, outputPath: hmrArtifactPath, launchNodeEnv });
+                if (compiled.status !== 0) {
+                  console.error(
+                    `${compiled.stdout ?? ''}${compiled.stderr ?? ''}\n`
+                    + chalk.red(`  ✗ Compile failed — fix errors above before starting the dev server.\n`)
+                    + chalk.dim(`    A dev boot over ${hmrArtifactPath} compiles ${relativeConfig} into it first, so the`)
+                    + chalk.dim('\n    metadata it serves is the config this boot evaluates.'),
+                  );
+                  process.exit(1);
+                }
+              }
               const { MetadataPlugin } = await import('@objectstack/metadata');
               // Mirror the standalone stack's dev config exactly
               // (packages/runtime/src/standalone-stack.ts): declarative
@@ -6232,7 +6271,7 @@ export function createUnknownHostnameGuardPlugin(
     <div class="host">${safeHost}</div>
     <p class="muted" style="margin-top:24px">
       If you own this domain, bind it to an environment in the
-      <a href="https://cloud.objectos.ai/">ObjectStack Cloud console</a>.
+      <a href="https://cloud.objectos.ai/">ObjectOS Cloud console</a>.
     </p>
   </main>
 </body>

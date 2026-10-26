@@ -401,6 +401,13 @@ export async function explainAccessForCaller(
               actsOnBehalfOf(c) ? sharing.buildReadFilter(o, c) : readFilterWithReadScope(o, c),
           }
         : {}),
+      // [#26188 · ADR-0057] Asked by the depth layer's record cell: with no
+      // resolver mounted a hierarchy read depth is evaluated as 'own', and the
+      // cell names that instead of the depth. The kernel's own answer, read
+      // per explain; no reader of the service, no answer.
+      ...(this.resolveKernelService
+        ? { hierarchyResolverMounted: () => this.resolveKernelService?.('hierarchy-scope-resolver') != null }
+        : {}),
       ...(sharing && typeof sharing.listShares === 'function'
         // [ADR-0111 D5] listShares is now management-gated in the sharing
         // service, but explain's own caller authorization already ran

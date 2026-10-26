@@ -2895,6 +2895,7 @@ const ar = {
     },
     shell: {
       tenantHostHint: "تسجل الدخول إلى هذا النظام",
+      poweredBy: "مدعوم بـ ObjectStack",
     },
     layout: {
       headline: "أنشئ تطبيقات أعمال قوية بسرعة أكبر.",
@@ -4108,7 +4109,7 @@ const ar = {
       cancel: "إلغاء",
     },
     bound: {
-      title: "متصل بـ ObjectStack Cloud",
+      title: "متصل بـ ObjectOS Cloud",
       runtime: "بيئة التشغيل",
       organization: "المؤسسة",
       approvedBy: "تمت الموافقة بواسطة",
@@ -4235,13 +4236,13 @@ const ar = {
     install: {
       dialogTitle: "تثبيت {{name}}",
       dialogDescCurrent: "تثبيت في هذه البيئة ({{host}}).",
-      dialogDescPicker: "اختر بيئة لتثبيت هذا التطبيق. يجب أن تكون مسجلاً في ObjectStack Cloud.",
+      dialogDescPicker: "اختر بيئة لتثبيت هذا التطبيق. يجب أن تكون مسجلاً في ObjectOS Cloud.",
       environment: "البيئة",
       environmentPlaceholder: "تحديد بيئة",
       includeSampleData: "تضمين بيانات نموذجية",
       noEnvs: "لم يتم العثور على بيئات في مؤسستك النشطة.",
       noPermission: "ليس لديك إذن لتثبيت التطبيقات. فقط مالكو المؤسسة والمشرفون يمكنهم التثبيت — تواصل مع مشرف مؤسستك.",
-      signInFirst: "يجب عليك أولاً تسجيل الدخول إلى ObjectStack Cloud.",
+      signInFirst: "يجب عليك أولاً تسجيل الدخول إلى ObjectOS Cloud.",
       success: "تم التثبيت بنجاح. افتح البيئة لرؤية التطبيق الجديد.",
       localSuccess: "تم تثبيت v{{version}} في هذا الوقت التشغيل. يجب أن يظهر \"{{name}}\" الآن في مبدّل التطبيقات.",
       localLoadsAtRestart: "تم تثبيت v{{version}} في وقت التشغيل هذا. سيُحمَّل \"{{name}}\" عند إعادة التشغيل التالية لوقت التشغيل، ولن يظهر في مبدّل التطبيقات قبل ذلك.",
@@ -4283,7 +4284,7 @@ const ar = {
     update: {
       dialogTitle: "تحديث {{name}}",
       dialogDescCurrent: "تحديث النسخة المثبتة في هذه البيئة ({{host}}).",
-      dialogDescPicker: "اختر البيئة التي تريد تحديث النسخة المثبتة فيها. يجب أن تكون مسجلاً في ObjectStack Cloud.",
+      dialogDescPicker: "اختر البيئة التي تريد تحديث النسخة المثبتة فيها. يجب أن تكون مسجلاً في ObjectOS Cloud.",
       majorNotice: "هذا تحديث إلى إصدار رئيسي جديد (v{{fromMajor}} → v{{toMajor}})، وقد يتضمن تغييرات غير متوافقة.",
       releaseNotes: "اقرأ ملاحظات الإصدار v{{version}}",
       success: "تم التحديث إلى v{{version}}.",
