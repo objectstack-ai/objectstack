@@ -111,9 +111,11 @@ describe('objectstack verify FLOW SCREEN RECORD LINK (#25872): a result screen l
     for (const inputs of [{ account_link: createdAccountId }, { contact_link: null }]) {
       const refused = await resume(runId, inputs);
       expect(refused.status, JSON.stringify(inputs)).toBe(400);
-      const text = await refused.text();
-      expect(text).toContain('INVALID_SCREEN_INPUT');
-      expect(text).toContain(`Screen field "${Object.keys(inputs)[0]}" shows a record and takes no value`);
+      const body = (await refused.json()) as any;
+      expect(body.error?.code).toBe('INVALID_SCREEN_INPUT');
+      expect(String(body.error?.message)).toContain(
+        `Screen field "${Object.keys(inputs)[0]}" shows a record and takes no value`,
+      );
     }
 
     // Refused, not consumed: the resume that leaves the links out finishes the run.
