@@ -399,6 +399,10 @@ import { readClause2Line, readMetadataProtocolLine } from './pm/clause2-line.mjs
 // this gate into a sandbox (`objectui-changeset-digest.mjs`), because two hand
 // lists for one graph is how one of them goes stale unnoticed.
 import { stageFirstPartyClosure } from './first-party-closure.mjs';
+// #26220 — the workspace's package globs, through the repo's ONE parse of
+// `pnpm-workspace.yaml` rather than a hand-kept list of roots (see
+// `workspaceGlobsAt`).
+import { WORKSPACE_FILE, WorkspaceEnumerationError, isExclusionGlob, parseWorkspaceGlobs } from './workspace-enumerator.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //
@@ -533,8 +537,6 @@ export const MIGRATION_LEDGER_ENTRY_DIRS = [
 const WITNESS_GENERATOR = 'packages/spec/scripts/build-spec-changes.ts';
 const WITNESS_INPUTS = ['packages/spec/src', 'packages/spec/scripts', 'packages/spec/package.json'];
 
-/** Package roots holding workspace manifests, for the `unpublished` precondition. */
-const PACKAGE_ROOTS = ['packages', 'apps', 'examples'];
 
 /**
  * The closed disposition vocabulary. Adding a category is a deliberate act.
@@ -2664,20 +2666,81 @@ export function assertInputs({ cwd, head, witness = generatedWitness }) {
 // ---------------------------------------------------------------------------
 
 /**
+ * The workspace's package globs at a rev -- `pnpm-workspace.yaml` read from git and
+ * parsed by `workspace-enumerator.mjs`, the repo's one parse of it (#26220).
+ *
+ * This gate used to carry its own `PACKAGE_ROOTS = ['packages', 'apps', 'examples']`.
+ * That list predates the objectui import, so every `@object-ui/*` package (the
+ * `ui/packages/*`, `ui/apps/*` and `ui/examples/*` globs) had no workspace manifest
+ * here, and every disposition that reads one -- `unpublished`, `type-surface-only`
+ * predicate 1, `runtime-export-retired` predicate 1 -- refused a true claim about
+ * them. A hand-kept copy of the workspace's membership is the same drift #14378
+ * found in a different file; the workspace's own declaration cannot drift from
+ * itself. Read at the REV being judged, never from the working tree, so the gate
+ * stays a pure function of its two revs.
+ *
+ * A missing file, an empty or duplicate `packages:` block and a glob richer than
+ * `<dir>` / `<dir>/*` are REFUSED with `WorkspaceEnumerationError`, never read as an
+ * empty workspace: every disposition above would then answer "no workspace
+ * manifest" about a package that has one.
+ *
+ * @returns {string[]} the inclusion globs; an exclusion (`!pattern`) enumerates nothing
+ */
+export function workspaceGlobsAt(rev, cwd) {
+  const source = `${WORKSPACE_FILE} at ${rev.slice(0, 12)}`;
+  const text = showOrNull(rev, WORKSPACE_FILE, cwd);
+  if (text === null) {
+    throw new WorkspaceEnumerationError(
+      `${source} is missing -- the workspace's package globs cannot be read, so no package can be\n` +
+        '      matched to its manifest. Refused rather than read as an empty workspace (#4690).',
+    );
+  }
+  const globs = parseWorkspaceGlobs(text, { source }).filter((g) => !isExclusionGlob(g));
+  for (const g of globs) {
+    if (g.replace(/\/\*$/, '').includes('*')) {
+      throw new WorkspaceEnumerationError(
+        `${source}: pattern ${JSON.stringify(g)} is richer than \`<dir>\` or \`<dir>/*\`, the two shapes\n` +
+          '      `workspace-enumerator.mjs` expands. Teach both readers the new shape in one edit;\n' +
+          '      matching fewer manifests would refuse true claims about the packages left out.',
+      );
+    }
+  }
+  return globs;
+}
+
+/**
+ * Is `manifest` (a repo-relative `<dir>/package.json`) a workspace member's
+ * manifest under `globs`? `<dir>` names that directory; `<dir>/*` names each
+ * directory directly under it -- the expansion `expandWorkspaceGlob` performs on a
+ * working tree, applied here to a path listed from a rev.
+ */
+export function isWorkspaceManifest(manifest, globs) {
+  if (!manifest.endsWith('/package.json') || manifest.includes('node_modules/')) return false;
+  const dir = manifest.slice(0, -'/package.json'.length);
+  const parent = posix.dirname(dir);
+  const leaf = posix.basename(dir);
+  return globs.some((g) => (g.endsWith('/*')
+    ? parent === g.slice(0, -2) && !leaf.startsWith('.')
+    : dir === g));
+}
+
+/**
  * name -> { private, file } for every workspace package at a rev.
  *
  * Read from git rather than the working tree so the whole gate is a pure function
  * of two revs, which is what lets the self-test drive the shipping code path with
- * real temp repositories instead of an imitation of it.
+ * real temp repositories instead of an imitation of it. The members are the ones
+ * the rev's own `pnpm-workspace.yaml` declares (`workspaceGlobsAt`).
  */
 export function workspacePackagesAt(rev, cwd) {
   const pkgs = new Map();
+  const globs = workspaceGlobsAt(rev, cwd);
   let out;
   try { out = git(['ls-tree', '-r', '--name-only', rev], cwd); } catch { return pkgs; }
   const manifests = out
     .split('\n')
     .map((s) => s.trim())
-    .filter((p) => p.endsWith('/package.json') && !p.includes('node_modules/') && PACKAGE_ROOTS.some((r) => p.startsWith(`${r}/`)));
+    .filter((p) => isWorkspaceManifest(p, globs));
   for (const [p, raw] of showManyOrNull(rev, manifests, cwd)) {
     try {
       const json = JSON.parse(raw);
@@ -4537,6 +4600,7 @@ function readExportSurface(rev, cwd, pkgName, pkgs, kit) {
   const fromVirtual = (f) => (f.startsWith(VIRTUAL_ROOT) ? f.slice(VIRTUAL_ROOT.length) : null);
   const options = {
     noEmit: true, skipLibCheck: true, types: [], lib: ['lib.es2022.d.ts'],
+    jsx: ts.JsxEmit.Preserve,
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler,
   };
   const real = ts.createCompilerHost(options, true);
@@ -5587,7 +5651,16 @@ function selfTest() {
     '# ADR-0087 (fixture)\n\n' +
     cats.map((c) => `<!-- adr-0087: not-required (${c}) ... -->\n`).join('');
 
-  const build = ({ baseIds = ['old-entry-one', 'old-entry-two'], headIds = null, files = {}, baseFiles = {}, pkgs = null }) => {
+  // The fixture's `pnpm-workspace.yaml` (#26220): the real file's glob shapes,
+  // `ui/packages/*` among them, so a fixture package is a member exactly when it
+  // would be one in this repository. `workspace: null` writes none.
+  const WORKSPACE_YAML =
+    'packages:\n  - packages/*\n  - packages/apps/*\n  - packages/drivers/*\n  - packages/plugins/*\n' +
+    '  - packages/qa/*\n  - packages/triggers/*\n  - packages/services/*\n  - packages/adapters/*\n' +
+    '  - packages/connectors/*\n  - apps/*\n  - examples/*\n' +
+    '  # the objectui tree\n  - ui\n  - ui/packages/*\n  - ui/apps/*\n  - ui/examples/*\n';
+
+  const build = ({ baseIds = ['old-entry-one', 'old-entry-two'], headIds = null, files = {}, baseFiles = {}, pkgs = null, workspace = WORKSPACE_YAML }) => {
     const dir = mkdtempSync(join(tmpdir(), 'adr0087-'));
     const w = (rel, text) => {
       mkdirSync(dirname(join(dir, rel)), { recursive: true });
@@ -5601,6 +5674,7 @@ function selfTest() {
     w(LEDGER_SOURCES[1], CONV(['a-conversion']));
     w(WITNESS_GENERATOR, WITNESS_GEN());
     w(ADR_0087, ADR_DOC());
+    if (workspace !== null) w(WORKSPACE_FILE, workspace);
     // stock: one declared-breaking changeset -- realistic mid-cycle stock for
     // the inherited-changeset cases. (No longer needed to satisfy assertInputs:
     // since #8658 its convention-rot control is synthetic and phase-independent.)
