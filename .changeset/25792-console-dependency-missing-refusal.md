@@ -1,6 +1,6 @@
 ---
-'@object-ui/app-shell': minor
-'@object-ui/i18n': minor
+'@object-ui/app-shell': patch
+'@object-ui/i18n': patch
 ---
 
 feat(app-shell,i18n): the Console draws the install refusal `DEPENDENCY_MISSING` in the author's terms, one line per unmet dependency
