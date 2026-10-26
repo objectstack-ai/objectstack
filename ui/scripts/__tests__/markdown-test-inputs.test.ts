@@ -113,7 +113,7 @@ const [TYPE_CHECK_STEP, TEST_STEP, DIST_PINS_STEP, E2E_STEP] = STEPS;
 
 type Outcome = { shouldRun: string; log: string };
 
-let scratch = '';
+let scratch: string;
 
 function git(cwd: string, ...args: string[]): void {
   execFileSync('git', args, { cwd, stdio: 'pipe' });

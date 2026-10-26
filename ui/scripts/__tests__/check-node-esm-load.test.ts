@@ -369,24 +369,24 @@ describe('the scope this gate ratchets, now that the emit question is answered',
     // sources — so nothing live left the leg with it. The sources keep a
     // STRICTER guard than this heuristic: that config pins `nodenext`, under
     // which a missing relative extension is TS2835 in the package's own build.
-    const dir = path.join(REPO_ROOT, 'packages/fields');
-    const build = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).scripts.build;
+    const pkgDir = path.join(REPO_ROOT, 'packages/fields');
+    const build = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8')).scripts.build;
 
-    expect(effectiveNoEmit(path.join(dir, 'tsconfig.json'))).toBe(true);
-    expect(buildPreservesSpecifiers(build, dir)).toBe(false);
-    expect(parseTsconfig(path.join(dir, 'tsconfig.json')).compilerOptions?.noEmit).toBeUndefined();
+    expect(effectiveNoEmit(path.join(pkgDir, 'tsconfig.json'))).toBe(true);
+    expect(buildPreservesSpecifiers(build, pkgDir)).toBe(false);
+    expect(parseTsconfig(path.join(pkgDir, 'tsconfig.json')).compilerOptions?.noEmit).toBeUndefined();
   });
 
   it('keeps `@object-ui/auth` in the leg on its DECLARED noEmit, not on a catch', () => {
     // Its config throws under the old reader too, so it was in the leg by
     // accident. It declares `"noEmit": false` outright, so the verdict is
     // unchanged — what changes is that it is now a reading.
-    const dir = path.join(REPO_ROOT, 'packages/auth');
-    const build = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).scripts.build;
+    const pkgDir = path.join(REPO_ROOT, 'packages/auth');
+    const build = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8')).scripts.build;
 
-    expect(parseTsconfig(path.join(dir, 'tsconfig.json')).compilerOptions?.noEmit).toBe(false);
-    expect(effectiveNoEmit(path.join(dir, 'tsconfig.json'))).toBe(false);
-    expect(buildPreservesSpecifiers(build, dir)).toBe(true);
+    expect(parseTsconfig(path.join(pkgDir, 'tsconfig.json')).compilerOptions?.noEmit).toBe(false);
+    expect(effectiveNoEmit(path.join(pkgDir, 'tsconfig.json'))).toBe(false);
+    expect(buildPreservesSpecifiers(build, pkgDir)).toBe(true);
   });
 });
 

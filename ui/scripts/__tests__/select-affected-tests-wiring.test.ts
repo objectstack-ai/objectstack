@@ -134,7 +134,7 @@ function parseOutputs(text: string): Record<string, string> {
   return outputs;
 }
 
-let scratch = '';
+let scratch: string;
 const nodeDir = path.dirname(process.execPath);
 
 /** Write an executable stand-in for `name` into a fresh bin directory. */
