@@ -66,7 +66,6 @@ const SEEDED: Record<string, number> = {
 const SEED_TOTAL = Object.values(SEEDED).reduce((a, b) => a + b, 0);
 const OBSERVER = 'dogfood.install-local-purge-observer';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const rowsOf = (r: any): any[] => (Array.isArray(r) ? r : Array.isArray(r?.records) ? r.records : []);
 
 /**
@@ -97,11 +96,8 @@ async function countSeeded(ql: IObjectQLEngine, organizationId?: string): Promis
 function observeDeletes(ql: IObjectQLEngine): { before: string[]; after: string[] } {
   const seen = { before: [] as string[], after: [] as string[] };
   const objects = Object.keys(SEEDED);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const idOf = (ctx: any) => String(ctx?.input?.id ?? ctx?.previous?.id ?? '');
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ql.registerHook('beforeDelete', (ctx: any) => { seen.before.push(`${ctx.object}#${idOf(ctx)}`); }, { object: objects, packageId: OBSERVER });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ql.registerHook('afterDelete', (ctx: any) => { seen.after.push(`${ctx.object}#${idOf(ctx)}`); }, { object: objects, packageId: OBSERVER });
   return seen;
 }
@@ -117,7 +113,7 @@ async function rowKeys(ql: IObjectQLEngine, where?: Record<string, unknown>): Pr
   return keys.sort();
 }
 
-async function json(res: Response): Promise<{ status: number; body: any }> { // eslint-disable-line @typescript-eslint/no-explicit-any
+async function json(res: Response): Promise<{ status: number; body: any }> {
   return { status: res.status, body: await res.json().catch(() => null) };
 }
 
@@ -135,9 +131,9 @@ describe('dogfood: install-local purge on the single-tenant posture — the card
   let stack: VerifyStack;
   let storageDir: string;
   let ql: IObjectQLEngine;
-  let install: { status: number; body: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
-  let purge: { status: number; body: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
-  let reseed: { status: number; body: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
+  let install: { status: number; body: any };
+  let purge: { status: number; body: any };
+  let reseed: { status: number; body: any };
   let afterInstall: Record<string, number>;
   let afterPurge: Record<string, number>;
   let afterReseed: Record<string, number>;
@@ -230,8 +226,8 @@ describe('dogfood: install-local purge under an organization wall — one organi
   let storageDir: string;
   let ql: IObjectQLEngine;
   let token: string;
-  let purge: { status: number; body: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
-  let reseedA: { status: number; body: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
+  let purge: { status: number; body: any };
+  let reseedA: { status: number; body: any };
   let orgARowsBefore: Record<string, number>;
   let orgBKeysBefore: string[];
   let orgBKeysAfter: string[];

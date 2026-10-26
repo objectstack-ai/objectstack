@@ -1692,11 +1692,13 @@ const actionObject = () => strictObject({
   /**
    * Post-success navigation (#9566 / #9474, maintainer ruling 2026-08-18) —
    * where to take the user after a server-executing action succeeds. Read for
-   * `type: 'api'` and `type: 'script'` only (the refinement below refuses it on
-   * other types: a `type:'url'` action already navigates via `target` +
-   * `openIn`, and `modal`/`flow`/`form` dispatch on `target` with no success
-   * event this key could ride — a declared key those paths never read is the
-   * ADR-0078 silently-inert shape).
+   * `type: 'api'`, `type: 'script'` and `type: 'flow'` only (the refinement
+   * below refuses it on other types: a `type:'url'` action already navigates
+   * via `target` + `openIn`, and `modal`/`form` dispatch on `target` with no
+   * success result this key could ride — a declared key those paths never read
+   * is the ADR-0078 silently-inert shape). `flow` joined `api` and `script`
+   * later (`action-on-success-executor.ts` holds the set): its hop follows a
+   * run that COMPLETES, never one that pauses at a screen or ends refused.
    *
    * **`navigate`** is a route/URL template. Its interpolation scope is the
    * CONTRACT recorded here; the interpolation ENGINE is the renderer's
@@ -1708,9 +1710,14 @@ const actionObject = () => strictObject({
    *   scope `target` interpolates today).
    * - `${result.X}` — **NEW with this key**: the action's server response
    *   payload. For a `type:'api'` action, the response body of the `target`
-   *   call; for a `type:'script'` action, the handler's return value. This is
-   *   what makes "server clones a record → jump to the new record" declarable:
-   *   `navigate: '/apps/crm/tasks/${result.id}'`.
+   *   call; for a `type:'script'` action, the handler's return value; for a
+   *   `type:'flow'` action, the completed run's answer (`AutomationResult`),
+   *   whose `output` carries the flow's `isOutput` variables. This is what
+   *   makes "server clones a record → jump to the new record" declarable:
+   *   `navigate: '/apps/crm/tasks/${result.id}'`, or, from a flow whose
+   *   `create_record` node writes an `isOutput` variable `renewal`,
+   *   `navigate: '/apps/clm/clm_contract/record/${result.output.renewal.id}'`.
+   *   A variable the flow does not declare `isOutput` is not in `output`.
    *
    * Renderers MUST `encodeURIComponent` interpolated values in URL query
    * positions (same rule as `target`). A relative template is an SPA route
@@ -1750,9 +1757,11 @@ const actionObject = () => strictObject({
    *
    * The console consumer is objectui's action runner (recorded by symbol in
    * `packages/spec/liveness/action.json`, rows `onSuccess.*`). After an `api` or `script` action
-   * succeeds, it interpolates `navigate` with the `${param.*}`, `${ctx.*}` and
-   * `${result.*}` scopes and hands the URL to the console's router. It opens
-   * a new tab only on `openIn: 'newTab'`. The liveness ledger's two
+   * succeeds, or a `flow` action's run completes, it interpolates `navigate`
+   * with the `${param.*}`, `${ctx.*}` and `${result.*}` scopes and hands the
+   * URL to the console's router. A `flow` run that pauses at a screen or ends
+   * refused hands off instead (the console's launch judge marks the success
+   * `handedOff`) and gets no hop. It opens a new tab only on `openIn: 'newTab'`. The liveness ledger's two
    * `onSuccess` rows are `live` and cite this reader.
    *
    * **The doubled channel is refused where the schema can see it** (#11519,
@@ -1784,7 +1793,7 @@ const actionObject = () => strictObject({
         "the tab choice is the closed enum `openIn: 'self' | 'newTab'` — write `openIn: 'newTab'`.",
     },
   }, {
-    navigate: z.string().describe("Route/URL template navigated to after the action succeeds. Interpolates ${param.*} (params-dialog values), ${ctx.*} (origin/apiBase/user/org/recordId/selection) and ${result.*} (the action's server response payload — NEW with this key, e.g. ${result.id}). An http:// or https:// URL, a mailto: address, or an in-app path starting with / or ./ (an SPA route hop); a template that opens with ${ is judged after interpolation. Every other scheme and a protocol-relative //host are refused. Renderers MUST encodeURIComponent values in query positions."),
+    navigate: z.string().describe("Route/URL template navigated to after the action succeeds. Interpolates ${param.*} (params-dialog values), ${ctx.*} (origin/apiBase/user/org/recordId/selection) and ${result.*} (the action's server response payload — NEW with this key, e.g. ${result.id}; on a type:'flow' action the completed run's answer, whose `output` carries the flow's isOutput variables, e.g. ${result.output.renewal.id}). An http:// or https:// URL, a mailto: address, or an in-app path starting with / or ./ (an SPA route hop); a template that opens with ${ is judged after interpolation. Every other scheme and a protocol-relative //host are refused. Renderers MUST encodeURIComponent values in query positions."),
     openIn: z.enum(['self', 'newTab'], {
       error: (issue) => (issue.input === 'new-tab'
         ? "`onSuccess.openIn` spells the new-tab member `'newTab'` (matching the handler-return "
@@ -1792,7 +1801,7 @@ const actionObject = () => strictObject({
           + "to the top-level `openIn` key for `type:'url'` actions. Write `openIn: 'newTab'`."
         : undefined),
     }).default('self').describe("Where to perform the post-success navigation: 'self' (default — in-place SPA navigation, immune to popup blocking) or 'newTab'. Closed enum — no general navigation DSL."),
-  }).superRefine(refuseUnopenableOnSuccessNavigate).optional().describe("Post-success navigation for type:'api' and type:'script' actions. `navigate` is a route/URL template interpolating ${param.*}, ${ctx.*} and ${result.*} (the server response); `openIn` defaults 'self'. The handler-return convention ({ redirectUrl } without openIn) keeps its 17.0.0 new-tab behavior."),
+  }).superRefine(refuseUnopenableOnSuccessNavigate).optional().describe("Post-success navigation for type:'api', type:'script' and type:'flow' actions. `navigate` is a route/URL template interpolating ${param.*}, ${ctx.*} and ${result.*} (the server response; for a flow, the completed run's answer); `openIn` defaults 'self'. A flow run that pauses at a screen or ends refused performs no navigation. The handler-return convention ({ redirectUrl } without openIn) keeps its 17.0.0 new-tab behavior."),
 
   // `aria` REMOVED (ADR-0049 enforce-or-remove; the triage record on the card,
   // comment 5860351140 on #20323, follows the `ChartConfig.aria` retirement
@@ -2060,16 +2069,19 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
     + '`bulkActionDefs`, where the pair renders one dialog by that schema\'s own contract.',
   path: ['confirmText'],
 }).superRefine((data, ctx) => {
-  // #9566/#9474 — `onSuccess` is scoped to the two action types whose success
+  // #9566/#9474 — `onSuccess` is scoped to the action types whose success
   // carries a result for `${result.*}` to read: `api` (the `target` call's
-  // response body) and `script` (the handler's return value). The console's
-  // action runner performs the hop after EVERY executor that succeeds, so on
-  // `url` / `modal` / `flow` / `form` the key is read, not dead: it navigates
-  // a second time, or follows a result the contract does not declare. The
-  // pair and the refusal text live in `action-on-success-executor.ts`, which
-  // the page action rows (`component.zod.ts`) read too, so an action and a
-  // row give one verdict in one wording. `type` is the closed `ActionType`
-  // enum with a `script` default, so the reach is exactly the four.
+  // response body), `script` (the handler's return value) and `flow` (the
+  // completed run's answer, its `output` the flow's `isOutput` variables; a
+  // run that pauses or ends refused is a hand-off and gets no hop). The
+  // console's action runner performs the hop after EVERY executor that
+  // succeeds, so on `url` / `modal` / `form` the key is read, not dead: it
+  // navigates a second time, or follows a result the contract does not
+  // declare. The set and the refusal text live in
+  // `action-on-success-executor.ts`, which the page action rows
+  // (`component.zod.ts`) read too, so an action and a row give one verdict in
+  // one wording. `type` is the closed `ActionType` enum with a `script`
+  // default, so the reach is exactly the three.
   if (data.onSuccess && !ON_SUCCESS_EXECUTORS.has(data.type)) {
     ctx.addIssue({
       code: 'custom',

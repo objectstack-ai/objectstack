@@ -13,11 +13,12 @@
  * The pinned `@objectstack/spec` declares the key as a CLOSED STRICT object
  * `{ navigate: string, openIn: 'self' | 'newTab' }`, refine-scoped to
  * `type: 'api'` and `type: 'script'` — the two types that have a success event
- * carrying a server response for `${result.*}` to read. `openIn` is a
- * materialised `.default('self')`, so parse output ALWAYS carries a resolved
- * member and this runner writes no default of its own.
+ * carrying a server response for `${result.*}` to read — and to `type: 'flow'`,
+ * whose completed run answers with its `AutomationResult` (objectstack#25800).
+ * `openIn` is a materialised `.default('self')`, so parse output ALWAYS
+ * carries a resolved member and this runner writes no default of its own.
  *
- * Three facts under test, and they are different facts:
+ * Four facts under test, and they are different facts:
  *
  * 1. **The hop happens, through the app's own router.** `navigationHandler` is
  *    the SPA seam every other navigator in this file already uses (the console
@@ -32,6 +33,10 @@
  *    `'self' | 'newTab'`; the top-level `type: 'url'` switch is
  *    `'self' | 'new-tab'`. Spec refuses each crossover with a keyed error, so
  *    this runner must not quietly accept one for the other.
+ * 4. **A hand-off is not a completion.** A `flow` run that paused at a screen
+ *    or ended refused answers success marked `handedOff` (app-shell
+ *    `judgeFlowLaunch`), and gets no hop; a completed run's `AutomationResult`
+ *    is the payload, so `${result.output.VAR}` reads an `isOutput` variable.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -221,6 +226,68 @@ describe('ActionSchema.onSuccess — controls', () => {
     } as never);
 
     expect(nav).not.toHaveBeenCalled();
+  });
+});
+
+describe('ActionSchema.onSuccess — a flow action hops after a COMPLETED run only', () => {
+  /** A runner whose `flow` handler answers `result`, as the console's launch judge would. */
+  function flowRunner(result: Record<string, unknown>) {
+    const nav = vi.fn();
+    const runner = new ActionRunner({});
+    runner.setNavigationHandler(nav as never);
+    runner.setToastHandler(vi.fn() as never);
+    runner.registerHandler('flow', async () => result as never);
+    const calls = () => nav.mock.calls as unknown as NavCall[];
+    return { runner, nav, calls };
+  }
+
+  const ACTION = {
+    type: 'flow',
+    name: 'start_renewal',
+    target: 'renewal_start',
+    onSuccess: { navigate: '/apps/clm/clm_contract/record/${result.output.renewal.id}', openIn: 'self' },
+  };
+
+  /** The completed run as the launch judge hands it on: `data` is the `AutomationResult`. */
+  const COMPLETED = {
+    success: true,
+    data: { success: true, status: 'completed', output: { renewal: { id: 'ctr_18' } }, flowLabel: 'Start renewal' },
+    reload: true,
+  };
+
+  it('reads ${result.output.VAR} off the run\'s AutomationResult and lands there', async () => {
+    const { runner, calls } = flowRunner(COMPLETED);
+
+    const result = await runner.execute(ACTION as never);
+
+    expect(result.success).toBe(true);
+    expect(calls()).toHaveLength(1);
+    expect(calls()[0][0]).toBe('/apps/clm/clm_contract/record/ctr_18');
+    expect(calls()[0][1]?.newTab).toBe(false);
+  });
+
+  it('a completed run whose toast the host speaks (`silent`) still hops', async () => {
+    const { runner, calls } = flowRunner({ ...COMPLETED, silent: true });
+
+    await runner.execute(ACTION as never);
+
+    expect(calls().map(([url]) => url)).toEqual(['/apps/clm/clm_contract/record/ctr_18']);
+  });
+
+  it('a handed-off success performs no hop (positive control: the same runner hops once it completes)', async () => {
+    const handedOff = flowRunner({ success: true, silent: true, handedOff: true });
+
+    const result = await handedOff.runner.execute(ACTION as never);
+
+    expect(result.success).toBe(true);
+    expect(handedOff.nav).not.toHaveBeenCalled();
+
+    // POSITIVE CONTROL — the identical action and harness, the handler now
+    // answering the completed run: the hop happens, so the silence above is a
+    // reading of `handedOff`, not of a dead harness.
+    handedOff.runner.registerHandler('flow', async () => COMPLETED as never);
+    await handedOff.runner.execute(ACTION as never);
+    expect(handedOff.calls().map(([url]) => url)).toEqual(['/apps/clm/clm_contract/record/ctr_18']);
   });
 });
 

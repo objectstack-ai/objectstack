@@ -1070,6 +1070,7 @@ export const ERROR_CODE_LEDGER = {
     // executor in `@objectstack/service-automation` returns the same report.
     'AMBIGUOUS_MATCH',            // import row matched more than one record
     'BLANK_MATCH_KEY',
+    'DUPLICATE_MATCH_KEY',        // [#26133] import row shares its match key with another row of the same import; none of them is written
     'NO_MATCH',                   // import upsert found no record for the match key
     'SUMMARY_RECOMPUTE_FAILED',
     'UNSUPPORTED_TRANSFORM',
