@@ -444,6 +444,10 @@ const de = {
     selected_other: "{{count}} ausgewählt",
     edit: "Bearbeiten",
     delete: "Löschen",
+    // The inline-edit row buttons and the hover open affordance (#25916).
+    openRecord: "Datensatz öffnen",
+    cancelChanges: "Änderungen verwerfen",
+    saveRow: "Zeile speichern",
   },
   grid: {
     bulkSelected: "{{count}} ausgewählt",
@@ -2409,6 +2413,8 @@ const de = {
         stepInput: 'Eingabe',
         stepOutput: 'Ausgabe',
         stepError: 'Fehler',
+        // A client that lacks the method a panel calls (#25916).
+        clientMethodUnavailable: "{{method}} ist auf diesem Client nicht verfügbar",
       },
       // objectui#13460 — the Integrations page's "Connect an AI agent" card (`AgentConnectSection`).
       agentConnect: {
@@ -4730,6 +4736,14 @@ const de = {
       unknownType: "Unbekannter Metadaten-Ansichtstyp. Erwartet: {{a}}, {{b}} oder {{c}}.",
       unknownTypeNamed: "Unbekannter Metadaten-Ansichtstyp „{{type}}“. Erwartet: {{a}}, {{b}} oder {{c}}.",
     },
+  },
+  reactPage: {
+    disabledTitle: "React-Seiten sind in dieser Bereitstellung deaktiviert",
+    disabledBody: "Seiten vom Typ {{kind}} führen das JavaScript ihrer Autoren direkt in der Anwendung aus und sind daher deaktiviert, sofern die Bereitstellung sie nicht einschaltet. Ein Betreiber, der seinen Seitenautoren vertraut, setzt {{flag}} auf dem Server (ein Host, der den Renderer einbettet, ruft {{call}} auf).",
+    loadFailed: "Die React-Laufzeit konnte nicht geladen werden",
+    sourceRequired: "Eine Seite vom Typ {{kind}} benötigt einen nicht leeren Wert für {{source}}.",
+    loading: "React-Laufzeit wird geladen…",
+    error: "Fehler auf der React-Seite",
   },
 };
 

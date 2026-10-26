@@ -450,6 +450,10 @@ const fr = {
     selected_other: "{{count}} sélectionnés",
     edit: "Modifier",
     delete: "Supprimer",
+    // The inline-edit row buttons and the hover open affordance (#25916).
+    openRecord: "Ouvrir l'enregistrement",
+    cancelChanges: "Annuler les modifications",
+    saveRow: "Enregistrer la ligne",
   },
   grid: {
     bulkSelected: "{{count}} sélectionné(s)",
@@ -2457,6 +2461,8 @@ const fr = {
         stepInput: 'Entrée',
         stepOutput: 'Sortie',
         stepError: 'Erreur',
+        // A client that lacks the method a panel calls (#25916).
+        clientMethodUnavailable: "{{method}} n'est pas disponible sur ce client",
       },
       // objectui#13460 — the Integrations page's "Connect an AI agent" card (`AgentConnectSection`).
       agentConnect: {
@@ -4839,6 +4845,14 @@ const fr = {
       unknownType: "Type de vue de métadonnées inconnu. Attendu : {{a}}, {{b}} ou {{c}}.",
       unknownTypeNamed: "Type de vue de métadonnées inconnu « {{type}} ». Attendu : {{a}}, {{b}} ou {{c}}.",
     },
+  },
+  reactPage: {
+    disabledTitle: "Les pages React sont désactivées sur ce déploiement",
+    disabledBody: "Les pages {{kind}} exécutent le JavaScript de leur auteur directement dans l'application, elles sont donc désactivées sauf si le déploiement les active. Un opérateur qui fait confiance aux auteurs de ses pages définit {{flag}} sur le serveur (un hôte qui intègre le moteur de rendu appelle {{call}}).",
+    loadFailed: "Impossible de charger l'environnement d'exécution React",
+    sourceRequired: "Une page {{kind}} nécessite un {{source}} non vide.",
+    loading: "Chargement de l'environnement d'exécution React…",
+    error: "Erreur de la page React",
   },
 };
 

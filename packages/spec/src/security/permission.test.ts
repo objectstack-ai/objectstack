@@ -728,6 +728,75 @@ describe('FieldPermissionSchema', () => {
 
     expect(() => FieldPermissionSchema.parse(permission)).not.toThrow();
   });
+
+  // [Ruling of record 6408558941, letter A] The row condition on the EDIT vote.
+  describe('`when` — a row condition on the edit vote', () => {
+    it('accepts a conditioned lock and keeps the predicate on the parsed entry', () => {
+      const permission: FieldPermission = {
+        readable: true,
+        editable: false,
+        when: 'status in ["approved", "signing", "active", "expired", "terminated"]',
+      };
+      const parsed = FieldPermissionSchema.parse(permission);
+      expect(parsed).toEqual({
+        readable: true,
+        editable: false,
+        when: 'status in ["approved", "signing", "active", "expired", "terminated"]',
+      });
+    });
+
+    it('accepts a conditioned grant, with `readable` left to its default', () => {
+      const parsed = FieldPermissionSchema.parse({ editable: true, when: 'status == "draft"' });
+      expect(parsed).toEqual({ readable: true, editable: true, when: 'status == "draft"' });
+    });
+
+    it('an entry without `when` parses exactly as before (no key materialises)', () => {
+      expect(FieldPermissionSchema.parse({ editable: false })).toEqual({ readable: true, editable: false });
+      expect(FieldPermissionSchema.parse({})).not.toHaveProperty('when');
+    });
+
+    it('refuses `readable: false` beside a `when` — reads are row-blind', () => {
+      const result = FieldPermissionSchema.safeParse({ readable: false, editable: false, when: 'status == "approved"' });
+      expect(result.success).toBe(false);
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'when');
+      expect(issue?.message).toContain('reaches the EDIT vote only');
+      expect(issue?.message).toContain('`readable: true`');
+    });
+
+    it('refuses a blank `when` with the prescription, and never a `null`', () => {
+      for (const when of ['', '   ', '\n']) {
+        const result = FieldPermissionSchema.safeParse({ editable: false, when });
+        expect(result.success).toBe(false);
+        expect(result.error!.issues[0]!.message).toContain('A blank `when` is not a row condition');
+      }
+      expect(FieldPermissionSchema.safeParse({ editable: false, when: null }).success).toBe(false);
+    });
+
+    it('rides on a permission set under the `<object>.<field>` key', () => {
+      const ps = PermissionSetSchema.parse({
+        name: 'clm_finance',
+        objects: { clm_contract: { allowRead: true, allowEdit: true } },
+        fields: {
+          'clm_contract.governing_law': { editable: false, when: 'status in ["approved", "active"]' },
+          'clm_contract.summary': { editable: true },
+        },
+      });
+      expect(ps.fields!['clm_contract.governing_law']).toEqual({
+        readable: true,
+        editable: false,
+        when: 'status in ["approved", "active"]',
+      });
+      expect(ps.fields!['clm_contract.summary']).toEqual({ readable: true, editable: true });
+    });
+
+    it('points `condition` / `where` / `filter` at `when`', () => {
+      for (const alias of ['condition', 'where', 'filter']) {
+        const result = FieldPermissionSchema.safeParse({ editable: false, [alias]: 'status == "x"' });
+        expect(result.success).toBe(false);
+        expect(result.error!.issues[0]!.message).toContain(`\`${alias}\` → \`when\``);
+      }
+    });
+  });
 });
 
 describe('PermissionSetSchema', () => {

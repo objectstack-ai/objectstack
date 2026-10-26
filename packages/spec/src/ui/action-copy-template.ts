@@ -18,8 +18,7 @@ import { InlineLocaleMapSchema } from './i18n.zod';
  * ## The roots are what the runner binds
  *
  * Each key's holes read a CLOSED scope, measured at the console's action
- * runner (objectui `ActionRunner`, the pinned `.objectui-sha`), not invented
- * here:
+ * runner (`ActionRunner` in the `ui/` tree), not invented here:
  *
  *  - `confirmText` — `record`, the record the action runs against (the clicked
  *    row on a list, else the page's record), and `params`, the action's
@@ -46,43 +45,23 @@ import { InlineLocaleMapSchema } from './i18n.zod';
  * stored blank sentence an invalid row on load, a narrowing wider than the
  * doors. The doors refuse instead (#25680): a blank sentence, a hole over a
  * root the key does not bind, a single-brace `{x}` token, a hole holding logic
- * or an unknown formatter, and a `${…}` token the runner shows raw are
- * ERRORS, so `objectstack validate` and `compile` fail and the publish gate
- * answers its 422. A stored row keeps loading until its next save, and that
- * save is judged.
- *
- * One finding stays a WARNING: a `${…}` token the runner still fills (the
- * next section), in a sentence with no `{{ }}` hole, over a root
- * {@link ACTION_COPY_DOLLAR_TRANSITION_ROOTS} names. Refusing it waits for
- * the runner to retire that reading.
+ * or an unknown formatter, and a `${…}` token (the next section) are ERRORS,
+ * so `objectstack validate` and `compile` fail and the publish gate answers
+ * its 422. A stored row keeps loading until its next save, and that save is
+ * judged.
  *
  * ## The `${…}` spelling
  *
  * Until these slots were typed, the console's runner filled `${…}` in them
  * (`${record.name}` through its expression evaluator for `confirmText`,
  * `${result.email}` for `successMessage`), and the platform's own sentences
- * were written that way. The runner still fills `${…}` in a sentence that
- * carries no `{{ }}` hole, for the transition; a sentence with a `{{ }}` hole
- * is filled by the template engine alone. The judge reads a `${…}` token with
- * its `$` and prescribes the `{{ }}` hole in its place.
+ * were written that way. It no longer does (objectui#13476): a sentence with
+ * no `{{ }}` hole is shown as written, and one with a hole is filled by the
+ * template engine alone, so a `${…}` token is shown raw in every sentence of
+ * every key, and the doors refuse it wherever it stands (#25709). The judge
+ * reads a `${…}` token with its `$` and prescribes the `{{ }}` hole in its
+ * place.
  */
-
-/**
- * The roots whose `${…}` tokens the console's action runner still fills, per
- * key, in a sentence with no `{{ }}` hole — measured at objectui
- * `ActionRunner` (the pinned `.objectui-sha`): `confirmMessage` evaluates a
- * holeless `confirmText` through its `${…}` expression evaluator over the
- * runner's context, whose `record` is the record the action runs against;
- * `composeSuccessMessage` substitutes `${result.*}` alone in a holeless
- * `successMessage` (any other `${…}` is left as written); an `errorMessage` is
- * shown as written. A door names a `${…}` token over one of these roots as a
- * warning and every other one as an error (the module note).
- */
-export const ACTION_COPY_DOLLAR_TRANSITION_ROOTS: Readonly<Record<ActionCopyKey, readonly string[]>> = Object.freeze({
-  confirmText: Object.freeze(['record']),
-  successMessage: Object.freeze(['result']),
-  errorMessage: Object.freeze([]),
-});
 
 /** The root a `confirmText` / `successMessage` hole names for the record the action runs against. */
 export const ACTION_COPY_RECORD_ROOT = 'record';
@@ -187,11 +166,6 @@ const DOORS =
   'and refused at `objectstack validate`, `compile` and the publish gate; the text still parses, so a stored one '
   + 'loads until its next save.';
 
-/** What the confirm and success describes add: the one transitional `${…}` reading the doors only warn about. */
-const transition = (root: string) =>
-  ` A \`\${${root}.*}\` token in a sentence with no \`{{ }}\` hole, which the console's runner still fills, is named `
-  + 'as a warning instead.';
-
 /** `confirmText`'s describe: its roots, by where the action's static values live. */
 export const ACTION_CONFIRM_TEXT_TEMPLATE_DESCRIBE =
   "a `template` slot (ADR-0032): a bare string is shorthand for `{ dialect: 'template', source }`, and text with no "
@@ -200,7 +174,7 @@ export const ACTION_CONFIRM_TEXT_TEMPLATE_DESCRIBE =
   + 'is an object of static values — `params` (`{{ params.tier }}`); an input list binds nothing, since its values '
   + `are collected after the confirmation. ${GRAMMAR} Example: 'Delete {{ record.name }}?'. A hole over any other `
   + 'root, a `${…}` or single-brace `{x}` token (each named with its `{{ }}` spelling), a hole holding logic or an '
-  + `unknown formatter, and a blank sentence are named ${DOORS}${transition('record')}`;
+  + `unknown formatter, and a blank sentence are named ${DOORS}`;
 
 /** `successMessage`'s describe. */
 export const ACTION_SUCCESS_MESSAGE_TEMPLATE_DESCRIBE =
@@ -209,7 +183,7 @@ export const ACTION_SUCCESS_MESSAGE_TEMPLATE_DESCRIBE =
   + 'the action\'s handler answered (`{{ result.email }}`; for an `api` or `script` action the server response), and '
   + `\`record\`, the record the action ran against. ${GRAMMAR} Example: 'Invitation sent to {{ result.email }}'. A `
   + 'hole over any other root, a `${…}` or single-brace `{x}` token (each named with its `{{ }}` spelling), a hole '
-  + `holding logic or an unknown formatter, and a blank sentence are named ${DOORS}${transition('result')}`;
+  + `holding logic or an unknown formatter, and a blank sentence are named ${DOORS}`;
 
 /** `errorMessage`'s describe: a slot that fills no hole. */
 export const ACTION_ERROR_MESSAGE_TEMPLATE_DESCRIBE =

@@ -242,3 +242,44 @@ export async function seedHookUserGrants(api: unknown): Promise<unknown> {
   if (!seedable || typeof seedable[SEED_USER_GRANTS] !== 'function') return api;
   return seedable[SEED_USER_GRANTS]();
 }
+
+/**
+ * [#25653] The key the engine's `ScopedContext` derives an APP-AUTHORED hook's
+ * api under: the api a hook bound through the hook binder (`bindHooksToEngine`,
+ * the one door metadata hooks come through) is handed, whatever its `runAs`.
+ *
+ * "App-authored" is the line the engine already draws for `skipAutomations`:
+ * a hook bound through the binder carries a metadata binding (`meta`) and is an
+ * automation; a hook registered in code with `engine.registerHook` and no
+ * `meta` (audit, security, every plugin's own hook) is platform code. The binder
+ * says so to the wrapper (`WrapDeclarativeOptions.appAuthored`), and the wrapper
+ * derives through this key.
+ *
+ * The derived api carries app-automation provenance in two places the refusal
+ * of identity-assignment writes (plugin-security) reads:
+ *  - an inherited system context with no `flowRunId` and no mark of its own
+ *    gets the `'hook'` mark (`@objectstack/core`): a hook that declares no
+ *    `runAs` and fires on a platform system write runs elevated, and that
+ *    elevation is the hook's;
+ *  - its `sudo()`, on it and on every api derived from it (`transaction`,
+ *    `withRunAs`), marks the elevation it makes.
+ *
+ * A symbol, and ⛔ not re-exported from the package entry, for the reason
+ * {@link SEED_USER_GRANTS} gives.
+ */
+export const APP_AUTHORED_HOOK_API: unique symbol = Symbol('objectstack.objectql.appAuthoredHookApi');
+
+interface AppAuthoredDerivableApi {
+  [APP_AUTHORED_HOOK_API](): IScopedContext;
+}
+
+/**
+ * Derive the api an app-authored hook runs with ({@link APP_AUTHORED_HOOK_API}).
+ * An api that cannot derive one (a hook context assembled by hand) is returned
+ * as is.
+ */
+export function deriveAppAuthoredHookApi(api: unknown): unknown {
+  const derivable = api as Partial<AppAuthoredDerivableApi> | undefined;
+  if (!derivable || typeof derivable[APP_AUTHORED_HOOK_API] !== 'function') return api;
+  return derivable[APP_AUTHORED_HOOK_API]();
+}

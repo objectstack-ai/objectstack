@@ -488,7 +488,7 @@ orthogonal to both, and no cell here can carry it; it is written out in
 | Organization-axis red lines (ADR-0105 D6) | ✓ | ✓ | ✓ | — |
 | Declared enforcement that cannot run, **declared on the object being written** — a validation rule's regex / JSON Schema (#4762) and its `format` names (#5178) | ✓ | ✓ | ✓ | ✓ᵒ |
 | Declared enforcement that cannot run, **declared on another collection** — sharing-rule conditions (#4698) | ✓ | ✓ | ✓ | — |
-| Row-level-security predicates (#4983) — a permission set's policies, an object's `defaultRowScope` and a membership key's `filter`; at the save door also a membership key nothing owns (#25234) | ✓ | ✓ | ✓ | ✓ᵖᵉᵒ |
+| Row-level-security predicates (#4983) — a permission set's policies, an object's `defaultRowScope`, a membership key's `filter` and a field permission entry's `when` (#25866); at the save door also a membership key nothing owns (#25234) | ✓ | ✓ | ✓ | ✓ᵖᵉᵒ |
 | Membership key declarations — `userField` / `valueField` columns, one key on one object, a key the registered resolver also owns (save door only) (#25234) | ✓ | ✓ | ✓ | ✓ᵒ |
 | Platform-schedule `create_record` organization (#6285) | — | — | — | ✓ᶠ |
 | Public-form anonymous intake on this deployment's tenancy posture — advisory only (#21476) | — | — | — | ✓ᵛ |

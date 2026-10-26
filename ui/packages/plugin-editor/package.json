@@ -39,7 +39,8 @@
     "@monaco-editor/react": "^4.7.0",
     "@object-ui/components": "workspace:*",
     "@object-ui/core": "workspace:*",
-    "@object-ui/types": "workspace:*"
+    "@object-ui/types": "workspace:*",
+    "monaco-editor": "^0.55.1"
   },
   "peerDependencies": {
     "react": "^19.0.0",
