@@ -238,12 +238,13 @@ describe('client-grouped: each group\'s order value is folded from its rows (obj
   });
 
   it('a numeric order value arriving as a numeric string orders as the number', () => {
+    // As text the values read '12' < '3.10' < '3.9', and the labels read a, b, c.
     const rows = [
-      { id: 1, bucket: 'a', amount: '3.10' },
+      { id: 1, bucket: 'c', amount: '3.10' },
       { id: 2, bucket: 'b', amount: '3.9' },
-      { id: 3, bucket: 'c', amount: '12' },
+      { id: 3, bucket: 'a', amount: '12' },
     ];
-    expect(groupLabelsOf({ fields: [{ field: 'bucket', orderBy: 'amount' }] }, rows)).toEqual(['a', 'b', 'c']);
+    expect(groupLabelsOf({ fields: [{ field: 'bucket', orderBy: 'amount' }] }, rows)).toEqual(['c', 'b', 'a']);
   });
 
   it('CONTROL — no `orderBy`: label order, exactly as before', () => {
