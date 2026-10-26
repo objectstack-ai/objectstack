@@ -25,6 +25,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
+import type { WithoutCatchall } from './zod-catchall-type';
 import {
   ObjectGridSchema,
   ObjectMapSchema,
@@ -53,9 +54,13 @@ export type _GanttSortIsArrayOnly = Expect<
   Equal< NonNullable< TsObjectGanttSchema['sort'] >, SortConfig[] >
 >;
 
-/** And the mirror's AUTHORING face agrees with the interface, key for key. */
+/**
+ * And the mirror's AUTHORING face agrees with the interface, key for key — read
+ * without the `.passthrough()` catchall `SortConfigSchema` carries since
+ * objectstack#25923 (`./zod-catchall-type`), which refuses nothing.
+ */
 export type _MirrorGridFaceMatches = Expect<
-  Equal< NonNullable< z.input< typeof ObjectGridSchema >['sort'] >, SortConfig[] >
+  Equal< WithoutCatchall< NonNullable< z.input< typeof ObjectGridSchema >['sort'] > >, SortConfig[] >
 >;
 
 /* ── Runtime: the mirrors refuse the clause and accept the array ─────────── */

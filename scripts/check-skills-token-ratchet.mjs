@@ -680,6 +680,47 @@ export const CEILINGS = new Map([
   ['skills/objectstack-platform/references/operations.md', 3125],
   ['skills/objectstack-platform/references/plugin-development.md', 3137],
   ['skills/objectstack-upgrade/references/examples-upgrade.md', 1197],
+
+  // ── 2026-10-26 the objectui bundle joins the catalog — decision C, #25832 ──
+  // The maintainer ruled (decision C, 2026-10-25, recorded as item 17d of the
+  // cutover card #25752) that objectui's published skill bundle moves from
+  // `ui/skills/objectui` into this catalog, so one `@objectstack/skills` package
+  // serves both products. The 27 files arrived from the objectui repository,
+  // where they shipped unpriced by this gate. Each row is an INITIAL
+  // measurement of the moved file on the PR that moves it, after that PR's own
+  // edits (the reserved-word rewrite, the `visibleWhen` key, the stamped
+  // `metadata.version`, whose line is not priced), pinned AT it — zero
+  // headroom, on the same terms as the #12392 extension and the evals rows.
+  // No existing row moves. Adding the rows is the pricing act the header
+  // reserves to the maintainer; the PR that adds them is Tier H and lands only
+  // on the maintainer's approval, which is that word.
+  ['skills/objectui/README.md', 735],
+  ['skills/objectui/SKILL.md', 1852],
+  ['skills/objectui/evals/app-composition.json', 810],
+  ['skills/objectui/evals/auth-permissions.json', 366],
+  ['skills/objectui/evals/data-integration.json', 471],
+  ['skills/objectui/evals/i18n.json', 439],
+  ['skills/objectui/evals/mobile.json', 452],
+  ['skills/objectui/evals/page-builder.json', 560],
+  ['skills/objectui/evals/plugin-development.json', 492],
+  ['skills/objectui/evals/project-setup.json', 786],
+  ['skills/objectui/evals/protocol.json', 761],
+  ['skills/objectui/evals/schema-expressions.json', 536],
+  ['skills/objectui/evals/testing.json', 466],
+  ['skills/objectui/guides/app-composition.md', 1079],
+  ['skills/objectui/guides/architecture.md', 1045],
+  ['skills/objectui/guides/auth-permissions.md', 3866],
+  ['skills/objectui/guides/data-integration.md', 4451],
+  ['skills/objectui/guides/i18n.md', 1413],
+  ['skills/objectui/guides/mobile.md', 1349],
+  ['skills/objectui/guides/page-builder.md', 3411],
+  ['skills/objectui/guides/plugin-development.md', 4184],
+  ['skills/objectui/guides/project-setup.md', 2727],
+  ['skills/objectui/guides/schema-expressions.md', 6571],
+  ['skills/objectui/guides/testing.md', 3101],
+  ['skills/objectui/rules/composition.md', 1624],
+  ['skills/objectui/rules/protocol.md', 4368],
+  ['skills/objectui/rules/styling.md', 2699],
 ]);
 
 /**

@@ -161,13 +161,15 @@ describe('objectui#7694 — when BOTH spellings are written the document is refu
     if (r.success) expect(r.data).toEqual({ name: 'r', type: 'line' });
   });
 
-  it('CONTROL — a truly undeclared key is STILL stripped in silence: the object is non-strict, which is why the arm exists', () => {
+  it('CONTROL — a truly undeclared key is STILL accepted: the object is non-strict, which is why the arm exists', () => {
     // The deletion-not-chosen. This is what `chartType` looked like on the
     // base, and what it would look like again if someone "simplified" the arm
-    // away. `chart-series-keys-7546.test.ts` (e) pins the same fact.
+    // away. `chart-series-keys-7546.test.ts` (e) pins the same fact. It was
+    // stripped while the mirror was strip mode; since objectstack#25923 the
+    // mirror is `.passthrough()` and the key is kept.
     const r = ChartDataSeriesSchema.safeParse({ name: 'r', notAKeyAtAll: 'x' });
     expect(r.success).toBe(true);
-    if (r.success) expect(r.data).not.toHaveProperty('notAKeyAtAll');
+    if (r.success) expect(r.data).toHaveProperty('notAKeyAtAll', 'x');
   });
 });
 

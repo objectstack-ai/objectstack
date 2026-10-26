@@ -55,6 +55,7 @@
 import { DATASET_DURATION_UNIT_SECONDS, type DatasetDurationUnit } from '@objectstack/spec/ui';
 import type { DurationMeasureSpec } from './strategies/types.js';
 import type { AnalyticsSqlDialect } from './text-match-sql.js';
+import { scopedMeasureKey } from './scoped-measure-key.js';
 
 /**
  * The key in a compiled dataset's `durations` (the dataset scope's
@@ -63,19 +64,15 @@ import type { AnalyticsSqlDialect } from './text-match-sql.js';
  * the discovery surface lists it under (`AnalyticsService.getMeta`), when the
  * caller passes the cube's name. Own keys only, so a measure named after an
  * `Object.prototype` member (`constructor`) is never read as a duration it is
- * not.
+ * not. The rule is {@link scopedMeasureKey}, the one every reader of a
+ * dataset scope's per-measure records shares (#25906).
  */
 export function durationMeasureKey(
   durations: Readonly<Record<string, DurationMeasureSpec>> | undefined,
   name: string,
   cubeName?: string,
 ): string | undefined {
-  if (!durations || typeof name !== 'string') return undefined;
-  const own = (key: string) => Object.prototype.hasOwnProperty.call(durations, key);
-  if (own(name)) return name;
-  const prefix = cubeName ? `${cubeName}.` : undefined;
-  if (prefix && name.startsWith(prefix) && own(name.slice(prefix.length))) return name.slice(prefix.length);
-  return undefined;
+  return scopedMeasureKey(durations, name, cubeName);
 }
 
 /** The duration measure {@link durationMeasureKey} finds for `name`, or `undefined`. The one lookup every reader uses. */

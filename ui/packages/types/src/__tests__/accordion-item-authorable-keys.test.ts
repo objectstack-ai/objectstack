@@ -69,10 +69,13 @@ describe('AccordionItem: `icon` is retired from the authoring surface (objectui#
     expect(item.value).toBe('section-1');
   });
 
-  it('drops `icon` when parsing through the Zod mirror', () => {
-    // `z.object` is non-strict, so an authored `icon` is not an error — it is
-    // simply not part of the declared surface any more, and parse output is
-    // the observable statement of what that surface contains.
+  it('keeps `icon` as an undeclared key when parsing through the Zod mirror', () => {
+    // The mirror is non-strict, so an authored `icon` is not an error — it is
+    // simply not part of the declared surface any more. It was DROPPED from the
+    // parse output while the mirror was strip mode; since objectstack#25923 the
+    // mirror is `.passthrough()`, so it rides through undeclared (the strict
+    // authoring face refuses it by name). The shape test below is the statement
+    // of what the declared surface contains.
     const parsed = AccordionItemSchema.parse({
       value: 'section-1',
       title: 'Section 1',
@@ -84,8 +87,8 @@ describe('AccordionItem: `icon` is retired from the authoring surface (objectui#
       value: 'section-1',
       title: 'Section 1',
       content: 'Content for section 1',
+      icon: 'chevron',
     });
-    expect('icon' in parsed).toBe(false);
   });
 
   it('keeps `icon` out of the Zod schema shape', () => {

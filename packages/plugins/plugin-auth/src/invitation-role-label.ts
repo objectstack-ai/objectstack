@@ -39,6 +39,18 @@ import { EMAIL_TEMPLATE_FLOOR_LOCALE } from '@objectstack/spec/system';
  * dropped, never an empty string — and one `warn` names it. An i18n read that
  * throws degrades to the authored (English) labels with one `warn`; it never
  * blocks the invitation.
+ *
+ * ## A label with no translation in the mail's locale is said so once, too
+ *
+ * The read can also answer without throwing and still leave the mail in two
+ * languages: no i18n service at all, a service holding no bundle for the
+ * mail's locale, or one whose bundle has no entry for the option — each one
+ * hands back the authored label (`Member`), or the English fallback-chain
+ * entry that repeats it, inside a Chinese sentence. When the mail's locale is
+ * not the authored labels' own language ({@link AUTHORED_LABEL_LANGUAGE}) and
+ * a token's label is still its authored text, one `warn` names the tokens and
+ * the locale, the same way the thrown read does. The mail still goes; the
+ * deployment learns that its i18n service never reached this locale's labels.
  */
 export async function invitationRoleLabel(
   role: string,
@@ -68,10 +80,12 @@ export async function invitationRoleLabel(
       if (typeof label === 'string' && label.length > 0) labels.set(String(option.value), label);
     }
   };
+  let readFailed = false;
+  let i18nService: unknown;
   try {
     const [translated] = (await translateMetaList(
       {
-        resolveI18nService: async () => deps.getI18n?.(),
+        resolveI18nService: async () => (i18nService = deps.getI18n?.()),
         // A packaged base only decides between a catalog and an OVERRIDDEN
         // object scalar; option labels never consult it.
         resolveProtocol: async () => undefined,
@@ -82,6 +96,7 @@ export async function invitationRoleLabel(
     )) as Array<{ fields?: { role?: { options?: unknown } } }>;
     collect(translated?.fields?.role?.options);
   } catch (err) {
+    readFailed = true;
     deps.warn?.(
       '[AuthManager] invitation mail: the membership role labels could not be read from the i18n service; ' +
         'the mail names the authored (English) labels instead',
@@ -98,6 +113,23 @@ export async function invitationRoleLabel(
       { role, locale: mailLocale },
     );
   }
+  if (!readFailed && !isAuthoredLabelLanguage(mailLocale)) {
+    const authoredLabels = new Map<string, string>();
+    for (const option of (authored?.options ?? []) as Array<{ value?: unknown; label?: unknown }>) {
+      if (typeof option?.label === 'string') authoredLabels.set(String(option.value), option.label);
+    }
+    const untranslated = tokens.filter((token) => labels.has(token) && labels.get(token) === authoredLabels.get(token));
+    if (untranslated.length > 0) {
+      deps.warn?.(
+        `[AuthManager] invitation mail: no '${mailLocale}' label was found for the membership role(s) ` +
+          `${untranslated.map((t) => `'${t}'`).join(', ')}; the mail names the authored (English) label instead. ` +
+          'The i18n service served no translation of sys_member.role for this locale: check that it holds the ' +
+          'platform translation bundles and that its locales (i18n.supportedLocales, when declared) name this ' +
+          'locale as the bundles spell it (zh-CN, not zh)',
+        { role, locale: mailLocale, i18nService: i18nService !== undefined },
+      );
+    }
+  }
   const named = tokens.map((token) => labels.get(token) ?? token);
   if (named.length === 1) return named[0]!;
   // `Intl.ListFormat` is ES2021; this package compiles against the ES2020 lib,
@@ -109,6 +141,19 @@ export async function invitationRoleLabel(
     // A tag `Intl` refuses (a tenant overlay's own spelling) still gets a list.
   }
   return named.join(', ');
+}
+
+/**
+ * The language `sys_member.role`'s authored option labels are written in:
+ * `platform-objects` authors its metadata in English, and its `en` bundle is
+ * regenerated from that source. A mail in this language reads the authored
+ * label as its own text, so only a mail in any OTHER language can be left
+ * untranslated.
+ */
+const AUTHORED_LABEL_LANGUAGE = 'en';
+
+function isAuthoredLabelLanguage(locale: string): boolean {
+  return locale.trim().toLowerCase().split(/[-_]/)[0] === AUTHORED_LABEL_LANGUAGE;
 }
 
 type IntlListFormatConstructor = new (

@@ -3791,9 +3791,10 @@ jobs:
           pnpm --dir ui run check:bash32-floor
 
       # ── objectui's Repo Gates (objectstack#25880) ────────────────────────
-      # The nineteen gates of `ui/.github/workflows/repo-gates.yml`, which
-      # GitHub stopped running when the tree moved under `ui/` (it reads only
-      # this repository's `.github/workflows/`). They judge what objectui ships
+      # The gates of objectui's `repo-gates.yml`, which GitHub stopped running
+      # when the tree moved under `ui/` (it reads only this repository's
+      # `.github/workflows/`), and which objectstack#25712 deleted with the
+      # rest of `ui/.github/workflows/`. They judge what objectui ships
       # — `ui/content/docs/**`, `ui/skills/**`, the package READMEs and the
       # documented component types — so the change most likely to trip them is
       # a docs-only or skills-only PR, which the `filter` job's `ui` globs
@@ -3808,14 +3809,13 @@ jobs:
       # `.objectstack-pin` restore / build / save (the merged tree builds
       # `@objectstack/*` from the workspace, see the header above
       # `type-check-ui`) and the turbo-cache report / prune bookkeeping (this
-      # job's own restore and save serve the build below).
+      # job's own restore and save serve the build below). Retired since: the
+      # Action Ref Convention scan, which judged objectui's own workflows and
+      # went with them (objectstack#25712); a repository-wide action-ref
+      # convention needs a home that no `ui` path filter skips (sub-issue 4).
       - name: Control Byte Scan — Scan tracked text files for raw control bytes
         if: ${{ !cancelled() }}
         run: pnpm --dir ui run check:control-bytes
-
-      - name: Action Ref Convention — Check action reference spelling against the declared convention
-        if: ${{ !cancelled() }}
-        run: pnpm --dir ui run check:action-ref-convention
 
       # Self-test first: a scan whose recogniser is broken reports a clean
       # tree. It derives its population from this repository's workflows, so

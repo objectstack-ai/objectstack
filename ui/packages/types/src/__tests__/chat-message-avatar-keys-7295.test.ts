@@ -280,15 +280,15 @@ describe('objectui#7295 — the control key stays undeclared, so nothing outside
     expect(shapeKeys()).not.toContain(CONTROL_KEY);
   });
 
-  it('the SAME wrong-typed value under the control key is still admitted-and-STRIPPED', () => {
+  it('the SAME wrong-typed value under the control key is still admitted', () => {
     // The before-state of `avatar`, kept on purpose on a key that is not read:
-    // the mirror is strip mode, so an undeclared key of any type parses green
-    // and does NOT survive. This is the proof the mirror's unknown-key policy is
-    // byte-for-byte what it was — neither `.passthrough()` nor `.strict()` was
-    // reached for on the way past.
+    // an undeclared key of any type parses green. It did NOT survive while the
+    // mirror was strip mode (this card reached for neither `.passthrough()` nor
+    // `.strict()` on the way past); objectstack#25923 made every mirror object
+    // `.passthrough()`, so it survives now — and is still not refused.
     const r = ChatMessageSchema.safeParse({ ...MESSAGE, [CONTROL_KEY]: 42 });
     expect(r.success).toBe(true);
-    if (r.success) expect(CONTROL_KEY in (r.data as Record<string, unknown>)).toBe(false);
+    if (r.success) expect((r.data as Record<string, unknown>)[CONTROL_KEY]).toBe(42);
   });
 
   it('the type-level bindings above are referenced, so lint keeps them', () => {

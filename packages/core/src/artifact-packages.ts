@@ -182,6 +182,24 @@ export function artifactPackageId(manifest: unknown): string | undefined {
 }
 
 /**
+ * The package ids a manifest declares in `manifest.dependencies` — the record
+ * `{ [packageId]: versionRange }` (`ManifestSchema.dependencies`) — in
+ * declaration order.
+ *
+ * Read by the seams that act on the declaration without judging its ranges:
+ * the install gate's dependency-declared co-owners (ADR-0141 D5) and the
+ * hydrate order (D5). Anything that is not a plain record — absent, `null`, an
+ * array (the marketplace `PackageDependencySchema` shape) — declares nothing
+ * here; judging a malformed declaration is the install check's job (D2), not
+ * this reader's.
+ */
+export function declaredDependencyIds(manifest: unknown): string[] {
+  const declared = (manifest as { dependencies?: unknown } | null | undefined)?.dependencies;
+  if (declared === null || typeof declared !== 'object' || Array.isArray(declared)) return [];
+  return Object.keys(declared);
+}
+
+/**
  * One package to register, as {@link resolveArtifactPackageEntries} answers it:
  * the body, and the origin its artifact entry stated for it.
  */
