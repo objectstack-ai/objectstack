@@ -3,7 +3,7 @@
 /**
  * #25976 — every door that starts or resumes a run refuses non-object input
  * the same way, through the one shared shape check (`objectValueFailure`,
- * `domains/object-value-shape.ts`).
+ * `object-value-shape.ts`).
  *
  * Two neighbouring doors still coerced a mis-shaped value silently after the
  * trigger door's `params` was closed (#25821):

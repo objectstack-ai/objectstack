@@ -73,7 +73,7 @@ import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.
 import { readDispatchedBody } from '../deferred-request-body.js';
 // [#9416, #25821, #25976] The one value-shape check every door that starts or
 // resumes a run asks — shared with the action door, so it lives beside both.
-import { objectValueFailure } from './object-value-shape.js';
+import { objectValueFailure } from '../object-value-shape.js';
 // [#20552] The per-type credential redaction every metadata read exit applies,
 // and its write-path inverse — reused, never restated, for the definitions this
 // domain serves and overwrites.

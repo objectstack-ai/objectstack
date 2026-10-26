@@ -15,7 +15,9 @@
  *
  * It lived inside `domains/automation.ts` while only the two flow doors asked
  * it; the action door asking too is why it lives here, in a module both domains
- * import, rather than a copy over there.
+ * import, rather than a copy over there — beside `validation-failure.ts`, whose
+ * constructor carries the entry it returns. It answers nothing itself, so it is
+ * not a dispatcher domain.
  *
  * Returns the located `fields[]` entry (ADR-0114 `invalid_type`) for a value
  * that is not an object, `undefined` otherwise. `undefined` counts as ABSENT,

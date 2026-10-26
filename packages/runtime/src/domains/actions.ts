@@ -74,7 +74,7 @@ import { actorUserFromExecutionContext, resolveActorDisplayName } from '../secur
 import { validationFailure, validationFailureDetails, VALIDATION_FAILED_STATUS } from '../validation-failure.js';
 // [#25976] The one value-shape check the run doors share — the trigger and
 // resume doors ask it of their input too.
-import { objectValueFailure } from './object-value-shape.js';
+import { objectValueFailure } from '../object-value-shape.js';
 import { buildApiError } from '../error-envelope.js';
 // [ADR-0126 §5] The shared activation write-authority gates — the same two
 // tiers `/automation`'s toggle door passes, one implementation.
