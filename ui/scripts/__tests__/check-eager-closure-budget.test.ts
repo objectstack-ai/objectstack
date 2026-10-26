@@ -833,9 +833,10 @@ describe('ceiling sensitivity, judged live (objectui#5924)', () => {
     // 3160.1 when the built-in designers left it, ruling 6070754914,
     // objectui#12030 down to 3049.3 on objectstack#22044, the payback of the
     // objectui#11717 raise, objectui#13410 down to 3000.1 when the chat UI left
-    // the first load) — a rendering derived in the test would agree with the
-    // renderer by construction and pin nothing.
-    expect(result.message).toContain('3000.1');
+    // the first load, objectstack#25925 down to 1935.6 after the spec's shared
+    // chunks and the move into objectstack) — a rendering derived in the test
+    // would agree with the renderer by construction and pin nothing.
+    expect(result.message).toContain('1935.6');
   });
 
   it('is exactly one regression wide, from either side of the line', () => {
@@ -1672,7 +1673,7 @@ describe('main', () => {
     // about the FIXTURE while the gate under test behaved correctly. The number
     // this case is actually about is "the report's chunk count, echoed".
     expect(outputs.closure_chunks).toBe(String(fixture.files.length));
-    expect(outputs.closure_gzip_kb).toBe('3000.1');
+    expect(outputs.closure_gzip_kb).toBe('1935.6');
   });
 
   it('exits 1 — a verdict about the BUNDLE — when over budget', () => {

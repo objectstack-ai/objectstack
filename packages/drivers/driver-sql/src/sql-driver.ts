@@ -123,7 +123,6 @@ import {
   ceremonyOwnedDropFinding,
   isCeremonyOwnedColumnDrop,
   hashShadowColumnFor,
-  isHashShadowCarrier,
   parseHashShadowKeyParts,
   indexedKeyColumns,
   isIndexDriftOp,
@@ -161,8 +160,9 @@ import { withUpsertConflictClause } from './upsert-conflict-clause.js';
 // [#25521 cut 1] The catalog-introspection helpers (`introspectColumnOrder`,
 // `introspectColumns` and the foreign-key, primary-key and unique-constraint reads),
 // [cut 4] `introspectSchema`, the whole-schema read built on them, and [cut 5]
-// `introspectIndexes`, the per-table index read schema sync is built on; the methods
-// of the same names below hand each body the members it reads (`IntrospectionHost`).
+// `introspectIndexes`, the per-table index read schema sync is built on, and [cut 7]
+// `resolveHashShadowKeys`, its MySQL hash-shadow enrichment; the methods of the
+// same names below hand each body the members it reads (`IntrospectionHost`).
 import {
   introspectColumnOrder,
   introspectColumns,
@@ -171,6 +171,7 @@ import {
   introspectPrimaryKeys,
   introspectSchema,
   introspectUniqueConstraints,
+  resolveHashShadowKeys,
 } from './sql-driver-introspection.js';
 // [#25521 cut 2] The raw-execution path (`execute`, its refusal terminal
 // `rawStatementFault`, and `noteRuntimeIndexDdl`, which keeps the ledger of the
@@ -15131,35 +15132,16 @@ export class SqlDriver implements IDataDriver {
    * rather than proposing a rebuild it cannot reason about. The degraded
    * outcome is a missing finding, never a dropped constraint.
    */
-  protected async resolveHashShadowKeys(
+  protected resolveHashShadowKeys(
     tableName: string,
     indexes: PhysicalIndex[],
   ): Promise<void> {
-    const carriers = indexes.filter((i) => isHashShadowCarrier(i));
-    if (carriers.length === 0) return;
-    try {
-      const rows: Array<Record<string, unknown>> = await this.knex
-        .select('COLUMN_NAME', 'GENERATION_EXPRESSION')
-        .from('information_schema.COLUMNS')
-        .where({ TABLE_SCHEMA: this.knex.client.database(), TABLE_NAME: tableName })
-        .whereIn(
-          'COLUMN_NAME',
-          carriers.map((i) => i.columns[0]!),
-        );
-      const exprByColumn = new Map<string, string>();
-      for (const r of rows) {
-        const column = String(r.COLUMN_NAME ?? r.column_name ?? '');
-        if (column) {
-          exprByColumn.set(column, String(r.GENERATION_EXPRESSION ?? r.generation_expression ?? ''));
-        }
-      }
-      for (const i of carriers) {
-        const parts = parseHashShadowKeyParts(exprByColumn.get(i.columns[0]!) ?? '');
-        if (parts.length > 0) i.shadowKey = parts;
-      }
-    } catch {
-      /* see the head note: an unresolved carrier degrades to "no finding". */
-    }
+    // [#25521 cut 7] The body moved to `sql-driver-introspection.ts` (see `IntrospectionHost`).
+    const readKnex = () => this.knex;
+    const host: ThisParameterType<typeof resolveHashShadowKeys> = {
+      get knex() { return readKnex(); },
+    };
+    return resolveHashShadowKeys.call(host, tableName, indexes);
   }
 
   /**
