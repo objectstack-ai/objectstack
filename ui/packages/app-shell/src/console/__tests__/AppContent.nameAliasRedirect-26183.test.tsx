@@ -27,7 +27,7 @@
 
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import React from 'react';
+import React, { useEffect } from 'react';
 import { render, cleanup, waitFor, screen } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation, useNavigationType } from 'react-router-dom';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
@@ -123,22 +123,27 @@ const seen: { pathname?: string; search?: string; hash?: string; state?: unknown
 function LocationProbe() {
   const location = useLocation();
   const type = useNavigationType();
-  seen.pathname = location.pathname;
-  seen.search = location.search;
-  seen.hash = location.hash;
-  seen.state = location.state;
-  seen.type = type;
+  useEffect(() => {
+    Object.assign(seen, {
+      pathname: location.pathname,
+      search: location.search,
+      hash: location.hash,
+      state: location.state,
+      type,
+    });
+  }, [location, type]);
   return null;
 }
 
 afterEach(cleanup);
 
 /** Mount the console's app router at `entry`; the object list page renders. */
-async function visit(entry: string | { pathname: string; search?: string; hash?: string; state?: unknown }): Promise<void> {
+type Entry = NonNullable<React.ComponentProps<typeof MemoryRouter>['initialEntries']>[number];
+async function visit(entry: Entry): Promise<void> {
   const i18n = createI18n({ defaultLanguage: 'en', detectBrowserLanguage: false });
   render(
     <I18nProvider instance={i18n}>
-      <MemoryRouter initialEntries={[entry as any]}>
+      <MemoryRouter initialEntries={[entry]}>
         <Routes>
           <Route path="/apps/:appName/*" element={<AppContent />} />
         </Routes>
