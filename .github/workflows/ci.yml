@@ -137,18 +137,24 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      # On merge_group — and on the `schedule` / `workflow_dispatch` full runs
-      # (#16467) — everything counts as changed: dorny/paths-filter resolves a
-      # diff only on `pull_request` and `push`, and each of these three events
-      # is a place a skipped job can never be the right answer (the queue build
-      # is the last validation before main; the hourly run IS the full battery).
-      # A skipped step's output is the empty string (falsy), so `|| 'true'`
-      # supplies their value without touching PR/push behavior.
-      docs: ${{ steps.changes.outputs.docs || 'true' }}
-      core: ${{ steps.changes.outputs.core || 'true' }}
+      # On the `schedule` / `workflow_dispatch` full runs (#16467) everything
+      # counts as changed: dorny/paths-filter is skipped there (no diff to
+      # resolve), a skipped step's output is the empty string (falsy), and
+      # `|| 'true'` supplies the value without touching PR/push behavior.
+      #
+      # On merge_group the step RUNS (the diff is the queue base_sha against
+      # the group head, see the step below), but only the three ui outputs
+      # read it. `docs`, `core` and `crosspkg` stay 'true' there through the
+      # `github.event_name != 'merge_group' &&` guard: the queue build is the
+      # last validation before main, and those jobs run on every entry, as
+      # they did before the step ran on this event. On any other event the
+      # guard is true and the expression reads exactly as `<output> ||
+      # 'true'` did.
+      docs: ${{ github.event_name != 'merge_group' && steps.changes.outputs.docs || 'true' }}
+      core: ${{ github.event_name != 'merge_group' && steps.changes.outputs.core || 'true' }}
       # Gates the `test` job ONLY, ORed with `core` — see the `crosspkg`
       # filter below and the `test` job's `if:` (#9829, #10015).
-      crosspkg: ${{ steps.changes.outputs.crosspkg || 'true' }}
+      crosspkg: ${{ github.event_name != 'merge_group' && steps.changes.outputs.crosspkg || 'true' }}
       # The objectui tree under `ui/` (objectstack#25677). Three outputs, read
       # together by the four `* UI` jobs at the bottom of this file:
       #   ui            — a path under ui/, or a root file the ui jobs build
@@ -158,13 +164,21 @@ jobs:
       #                   UI) and built (Build & E2E UI) against the new shape in
       #                   the PR that moves it;
       #   ui_tree       — `ui/package.json` exists in this checkout.
+      # On merge_group `ui` and `ui_consumers` come from the queue diff
+      # (objectstack#25867): an entry whose merged diff against
+      # `merge_group.base_sha` touches no ui path and none of the seven
+      # packages skips the four ui jobs, exactly as the same diff does on its
+      # PR head; an entry that touches one runs them. If the step fails (the
+      # base cannot be fetched, the diff errors), it is `continue-on-error`
+      # there, its outputs are empty and `|| 'true'` runs every ui job.
+      #
       # `ui_tree` is what keeps the ui jobs SKIPPED, not failed, on a tree that
       # does not carry ui/ yet: `ui` and `ui_consumers` fall back to 'true' on
-      # merge_group / schedule / dispatch (half 1 below), and on push to main a
-      # spec change sets `ui_consumers`, so neither path output alone can tell a
-      # job there is nothing to build. Its step runs on every event, so the
-      # `|| 'true'` fallback is reached only when this job died before it — and
-      # then THE FILTER CONTRACT's "run everything" is the intended reading.
+      # schedule / dispatch (half 1 below), and on push to main a spec change
+      # sets `ui_consumers`, so neither path output alone can tell a job there
+      # is nothing to build. Its step runs on every event, so the `|| 'true'`
+      # fallback is reached only when this job died before it — and then THE
+      # FILTER CONTRACT's "run everything" is the intended reading.
       ui: ${{ steps.changes.outputs.ui || 'true' }}
       ui_consumers: ${{ steps.changes.outputs.ui_consumers || 'true' }}
       ui_tree: ${{ steps.ui-tree.outputs.present || 'true' }}
@@ -216,13 +230,15 @@ jobs:
             echo 'ui/package.json is absent: every ui job skips on this run.'
           fi
 
-      # ⭐ SPELLED AS AN ALLOW-LIST, not as `!= 'merge_group'` (#16467). This
-      # action reads a diff, and the only two events that hand it one it can
-      # resolve unaided are `pull_request` (base vs head) and `push`
-      # (`event.before` vs `after`). `merge_group` was the first event with
-      # neither, and the exclusion was written as its name; `schedule` and
-      # `workflow_dispatch` are the second and third, and under the old
-      # spelling they would have RUN the action with no resolvable base.
+      # ⭐ SPELLED AS AN ALLOW-LIST, never as a deny-list (#16467). This
+      # action reads a diff, and only three events hand it one it can resolve
+      # unaided: `pull_request` (base vs head), `push` (`event.before` vs
+      # `after`) and `merge_group` (the payload's `base_sha` vs `head_sha`; at
+      # the pinned v4.0.3, src/main.ts reads both when `base` / `ref` are
+      # unset, and src/git.ts fetches the base sha at depth 1 and diffs the two
+      # trees, `base..head`). `schedule` and `workflow_dispatch` hand it
+      # neither, and under a deny-list spelling they would RUN the action with
+      # no resolvable base.
       #
       # That failure direction is the dangerous one: every filter output would
       # come back `false`, `|| 'true'` supplies nothing (the output exists and
@@ -231,9 +247,16 @@ jobs:
       # of nothing at all. An allow-list makes each new event fail toward
       # THE FILTER CONTRACT's half 1 instead: the step is skipped, its outputs
       # are the empty string, `|| 'true'` fills them in, and everything runs.
+      #
+      # `merge_group` joined the list for the ui outputs alone (#25867; the
+      # three core-side outputs above ignore the step on that event). Its
+      # `continue-on-error` is the fail-open half there: a queue build whose
+      # base cannot be fetched reads as "run every ui job", never as a red
+      # `filter` job. On pull_request and push a failure stays red, as before.
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: changes
-        if: github.event_name == 'pull_request' || github.event_name == 'push'
+        if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'merge_group'
+        continue-on-error: ${{ github.event_name == 'merge_group' }}
         with:
           filters: |
             docs:
