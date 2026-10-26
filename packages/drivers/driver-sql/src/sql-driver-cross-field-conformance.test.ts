@@ -60,6 +60,8 @@ import { DIALECT_CELLS, declareUnprovisionedCell, type DialectCell } from './liv
 import {
   CROSS_FIELD_AUTHORED_CASES,
   CROSS_FIELD_CASES,
+  CROSS_FIELD_NOW_CASES,
+  CROSS_FIELD_NOW_REFUSALS,
   CROSS_FIELD_OBJECT_FIELDS,
   CROSS_FIELD_OFFSET_CASES,
   CROSS_FIELD_OFFSET_OBJECT_FIELDS,
@@ -315,6 +317,90 @@ describe(`[#14104] driver-sql — \`addDays\` offset push-down conformance (${ce
 });
 }
 
+/**
+ * [#25808] The `{ $now: true, addDays }` anchor, on the offset fixture: the
+ * same two-path agreement the offset sweep pins, with `$now` pinned to the
+ * corpus's instant on both paths (the evaluator reads the pinned ISO string
+ * exactly as the compiler binds it), and the anchor refusal arm under the
+ * offset arm's withholding contract.
+ */
+function declareCrossFieldNowSweep(cell: DialectCell): void {
+describe(`[#25808] driver-sql — \`{ $now, addDays }\` anchor push-down conformance (${cell.label})`, () => {
+  let driver: SqlDriver;
+  let records: Array<Record<string, unknown>>;
+
+  beforeAll(async () => {
+    driver = new SqlDriver(cell.config());
+    await driver.execute(`drop table if exists ${OFFSET_TABLE}`).catch(() => {});
+    await driver.initObjects([{ name: OFFSET_TABLE, fields: CROSS_FIELD_OFFSET_OBJECT_FIELDS } as any]);
+    for (const row of CROSS_FIELD_OFFSET_ROWS) await driver.create(OFFSET_TABLE, { ...row });
+    records = (await driver.find(OFFSET_TABLE, {})) as Array<Record<string, unknown>>;
+  });
+
+  afterAll(async () => {
+    await driver?.execute(`drop table if exists ${OFFSET_TABLE}`).catch(() => {});
+    await driver?.disconnect?.();
+  });
+
+  const sqlIds = async (filter: unknown): Promise<string[]> => {
+    const rows = await driver.find(OFFSET_TABLE, {
+      fields: ['id'],
+      where: filter as FilterCondition,
+    });
+    return rows.map((r: any) => String(r.id)).sort();
+  };
+
+  const memoryIds = (filter: unknown): string[] =>
+    records
+      .filter((r) => matchesFilterCondition(r, filter as FilterCondition))
+      .map((r) => String(r.id))
+      .sort();
+
+  for (const testCase of CROSS_FIELD_NOW_CASES) {
+    it(`${testCase.name} — same rows on both paths`, async () => {
+      const expected = [...testCase.expected].sort();
+      const note = testCase.note ? `\n${testCase.note}` : '';
+      expect(memoryIds(testCase.filter), `in-memory evaluator disagreed${note}`).toEqual(expected);
+      expect(await sqlIds(testCase.filter), `SQL push-down disagreed${note}`).toEqual(expected);
+    });
+  }
+
+  describe('the anchor refusal arm (ADR-0112 envelope, operands withheld)', () => {
+    for (const refusal of CROSS_FIELD_NOW_REFUSALS) {
+      it(`${refusal.name} → 400 INVALID_FILTER`, async () => {
+        const logged: string[] = [];
+        const restore = (driver as unknown as { logger: { warn: (m: string) => void } }).logger;
+        (driver as unknown as { logger: unknown }).logger = {
+          ...restore,
+          warn: (m: string) => { logged.push(m); },
+        };
+        let error: (Error & { code?: string; status?: number }) | null = null;
+        try {
+          await sqlIds(refusal.filter);
+        } catch (e) {
+          error = e as Error & { code?: string; status?: number };
+        } finally {
+          (driver as unknown as { logger: unknown }).logger = restore;
+        }
+        expect(error, `expected a refusal${refusal.note ? `\n${refusal.note}` : ''}`).not.toBeNull();
+        expect(error!.code).toBe('INVALID_FILTER');
+        expect(error!.status).toBe(400);
+        expect(error!).not.toBeInstanceOf(TypeError);
+        expect(error!.message).not.toContain('can only bind');
+        expect(error!.message).not.toContain('[sql-driver]');
+        for (const name of CROSS_FIELD_OFFSET_OPERAND_NAMES) {
+          expect(error!.message, `caller-visible message names "${name}"`).not.toContain(name);
+        }
+        const diagnostic = logged.join('\n');
+        for (const fragment of refusal.diagnosticIncludes) {
+          expect(diagnostic, `server log lost "${fragment}"`).toContain(fragment);
+        }
+      });
+    }
+  });
+});
+}
+
 // ── The driver axis ─────────────────────────────────────────────────────────
 
 for (const cell of DIALECT_CELLS) {
@@ -328,4 +414,5 @@ for (const cell of DIALECT_CELLS) {
   }
   declareCrossFieldSweep(cell);
   declareCrossFieldOffsetSweep(cell);
+  declareCrossFieldNowSweep(cell);
 }

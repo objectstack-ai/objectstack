@@ -190,7 +190,7 @@ const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'coverage'])
  * `check-watch-hint-literal.mjs` holds that rule fleet-wide; the self-test
  * below holds the own-source half.
  */
-const ROOT_DIR_WATCH_HINTS = ['scripts/**/*.mjs', 'scripts/**/*.ts', 'scripts/**/*.sh'];
+const ROOT_DIR_WATCH_HINTS = ['scripts/**/*.mjs', 'scripts/**/*.sh'];
 
 /**
  * How far apart the method slot and the `/labels` path may sit and still be

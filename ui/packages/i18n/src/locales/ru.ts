@@ -224,6 +224,8 @@ const ru = {
     update: "Обновить",
     createSuccess: "{{object}} создан",
     updateSuccess: "{{object}} обновлён",
+    createdNamed: "{{object}} \"{{title}}\" создан",
+    updatedNamed: "{{object}} \"{{title}}\" обновлён",
     created: "Создано",
     saved: "Сохранено",
     savedNamed: "{{title}} сохранён",
@@ -2782,6 +2784,7 @@ const ru = {
     },
     shell: {
       tenantHostHint: "Вы входите в эту систему",
+      poweredBy: "Работает на ObjectStack",
     },
     layout: {
       headline: "Создавайте мощные бизнес-приложения быстрее.",
@@ -3952,7 +3955,7 @@ const ru = {
       cancel: "Отмена",
     },
     bound: {
-      title: "Подключено к ObjectStack Cloud",
+      title: "Подключено к ObjectOS Cloud",
       runtime: "Среда выполнения",
       organization: "Организация",
       approvedBy: "Подтвердил",
@@ -4075,13 +4078,13 @@ const ru = {
     install: {
       dialogTitle: "Установить {{name}}",
       dialogDescCurrent: "Установить в эту среду ({{host}}).",
-      dialogDescPicker: "Выберите среду для установки. Требуется вход в ObjectStack Cloud.",
+      dialogDescPicker: "Выберите среду для установки. Требуется вход в ObjectOS Cloud.",
       environment: "Среда",
       environmentPlaceholder: "Выбрать среду",
       includeSampleData: "Включить образцы данных",
       noEnvs: "В активной организации нет сред.",
       noPermission: "Нет прав на установку. Только владельцы и администраторы организации могут устанавливать — обратитесь к администратору вашей организации.",
-      signInFirst: "Сначала войдите в ObjectStack Cloud.",
+      signInFirst: "Сначала войдите в ObjectOS Cloud.",
       success: "Установлено. Откройте среду, чтобы увидеть новое приложение.",
       localSuccess: "v{{version}} установлено. \"{{name}}\" должно появиться в переключателе.",
       localLoadsAtRestart: "v{{version}} установлено. \"{{name}}\" загрузится при следующем перезапуске среды выполнения и до этого не появится в переключателе.",
@@ -4123,7 +4126,7 @@ const ru = {
     update: {
       dialogTitle: "Обновить {{name}}",
       dialogDescCurrent: "Обновить копию, установленную в этой среде ({{host}}).",
-      dialogDescPicker: "Выберите среду, в которой нужно обновить установленную копию. Требуется вход в ObjectStack Cloud.",
+      dialogDescPicker: "Выберите среду, в которой нужно обновить установленную копию. Требуется вход в ObjectOS Cloud.",
       majorNotice: "Это обновление основной версии (v{{fromMajor}} → v{{toMajor}}), оно может содержать несовместимые изменения.",
       releaseNotes: "Прочитать примечания к выпуску v{{version}}",
       success: "Обновлено до v{{version}}.",

@@ -21,7 +21,8 @@ export interface RealtimeServicePluginOptions {
  * Registers a realtime pub/sub service with the kernel during the init phase.
  * Currently supports in-memory pub/sub for single-process environments.
  *
- * **v1 deployment contract (launch-readiness.md P0-5): single-instance only.**
+ * **v1 deployment contract (launch-readiness P0-5): single-instance only.** The
+ * contract's source is `docs/launch-readiness.md` as of commit df8aac41.
  * The in-memory adapter is process-local — events published on node A are not
  * delivered to subscribers on node B. A default `maxSubscriptions` safety cap is
  * enforced (see {@link InMemoryRealtimeAdapter}) so the subscription map can't

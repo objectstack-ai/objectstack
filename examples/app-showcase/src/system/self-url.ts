@@ -23,9 +23,12 @@
  * 2. `OS_PORT`, then its deprecated alias `PORT` — **the same names, in the
  *    same order, that the CLI itself reads to choose the listen port**
  *    (`packages/cli/src/commands/serve.ts`: `readEnvWithDeprecation('OS_PORT',
- *    'PORT') ?? '3000'`). Following the CLI's own inputs is what makes the
- *    isolated-port boot self-ping correctly with no extra configuration — the
- *    exact case #7538 was filed for.
+ *    'PORT') ?? '3000'`). A `--port` flag reaches these names too: `os dev`,
+ *    `os serve` and `os start` export it as both before the config loads
+ *    (`portFlagEnv` in `packages/cli/src/utils/port-contract.ts`, #26243).
+ *    Following the CLI's own inputs is what makes the isolated-port boot
+ *    self-ping correctly with no extra configuration — the exact case #7538
+ *    was filed for.
  * 3. `http://127.0.0.1:3000` — the historical literal, unchanged, so a plain
  *    `pnpm dev` behaves exactly as before.
  *

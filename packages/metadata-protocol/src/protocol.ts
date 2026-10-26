@@ -27,6 +27,7 @@ import { stripUnauthorableProperties } from './unauthorable-nodes.js';
 // admits anything. See the module header for the predicate and its controls.
 import { markErasedAuthoringInput } from './erased-authoring-mark.js';
 import {
+    HIERARCHY_SCOPE_RESOLVER_SERVICE,
     SDUI_MANIFEST_SERVICE,
     isUsableSduiManifest,
     stampHtmlPageRequires,
@@ -397,6 +398,8 @@ import { applySeedBodies, collectBatchPendingDeclarations } from './protocol-pub
 import { artifactLockLayerAt, lookupArtifactItem, shippedArtifactsOf, shippingPackagesOf } from './protocol-artifact-lookup.js';
 // [#25467 cut 16] The stored-overlay row reads: a type's active rows, their parsed entries, the names with a row of their own, and one item's rows.
 import { namesWithOwnStoredRow, readActiveOverlayRows, readItemActiveRows, storedOverlayEntries } from './protocol-stored-overlay-reads.js';
+// [#25467 cut 17] The object-owner verdicts: which contributor kind a stored object row registers as, and handing an adopted object's name to its rebound row.
+import { classifyObjectContribution, releaseAdoptedObjectOwner } from './protocol-object-owner.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -7144,6 +7147,7 @@ export class ObjectStackProtocolImplementation implements
             get authoringChannel() { return readAuthoringChannel(); },
             get engine() { return readEngine(); },
             foldStoredCollection: (...a) => this.foldStoredCollection(...a),
+            hierarchyResolverMounted: (...a) => this.hierarchyResolverMounted(...a),
             orgWallEnforced: (...a) => this.orgWallEnforced(...a),
             resolveSduiManifest: (...a) => this.resolveSduiManifest(...a),
             resolveWritePackageScope: (...a) => this.resolveWritePackageScope(...a),
@@ -7536,6 +7540,30 @@ export class ObjectStackProtocolImplementation implements
         const keys = (resolver as { keys?: unknown }).keys;
         if (!Array.isArray(keys) || !keys.every((k) => typeof k === 'string')) return undefined;
         return keys as readonly string[];
+    }
+
+    /**
+     * [#26188] Is a hierarchy resolver mounted on this runtime — a service
+     * registered under `HIERARCHY_SCOPE_RESOLVER_SERVICE` (ADR-0057; the
+     * enterprise `hierarchy-security` capability registers one, the open edition
+     * none)? The input the runtime authoring gate refuses an unenforceable
+     * hierarchy scope with on publish, and warns on a draft save with.
+     *
+     * Read per write, as {@link rlsMembershipResolverKeys} reads its service, so a
+     * resolver registered after this protocol is assembled is seen by the next
+     * write; nothing is recorded. `undefined` — the CLI's reading, under which
+     * nothing is judged — when this host has no service registry or the lookup
+     * throws.
+     */
+    private hierarchyResolverMounted(): boolean | undefined {
+        const registry = this.getServicesRegistry?.();
+        if (!registry) return undefined;
+        try {
+            const resolver = registry.get(HIERARCHY_SCOPE_RESOLVER_SERVICE);
+            return resolver !== undefined && resolver !== null;
+        } catch {
+            return undefined;
+        }
     }
 
     /**
@@ -17515,35 +17543,12 @@ export class ObjectStackProtocolImplementation implements
     ):
         | { kind: 'own' | 'overlay'; packageId: string }
         | { kind: 'mismatch'; packageId: string; ownerPackageId: string } {
-        // `||`, not `??`: an empty-string binding is "no package", the same
-        // normalisation both hydration seams apply to `package_id`.
-        const binding = rowPackageId || '';
-        const registry: any = (this.engine as any)?.registry;
-        const owner = typeof registry?.getPackagedObjectOwner === 'function'
-            ? registry.getPackagedObjectOwner(name)
-            : undefined;
-        const ownerPackageId: unknown = owner?.packageId;
-        if (typeof ownerPackageId !== 'string' || ownerPackageId === '') {
-            // [#23416] No packaged owner: the runtime-authored one, if any.
-            const runtimeOwner = typeof registry?.getObjectOwner === 'function'
-                ? registry.getObjectOwner(name)
-                : undefined;
-            const runtimeOwnerPackageId: unknown = runtimeOwner?.packageId;
-            // [#23514] The `'sys_metadata'` sentinel owner is judged too: see the header.
-            if (
-                binding !== ''
-                && typeof runtimeOwnerPackageId === 'string'
-                && runtimeOwnerPackageId !== ''
-                && binding !== runtimeOwnerPackageId
-            ) {
-                return { kind: 'mismatch', packageId: binding, ownerPackageId: runtimeOwnerPackageId };
-            }
-            return { kind: 'own', packageId: binding || 'sys_metadata' };
-        }
-        if (binding !== '' && binding !== ownerPackageId) {
-            return { kind: 'mismatch', packageId: binding, ownerPackageId };
-        }
-        return { kind: 'overlay', packageId: binding || 'sys_metadata' };
+        // [#25467 cut 17] The body moved to `protocol-object-owner.ts` (see `ObjectOwnerHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof classifyObjectContribution> = {
+            get engine() { return readEngine(); },
+        };
+        return classifyObjectContribution.call(host, name, rowPackageId);
     }
 
     /**
@@ -26123,28 +26128,12 @@ export class ObjectStackProtocolImplementation implements
      * for a body with no name, which register nothing.
      */
     private releaseAdoptedObjectOwner(name: string, item: unknown, targetPackageId: string): boolean {
-        const registry: any = (this.engine as any)?.registry;
-        if (typeof registry?.registerObject !== 'function') return false;
-        if (!item || typeof item !== 'object' || typeof (item as { name?: unknown }).name !== 'string') return false;
-        const owner: { packageId?: unknown } | undefined = typeof registry.getObjectOwner === 'function'
-            ? registry.getObjectOwner(name)
-            : undefined;
-        if (owner === undefined) return true;
-        if (owner.packageId !== 'sys_metadata' || typeof registry.unregisterObject !== 'function') return false;
-        try {
-            registry.unregisterObject(name);
-            return true;
-        } catch (err: any) {
-            console.error(
-                `[Protocol] reassignOrphanedMetadata: object '${name}' was adopted into package `
-                + `'${targetPackageId}' in sys_metadata, but the registry keeps its package-less definition `
-                + `(owner 'sys_metadata') until the next restart: ${err?.message ?? err}. Until then the data `
-                + `plane serves the pre-adoption definition, and a save of the object naming '${targetPackageId}' `
-                + 'answers success without going live. Fix: restart the server; the boot registers the object '
-                + `under '${targetPackageId}'.`,
-            );
-            return false;
-        }
+        // [#25467 cut 17] The body moved to `protocol-object-owner.ts` (see `ObjectOwnerHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof releaseAdoptedObjectOwner> = {
+            get engine() { return readEngine(); },
+        };
+        return releaseAdoptedObjectOwner.call(host, name, item, targetPackageId);
     }
 
     // ─────────────────────────────────────────────────────────────────────

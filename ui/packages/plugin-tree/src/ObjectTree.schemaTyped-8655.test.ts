@@ -457,11 +457,15 @@ describe('objectui#8655 — `filter` is the one DECLARE verdict, executed by obj
 });
 
 describe('objectui#8655 — `tree` was a VIEW-level block, and since 17.5.0 the node\'s own (declared by objectui#11168)', () => {
-  it('the spec declares the block, and its members are the four this resolver reads', () => {
+  it('the spec declares the block, and its members include the four this resolver reads', () => {
     const blockKeys = Object.keys(
       (TreeConfigSchema as unknown as { shape: Record<string, unknown> }).shape,
     ).sort();
-    expect(blockKeys).toEqual(['defaultExpandedDepth', 'fields', 'labelField', 'parentField']);
+    // Membership (#26238): a key the spec adds to the block is not one this
+    // resolver reads, so it does not move this claim.
+    for (const key of ['defaultExpandedDepth', 'fields', 'labelField', 'parentField']) {
+      expect(blockKeys).toContain(key);
+    }
   });
 
   it('…and ONE element face declares a `tree` key since 17.5.0 — this node\'s — beside the `list-view` row (control: one key that IS on four)', () => {

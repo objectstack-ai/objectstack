@@ -19,7 +19,8 @@ interface Subscription {
 
 /**
  * Default safety cap on active subscriptions. This adapter is process-local
- * (the v1 single-instance contract — see launch-readiness.md P0-5); an
+ * (the v1 single-instance contract — launch-readiness P0-5, in
+ * `docs/launch-readiness.md` as of commit df8aac41); an
  * unbounded subscription map would grow until the pod OOMs under a subscription
  * leak or an abusive client. The cap is a backstop: `subscribe` throws once
  * it's reached. Operators raise `maxSubscriptions` for high-fan-out nodes;

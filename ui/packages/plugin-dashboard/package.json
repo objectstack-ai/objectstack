@@ -50,7 +50,8 @@
     "react-grid-layout": "^2.2.4",
     "typescript": "^6.0.3",
     "vite": "^8.2.1",
-    "vite-plugin-dts": "^5.0.3"
+    "vite-plugin-dts": "^5.0.3",
+    "vitest": "^4.1.10"
   },
   "keywords": [
     "objectui",

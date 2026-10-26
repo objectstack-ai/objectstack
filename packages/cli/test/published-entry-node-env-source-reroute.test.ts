@@ -139,8 +139,8 @@ const CHILD_BUDGET_MS = 120_000;
 const CARD_SIGNATURE = "Cannot find module './registry'";
 
 /**
- * The reroute itself, visible in oclif's own warning block: it names the module
- * it failed to load, and under the reroute that path is under `src/commands`.
+ * The reroute itself, visible in oclif's own report: it names the module it
+ * failed to load, and under the reroute that path is under `src/commands`.
  */
 const SOURCE_COMMANDS = join('packages', 'cli', 'src', 'commands');
 
@@ -170,10 +170,26 @@ afterAll(() => {
 /**
  * Run the published entry from the armed fixture directory.
  *
- * `--version` is the probe on purpose: it is the cheapest invocation that still
- * makes oclif build its command table, which is where the reroute happens.
- * Measured — every command tried (`--version`, `doctor --help`, `compile
- * --help`) reproduces identically, so the cheapest one is the honest one.
+ * `explain object` is the probe because it RUNS a command: oclif has to resolve
+ * that command's module and import it, which is where the reroute happens, and
+ * `explain.ts` imports the trapped `chalk` at its top. It prints a static
+ * reference page and exits 0 with nothing to read from the fixture directory.
+ *
+ * ⛔ Not `--version`, which this file used until #23181. `--version` loads no
+ * command; it reached the reroute only because, with no `oclif.manifest.json`
+ * beside `package.json`, `Config.load()` builds the command table by importing
+ * every command module. The `integration` project now writes that manifest for
+ * the run (`helpers/oclif-manifest.global-setup.ts`), and with it present
+ * `--version` imports nothing: this leg's CONTROL stopped reproducing the card
+ * and the three legs above it passed over a fixture that armed nothing. A real
+ * command reaches the reroute with the manifest and without it, measured both
+ * ways at the slice that made this change.
+ *
+ * `OCLIF_COLUMNS` is set wide so oclif renders the load failure on one line.
+ * With a manifest the failure arrives as the error `handle()` prints, which is
+ * word-wrapped at 80 columns on a pipe, and a wrap can fall inside the card's
+ * signature or a path. A split signature fails the CONTROL; worse, it would
+ * let every `not.toContain` above pass over text it can no longer match.
  *
  * ⚠️ `TSX_TSCONFIG_PATH` is cleared explicitly. It is what `bin/run-dev.js`
  * sets to pin tsx away from the CWD's tsconfig, and a developer running the
@@ -202,12 +218,12 @@ function runPublishedEntry(
   const startedAt = Date.now();
   const result = spawnSync(
     process.execPath,
-    [...(options.neutralise ? [`--import=${NEUTRALISER}`] : []), PUBLISHED_ENTRY, '--version'],
+    [...(options.neutralise ? [`--import=${NEUTRALISER}`] : []), PUBLISHED_ENTRY, 'explain', 'object'],
     {
       cwd: fixtureCwd,
       encoding: 'utf8',
       timeout: CHILD_BUDGET_MS,
-      env: childEnv({ TSX_TSCONFIG_PATH: undefined, ...env }),
+      env: childEnv({ TSX_TSCONFIG_PATH: undefined, OCLIF_COLUMNS: '100000', ...env }),
     },
   );
   const elapsedMs = Date.now() - startedAt;
@@ -257,7 +273,7 @@ describe('#12271 - the published entry does not reroute to src/ on an ambient NO
    * ⚠️ It arms only if oclif can REGISTER tsx (`registerTsx` in `ts-path`).
    * When that fails, oclif logs `Could not find tsx` under
    * `DEBUG=oclif:config:ts-path` and stays on `dist/`. This leg then prints
-   * the version line and nothing else, and the legs above pass with the
+   * the reference page and nothing else, and the legs above pass with the
    * declaration deleted. tsx 4.23.15's CommonJS ESM API fails that way on any
    * Node without tsx's `registerHooks` path (below 22.22.3 on the 22 line).
    * That is why the workspace patches it: see `tsx@4.23.15` under

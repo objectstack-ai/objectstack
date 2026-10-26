@@ -298,13 +298,13 @@ export default class PackagePublish extends Command {
   static override flags = {
     server: Flags.string({
       char: 's',
-      description: 'ObjectStack Cloud control-plane URL (override for self-hosted registries)',
+      description: 'ObjectOS Cloud control-plane URL (override for self-hosted registries)',
       env: 'OS_CLOUD_URL',
       default: DEFAULT_CLOUD_URL,
     }),
     token: Flags.string({
       char: 't',
-      description: 'API key for ObjectStack Cloud (bearer token; defaults to OS_CLOUD_API_KEY / OS_TOKEN)',
+      description: 'API key for ObjectOS Cloud (bearer token; defaults to OS_CLOUD_API_KEY / OS_TOKEN)',
       env: 'OS_CLOUD_API_KEY',
     }),
     'manifest-id': Flags.string({
@@ -337,7 +337,7 @@ export default class PackagePublish extends Command {
         "'private': only explicitly-granted orgs/envs. " +
         "'marketplace': public after review. " +
         'Omit it to leave an existing package\'s visibility unchanged; a new package then gets ' +
-        "the control plane's default ('org' on ObjectStack Cloud).",
+        "the control plane's default ('org' on ObjectOS Cloud).",
       options: ['private', 'org', 'marketplace'],
     }),
     org: Flags.string({
@@ -517,7 +517,7 @@ export default class PackagePublish extends Command {
       }
       if (!token) {
         printError(
-          'Not logged in to ObjectStack Cloud. Run `os cloud login` first, or pass --token / set $OS_TOKEN.',
+          'Not logged in to ObjectOS Cloud. Run `os cloud login` first, or pass --token / set $OS_TOKEN.',
         );
         this.exit(1);
         return;
