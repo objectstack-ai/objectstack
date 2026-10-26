@@ -530,7 +530,7 @@ Even inside your own worktree, operate defensively:
    check-run name, so a rename detaches its gate silently — treat those five names as contract.
    **Two speeds** (ruling record 6120820653): PR and queue runs carry the fast set, 10 minutes of
    wall per queue entry; `main`'s hourly and push runs carry the full battery — dogfood, e2e,
-   `Console Pin Gate`, `Temporal Conformance (live PG + MySQL)` — read by the publish lane before
+   `Temporal Conformance (live PG + MySQL)` — read by the publish lane before
    any approval. **Main-red:** a full-battery red is its lane's first work — triage files it under
    the main-red convention, the lane's next PR fixes it, and ⛔ no lane PR arms the queue meanwhile.
 
@@ -1100,8 +1100,8 @@ Both non-handshake shapes, and how to classify and probe your own:
    (`pnpm check:adr-0087-registration` reads the arm and the kind there). ⛔ The categories are NOT copied here —
    the gate prints the full set when it fails.
 4. **A removal that breaks the pinned sibling checkout ships together with the sibling fix and the pin bump — or it
-   does not ship.** The full battery's `Console Pin Gate` builds objectui at the pinned `.objectui-sha` against
-   **current** `main`, so such a removal is a main-red the moment it merges; its ruling therefore authorizes the
+   does not ship.** `Type Check UI` compiles the Console under `ui/` against the spec of the PR that makes such a
+   removal, so the removal reds its own PR; its ruling therefore authorizes the
    objectui-side fix and the pin bump (manifest regeneration included — see the Frontend section) in the same
    landing. Before merging, `git grep` what you remove or rename in `../objectui` at the pinned SHA.
 5. **Touched `packages/spec`? Regenerate and commit its artifacts before pushing** — § *Touched `packages/spec`*

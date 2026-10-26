@@ -1264,9 +1264,9 @@ export function jobIfReading(ifExpression) {
  *
  * `name` is read from the job's own `name:` key at its child indent and falls
  * back to the job id. It is load-bearing rather than cosmetic: the id
- * `console-pin` is not what CI, branch protection or a red check calls that
- * job, and a lead a dev cannot find in the Checks tab is a lead they will not
- * act on.
+ * `console-pin` was not what CI, branch protection or a red check called that
+ * job (`Console Pin Gate`, retired with the objectui pin), and a lead a dev
+ * cannot find in the Checks tab is a lead they will not act on.
  */
 export function extractJobBlocks(workflowText) {
   const lines = workflowText.split('\n');
@@ -2083,8 +2083,9 @@ export function defaultedArgv(args, defaults = new Map()) {
  * `DIRECT_CHECK_INVOCATION` stops the tail before `>`, which is right — the
  * redirection is the shell's. But `2>&1` puts its fd on the argv side of that
  * boundary, so `--verbose 2>&1` captured as ` --verbose 2` and the stray `2`
- * read as an argument. It is the live spelling in `prerelease-pin-watch.yml`,
- * and it is why an argv that was complete all along scored unrenderable.
+ * read as an argument. It was the live spelling in `prerelease-pin-watch.yml`
+ * (retired with the objectui pin gates), and it is why an argv that was
+ * complete all along scored unrenderable.
  *
  * The discriminator is the shell's own: digits touching the operator are a
  * descriptor (`2>`), digits with a space before it are an argument
@@ -7698,7 +7699,7 @@ export function coveringTrigger(entry, inputPath) {
  * what it refuses to follow.
  *
  * The JOB NAME travels with the answer because that is what a dev sees go red.
- * `console-pin` is the id; `Console Pin Gate` is the required check, and the
+ * `console-pin` was the id and `Console Pin Gate` the check name, and the
  * measured failure this closes (#12956) was a dev reading a derived list that
  * named neither.
  */

@@ -3261,7 +3261,7 @@ jobs:
       # from git: 17.1.0 ran 5h44m (36 PRs landed), 16.1.0 ran 25 days (2712 PRs).
       # Hard-failing would have red 2748 PRs for a debt none of them created. So
       # findings are a `::warning::` + step summary with the job GREEN — the
-      # loud-but-non-blocking shape prerelease-pin-watch.yml uses — and the policy
+      # loud-but-non-blocking shape the retired prerelease-pin-watch.yml used — and the policy
       # follows half-state-patrol.yml's rule verbatim: findings never fail
       # anything, the job DOES fail when the sweep could not run. A broken
       # instrument is fatal here in every mode. `--strict` promotes findings to
@@ -4727,7 +4727,7 @@ jobs:
       # the legacy `##[...]` form is parsed ANYWHERE in a printed line (the
       # measured token sat at column 18 and was still consumed), while the
       # `::...::` form is parsed only at LINE START (two mid-sentence ones print
-      # on every PR from `check-prerelease-pin-watch` and mint nothing). So the
+      # on every PR from the since-retired `check-prerelease-pin-watch` and minted nothing). So the
       # first detector is unanchored and the second is anchored — flagging inert
       # prose would be a false positive the next author would be right to delete.
       #

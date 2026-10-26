@@ -75,11 +75,11 @@
 // whichever PR happens to run CI next". An uncovered minor is a fact about the
 // release history, not about whichever PR runs CI next. Same shape, same answer.
 //
-// Loud-but-non-blocking is `prerelease-pin-watch.yml`'s mechanism, reused here:
+// Loud-but-non-blocking was `prerelease-pin-watch.yml`'s mechanism (retired, #25697), reused here:
 // a `::warning::` annotation plus a step-summary table, job GREEN. `--strict`
 // promotes findings to exit 1 for a caller that OWNS the remedy (a standing
 // patrol, or someone editing the release pages) — the same escape hatch that
-// workflow's own `--strict` provides.
+// workflow's own `--strict` provided.
 //
 // ## What IS fatal: the instrument
 //
@@ -1184,7 +1184,7 @@ function renderOk(checked, minorCount) {
 }
 
 /**
- * Loud-but-non-blocking, the `prerelease-pin-watch.yml` mechanism: a `::warning::`
+ * Loud-but-non-blocking, the retired `prerelease-pin-watch.yml` mechanism: a `::warning::`
  * annotation plus a step-summary table, job GREEN. Silent outside Actions.
  *
  * @param {string[]} findings
