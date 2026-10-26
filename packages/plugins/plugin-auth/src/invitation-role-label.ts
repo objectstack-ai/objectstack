@@ -123,8 +123,9 @@ export async function invitationRoleLabel(
       deps.warn?.(
         `[AuthManager] invitation mail: no '${mailLocale}' label was found for the membership role(s) ` +
           `${untranslated.map((t) => `'${t}'`).join(', ')}; the mail names the authored (English) label instead. ` +
-          'The i18n service holds no translation of sys_member.role for this locale: check that the platform ' +
-          'translation bundles are loaded into it and that the locale is among the declared i18n.supportedLocales',
+          'The i18n service served no translation of sys_member.role for this locale: check that it holds the ' +
+          'platform translation bundles and that its locales (i18n.supportedLocales, when declared) name this ' +
+          'locale as the bundles spell it (zh-CN, not zh)',
         { role, locale: mailLocale, i18nService: i18nService !== undefined },
       );
     }

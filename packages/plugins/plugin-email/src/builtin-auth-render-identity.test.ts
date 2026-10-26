@@ -49,6 +49,10 @@ const DATA = {
   role: 'admin',
   inviter: { name: 'Grace <Hopper>', email: 'grace@example.test' },
   organization: { name: 'Analytical & Engines' },
+  // [#25802] The invitation's expiry instant, rendered by a date formatter in
+  // the timezone the render names (UTC below) so the bytes never follow the
+  // machine's zone.
+  expiresAt: '2031-03-04T05:06:07.000Z',
 };
 
 /**
@@ -120,25 +124,28 @@ const RENDERED: Record<string, { subject: string; html: string; text: string }> 
   // bodies gained the role clause their HTML bodies carry (each recomputed
   // from its expected string by hand, not copied from a run); the subject and
   // HTML pins are the row path's, unchanged.
+  // [#25802] The four invitation rows gained the expiry sentence; their bodies
+  // are re-pinned from the registry render in that commit (every other row's
+  // bytes were unchanged by it, the UTC render included).
   'auth.invitation@en-US': {
     subject: 'Grace <Hopper> invited you to Analytical & Engines',
-    html: '58aa661450e6d836a02267bede0e644f2f6cfcce2f125e63e4a4cc661d424069',
-    text: '80f58fec58593820cc25e500532d7749044829ff81313430087a8ee534c2c3d9',
+    html: '3257f890eae1ea9ab5aa15fd9462cc0af8398245c17d1fae7c881ab7e3318958',
+    text: '803d50c95e31d97c1cc5cd6f0f2fc3713e3a461de9d4c5479e11641346160c85',
   },
   'auth.invitation@zh-CN': {
     subject: 'Grace <Hopper> 邀请您加入 Analytical & Engines',
-    html: '6789d8a1f8fe77ae9dac42694c4512df93be52edac56bfe91bbfad0a453e63fe',
-    text: '6590d3d0c00efdddbdfd9e6883a8f8955f22c0dbd88c8c315c3bf66be2d19841',
+    html: '96c09860c09b3a76164c0c181a27663bc35424d8869c13711456a9c6605660a5',
+    text: '33b3161880d56360587262f876b2c498a90fdf41b1d816c7c50392a9aecdb756',
   },
   'auth.invitation@ja-JP': {
     subject: 'Grace <Hopper> さんが Analytical & Engines に招待しています',
-    html: '6f5123d67393d721038b50292106bf83676d946f1950bf45869f16c2e977ef0f',
-    text: 'c8856c71f961085c3953f58886896d06506c453c7bddcec94460bfe12a13010e',
+    html: '73805dd36d6f274c1ea823b16fb3503607b5da266edf7a94af259f23b4344dbd',
+    text: 'efd6c6bccd941f2f90c6c112b760cff5473b0b5baaed46c788746b9d7d924b50',
   },
   'auth.invitation@es-ES': {
     subject: 'Grace <Hopper> te ha invitado a Analytical & Engines',
-    html: '9f49cf12933faf499b1000b8895d29c4dbfba9b051e695bd845e885b22e7db02',
-    text: '53e0aa5ea929c9d1da42c129d5289f51557790a3a88ddc22c68bf47cdebd6b10',
+    html: 'fa9c29ebe44c378fa5c46a0718194fb6f914ee645f0a720a3c7c6340d022b1b4',
+    text: '7ecdc33615b38d36bcac72447e1a2248df5aa37e5aad66969876bbe6a6f00b16',
   },
   // [#23343] Declared after the row path was deleted, so these four never had
   // a seeded row: they are pinned against their first registry render, in the
@@ -259,7 +266,7 @@ describe('every built-in auth mail renders byte-identical from the registry', ()
     const svc = await bootEmailService();
     const rendered: Record<string, { subject: string; html: string; text: string }> = {};
     for (const tpl of BUILTIN_AUTH_TEMPLATES) {
-      const r = await svc.renderTemplate({ template: tpl.name, locale: tpl.locale, data: DATA });
+      const r = await svc.renderTemplate({ template: tpl.name, locale: tpl.locale, data: DATA, timezone: 'UTC' });
       rendered[`${tpl.name}@${tpl.locale}`] = { subject: r.subject, html: sha256(r.html), text: sha256(r.text) };
     }
 
