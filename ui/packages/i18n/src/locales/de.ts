@@ -4351,6 +4351,8 @@ const de = {
       detailLoadFailed: 'Änderungsdetails konnten nicht geladen werden:',
       detailNone: 'Keine Unterschiede erkannt — der Entwurf entspricht der veröffentlichten Version.',
       detailChangedKeys: 'Ebenfalls geändert:',
+      detailNewKeys: 'Enthält:',
+      generatedGroup: 'Von der Plattform erzeugt ({{n}})',
       confirmNote: 'Beim Veröffentlichen werden alle {{count}} ausstehenden Entwürfe dieses Pakets atomar freigegeben.',
       confirmNote_one: 'Beim Veröffentlichen wird der {{count}} ausstehende Entwurf dieses Pakets atomar freigegeben.',
       confirmNote_other: 'Beim Veröffentlichen werden alle {{count}} ausstehenden Entwürfe dieses Pakets atomar freigegeben.',

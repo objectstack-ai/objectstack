@@ -34,6 +34,12 @@ import {
  *     start is the shape objectui#3523 spent a P0 on, and this gate's own subject
  *     matter makes it acute: `changeset-guard.yml` is invisible to a PR that
  *     forgot its changeset precisely because it filters on `.changeset/**`.
+ *     Retired with objectstack#25712: these pins read objectui's
+ *     `changeset-presence.yml` and `changeset-guard.yml`, which run nowhere
+ *     under the monorepo (GitHub runs the root `.github/workflows/` alone). The
+ *     two are rows 4 and 3 of the objectstack#25697 workflow roster
+ *     (→ sub-issue 4), and a port brings them back against its root workflow,
+ *     by path.
  *  2. **The guarded surface is DERIVED**, not a hand-written glob. The issue
  *     proposed one glob under `packages/`; `@object-ui/console` lives at
  *     `apps/console` and would have been missed — the most-edited published
@@ -63,25 +69,6 @@ import {
  */
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const GATE = 'scripts/check-changeset-presence.mjs';
-const WORKFLOW = '.github/workflows/changeset-presence.yml';
-const workflowDir = path.join(repoRoot, '.github/workflows');
-
-/**
- * A workflow's YAML with whole-line comments removed.
- *
- * Required, not cosmetic: this workflow's header discusses `paths`,
- * `paths-ignore` and `push` at length — a scan that counted the prose would
- * report filters and triggers the file does not have. Same helper, same reason,
- * as in `docs-links-workflow.test.ts` and `merge-queue-reporting.test.ts`.
- */
-function withoutComments(yaml: string): string {
-  return yaml
-    .split('\n')
-    .filter((line) => !/^\s*#/.test(line))
-    .join('\n');
-}
-
-const workflowYaml = withoutComments(fs.readFileSync(path.join(repoRoot, WORKFLOW), 'utf8'));
 
 // ── fixture repositories ─────────────────────────────────────────────────────
 
@@ -191,94 +178,20 @@ function lastCommitRange(fixture: Fixture): string[] {
 }
 
 // ── 1. the workflow is reachable ─────────────────────────────────────────────
-
-describe('changeset-presence.yml — the gate can start on the PR that needs it', () => {
-  it('exists, and runs the gate script', () => {
-    expect(fs.existsSync(path.join(repoRoot, WORKFLOW)), 'a check nothing runs is not a gate').toBe(true);
-    expect(fs.existsSync(path.join(repoRoot, GATE)), `${GATE} must exist for the workflow to run it`).toBe(true);
-    expect(workflowYaml).toMatch(new RegExp(`run:\\s*node\\s+${GATE.replace(/[.]/g, '\\.')}`));
-  });
-
-  it('carries NO path filter of any kind', () => {
-    // The reason it is its own workflow AND unfiltered. A filter on the trigger
-    // skips the whole workflow (GitHub has no per-job path filter), so the
-    // context is never CREATED on a PR that does not match — and a required
-    // context that is never created leaves the PR pending rather than failing
-    // it, which in the queue means the ruleset's 60-minute timeout
-    // (objectui#3523, #3509). It would also be a second copy of the script's
-    // guarded surface, free to drift from the `.changeset/config.json` the
-    // script derives it from.
-    expect(workflowYaml).not.toMatch(/paths-ignore:/);
-    expect(workflowYaml).not.toMatch(/^\s+paths:/m);
-  });
-
-  it('reports on pull requests and on merge-queue builds', () => {
-    expect(workflowYaml).toMatch(/^\s*pull_request:/m);
-    expect(
-      workflowYaml,
-      'A gate with no path filter reports on every PR and can therefore be REQUIRED. A required ' +
-        'context that does not report on a queue build does not fail the queue, it stalls it until ' +
-        "the ruleset's 60-minute status-check timeout (objectui#3523).",
-    ).toMatch(/^\s*merge_group:/m);
-  });
-
-  it('does not run on push to main, where nothing can be declared any more', () => {
-    // Not tidiness: the change has already landed, so a red push paints `main`
-    // red at whoever committed next, and no declaration can still be written
-    // into that change. The PR and the queue build are the two moments it can.
-    expect(workflowYaml).not.toMatch(/^\s*push:/m);
-  });
-
-  it('checks out enough history for a merge base to exist', () => {
-    // `fetch-depth: 0`. The default depth-1 clone gives `git merge-base` nothing
-    // to find, and the script treats an unresolvable base as a hard failure — so
-    // omitting this is a red build, not a silent pass. Pinned so it stays that
-    // way rather than being "fixed" by making the script skip.
-    expect(workflowYaml).toMatch(/fetch-depth:\s*0/);
-  });
-
-  it('is the only workflow that runs this gate, and needs no install to do it', () => {
-    const runners = fs
-      .readdirSync(workflowDir)
-      .filter((file) => file.endsWith('.yml'))
-      .filter((file) => withoutComments(fs.readFileSync(path.join(workflowDir, file), 'utf8')).includes(GATE));
-    expect(runners).toEqual(['changeset-presence.yml']);
-    expect(
-      workflowYaml,
-      'This gate reads `.changeset/config.json` and `git diff` only. A `pnpm install` here would ' +
-        'turn a few-second check into a full install on every pull request.',
-    ).not.toMatch(/pnpm install/);
-  });
-
-  it('leaves changeset-guard.yml alone — the two gates face opposite directions', () => {
-    // `changeset-guard.yml`'s `paths: ['.changeset/**']` is deliberate: on a PR
-    // that adds ONLY a changeset, every gate inside `ci.yml` and `lint.yml`
-    // skips, so nothing in either of them ever reads the changeset — and that
-    // guard exists to see exactly that PR. A PR that FORGOT its changeset does
-    // not touch `.changeset/**`, so widening those paths would have broken the
-    // case it was built for while still not catching this one. Two workflows,
-    // one direction each.
-    //
-    // Not the reason this comment used to give — "a PR adding ONLY a changeset
-    // starts no other workflow". That is the sentence PR #4371 rewrote in the
-    // docblock of `check-changeset-presence.mjs`, the script this file
-    // accompanies, and the pair disagreed across the two until objectui#4381.
-    // objectui#3523 step 2 deleted `paths-ignore` from `ci.yml`'s and
-    // `lint.yml`'s `pull_request` trigger; it survives only on `push`. Such a PR
-    // therefore DOES start both and DOES produce their contexts — measured: PR
-    // #3856 (one markdown file) 16 checks, PR #4339 (one line added to
-    // AGENTS.md) 17. What still skips is the expensive work: the `Decide whether
-    // this change needs a full run` step excludes markdown and `.changeset/**`
-    // and skips every step below itself, and its exclusion list is that `push`
-    // filter unchanged, held identical to it by
-    // `scripts/__tests__/merge-queue-reporting.test.ts`. The conclusion outlived
-    // its premise; objectui#3857 pinned the correction.
-    const guard = withoutComments(fs.readFileSync(path.join(workflowDir, 'changeset-guard.yml'), 'utf8'));
-    expect(guard).toMatch(/^\s+paths:/m);
-    expect(guard).toMatch(/\.changeset\//);
-    expect(guard).toMatch(/check-changeset-no-major\.mjs/);
-  });
-});
+//
+// Retired with objectstack#25712: `exists, and runs the gate script`, `carries
+// NO path filter of any kind`, `reports on pull requests and on merge-queue
+// builds`, `does not run on push to main, where nothing can be declared any
+// more`, `checks out enough history for a merge base to exist`, `is the only
+// workflow that runs this gate, and needs no install to do it` and `leaves
+// changeset-guard.yml alone — the two gates face opposite directions`. Each read
+// objectui's `changeset-presence.yml` or `changeset-guard.yml` from
+// `ui/.github/workflows/`, which runs nowhere under the monorepo: GitHub runs
+// the root `.github/workflows/` alone, and no root workflow runs this gate.
+// They are rows 4 and 3 of the objectstack#25697 workflow roster
+// (→ sub-issue 4), where the root `pr-automation.yml` `Check Changeset` job is
+// the counterpart; a port brings these pins back against its root workflow, by
+// path.
 
 // ── 2. the guarded surface is derived from the release configuration ─────────
 

@@ -4438,6 +4438,8 @@ const pt = {
       detailLoadFailed: 'Não foi possível carregar os detalhes da alteração:',
       detailNone: 'Nenhuma diferença detectada — o rascunho corresponde à versão publicada.',
       detailChangedKeys: 'Também alterado:',
+      detailNewKeys: 'Inclui:',
+      generatedGroup: 'Gerado pela plataforma ({{n}})',
       confirmNote: 'Publicar libera atomicamente todos os {{count}} rascunhos pendentes deste pacote.',
       confirmNote_one: 'Publicar libera atomicamente {{count}} rascunho pendente deste pacote.',
       confirmNote_many: 'Publicar libera atomicamente todos os {{count}} de rascunhos pendentes deste pacote.',
