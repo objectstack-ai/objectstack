@@ -12,8 +12,10 @@
  *
  *   - A browser that answers the probe mounts the map, markers and all, and
  *     shows no fallback list.
- *   - A style or tile failure is a different, non-fatal case: the map keeps
- *     running, so it keeps its markers and gains the alert over them.
+ *   - A style or tile failure is a different case: the map did start, so it
+ *     is removed and the record list takes its place with a retry, under its
+ *     own test id (objectstack#25889; the full battery is
+ *     `ObjectMap.styleFailureList-25889.test.tsx`).
  *   - The probe is asked once per mount and hands its context straight back.
  *
  * The map is the stub the sibling tests use; `./__tests__/webgl2Available`
@@ -62,16 +64,18 @@ describe('ObjectMap with WebGL2 — what the probe leaves alone (objectui#11819)
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
-  it('a style or tile failure keeps the map and its markers, with the alert over them', async () => {
+  it('a style or tile failure swaps the map for the record list, not the WebGL2 one', async () => {
     render(<ObjectMap schema={schema} data={records} />);
     await screen.findByLabelText('Map');
 
     fireEvent.click(screen.getByTestId('simulate-style-error'));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Map failed to load (Failed to fetch)');
-    expect(screen.getByLabelText('Map')).toBeInTheDocument();
-    expect(screen.getAllByTestId('map-marker')).toHaveLength(2);
+    expect(screen.queryByLabelText('Map')).toBeNull();
+    expect(screen.queryAllByTestId('map-marker')).toHaveLength(0);
+    expect(screen.getByTestId('map-style-fallback')).toHaveTextContent('Replace boiler');
     expect(screen.queryByTestId('map-webgl2-fallback')).toBeNull();
+    expect(screen.getByTestId('map-style-retry')).toBeInTheDocument();
   });
 
   it('asks for WebGL2 once per mount and releases the probe context', async () => {

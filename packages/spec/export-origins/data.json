@@ -830,6 +830,7 @@
     "classifyFilterToken": "src/data/context-tokens.zod.ts#classifyFilterToken (function)",
     "containsUnresolvedPlaceholder": "src/data/driver/common.zod.ts#containsUnresolvedPlaceholder (function)",
     "controlledByParentMasterRefusal": "src/data/controlled-by-parent-master.ts#controlledByParentMasterRefusal (function)",
+    "controlledByParentOwnerMayEdit": "src/data/object.zod.ts#controlledByParentOwnerMayEdit (function)",
     "countAuthorableFields": "src/data/record-surface.ts#countAuthorableFields (function)",
     "credentialFreeMongoOptions": "src/data/driver/common.zod.ts#credentialFreeMongoOptions (function)",
     "credentialFreeUrl": "src/data/driver/common.zod.ts#credentialFreeUrl (function)",

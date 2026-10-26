@@ -18,8 +18,13 @@ import {
   Input,
   Button,
   Skeleton,
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
 } from '@object-ui/components';
-import { Package, Search, Store, AlertCircle, CheckCircle2, Settings, Loader2 } from 'lucide-react';
+import {
+  Package, Search, Store, AlertCircle, CheckCircle2, Settings, Loader2, ChevronDown, Copy, Check,
+} from 'lucide-react';
 import { useWorkspaceAdminStatus } from '@object-ui/auth';
 import { useDisplayLocale, useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { useAdapter } from '@object-ui/react';
@@ -150,15 +155,23 @@ function useRelativeFormatter() {
 interface LoadFailure {
   message: string;
   showOnlineHint: boolean;
-  /**
-   * The answered status, or `undefined` when no server answered (objectui#12710).
-   * It names the failure's class on the page: "could not be reached" (a
-   * transport failure: a network error, a CORS refusal, an abort) against
-   * "answered with an error" (any HTTP status). A 502 from the runtime's proxy
-   * is the second class with the online hint beside it: the runtime answered,
-   * and what it said is that it could not reach the plane behind it.
-   */
+  /** The answered status, or `undefined` when no server answered (objectui#12710). */
   status: number | undefined;
+  /** The answered error code `call()` stamps from the envelope, if any. */
+  code: string | undefined;
+  /**
+   * The failure's class on the page (objectui#12710, #25891): "could not be
+   * reached" against "answered with an error (HTTP n)". Unreachable is a
+   * transport failure (a network error, a CORS refusal, an abort: no status),
+   * or the runtime proxy's own `MARKETPLACE_PROXY_FAILED`, which it answers
+   * only when its own fetch to the catalog threw: that 502 is the runtime
+   * saying it reached nothing, not the catalog answering. A 502 / 503 / 504 the
+   * upstream itself answered is relayed with the upstream's own code, and stays
+   * an answer. The unreachable class's message is the raw transport text
+   * ("fetch failed"), so the page keeps it behind More; an answer's message is
+   * the server's own words and stays in full view (objectui#11688).
+   */
+  unreachable: boolean;
 }
 
 /**
@@ -168,14 +181,93 @@ interface LoadFailure {
  */
 const UNREACHABLE_STATUSES: ReadonlySet<number> = new Set([502, 503, 504]);
 
+/** The code the runtime's marketplace proxy answers when its upstream fetch throws. */
+const PROXY_UNREACHABLE_CODE = 'MARKETPLACE_PROXY_FAILED';
+
 function toLoadFailure(e: unknown): LoadFailure {
-  const err = e as { message?: unknown; status?: unknown } | null | undefined;
+  const err = e as { message?: unknown; status?: unknown; code?: unknown } | null | undefined;
   const status = typeof err?.status === 'number' ? err.status : undefined;
+  const code = typeof err?.code === 'string' ? err.code : undefined;
   return {
     message: typeof err?.message === 'string' ? err.message : String(e),
     showOnlineHint: status === undefined || UNREACHABLE_STATUSES.has(status),
     status,
+    code,
+    unreachable: status === undefined || code === PROXY_UNREACHABLE_CODE,
   };
+}
+
+/**
+ * The load failure's class line and its cause (#25891). An answer shows the
+ * server's own words under its class line. An unreachable failure says so in
+ * one plain line, and the raw transport text, written for a developer, sits
+ * behind More, selectable and copyable, as `RefusalMessage` keeps a refusal's
+ * detail (the same `refusalDetails` keys).
+ */
+function LoadFailureCause({ failure }: { failure: LoadFailure }) {
+  const { t } = useObjectTranslation();
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const id = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(id);
+  }, [copied]);
+
+  // The server's own text, as a text child: it is server-supplied data, so it
+  // never reaches `dangerouslySetInnerHTML`.
+  if (!failure.unreachable) {
+    return (
+      <>
+        <div className="mt-1" data-testid="marketplace-load-class">
+          {t('marketplace.load.answeredError', { status: failure.status })}
+        </div>
+        <div className="text-muted-foreground mt-1" data-testid="marketplace-load-cause">{failure.message}</div>
+      </>
+    );
+  }
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(failure.message);
+      setCopied(true);
+    } catch {
+      // Denied or unavailable: the text is on screen and selectable.
+    }
+  };
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} className="mt-1 min-w-0">
+      <span data-testid="marketplace-load-class">{t('marketplace.load.unreachable')}</span>{' '}
+      <CollapsibleTrigger
+        className="group inline-flex items-center gap-0.5 whitespace-nowrap text-xs font-medium underline underline-offset-2 opacity-80 hover:opacity-100"
+        data-testid="marketplace-load-more"
+      >
+        {open ? t('refusalDetails.less') : t('refusalDetails.more')}
+        <ChevronDown className="size-3 transition-transform group-data-[state=open]:rotate-180" aria-hidden="true" />
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="mt-2 flex items-start gap-1 rounded border border-destructive/30 bg-background/60 p-2">
+          <pre
+            data-testid="marketplace-load-cause"
+            className="min-w-0 flex-1 max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono text-xs select-text"
+          >
+            {failure.message}
+          </pre>
+          <button
+            type="button"
+            onClick={() => { void copy(); }}
+            aria-label={copied ? t('refusalDetails.copied') : t('refusalDetails.copy')}
+            title={copied ? t('refusalDetails.copied') : t('refusalDetails.copy')}
+            className="shrink-0 rounded p-1 opacity-80 hover:bg-destructive/10 hover:opacity-100"
+            data-testid="marketplace-load-copy"
+          >
+            {copied ? <Check className="size-3.5" aria-hidden="true" /> : <Copy className="size-3.5" aria-hidden="true" />}
+          </button>
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
 }
 
 /**
@@ -717,14 +809,7 @@ export function MarketplacePage() {
           <AlertCircle className="h-4 w-4 mt-0.5 shrink-0 text-destructive" aria-hidden="true" />
           <div className="flex-1">
             <div className="font-medium text-destructive">{t('marketplace.load.failed')}</div>
-            <div className="mt-1" data-testid="marketplace-load-class">
-              {error.status === undefined
-                ? t('marketplace.load.unreachable')
-                : t('marketplace.load.answeredError', { status: error.status })}
-            </div>
-            {/* The server's own text, as a text child: it is server-supplied
-                data, so it never reaches `dangerouslySetInnerHTML`. */}
-            <div className="text-muted-foreground mt-1" data-testid="marketplace-load-cause">{error.message}</div>
+            <LoadFailureCause failure={error} />
             {/* The hint names the control plane the SERVER said it uses, so it
                 can never claim a default the operator overrode (objectui#5504).
                 Under `''` it names none and says only that the catalog is

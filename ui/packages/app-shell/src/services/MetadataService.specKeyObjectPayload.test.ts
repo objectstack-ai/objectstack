@@ -171,8 +171,11 @@ describe('the instrument', () => {
     // (objectstack#25513; measured against the 915e9404 pin: the spec's own
     // `authorable-surface/data.json` gains exactly `data/Object:membershipKeys`
     // between the two commits, none lost; objectui#13440). Re-pointed the same way.
+    // 48 on the objectstack `main` pin after objectstack#26005 (5e113b39), which adopted
+    // `sharing` (measured against its parent fbb75998: gained set exactly `['sharing']`,
+    // lost set empty; unchanged at 43b47156). Re-pointed the same way.
     const accept = new Set(Object.keys(ObjectSchema.shape as Record<string, unknown>));
-    expect(accept.size).toBe(47);
+    expect(accept.size).toBe(48);
     // `fieldGroups` is the only grouping key on the object, and it groups the
     // FIELDS INSIDE one object — it is not a category for objects themselves,
     // so `group` has no mapping target here.

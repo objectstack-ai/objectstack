@@ -75,15 +75,16 @@
 // reds it, the lever is that case's own work, ⛔ not a timeout.
 //
 // ⛔ It shares nothing a case asserts on. Its engine and manager are its own
-// and are destroyed before any case starts. Every case still builds a fresh
-// engine, a fresh `AuthManager` and a fresh sign-up. What it leaves warm is
-// process-level: the module registry, sql.js's compiled WASM and the JIT,
-// which the first case used to leave to every later case.
+// and are destroyed before any case starts. The cases then share one engine
+// and one `AuthManager` of their own (`fileServer()`), and every case still
+// signs up a fresh user. What the warm-up leaves warm is process-level: the
+// module registry, sql.js's compiled WASM and the JIT, which the first case
+// used to leave to every later case.
 //
 // ⛔ Do not move it into a hook, and do not answer a recurrence by raising a
 // timeout: vitest clocks a hook exactly as it clocks a test body.
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createHmac } from 'node:crypto';
@@ -200,8 +201,8 @@ const newClient = (manager: AuthManager, token?: string): ObjectStackClient =>
       manager.handleRequest(new Request(String(input), init)),
   });
 
-/** A real `AuthManager` plus a client whose socket IS that manager. */
-const arrange = async () => {
+/** A real `AuthManager` over a fresh engine. */
+const arrangeServer = async () => {
   const engine = await makeEngine();
   const manager = new AuthManager({
     secret: SECRET,
@@ -209,7 +210,25 @@ const arrange = async () => {
     dataEngine: engine,
     plugins: { twoFactor: true },
   } as never);
+  return { engine, manager };
+};
 
+/**
+ * [#23181] The file's ONE server, built by the first case that signs in and
+ * shared by every later one. Each case still signs a user of its own up on it,
+ * through a client of its own, and every assertion here is about that user's
+ * credential: a rotation revokes only the rotating user's sessions, and a
+ * case reads its own user by address. So no case reads another case's writes,
+ * and the order of cases does not matter (measured with `--sequence.shuffle`).
+ * What a case no longer pays is a fresh engine, a schema sync and a fresh
+ * better-auth instance of its own, about 150 ms each, measured.
+ */
+let server: ReturnType<typeof arrangeServer> | undefined;
+const fileServer = () => (server ??= arrangeServer());
+
+/** A real `AuthManager` plus a client whose socket IS that manager. */
+const arrange = async () => {
+  const { engine, manager } = await fileServer();
   return { engine, manager, client: newClient(manager) };
 };
 
@@ -220,6 +239,22 @@ const nextEmail = () => `rotation-${++emailSeq}-${Date.now()}@example.com`;
 const signedIn = async () => {
   const { engine, manager, client } = await arrange();
   const email = nextEmail();
+  // The default audience posture is invite_only, and the shared server's first
+  // sign-up is its only uninvited one: every user enters through a pending
+  // invitation, the lane `@objectstack/verify`'s signUp takes.
+  await engine.insert(
+    'sys_invitation',
+    {
+      id: `inv_${emailSeq}`,
+      email,
+      status: 'pending',
+      organization_id: 'org_rotation_audience_gate',
+      role: 'member',
+      inviter_id: 'usr_rotation_audience_gate',
+      expires_at: new Date(Date.now() + 3_600_000),
+    },
+    { context: { isSystem: true } } as never,
+  );
   await client.auth.register({ email, password: PASSWORD, name: 'Rotating User' });
   const token = storedToken(client);
   expect(token, 'register stored no bearer token — the premise of this suite is gone').toBeTruthy();
@@ -304,8 +339,9 @@ const signedCredentialFor = async (
   return String(signed);
 };
 
-/** Destroy every engine a scenario opened: after each case, and after the warm-up. */
+/** Destroy the file's server: after the warm-up, and after the last case. */
 const closeEngines = async (): Promise<void> => {
+  server = undefined;
   while (engines.length) {
     const e = engines.pop();
     try {
@@ -326,10 +362,10 @@ beforeEach(() => {
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
 });
-afterEach(async () => {
+afterEach(() => {
   vi.restoreAllMocks();
-  await closeEngines();
 });
+afterAll(closeEngines);
 
 // ───────────────────────────────────────────────────────────────────────────
 describe("#16534 ① the card's own probe, with the manual re-set deleted", () => {

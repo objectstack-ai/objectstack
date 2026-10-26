@@ -2245,6 +2245,47 @@ function refuseControlledByParentWithoutOneMaster(
 }
 
 /**
+ * [ADR-0055 §3 amendment · ruling 6398566164] `sharing.controlledByParent.ownerMayEdit: true`
+ * is read by exactly one door — the master-write gate of a
+ * `sharingModel: 'controlled_by_parent'` detail — so on any other object it is
+ * a declared capability the runtime never delivers (ADR-0049). Refused here,
+ * at the object's own door, with the path of the key and the fix: a
+ * `private` / `public_read` / `public_read_write` object already lets its
+ * owner write under its own model, so the key is deleted; an object meant to
+ * be a detail sets `sharingModel: 'controlled_by_parent'` and declares its
+ * one required `master_detail` (judged beside this, by
+ * {@link refuseControlledByParentWithoutOneMaster}).
+ *
+ * Only the sharing-model half is judged at parse. Whether the object carries
+ * the `owner_id` column the opt-in reads is the injected-column plan's
+ * question (`resolveInjectedSystemColumns`, which imports this module — the
+ * same cycle the attached-block refusal above stops at); the gate reads the
+ * stored row's `owner_id` and admits nobody when it is absent, and the
+ * relation resolver reports the inert opt-in once per object.
+ */
+function refuseControlledByParentOwnerMayEditOffDetail(
+  objectName: unknown,
+  sharingModel: unknown,
+  sharing: unknown,
+  ctx: z.RefinementCtx,
+): void {
+  if (!controlledByParentOwnerMayEdit({ sharing })) return;
+  if (sharingModel === 'controlled_by_parent') return;
+  const name = typeof objectName === 'string' && objectName.length > 0 ? objectName : '<unnamed>';
+  const model = typeof sharingModel === 'string' ? `'${sharingModel}'` : 'no sharingModel';
+  ctx.addIssue({
+    code: 'custom',
+    path: ['sharing', 'controlledByParent', 'ownerMayEdit'],
+    message:
+      `Object "${name}" declares sharing.controlledByParent.ownerMayEdit: true under ${model}. ` +
+      "The opt-in is read only on a sharingModel: 'controlled_by_parent' detail (ADR-0055 §3): it lets the " +
+      "row's owner update the row with read access to the master. Under any other sharing model the owner " +
+      'already writes under that model, and nothing reads this key. Delete the key, or make this object a ' +
+      "detail: sharingModel: 'controlled_by_parent' plus one required master_detail field.",
+  });
+}
+
+/**
  * [ADR-0015 §4.2 · #25168] An `external` binding names, in the object's own
  * `datasource`, a datasource that is not the platform's managed primary.
  *
@@ -3024,6 +3065,69 @@ const ObjectSchemaBase = strictObject(
   sharingModel: z.enum(['private', 'public_read', 'public_read_write', 'controlled_by_parent']).optional().describe('Org-Wide Default record visibility (OWD) for INTERNAL users. Canonical four only (legacy aliases removed, ADR-0090 D4): private (owner-only) | public_read (everyone reads, owner writes) | public_read_write (everyone reads+writes) | controlled_by_parent (derived from the master record). A CUSTOM object that omits this resolves to private at runtime (ADR-0090 D1).'),
 
   /**
+   * Per-object sharing opt-ins that REFINE the org-wide default
+   * {@link sharingModel} declares — never replace it. One block today:
+   *
+   * - `controlledByParent` — read only under
+   *   `sharingModel: 'controlled_by_parent'` (ADR-0055 §3, as amended for
+   *   ruling 6398566164). `ownerMayEdit: true` lets the owner of a DETAIL row
+   *   — the principal its injected `owner_id` names — pass the master-write
+   *   gate on a by-id `update` of that row with READ access to the master,
+   *   where every other caller still needs EDIT access to the master. The
+   *   default (the key absent or `false`) is unchanged: editing a detail
+   *   requires edit on its master. The opt-in widens nothing else: an
+   *   `insert`, a `delete`, a predicate (`multi: true`) update and an
+   *   on-behalf-of write keep the master-edit rule, and the detail's own
+   *   row-level policies still compose (AND) on the admitted write, so an
+   *   owner-keyed `update` policy on the detail decides as authored.
+   *
+   * The parse refuses the opt-in on an object whose `sharingModel` is not
+   * `controlled_by_parent` ({@link refuseControlledByParentOwnerMayEditOffDetail}):
+   * a declaration no door reads is a capability the runtime never delivers.
+   * The runtime reads the block through {@link controlledByParentOwnerMayEdit},
+   * exported beside this declaration, so the gate and the lint
+   * (`security-controlled-by-parent-owner-policy-without-opt-in`) ask one
+   * question one way.
+   */
+  sharing: strictObject({
+    surface: "this object's `sharing` block",
+    history:
+      'Closed from its first release: an opt-in that widens who may write a detail row must be ' +
+      'spelled exactly, so a misspelt key is refused rather than dropped into a silent default.',
+    guidance: {
+      sharingModel:
+        '`sharingModel` is the org-wide default record visibility and is a TOP-LEVEL object key, not a ' +
+        '`sharing` key. `sharing` carries the per-object opt-ins that refine it.',
+      publicSharing:
+        '`publicSharing` (the share-link policy) is a TOP-LEVEL object key, not a `sharing` key.',
+      ownerMayEdit:
+        '`ownerMayEdit` lives one level down, under `sharing.controlledByParent`, because it is read ' +
+        "only on a `sharingModel: 'controlled_by_parent'` detail.",
+    },
+  }, {
+    controlledByParent: strictObject({
+      surface: "this object's `sharing.controlledByParent` block",
+      history:
+        'Closed from its first release: a key here changes who may write a detail row, so an unknown ' +
+        'spelling is refused with its prescription rather than dropped into the default.',
+    }, {
+      ownerMayEdit: z.boolean().optional().describe(
+        "Opt-in on a sharingModel: 'controlled_by_parent' detail (ADR-0055 §3 amendment): true lets the " +
+        'owner of a detail row (its owner_id) update that row by id with READ access to the master; ' +
+        'everyone else, and every insert, delete, predicate update and on-behalf-of write, still needs EDIT ' +
+        'access to the master. Absent or false: the default, master edit for every write. Refused on an ' +
+        'object whose sharingModel is not controlled_by_parent.',
+      ),
+    }).optional().describe(
+      "Opt-ins read only under sharingModel: 'controlled_by_parent' (ADR-0055 §3): ownerMayEdit.",
+    ),
+  }).optional().describe(
+    'Per-object sharing opt-ins that refine the org-wide default sharingModel declares. ' +
+    "controlledByParent.ownerMayEdit: on a controlled_by_parent detail, the row's owner may update it with " +
+    'read access to the master (ADR-0055 §3 amendment).',
+  ),
+
+  /**
    * The object's default row scope (#24164 ruling E′, item 1): one row-level
    * security policy, the permission-set `rowLevelSecurity` entry shape without
    * `object` ({@link DefaultRowScopeSchema}). Layer 1 silence on an object, no
@@ -3306,6 +3410,9 @@ const ObjectSchemaBase = strictObject(
   // under `controlled_by_parent` — the one master relation the runtime derives
   // access from. See the helper's docblock.
   refuseControlledByParentWithoutOneMaster(object.name, object.sharingModel, object.fields, ctx);
+  // [ADR-0055 §3 amendment · ruling 6398566164] `sharing.controlledByParent.ownerMayEdit`
+  // is read only on a `controlled_by_parent` detail. See the helper's docblock.
+  refuseControlledByParentOwnerMayEditOffDetail(object.name, object.sharingModel, object.sharing, ctx);
   // [ADR-0015 §4.2 · #25168] An `external` binding is not on the platform's
   // managed primary datasource. See the helper's docblock.
   refuseExternalBindingOnPrimaryDatasource(object.name, object.external, object.datasource, ctx);
@@ -3347,6 +3454,30 @@ const ObjectSchemaBase = strictObject(
 export function isPublicSharingEnabled(schema: unknown): boolean {
   return (schema as { publicSharing?: { enabled?: unknown } } | null | undefined)
     ?.publicSharing?.enabled === true;
+}
+
+/**
+ * [ADR-0055 §3 amendment · ruling 6398566164] Has this object opted its detail
+ * rows' owners into writing with READ on the master —
+ * `sharing.controlledByParent.ownerMayEdit: true`?
+ *
+ * The ONE reading of the opt-in declared in the `sharing` block above,
+ * exported beside it so every surface that asks the question asks it one way:
+ * the master-write gate (`@objectstack/plugin-security`, through the
+ * relation it resolves per object), the parse refusal above
+ * (`refuseControlledByParentOwnerMayEditOffDetail`) and the security-posture
+ * lint (`@objectstack/lint`). The same shape as {@link isPublicSharingEnabled}.
+ *
+ * Fail-CLOSED: an absent block, an absent schema and an unreadable schema are
+ * one answer, `false`. Only the boolean `true` opts in — a truthy `'true'` or
+ * `1` that never went through this schema widens nothing. It does NOT read
+ * `sharingModel`: whether the object is a detail at all is the caller's
+ * question (the parse refuses the opt-in elsewhere; the gate asks it only of an
+ * object whose relation resolved).
+ */
+export function controlledByParentOwnerMayEdit(schema: unknown): boolean {
+  return (schema as { sharing?: { controlledByParent?: { ownerMayEdit?: unknown } } } | null | undefined)
+    ?.sharing?.controlledByParent?.ownerMayEdit === true;
 }
 
 /**

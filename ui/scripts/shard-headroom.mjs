@@ -11,8 +11,9 @@
  *   node scripts/shard-headroom.mjs --job 'Test (shard {n}/16)' --shards 16 --cap-minutes 20 --target-minutes 10
  *   node scripts/shard-headroom.mjs ... --fixture <jobs.json>
  *
- * `ci.yml`'s two aggregators run it: `test-aggregate` (`Test`) for the `test`
- * matrix and `coverage-report` (`Test (coverage)`) for the coverage matrix.
+ * The root `ui-coverage-nightly.yml`'s `ui-coverage-report` (`Test UI
+ * (coverage)`) runs it for the coverage matrix (objectstack#25924). objectui's
+ * other aggregator, `test-aggregate` (`Test`), has no root job yet.
  * `scripts/__tests__/shard-headroom.test.ts` pins each invocation's
  * `--shards` and `--cap-minutes` to the matrix and the `timeout-minutes` of
  * the job it reads, so the reading cannot quietly describe another cap.

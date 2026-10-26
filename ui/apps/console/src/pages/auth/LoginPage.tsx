@@ -26,6 +26,12 @@
  *    (objectui#11806). The sign-in request goes to the same server, so a
  *    live-looking form would only have deferred that news to the submit.
  *
+ * A visitor who arrived signed out from an invitation link
+ * (`?redirect=/accept-invitation/ID`) is greeted for that invitation instead
+ * of as a returning user, and, where sign-up is offered, gets app-shell's
+ * `InvitationSignUpPrompt` above the form in place of the small "Sign up"
+ * link — the same prompt `DefaultLoginPage` shows (#25886).
+ *
  * Layout (objectui#12600): one 400 px column — brand mark, the card, a footer.
  * The card carries this page's own two-line header, so `<LoginForm>` renders
  * with `hideHeader`. On a dev instance the card's last row offers a one-click
@@ -54,6 +60,7 @@ import {
   needsBootstrapProbe,
   useBootstrapStatus,
   LocaleSwitcher,
+  InvitationSignUpPrompt,
 } from '@object-ui/app-shell';
 import { AuthLayout } from './AuthLayout';
 import { followOauthAuthorize } from './followAuthorize';
@@ -304,6 +311,7 @@ export function LoginPage() {
     ? `/register?redirect=${encodeURIComponent(redirect)}`
     : '/register';
   const legalLinks = readLegalLinks(authConfig);
+  const offerSignUp = configRead === 'known' && signUpOffer === 'form';
 
   return (
     <AuthLayout formWidth="base">
@@ -345,18 +353,28 @@ export function LoginPage() {
             <>
               <div className="mb-5">
                 <h1 className="text-xl font-semibold tracking-tight text-foreground">
-                  {t('auth.login.welcomeTitle', { defaultValue: 'Welcome back' })}
+                  {invitationRedirect
+                    ? t('auth.login.invitationTitle', { defaultValue: 'Accept your invitation' })
+                    : t('auth.login.welcomeTitle', { defaultValue: 'Welcome back' })}
                 </h1>
                 <p className="mt-1 text-[13px] text-muted-foreground">
-                  {t('auth.login.welcomeDescription', {
-                    defaultValue: 'Sign in to continue your work',
-                  })}
+                  {invitationRedirect
+                    ? t('auth.login.invitationDescription', {
+                        defaultValue: 'Use the email address the invitation was sent to.',
+                      })
+                    : t('auth.login.welcomeDescription', {
+                        defaultValue: 'Sign in to continue your work',
+                      })}
                 </p>
               </div>
+              {invitationRedirect && offerSignUp ? (
+                <div className="mb-5">
+                  <InvitationSignUpPrompt registerUrl={registerUrl} />
+                </div>
+              ) : null}
               <LoginFormCard
-                registerUrl={
-                  configRead === 'known' && signUpOffer === 'form' ? registerUrl : undefined
-                }
+                // An invitee's sign-up is the prompt above, not a second link.
+                registerUrl={offerSignUp && !invitationRedirect ? registerUrl : undefined}
                 redirect={redirect}
               />
               {devSeedAdmin ? <DevAdminRow seed={devSeedAdmin} /> : null}

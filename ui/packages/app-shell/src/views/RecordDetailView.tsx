@@ -384,6 +384,12 @@ const COMMENT_REACTION_OBJECT = 'sys_comment_reaction';
 const COMMENT_OBJECT = 'sys_comment';
 
 /**
+ * `sys_approval_request`'s declared recall. While the decision bar draws it,
+ * the DetailView approval band yields its own Recall (objectstack#25877).
+ */
+const APPROVAL_RECALL_ACTION = 'approval_recall';
+
+/**
  * Which writes the record feed may offer: its comment and reply composers, the
  * author's Edit and Delete on their own comment (objectui#12268), and its
  * reaction control on either store (objectui#12082).
@@ -1683,6 +1689,19 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // This gates the AFFORDANCE only. `canEdit` / `approvalLocked` below are
   // untouched by it, and the recall endpoint authorizes the recall itself.
   const approvalIsSubmitter = isSubmitterOf(approvals.pendingRequest, user?.id);
+  // Does this page mount the pending request's declared decision bar
+  // (objectui#3055)?
+  const approvalBarMounted = approvals.available && !!approvals.pendingRequest;
+  // Recall is drawn ONCE per page (objectstack#25877). The bar reports which
+  // declared actions it actually draws, after their capability and `visible`
+  // gates; while it draws the request's own `approval_recall`, the DetailView
+  // approval band keeps its lock badge only. Read off what the bar DRAWS, not
+  // off whether it is mounted: before the request's definition loads, or on a
+  // backend too old to send a `viewer` block (every declared gate fails
+  // closed), the bar draws no recall and the band stays the lever.
+  const [approvalBarDrawn, setApprovalBarDrawn] = useState<string[]>([]);
+  const approvalRecallDrawnByHost =
+    approvalBarMounted && approvalBarDrawn.includes(APPROVAL_RECALL_ACTION);
 
   // A decision landed through the declared-action bar (objectui#3055). The
   // action itself already POSTed and the runtime already toasted; what the HOST
@@ -3676,6 +3695,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           approvalReadAnswered={approvals.answered}
           approvalProgress={approvalProgress}
           approvalIsSubmitter={approvalIsSubmitter}
+          approvalRecallDrawnByHost={approvalRecallDrawnByHost}
           lockedReason={t('detail.lockedTooltip', {
             defaultValue: 'This record has a pending approval request; editing is locked',
           })}
@@ -3808,8 +3828,17 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   renders a richer remind (throttle-aware copy, timeline
                   refresh), and `exclude` is how a host keeps one of an
                   object's declared actions in its own UI without the bar
-                  double-rendering it. */}
-              {approvals.available && approvals.pendingRequest && (
+                  double-rendering it.
+
+                  objectstack#25877 — for an administrator who is NOT an
+                  approver, the override levers (approve / reject / reassign
+                  in their name, and recall) are the exception path, so
+                  `foldOverrides` collapses them into one status line and one
+                  marked menu; the approver's own bar is unchanged. While the
+                  bar draws the request's Recall, it is the page's one Recall:
+                  `onDrawnActionsChange` is how the page learns that and tells
+                  the DetailView band below to keep its lock badge only. */}
+              {approvalBarMounted && (
                 <DeclaredActionsBar
                   className="mb-4"
                   objectName={SYS_APPROVAL_REQUEST_OBJECT}
@@ -3817,6 +3846,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   location={RECORD_APPROVAL_ACTION_LOCATION}
                   exclude={[...RECORD_APPROVAL_EXCLUDED_ACTIONS]}
                   onDone={handleApprovalActionDone}
+                  foldOverrides
+                  onDrawnActionsChange={setApprovalBarDrawn}
                 />
               )}
               <RelatedRecordActionsBridge
