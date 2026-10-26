@@ -108,6 +108,14 @@ const CALLERS: Record<string, Classification> = {
       + 'that only narrows the read the caller addressed, whose own door already admitted it; no row and no field of the '
       + 'parent is served, and a refused parent answers `$in: []`',
   },
+  // [#25522 cut 11] File-field hydration's `sys_file` admission, moved out of engine.ts.
+  'packages/objectql/src/engine-file-reference-hydration.ts': {
+    kind: 'not-a-door',
+    reason:
+      "file-field hydration's ask before the caller's own `sys_file` sub-read (`callerMayReadSysFile`, #24335): it only "
+      + 'narrows what is read (`true` still reads as the caller, through the engine middleware; anything else serves the '
+      + "refused marker), and it serves no row of its own; the record read it hydrates was admitted by that read's door",
+  },
 };
 
 const SCAN_TIMEOUT_MS = 60_000;
