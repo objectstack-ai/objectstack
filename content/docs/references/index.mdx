@@ -1,7 +1,7 @@
 ---
 title: Protocol reference — every schema by module
 navTitle: Protocol Reference
-description: Every schema published by @objectstack/spec — 1542 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1544 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -33,8 +33,8 @@ counts are sums of the rows they head. Regenerate with
 | [Shared Protocol](/docs/references/shared) | 10 | 31 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
 | [System Protocol](/docs/references/system) | 37 | 286 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
-| [UI Protocol](/docs/references/ui) | 16 | 169 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **199** | **1542** | 14 protocol modules |
+| [UI Protocol](/docs/references/ui) | 16 | 171 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
+| **Total** | **199** | **1544** | 14 protocol modules |
 
 ---
 
@@ -366,7 +366,7 @@ The runtime environment — logging, jobs, cache, metrics, notifications, i18n a
 
 ## UI Protocol
 
-**Source:** `packages/spec/src/ui/` · **Import:** `@objectstack/spec/ui` · **16 pages, 169 schemas**
+**Source:** `packages/spec/src/ui/` · **Import:** `@objectstack/spec/ui` · **16 pages, 171 schemas**
 
 Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer.
 
@@ -379,7 +379,7 @@ Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI lay
 | [`chart.zod.ts`](/docs/references/ui/chart) | `ChartAggregate`, `ChartAggregateFunction`, `ChartAnnotation`, `ChartAxis`, `ChartConfig`, `ChartDrillDown`, `ChartGroupBy`, `ChartInteraction`, `ChartSeries`, `ChartType` |
 | [`component.zod.ts`](/docs/references/ui/component) | `ActionButtonProps`, `ActionGroupProps`, `ActionIconProps`, `ActionMenuProps`, `ElementButtonProps`, `ElementDefinitionListProps`, `ElementFilterProps`, `ElementFormProps`, `ElementImageProps`, `ElementMetadataViewerProps`, `ElementNumberProps`, `ElementRecordPickerProps`, `ElementRepeaterProps`, `ElementTextInputProps`, `ElementTextProps`, `ObjectCalendarProps`, `ObjectFormProps`, `ObjectGanttProps`, `ObjectGridProps`, `ObjectKanbanProps`, `ObjectMapProps`, `ObjectMasterDetailFormProps`, `ObjectMetricProps`, `ObjectTimelineProps`, `ObjectTreeProps`, `PageAccordionProps`, `PageCardProps`, `PageContainerProps`, `PageHeaderProps`, `PageTabsProps`, `RecordActivityProps`, `RecordAlertAction`, `RecordAlertProps`, `RecordChatterProps`, `RecordDetailsProps`, `RecordHighlightsField`, `RecordHighlightsProps`, `RecordHistoryProps`, `RecordLineItemsProps`, `RecordPathProps`, `RecordQuickActionsProps`, `RecordReferenceRailProps`, `RecordRelatedListProps`, `ReferenceRailEntry` |
 | [`dashboard.zod.ts`](/docs/references/ui/dashboard) | `Dashboard`, `DashboardHeader`, `DashboardHeaderAction`, `DashboardWidget`, `DashboardWidgetChartConfig`, `DashboardWidgetOptions`, `GlobalFilter`, `GlobalFilterOptionsFrom`, `WidgetActionType`, `WidgetColorVariant` |
-| [`dataset.zod.ts`](/docs/references/ui/dataset) | `Dataset`, `DatasetDimension`, `DatasetMeasure`, `DerivedMeasureOp` |
+| [`dataset.zod.ts`](/docs/references/ui/dataset) | `Dataset`, `DatasetDimension`, `DatasetDurationUnit`, `DatasetMeasure`, `DatasetMeasureDuration`, `DerivedMeasureOp` |
 | [`expression-bindable-text-keys.zod.ts`](/docs/references/ui/expression-bindable-text-keys) | `ExpressionBindableTextKey` |
 | [`i18n.zod.ts`](/docs/references/ui/i18n) | `AriaProps`, `I18nLabel`, `InlineLocaleMap` |
 | [`notification.zod.ts`](/docs/references/ui/notification) | `NotificationPosition`, `NotificationSeverity`, `NotificationType` |
