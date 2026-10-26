@@ -307,7 +307,7 @@ describe('[ADR-0142 D5] the assignment seam', () => {
     await insert({ subject: 'B' });
     expect(a).toMatchObject({ queue: 'support' });
     expect(a.owner_id ?? null).toBeNull();
-    expect(warn.mock.calls.filter((c) => /has no members/.test(String(c[0])))).toHaveLength(1);
+    expect(warn.mock.calls.filter((c: unknown[]) => /has no members/.test(String(c[0])))).toHaveLength(1);
   });
 
   it('a target that resolves nowhere in the row\'s organization leaves it ownerless, in no queue, and warns', async () => {
@@ -315,7 +315,7 @@ describe('[ADR-0142 D5] the assignment seam', () => {
     const row = await engine.insert('ticket', { subject: 'A', organization_id: 'org_b' }, { context: { ...SYS, tenantId: 'org_b' } });
     expect(row.owner_id ?? null).toBeNull();
     expect(row.queue ?? null).toBeNull();
-    expect(warn.mock.calls.some((c) => /does not resolve in organization 'org_b'/.test(String(c[0])))).toBe(true);
+    expect(warn.mock.calls.some((c: unknown[]) => /does not resolve in organization 'org_b'/.test(String(c[0])))).toBe(true);
   });
 
   it('a row that arrives with an owner or a queue is not evaluated', async () => {
