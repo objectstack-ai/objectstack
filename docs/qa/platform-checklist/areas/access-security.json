@@ -463,7 +463,7 @@
       "title": "CRUD × permission-set matrix: every access-matrix.json row holds — allowed verbs succeed, withheld verbs 403, VAMA bounded",
       "since": "v15",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -479,7 +479,7 @@
         ],
         "knownGaps": [
           "every authenticated member ALSO holds the everyone baseline showcase_member_default additively (ADR-0090 D5) — the effective expectation per cell is the UNION of the tested set's row and the baseline's row for that object; compute the union before judging a cell, or a baseline-granted read will look like a matrix violation. Measured on the committed table: 9 of the 164 showcase_* cells (41 rows × 4 verbs at revision 4) are granted ONLY by the baseline (showcase_auditor and showcase_executive can CREATE an inquiry and create+edit a private note; guest_portal can READ an inquiry; showcase_manager and showcase_ops can CREATE an inquiry). showcase-crud-persona-matrix.dogfood.test.ts computes the union and asserts those 9 as allowed.",
-          "access-matrix.json is the APP's declared matrix; the platform's own baseline permission sets are additionally in force and grant some sys_* surface the app matrix never mentions (measured: a plain member reads /data/sys_user 200, self-scoped). So the absence of a row is NOT a prediction of denial on sys_* objects, and the automated sweep judges the showcase_* rows only — see automated.ref.",
+          "access-matrix.json is the APP's declared matrix; the platform's own baseline permission sets are additionally in force and grant some sys_* surface the app matrix never mentions (measured: a plain member reads /data/sys_user 200 — the organization's whole user directory, not a self-scoped row: member_default's sys_user_org_members policy selects `id in current_user.org_user_ids`; sys_account and sys_session are the self-scoped ones). So the absence of a row is NOT a prediction of denial on sys_* objects, and the automated sweep judges the showcase_* rows only — see automated.ref.",
           "clause 5 (guest_portal create-without-read) is UNOBSERVABLE on a stock boot — record it blocked(fixture), never pass or fail. The guest anchor ships unbound (binding guest → showcase_guest_portal is an admin action; the app only ships the capability, permission-sets.ts GuestPortalPermissionSet), a member persona holding the set also holds the baseline's read on showcase_inquiry, and QA run #21056 measured REST anonymous create AND read both answering 401 even with the anchor bound. The only anonymous create lane is the public form (publicFormGrant on the inquiry form view, ADR-0056 Option A), whose grant is create plus read-back of the row it created — a different contract from this clause's",
           "sys_user create and delete answer 405 OBJECT_API_METHOD_NOT_ALLOWED for EVERY caller, admin included: sys_user declares apiMethods ['get','list','update','bulk'] (identity writes belong to better-auth, ADR-0092), and the API-exposure gate answers before any permission is judged. Score those two delegate × sys_user cells against 405, not 403"
         ]
@@ -534,7 +534,7 @@
         {
           "clause": "every variant (permission set) is driven over EVERY object row access-matrix.json lists for it, and the run record carries one verdict per cell — a set skipped or an object row skipped makes the item at best partial",
           "oracle": "api",
-          "verify": "verdict matrix dimensions match access-matrix.json entries (45 rows × 4 verbs at revision 6: the 41 showcase_* rows are 164 cells, 87 effective-allow and 77 effective-deny after the baseline union; recount from the file each run)",
+          "verify": "verdict matrix dimensions match access-matrix.json entries (45 rows × 4 verbs at revision 8: the 41 showcase_* rows are 164 cells, 87 effective-allow and 77 effective-deny after the baseline union, and only these are judged by the dogfood pin; the 4 showcase_field_ops_delegate × sys_* rows are 16 hand-driven cells per steps[6]; recount from the file each run)",
           "evidence": "the matrix artifact"
         }
       ],
@@ -555,7 +555,7 @@
       ],
       "automated": {
         "kind": "verify",
-        "ref": "packages/verify/src/verify.ts (runCrudVerification) + packages/verify/src/rls.ts (runRlsProofs) — `objectstack verify --rls` for the OBJECT-level CRUD and cross-owner RLS half (the flag is load-bearing: bare verify prints no RLS section) + packages/qa/dogfood/test/showcase-crud-persona-matrix.dogfood.test.ts for the PERSONA-grained cells: every showcase_* row of access-matrix.json (41 at revision 4) driven over all four verbs by one fresh member per permission set — 164 cells, 87 effective-allow and 77 effective-deny, each judged against the BASELINE-UNIONED expectation (row OR showcase_member_default row, ADR-0090 D5), which is also asserted as load-bearing on the 9 cells whose only grant is the baseline. Reaches clauses 0, 1, 2, 3, 4 and 6 for those rows; every denial is checked to be 403 PERMISSION_DENIED specifically, every allow to persist, and an admin payload control runs first so a persona 403 cannot be a 400 in disguise. STILL MANUAL: (a) the 4 showcase_field_ops_delegate x sys_* rows — the platform's OWN baseline sets grant part of that surface independently of the app matrix (measured: a member holding nothing but the app baseline reads /data/sys_user 200, self-scoped, though the matrix lists sys_user read only for the delegate), and the delegate's sys_user_position writes are decided by the ADR-0090 D12 adminScope subtree gate that showcase-permission-zoo.dogfood.test.ts pins on both sides ON THE VERIFY HARNESS — a raw cell verdict there would be false in one direction or the other. That pin runs on the verify harness, so drive those cells by hand on the dev boot and score them against the live answer: since #21057 closed (2026-10-08) the seeded business units carry organization_id and the delegate's in-subtree sys_user_position create answers 201 while the out-of-subtree create (bu_hq_finance) answers 403 PERMISSION_DENIED 'outside the delegated subtree'; (b) clause 5's guest-anchor intake asymmetry (guest_portal create-without-read) — NOT observable on a member persona at all, because the everyone baseline grants read on showcase_inquiry and capability is a union, so the member-persona expectation is READ ALLOWED; the asymmetry lives on the unauthenticated guest anchor, a different admission lane."
+        "ref": "`objectstack verify --rls` (packages/verify/src/verify.ts runCrudVerification + packages/verify/src/rls.ts runRlsProofs) for the OBJECT-level CRUD and cross-owner RLS half — a CLI proof a runner invokes, not a test file: no pin in this ref drives it over the showcase (rls-fixture and rls-multitenant dogfood run runRlsProofs on purpose-built fixtures only), so that half scores only from a run that executes the command (the flag is load-bearing: bare verify prints no RLS section) + packages/qa/dogfood/test/showcase-crud-persona-matrix.dogfood.test.ts for the PERSONA-grained cells: every showcase_* row of access-matrix.json (41 at revision 4) driven over all four verbs by one fresh member per permission set — 164 cells, 87 effective-allow and 77 effective-deny, each judged against the BASELINE-UNIONED expectation (row OR showcase_member_default row, ADR-0090 D5), which is also asserted as load-bearing on the 9 cells whose only grant is the baseline. Reaches clauses 0, 1, 2 and 4 for those rows; clause 3 only on showcase_private_note (the auditor's viewAllRecords reads of showcase_inquiry, showcase_invoice and showcase_invoice_line are not asserted — drive them by hand); clause 6 only for the 41 showcase_* rows (the pin excludes the 4 sys_* rows by name, so clause 6 cannot be pinned whole); every denial is checked to be 403 PERMISSION_DENIED specifically, every allow to persist, and an admin payload control runs first so a persona 403 cannot be a 400 in disguise. STILL MANUAL: (a) the 4 showcase_field_ops_delegate x sys_* rows — the platform's OWN baseline sets grant part of that surface independently of the app matrix (measured: a member holding nothing but the app baseline reads /data/sys_user 200 — the organization's user directory, not only its own row — though the matrix lists sys_user read only for the delegate), and the delegate's sys_user_position writes are decided by the ADR-0090 D12 adminScope subtree gate that showcase-permission-zoo.dogfood.test.ts pins ON THE VERIFY HARNESS — its in-subtree assignment asserts a 2xx and its out-of-subtree create asserts only a non-2xx, not the 403 PERMISSION_DENIED named below, so the code is a hand-scored answer — a raw cell verdict there would be false in one direction or the other. That pin runs on the verify harness, so drive those cells by hand on the dev boot and score them against the live answer: since #21057 closed (2026-10-08) the seeded business units carry organization_id and the delegate's in-subtree sys_user_position create answers 201 while the out-of-subtree create (bu_hq_finance) answers 403 PERMISSION_DENIED 'outside the delegated subtree'; (b) clause 5's guest-anchor intake asymmetry (guest_portal create-without-read) — NOT observable on a member persona at all, because the everyone baseline grants read on showcase_inquiry and capability is a union, so the member-persona expectation is READ ALLOWED; the asymmetry lives on the unauthenticated guest anchor, a different admission lane."
       },
       "traps": [
         "wrong-persona",
@@ -604,6 +604,12 @@
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
           "ref": "#25003"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-26",
+          "change": "Six checklist-accuracy findings of the 18.2.0 sweep, re-read on main b4199c96. From P0 record #25812: knownGaps[1] said a plain member reads /data/sys_user self-scoped; member_default's sys_user_org_members policy (id in current_user.org_user_ids) serves the organization's whole directory, so the gap and automated.ref now say so. From Tier 1 record #25815: automated.ref no longer reads `objectstack verify --rls` as a pin (it is a CLI proof no test here drives over the showcase); it no longer claims clauses 3 and 6 whole (the viewAllRecords case probes showcase_private_note only, and the pin excludes the 4 sys_* rows by name); it says the zoo's out-of-subtree case asserts a non-2xx, not 403 PERMISSION_DENIED; acceptance[6].verify says which 164 cells the pin judges and which 16 are hand-driven. The pin header comment's '6 delegate × sys_* rows' is in the test file, outside this ledger: the ledger already says 4. No status changed",
+          "ref": "#25835"
         }
       ]
     },
@@ -970,7 +976,7 @@
       "title": "Anonymous requests to every mounted API family answer 401 UNAUTHENTICATED — uniformly, before any resource resolution",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -1050,7 +1056,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/showcase-anonymous-deny-surfaces.dogfood.test.ts — drives all seven variant families: data, meta (read and the five write doors), actions, automation, analytics (cube read, SQL echo and meta, the two body-carrying faces also with a malformed body — #21061), batch (POST /batch with the empty operation list) and security-explain (GET /security/explain), each anonymous 401 classified into exactly one declared envelope family, with a member contrast proving each route is registered. Batch and security-explain joined at revision 2; before that they were checked by hand only"
+        "ref": "packages/qa/dogfood/test/showcase-anonymous-deny-surfaces.dogfood.test.ts — drives all seven variant families: data, meta (read and the five write doors), actions, automation, analytics (cube read, SQL echo and meta, the two body-carrying faces also with a malformed body — #21061), batch (POST /batch with the empty operation list) and security-explain (GET /security/explain), each anonymous 401 classified into exactly one declared envelope family, with a member contrast proving each route is registered. Batch and security-explain joined at revision 2; before that they were checked by hand only. What it does NOT assert, so these legs stay hand-driven: acceptance[4]'s /meta member contrast is `.not.toBe(401)` in the pin, not the clause's 200 (only the /data contrast asserts 200); acceptance[5]'s declared-public contrast (an anonymous forms-family route answering non-401) has no case in any pin; negative[0]'s read-back — the authed GET /api/v1/automation/showcase_reassign_wizard answering 200 after the anonymous DELETE — is not driven (the pin asserts only the DELETE's 401)"
       },
       "traps": [
         "dispatcher-vs-hono-route"
@@ -1082,6 +1088,12 @@
           "date": "2026-10-01",
           "change": "the pin now covers POST /batch and GET /security/explain (QA run #21056 measured both 401 rest-flat live; the pin drove four of the six variant families). automated.ref names what the pin drives",
           "ref": "#21060"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-26",
+          "change": "Three checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96 in showcase-anonymous-deny-surfaces.dogfood.test.ts: acceptance[4]'s /meta member contrast is .not.toBe(401) where the clause demands 200; acceptance[5]'s public-forms contrast is in no pin; negative[0]'s post-DELETE authed read-back is not driven. automated.ref names all three as hand-driven legs. No clause or status changed",
+          "ref": "#25835"
         }
       ]
     },
@@ -2564,7 +2576,7 @@
       "title": "Activation-ledger write authority (ADR-0126 §5): the manage_metadata tier refuses first on every posture, and the shared operator gate — INERT on stock `single` — demands the platform_admin POSITION in walled postures, at both the flow and action doors",
       "since": "v17",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2653,7 +2665,7 @@
       },
       "automated": {
         "kind": "unit",
-        "ref": "packages/runtime/src/domains/automation-activation-posture-gate.test.ts (#12157, flow door) + packages/runtime/src/domains/action-activation-posture-gate.test.ts (#12160, action door) — the full posture x identity matrix for both doors, including the group/isolated legs this item marks blocked(fixture), the no-write-on-refusal assertion, and the isSystem bypass"
+        "ref": "packages/runtime/src/domains/automation-activation-posture-gate.test.ts (#12157, flow door) + packages/runtime/src/domains/action-activation-posture-gate.test.ts (#12160, action door) — the posture x operator matrix for both doors, including the group/isolated legs this item marks blocked(fixture), the no-write-on-refusal assertion, and the isSystem bypass; both are unit pins (the domain handler over fakes, no HTTP). What they do NOT reach: the flow pin has no caller-without-manage_metadata case at all — that tier and its exact FLOW_ENABLEMENT_DENY_MESSAGE sentence are pinned at the same unit layer by packages/runtime/src/domains/automation-toggle-deny-message.test.ts (#11666, sentence plus 403 PERMISSION_DENIED, both directions) and packages/runtime/src/domains/automation-write-capability-gate.test.ts (envelope); the action pin's 'REFUSES a caller without `manage_metadata`, in every posture' runs only `single` and asserts only that the message contains 'manage_metadata' — not acceptance[1]'s 'functionally equivalent to deleting it' rationale nor its 'a packaged action' subject. + packages/qa/dogfood/test/packaged-activation-ledger-reach.dogfood.test.ts (#12359) drives the action flip over HTTP and asserts ONE deployment-level row with no organization_id key — acceptance[3]'s row shape — but as the dev admin, not a manage_metadata holder without platform_admin, so acceptance[3]'s persona leg stays live. STILL MANUAL: acceptance[1] and acceptance[0] over HTTP (the pins stop at the handler), acceptance[3]'s persona, and acceptance[5]'s live corroboration — no pin restarts a boot and reads the re-hydration line, only the test half is pinned"
       },
       "source": [
         "packages/runtime/src/domains/activation-gate.ts#refuseUngrantedActivationWrite (the shared §5 gate: the posture read through readEffectiveTenancyPosture and the early return where postureEnforcesWall is false, then the PLATFORM_ADMIN posture-rung test, #15981 — never a position name) + packages/runtime/src/domains/activation-gate.ts#refuseUngrantedActivationAuthoring (the manage_metadata tier) + packages/runtime/src/domains/activation-gate.ts#FLOW_ACTIVATION_SUBJECT and packages/runtime/src/domains/activation-gate.ts#ACTION_ACTIVATION_SUBJECT (the per-artifact remedies); the fail-open rationale is the file header's section 'Fail-open on an ABSENT posture is deliberate'",
@@ -2717,6 +2729,12 @@
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
           "ref": "#25003"
+        },
+        {
+          "revision": 10,
+          "date": "2026-10-26",
+          "change": "Four checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96, all in automated.ref. a0/n2: the ref claimed the full posture x identity matrix while automation-activation-posture-gate.test.ts has no caller-without-manage_metadata case — the ref now says so and names the two unit pins that do hold that tier. The record's second half (FLOW_ENABLEMENT_DENY_MESSAGE asserted by no test) does not hold on this tree: automation-toggle-deny-message.test.ts (#11666) asserts the sentence verbatim, by value rather than by the constant's name; it joins the ref. a1: the action pin's no-manage_metadata case is single-only and asserts a substring. a3: packaged-activation-ledger-reach.dogfood.test.ts joins the ref for the row shape, with its dev-admin persona named. a5: the restart re-hydration corroboration is named unpinned. No clause or status changed",
+          "ref": "#25835"
         }
       ]
     },
@@ -3444,7 +3462,7 @@
       "title": "The anonymous floor answers 401 FIRST on the doors v18 added to it — /notifications (was 501), non-POST /keys (was 405), share-link management (was 501), /openapi.json, every /i18n face and the settings family — while the token faces and the public-form submit stay anonymous and the submit echoes only {id}",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3510,7 +3528,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/anonymous-door-sweep.dogfood.test.ts + packages/rest/src/rest-api-description-anonymous-deny.test.ts + packages/rest/src/rest-docs-viewer-retired.pin.test.ts + packages/runtime/src/domains/i18n-anonymous-deny.test.ts + packages/services/service-settings/src/settings-routes.anonymous-floor.pin.test.ts + packages/rest/src/public-form-submit-answer.test.ts"
+        "ref": "packages/qa/dogfood/test/anonymous-door-sweep.dogfood.test.ts + packages/rest/src/rest-api-description-anonymous-deny.test.ts + packages/rest/src/rest-docs-viewer-retired.pin.test.ts + packages/runtime/src/domains/i18n-anonymous-deny.test.ts + packages/services/service-settings/src/settings-routes.anonymous-floor.pin.test.ts + packages/rest/src/public-form-submit-answer.test.ts. What the pins assert, clause by clause (RUNNER rule 6, layer named), so a run knows which legs stay live: acceptance[1] — the sweep's EVERYTHING_ELSE expectation (packages/qa/dogfood/test/anonymous-door-sweep.classification.ts) checks status 401 and an error envelope, never error.code; UNAUTHENTICATED is asserted by this ref's i18n, settings and API-description unit pins and, outside this ref, on other faces of the same families by packages/plugins/plugin-sharing/src/share-link-routes.anonymous-floor.pin.test.ts (every registered share-link route, on a mock host), packages/runtime/src/notifications-every-verb.hono.integration.test.ts (the unserved verbs, over a real Hono app) and packages/runtime/src/api-key-lifecycle.pin.test.ts (POST /keys) — no pin asserts the code on the GET /notifications, GET /keys and GET /share-links faces steps[0] lists; acceptance[2] — rest-docs-viewer-retired.pin.test.ts asserts that /docs has no registration on the server, its route manager or the host, but no pin compares GET /api/v1/docs with the never-served control path, anonymous and as admin; acceptance[3] — the sweep's share-link token class (DOOR_CLASSES[1], REFUSED_WITHOUT_A_SUBJECT) accepts any 4xx, 401 included, so the clause's 'not 401' is asserted by no pin; acceptance[4] — the dogfood submit asserts a 2xx and body keys ['id'] on the showcase without sending steps[3]'s forged owner_id and status, and the exact 201 is asserted only by public-form-submit-answer.test.ts (the registered handler, and the real Hono transport over a protocol double)"
       },
       "source": [
         "packages/core/src/security/anonymous-deny.ts#shouldDenyAnonymous",
@@ -3536,6 +3554,12 @@
           "date": "2026-10-21",
           "change": "re-pointed for the retirement of GET /api/v1/docs, the OpenAPI document's HTML viewer page (no consumer; the API origin serves no HTML viewer). /docs left the title and the floored-door step, so acceptance[1] no longer demands 401 of it; a new step and acceptance[2] drive the retired path anonymously and as admin and demand the host's ordinary 404, the never-served control path's body, on that boot. automated.ref gains packages/rest/src/rest-docs-viewer-retired.pin.test.ts, the registrar-level not-served pin on both route shapes. /openapi.json stays on the floor, unchanged",
           "ref": "#25104"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-26",
+          "change": "Four checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96; automated.ref now says what each pin asserts per clause. a1: EVERYTHING_ELSE never reads error.code. The record's further claim that no pin asserts UNAUTHENTICATED for /notifications, /keys and /share-links does not hold on this tree for those families' other faces — share-link-routes.anonymous-floor.pin.test.ts, notifications-every-verb.hono.integration.test.ts and api-key-lifecycle.pin.test.ts assert it — but none asserts it on the three GET faces steps[0] lists, which is what the ref now says. a2: the docs-viewer pin asserts non-registration, not the control-path comparison. a3: the share-link token class accepts 401. a4: the dogfood submit sends no forged fields and asserts 2xx, the exact 201 is pinned over a protocol double. No clause or status changed",
+          "ref": "#25835"
         }
       ]
     },
@@ -3544,7 +3568,7 @@
       "title": "Under a walled posture (group / isolated) environment metadata and the security catalog belong to the platform operator: an org owner holding manage_metadata is refused 403 on every /meta write verb, every /packages write, install-local of a catalog-carrying package, _migrate-stored and POST /automation — and the single posture is unchanged",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -3560,7 +3584,7 @@
           "on the walled boot: a second organization whose owner is granted manage_metadata but not the platform_admin position. No HTTP door places that grant on a walled boot (QA run #24783): the operator's insert into an organization it is not a member of is refused by the Layer 0 tenant check, 403 '… organization_id is outside the caller's organization scope' (packages/plugins/plugin-security/src/security-plugin-write-tenant-wall.ts#denyTenantPlacement), and the owner's own insert is refused by ADR-0090 D12 condition (c), because manage_metadata is declared scope 'platform' (packages/spec/src/security/capabilities.ts; packages/plugins/plugin-security/src/delegated-admin-gate.ts#organizationBoundaryFailure). The recipe is the dogfood harness's: the operator saves a permission set carrying systemPermissions ['manage_metadata'], and the grant row {user_id, permission_set, organization_id} is a system-context engine insert stamped with that organization, as packages/qa/dogfood/test/wall-environment-metadata-refusal.dogfood.test.ts#boot places it, or a direct row on the run's own scratch DB, as QA run #24783 placed it. Record it in the run record as a fixture write made outside HTTP"
         ],
         "knownGaps": [
-          "Every live leg here needs the walled boot fixtures.requires[1] names and the second organization fixtures.requires[2] names. On 18.0.0 os serve — and os dev / os start, which boot through it — boots OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true): 18.x step 4 (#24580) deleted the walled boot refusal (serve.ts walledPostureRefusal) before 18.0.0, and of the published prereleases only 18.0.0-next.5 carries it. The walled boot is provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own': the multi-org runtime declared by the app (no example app declares it), OS_PLATFORM_OWNER_EMAIL, and a declared OS_AUTH_MEMBERSHIP_POLICY; each one absent refuses an os dev boot naming itself, while a bare os serve in production mode judges none of them until OS_AUTH_SECRET is set (that entry). On that boot the second organization is created through POST /api/v1/auth/organization/create (RUNNER.md 'A stock `single` boot holds exactly one organization, and no door mints a second; a walled boot mints them through the auth API'). A run that does not provision them records acceptance[1], acceptance[2] and negative[0] blocked(fixture) naming those entries, never fail. steps[3]'s single-posture admit is only the control for the walled refusal and proves nothing alone. acceptance[0]'s pins boot the walled posture at kernel level and stay the item's pinned evidence"
+          "Every live leg here needs the walled boot fixtures.requires[1] names and the second organization fixtures.requires[2] names. On 18.0.0 os serve — and os dev / os start, which boot through it — boots OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true): 18.x step 4 (#24580) deleted the walled boot refusal (serve.ts walledPostureRefusal) before 18.0.0, and of the published prereleases only 18.0.0-next.5 carries it. The walled boot is provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own': the multi-org runtime declared by the app (no example app declares it), OS_PLATFORM_OWNER_EMAIL, and a declared OS_AUTH_MEMBERSHIP_POLICY; each one absent refuses an os dev boot naming itself, while a bare os serve in production mode judges none of them until OS_AUTH_SECRET is set (that entry). On that boot the second organization is created through POST /api/v1/auth/organization/create (RUNNER.md 'A stock `single` boot holds exactly one organization, and no door mints a second; a walled boot mints them through the auth API'). A run that does not provision them records acceptance[1], acceptance[2] and negative[0] blocked(fixture) naming those entries, never fail. steps[3]'s single-posture admit is only the control for the walled refusal and proves nothing alone. acceptance[0]'s pins boot the walled posture at kernel level and stay the item's pinned evidence. The three wall-* dogfood pins boot the CRM example (@objectstack/example-crm: crm_lead and its package), not the showcase the steps name, so their door answers are the same doors on another app's objects; a live run drives the steps' showcase objects and does not match object names against the pins. Their single-posture CONTROL drives a manage_metadata holder below the operator, a stronger control than acceptance[2]'s seeded admin, which no pin drives on single: that admin leg is hand-driven"
         ]
       },
       "steps": [
@@ -3635,6 +3659,12 @@
           "date": "2026-10-20",
           "change": "fixtures.requires[2] names the recipe for its organization-scoped manage_metadata grant, and knownGaps[0]'s prerequisite sentence says os dev — QA run #24783 (findings F7 and F2), round 11 of wave anchor #24579. No HTTP door placed the grant on the walled boot: the operator's insert into an organization it is not a member of is refused by the Layer 0 tenant check, and the owner's own insert by ADR-0090 D12 condition (c), manage_metadata being scope 'platform'. The recipe is the dogfood harness's system-context engine insert (wall-environment-metadata-refusal.dogfood.test.ts, its boot helper). A bare production os serve judges none of the walled prerequisites until OS_AUTH_SECRET is set (RUNNER.md), so the refusal sentence now names os dev. No clause changed",
           "ref": "#24801"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-26",
+          "change": "Two checklist-accuracy findings of the 18.2.0 sweep, re-read on main b4199c96, added to knownGaps[0]. From P0 record #25812: the steps name showcase objects while the wall-* dogfood pins boot the CRM example; the item now says so. From Tier 1 record #25815 (acceptance[2]): the pins' single-posture leg is a manage_metadata holder below the operator, not the seeded admin; the admin leg is named hand-driven. No clause or status changed",
+          "ref": "#25835"
         }
       ]
     },
