@@ -44,6 +44,8 @@ const LISTS: ReadonlyArray<{ label: string; apps: any[] }> = [
   { label: 'ordinary multi-app environment, nothing declared', apps: [{ name: 'crm' }, { name: 'ops' }, SETUP] },
   { label: 'one product app + Setup, nothing declared', apps: [{ name: 'crm' }, SETUP] },
   { label: 'Setup only — a fresh environment', apps: [SETUP] },
+  { label: 'declared packaged app (objectstack-ai/objectstack#26183)', apps: [{ name: 'clm', _packageId: 'app.objectstack.hotclm', isDefault: true }, SETUP] },
+  { label: 'declared second app of a two-app package', apps: [{ name: 'crm', _packageId: 'com.acme.suite' }, { name: 'ops', _packageId: 'com.acme.suite', isDefault: true }, SETUP] },
   { label: 'empty list', apps: [] },
 ];
 
@@ -76,6 +78,21 @@ describe('objectui#7256 — one declaration, one home', () => {
     const apps = [{ name: 'alpha', isDefault: true }, { name: 'beta', isDefault: true }];
     expect(resolveDeclaredHomePath(apps)).toBe('/apps/alpha');
     expect(resolveLandingPath(apps)).toBe('/apps/alpha');
+  });
+
+  it('DRIFT CANARY: both land on the package id, the address the sidebar builds (objectstack-ai/objectstack#26183)', () => {
+    const apps = [{ name: 'clm', _packageId: 'app.objectstack.hotclm', isDefault: true }, SETUP];
+    expect(resolveDeclaredHomePath(apps)).toBe('/apps/app.objectstack.hotclm');
+    expect(resolveLandingPath(apps)).toBe('/apps/app.objectstack.hotclm');
+  });
+
+  it('DRIFT CANARY: a package id another app answers to is not this app\'s address', () => {
+    const apps = [
+      { name: 'crm', _packageId: 'com.acme.suite' },
+      { name: 'ops', _packageId: 'com.acme.suite', isDefault: true },
+    ];
+    expect(resolveDeclaredHomePath(apps)).toBe('/apps/ops');
+    expect(resolveLandingPath(apps)).toBe('/apps/ops');
   });
 
   it('DRIFT CANARY: a nameless declaration is a declaration to neither', () => {

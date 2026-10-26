@@ -1201,31 +1201,6 @@ const TRIAGE = new Map([
       + 'above: that gate walks the same root RECURSIVELY at 49 of 50, where the precise '
       + 'spelling buys one file of discrimination and its deferral is untouched by this row',
   }],
-  ['scripts/check-adr-0087-registration.mjs PACKAGE_ROOTS packages', {
-    verdict: 'SPELLABLE-UNDECLARED',
-    spelling: 'packages manifests',
-    why: 'workspace manifests only — 74 of 5275 (1.4%), re-measured 2026-08-26. The recorded '
-      + 'spelling is live and reaches 74 of 74, 100% precise and complete. Deferred: six rows '
-      + 'across two source files share this one population shape and no consumer has asked for '
-      + 'any of them, so declaring here is a six-edit expansion ahead of demand — RE-COUNTED '
-      + '2026-09-04. The "nine rows across three gates" this replaces counted CI invocation '
-      + 'names, not source files: check:changeset-gate-self-tests runs THIS script --self-test, '
-      + 'so it never was a third gate, and #15127 keying this table on the gate source file is '
-      + 'what made that visible: the six are three roots each under this gate and its '
-      + 'check-skill-compatibility-version.mjs sibling',
-  }],
-  ['scripts/check-adr-0087-registration.mjs PACKAGE_ROOTS apps', {
-    verdict: 'SPELLABLE-UNDECLARED',
-    spelling: 'apps manifests',
-    why: 'workspace manifests only — 1 of 40 (2.5%), re-measured 2026-08-26; the spelling reaches '
-      + '1 of 1, 100% precise and complete. Deferred with its packages half',
-  }],
-  ['scripts/check-adr-0087-registration.mjs PACKAGE_ROOTS examples', {
-    verdict: 'SPELLABLE-UNDECLARED',
-    spelling: 'examples manifests',
-    why: 'workspace manifests only — 4 of 241 (1.7%), re-measured 2026-08-26; the spelling reaches '
-      + '4 of 4, 100% precise and complete. Deferred with its packages half',
-  }],
   ['scripts/check-skill-compatibility-version.mjs PACKAGE_ROOTS packages', {
     verdict: 'SPELLABLE-UNDECLARED',
     spelling: 'packages manifests',
@@ -2093,7 +2068,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // 128 → 126 (#24037): the loop registers two cases per recorded row, and the
   // four check-position-name-fold-loaders rows were withdrawn (134 → 126 on a
   // run) — fewer rows to judge, not cases that stopped registering.
-  "The DECLARATION a row describes, read from the gate's own SOURCE": 126,
+  // 126 → 122 (#26220): the three check-adr-0087-registration PACKAGE_ROOTS rows
+  // were deleted — that gate now reads its package globs from the workspace file,
+  // so the bare words they judged no longer exist (128 → 122 on a run).
+  "The DECLARATION a row describes, read from the gate's own SOURCE": 122,
   'CENSUS_REFUSE_WIDE, pinned on its OWN terms (#14695)': 5,
 });
 
