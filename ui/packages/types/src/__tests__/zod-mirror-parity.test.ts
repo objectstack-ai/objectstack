@@ -154,7 +154,15 @@
  *     a delta to this number; count the registry. Nothing asserts it against a written
  *     one, so this line is prose and can rot; the pin that cannot is the one
  *     comparing the two halves to each other.
- *   - **55 entries** in `KnownDrift`, **93 keys** across them — 55 / 92 until
+ *   - **53 entries** in `KnownDrift`, **90 keys** across them — 55 / 93 until
+ *     objectstack#25923 made every object in `../zod/` `.passthrough()` and taught
+ *     `NarrowerThanDeclared` the interface rule (`AcceptedOf`): four
+ *     INTERFACE-TO-PASSTHROUGH keys LEFT — two entries whole
+ *     (`app.zod.ts#AppSchemaRendererNodeSchema`, `reports.zod.ts#ReportSectionSchema`),
+ *     `complex.zod.ts#DashboardWidgetSchema`'s `component`, and
+ *     `reports.zod.ts#ReportComponentSchema`'s `sections` — and ONE key JOINED, that
+ *     entry's `exportConfigs`, the same artifact one level inside a
+ *     `Partial< Record< … > >` the operator does not walk. It was 55 / 92 until
  *     objectui#12620 declared `DataTableSchema.rowGroups`, the host-built group
  *     bands of a grouped grid, as a runtime slot refused by name on the mirror,
  *     so `rowGroups` JOINED `data-display.zod.ts#DataTableSchema`'s existing
@@ -904,7 +912,7 @@
  *
  * ## KNOWN_DRIFT is a ratchet, not a waiver
  *
- * 55 of the registered pairs carry TYPE drift TODAY (measured, not assumed). Each is
+ * 53 of the registered pairs carry TYPE drift TODAY (measured, not assumed). Each is
  * pinned to its EXACT drifted key set, so the entry fails when new drift appears on
  * that mirror AND when the recorded drift is fixed — a stale entry cannot rot
  * quietly. Correcting them is not one change: the pairs below split into DISJOINT
@@ -949,6 +957,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import ts from 'typescript';
 import type { z } from 'zod';
+import type { WithoutCatchall } from './zod-catchall-type';
 
 import { AIConfigSchema, AIFieldSuggestionSchema, AIFormAssistSchema, AIRecommendationItemSchema, AIRecommendationsSchema, NLQueryResultSchema, NLQuerySchema } from '../zod/ai.zod.js';
 import { AppComponentSchema, AppSchemaRendererNodeSchema, MenuItemSchema as AppMenuItemSchema, NavigationAreaSchema, NavigationItemSchema } from '../zod/app.zod.js';
@@ -1003,6 +1012,21 @@ export type Expect< T extends true > = T;
 type ShapeOf< M > = M extends { shape: infer S } ? S : never;
 /** What a shape entry ACCEPTS (input side, so `.optional()` shows). */
 type InputOf< T > = T extends z.ZodType ? z.input< T > : never;
+/**
+ * The same, read without the `.passthrough()` catchall every object in `../zod/`
+ * carries since objectstack#25923 — for the NARROWER direction only.
+ *
+ * zod 4 types that catchall as an `unknown` index signature, and a declared
+ * `interface` is not assignable to a type carrying one, so `[D] extends [InputOf]`
+ * reports a nested object member as NARROWER than its declaration over a difference
+ * no value has: the catchall refuses nothing. `./zod-catchall-type` removes exactly
+ * that signature, wherever a loose object nests in a loose object — not inside an
+ * object without a catchall, which is that module's measured limit and the reason
+ * `reports.zod.ts`'s `exportConfigs` residue stays ledgered. The WIDER direction keeps the raw `InputOf`: a catchall never makes
+ * a mirror refuse less than its declaration, and `MirrorAdmitsOpenRecord` reads the
+ * raw input on purpose.
+ */
+type AcceptedOf< T > = WithoutCatchall< InputOf< T > >;
 
 /** The mirror's DECLARED keys, read from its own shape. */
 export type MirroredKeys< M > = Extract< keyof ShapeOf< M >, string >;
@@ -1022,7 +1046,7 @@ export type MirroredKeys< M > = Extract< keyof ShapeOf< M >, string >;
  * `assertionNarrowerOperatorIsBlindToAWidening` pins that this one cannot.
  */
 export type NarrowerThanDeclared< M, D > = {
-  [K in MirroredKeys< M > & keyof D]: [D[K]] extends [InputOf< ShapeOf< M >[K] >] ? never : K;
+  [K in MirroredKeys< M > & keyof D]: [D[K]] extends [AcceptedOf< ShapeOf< M >[K] >] ? never : K;
 }[MirroredKeys< M > & keyof D];
 
 /**
@@ -2281,8 +2305,17 @@ interface KnownDrift {
    * same mirror input, so the residue is exactly the interface rule. The four
    * `reports.zod.ts` entries below are the same cause. They leave if the
    * operator learns the rule, or if the member stops being an interface.
+   *
+   * ⛔ `app.zod.ts#AppSchemaRendererNodeSchema` LEFT this ledger under
+   * objectstack#25923: the operator learned the rule. Every object in `../zod/` became
+   * `.passthrough()` on that card, which would have ledgered the same artifact on every
+   * nested object member (`form.zod.ts#SelectSchema`'s `options` was the first measured),
+   * so `NarrowerThanDeclared` now reads the mirror side through `AcceptedOf`, which
+   * drops exactly the catchall's `unknown` index signature (`./zod-catchall-type`).
+   * `reports.zod.ts#ReportSectionSchema`, `ReportComponentSchema`'s `sections` and
+   * `DashboardWidgetSchema`'s `component` left with it; the two `report` entries in
+   * `reports.zod.ts` stay, for the reason written beside them.
    */
-  'app.zod.ts#AppSchemaRendererNodeSchema': 'schema';
   /**
    * RUNTIME SLOT (objectui#6124): `calendar-view`'s `pickHostCallbacks` reads
    * `onViewChange` off the spread props (function values only) and hands it to
@@ -2350,8 +2383,10 @@ interface KnownDrift {
    * The mirror is the STRICTER side here — narrowing the check would be wrong, widening
    * the TS declaration is the ADR-0049 question.
    *
-   * `component` — INTERFACE-TO-PASSTHROUGH since objectui#12163 (the class the
-   * `app.zod.ts#AppSchemaRendererNodeSchema` entry above describes), an artifact of this
+   * `component` LEFT under objectstack#25923, when the operator learned the interface
+   * rule (the note where the `app.zod.ts#AppSchemaRendererNodeSchema` entry stood above).
+   * It had been INTERFACE-TO-PASSTHROUGH since objectui#12163 (the class that entry
+   * described), an artifact of this
    * ratchet's assignability test and ⛔ not a narrowing a document can hit. Ruling C
    * (comment 6121298298) gave the slot one accept set on both faces: the declaration is the
    * component arm alone, `DashboardWidgetSlotComponentSchema`, and the mirror refuses every
@@ -2378,7 +2413,7 @@ interface KnownDrift {
    * the slot's element type and dropped the component type on this face too, so both
    * faces name the same widget vocabulary and the key measures clean.
    */
-  'complex.zod.ts#DashboardWidgetSchema': 'component' | 'options';
+  'complex.zod.ts#DashboardWidgetSchema': 'options';
   /**
    * `onChange` — RUNTIME SLOT (objectui#6124): the `filter-builder` renderer
    * calls it as `props.onChange` after `SchemaRenderer`'s spread. (`fields` LEFT
@@ -2765,13 +2800,29 @@ interface KnownDrift {
    * against a `.passthrough()` mirror whose input demands a string index
    * signature an interface never implicitly has. Measured at removal for
    * `chart`: the declared type is refused, a one-level anonymous copy fits.
+   *
+   * Since objectstack#25923 the operator knows that rule (`AcceptedOf`, see the note
+   * where the `app.zod.ts#AppSchemaRendererNodeSchema` entry stood), and what keeps
+   * `report` here is narrower: `ReportComponentSchema`'s `exportConfigs` is a
+   * `Partial< Record< Format, ReportExportConfig > >`, an object WITHOUT a catchall
+   * that the operator returns as it is, so the `.passthrough()`
+   * `ReportExportConfigSchema` inside it keeps its signature against the declared
+   * `interface ReportExportConfig` (`./zod-catchall-type`'s measured limit).
    */
   'reports.zod.ts#ReportBuilderSchema': 'report';
-  /** INTERFACE-TO-PASSTHROUGH (objectui#8347): see `ReportBuilderSchema` above; `sections` carries the element. */
-  'reports.zod.ts#ReportComponentSchema': 'sections';
-  /** INTERFACE-TO-PASSTHROUGH (objectui#8347): see `ReportBuilderSchema` above. */
-  'reports.zod.ts#ReportSectionSchema': 'chart';
-  /** INTERFACE-TO-PASSTHROUGH (objectui#8347): see `ReportBuilderSchema` above. */
+  /**
+   * INTERFACE-TO-PASSTHROUGH: `exportConfigs` JOINED under objectstack#25923, when
+   * `ReportExportConfigSchema` stopped stripping — the residue `ReportBuilderSchema`
+   * above describes, met directly. `sections` LEFT on the same card: the operator
+   * learned the interface rule, and `ReportSection`'s `chart` reads clean through it.
+   */
+  'reports.zod.ts#ReportComponentSchema': 'exportConfigs';
+  /**
+   * ⛔ `reports.zod.ts#ReportSectionSchema` (`chart`) LEFT this ledger under
+   * objectstack#25923: INTERFACE-TO-PASSTHROUGH (objectui#8347), resolved when the
+   * operator learned the interface rule.
+   */
+  /** INTERFACE-TO-PASSTHROUGH: see `ReportBuilderSchema` above — `report` holds `exportConfigs`. */
   'reports.zod.ts#ReportViewerSchema': 'report';
   /**
    * RUNTIME SLOT (objectui#7344): `detail-view` spreads the node's keys onto
@@ -4783,6 +4834,25 @@ type VacuousEntry = {
 export type assertionNoVacuousEntry = Expect< Equal< VacuousEntry, never > >;
 
 /**
+ * No object in `../zod/` is a STRIP-mode object (objectstack#25923) — pinned at
+ * RUNTIME, by 'no object in ../zod/ strips an unknown key' at the bottom of this file,
+ * and stated here because this is where a reader looks for the shape guards.
+ *
+ * A strip-mode `z.object()` answers a misspelled key with success and then drops it:
+ * `FormFieldSchema.safeParse({ name, type, labell })` passed with `labell` gone while
+ * `@objectstack/spec` refused it by name. Every object in `../zod/` is `.passthrough()`
+ * (`z.looseObject`) or strict since that card — an unknown key is KEPT on the tolerant
+ * face and refused by name on the strict one (`../strict-authoring-face.ts`), never
+ * dropped.
+ *
+ * ⛔ It cannot be a TYPE-level pin like the ones above: zod 4 spells `$strip` and
+ * `$strict` identically (`{ out: {}; in: {} }`), so a type that asks "is this entry
+ * strip-mode?" also answers yes for every `.strict()` mirror. Measured on that card: a
+ * `z.ZodObject< …, infer Mode >` / `Equal< Mode, z.core.$strip >` spelling named
+ * exactly the five strict entries and no strip one.
+ */
+
+/**
  * A pairing whose two sides share NO key compares nothing and is green forever —
  * the shape a wrong pairing takes. (It is not a complete defence against a wrong
  * pairing, only against the vacuous one; the pairings themselves are reviewed.)
@@ -5529,6 +5599,75 @@ exactly how objectui#4605 and #5186 stayed latent.`).toEqual([]);
   it('every exclusion carries a reason', () => {
     const empty = Object.entries(EXCLUSIONS).filter(([, why]) => why.trim().length < 20);
     expect(empty.map(([k]) => k), 'an exclusion without a reason is an oversight').toEqual([]);
+  });
+});
+
+describe('no object in ../zod/ strips an unknown key (objectstack#25923)', () => {
+  /**
+   * Every `z.object(…)` call in a mirror source, with the unknown-key mode its own
+   * method chain gives it — `strip` when the chain names none. Read from the AST, so a
+   * nested object inside a member counts as much as an exported one, and a comment
+   * that spells `z.object(` counts as nothing.
+   */
+  function objectCallSites(): { site: string; mode: string }[] {
+    const MODE_METHODS = new Set(['passthrough', 'loose', 'strict', 'strip', 'catchall']);
+    const out: { site: string; mode: string }[] = [];
+    for (const file of readdirSync(ZOD_DIR).sort()) {
+      if (!file.endsWith('.zod.ts')) continue;
+      const sf = ts.createSourceFile(file, readFileSync(join(ZOD_DIR, file), 'utf8'), ts.ScriptTarget.Latest, true);
+      const visit = (node: ts.Node): void => {
+        if (
+          ts.isCallExpression(node)
+          && ts.isPropertyAccessExpression(node.expression)
+          && ts.isIdentifier(node.expression.expression)
+          && node.expression.expression.text === 'z'
+          && ['object', 'looseObject', 'strictObject'].includes(node.expression.name.text)
+        ) {
+          let mode = node.expression.name.text === 'object' ? 'strip' : node.expression.name.text;
+          let cur: ts.Node = node;
+          while (
+            ts.isPropertyAccessExpression(cur.parent)
+            && cur.parent.expression === cur
+            && ts.isCallExpression(cur.parent.parent)
+          ) {
+            if (MODE_METHODS.has(cur.parent.name.text)) mode = cur.parent.name.text;
+            cur = cur.parent.parent;
+          }
+          const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
+          out.push({ site: `${file}:${line}`, mode });
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(sf);
+    }
+    return out;
+  }
+
+  it('every object a mirror source writes names a mode that keeps or refuses an unknown key', () => {
+    const strip = objectCallSites().filter((c) => c.mode === 'strip');
+    expect(strip.map((c) => c.site), `
+A strip-mode \`z.object()\` in packages/types/src/zod/ — it answers a misspelled key
+with success and drops it, so the tolerant face loses what the author wrote while the
+spec refuses it by name. Write \`z.looseObject(…)\` (the tolerant face keeps the key and
+the strict face refuses it), or \`.strict()\` where refusing is the contract.`).toEqual([]);
+  });
+
+  it('the call-site scan can see the directory (non-vacuity)', () => {
+    // A broken reader returns [] and the assertion above passes while checking nothing.
+    const sites = objectCallSites();
+    expect(sites.filter((c) => c.mode === 'looseObject').length).toBeGreaterThan(100);
+    expect(sites.some((c) => c.site.startsWith('form.zod.ts:') && c.mode === 'looseObject')).toBe(true);
+    expect(sites.some((c) => c.mode === 'strict' || c.mode === 'strictObject')).toBe(true);
+  });
+
+  it('no registered mirror strips at runtime', () => {
+    const strip = Object.entries(MIRRORS)
+      .filter(([, mirror]) => {
+        const def = (mirror as { _zod?: { def?: { type?: string; catchall?: unknown } } })._zod?.def;
+        return def?.type === 'object' && def.catchall === undefined;
+      })
+      .map(([key]) => key);
+    expect(strip, 'a registered mirror parses in strip mode — see objectstack#25923').toEqual([]);
   });
 });
 
