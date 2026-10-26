@@ -113,8 +113,9 @@ const duplicate = (row: number, rows: number[], keySet = 'supplier + cert_type +
 describe('[#26133] an upsert import refuses rows of its own that share a match key', () => {
   let ctx: Awaited<ReturnType<typeof boot>>;
   const certs = async (object = CERT.name) =>
-    (await ctx.engine.find(object, { orderBy: [{ field: 'note', order: 'asc' }] } as any))
-      .map((r: any) => ({ supplier: r.supplier, cert_type: r.cert_type, cert_no: r.cert_no, note: r.note ?? null }));
+    (await ctx.engine.find(object, {}))
+      .map((r: any) => ({ supplier: r.supplier, cert_type: r.cert_type, cert_no: r.cert_no, note: r.note ?? null }))
+      .sort((a: { note: string | null }, b: { note: string | null }) => String(a.note).localeCompare(String(b.note)));
   beforeEach(async () => { ctx = await boot(); });
 
   it('the card: two identical rows, and `ISO 14001` beside `ISO14001`, are refused whole; the rest of the file imports', async () => {
