@@ -156,6 +156,29 @@ function securityHarness() {
     return { dispatcher, saveMetaItem };
 }
 
+/** The action door: one declared `type: 'flow'` action on one object, and an automation service to run it. */
+function actionsHarness() {
+    const action = { name: 'reassign', label: 'Reassign', objectName: 'task', type: 'flow', target: 'welcome_flow' };
+    const object = { name: 'task', actions: [action] };
+    const ql: any = {
+        getSchema: (n: string) => (n === 'task' ? object : undefined),
+        registry: { getObject: (n: string) => (n === 'task' ? object : undefined), getItem: () => undefined },
+        find: async () => [],
+    };
+    const metadata = {
+        load: async () => null,
+        loadDiagnosed: async () => ({ data: null, degraded: false, errors: [] }),
+        loadMany: async () => [],
+        listObjects: async () => [object],
+        getObject: async (n: string) => (n === 'task' ? object : undefined),
+    };
+    const automation = {
+        execute: vi.fn(async () => ({ success: true, runId: 'run_9' })),
+        getFlow: async (name: string) => (name === 'welcome_flow' ? { name } : null),
+    };
+    return { dispatcher: new HttpDispatcher(kernelOf({ objectql: ql, data: ql, metadata, automation }) as never), automation };
+}
+
 function analyticsHarness() {
     const analytics = { query: vi.fn(async () => ({ rows: [] })) };
     return { dispatcher: new HttpDispatcher(kernelOf({ analytics }) as never), analytics };
@@ -257,6 +280,13 @@ const automationDoor = (path: string, method: string, body: unknown, ctx: () => 
     () => automationHarness(opts).dispatcher.handleAutomation(path, method, body, ctx(), undefined);
 
 const CENSUS: CensusCase[] = [
+    // actions.ts `POST /actions/:object/:action` — `params` through `objectValueFailure`
+    {
+        site: 'actions.ts action door — `params` not an object',
+        run: () => (actionsHarness().dispatcher as any).handleActions('/task/reassign', 'POST', { params: 'oops' }, MEMBER()),
+        rows: [{ field: 'params', code: 'invalid_type' }],
+    },
+
     // activation-gate.ts `readActivationBody` (the catalog activation door; the action activation door reads the same helper)
     ...([
         ['body not an object', 'garbage', [{ field: '(body)', code: 'invalid_type' }]],
@@ -305,6 +335,10 @@ const CENSUS: CensusCase[] = [
     { site: 'automation.ts flow clone — `name` not a string', run: automationDoor('/welcome_flow/clone', 'POST', { name: 42, label: 'Copy' }, AUTHOR), rows: [{ field: 'name', code: 'invalid_type' }] },
     { site: 'automation.ts flow clone — `label` missing', run: automationDoor('/welcome_flow/clone', 'POST', { name: 'welcome_copy' }, AUTHOR), rows: [{ field: 'label', code: 'required' }] },
     { site: 'automation.ts flow clone — `label` not a string', run: automationDoor('/welcome_flow/clone', 'POST', { name: 'welcome_copy', label: 42 }, AUTHOR), rows: [{ field: 'label', code: 'invalid_type' }] },
+
+    // automation.ts `buildAutomationContext` — the trigger door's body and `params`, through `objectValueFailure`
+    { site: 'automation.ts trigger — body not an object', run: automationDoor('/welcome_flow/trigger', 'POST', 'garbage', MEMBER), rows: [{ field: '(body)', code: 'invalid_type' }] },
+    { site: 'automation.ts trigger — `params` not an object', run: automationDoor('/welcome_flow/trigger', 'POST', { params: [1, 2] }, MEMBER), rows: [{ field: 'params', code: 'invalid_type' }] },
 
     // automation.ts `POST /:name/runs/:runId/resume`
     { site: 'automation.ts resume — body not an object', run: automationDoor('/approval_flow/runs/run_7/resume', 'POST', 'garbage', MEMBER), rows: [{ field: '(body)', code: 'invalid_type' }] },

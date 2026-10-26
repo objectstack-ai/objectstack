@@ -71,7 +71,10 @@ import { isNativeErrorName, INTERNAL_ERROR_MESSAGE, sandboxBusinessMessage } fro
 import { isCodeArtifactBody, isTenantAuthored } from '@objectstack/metadata-core';
 import * as actionExec from '../action-execution.js';
 import { actorUserFromExecutionContext, resolveActorDisplayName } from '../security/actor-user.js';
-import { validationFailureDetails } from '../validation-failure.js';
+import { validationFailure, validationFailureDetails, VALIDATION_FAILED_STATUS } from '../validation-failure.js';
+// [#25976] The one value-shape check the run doors share — the trigger and
+// resume doors ask it of their input too.
+import { objectValueFailure } from './object-value-shape.js';
 import { buildApiError } from '../error-envelope.js';
 // [ADR-0126 §5] The shared activation write-authority gates — the same two
 // tiers `/automation`'s toggle door passes, one implementation.
@@ -687,7 +690,25 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
 
     const reqBody = body && typeof body === 'object' ? body : {};
     const recordId = recordIdFromPath ?? reqBody.recordId;
-    const reqParams = (reqBody.params && typeof reqBody.params === 'object') ? reqBody.params : {};
+    // [#25976] The params bag must be an object before the param contract or
+    // any handler reads it. This read used to be
+    // `params && typeof params === 'object' ? params : {}`, so `{"params":"oops"}`
+    // ran the action with an EMPTY bag and an array was handed on as the bag
+    // itself — answered `200` with a started run, exactly like `{"params":{}}`.
+    // Asked through `objectValueFailure`, the check the trigger and resume
+    // doors ask too, and answered the way they answer it. `undefined` is
+    // absent, so a body with no `params` key keeps its empty bag. Before the
+    // param contract, the record load and dispatch: a refused call reads no
+    // row and runs nothing.
+    const paramsFailure = objectValueFailure('params', reqBody.params);
+    if (paramsFailure) {
+        const message = `Invalid action body — \`params\` ${paramsFailure.message}`;
+        return {
+            handled: true,
+            response: deps.error(message, VALIDATION_FAILED_STATUS, validationFailureDetails(validationFailure(message, [paramsFailure]))),
+        };
+    }
+    const reqParams: Record<string, unknown> = reqBody.params ?? {};
 
     // [ADR-0104 D2] Enforce the declared param contract before the handler
     // runs — required/option/multiple/reference-id shape + unknown keys.

@@ -19,7 +19,7 @@
  * The resume door already refuses the same value-shape class on its own
  * object-valued keys (#9416), so the two doors of one engine disagreed. The
  * trigger door now asks the resume door's question through the same function
- * (`objectValueFailure`, `domains/automation.ts`) and answers the same
+ * (`objectValueFailure`, `domains/object-value-shape.ts`) and answers the same
  * refusal: `400 VALIDATION_FAILED`, one `fields[]` entry naming `params` with
  * `invalid_type`, before dispatch — `execute()` is never called, so no run row
  * exists. `null` is refused too, as the resume door refuses `{"inputs":null}`.
