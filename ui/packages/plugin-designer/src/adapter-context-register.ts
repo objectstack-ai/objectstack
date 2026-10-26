@@ -8,6 +8,9 @@
  * (`getClient`), a member beyond `DataSource`, and run inside the ObjectStack
  * Console, whose shell installs an `ObjectStackAdapter`; so the designer
  * declares that adapter here, in the package that already depends on it.
+ *
+ * Imported by each page that reads such a member, so every program that
+ * compiles the page (the build and the test type-check) sees the declaration.
  */
 
 import type { ObjectStackAdapter } from '@object-ui/data-objectstack';

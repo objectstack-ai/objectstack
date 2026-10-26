@@ -15,6 +15,8 @@ import type { AppWizardDraft, ObjectSelection } from '@object-ui/types';
 import { AppSchema as SpecAppSchema, AppBrandingSchema as SpecAppBrandingSchema } from '@objectstack/spec/ui';
 import { useMetadata } from '@object-ui/react';
 import { useAdapter } from '@object-ui/react';
+// Declares the ObjectStackAdapter this page reads `getClient` off.
+import '../adapter-context-register';
 import { toast } from 'sonner';
 
 /**
