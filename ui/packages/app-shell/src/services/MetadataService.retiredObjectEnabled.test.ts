@@ -101,6 +101,26 @@ const unrecognizedKeys = (result: { success: boolean; error?: unknown }): string
         .filter((i) => i.code === 'unrecognized_keys')
         .flatMap((i) => i.keys ?? []));
 
+/**
+ * Levenshtein distance, case-insensitive. The near-spelling claims below are
+ * stated over the accept set with this, rather than through a key count that
+ * every unrelated spec adoption moves (#26238).
+ */
+function editDistance(a: string, b: string): number {
+  const [x, y] = [a.toLowerCase(), b.toLowerCase()];
+  const row = Array.from({ length: y.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= x.length; i++) {
+    let diagonal = row[0];
+    row[0] = i;
+    for (let j = 1; j <= y.length; j++) {
+      const above = row[j];
+      row[j] = Math.min(above + 1, row[j - 1] + 1, diagonal + (x[i - 1] === y[j - 1] ? 0 : 1));
+      diagonal = above;
+    }
+  }
+  return row[y.length];
+}
+
 /** A base document `ObjectSchema` accepts, for probing one key at a time. */
 const BASE = { name: 'account', label: 'Account', fields: { n: { type: 'text', label: 'N' } } };
 
@@ -137,37 +157,22 @@ describe('objectui#6238 · the schema oracle — both tombstone keys are refused
     // key-name gate could never have stated it. `enable` passes on the name and
     // fails on the value, which is why this is objectui#4687's resolution
     // (delete the declaration) rather than objectui#6041's (rename it).
-    // 43, not the 42 this pin carried against 17.2.0: `@objectstack/spec` 17.3.0
-    // ADOPTED `editMode` (measured — gained set exactly `['editMode']`, lost set
-    // empty). That adoption is unrelated to this file's subject and is pinned in
-    // `packages/types/src/__tests__/object-schema-metadata-spec-derivation.test.ts`;
-    // the count rides here only as the corpus guard for the membership claims
-    // below, so it is re-pointed, not weakened.
-    // 44 at `@objectstack/spec` 17.6.0, which adopted `imageField` (measured against
-    // a 17.5.0 control: gained set exactly `['imageField']`, lost set empty;
-    // objectui#11438). Re-pointed as the 17.3.0 adoption was, not weakened.
-    // 45 at `@objectstack/spec` 18.0.0-next.0, which adopted `attachedOnRead`
-    // (measured against a 17.7.0 control: gained set exactly `['attachedOnRead']`,
-    // lost set empty; objectui#12030). Re-pointed the same way.
-    // 46 on the objectstack `main` pin after 18.0.0-next.3, which adopted
-    // `defaultRowScope` (objectstack#24398; measured against the next.3 pin: the
-    // one top-level key `ObjectSchema` gains between the two commits, none lost;
-    // objectui#12971). Re-pointed the same way.
-    // 47 at `@objectstack/spec` 18.1.0, which adopted `membershipKeys`
-    // (objectstack#25513; measured against the 915e9404 pin: the spec's own
-    // `authorable-surface/data.json` gains exactly `data/Object:membershipKeys`
-    // between the two commits, none lost; objectui#13440). Re-pointed the same way.
-    // 48 on the objectstack `main` pin after objectstack#26005 (5e113b39), which adopted
-    // `sharing` (measured against its parent fbb75998: gained set exactly `['sharing']`,
-    // lost set empty; unchanged at 43b47156). Re-pointed the same way.
+    // The membership claims are asserted by name over the accept set; an exact
+    // key count used to stand in for them and was re-pointed six times by
+    // unrelated spec adoptions (42 → 48), so it is gone (#26238).
     const accept = new Set(Object.keys(ObjectSchema.shape as Record<string, unknown>));
-    expect(accept.size).toBe(48);
     expect(accept.has('enable')).toBe(true);
     expect(accept.has('enabled')).toBe(false);
     expect(accept.has('_deleted')).toBe(false);
     for (const key of ['disabled', 'active', 'isActive', 'deleted', 'isDeleted', 'softDeleted']) {
       expect(accept.has(key), `ObjectSchema unexpectedly accepts \`${key}\``).toBe(false);
     }
+    // No near-spelling of either tombstone key is accepted, except `enable`,
+    // whose VALUE is what refuses the rename (asserted next).
+    const nearSpellings = [...accept].filter(
+      (key) => key !== 'enable' && ['enabled', '_deleted'].some((retired) => editDistance(key, retired) <= 2),
+    );
+    expect(nearSpellings, 'ObjectSchema accepts a near-spelling of a tombstone key').toEqual([]);
 
     const asBoolean = ObjectSchema.safeParse({ ...BASE, enable: false });
     expect(asBoolean.success).toBe(false);

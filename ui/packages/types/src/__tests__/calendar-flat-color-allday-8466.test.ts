@@ -535,13 +535,10 @@ describe('objectui#8466 — the spec refuses ALL FIVE flat keys, which is why de
     // by name, an asymmetry that was real nested and absent flat. 17.5.0
     // declares `allDayField` in the nested block too (objectui#11073), so the
     // nested asymmetry is gone; the flat refusal of all five did not move.
-    expect(Object.keys(CalendarConfigSchema.shape)).toEqual([
-      'startDateField',
-      'endDateField',
-      'titleField',
-      'colorField',
-      'allDayField',
-    ]);
+    // The nested keys this decision turns on, by name (#26238).
+    expect(Object.keys(CalendarConfigSchema.shape)).toEqual(
+      expect.arrayContaining(['startDateField', 'colorField', 'allDayField']),
+    );
     expect(CalendarConfigSchema.safeParse({ startDateField: 's', allDayField: 'x' }).success).toBe(true);
     expect(CalendarConfigSchema.safeParse({ startDateField: 's', colorField: 'c' }).success).toBe(true);
     // Firing control: a key the nested block never declared is still refused by name.

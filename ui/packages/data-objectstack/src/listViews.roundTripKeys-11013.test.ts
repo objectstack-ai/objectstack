@@ -83,8 +83,12 @@ async function reloadRow(ds: any): Promise<Record<string, any>> {
 }
 
 describe('objectui#11013 — the carried set is the spec\'s', () => {
-  it('the ViewItem round-trip keys are the five the card names, read off the spec', () => {
-    expect([...VIEW_ITEM_KEYS].sort()).toEqual(['columnState', 'isDefault', 'isPinned', 'sortOrder', 'visibility']);
+  it('the ViewItem round-trip keys include the five the card names, read off the spec', () => {
+    // Membership (#26238): the set is the spec's, so a key it adds is carried
+    // too; what this card needs is that these five are among them.
+    for (const key of ['columnState', 'isDefault', 'isPinned', 'sortOrder', 'visibility']) {
+      expect(VIEW_ITEM_KEYS).toContain(key);
+    }
     // Control on the same record: a key declared on the list overlay only is not one of them.
     expect(VIEW_ITEM_KEYS).not.toContain('_isOverride');
     expect(Object.keys(VIEW_CONSOLE_ROUND_TRIP_KEYS)).toContain('_isOverride');

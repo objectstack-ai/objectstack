@@ -810,7 +810,8 @@ export type FlowRecordExpander = (
 
 /**
  * Default ceiling on the in-memory execution-log ring buffer. Execution logs are
- * process-local and diagnostic only (launch-readiness.md P1-2); the buffer keeps
+ * process-local and diagnostic only (launch-readiness P1-2, in
+ * `docs/launch-readiness.md` as of commit df8aac41); the buffer keeps
  * the most recent N entries and evicts the oldest, so memory is bounded
  * regardless of throughput. Operators tune the window via
  * {@link AutomationServicePluginOptions.maxLogSize}. Durable, queryable run
