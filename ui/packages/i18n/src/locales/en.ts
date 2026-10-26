@@ -4745,6 +4745,15 @@ const en = {
         // of it is served before the next restart.
         localLoadsAtRestart: 'Installed v{{version}} to this runtime. "{{name}}" loads when the runtime next restarts; it does not appear in the app switcher until then.',
         localManifestConflict: '{{message}}\nTip: a local app already owns this manifest_id. Remove it from objectstack.config.ts first.',
+        // ADR-0141 D2 — the install refusal DEPENDENCY_MISSING, one line per unmet entry.
+        dependencyMissing: {
+          heading: 'Install refused: a dependency this package declares is not satisfied in this environment, so nothing was installed.',
+          absent: 'Install {{dependency}} {{range}} first.',
+          outOfRange: 'Install {{dependency}} {{range}} first. Version {{installedVersion}} is installed.',
+          unreadableRange: '{{packageId}} declares {{dependency}} with the version range {{range}}, which cannot be read. Fix the range and republish the package.',
+          unreadableVersion: 'Install a release version of {{dependency}} inside {{range}}. The installed version {{installedVersion}} is not MAJOR.MINOR.PATCH.',
+          unreadableDeclaration: '{{packageId}} declares its dependencies in a shape install cannot read. Write them as a map from package ID to version range and republish the package.',
+        },
         localUnauthorized: 'Sign in to this runtime first, then try again.',
         localMarketplaceUnavailable: 'This runtime has no OS_CLOUD_URL configured, so the marketplace catalog is unreachable.',
         updateTo: 'Update → v{{version}}',

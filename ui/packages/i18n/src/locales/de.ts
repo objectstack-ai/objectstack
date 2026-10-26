@@ -4007,6 +4007,15 @@ const de = {
       localSuccess: "v{{version}} in diesem Laufzeitsystem installiert. „{{name}}“ sollte jetzt im App-Wechsler erscheinen.",
       localLoadsAtRestart: "v{{version}} in diesem Laufzeitsystem installiert. „{{name}}“ wird beim nächsten Neustart des Laufzeitsystems geladen und erscheint erst dann im App-Wechsler.",
       localManifestConflict: "{{message}}\nHinweis: Eine lokale App besitzt bereits diese manifest_id. Entfernen Sie sie zuerst aus objectstack.config.ts.",
+      // ADR-0141 D2 — the install refusal DEPENDENCY_MISSING, one line per unmet entry.
+      dependencyMissing: {
+        heading: "Installation abgelehnt: Eine von diesem Paket deklarierte Abhängigkeit ist in dieser Umgebung nicht erfüllt, daher wurde nichts installiert.",
+        absent: "Installieren Sie zuerst {{dependency}} {{range}}.",
+        outOfRange: "Installieren Sie zuerst {{dependency}} {{range}}. Installiert ist Version {{installedVersion}}.",
+        unreadableRange: "{{packageId}} deklariert {{dependency}} mit dem Versionsbereich {{range}}, der nicht gelesen werden kann. Korrigieren Sie den Bereich und veröffentlichen Sie das Paket erneut.",
+        unreadableVersion: "Installieren Sie eine Release-Version von {{dependency}} innerhalb von {{range}}. Die installierte Version {{installedVersion}} hat nicht das Format MAJOR.MINOR.PATCH.",
+        unreadableDeclaration: "{{packageId}} deklariert seine Abhängigkeiten in einer Form, die die Installation nicht lesen kann. Schreiben Sie sie als Zuordnung von Paket-ID zu Versionsbereich und veröffentlichen Sie das Paket erneut.",
+      },
       localUnauthorized: "Melden Sie sich zuerst in diesem Laufzeitsystem an.",
       localMarketplaceUnavailable: "Dieses Laufzeitsystem hat keine OS_CLOUD_URL konfiguriert.",
       updateTo: "Aktualisieren → v{{version}}",

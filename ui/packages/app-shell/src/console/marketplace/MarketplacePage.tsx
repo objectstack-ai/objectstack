@@ -45,6 +45,7 @@ import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
 import { appRouteSegment, filterActiveApps, resolveKeyedI18nLabel } from '../../utils/index.js';
 import { waitForServedApp, type ServedApp } from './waitForServedApp.js';
 import { splitPackageSuffix } from './middleTruncate.js';
+import { useDependencyMissingText } from './dependencyMissing.js';
 import { packagesHref } from '../../views/metadata-admin/packageSource.js';
 
 /**
@@ -214,6 +215,7 @@ export function MarketplacePage() {
   const { appName } = useParams();
   const { isAdmin, isResolved } = useWorkspaceAdminStatus();
   const { t, language } = useObjectTranslation();
+  const dependencyMissingText = useDependencyMissingText();
   const { appLabel } = useObjectLabel();
   // The adapter `MetadataProvider` reads through: the deploy wait asks the
   // same `GET /meta/app` the cache would, without the cache persisting it.
@@ -412,7 +414,9 @@ export function MarketplacePage() {
         await load();
       }
     } catch (e: any) {
-      setOrgMsg({ ok: false, text: e?.message ?? String(e) });
+      // ADR-0141 D2 — a `DEPENDENCY_MISSING` refusal reads one line per unmet
+      // dependency, from its own facts; anything else keeps its message.
+      setOrgMsg({ ok: false, text: dependencyMissingText(e) ?? e?.message ?? String(e) });
     } finally {
       setOrgInstalling(null);
     }
@@ -623,7 +627,7 @@ export function MarketplacePage() {
           </div>
           {orgDeployNote}
           {orgMsg && (
-            <div className={`rounded-md border p-3 text-sm ${orgMsg.ok ? 'border-green-500/30 bg-green-500/5 text-green-700 dark:text-green-400' : 'border-destructive/30 bg-destructive/5 text-destructive'}`}>
+            <div className={`whitespace-pre-wrap rounded-md border p-3 text-sm ${orgMsg.ok ? 'border-green-500/30 bg-green-500/5 text-green-700 dark:text-green-400' : 'border-destructive/30 bg-destructive/5 text-destructive'}`}>
               {orgMsg.text}
             </div>
           )}
