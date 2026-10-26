@@ -163,7 +163,7 @@ const CanvasLength = z.union([z.number(), z.string()]);
 /**
  * Designer Position — mirrors `DesignerPosition` (`../designer.ts`).
  */
-export const DesignerPositionSchema = z.object({
+export const DesignerPositionSchema = z.looseObject({
   x: z.number().describe('X coordinate (pixels or grid units)'),
   y: z.number().describe('Y coordinate (pixels or grid units)'),
   width: CanvasLength.describe('Width'),
@@ -173,7 +173,7 @@ export const DesignerPositionSchema = z.object({
 /**
  * Designer Canvas Config — mirrors `DesignerCanvasConfig` (`../designer.ts`).
  */
-export const DesignerCanvasConfigSchema = z.object({
+export const DesignerCanvasConfigSchema = z.looseObject({
   width: z.number().describe('Canvas width'),
   height: z.number().describe('Canvas height'),
   gridSize: z.number().optional().describe('Grid snap size'),
@@ -193,7 +193,7 @@ export const DesignerCanvasConfigSchema = z.object({
  * mirror against the declaration as a whole type at the annotation itself.
  */
 export const DesignerComponentSchema: z.ZodType<DesignerComponent, DesignerComponent> = z.lazy(() =>
-  z.object({
+  z.looseObject({
     id: z.string().describe('Unique component ID'),
     type: z.string().describe('Component type'),
     label: z.string().optional().describe('Display label'),
@@ -215,13 +215,13 @@ export const DesignerComponentSchema: z.ZodType<DesignerComponent, DesignerCompo
 /**
  * Designer Palette Item — mirrors `DesignerPaletteItem` (`../designer.ts`).
  */
-export const DesignerPaletteItemSchema = z.object({
+export const DesignerPaletteItemSchema = z.looseObject({
   type: z.string().describe('Component type'),
   label: z.string().describe('Display label'),
   icon: z.string().optional().describe('Icon'),
   defaultProps: z.record(z.string(), z.unknown()).optional().describe('Default properties'),
   defaultSize: z
-    .object({ width: CanvasLength, height: CanvasLength })
+    .looseObject({ width: CanvasLength, height: CanvasLength })
     .optional()
     .describe('Default size'),
   preview: z.string().optional().describe('Preview image URL'),
@@ -230,7 +230,7 @@ export const DesignerPaletteItemSchema = z.object({
 /**
  * Designer Palette Category — mirrors `DesignerPaletteCategory` (`../designer.ts`).
  */
-export const DesignerPaletteCategorySchema = z.object({
+export const DesignerPaletteCategorySchema = z.looseObject({
   name: z.string().describe('Category name'),
   label: z.string().describe('Category label'),
   icon: z.string().optional().describe('Category icon'),
@@ -260,7 +260,7 @@ export const PageDesignerSchema = BaseSchema.extend({
 /**
  * Data Model Field — mirrors `DataModelField` (`../designer.ts`).
  */
-export const DataModelFieldSchema = z.object({
+export const DataModelFieldSchema = z.looseObject({
   name: z.string().describe('Field name'),
   label: z.string().optional().describe('Display label'),
   type: z.string().describe('Field data type'),
@@ -274,12 +274,12 @@ export const DataModelFieldSchema = z.object({
 /**
  * Data Model Entity — mirrors `DataModelEntity` (`../designer.ts`).
  */
-export const DataModelEntitySchema = z.object({
+export const DataModelEntitySchema = z.looseObject({
   id: z.string().describe('Entity identifier'),
   name: z.string().describe('Entity name'),
   label: z.string().describe('Display label'),
   fields: z.array(DataModelFieldSchema).describe('Entity fields'),
-  position: z.object({ x: z.number(), y: z.number() }).describe('Position on canvas'),
+  position: z.looseObject({ x: z.number(), y: z.number() }).describe('Position on canvas'),
   color: z.string().optional().describe('Entity color'),
   description: z.string().optional().describe('Entity description'),
 });
@@ -301,7 +301,7 @@ const DeleteBehavior = z.enum(['set_null', 'cascade', 'restrict']);
  * respelling). `onUpdate` is RETIRED on both faces (objectui#11434): the
  * platform's relationship contract has no update behaviour.
  */
-export const DataModelRelationshipSchema = z.object({
+export const DataModelRelationshipSchema = z.looseObject({
   id: z.string().describe('Relationship identifier'),
   sourceEntity: z.string().describe('Source entity ID'),
   sourceField: z.string().describe('Source field'),
@@ -382,11 +382,11 @@ const BPMNNodeTypeSchema = z.enum([
 /**
  * BPMN Node — mirrors `BPMNNode` (`../designer.ts`).
  */
-export const BPMNNodeSchema = z.object({
+export const BPMNNodeSchema = z.looseObject({
   id: z.string().describe('Node identifier'),
   type: BPMNNodeTypeSchema.describe('Node type'),
   label: z.string().describe('Display label'),
-  position: z.object({ x: z.number(), y: z.number() }).describe('Position on canvas'),
+  position: z.looseObject({ x: z.number(), y: z.number() }).describe('Position on canvas'),
   properties: z.record(z.string(), z.unknown()).optional().describe('Node properties'),
   assignee: z.string().optional().describe('Assigned user/role (for user tasks)'),
   dueDate: z.string().optional().describe('Due date expression'),
@@ -403,7 +403,7 @@ export const BPMNNodeSchema = z.object({
 /**
  * BPMN Edge — mirrors `BPMNEdge` (`../designer.ts`).
  */
-export const BPMNEdgeSchema = z.object({
+export const BPMNEdgeSchema = z.looseObject({
   id: z.string().describe('Edge identifier'),
   source: z.string().describe('Source node ID'),
   target: z.string().describe('Target node ID'),
@@ -417,7 +417,7 @@ export const BPMNEdgeSchema = z.object({
  * `ProcessDesigner` draws as a band around the nodes `nodeIds` names
  * (objectui#11434).
  */
-export const BPMNLaneSchema = z.object({
+export const BPMNLaneSchema = z.looseObject({
   id: z.string().describe('Lane identifier'),
   label: z.string().describe('Lane label'),
   role: z.string().optional().describe('Associated role or department'),
@@ -494,7 +494,7 @@ const ReportElementPropertiesSchema = z.record(z.string(), z.unknown()).superRef
  * `properties` stays an open bag (a text element keeps its `text` there), with
  * ONE key refused by name: `field`, respelled as the element's `dataBinding`.
  */
-export const ReportDesignerElementSchema = z.object({
+export const ReportDesignerElementSchema = z.looseObject({
   id: z.string().describe('Element identifier'),
   type: z
     .enum(['text', 'field', 'image', 'chart', 'table', 'barcode', 'line', 'rectangle', 'expression'])
@@ -503,7 +503,7 @@ export const ReportDesignerElementSchema = z.object({
   properties: ReportElementPropertiesSchema.describe('Element properties'),
   dataBinding: z.string().optional().describe('Data binding expression'),
   format: z
-    .object({
+    .looseObject({
       fontFamily: z.string().optional(),
       fontSize: z.number().optional(),
       fontWeight: z.enum(['normal', 'bold']).optional(),
@@ -524,7 +524,7 @@ export const ReportDesignerElementSchema = z.object({
 /**
  * Report Designer Section — mirrors `ReportDesignerSection` (`../designer.ts`).
  */
-export const ReportDesignerSectionSchema = z.object({
+export const ReportDesignerSectionSchema = z.looseObject({
   type: ReportSectionTypeSchema.describe('Section type'),
   height: z.number().describe('Section height'),
   elements: z.array(ReportDesignerElementSchema).describe('Elements in this section'),
@@ -546,7 +546,7 @@ export const ReportDesignerSchema = BaseSchema.extend({
   pageSize: z.enum(['A4', 'A3', 'Letter', 'Legal', 'Tabloid']).optional().describe('Page size'),
   orientation: z.enum(['portrait', 'landscape']).optional().describe('Page orientation'),
   margins: z
-    .object({ top: z.number(), right: z.number(), bottom: z.number(), left: z.number() })
+    .looseObject({ top: z.number(), right: z.number(), bottom: z.number(), left: z.number() })
     .optional()
     .describe('Page margins'),
   sections: z.array(ReportDesignerSectionSchema).describe('Report sections'),
@@ -570,7 +570,7 @@ export const ReportDesignerSchema = BaseSchema.extend({
 /**
  * Object Definition — mirrors `ObjectDefinition` (`../designer.ts`).
  */
-export const ObjectDefinitionSchema = z.object({
+export const ObjectDefinitionSchema = z.looseObject({
   id: z.string().describe('Unique object identifier'),
   name: z.string().describe('API name (snake_case)'),
   label: z.string().describe('Display label'),
@@ -608,7 +608,7 @@ export const ObjectManagerSchema = BaseSchema.extend({
 /**
  * Designer Field Option — mirrors `DesignerFieldOption` (`../designer.ts`).
  */
-export const DesignerFieldOptionSchema = z.object({
+export const DesignerFieldOptionSchema = z.looseObject({
   label: z.string().describe('Option label'),
   value: z.string().describe('Option value'),
   color: z.string().optional().describe('Option color (for badge display)'),
@@ -620,7 +620,7 @@ export const DesignerFieldOptionSchema = z.object({
  * `DESIGNER_FIELD_TYPES`, read from the declaration module rather than
  * restated, so the two cannot drift.
  */
-export const DesignerFieldDefinitionSchema = z.object({
+export const DesignerFieldDefinitionSchema = z.looseObject({
   id: z.string().describe('Unique field identifier'),
   name: z.string().describe('API name (snake_case)'),
   label: z.string().describe('Display label'),

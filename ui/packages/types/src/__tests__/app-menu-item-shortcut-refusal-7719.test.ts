@@ -212,8 +212,8 @@ describe('objectui#7719 — the JSON face refuses `shortcut` by name', () => {
 
 /* ── (c) why it had to be a refusal — the SILENT STRIP, measured here ─────── */
 
-describe('objectui#7719 — a bare non-declaration strips in silence; it refuses nothing', () => {
-  it('an UNDECLARED sibling key is accepted and STRIPPED — it never reaches `.data`', () => {
+describe('objectui#7719 — a bare non-declaration refuses nothing', () => {
+  it('an UNDECLARED sibling key is accepted — it is not refused', () => {
     // THE LOAD-BEARING ROW of this file: without it, "leaving `shortcut`
     // undeclared would not have refused it" is unfalsifiable prose. Here it is a
     // reading taken on this very schema. `keyboardShortcut` is declared nowhere;
@@ -228,10 +228,16 @@ describe('objectui#7719 — a bare non-declaration strips in silence; it refuses
     // PROVING REMOVAL: append `.passthrough()` to the object inside the `z.lazy`
     // and the second assertion reds (the key survives) while the first stays
     // green — which is exactly how this row tells the two mechanisms apart.
+    //
+    // objectstack#25923 made that object `.passthrough()` — every mirror object
+    // is, so none drops an authored key in silence — and the key now SURVIVES
+    // into `.data`, as on `DetailViewSchema`. The load-bearing half is
+    // unchanged: the parse SUCCEEDS, so leaving `shortcut` undeclared would
+    // still not have refused it.
     const r = MenuItemSchema.safeParse({ type: 'item', label: 'Profile', keyboardShortcut: 'Ctrl+P' });
     expect(r.success).toBe(true);
     if (!r.success) return;
-    expect(Object.keys(r.data as Record<string, unknown>)).not.toContain('keyboardShortcut');
+    expect(Object.keys(r.data as Record<string, unknown>)).toContain('keyboardShortcut');
   });
 
   it('and the tombstoned key does NOT get that treatment — the pair is the whole argument', () => {

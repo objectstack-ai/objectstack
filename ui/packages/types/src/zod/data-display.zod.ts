@@ -159,7 +159,7 @@ export const AvatarSchema = BaseSchema.extend({
 /**
  * List Item Schema
  */
-export const ListItemSchema = z.object({
+export const ListItemSchema = z.looseObject({
   id: z.string().optional().describe('Item ID'),
   label: z.string().optional().describe('Item label'),
   description: z.string().optional().describe('Item description'),
@@ -262,7 +262,7 @@ export const ListSchema = BaseSchema.extend({
 /**
  * Table Column Schema
  */
-export const TableColumnSchema = z.object({
+export const TableColumnSchema = z.looseObject({
   header: z.string().describe('Column header text'),
   accessorKey: z.string().describe('Data accessor key'),
   className: z.string().optional().describe('Column class name'),
@@ -316,7 +316,7 @@ export const TableColumnSchema = z.object({
   format: z.string().optional().describe('Field-meta override: display format pattern (e.g. "$0,0", "0%", "YYYY-MM-DD")'),
   options: z
     .array(
-      z.object({
+      z.looseObject({
         value: z.any().describe('Stored value the cell value is matched against'),
         label: z.string().describe('Label rendered for the matched value'),
         color: z.string().optional().describe('Badge/dot color for the matched value'),
@@ -393,7 +393,7 @@ export const TableColumnSchema = z.object({
  * an author reading guidance on nine keys and zod's generic on five learns the
  * message means something, then has it withheld.
  */
-export const StaticTableColumnSchema = z.object({
+export const StaticTableColumnSchema = z.looseObject({
   header: z.string().describe('Column header text'),
   accessorKey: z.string().describe('Data accessor key'),
   className: z.string().optional().describe('Column class name'),
@@ -486,11 +486,11 @@ export const DataTableSchema = BaseSchema.extend({
   reorderableColumns: z.boolean().optional().describe('Allow column reordering'),
   onRowEdit: handlerKeyRefusal('onRowEdit', 'runtime-slot', 'Row edit handler'),
   onRowDelete: handlerKeyRefusal('onRowDelete', 'runtime-slot', 'Row delete handler'),
-  rowEditPredicates: z.object({
+  rowEditPredicates: z.looseObject({
     visibleWhen: z.unknown().optional(),
     disabledWhen: z.unknown().optional(),
   }).optional().describe('Per-record CEL predicates for the built-in row Edit item (objectui#2614)'),
-  rowDeletePredicates: z.object({
+  rowDeletePredicates: z.looseObject({
     visibleWhen: z.unknown().optional(),
     disabledWhen: z.unknown().optional(),
   }).optional().describe('Per-record CEL predicates for the built-in row Delete item (objectui#2614)'),
@@ -634,7 +634,7 @@ export const MarkdownSchema = BaseSchema.extend({
  * `base.zod.ts` — read it there before changing this line.
  */
 export const TreeNodeSchema: z.ZodType<TreeNode, TreeNode> = z.lazy(() =>
-  z.object({
+  z.looseObject({
     id: z.string().describe('Node ID'),
     label: z.string().describe('Node label'),
     icon: z.string().optional().describe('Node icon'),
@@ -753,7 +753,7 @@ export const ChartTypeSchema = stripImportedDefaults(SpecChartTypeSchema);
  * of payload — this is the STATIC SDUI node's series, the spec's is the
  * dataset-bound one, and neither carries values.
  */
-export const ChartDataSeriesSchema = z.object({
+export const ChartDataSeriesSchema = z.looseObject({
   // BOTH BINDING DIALECTS (`5f789538d`, maintainer ruling 2026-09-02 — the
   // `chart` row, verbatim 「同意」). `normalizeSeries` reads
   // `str(raw.dataKey) ?? str(raw.name)` (`plugin-charts/src/normalizeChartSchema.ts:239`),
@@ -1100,7 +1100,7 @@ export type DrillDownReportZodType = z.ZodObject<
  * `ReportSchema` by reference. The `{ name }` reference arm the declaration used
  * to carry beside it is retired and refused by name (objectui#11517).
  */
-export const DrillDownConfigSchema = z.object({
+export const DrillDownConfigSchema = z.looseObject({
   enabled: z.boolean().optional().describe('Master switch — true, or any other key present, turns the drill on'),
   mode: z.enum(['filter', 'record']).optional().describe(
     "'filter' (the aggregate default) drills through to a filtered list; 'record' (the table / list default) opens the clicked record itself",
@@ -1308,7 +1308,7 @@ export const PivotTableSchema = BaseSchema.extend({
  * a separate break that ruling did not name. ⛔ Not a timeline element shape —
  * an authored feed entry is `TimelineFeedItemSchema` below.
  */
-export const TimelineEventSchema = z.object({
+export const TimelineEventSchema = z.looseObject({
   id: z.string().optional().describe('Event ID'),
   title: z.string().describe('Event title'),
   description: z.string().optional().describe('Event description'),
