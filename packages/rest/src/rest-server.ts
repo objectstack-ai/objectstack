@@ -264,9 +264,15 @@ import { sendError as sendEnvelopeError } from '@objectstack/types';
  * API-exposure gate feature-detects it ({@link RestServer.enforceApiAccess});
  * a protocol without it is asked `getMetaItem`, as before. ⛔ No door serves
  * what it returns.
+ *
+ * [#25783] …and its LIST twin, `getMetaItemsForExecution`, equally optional:
+ * the object list every gate reads only to learn each object's `enable`
+ * ({@link RestServer.metaListSource}). A protocol without it is asked
+ * `getMetaItems`, as before. ⛔ No door serves what it returns either.
  */
 export type RestProtocol = DataProtocol & MetadataProtocol & {
     getMetaItemForExecution?: MetadataProtocol['getMetaItem'];
+    getMetaItemsForExecution?: MetadataProtocol['getMetaItems'];
 };
 
 // [#23050 slice 10] `TransportScopedMetaRequest`, the meta doors' request envelope, moved to
@@ -3639,6 +3645,14 @@ export class RestServer {
      * [#20193] The list half of {@link metaItemReadGateSources}: one
      * `getMetaItems` read of a whole type, env-scoped, `undefined` when this
      * protocol has no list read at all.
+     *
+     * [#25783] The `object` list on the protocol's EXECUTION face where it has
+     * one: its readers — the nav-servability gate on `/meta/app`, the batch
+     * route's exposure gate, the by-name gate's list fallback — read each
+     * object's `enable` and serve none of it, and the served face diagnosed
+     * every object of the registry on every such request (a full schema
+     * `safeParse` each). Same sources, merge and governance either way; the
+     * `book` and `doc` lists stay on the served face, unchanged.
      */
     private metaListSource(p: RestProtocol, environmentId: string | undefined): MetaReadGateListSource {
         return {
@@ -3647,6 +3661,9 @@ export class RestServer {
                     type,
                     ...(environmentId ? { environmentId } : {}),
                 };
+                if (type === 'object' && typeof p.getMetaItemsForExecution === 'function') {
+                    return p.getMetaItemsForExecution(listRequest);
+                }
                 return p.getMetaItems?.(listRequest);
             },
         };

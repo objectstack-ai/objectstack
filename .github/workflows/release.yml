@@ -1507,7 +1507,7 @@ jobs:
   full-battery:
     name: Full battery green at the version commit
     # A PR or queue build carries ci.yml's FAST SET since #22998; the dogfood
-    # and temporal legs run only on main's push, hourly and
+    # and temporal legs run only on main's push, 4-hourly schedule and
     # dispatch runs. So "tested before a release" is read HERE, as a gate: the
     # newest completed `schedule` or `push` runs of `CI` and `Lint & Type
     # Check` whose head is the version commit or a first-parent ancestor of it

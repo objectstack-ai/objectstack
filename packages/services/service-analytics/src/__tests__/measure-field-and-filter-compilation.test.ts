@@ -185,7 +185,8 @@ describe('[#10298] `/api/v1/analytics/query` compiles every per-measure `filter`
     // …and each filtered one carries its own predicate.
     expect(sql).toContain('COUNT(CASE WHEN stage = $1 THEN 1 END) AS "won_count"');
     expect(sql).toContain('COUNT(CASE WHEN stage = $2 THEN 1 END) AS "lost_count"');
-    expect(sql).toContain('SUM(CASE WHEN stage = $3 THEN amount END) AS "won_amount"');
+    // [#25907] A conditional `sum` answers `0` over no admitted row, in the statement.
+    expect(sql).toContain('COALESCE(SUM(CASE WHEN stage = $3 THEN amount END), 0) AS "won_amount"');
 
     // Comparands are BOUND, in the order their placeholders appear. The SELECT
     // list precedes the WHERE clause and `$n` is positional, so a filter
@@ -239,7 +240,7 @@ describe('[#10298] `/api/v1/analytics/query` compiles every per-measure `filter`
       }],
     });
     const { sql, params } = await sqlFor(svc, { cube: 'crm_case', measures: ['count', 'amount_sum'] });
-    expect(sql).toBe('SELECT COUNT(*) AS "count", SUM(amount) AS "amount_sum" FROM "crm_case"');
+    expect(sql).toBe('SELECT COUNT(*) AS "count", COALESCE(SUM(amount), 0) AS "amount_sum" FROM "crm_case"');
     expect(params).toEqual([]);
   });
 });

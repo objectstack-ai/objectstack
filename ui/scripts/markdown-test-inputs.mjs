@@ -962,7 +962,7 @@ export const ADJUDICATED = new Map([
   [
     'scripts/__tests__/ci-cd-pipeline-doc.test.ts',
     {
-      reads: ['.github/prompts/component.prompt.md', '.github/prompts/engine.prompt.md', '.github/prompts/ui-library.prompt.md', 'CONTRIBUTING.md', 'content/docs/guide/ci-cd-pipeline.md'],
+      reads: ['CONTRIBUTING.md', 'content/docs/guide/ci-cd-pipeline.md'],
       walker: 'not-markdown: `.github/workflows/*.yml`',
     },
   ],
@@ -1004,7 +1004,7 @@ export const ADJUDICATED = new Map([
   [
     'scripts/__tests__/dollar-dialect-alias-census.test.ts',
     {
-      reads: ['./*', '.changeset/**', '.claude/skills/**', '.github/prompts/component.prompt.md', '.github/prompts/engine.prompt.md', '.github/prompts/ui-library.prompt.md', 'apps/**', 'content/docs/**', 'docs/ARCHITECTURE.md', 'docs/CONSOLE-STREAMLINING-SUMMARY.md', 'docs/adr/**', 'docs/audits/**', 'examples/**', 'packages/**', 'patches/README.md', 'skills/objectui/**'],
+      reads: ['./*', '.changeset/**', '.claude/skills/**', 'apps/**', 'content/docs/**', 'docs/ARCHITECTURE.md', 'docs/CONSOLE-STREAMLINING-SUMMARY.md', 'docs/adr/**', 'docs/audits/**', 'examples/**', 'packages/**', 'patches/README.md', 'skills/objectui/**'],
     },
   ],
   [

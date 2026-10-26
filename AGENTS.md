@@ -529,7 +529,7 @@ Even inside your own worktree, operate defensively:
    that lands rides `main`'s merge ref into every later PR until stanched. A required context is
    matched by check-run name, so a rename detaches its gate silently — treat those eight names as contract.
    **Two speeds** (ruling record 6120820653): PR and queue runs carry the fast set, 10 minutes of
-   wall per queue entry; `main`'s hourly and push runs carry the full battery — dogfood, e2e,
+   wall per queue entry; `main`'s scheduled (4-hourly) and push runs carry the full battery — dogfood, e2e,
    `Temporal Conformance (live PG + MySQL)` — read by the publish lane before
    any approval. **Main-red:** a full-battery red is its lane's first work — triage files it under
    the main-red convention, the lane's next PR fixes it, and ⛔ no lane PR arms the queue meanwhile.
