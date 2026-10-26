@@ -18,7 +18,8 @@
  * that held the file and one who may not. For every way a file leaves its
  * slot, under both collection settings:
  *
- *   - the member refused the record is refused the file, on both doors;
+ *   - the member refused the record is refused the file, on both doors (a
+ *     write naming it is refused at the field, #26043);
  *   - the member who reads the record still reads it, and may take it back;
  *   - once the record is deleted, only the uploader reads the file.
  *
@@ -46,6 +47,7 @@ import type { IStorageService, RouteHandler } from '@objectstack/spec/contracts'
 import { RAW_FILE_VALUES_CONTEXT_KEY, type EngineQueryOptions } from '@objectstack/spec/data';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
+import { resolveThrownHttpError } from '@objectstack/types';
 import { StorageServicePlugin } from './storage-service-plugin.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 
@@ -261,17 +263,28 @@ async function boot(tombstones: boolean) {
 
   /**
    * Write `fileId` into a new contract's `doc` as `user`, and report what the
-   * write did with it: `claimed` (the record owns the file it named) or `kept`
-   * (the record holds the id as written and owns nothing).
+   * write did with it: `claimed` (the record owns the file it named) or
+   * [#26043] `refused` (the write was refused at `doc`, and no record was
+   * written).
    */
   let seq = 0;
   const writeAs = async (fileId: string, user: string) => {
     const recordId = `c_${++seq}`;
-    await engine.insert('contract', { id: recordId, doc: fileId } as any, { context: { userId: user } });
+    const err = await engine
+      .insert('contract', { id: recordId, doc: fileId } as any, { context: { userId: user } })
+      .then(() => null, (e: any) => e);
     const held = ((await engine.find('contract', { where: { id: recordId }, context: SYS_RAW })) as any[])[0]?.doc;
+    if (err) {
+      const answered = resolveThrownHttpError(err);
+      const fields = (answered.details?.fields as any[] | undefined)?.map((f) => [f.field, f.code]);
+      return answered.status === 400 && answered.code === 'VALIDATION_FAILED' && held === undefined
+        && JSON.stringify(fields) === JSON.stringify([['doc', 'invalid_value']])
+        ? 'refused'
+        : `unexpected (${answered.status} ${answered.code})`;
+    }
     const row = await fileById(fileId);
     const owns = row?.ref_object === 'contract' && row?.ref_id === recordId && row?.ref_field === 'doc';
-    return held === fileId && owns ? 'claimed' : held === fileId && !owns ? 'kept' : `unexpected (held ${String(held)})`;
+    return held === fileId && owns ? 'claimed' : `unexpected (held ${String(held)}, owns ${owns})`;
   };
 
   return {
@@ -301,7 +314,7 @@ describe('#26046 — a file its owning record lets go keeps that record\'s read 
   describe.each(RELEASES)('$name', (r) => {
     it('a member refused the record is refused the file, at the download door and at a write', async () => {
       expect(await h.door(r.file, OUTSIDER)).toEqual(DENIED);
-      expect(await h.writeAs(r.file, OUTSIDER)).toBe('kept');
+      expect(await h.writeAs(r.file, OUTSIDER)).toBe('refused');
       expect((await h.fileById(r.file))?.ref_id ?? null).toBeNull();
     });
 
@@ -316,7 +329,7 @@ describe('#26046 — a file its owning record lets go keeps that record\'s read 
       async () => {
         if (!r.recordSurvives) {
           expect(await h.door(r.file, READER)).toEqual(DENIED);
-          expect(await h.writeAs(r.file, READER)).toBe('kept');
+          expect(await h.writeAs(r.file, READER)).toBe('refused');
           return;
         }
         expect(await h.door(r.file, READER)).toEqual(ALLOWED);
@@ -347,7 +360,7 @@ describe('#26046 — a file its owning record lets go keeps that record\'s read 
 
   describe.each(RELEASES)('$name', (r) => {
     it('a write by a member refused the record neither takes nor revives the file', async () => {
-      expect(await h.writeAs(r.file, OUTSIDER)).toBe('kept');
+      expect(await h.writeAs(r.file, OUTSIDER)).toBe('refused');
       expect(await h.fileById(r.file)).toMatchObject({ status: 'deleted', ref_id: null });
     });
 
@@ -357,7 +370,7 @@ describe('#26046 — a file its owning record lets go keeps that record\'s read 
         : 'with the record gone, its reader may not take it back either',
       async () => {
         if (!r.recordSurvives) {
-          expect(await h.writeAs(r.file, READER)).toBe('kept');
+          expect(await h.writeAs(r.file, READER)).toBe('refused');
           expect(await h.fileById(r.file)).toMatchObject({ status: 'deleted', ref_id: null });
           return;
         }
