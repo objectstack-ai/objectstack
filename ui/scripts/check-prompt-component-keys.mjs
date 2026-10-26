@@ -13,6 +13,7 @@
  * (objectui#8929).
  *
  *   Run:  node scripts/check-prompt-component-keys.mjs   (`pnpm check:prompt-keys`)
+ *         [--root <objectui root>] [--prompts-root <dir holding .github/prompts>]
  *   Exit: 0 = every taught key resolves to a real component
  *         1 = a taught key resolves to nothing, or resolves only to the
  *             placeholder panel, or this gate's own derivation collapsed
@@ -136,8 +137,20 @@ import { closesFence, openFence } from './markdown-fence-scan.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 
-/** The instruction surface this gate reads. */
+/** The instruction surface this gate reads, under `promptsRoot()`. */
 export const PROMPT_DIR = '.github/prompts';
+
+/**
+ * Where `PROMPT_DIR` lives: the repository root, not the objectui root. VS Code
+ * reads prompt files from the workspace root's `.github/prompts/`, so they moved
+ * there from `ui/.github/prompts/` when objectui's nested `.github/` was retired
+ * (objectstack#25712). The registry the keys are judged against stays under the
+ * objectui root, which is why `analyze()` takes the two roots separately. A
+ * fixture tree that holds both passes one directory for both.
+ */
+export function promptsRoot(root = resolve(scriptDir, '..')) {
+  return resolve(root, '..');
+}
 
 /** The namespace `INDIRECT_REGISTRATIONS` gives the opt-in placeholder module. */
 export const PLACEHOLDER_NAMESPACE = 'protocol-placeholder';
@@ -475,8 +488,13 @@ export function letterRunFindings(runs) {
 /**
  * Judge the prompt surface. Throws when an input is missing, because a gate
  * that cannot see its inputs must not report a pass.
+ *
+ * `root` is the objectui root the registry is derived from; the prompts are read
+ * under `options.promptsRoot`, which defaults to `root` itself (a fixture tree).
+ * The real tree passes `promptsRoot()`.
  */
 export function analyze(root, options = {}) {
+  const prompts = options.promptsRoot ?? root;
   const registry = deriveRegistryKeys(root, options);
   if (registry.findings.length > 0) {
     const lines = registry.findings.map((f) => `  ${f.reason} at ${f.site}: ${f.detail}`);
@@ -507,7 +525,7 @@ export function analyze(root, options = {}) {
     throw new Error('the derivation produced no authorable keys — refusing to judge against an empty set.');
   }
 
-  const { sites: taught, bullets, blocks, emptyBlocks } = scanPromptKeys(root);
+  const { sites: taught, bullets, blocks, emptyBlocks } = scanPromptKeys(prompts);
   if (bullets === 0) {
     throw new Error(
       `no \`**Keys:**\` bullet was found under ${PROMPT_DIR}. The surface this gate reads is gone or ` +
@@ -523,7 +541,7 @@ export function analyze(root, options = {}) {
     );
   }
 
-  const sections = scanPromptSections(root);
+  const sections = scanPromptSections(prompts);
   const runs = lettered(sections);
   if (sections.length > 0 && runs.length === 0) {
     throw new Error(
@@ -549,7 +567,7 @@ export function analyze(root, options = {}) {
   return {
     findings,
     counters: {
-      promptFiles: promptFiles(root).length,
+      promptFiles: promptFiles(prompts).length,
       bullets,
       blocks,
       keys: taught.length,
@@ -594,10 +612,12 @@ if (isEntrypoint(import.meta.url)) {
     return index > -1 ? process.argv[index + 1] : null;
   };
   const root = resolve(argOf('--root') ?? resolve(scriptDir, '..'));
+  // A `--root` fixture tree holds its own prompts unless told otherwise.
+  const prompts = resolve(argOf('--prompts-root') ?? (argOf('--root') ? root : promptsRoot()));
 
   let result;
   try {
-    result = analyze(root);
+    result = analyze(root, { promptsRoot: prompts });
   } catch (error) {
     console.error(
       `x  ${error.message}\n\n` +
