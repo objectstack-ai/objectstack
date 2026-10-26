@@ -28,8 +28,8 @@
  * tombstone KEEPS the key in the shape (`z.never().optional()`, so `z.input`
  * types it `undefined`, which is why an authored name reads as
  * `TS2322: Type 'string' is not assignable to type 'undefined'`) — so
- * `SpecDeclaredKeys` below still lists `view`, and ⛔ removing it from that
- * list would break `_KeysAreExactlyTheSpecSix`, not repair it.
+ * `SpecDeclaredKeys` below still lists `view`, and `_ViewIsStillDeclared`
+ * pins it by name: ⛔ removing it from that list would not repair anything.
  *
  * This is objectui#4550 / PR objectui#4586 one package over: that one collapsed
  * `@object-ui/react`'s `NavigationConfig` to the spec's authored input. This
@@ -104,12 +104,17 @@ type _IsExactlyTheSpecInput = Expect< Equal< ViewNavigationConfig, NavigationCon
  * `retiredKey()` tombstone is `z.never().optional()`: the key is still IN the
  * object shape, so `keyof` still yields it — only its input type collapses from
  * `string | undefined` to `undefined`. DECLARED and WRITABLE are two different
- * facts, and this alias measures the first one. Dropping `view` here reddens
- * `_KeysAreExactlyTheSpecSix` against both the installed spec and spec@main.
+ * facts, and this alias measures the first one. `_ViewIsStillDeclared` below
+ * holds `view` by name, so it stays measured even if the list is tidied.
+ *
+ * Membership, not a closed list: `_IsExactlyTheSpecInput` above already refuses
+ * a local key, so closing this list again would only restate the spec, and a
+ * key the spec adds would turn this file red with no ui change behind it.
  */
 type SpecDeclaredKeys = 'mode' | 'view' | 'preventNavigation' | 'openNewTab' | 'size' | 'width';
 
-type _KeysAreExactlyTheSpecSix = Expect< Equal< keyof ViewNavigationConfig, SpecDeclaredKeys > >;
+type _KeysIncludeTheSpecSix = Expect< Equal< Exclude< SpecDeclaredKeys, keyof ViewNavigationConfig >, never > >;
+type _ViewIsStillDeclared = Expect< Equal< 'view' extends keyof ViewNavigationConfig ? true : false, true > >;
 
 /* ── `mode` is optional, because the spec defaults it ────────────────────── */
 
@@ -129,12 +134,22 @@ type _ModeIsOptional = Expect<
  * puts there on purpose, not a drift in which modes exist. `NonNullable` keeps
  * this assertion pointed at the thing it guards. (Same care PR objectui#4586
  * took with `_ModeIsConfigMode` one package over.)
+ *
+ * The seven are required members, not a closed list: no ui consumer is total
+ * over the modes, so a mode the spec adds is not a red here. A widening to
+ * `string` still is.
  */
 type _ModeMembershipIsTheSevenSpecModes = Expect<
   Equal<
-    NonNullable< ViewNavigationConfig['mode'] >,
-    'page' | 'drawer' | 'modal' | 'split' | 'popover' | 'new_window' | 'none'
+    Exclude<
+      'page' | 'drawer' | 'modal' | 'split' | 'popover' | 'new_window' | 'none',
+      NonNullable< ViewNavigationConfig['mode'] >
+    >,
+    never
   >
+>;
+type _ModeIsClosed = Expect<
+  Equal< string extends NonNullable< ViewNavigationConfig['mode'] > ? true : false, false >
 >;
 
 /* ── The three schema sites use the shared type ──────────────────────────── */
@@ -195,7 +210,7 @@ describe('ViewNavigationConfig is the spec navigation config (objectui#4588)', (
     // than an omission: objectstack#18619 retired it, so on a spec carrying the
     // tombstone its input type is `undefined` and any authored name is
     // `TS2322: Type 'string' is not assignable to type 'undefined'`. It is
-    // still a DECLARED key — `_KeysAreExactlyTheSpecSix` above measures that,
+    // still a DECLARED key — `_ViewIsStillDeclared` above measures that,
     // on this same file, which is the control that keeps this case's shorter
     // list from reading as "the spec lost a key".
     const full: ViewNavigationConfig = {
