@@ -290,6 +290,7 @@
     "SeedColumnSchema": "data/SeedColumn",
     "SeedFileContent": "data/SeedFileContent",
     "SeedFileContentSchema": "data/SeedFileContent",
+    "SeedFilePath": "data/SeedFilePath",
     "SeedFilePathSchema": "data/SeedFilePath",
     "SeedFileReference": "data/SeedFileReference",
     "SeedFileReferenceSchema": "data/SeedFileReference",
