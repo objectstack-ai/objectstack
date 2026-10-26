@@ -138,7 +138,6 @@ const CALLERS: Record<string, Classification> = {
     read: "the expansion sub-read (`ObjectQL.expandRelatedRecords`), for the data door's `$expand`",
     decidedIn: 'packages/metadata-protocol/src/protocol-query-validation.ts',
     also:
-      'the write-path reference-existence probe (`referenceExists`: whether a stored id resolves, no field) and ' +
       'the validation-predicate reads (`resolvePredicateRelated`: a pass/fail verdict, the value never served). ' +
       "The engine's privileged callers (a flow's `config.expand`, a hook's read) never pass the door, by design.",
   },
@@ -209,6 +208,14 @@ const CALLERS: Record<string, Classification> = {
   'packages/metadata-protocol/src/seed-loader.ts': {
     kind: 'not-a-served-read',
     reason: "resolves a seed's references at install, under the system identity; serves nothing to a caller",
+  },
+  // [#25522 cut 10] The write-path reference check, moved out of engine.ts.
+  'packages/objectql/src/engine-referential-integrity.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      'the write-path reference-existence check (`assertReferencesResolve`): it asks whether a caller-supplied id ' +
+      "resolves on the target (the engine's `referenceExists` probe) and answers `reference_not_found` or nothing, " +
+      'never a field of the target',
   },
   'packages/objectql/src/integrity/dangling-reference-audit.ts': {
     kind: 'not-a-served-read',
