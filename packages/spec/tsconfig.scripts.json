@@ -36,7 +36,7 @@
 //
 // STRICTNESS IS UNTOUCHED, the same commitment `tsconfig.test.json` makes and
 // for the same reason: `strict`, `noUnusedLocals`, `noUnusedParameters`,
-// `noImplicitReturns` and the rest are inherited from the root config. Only
+// `noImplicitReturns` and the rest are inherited from the base config. Only
 // module semantics and the program's root move. If a script does not compile,
 // that is the finding — it is how this change learned that ~100 lines of
 // `build-schemas.ts` were being checked as `never` (see that file's

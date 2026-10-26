@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 210 — spawns the real producer once per single-cause fixture: three `os start` boots of the tsx source entry in sequence (install, restart on the same home, and the `--artifact` control on its own home) and six `os package install` runs; slowest CI reading of this shape 161.8 s (hourly full battery run 40290659753; 160.9 s in run 38332198724, the card's window) x 1.25, rounded up
 
 /**
  * #21489 — a package's job BODIES run on every door that brings an artifact

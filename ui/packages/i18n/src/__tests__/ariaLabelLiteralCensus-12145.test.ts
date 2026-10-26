@@ -282,7 +282,7 @@ const BACKLOG: Declared[] = (
     ['packages/plugin-list/src/ListView.tsx', ['Bulk actions']],
     [
       'packages/plugin-map/src/ObjectMap.tsx',
-      ['Locations', 'Show my location', 'Your location', 'Location details', 'Close details'],
+      ['Show my location', 'Your location', 'Location details', 'Close details'],
     ],
   ] as Array<[string, string[]]>
 ).map(([file, names]) => ({ file, names, verdict: 'backlog' as const, reason: BACKLOG_REASON }));
