@@ -210,14 +210,9 @@ const NON_PARSERS = [
     file: SELF,
     why: 'this gate -- it carries the keyword set as its own MUTATION ANCHORS (X4) and as the specimen the sweep self-test plants',
   },
-  // The three below arrived with the objectui import under ui/. The closer copy
-  // IS a parser in its own repository, but GitHub runs workflows only from the
-  // root .github/workflows, so here it never executes; the governance fold that
-  // deletes ui/.github removes the first row and, with the harness, the third.
-  {
-    file: 'ui/.github/workflows/cross-repo-issue-closer.yml',
-    why: 'the imported objectui copy of the closer -- inert in this repository (GitHub runs only the root .github/workflows), so it closes nothing here; it goes when ui/.github is folded into the root',
-  },
+  // The two below arrived with the objectui import under ui/. A third, objectui's
+  // copy of the closer workflow, left with ui/.github/workflows (objectstack#25712);
+  // the harness row goes with the closer's roster row in sub-issue 4.
   {
     file: 'ui/AGENTS.md',
     why: 'the imported objectui agent guide -- it quotes the keyword alternation in prose, warning that the closer ignores negation; it parses nothing',

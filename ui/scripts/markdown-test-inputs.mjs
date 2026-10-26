@@ -973,13 +973,6 @@ export const ADJUDICATED = new Map([
     },
   ],
   [
-    'scripts/__tests__/ci-cd-pipeline-doc.test.ts',
-    {
-      reads: ['CONTRIBUTING.md', 'content/docs/guide/ci-cd-pipeline.md'],
-      walker: 'not-markdown: `.github/workflows/*.yml`',
-    },
-  ],
-  [
     'scripts/__tests__/component-node-vocabulary-7434.test.ts',
     {
       reads: ['content/docs/**', 'packages/**'],
