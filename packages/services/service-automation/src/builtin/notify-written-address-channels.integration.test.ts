@@ -59,7 +59,13 @@ function dataEngine(users: Row[]) {
         async findOne(object: string, query?: EngineFindOneQueryInput) {
             assertEngineFindOnePredicate(object, query);
             const where = (query as { where?: Record<string, unknown> } | undefined)?.where ?? {};
-            const hit = (tables[object] ?? []).find((r) => Object.entries(where).every(([k, v]) => r[k] === v));
+            // Equality on plain fields only: a combinator or operator is refused, never read as a field name.
+            const hit = (tables[object] ?? []).find((r) => Object.entries(where).every(([k, v]) => {
+                if (k.startsWith('$') || (typeof v === 'object' && v !== null)) {
+                    throw new Error(`this double matches equality on plain fields only: ${JSON.stringify(where)}`);
+                }
+                return r[k] === v;
+            }));
             return hit ? { ...hit } : undefined;
         },
     };
