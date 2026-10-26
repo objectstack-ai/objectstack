@@ -2699,7 +2699,7 @@ const APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY_EXPLANATION: RuleExplanation = {
   paragraphs: [
     'An approval node opens its request on the people its approvers expand to at runtime. When ' +
       'EVERY approver on the node routes to a group whose membership is runtime data — a ' +
-      '`position`, a `team` or a `department` — and none is staffed, no person the node names can ' +
+      '`position`, a `team`, a `department` or a `queue` — and none is staffed, no person the node names can ' +
       'act. Under the default `onEmptyApprovers: \'admin_rescue\'` the request then opens on the ' +
       "organization's administrators (the people holding its organization-admin capability) " +
       'instead, and under the default `lockRecord: true` the record stays locked until one of them ' +
@@ -4616,8 +4616,10 @@ const ORG_AXIS_CROSS_ORG_BU_GRANT_EXPLANATION: RuleExplanation = {
       'column to scope against: the grant reaches every organization\'s rows, the ' +
       'cross-organization business-unit tree the ADR rejected, arrived at by accident.',
     'The other recipients are the sanctioned way to share a platform-global object (ADR-0066): ' +
-      '`user`, `team` and `position` expand flat, and `field` reads the users a column on the record ' +
-      'itself names, so none of them walks a business-unit tree. A platform-global catalog everyone ' +
+      '`user`, `team` and `position` expand flat, `field` reads the users a column on the record ' +
+      'itself names, and a `queue` is a work-distribution list whose declared members are positions, ' +
+      'so none of them walks a business-unit tree here (a queue an organization staffs with a unit ' +
+      'resolves that unit through the same org-predicated resolver at runtime). A platform-global catalog everyone ' +
       'should read wants an organization-wide default of `public_read`, not a business-unit grant. ' +
       'An error: it mirrors a real enforcement property, the org-predicated business-unit resolver, ' +
       'so the failure moves from a silent wrong answer to an authoring fix.',
@@ -4653,6 +4655,42 @@ const PERMISSION_RETIRED_LIFECYCLE_RESIDUE_EXPLANATION: RuleExplanation = {
 };
 
 // ── Seed datasets (`validate-seed-replay-safety.ts`, `validate-seed-state-machine.ts`) ──
+
+// ── Assignment rules (`validate-assignment-rules.ts`) ──
+
+const ASSIGNMENT_RULE_USER_TARGET_EXPLANATION: RuleExplanation = {
+  rule: 'assignment-rule-user-target',
+  covers: 'why an assignment rule should not name a user id',
+  paragraphs: [
+    'An assignment rule routes each inserted row of its object that is still unowned after the ' +
+      '`beforeInsert` hooks have run (ADR-0142 D5). An entry whose `assignTo` is `{ type: \'user\' }` ' +
+      'writes that user id as the row\'s owner. A user id is one organization\'s data, and a ' +
+      'package declares metadata for every organization it is installed into (ADR-0086 D1): in any ' +
+      'other organization the id names nobody, and the row it routes is owned by no member there.',
+    'Route to a queue instead. A declared queue\'s members are positions, which each organization ' +
+      'staffs with its own people, and the entry can pick one of them (`round_robin`, ' +
+      '`least_loaded`) or park the row in the queue for a member to claim.',
+    'A warning, not a refusal: the rule loads, and in the one organization the id belongs to it ' +
+      'routes as written.',
+  ],
+};
+
+const ASSIGNMENT_RULE_QUEUE_UNSTAFFED_EXPLANATION: RuleExplanation = {
+  rule: 'assignment-rule-queue-unstaffed',
+  covers: 'why an empty declared queue parks every row it is sent',
+  paragraphs: [
+    'An entry that targets a queue picks from the queue\'s members in the row\'s organization, or ' +
+      'parks the row in the queue when it declares no strategy. A queue this stack declares with ' +
+      'no member at all is staffed only by an organization\'s own `sys_queue_member` rows, which ' +
+      'are runtime data: until an organization adds members, every row the entry matches is parked ' +
+      'unowned, and the engine logs the empty pool once per rule.',
+    'Declare at least one member on the queue (`{ type: \'position\', value: \'<position name>\' }`). ' +
+      'The rule cannot read runtime membership, so a queue that organizations staff themselves may be ' +
+      'intended; a target this stack does not declare is an organization\'s own queue and is not judged.',
+    'Advisory (`info`): the shape mirrors `approval-approvers-may-resolve-empty`, and the engine never ' +
+      'refuses an insert on a rule\'s account.',
+  ],
+};
 
 const SEED_INSERT_MODE_DUPLICATES_ON_REPLAY_EXPLANATION: RuleExplanation = {
   rule: 'seed-insert-mode-duplicates-on-replay',
@@ -5133,6 +5171,8 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [ORG_AXIS_PERMISSION_INHERITANCE_EXPLANATION.rule]: ORG_AXIS_PERMISSION_INHERITANCE_EXPLANATION,
   [ORG_AXIS_CROSS_ORG_BU_GRANT_EXPLANATION.rule]: ORG_AXIS_CROSS_ORG_BU_GRANT_EXPLANATION,
   [PERMISSION_RETIRED_LIFECYCLE_RESIDUE_EXPLANATION.rule]: PERMISSION_RETIRED_LIFECYCLE_RESIDUE_EXPLANATION,
+  [ASSIGNMENT_RULE_USER_TARGET_EXPLANATION.rule]: ASSIGNMENT_RULE_USER_TARGET_EXPLANATION,
+  [ASSIGNMENT_RULE_QUEUE_UNSTAFFED_EXPLANATION.rule]: ASSIGNMENT_RULE_QUEUE_UNSTAFFED_EXPLANATION,
   [SEED_INSERT_MODE_DUPLICATES_ON_REPLAY_EXPLANATION.rule]: SEED_INSERT_MODE_DUPLICATES_ON_REPLAY_EXPLANATION,
   [SEED_VALUE_OUTSIDE_STATE_MACHINE_EXPLANATION.rule]: SEED_VALUE_OUTSIDE_STATE_MACHINE_EXPLANATION,
   [SEMANTIC_ROLE_FIELD_UNPROVISIONED_EXPLANATION.rule]: SEMANTIC_ROLE_FIELD_UNPROVISIONED_EXPLANATION,
