@@ -573,6 +573,20 @@ describe('Storage REST Routes', () => {
         expect(ttlOf(res._json.data.url)).toBeGreaterThan(1700);
         expect(authorizeFileRead).toHaveBeenCalledOnce();
       });
+
+      // [#26046] A file a record let go is still governed by that record's
+      // rule, so its link gets the record-governed lifetime too.
+      it('mints a file a record let go with the record-governed lifetime', async () => {
+        const { server, store: s, authorizeFileRead } = serverWith('allow', { downloadTtl: 120, presignedTtl: 1800 });
+        await commit(s, owned('fo7', {
+          ref_object: null, ref_id: null, ref_field: null,
+          released_ref_object: 'product', released_ref_id: 'p1',
+        }));
+        const res = await hit(server, '/api/v1/storage/files/:fileId/url', 'fo7');
+        expect(res._status).toBe(200);
+        expect(ttlOf(res._json.data.url)).toBeLessThanOrEqual(120);
+        expect(authorizeFileRead).toHaveBeenCalledOnce();
+      });
     });
   });
 

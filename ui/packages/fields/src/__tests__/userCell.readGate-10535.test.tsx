@@ -25,9 +25,11 @@
  *
  *  - single and multi: a denied name and a denied image are not drawn; the
  *    cell reads exactly as a stripping backend's row makes it read;
- *  - the person's object is the field's `reference`, and `sys_user` when it
- *    names none — the answer `UserField` gives the picker; a retired
- *    `reference_to` names nothing (objectui#11070 round 4);
+ *  - the person's object is always `sys_user`, a constant of the `user` type
+ *    (objectstack#24952) — the answer `UserField` gives the picker and the
+ *    target the runtime's `referenceTargetOf` resolves: an authored foreign
+ *    `reference` (a stored body saved before the spec refused it) is not read,
+ *    and neither is a retired `reference_to` (objectui#11070 round 4);
  *  - a policy that changes after mount relabels the SAME mounted cell;
  *  - lit controls: fields the policy does NOT deny still print, and with no
  *    policy loaded (no provider: `isLoaded` is false) the row is drawn as
@@ -151,17 +153,21 @@ describe('UserCellRenderer — the name and the avatar are drawn from the fields
     expect(gated.html).toBe(served.html);
   });
 
-  it("the person's object is the field's `reference`, and `sys_user` when it names none", () => {
-    // `reference` is the spec's spelling and, since objectui#11070 round 4, the
-    // only one read. `UserFieldMetadata` does not declare it, hence the cast.
+  it("a foreign `reference` is not read — the person's object is `sys_user`, the `user` type's constant (objectstack#24952)", () => {
+    // The spec refuses this field, and `referenceTargetOf` resolves it to
+    // `sys_user` anyway, so a stored body saved before the refusal still
+    // reaches the cell. `UserFieldMetadata` does not declare `reference`,
+    // hence the cast.
     const field = { type: 'user', reference: 'crm_member' } as unknown as FieldMetadata;
-    const gated = drawn({ value: AMY, field, policy: policyDenying('crm_member', 'name', 'image') });
+    // The cell gates by the `sys_user` policy, the object the runtime resolves…
+    const gated = drawn({ value: AMY, field, policy: policyDenying('sys_user', 'name', 'image') });
     for (const secret of SECRETS) expect(gated.html).not.toContain(secret);
+    expect(gated.html).toBe(drawn({ value: AMY, policy: policyDenying('sys_user', 'name', 'image') }).html);
 
-    // A policy on `sys_user` says nothing about a field that points elsewhere.
-    const elsewhere = drawn({ value: AMY, field, policy: policyDenying('sys_user', 'name', 'image') });
-    expect(elsewhere.text).toContain('Amy Lin');
-    expect(elsewhere.imgs).toEqual(['http://x/amy.png']);
+    // …and a policy on the authored object does not reach it.
+    const unreached = drawn({ value: AMY, field, policy: policyDenying('crm_member', 'name', 'image') });
+    expect(unreached.text).toContain('Amy Lin');
+    expect(unreached.imgs).toEqual(['http://x/amy.png']);
   });
 
   it('a retired `reference_to` names no person object — the cell reads `sys_user` (objectui#11070 round 4)', () => {

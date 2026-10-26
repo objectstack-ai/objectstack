@@ -414,8 +414,6 @@ const TRIAGE = [
     verdict: 'REPAIRED', why: 'kind 3 — same shape over the whole publishable workspace, which moves on every package add or removal' },
   { file: 'scripts/check-release-section-coverage.mjs', match: 'assertion 1 fires on 24 minors',
     verdict: 'ILLUSTRATION', why: 'the figures justify shipping WITH a baseline, and the ruling that fixes them is dated in the sentence before' },
-  { file: 'scripts/check-sdui-lockstep.mjs', match: 'measured on this tree at 96 hint literals',
-    verdict: 'ILLUSTRATION', why: '"at 96 hint literals" is the CONDITION of the reading, not its subject: the claim is about which leading-dot literals the allowlist admits' },
   { file: 'scripts/check-skill-compatibility-version.mjs', match: 'both were measured on this tree',
     verdict: 'REPAIRED', why: 'kind 3 — four precision ratios deciding which roots are declared, all moving with the tree and none reprinted' },
   { file: 'scripts/check-slot-lookup-ratchet.mjs', match: 'Measured on this tree: 46s',

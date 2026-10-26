@@ -400,6 +400,9 @@ export const CEILINGS = new Map([
   // were paid by deleting two 红线 that restated rules AGENTS.md carries
   // (worktree/stash, hook-enforced; `content/docs/releases/`, its Documentation
   // Guardrails row), never by re-wrap.
+  // Unchanged at 319 by #25712 item 4: its `domain:ui` lane-table row was paid
+  // by deleting the hold rule's pin-consumer clause (no pin is left to consume)
+  // and folding the rest of that line into the `pm:on-hold` rule it qualified.
   ['.claude/skills/pm-dispatch/SKILL.md', 319],
   // Raised 223 → 244 by the triage reading-cost card (maintainer ruling
   // 2026-08-20, quoted in the raising PR): three mandated conventions land in
@@ -1285,7 +1288,9 @@ export const CEILINGS = new Map([
   ['.claude/skills/pm-dispatch/references/untrusted-text.md', 54],
   ['.claude/skills/pm-dispatch/references/external-contributions.md', 22],
   ['.claude/skills/pm-dispatch/references/reading-discipline.md', 37],
-  ['.claude/skills/pm-dispatch/references/cross-repo-coordination.md', 51],
+  // Lowered 51 → 47 by #25712 item 4: objectui stopped being a sister repo, so
+  // its sibling-checkout and pin-lag lines were deleted (lowering is legitimate).
+  ['.claude/skills/pm-dispatch/references/cross-repo-coordination.md', 47],
   // Unchanged at 120 through the maintainer's revocation of every autonomous-
   // adjudication channel: the delegated-adjudication lane, its confidence gate
   // and the first-class self-ruling gate left (−13), and the same ruling batch
@@ -1428,7 +1433,9 @@ export const CEILINGS = new Map([
   // charter is read per seat session like every entry above. Set at the landed
   // line count read from this ratchet's own run (headroom 0, same convention as
   // above); it is a NEW file, so this is an added row and no other row moves.
-  ['.claude/skills/pm-dispatch/references/lanes/ui.md', 38],
+  // Lowered 38 → 23 by #25712 item 4: `ui/` is a workspace of this repo, so the
+  // sister-repo seat steps (`pnpm objectui:refresh`, pin moves) were deleted.
+  ['.claude/skills/pm-dispatch/references/lanes/ui.md', 23],
   // repo:hotcrm lane charter (maintainer rulings 2026-08-20: exemplar-app repo —
   // platform capabilities implemented upstream, 展现平台能力, 不扩散需求, runs on
   // community edition). Set at landed line count (headroom 0, same convention).
@@ -1707,7 +1714,9 @@ export const CEILINGS = new Map([
   // Maintainer ruling, verbatim and untranslated: 「A 上限抬到 1117 (Recommended)」
   // — the maintainer's live answer to the seat session, recorded on PR #23596
   // comment 6184004601. Landed count, headroom 0, same convention.
-  ['AGENTS.md', 1117],
+  // Lowered 1117 → 1112 by #25712 item 4: the objectui sibling-repo steps were
+  // deleted once `ui/` became a workspace here. Landed count, headroom 0.
+  ['AGENTS.md', 1112],
   // #9965: root CLAUDE.md is the other repo-root instruction file — same read
   // path (every seat session), same governance (Prime Directive #14). It is
   // structurally growth-prone in the way the ratchet is built for: it exists to

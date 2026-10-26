@@ -66,11 +66,10 @@ const BASE_ID = 'com.example.crm-copy';
 const ROUTE = '/marketplace/install-local';
 const BOTH = ['managed', 'unmanaged'];
 
-type Answer = { status: number; body: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
+type Answer = { status: number; body: any };
 
 type Item = { type: string; name: string };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const rowsOf = (r: any): any[] => (Array.isArray(r) ? r : Array.isArray(r?.records) ? r.records : []);
 
 async function json(res: Response): Promise<Answer> {
@@ -92,8 +91,8 @@ const DATASET_LOCK_REASON = 'Forecast reports read these measures; change them i
  * dataset through the author-facing `protection` block (`no-overlay`).
  */
 function lockedCrmStack(): Record<string, unknown> {
-  const stack = crmStack as unknown as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
-  const lockOne = (items: any[], name: string, lock: Record<string, unknown>) => { // eslint-disable-line @typescript-eslint/no-explicit-any
+  const stack = crmStack as unknown as Record<string, any>;
+  const lockOne = (items: any[], name: string, lock: Record<string, unknown>) => {
     if (!items.some((item) => item?.name === name)) throw new Error(`fixture: the CRM ships no '${name}' to lock`);
     return items.map((item) => (item?.name === name ? { ...item, ...lock } : item));
   };
@@ -141,14 +140,14 @@ function editableBody(item: Record<string, unknown>): Record<string, unknown> {
 }
 
 /** The active `sys_metadata` rows of the copied items, as `type/name` → row. */
-async function copiedRows(ql: IObjectQLEngine, items: readonly Item[]): Promise<Map<string, any>> { // eslint-disable-line @typescript-eslint/no-explicit-any
+async function copiedRows(ql: IObjectQLEngine, items: readonly Item[]): Promise<Map<string, any>> {
   const names = [...new Set(items.map((i) => i.name))];
   const rows = rowsOf(await ql.find('sys_metadata', {
     where: { name: { $in: names }, state: 'active' },
     context: SYS,
   }));
   const wanted = new Set(items.map((i) => `${i.type}/${i.name}`));
-  const out = new Map<string, any>(); // eslint-disable-line @typescript-eslint/no-explicit-any
+  const out = new Map<string, any>();
   for (const row of rows) {
     const key = `${row.type}/${row.name}`;
     if (wanted.has(key)) out.set(key, row);
@@ -165,7 +164,7 @@ describe('dogfood: the unmanaged install mode on `single` — P1 and P3 (ADR-013
   let copied: Item[] = [];
   let reads: Array<Item & { status: number; provenance: unknown; lock: unknown; editable: unknown }> = [];
   let saves: Array<Item & { status: number; body: unknown }> = [];
-  let rowsAfterInstall = new Map<string, any>(); // eslint-disable-line @typescript-eslint/no-explicit-any
+  let rowsAfterInstall = new Map<string, any>();
   let sourcePackageAfterInstall: unknown;
   let ledgerFilesAfterInstall: string[] = [];
   let translationServed: Answer;
@@ -217,7 +216,6 @@ describe('dogfood: the unmanaged install mode on `single` — P1 and P3 (ADR-013
       const put = await json(await stack.apiAs(token, 'PUT', `/meta/${item.type}/${item.name}`, editableBody(served ?? {})));
       saves.push({ ...item, status: put.status, body: put.status === 200 ? undefined : put.body });
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     sourcePackageAfterInstall = (ql as any).registry?.getPackage?.(CRM);
     ledgerFilesAfterInstall = ledgerFiles();
     translationServed = await json(await stack.apiAs(token, 'GET', '/meta/translation/crm_zh_cn'));
@@ -232,7 +230,6 @@ describe('dogfood: the unmanaged install mode on `single` — P1 and P3 (ADR-013
       const read = await json(await stack.apiAs(token, 'GET', `/meta/${item.type}/${item.name}`));
       readsAfterRestart.push({ ...item, status: read.status });
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const registry = (ql as any).registry;
     sourcePackageAfterRestart = registry?.getPackage?.(CRM);
     basePackageAfterRestart = registry?.getPackage?.(BASE_ID);
@@ -250,10 +247,9 @@ describe('dogfood: the unmanaged install mode on `single` — P1 and P3 (ADR-013
     // The import's three registry reads, on the REAL registry (the verb
     // itself, through the protocol service — the door always names the
     // default target).
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const protocol: any = await stack.kernel.getServiceAsync('protocol');
     const flat = (() => {
-      const body = installBody().manifest as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+      const body = installBody().manifest as Record<string, any>;
       const { manifest: meta, ...sections } = body;
       return { ...meta, ...sections };
     })();
@@ -261,7 +257,7 @@ describe('dogfood: the unmanaged install mode on `single` — P1 and P3 (ADR-013
       try {
         await protocol.importUnmanagedPackage({ manifest: flat, targetPackageId });
         return null;
-      } catch (e: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
+      } catch (e: any) {
         return { code: e?.code, status: e?.status, message: e?.message, details: e?.details };
       }
     };
@@ -421,7 +417,6 @@ describe('dogfood: the unmanaged install mode on `isolated` — P2 (ADR-0131 D6)
     const ql = stack.kernel.getService<IObjectQLEngine>('objectql');
 
     refused = await json(await stack.apiAs(token, 'POST', ROUTE, installBody({ installMode: 'unmanaged' })));
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     baseAfterRefusal = (ql as any).registry?.getPackage?.(BASE_ID);
     baseRowsAfterRefusal = rowsOf(await ql.find('sys_metadata', { where: { package_id: BASE_ID }, context: SYS })).length;
     ledgerAfterRefusal = readdirSync(storageDir).filter((f) => f.endsWith('.json'));

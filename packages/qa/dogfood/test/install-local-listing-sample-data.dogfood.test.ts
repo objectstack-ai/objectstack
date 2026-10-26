@@ -48,7 +48,6 @@ const SEEDED: Record<string, number> = {
 };
 const SEED_TOTAL = Object.values(SEEDED).reduce((a, b) => a + b, 0);
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const rowsOf = (r: any): any[] => (Array.isArray(r) ? r : Array.isArray(r?.records) ? r.records : []);
 
 /** The install body `os package install <artifact>.json` sends. */
@@ -67,7 +66,7 @@ async function countRows(ql: IObjectQLEngine, organizationId: string): Promise<n
   return total;
 }
 
-async function json(res: Response): Promise<{ status: number; body: any }> { // eslint-disable-line @typescript-eslint/no-explicit-any
+async function json(res: Response): Promise<{ status: number; body: any }> {
   return { status: res.status, body: await res.json().catch(() => null) };
 }
 
@@ -80,8 +79,8 @@ describe('dogfood: the install-local listing answers withSampleData per organiza
   let dbDir: string;
   let tenancy: { posture?: string; isolationActive?: boolean } | undefined;
   let installSeeded: unknown;
-  let reseedB: { status: number; body: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
-  let purgeA: { status: number; body: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
+  let reseedB: { status: number; body: any };
+  let purgeA: { status: number; body: any };
   let recordAfterPurge: { withSampleData?: boolean; sampleDataPurged?: boolean } | null | undefined;
   const beforeRestart: Record<'A' | 'B', View> = {} as never;
   const afterRestart: Record<'A' | 'B', View> = {} as never;

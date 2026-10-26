@@ -88,9 +88,11 @@ const source = {
     },
   ],
   permissions: [manager, rep],
+  // [ADR-0131 D3/D4; #24757] Each position names its set: a set that only
+  // shares a position's name is granted by nothing.
   positions: [
-    { name: 'pwr_manager', label: 'Manager' },
-    { name: 'pwr_rep', label: 'Rep' },
+    { name: 'pwr_manager', label: 'Manager', permissionSets: ['pwr_manager'] },
+    { name: 'pwr_rep', label: 'Rep', permissionSets: ['pwr_rep'] },
   ],
 };
 

@@ -30,7 +30,6 @@ const SYS = { isSystem: true } as const;
 describe('showcase, walled posture: the public contact form is not offered, and the admin read says why', () => {
   let stack: VerifyStack;
   let admin: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let ql: any;
   let probeSeq = 0;
 

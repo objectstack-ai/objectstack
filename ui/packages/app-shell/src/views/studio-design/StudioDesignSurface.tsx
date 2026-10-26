@@ -2406,7 +2406,8 @@ function NavTreeGroup({
  * so the design surface agrees with the app it designs. Mirrored, not
  * imported: the sidebar draws both inline in its row renderer, and its rows
  * are `SidebarMenu` items this rail does not use. The pin that holds the two
- * together renders both: `StudioDesignSurface.railSeparatorBadge-11791.test.tsx`.
+ * together renders both: the `StudioDesignSurface.railSeparatorBadge-11791`
+ * block of `StudioDesignSurface.railLabels.test.tsx`.
  */
 function NavTree({
   nodes,

@@ -229,11 +229,17 @@ async function resolverByPrincipal(posture: Posture): Promise<Record<string, unk
     member: 'usr_member',
     agent: 'usr_agent',
   } as const;
+  // [#25799] The golden below was recorded before the resolver reported its
+  // channel split (`directPermissions`); it pins the grants, so the split is
+  // left out here and pinned where it was added
+  // (`resolve-authz-context.direct-permissions.test.ts`, core).
+  const grantsOf = (userId: string, opts: { tenantId?: string }) =>
+    resolveUserAuthzGrants(engine, userId, opts).then(({ directPermissions: _channel, ...grants }) => grants);
   const byPrincipal: Record<string, unknown> = {};
   for (const [kind, userId] of Object.entries(principals)) {
     byPrincipal[kind] = {
-      inOrganization: await resolveUserAuthzGrants(engine, userId, { tenantId: ORG }),
-      noOrganization: await resolveUserAuthzGrants(engine, userId, {}),
+      inOrganization: await grantsOf(userId, { tenantId: ORG }),
+      noOrganization: await grantsOf(userId, {}),
       platformStanding: await hasPlatformAdminStanding(engine, userId),
     };
   }

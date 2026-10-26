@@ -6,7 +6,6 @@
 
 - 整车道一次读全,本地求交:`list_issues` 带 `labels: [domain:X]` + 最小字段拿回全车道 open 集。
 - 候选 = open、未 assign、无 `needs-user-decision`、无 `pm:retriage`;⛔ 排除三门皆无的 `tooling` 卡。
-- `tooling` 卡至多占一轮派发的 10%,溢出留积压、⛔ 不入 `pm:queue`;⛔ 无门禁无脚本强制。
 - 无分诊审计评论即非候选;例外:sub-issue 承父卡首触,main-red 锚卡见 `landing-operations.md`。
 - 已排队父单的 open sub-issue 自动是候选,`pm:epic` 父单的子树除外。
 - 每张候选读全文 + 全部评论,写派发词前做决策复读:评论读到最后一页。

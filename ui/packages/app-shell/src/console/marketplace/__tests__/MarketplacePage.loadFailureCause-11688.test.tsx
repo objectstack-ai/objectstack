@@ -41,7 +41,7 @@
 
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 
 vi.mock('react-router-dom', () => ({
   useNavigate: () => vi.fn(),
@@ -184,19 +184,63 @@ describe('a failure whose cause IS reachability keeps the online hint (objectui#
     await screen.findByText('«marketplace.load.failed»');
     expect(screen.getByTestId('marketplace-load-hint')).toHaveTextContent('«marketplace.load.failedHintSameOrigin»');
     expect(screen.queryByText('«marketplace.noApprovedYet»')).toBeNull();
+    // The browser's own transport text is a developer string: behind More (#25891).
+    expect(screen.getByTestId('marketplace-load-class')).toHaveTextContent('«marketplace.load.unreachable»');
+    expect(screen.queryByText('Failed to fetch')).toBeNull();
   });
 
-  it('the runtime proxy reporting its upstream unreachable (502) shows its message and names the plane', async () => {
+  it('the runtime proxy reporting its upstream unreachable (502) reads as unreachable, its raw text behind More (#25891)', async () => {
     await bootOn('https://cloud.acme.internal');
     catalog = async () =>
       json({ success: false, error: { code: 'MARKETPLACE_PROXY_FAILED', message: 'fetch failed' } }, 502, 'Bad Gateway');
 
     render(<MarketplacePage />);
 
-    expect(await screen.findByTestId('marketplace-load-cause')).toHaveTextContent('fetch failed');
+    // The runtime reached nothing: the catalog did not "answer with an error".
+    expect(await screen.findByTestId('marketplace-load-class')).toHaveTextContent('«marketplace.load.unreachable»');
+    expect(screen.queryByText('«marketplace.load.answeredError»')).toBeNull();
     expect(screen.getByTestId('marketplace-load-hint')).toHaveTextContent(
       '«marketplace.load.failedHintConfigured:https://cloud.acme.internal»',
     );
+    // "fetch failed" is not in full view until More is pressed.
+    expect(screen.queryByText('fetch failed')).toBeNull();
+    const more = screen.getByTestId('marketplace-load-more');
+    expect(more).toHaveTextContent('«refusalDetails.more»');
+
+    fireEvent.click(more);
+
+    expect(screen.getByTestId('marketplace-load-cause')).toHaveTextContent('fetch failed');
+    expect(more).toHaveTextContent('«refusalDetails.less»');
+    expect(screen.getByTestId('marketplace-load-copy')).toHaveAttribute('aria-label', '«refusalDetails.copy»');
+  });
+});
+
+describe('controls: an answered failure keeps its class and its text in full view (#25891)', () => {
+  it.each([
+    [
+      'a 503 the upstream answered, relayed by the proxy',
+      async () =>
+        json({ success: false, error: { code: 'SERVICE_UNAVAILABLE', message: 'catalog is down' } }, 503, 'Service Unavailable'),
+      'catalog is down',
+      true,
+    ],
+    [
+      'a 403 refusal',
+      async () =>
+        new Response(ALLOWLIST_TEXT, { status: 403, statusText: 'Forbidden', headers: { 'content-type': 'text/plain' } }),
+      ALLOWLIST_TEXT,
+      false,
+    ],
+  ] as const)('%s', async (_label, answer, cause, hinted) => {
+    await bootOn('');
+    catalog = answer;
+
+    render(<MarketplacePage />);
+
+    expect(await screen.findByTestId('marketplace-load-class')).toHaveTextContent('«marketplace.load.answeredError»');
+    expect(screen.getByTestId('marketplace-load-cause')).toHaveTextContent(cause);
+    expect(screen.queryByTestId('marketplace-load-more')).toBeNull();
+    expect(screen.queryByTestId('marketplace-load-hint') !== null).toBe(hinted);
   });
 });
 

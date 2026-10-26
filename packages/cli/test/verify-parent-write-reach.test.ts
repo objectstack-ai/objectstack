@@ -71,7 +71,9 @@ const PERMISSIONS = [
   },
 ];
 
-const POSITIONS = [{ name: 'vpw_manager', label: 'Manager' }];
+// [ADR-0131 D3/D4; #24757] The position names its set: a set that only shares
+// a position's name is granted by nothing.
+const POSITIONS = [{ name: 'vpw_manager', label: 'Manager', permissionSets: ['vpw_manager'] }];
 
 /** The same app, plus a hook that refuses every edit of a contract with the platform's own code. */
 const CONTROL_SOURCE = `{

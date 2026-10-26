@@ -141,6 +141,7 @@ function observable(ctx: any): Record<string, unknown> {
 const baseAuthz = (over: Partial<ResolvedAuthzContext> = {}): ResolvedAuthzContext => ({
   positions: [],
   permissions: [],
+  directPermissions: [],
   systemPermissions: [],
   org_user_ids: [],
   accessible_org_ids: [],
