@@ -283,7 +283,7 @@ import type * as M193 from './automation/assignment-rule.zod.js';
 import type * as M194 from './security/queue.zod.js';
 
 // ---------------------------------------------------------------------------
-// 793 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 794 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -886,6 +886,7 @@ export type Iso_data_field__LocationCoordinatesSchema = Assert<Eq< z.input< type
 // data/filter.zod.ts
 export type Iso_data_filter__FieldOperatorsSchema = Assert<Eq< z.input< typeof M67.FieldOperatorsSchema >, z.infer< typeof M67.FieldOperatorsSchema > >>;
 export type Iso_data_filter__FieldReferenceSchema = Assert<Eq< z.input< typeof M67.FieldReferenceSchema >, z.infer< typeof M67.FieldReferenceSchema > >>;
+export type Iso_data_filter__NowAnchorSchema = Assert<Eq< z.input< typeof M67.NowAnchorSchema >, z.infer< typeof M67.NowAnchorSchema > >>;
 export type Iso_data_filter__QueryFilterSchema = Assert<Eq< z.input< typeof M67.QueryFilterSchema >, z.infer< typeof M67.QueryFilterSchema > >>;
 
 // data/hook-body.zod.ts
@@ -1721,7 +1722,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 793 isomorphic pins', () => {
+  it('still declares all 794 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2612,14 +2613,20 @@ describe('ADR-0122 type-alias convention', () => {
     // Iso_ui_dataset__DatasetDurationUnit) rather than given `…Parsed`
     // synonyms. +2 added.
     //
-    // 789 -> 793 is ADR-0142 phase 2 (#25769): the ownership queue's
+    // 789 -> 790 is #25808: `NowAnchorSchema` (`data/filter.zod.ts`), the
+    // `{ $now: true, addDays }` now-anchored comparand — a literal flag and
+    // the `addDays` union `FieldReferenceSchema` already carries, no default
+    // and no transform — so it is pinned here (Iso_data_filter__NowAnchorSchema)
+    // rather than given a `…Parsed` synonym. +1 added.
+    //
+    // 790 -> 794 is ADR-0142 phase 2 (#25769): the ownership queue's
     // `QueueMemberType` enum and `DeclaredQueueMemberSchema`, and the assignment
     // rule's `AssignmentStrategy` enum and `AssignmentTargetSchema`, pinned here
     // (Iso_security_queue__QueueMemberType, Iso_security_queue__DeclaredQueueMemberSchema,
     // Iso_automation_assignmentRule__AssignmentStrategy,
     // Iso_automation_assignmentRule__AssignmentTargetSchema). The rule's entry
     // schema has two shapes and carries `AssignmentRuleEntryParsed` instead. +4 added.
-    expect(pins).toHaveLength(793);
+    expect(pins).toHaveLength(794);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either

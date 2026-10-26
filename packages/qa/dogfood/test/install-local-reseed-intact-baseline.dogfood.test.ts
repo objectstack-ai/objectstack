@@ -52,7 +52,6 @@ const SEEDED: Record<string, number> = {
 const SEED_TOTAL = Object.values(SEEDED).reduce((a, b) => a + b, 0);
 const EMPTY = Object.fromEntries(Object.keys(SEEDED).map((o) => [o, 0]));
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const rowsOf = (r: any): any[] => (Array.isArray(r) ? r : Array.isArray(r?.records) ? r.records : []);
 
 type Dataset = { object: string; records: unknown[]; env?: string[] };
@@ -88,7 +87,7 @@ async function rowStamps(ql: IObjectQLEngine): Promise<string[]> {
   return stamps.sort();
 }
 
-async function json(res: Response): Promise<{ status: number; body: any }> { // eslint-disable-line @typescript-eslint/no-explicit-any
+async function json(res: Response): Promise<{ status: number; body: any }> {
   return { status: res.status, body: await res.json().catch(() => null) };
 }
 
@@ -96,10 +95,10 @@ describe('dogfood: install-local reseed over an intact baseline, then after a pu
   let stack: VerifyStack;
   let storageDir: string;
   let ql: IObjectQLEngine;
-  let install: { status: number; body: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
-  let intact: { status: number; body: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
-  let purge: { status: number; body: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
-  let afterPurge: { status: number; body: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
+  let install: { status: number; body: any };
+  let intact: { status: number; body: any };
+  let purge: { status: number; body: any };
+  let afterPurge: { status: number; body: any };
   let afterInstall: Record<string, number>;
   let stampsBefore: string[];
   let stampsAfterIntact: string[];
@@ -177,8 +176,8 @@ describe('dogfood: install-local reseed of a package with no seed record for thi
   let storageDir: string;
   let ql: IObjectQLEngine;
   let body: { manifest: Record<string, unknown> };
-  let install: { status: number; body: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
-  let reseed: { status: number; body: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
+  let install: { status: number; body: any };
+  let reseed: { status: number; body: any };
   let counts: Record<string, number>;
 
   beforeAll(async () => {

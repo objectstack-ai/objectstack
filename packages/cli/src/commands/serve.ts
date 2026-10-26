@@ -89,6 +89,7 @@ import {
   parseRequestedPort,
   formatInvalidPortNotice,
   portTextReadNotice,
+  portFlagEnv,
   MAX_PORT,
   type PortInputSource,
 } from '../utils/port-contract.js';
@@ -2209,6 +2210,14 @@ export default class Serve extends Command {
       this.exit(1);
     }
     const requestedPort = parsedPort;
+    // ── A `--port` on argv is the port the config reads (#26243) ──────────
+    // The config is loaded in this process further down, and a config may read
+    // `OS_PORT`/`PORT` at module evaluation (the showcase's self URL does). The
+    // flag reached only the listener before: `os serve --port 41303` with no
+    // `OS_PORT` served and dispatched `http://127.0.0.1:3000`. Exported here
+    // the way `os dev` and `os start` export theirs (`portFlagEnv`); a port
+    // that came from the environment or the default is left as it is.
+    if (metadata.flags.port?.setFromDefault !== true) Object.assign(process.env, portFlagEnv(requestedPort));
 
     // ── The TLS pair, refused here for the same reason the port is (#16804) ──
     // Ahead of every socket and every import that branches on the protocol, and

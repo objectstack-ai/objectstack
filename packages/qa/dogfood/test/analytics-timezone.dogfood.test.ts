@@ -63,7 +63,6 @@ describe('dogfood: org timezone drives analytics date bucketing (#1982/#2018)', 
     // `plugin-audit-created-at-create-side.test.ts`. `preserveAudit` is the flag
     // REST's `treatAsHistorical` import sets on the write context
     // (`packages/rest/src/import-runner.ts`), reaching this same hook.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ql = await stack.kernel.getServiceAsync<any>('objectql');
     for (let i = 0; i < N_LEADS; i++) {
       await ql.insert(

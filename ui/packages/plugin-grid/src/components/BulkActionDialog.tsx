@@ -410,7 +410,7 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
           </DialogTitle>
           {step === 'confirm' && (
             <DialogDescription>
-              {bulkConfirmText(def.confirmText, { count: rows.length }) ?? t('grid.bulk.confirmDefault', { count: rows.length, defaultValue: `This will apply to ${rows.length} record(s).` })}
+              {bulkConfirmText(def.confirmText, { count: rows.length, params, values, lookupLabels }) ?? t('grid.bulk.confirmDefault', { count: rows.length, defaultValue: `This will apply to ${rows.length} record(s).` })}
             </DialogDescription>
           )}
         </DialogHeader>

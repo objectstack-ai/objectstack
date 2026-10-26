@@ -500,6 +500,8 @@
     "NonNumericValueForm": "src/data/filter-number-comparand-declared-type.ts#NonNumericValueForm (type)",
     "NormalizedFilter": "src/data/filter.zod.ts#NormalizedFilter (type)",
     "NormalizedFilterSchema": "src/data/filter.zod.ts#NormalizedFilterSchema (const)",
+    "NowAnchor": "src/data/filter.zod.ts#NowAnchor (type)",
+    "NowAnchorSchema": "src/data/filter.zod.ts#NowAnchorSchema (const)",
     "NumberComparandDoorCase": "src/data/filter-number-comparand-declared-type.ts#NumberComparandDoorCase (type)",
     "NumberComparandDoorDeferredCase": "src/data/filter-number-comparand-declared-type.ts#NumberComparandDoorDeferredCase (interface)",
     "NumberComparandDoorFieldMeta": "src/data/filter-number-comparand-declared-type.ts#NumberComparandDoorFieldMeta (interface)",

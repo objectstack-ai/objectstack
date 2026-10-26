@@ -161,6 +161,21 @@ describe('validateFilterTokens', () => {
     ]);
   });
 
+  // [#25808] The `{ $now: true, addDays }` anchor is an OBJECT comparand, not
+  // a placeholder string: the walk reads its values (a boolean, a number, a
+  // nested `{ $field }`) and finds no token in them — a dataset filter carrying
+  // it is clean, beside the macros it can sit next to.
+  it('leaves a now-anchored comparand alone — it is not a placeholder', () => {
+    const findings = validateFilterTokens({
+      datasets: [{
+        name: 'overdue',
+        filter: { opened_at: { $lt: { $now: true, addDays: { $field: 'sla_days' } } }, owner: '{current_user_id}' },
+        measures: [{ name: 'n', aggregate: 'count', filter: { closed_on: { $gte: { $now: true, addDays: -30 } } } }],
+      }],
+    });
+    expect(findings).toEqual([]);
+  });
+
   // Navigation resolves an extra vocabulary (AppContextSelector ids). Filters
   // do not, so the rule must not wander into `params` / `recordId`.
   it('ignores nav params and recordId, which resolve context-selector ids', () => {

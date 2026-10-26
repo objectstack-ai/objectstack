@@ -127,6 +127,17 @@ function isFieldReference(value: unknown): boolean {
   return isFilterNode(value) && typeof value.$field === 'string';
 }
 
+/**
+ * [#25808] `{ $now: true, addDays }` — the now-anchored comparand
+ * (`NowAnchorSchema`), authored (`true`) or resolved (the pinned instant).
+ * Compiled TOTAL on the six scalar comparisons exactly as a reference is
+ * (`driver-sql` writes the NULL conjuncts into the predicate; the memory
+ * evaluator answers two-valuedly), so rule 3 leaves it alone the same way.
+ */
+function isNowAnchor(value: unknown): boolean {
+  return isFilterNode(value) && (value.$now === true || typeof value.$now === 'string');
+}
+
 /** An operator map: a plain object with at least one `$` key. */
 function isOperatorMap(spec: unknown): spec is Record<string, unknown> {
   return isFilterNode(spec) && !isFieldReference(spec) && Object.keys(spec).some((k) => k.startsWith('$'));
@@ -378,7 +389,7 @@ const CROSS_FIELD_COMPARISON_OPERATORS: ReadonlySet<string> = new Set([
  * UNKNOWN? The copies' `operatorIsNullTotal`, cell for cell.
  */
 function operatorIsNullTotal(op: string, value: unknown): boolean {
-  if (CROSS_FIELD_COMPARISON_OPERATORS.has(op) && isFieldReference(value)) return true;
+  if (CROSS_FIELD_COMPARISON_OPERATORS.has(op) && (isFieldReference(value) || isNowAnchor(value))) return true;
   switch (op) {
     case '$null':
     case '$exists':
@@ -416,7 +427,7 @@ function nullGuardForFieldSpec(spec: unknown): NullGuard {
  * `IS NOT NULL`, and a `$ne: { $field }` is the total column comparison.
  */
 function isNegativePolarityOperator(op: string, value: unknown): boolean {
-  if (op === '$ne') return value !== null && !isFieldReference(value);
+  if (op === '$ne') return value !== null && !isFieldReference(value) && !isNowAnchor(value);
   return op === '$nin' || op === '$notContains';
 }
 

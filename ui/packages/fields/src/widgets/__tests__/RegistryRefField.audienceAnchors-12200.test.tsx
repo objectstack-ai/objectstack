@@ -72,8 +72,9 @@ afterEach(() => cleanup());
 
 describe('position-ref leaves the audience anchors out of what it offers (objectui#12200)', () => {
   it('offers the assignable positions and no anchor', async () => {
-    // The names the card asks for are the ones the spec publishes.
-    expect([...AUDIENCE_ANCHOR_POSITIONS].sort()).toEqual(['everyone', 'guest']);
+    // The names the card asks for are ones the spec publishes (membership,
+    // #26238: the list itself is the spec's).
+    for (const anchor of ['everyone', 'guest']) expect([...AUDIENCE_ANCHOR_POSITIONS]).toContain(anchor);
 
     mount(PositionRefField, { dataSource: lister(POSITIONS) });
 

@@ -219,6 +219,8 @@ const pt = {
     update: "Atualizar",
     createSuccess: "{{object}} criado",
     updateSuccess: "{{object}} atualizado",
+    createdNamed: "{{object}} \"{{title}}\" criado",
+    updatedNamed: "{{object}} \"{{title}}\" atualizado",
     created: "Criado",
     saved: "Salvo",
     savedNamed: "{{title}} salvo",

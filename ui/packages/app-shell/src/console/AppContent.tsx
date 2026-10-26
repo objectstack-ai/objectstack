@@ -15,6 +15,7 @@ import { ModalForm } from '@object-ui/plugin-form';
 import { Empty, EmptyTitle, EmptyDescription, Button } from '@object-ui/components';
 import { toast } from 'sonner';
 import { useActionRunner, useGlobalUndo, useMutationInvalidationBridge, notifyDataChanged, FilterScopeProvider } from '@object-ui/react';
+import { getRecordDisplayName } from '@object-ui/core';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
 import type { AppAccessVerdict, ConnectionState } from '@object-ui/data-objectstack';
 import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
@@ -807,17 +808,37 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     : currentObjectDef;
   const isChildFormTask = !!formObjectParam && formObjectParam !== currentObjectDef?.name;
 
-  const handleCrudSuccess = useCallback(() => {
+  // objectstack-ai/objectstack#26172 — a record save names the record it wrote
+  // (`ux-conventions.write-feedback`): `Task "Quarterly review" created`. The
+  // name is the saved record's display name from the ONE ADR-0079 resolver,
+  // read through the object being saved. The resolver's floor (`Record #<id>`,
+  // or the empty fallback for an id-less row) is not a name, so a record with
+  // nothing nameable keeps the object-label toast it always had.
+  const recordSaveMessage = useCallback((saved: any): string => {
     const label = formObjectDef ? objectLabel(formObjectDef as any) : t('common.record', { defaultValue: 'Record' });
+    const resolved = saved && typeof saved === 'object'
+      ? getRecordDisplayName(formObjectDef, saved, { fallback: '' })
+      : '';
+    const id = saved?.id ?? saved?._id;
+    const title = resolved && !(id !== null && id !== undefined && resolved === `Record #${id}`)
+      ? resolved
+      : undefined;
+    if (editingRecord) {
+      return title
+        ? t('form.updatedNamed', { object: label, title, defaultValue: `${label} "${title}" updated` })
+        : t('form.updateSuccess', { object: label, defaultValue: `${label} updated successfully` });
+    }
+    return title
+      ? t('form.createdNamed', { object: label, title, defaultValue: `${label} "${title}" created` })
+      : t('form.createSuccess', { object: label, defaultValue: `${label} created successfully` });
+  }, [editingRecord, formObjectDef, objectLabel, t]);
+
+  const handleCrudSuccess = useCallback((saved?: any) => {
     executeAction({
       type: 'crud_success',
-      params: {
-        message: editingRecord
-          ? t('form.updateSuccess', { object: label, defaultValue: `${label} updated successfully` })
-          : t('form.createSuccess', { object: label, defaultValue: `${label} created successfully` }),
-      },
+      params: { message: recordSaveMessage(saved) },
     });
-  }, [executeAction, editingRecord, formObjectDef, objectLabel, t]);
+  }, [executeAction, recordSaveMessage]);
 
   const handleDialogCancel = useCallback(() => {
     executeAction({ type: 'dialog_cancel' });
@@ -837,14 +858,11 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     // invalidation bus (#2269): the dataSource write already emitted a
     // MutationEvent that the bridge fans out — no manual notify needed.
     if (isChildFormTask) {
-      const label = formObjectDef ? objectLabel(formObjectDef as any) : t('common.record', { defaultValue: 'Record' });
-      toast.success(editingRecord
-        ? t('form.updateSuccess', { object: label, defaultValue: `${label} updated successfully` })
-        : t('form.createSuccess', { object: label, defaultValue: `${label} created successfully` }));
+      toast.success(recordSaveMessage(saved));
       closeRecordForm();
       return;
     }
-    handleCrudSuccess();
+    handleCrudSuccess(saved);
     if (editingRecord || !currentObjectDef) return;
     const target = resolvePostCreateTarget({
       objectName: currentObjectDef.name,
@@ -878,7 +896,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
       return;
     }
     navigate(target.url, { replace: true });
-  }, [handleCrudSuccess, isChildFormTask, formObjectDef, editingRecord, currentObjectDef, appSegment, location.pathname, navigate, closeRecordForm, objectLabel, objectPluralLabel, t]);
+  }, [handleCrudSuccess, recordSaveMessage, isChildFormTask, editingRecord, currentObjectDef, appSegment, location.pathname, navigate, closeRecordForm, objectPluralLabel]);
 
   // Track recent items on route change. The hook matches `appName` against the
   // pathname's app segment, so it takes the ROUTE SEGMENT: handed
