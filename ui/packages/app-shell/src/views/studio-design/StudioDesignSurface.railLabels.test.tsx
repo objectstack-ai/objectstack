@@ -67,7 +67,7 @@ import { InterfacesPillar, StudioNavItemInspector } from './StudioDesignSurface'
 import { t } from '../metadata-admin/i18n';
 import { listStudioCanvasPreviewTypes } from './studio-canvas-preview';
 
-// ── StudioDesignSurface.railLabelInherits-11196 ─────────────────────────────────────────────────────
+// ── StudioDesignSurface.railLabelInherits-11196 ──────────────────────────────
 
 /**
  * objectui#11196 — the Studio Interfaces rail names a label-less nav entry the
@@ -169,7 +169,7 @@ describe('StudioDesignSurface.railLabelInherits-11196', () => {
   });
 });
 
-// ── StudioDesignSurface.surfaceLabelInherits-11196 ──────────────────────────────────────────────────
+// ── StudioDesignSurface.surfaceLabelInherits-11196 ───────────────────────────
 
 /**
  * objectui#11196 — the open leaf's Surface names a label-less nav entry by what
@@ -305,7 +305,7 @@ describe('StudioDesignSurface.surfaceLabelInherits-11196', () => {
   });
 });
 
-// ── StudioDesignSurface.surfaceIdentity ─────────────────────────────────────────────────────────────
+// ── StudioDesignSurface.surfaceIdentity ──────────────────────────────────────
 
 /**
  * objectui#7254 — the Interfaces workbench spoke two vocabularies at once.
@@ -401,7 +401,7 @@ describe('StudioDesignSurface.surfaceIdentity', () => {
   });
 });
 
-// ── StudioDesignSurface.navRailLabels-11862 ─────────────────────────────────────────────────────────
+// ── StudioDesignSurface.navRailLabels-11862 ──────────────────────────────────
 
 /**
  * objectui#11862 — the Studio Interfaces rail shows a nav entry's label as the
@@ -555,7 +555,7 @@ describe('StudioDesignSurface.navRailLabels-11862', () => {
   });
 });
 
-// ── StudioDesignSurface.railSeparatorBadge-11791 ────────────────────────────────────────────────────
+// ── StudioDesignSurface.railSeparatorBadge-11791 ─────────────────────────────
 
 /**
  * objectui#11791 — the Studio Interfaces rail draws a `separator` and a leaf's
@@ -779,7 +779,7 @@ describe('StudioDesignSurface.railSeparatorBadge-11791', () => {
   });
 });
 
-// ── StudioDesignSurface.interfacesRailLabelMap-11158 ────────────────────────────────────────────────
+// ── StudioDesignSurface.interfacesRailLabelMap-11158 ─────────────────────────
 
 /**
  * objectui#11158: the Interfaces pillar's nav rail renders a nav item whose
@@ -924,7 +924,7 @@ describe('StudioDesignSurface.interfacesRailLabelMap-11158', () => {
   }
 });
 
-// ── StudioDesignSurface.interfacesAppLabelMap-11181 ─────────────────────────────────────────────────
+// ── StudioDesignSurface.interfacesAppLabelMap-11181 ──────────────────────────
 
 /**
  * objectui#11181: the Interfaces rail heading prints an app's own `label` in
@@ -1081,7 +1081,7 @@ describe('StudioDesignSurface.interfacesAppLabelMap-11181', () => {
   });
 });
 
-// ── StudioDesignSurface.railServedLabels-12688 ──────────────────────────────────────────────────────
+// ── StudioDesignSurface.railServedLabels-12688 ───────────────────────────────
 
 /**
  * objectui#12688 — on a zh-CN session the Studio Interfaces rail draws the
@@ -1274,7 +1274,7 @@ describe('StudioDesignSurface.railServedLabels-12688', () => {
   });
 });
 
-// ── StudioDesignSurface.zhPillarNames-11801 ─────────────────────────────────────────────────────────
+// ── StudioDesignSurface.zhPillarNames-11801 ──────────────────────────────────
 
 /**
  * objectui#11801, item 1 — zh-CN names a Studio pillar by the label its tab
@@ -1410,7 +1410,7 @@ describe('StudioDesignSurface.zhPillarNames-11801', () => {
   });
 });
 
-// ── StudioDesignSurface.navEntryIdentity-11774 ──────────────────────────────────────────────────────
+// ── StudioDesignSurface.navEntryIdentity-11774 ───────────────────────────────
 
 /**
  * objectui#11774 — the Interfaces rail's surface is the nav ENTRY, not its
