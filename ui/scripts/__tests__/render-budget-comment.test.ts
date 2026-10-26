@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -9,9 +8,6 @@ import { fileURLToPath } from 'node:url';
 import { renderBudgetComment, renderFromEnv } from '../render-budget-comment.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const workflowPath = path.join(repoRoot, '.github/workflows/performance-budget.yml');
-const rendererPath = path.join(repoRoot, 'scripts/render-budget-comment.mjs');
-const checkerPath = path.join(repoRoot, 'scripts/check-eager-closure-budget.mjs');
 const NO_SUCH_REPORT = path.join(repoRoot, 'scripts/__tests__/__no-size-report__.md');
 
 /**
@@ -439,202 +435,19 @@ describe('renderFromEnv', () => {
   });
 });
 
-/**
- * The renderer can only be correct if the workflow keeps feeding it. These pin
- * the two workflow-level halves of the fix, which no unit test can exercise:
- * the step conditions, and the env contract between the two files.
- */
-describe('performance-budget.yml contract', () => {
-  const workflow = fs.readFileSync(workflowPath, 'utf8');
-  const renderer = fs.readFileSync(rendererPath, 'utf8');
-  // Only the step conditions — prose in `#` comments discusses `always()` and
-  // must not be mistaken for a use of it.
-  const conditions = [...workflow.matchAll(/^\s*if:\s*(.+)$/gm)].map((m) => m[1]);
-
-  it('never gates a step on always() — it fires on cancelled runs, which measure nothing', () => {
-    expect(conditions.filter((c) => c.includes('always()'))).toEqual([]);
-  });
-
-  it('gates the size report, the renderer and the comment on !cancelled()', () => {
-    // Five: those three, plus the turbo cache report (objectui#12276), which is
-    // bookkeeping after the verdict and reports on a red run for the same reason,
-    // plus the pinned @objectstack build's save (objectui#12957), bookkeeping after
-    // the verdict that keeps the build whatever the verdict was.
-    expect(conditions.filter((c) => c.includes('!cancelled()'))).toHaveLength(5);
-  });
-
-  it('generates the size report only from a complete package build', () => {
-    expect(workflow).toContain(
-      "if: ${{ !cancelled() && steps.build_packages.outcome == 'success' }}",
-    );
-    expect(workflow).toContain('id: build_packages');
-  });
-
-  it('never interpolates a step output into the comment JS source', () => {
-    // `const status = '${{ steps.budget.outputs.budget_status }}'` is how an
-    // absent output became the empty string that rendered as FAIL.
-    expect(workflow).not.toMatch(/=\s*'\$\{\{\s*steps\.budget\.outputs/);
-  });
-
-  it('passes every env var the renderer reads, and reads every one it passes', () => {
-    // The render step's own block: another step's `env:` (the turbo cache
-    // report's RESTORED_CACHE_KEY, objectui#12276) is not the renderer's contract.
-    const renderStep = workflow.slice(workflow.indexOf('- name: Render performance budget comment'));
-    const block = renderStep.slice(0, renderStep.indexOf('- name:', 1));
-    expect(block, 'the render step is gone').toContain('scripts/render-budget-comment.mjs');
-    const declared = [...block.matchAll(/^\s{10}([A-Z_]+): \$\{\{ steps\./gm)].map((m) => m[1]);
-
-    expect(declared.length).toBeGreaterThan(0);
-    for (const name of declared) {
-      expect(renderer, `renderer must read env.${name}`).toContain(`env.${name}`);
-    }
-  });
-
-  /**
-   * objectui#6230: `closure_chunk_status` (objectui#5490) and
-   * `closure_headroom_status` (objectui#5924) were both published to
-   * `$GITHUB_OUTPUT` and never read, each following the precedent of the last.
-   * The card's explicit ask was that a THIRD round of this not happen — so the
-   * obligation is pinned mechanically rather than left to review: a half added
-   * to the checker fails here until it reaches the comment.
-   */
-  it('passes every closure verdict the checker publishes into the comment step', () => {
-    const checker = fs.readFileSync(checkerPath, 'utf8');
-    const call = checker.slice(checker.lastIndexOf('writeGithubOutput({'));
-    const published = [...call.slice(0, call.indexOf('});')).matchAll(/(closure_\w+):/g)].map(
-      (m) => m[1],
-    );
-
-    // Guard the guard: a regex that matched nothing would pass silently.
-    expect(published).toContain('closure_status');
-    expect(published).toContain('closure_chunk_status');
-    expect(published).toContain('closure_headroom_status');
-    expect(published).toContain('closure_freshness_status');
-    expect(published).toContain('closure_membership_status');
-
-    for (const key of published) {
-      expect(workflow, `workflow must pass steps.budget.outputs.${key} to the comment step`)
-        .toContain(`steps.budget.outputs.${key}`);
-    }
-  });
-
-  /**
-   * objectui#6245. The freshness half's inputs do NOT travel as `steps.*` env —
-   * they are the checker's, not the comment's — so the env-contract test above
-   * cannot see them, and without these three the wiring could rot silently while
-   * every other test in this file stayed green. The half would then report
-   * `error` on every PR, or, if `GITHUB_EVENT_NAME` stopped being the
-   * discriminator, quietly stop asking.
-   */
-  describe('ceiling freshness inputs', () => {
-    const checker = fs.readFileSync(checkerPath, 'utf8');
-
-    it('fetches deep enough to see the base commit the merge ref was built on', () => {
-      expect(workflow).toContain('fetch-depth: 2');
-    });
-
-    it('resolves both base-branch readings on pull_request runs only', () => {
-      expect(workflow).toContain('- name: Resolve the base-branch ceiling constants');
-      expect(workflow).toContain("if: ${{ github.event_name == 'pull_request' }}");
-    });
-
-    it('exports exactly the variables the checker reads', () => {
-      for (const name of [
-        'EAGER_CLOSURE_PR_BASE_SOURCE',
-        'EAGER_CLOSURE_BASE_SOURCE',
-        'EAGER_CLOSURE_PR_BASE_SHA',
-        'EAGER_CLOSURE_BASE_SHA',
-        'EAGER_CLOSURE_BASE_REF',
-      ]) {
-        expect(workflow, `workflow must export ${name}`).toContain(`echo "${name}=`);
-        expect(checker, `checker must read env.${name}`).toContain(`env.${name}`);
-      }
-    });
-
-    /**
-     * objectui#6245, second and third pass. The freshness half shipped a
-     * workflow half that `Bundle Analysis` could never run on: the PR editing it
-     * touched no `packages/**` path, so the gate never appeared on its own PR.
-     * Adding the YAML to the filters fixed that — and was still not enough. A PR
-     * touching only `check-eager-closure-budget.mjs`, the file that computes the
-     * verdict and the one this card is about, ALSO did not trigger the gate.
-     *
-     * The convention measured on `origin/main` is the gate's RUNTIME CLOSURE,
-     * not merely its own YAML: `half-state-patrol.yml` lists both the script it
-     * runs and `scripts/invoked-as.mjs`, that script's dependency.
-     *
-     * A wiring bug in any of these is fail-CLOSED — freshness `error`, exit 2 —
-     * so an untriggered gate does not fail quietly; it turns a REQUIRED context
-     * red on the next `packages/**` PR, belonging to another seat, reading to
-     * them as a bundle problem in their own diff.
-     */
-    const TRIGGER_CLOSURE = [
-      '.github/workflows/performance-budget.yml',
-      'scripts/check-eager-closure-budget.mjs',
-      // The COMPOSITION half (objectui#7479) — WHICH locale catalogues a page
-      // load pulls, which the byte half above cannot answer.
-      'scripts/check-eager-locale-catalogues.mjs',
-      'scripts/render-budget-comment.mjs',
-      // `isEntrypoint` decides whether `main()` runs at all — a regression here
-      // makes the checker exit 0 having measured nothing.
-      'scripts/invoked-as.mjs',
-      // The turbo cache report and prune the job runs after its verdict (objectui#12276).
-      'scripts/report-turbo-cache.mjs',
-      // The pinned @objectstack build the job restores or builds before install (objectui#12957).
-      'scripts/objectstack-pin.mjs',
-    ];
-
-    it('triggers on its whole runtime closure, so no part of this gate ships unexercised', () => {
-      // `#` lines are part of the block — an entry that needs explaining carries
-      // its reason inline — and `[ \t]*` rather than `\s*` so the run cannot walk
-      // past the end of the list into the next key.
-      const filters = [...workflow.matchAll(/^[ \t]*paths:\n((?:[ \t]*(?:- |#).*\n)+)/gm)].map(
-        (m) => m[1],
-      );
-      // Guard the guard: `push` and `pull_request` both carry one, and they must
-      // not drift apart — a gate that runs on a PR but not on the merge (or the
-      // reverse) is worse than one that runs on neither.
-      expect(filters).toHaveLength(2);
-      for (const filter of filters) {
-        for (const entry of TRIGGER_CLOSURE) {
-          expect(filter, `every paths: filter must list ${entry}`).toContain(entry);
-        }
-      }
-    });
-
-    /**
-     * The closure is defined by what the JOB EXECUTES, which is why the
-     * `__tests__` files are deliberately absent from it: this job runs two
-     * `node scripts/*.mjs` commands and never vitest, so a test-only edit cannot
-     * move this gate's verdict, and those tests already run on every PR in the
-     * root vitest `unit` project. This asserts the definition rather than the
-     * list, so the two stay in step.
-     */
-    it('lists every script the job runs, and nothing it merely tests', () => {
-      const invoked = [...workflow.matchAll(/^\s*(?:run: )?node (scripts\/[\w./-]+\.mjs)/gm)].map(
-        (m) => m[1],
-      );
-      expect(invoked.length).toBeGreaterThan(0);
-      for (const script of new Set(invoked)) {
-        expect(TRIGGER_CLOSURE, `${script} is executed by this job, so it belongs in the closure`)
-          .toContain(script);
-      }
-      expect(TRIGGER_CLOSURE.some((e) => e.includes('__tests__'))).toBe(false);
-    });
-
-    it('lets the bundle be measured even when the resolve step fails', () => {
-      // The checker turns absent inputs into a freshness ERROR, so failing the
-      // job here instead would only cost the run its numbers (objectui#3152).
-      const step = workflow.slice(workflow.indexOf('- name: Resolve the base-branch ceiling'));
-      const budgetStep = step.indexOf('- name: Check console performance budget');
-      expect(step.slice(0, budgetStep)).toContain('continue-on-error: true');
-      expect(budgetStep).toBeGreaterThan(-1);
-    });
-  });
-
-  it('writes budget_status on every path the budget step can exit through', () => {
-    // pass, fail, and the two "nothing to measure" errors.
-    const statuses = [...workflow.matchAll(/budget_status=(\w+)/g)].map((m) => m[1]);
-    expect(new Set(statuses)).toEqual(new Set(['pass', 'fail', 'error']));
-  });
-});
+// `performance-budget.yml contract` retired with objectstack#25712. Its
+// thirteen cases pinned the workflow halves no unit test can exercise: no step
+// gated on `always()`; the size report, the renderer and the comment gated on
+// `!cancelled()`; the size report only from a complete package build; no step
+// output interpolated into the comment's JS source; the env contract with the
+// renderer, both directions; every closure verdict the checker publishes passed
+// to the comment step; the ceiling-freshness inputs (`fetch-depth: 2`, both
+// base-branch readings on `pull_request` only, exactly the variables the checker
+// reads); the trigger carrying the gate's whole runtime closure; the job listing
+// every script it runs and nothing it merely tests; the bundle measured even
+// when the resolve step fails; and `budget_status` written on every exit path.
+// Each read objectui's `performance-budget.yml`, which runs nowhere under the
+// monorepo: GitHub runs the root `.github/workflows/` alone, and no root
+// workflow runs this renderer. That workflow is row 22 of the objectstack#25697
+// workflow roster, "kept, follow-up port" into `Build & E2E UI`; the port
+// brings these pins back against the root job, by path.

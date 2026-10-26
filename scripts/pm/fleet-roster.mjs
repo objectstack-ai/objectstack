@@ -86,6 +86,7 @@ import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../invoked-as.mjs';
 import { validateStroke } from './fleet-write/validate.mjs';
+import { ghApi, PER_PAGE, readAllPages } from './gh-pages.mjs';
 // The mailbox label, its ledger exclusion and its branch prefix have ONE owner,
 // the mailbox opener (#25417); this file reads them, never re-spells them.
 import * as mailboxOpen from './mailbox-open.mjs';
@@ -389,18 +390,11 @@ export function planWrite({ board, issue, body }) {
 }
 
 // ---------------------------------------------------------------------------
-// The live edges — `gh api` reads, the relay
+// The live edges — `gh api` reads (paged by `gh-pages.mjs`), the relay
 // ---------------------------------------------------------------------------
 
 function ghJson(path, { paginate = false } = {}) {
-  const r = spawnSync('gh', ['api', ...(paginate ? ['--paginate', '--slurp'] : []), path], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
-  if (r.status !== 0) return { ok: false, error: (r.stderr || r.error?.message || `gh exited ${r.status}`).trim() };
-  try {
-    const parsed = JSON.parse(r.stdout);
-    return { ok: true, value: paginate ? parsed.flat() : parsed };
-  } catch (e) {
-    return { ok: false, error: `unparseable answer from GET ${path}: ${e.message}` };
-  }
+  return paginate ? readAllPages(path) : ghApi(path);
 }
 
 /** Read every repo into the snapshot shape `buildRows` takes; throws on the first failed read. */
@@ -528,8 +522,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the rendered body: marker, columns, footer, determinism': 8,
   'refusing to overwrite what is not the roster': 6,
   'the CLI: fixture runs offline, usage errors are exit 2': 5,
+  'paging: a three-page read through the loop equals the slurped array': 4,
 });
-const SELF_TEST_BATTERY_FLOOR = 7;
+const SELF_TEST_BATTERY_FLOOR = 8;
 
 async function selfTest() {
   let failed = 0;
@@ -651,6 +646,23 @@ async function selfTest() {
     const p = planWrite({ board: DEFAULT_BOARD, issue: 7, body });
     return [p.actions.length, p.actions[0].op, Object.keys(p.actions[0]).sort(), p.errors];
   })(), [1, 'issue_patch', ['body', 'issue', 'op'], []]);
+
+  battery('paging: a three-page read through the loop equals the slurped array');
+  {
+    const slurped = [0, 1, 2].map((n) => Array.from({ length: n < 2 ? PER_PAGE : 37 }, (_, i) => ({ number: n * PER_PAGE + i + 1 })));
+    const asked = [];
+    const get = (path) => {
+      asked.push(path);
+      const page = Number(new URLSearchParams(path.split('?')[1]).get('page'));
+      return { ok: true, value: slurped[page - 1] ?? [] };
+    };
+    const read = readAllPages('/repos/o/r/issues?state=open&labels=pm%3Aseat&per_page=100', { get });
+    t('three pages read = the --slurp array, flattened', [read.ok, read.value], [true, slurped.flat()]);
+    t('pages 1..3 asked, per_page kept once, other keys kept, stop at the short page', asked, [1, 2, 3].map((n) => `/repos/o/r/issues?state=open&labels=pm%3Aseat&per_page=100&page=${n}`));
+    const exact = [];
+    t('an exact multiple of per_page reads one empty page and stops', [readAllPages('/x', { get: (p) => (exact.push(p), { ok: true, value: exact.length === 1 ? slurped[0] : [] }) }).value.length, exact.length], [PER_PAGE, 2]);
+    t('a failed page or a non-list page is an error, never a partial list', [readAllPages('/x', { get: () => ({ ok: false, error: 'boom' }) }), readAllPages('/x', { get: () => ({ ok: true, value: { message: 'x' } }) }).ok], [{ ok: false, error: 'boom' }, false]);
+  }
 
   battery('the CLI: fixture runs offline, usage errors are exit 2');
   const cli = (args) => spawnSync(process.execPath, [SELF_PATH, ...args], { encoding: 'utf8', env: { ...process.env, PATH: '/nonexistent', OS_FLEET_SESSION: '', CLAUDE_CODE_REMOTE_SESSION_ID: '' } });
