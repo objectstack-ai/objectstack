@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 140 — spawns the real producer once per single-cause fixture: two `os start` boots of the tsx source entry on one home (the hot installs, then the rehydrate of an entry an earlier build wrote) and four `os package install` runs, one per package under test; slowest CI reading 107.9 s (run 38335967790, the card's window; the job logs of hourly full battery run 40290659753 read here carry no line for this file) x 1.25, rounded up
 
 /**
  * install-local refuses an enabled job whose `pull` cannot bind, as it refuses
