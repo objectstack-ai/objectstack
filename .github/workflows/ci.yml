@@ -3695,7 +3695,10 @@ jobs:
   # `started_at` from the Actions jobs endpoint, before Build UI Deps existed
   # (so each run includes a cold seven-package build of up to 288 s):
   #   - Lint UI: n=42, min 71 s, median 112 s, p95 524 s, max 558 s (9.3 min)
-  #     => max(27.9, 24.3) => 30, the value it was ported with.
+  #     => max(27.9, 24.3) => 30, the value it was ported with. Re-derived
+  #     for objectui's Repo Gates (objectstack#25880), which add ~174 s (their
+  #     first PR run, 286 s, less the 112 s median): 558 + 174 = 732 s
+  #     (12.2 min) => max(36.6, 27.2) => 40.
   #   - Build & E2E UI: n=51, min 106 s, median 170 s, p95 423 s, max 457 s
   #     (7.6 min) => max(22.9, 22.6) => 25, down from objectui's 30 plus the
   #     15 the port added for the in-job build, which no derivation backed.
@@ -3706,7 +3709,7 @@ jobs:
     needs: [filter, ui-deps]
     if: ${{ !cancelled() && needs.filter.outputs.ui_tree != 'false' && needs.filter.outputs.ui != 'false' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     permissions:
       contents: read
     env:
@@ -3776,9 +3779,8 @@ jobs:
           pnpm --dir ui run check:bash32-floor
 
       # ── objectui's Repo Gates (objectstack#25880) ────────────────────────
-      # Eighteen of the nineteen gates of `ui/.github/workflows/repo-gates.yml`
-      # (the last is noted below), which GitHub stopped running when the tree
-      # moved under `ui/` (it reads only
+      # The nineteen gates of `ui/.github/workflows/repo-gates.yml`, which
+      # GitHub stopped running when the tree moved under `ui/` (it reads only
       # this repository's `.github/workflows/`). They judge what objectui ships
       # — `ui/content/docs/**`, `ui/skills/**`, the package READMEs and the
       # documented component types — so the change most likely to trip them is
@@ -3803,12 +3805,15 @@ jobs:
         if: ${{ !cancelled() }}
         run: pnpm --dir ui run check:action-ref-convention
 
-      # Not yet here, the nineteenth: `Pre-Install Import Graph Check`
-      # (`check:pre-install-import-graph`). It derives its population from
-      # `ui/.github/workflows/`, where ten workflows still run the deleted
-      # `scripts/objectstack-pin.mjs`, so it is red on `main` today for that
-      # reason alone. It joins this list when `ui/.github/` is retired
-      # (objectstack#25712), retargeted to this job.
+      # Self-test first: a scan whose recogniser is broken reports a clean
+      # tree. It derives its population from this repository's workflows, so
+      # it walks this job's install-free steps, itself included.
+      - name: Pre-Install Import Graph Check — Check the pre-install gates' import graphs
+        if: ${{ !cancelled() }}
+        run: |
+          pnpm --dir ui run check:pre-install-import-graph --self-test
+          pnpm --dir ui run check:pre-install-import-graph
+
       - name: Shell Escape Residue Scan — Check for machine-produced shell-escape residue in fenced examples
         if: ${{ !cancelled() }}
         run: pnpm --dir ui run check:shell-escape-residue
