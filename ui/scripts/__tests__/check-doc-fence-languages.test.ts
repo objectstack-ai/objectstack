@@ -34,10 +34,27 @@ import {
 } from '../check-doc-component-types.mjs';
 
 import { selfTestCases, stripAnsi } from './helpers/child-verdict';
+import {
+  globMatches,
+  jobBlock,
+  repoPath,
+  rootCi,
+  rootCiPath,
+  rootWorkflow,
+  rootWorkflowFiles,
+  uiFilterGlobs,
+  uiRun,
+  UI_JOBS,
+} from './helpers/root-ci';
 
 const ROOT = path.resolve(fileURLToPath(import.meta.url), '../../..');
 const GUARD = 'scripts/check-doc-fence-languages.mjs';
-const WORKFLOW = 'repo-gates.yml';
+const ALIAS = 'check:doc-fences';
+/**
+ * The guard's home, as failure messages name it: the root `lint-ui` job, where
+ * objectstack#25902 ported objectui's `repo-gates.yml` (objectstack#25712).
+ */
+const WORKFLOW = `ci.yml (${UI_JOBS.lint})`;
 
 /**
  * A numeral that qualifies a document-population noun, as `match: text`.
@@ -439,10 +456,17 @@ describe('check-doc-fence-languages: non-vacuity, through the shipped module', (
   });
 });
 
+/**
+ * GitHub runs only the repository root's `.github/workflows/`, so the wiring is
+ * the root `ci.yml`'s: objectstack#25902 ported objectui's `repo-gates.yml` into
+ * its `lint-ui` job, which runs the guard through its alias (objectstack#25712).
+ * Every pin below reads that file by path.
+ */
 describe('check-doc-fence-languages is wired, not merely present', () => {
-  const workflow = parseYaml(fs.readFileSync(path.join(ROOT, '.github/workflows', WORKFLOW), 'utf8'));
-  const steps: Array<Record<string, unknown>> = workflow.jobs['repo-gates'].steps;
-  const gateSteps = steps.filter((s) => typeof s.run === 'string' && (s.run as string).includes(GUARD));
+  const workflow = parseYaml(rootCi());
+  const steps: Array<Record<string, unknown>> = workflow.jobs[UI_JOBS.lint].steps;
+  const runs = (s: Record<string, unknown>) => typeof s.run === 'string' && (s.run as string).includes(uiRun(ALIAS));
+  const gateSteps = steps.filter(runs);
 
   it('the guard script exists', () => {
     expect(fs.existsSync(path.join(ROOT, GUARD))).toBe(true);
@@ -450,22 +474,24 @@ describe('check-doc-fence-languages is wired, not merely present', () => {
 
   it('package.json aliases it, and the alias points at the script that exists', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
-    expect(pkg.scripts['check:doc-fences']).toContain(GUARD);
+    expect(pkg.scripts[ALIAS]).toBe(`node ${GUARD}`);
   });
 
-  it('the workflow runs it — one step, both legs', () => {
+  it('the root Lint UI job runs it — one step, both legs', () => {
     expect(gateSteps).toHaveLength(1);
     const run = gateSteps[0].run as string;
-    expect(run).toContain(`node ${GUARD} --self-test`);
-    expect(run.split('\n').some((l) => l.trim() === `node ${GUARD}`)).toBe(true);
+    expect(run).toContain(`${uiRun(ALIAS)} --self-test`);
+    expect(run.split('\n').some((l) => l.trim() === uiRun(ALIAS))).toBe(true);
   });
 
-  it('one gate, one home — no other workflow runs the same script', () => {
-    const dir = path.join(ROOT, '.github/workflows');
-    const others = fs
-      .readdirSync(dir)
-      .filter((f) => f.endsWith('.yml') && f !== WORKFLOW)
-      .filter((f) => fs.readFileSync(path.join(dir, f), 'utf8').includes(GUARD));
+  it('one gate, one home — no other job or workflow runs the same script', () => {
+    const jobs = Object.entries(workflow.jobs as Record<string, { steps?: Array<Record<string, unknown>> }>)
+      .filter(([, job]) => (job.steps ?? []).some(runs))
+      .map(([key]) => key);
+    expect(jobs).toEqual([UI_JOBS.lint]);
+    const others = rootWorkflowFiles()
+      .filter((f) => f !== path.basename(rootCiPath))
+      .filter((f) => rootWorkflow(f).includes(ALIAS) || rootWorkflow(f).includes(GUARD));
     expect(others).toEqual([]);
   });
 
@@ -473,8 +499,15 @@ describe('check-doc-fence-languages is wired, not merely present', () => {
     // `on` parses as the boolean `true` in YAML 1.1; `yaml` gives back `on`.
     const on = workflow.on ?? workflow[true as unknown as string];
     expect(Object.keys(on)).toContain('pull_request');
-    expect(on.pull_request).not.toHaveProperty('paths');
-    expect(on.pull_request).not.toHaveProperty('paths-ignore');
+    expect(on.pull_request ?? {}).not.toHaveProperty('paths');
+    expect(on.pull_request ?? {}).not.toHaveProperty('paths-ignore');
+    // The root job runs on the `filter` job's `ui` globs, so those globs are the
+    // path filter that matters, and a docs-only change under `ui/` must match.
+    const globs = uiFilterGlobs(rootCi());
+    const missed = ['content/docs/guide/ci-cd-pipeline.md', 'packages/core/README.md']
+      .map(repoPath)
+      .filter((file) => !globs.some((glob) => globMatches(glob, file)));
+    expect(missed, 'a docs-only change under ui/ would skip Lint UI').toEqual([]);
   });
 
   it('subscribes to the merge queue, so it cannot stall one if it becomes required', () => {
@@ -483,10 +516,11 @@ describe('check-doc-fence-languages is wired, not merely present', () => {
   });
 
   it('needs no install — no pnpm runs before this gate in its job', () => {
-    // Since objectui#12214 the home is `repo-gates.yml`, ONE job that installs
-    // after its install-free gates: the property is now an ORDER -- nothing
-    // before this gate's step runs `pnpm install` -- and no longer an absence.
-    const gateAt = steps.findIndex((s) => typeof s.run === 'string' && (s.run as string).includes(GUARD));
+    // Since objectui#12214 the home is ONE job that installs after its
+    // install-free gates (`repo-gates.yml` then, the root `lint-ui` now): the
+    // property is an ORDER -- nothing before this gate's step runs
+    // `pnpm install` -- and no longer an absence.
+    const gateAt = steps.findIndex(runs);
     expect(gateAt).toBeGreaterThan(-1);
     const before = steps
       .slice(0, gateAt)
@@ -561,7 +595,7 @@ describe('check-doc-fence-languages is wired, not merely present', () => {
    * number is written here that a document being added would falsify.
    */
   it('its header states the population and never counts it — no count can rot here', () => {
-    const header = headerComments(fs.readFileSync(path.join(ROOT, '.github/workflows', WORKFLOW), 'utf8'));
+    const header = headerComments(jobBlock(rootCi(), UI_JOBS.lint));
 
     // objectui#7901 — the floor first, or the assertion below is vacuous. The
     // count half cannot distinguish a header that carries no counts from a

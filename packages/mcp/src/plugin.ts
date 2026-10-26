@@ -669,7 +669,7 @@ export class MCPServerPlugin implements Plugin {
         return resolveLocalizationContext({
           ql: scopedQl,
           settings: settingsService,
-          tenantId: initial.tenantId,
+          organizationId: initial.tenantId,
           userId: initial.userId,
         });
       };

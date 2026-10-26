@@ -154,8 +154,8 @@ describe('resolveLocalizationContext — success cache identity (#11633 §7 pin 
       { namespace: 'localization', key: 'locale', scope: 'tenant', organization_id: 'o1', value: 'ja-JP' },
       { namespace: 'localization', key: 'currency', scope: 'tenant', organization_id: 'o1', value: 'JPY' },
     ]);
-    const first = await resolveLocalizationContext({ ql, tenantId: 'o1' });
-    const second = await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    const first = await resolveLocalizationContext({ ql, organizationId: 'o1' });
+    const second = await resolveLocalizationContext({ ql, organizationId: 'o1' });
     // Both halves are load-bearing: equality alone passes on a cache that never
     // caches, and a zero-read count alone passes on a cache that returns junk.
     expect(second).toEqual(first);
@@ -167,11 +167,11 @@ describe('resolveLocalizationContext — success cache identity (#11633 §7 pin 
     const rows = [{ namespace: 'localization', key: 'timezone', scope: 'tenant', organization_id: 'o1', value: 'Asia/Tokyo' }];
     const qlA = makeQl(rows);
     const qlB = makeQl(rows);
-    await resolveLocalizationContext({ ql: qlA, tenantId: 't1' });
-    await resolveLocalizationContext({ ql: qlA, tenantId: 't2' });
-    await resolveLocalizationContext({ ql: qlA, tenantId: 't1' });
+    await resolveLocalizationContext({ ql: qlA, organizationId: 't1' });
+    await resolveLocalizationContext({ ql: qlA, organizationId: 't2' });
+    await resolveLocalizationContext({ ql: qlA, organizationId: 't1' });
     expect(qlA.counts.sys_setting).toBe(2);
-    await resolveLocalizationContext({ ql: qlB, tenantId: 't1' });
+    await resolveLocalizationContext({ ql: qlB, organizationId: 't1' });
     expect(qlB.counts.sys_setting).toBe(1);
   });
 });
@@ -180,10 +180,10 @@ describe('resolveLocalizationContext — the settings seam invalidates synchrono
   it('a `localization` write is observed by the very next resolve, with NO clock advance', async () => {
     const ql = makeQl([]);
     const settings = makeSettings({ timezone: 'UTC' });
-    const first = await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    const first = await resolveLocalizationContext({ ql, settings, organizationId: 'o1' });
     expect(first.timezone).toBe('UTC');
     // Cached: a repeat issues no read at all.
-    await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    await resolveLocalizationContext({ ql, settings, organizationId: 'o1' });
     expect(settings.counts.reads).toBe(1);
 
     settings.write('timezone', 'America/Los_Angeles');
@@ -191,7 +191,7 @@ describe('resolveLocalizationContext — the settings seam invalidates synchrono
     // ⭐ Assert the END of the chain — the new VALUE — never "the cache was
     // cleared". A clear-then-repopulate-from-a-stale-read implementation
     // passes the second and fails this one (#11633 §7 pin 2's discipline).
-    const after = await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    const after = await resolveLocalizationContext({ ql, settings, organizationId: 'o1' });
     expect(after.timezone).toBe('America/Los_Angeles');
     expect(settings.counts.reads).toBe(2);
   });
@@ -201,14 +201,14 @@ describe('resolveLocalizationContext — the settings seam invalidates synchrono
     const full = makeSettings({ timezone: 'UTC' });
     const { subscribe: _drop, ...seamless } = full;
     const settings = seamless as unknown as typeof full;
-    const first = await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    const first = await resolveLocalizationContext({ ql, settings, organizationId: 'o1' });
     expect(first.timezone).toBe('UTC');
     // Still cached — the engine-side backstop and the TTL are the remaining bounds.
-    await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    await resolveLocalizationContext({ ql, settings, organizationId: 'o1' });
     expect(settings.counts.reads).toBe(1);
     // ...and the backstop still retires it.
     await ql.write('sys_setting');
-    await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    await resolveLocalizationContext({ ql, settings, organizationId: 'o1' });
     expect(settings.counts.reads).toBe(2);
   });
 
@@ -216,8 +216,8 @@ describe('resolveLocalizationContext — the settings seam invalidates synchrono
     const ql = makeQl([]);
     const a = makeSettings({ timezone: 'Asia/Tokyo' });
     const b = makeSettings({ timezone: 'Europe/Paris' });
-    expect((await resolveLocalizationContext({ ql, settings: a, tenantId: 'o1' })).timezone).toBe('Asia/Tokyo');
-    expect((await resolveLocalizationContext({ ql, settings: b, tenantId: 'o1' })).timezone).toBe('Europe/Paris');
+    expect((await resolveLocalizationContext({ ql, settings: a, organizationId: 'o1' })).timezone).toBe('Asia/Tokyo');
+    expect((await resolveLocalizationContext({ ql, settings: b, organizationId: 'o1' })).timezone).toBe('Europe/Paris');
   });
 });
 
@@ -227,27 +227,27 @@ describe('resolveLocalizationContext — a write to a table the answer is read f
     // engine, so no settings event is ever emitted.
     const rows = [{ namespace: 'localization', key: 'timezone', scope: 'tenant', organization_id: 'o1', value: 'UTC' }];
     const ql = makeQl(rows);
-    expect((await resolveLocalizationContext({ ql, tenantId: 'o1' })).timezone).toBe('UTC');
-    await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    expect((await resolveLocalizationContext({ ql, organizationId: 'o1' })).timezone).toBe('UTC');
+    await resolveLocalizationContext({ ql, organizationId: 'o1' });
     expect(ql.counts.sys_setting).toBe(1);
 
     await ql.write('sys_setting', () => {
       rows[0].value = 'America/Los_Angeles';
     });
 
-    expect((await resolveLocalizationContext({ ql, tenantId: 'o1' })).timezone).toBe('America/Los_Angeles');
+    expect((await resolveLocalizationContext({ ql, organizationId: 'o1' })).timezone).toBe('America/Los_Angeles');
     expect(ql.counts.sys_setting).toBe(2);
   });
 
   it('a `sys_platform_setting` write — the global rung `getMany` reads — retires it too', async () => {
     const ql = makeQl([]);
     const settings = makeSettings({ timezone: 'UTC' });
-    await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
-    await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    await resolveLocalizationContext({ ql, settings, organizationId: 'o1' });
+    await resolveLocalizationContext({ ql, settings, organizationId: 'o1' });
     expect(settings.counts.reads).toBe(1);
     // A direct engine write of the global row: no settings event is emitted.
     await ql.write('sys_platform_setting', () => {}, 'insert');
-    await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    await resolveLocalizationContext({ ql, settings, organizationId: 'o1' });
     expect(settings.counts.reads).toBe(2);
   });
 
@@ -256,7 +256,7 @@ describe('resolveLocalizationContext — a write to a table the answer is read f
     // driver step is still running when the resolve reads the old row.
     const rows = [{ namespace: 'localization', key: 'timezone', scope: 'tenant', organization_id: 'o1', value: 'UTC' }];
     const ql = makeQl(rows);
-    await resolveLocalizationContext({ ql, tenantId: 'other' }); // first sight: wires the seam
+    await resolveLocalizationContext({ ql, organizationId: 'other' }); // first sight: wires the seam
     let land!: () => void;
     const landed = new Promise<void>((r) => {
       land = r;
@@ -265,10 +265,10 @@ describe('resolveLocalizationContext — a write to a table the answer is read f
       await landed;
       rows[0].value = 'Asia/Tokyo';
     });
-    expect((await resolveLocalizationContext({ ql, tenantId: 'o1' })).timezone).toBe('UTC');
+    expect((await resolveLocalizationContext({ ql, organizationId: 'o1' })).timezone).toBe('UTC');
     land();
     await inFlight;
-    expect((await resolveLocalizationContext({ ql, tenantId: 'o1' })).timezone).toBe('Asia/Tokyo');
+    expect((await resolveLocalizationContext({ ql, organizationId: 'o1' })).timezone).toBe('Asia/Tokyo');
   });
 
   it('a peer node\'s hint (`remote`) retires the entry the same way a local write does', async () => {
@@ -276,19 +276,19 @@ describe('resolveLocalizationContext — a write to a table the answer is read f
     // local bump — so cross-node convergence rides the same backstop.
     const rows = [{ namespace: 'localization', key: 'timezone', scope: 'tenant', organization_id: 'o1', value: 'UTC' }];
     const ql = makeQl(rows);
-    await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    await resolveLocalizationContext({ ql, organizationId: 'o1' });
     rows[0].value = 'Asia/Tokyo';
     ql.writeEpoch.bump('remote');
-    expect((await resolveLocalizationContext({ ql, tenantId: 'o1' })).timezone).toBe('Asia/Tokyo');
+    expect((await resolveLocalizationContext({ ql, organizationId: 'o1' })).timezone).toBe('Asia/Tokyo');
   });
 
   it('a `metadata` bump — no object to judge — retires it as well', async () => {
     const rows = [{ namespace: 'localization', key: 'timezone', scope: 'tenant', organization_id: 'o1', value: 'UTC' }];
     const ql = makeQl(rows);
-    await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    await resolveLocalizationContext({ ql, organizationId: 'o1' });
     rows[0].value = 'Asia/Tokyo';
     ql.writeEpoch.bump('metadata');
-    expect((await resolveLocalizationContext({ ql, tenantId: 'o1' })).timezone).toBe('Asia/Tokyo');
+    expect((await resolveLocalizationContext({ ql, organizationId: 'o1' })).timezone).toBe('Asia/Tokyo');
   });
 });
 
@@ -303,11 +303,11 @@ describe('resolveLocalizationContext — a write to any OTHER object does not re
     async (object) => {
       const ql = makeQl([{ namespace: 'localization', key: 'timezone', scope: 'tenant', organization_id: 'o1', value: 'UTC' }]);
       const settings = makeSettings({ timezone: 'Asia/Tokyo' });
-      expect((await resolveLocalizationContext({ ql, settings, tenantId: 'o1' })).timezone).toBe('Asia/Tokyo');
+      expect((await resolveLocalizationContext({ ql, settings, organizationId: 'o1' })).timezone).toBe('Asia/Tokyo');
       await ql.write(object);
       await ql.write(object, () => {}, 'insert');
       await ql.write(object, () => {}, 'delete');
-      expect((await resolveLocalizationContext({ ql, settings, tenantId: 'o1' })).timezone).toBe('Asia/Tokyo');
+      expect((await resolveLocalizationContext({ ql, settings, organizationId: 'o1' })).timezone).toBe('Asia/Tokyo');
       expect(settings.counts.reads).toBe(1);
       expect(ql.counts.sys_setting).toBe(0);
     },
@@ -316,18 +316,18 @@ describe('resolveLocalizationContext — a write to any OTHER object does not re
   it('a READ of a watched table retires nothing', async () => {
     const ql = makeQl([]);
     const settings = makeSettings({ timezone: 'UTC' });
-    await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    await resolveLocalizationContext({ ql, settings, organizationId: 'o1' });
     await ql.write('sys_setting', () => {}, 'find');
-    await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    await resolveLocalizationContext({ ql, settings, organizationId: 'o1' });
     expect(settings.counts.reads).toBe(1);
   });
 
   it('a bare `write` epoch bump is the middleware\'s to judge, and on its own retires nothing', async () => {
     const ql = makeQl([]);
     const settings = makeSettings({ timezone: 'UTC' });
-    await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    await resolveLocalizationContext({ ql, settings, organizationId: 'o1' });
     ql.writeEpoch.bump('write');
-    await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    await resolveLocalizationContext({ ql, settings, organizationId: 'o1' });
     expect(settings.counts.reads).toBe(1);
   });
 
@@ -339,9 +339,9 @@ describe('resolveLocalizationContext — a write to any OTHER object does not re
       seen.push(opts);
       register(fn, opts);
     };
-    await resolveLocalizationContext({ ql, tenantId: 'o1' });
-    await resolveLocalizationContext({ ql, tenantId: 'o2' });
-    await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    await resolveLocalizationContext({ ql, organizationId: 'o1' });
+    await resolveLocalizationContext({ ql, organizationId: 'o2' });
+    await resolveLocalizationContext({ ql, organizationId: 'o1' });
     expect(seen).toEqual([undefined]);
   });
 });
@@ -350,9 +350,9 @@ describe('resolveLocalizationContext — no seam, no success cache', () => {
   it('a `ql` without a write epoch never caches a success (the pre-#11966 multiset, exactly)', async () => {
     const rows = [{ namespace: 'localization', key: 'timezone', scope: 'tenant', organization_id: 'o1', value: 'UTC' }];
     const ql = makeQl(rows, { epoch: false });
-    await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    await resolveLocalizationContext({ ql, organizationId: 'o1' });
     rows[0].value = 'Asia/Tokyo';
-    const second = await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    const second = await resolveLocalizationContext({ ql, organizationId: 'o1' });
     expect(second.timezone).toBe('Asia/Tokyo');
     expect(ql.counts.sys_setting).toBe(2);
   });
@@ -360,9 +360,9 @@ describe('resolveLocalizationContext — no seam, no success cache', () => {
   it('a `ql` with the epoch but no middleware seam never caches a success either', async () => {
     const rows = [{ namespace: 'localization', key: 'timezone', scope: 'tenant', organization_id: 'o1', value: 'UTC' }];
     const ql = makeQl(rows, { middleware: false });
-    await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    await resolveLocalizationContext({ ql, organizationId: 'o1' });
     rows[0].value = 'Asia/Tokyo';
-    expect((await resolveLocalizationContext({ ql, tenantId: 'o1' })).timezone).toBe('Asia/Tokyo');
+    expect((await resolveLocalizationContext({ ql, organizationId: 'o1' })).timezone).toBe('Asia/Tokyo');
     expect(ql.counts.sys_setting).toBe(2);
   });
 
@@ -372,9 +372,9 @@ describe('resolveLocalizationContext — no seam, no success cache', () => {
     const rows = [{ namespace: 'localization', key: 'timezone', scope: 'tenant', organization_id: 'o1', value: 'UTC' }];
     const ql = makeQl(rows, { epoch: false });
     (ql as Record<string, unknown>).writeEpoch = { current: 0 };
-    await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    await resolveLocalizationContext({ ql, organizationId: 'o1' });
     rows[0].value = 'Asia/Tokyo';
-    expect((await resolveLocalizationContext({ ql, tenantId: 'o1' })).timezone).toBe('Asia/Tokyo');
+    expect((await resolveLocalizationContext({ ql, organizationId: 'o1' })).timezone).toBe('Asia/Tokyo');
     expect(ql.counts.sys_setting).toBe(2);
   });
 });
@@ -396,9 +396,9 @@ describe('resolveLocalizationContext — the TTL is the residual bound (#11633 �
       registered.push(fn);
       register(fn);
     };
-    await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    await resolveLocalizationContext({ ql, organizationId: 'o1' });
     rows[0].value = 'Asia/Tokyo';
-    const second = await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    const second = await resolveLocalizationContext({ ql, organizationId: 'o1' });
     expect(second.timezone).toBe('Asia/Tokyo');
     expect(ql.counts.sys_setting).toBe(2);
     // OFF leaves no footprint on the engine: nothing is registered.
@@ -411,9 +411,9 @@ describe('resolveLocalizationContext — the TTL is the residual bound (#11633 �
     process.env[TTL_ENV] = '3OOO';
     const rows = [{ namespace: 'localization', key: 'timezone', scope: 'tenant', organization_id: 'o1', value: 'UTC' }];
     const ql = makeQl(rows);
-    await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    await resolveLocalizationContext({ ql, organizationId: 'o1' });
     rows[0].value = 'Asia/Tokyo';
-    expect((await resolveLocalizationContext({ ql, tenantId: 'o1' })).timezone).toBe('Asia/Tokyo');
+    expect((await resolveLocalizationContext({ ql, organizationId: 'o1' })).timezone).toBe('Asia/Tokyo');
     expect(ql.counts.sys_setting).toBe(2);
   });
 
@@ -421,11 +421,11 @@ describe('resolveLocalizationContext — the TTL is the residual bound (#11633 �
     vi.useFakeTimers();
     try {
       const ql = makeQl([{ namespace: 'localization', key: 'timezone', scope: 'tenant', organization_id: 'o1', value: 'UTC' }]);
-      await resolveLocalizationContext({ ql, tenantId: 'o1' });
-      await resolveLocalizationContext({ ql, tenantId: 'o1' });
+      await resolveLocalizationContext({ ql, organizationId: 'o1' });
+      await resolveLocalizationContext({ ql, organizationId: 'o1' });
       expect(ql.counts.sys_setting).toBe(1);
       await vi.advanceTimersByTimeAsync(30_001);
-      await resolveLocalizationContext({ ql, tenantId: 'o1' });
+      await resolveLocalizationContext({ ql, organizationId: 'o1' });
       expect(ql.counts.sys_setting).toBe(2);
     } finally {
       vi.useRealTimers();
@@ -459,7 +459,7 @@ describe('resolveLocalizationContext — the failure memo survives what retires 
   it('an engine write does NOT retire a failure entry (#10221 log spam stays fixed)', async () => {
     const ql = makeFailingQl();
     const settings = makeSettings({});
-    expect(await resolveLocalizationContext({ ql, settings, tenantId: 'o1' })).toEqual({
+    expect(await resolveLocalizationContext({ ql, settings, organizationId: 'o1' })).toEqual({
       timezone: 'UTC',
       locale: 'en-US',
       currency: undefined,
@@ -470,7 +470,7 @@ describe('resolveLocalizationContext — the failure memo survives what retires 
     ql.writeEpoch.bump('remote');
     settings.write('timezone', 'Asia/Tokyo');
 
-    await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    await resolveLocalizationContext({ ql, settings, organizationId: 'o1' });
     // Still ONE failing query: the memo is TTL-bound only, exactly as shipped.
     expect(ql.counts.sys_setting).toBe(1);
   });
@@ -479,10 +479,10 @@ describe('resolveLocalizationContext — the failure memo survives what retires 
     vi.useFakeTimers();
     try {
       const ql = makeFailingQl();
-      await resolveLocalizationContext({ ql, tenantId: 'o1' });
+      await resolveLocalizationContext({ ql, organizationId: 'o1' });
       expect(ql.counts.sys_setting).toBe(1);
       await vi.advanceTimersByTimeAsync(30_001);
-      await resolveLocalizationContext({ ql, tenantId: 'o1' });
+      await resolveLocalizationContext({ ql, organizationId: 'o1' });
       expect(ql.counts.sys_setting).toBe(2);
     } finally {
       vi.useRealTimers();
@@ -506,22 +506,22 @@ describe('resolveLocalizationContext — the failure memo survives what retires 
         return rows;
       },
     };
-    await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    await resolveLocalizationContext({ ql, organizationId: 'o1' });
     expect(counts.sys_setting).toBe(1);
 
     // Migration lands; the memo is still standing, so nothing changes yet.
     broken = false;
     rows.push({ namespace: 'localization', key: 'timezone', scope: 'tenant', organization_id: 'o1', value: 'Asia/Tokyo' });
-    await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    await resolveLocalizationContext({ ql, organizationId: 'o1' });
     expect(counts.sys_setting).toBe(1);
 
     // The memo expires, a SUCCESS is recorded in its place...
     vi.useFakeTimers();
     try {
       await vi.advanceTimersByTimeAsync(30_001);
-      expect((await resolveLocalizationContext({ ql, tenantId: 'o1' })).timezone).toBe('Asia/Tokyo');
+      expect((await resolveLocalizationContext({ ql, organizationId: 'o1' })).timezone).toBe('Asia/Tokyo');
       expect(counts.sys_setting).toBe(2);
-      await resolveLocalizationContext({ ql, tenantId: 'o1' });
+      await resolveLocalizationContext({ ql, organizationId: 'o1' });
       expect(counts.sys_setting).toBe(2);
     } finally {
       vi.useRealTimers();
@@ -531,7 +531,7 @@ describe('resolveLocalizationContext — the failure memo survives what retires 
     await seams.write('sys_setting', () => {
       rows[0].value = 'Europe/Paris';
     });
-    expect((await resolveLocalizationContext({ ql, tenantId: 'o1' })).timezone).toBe('Europe/Paris');
+    expect((await resolveLocalizationContext({ ql, organizationId: 'o1' })).timezone).toBe('Europe/Paris');
   });
 });
 
@@ -563,10 +563,10 @@ describe('resolveLocalizationContext — a write DURING the read must not be swa
         return snapshot;
       },
     };
-    const first = await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    const first = await resolveLocalizationContext({ ql, organizationId: 'o1' });
     expect(first.timezone).toBe('UTC');
     // The stale answer must NOT be reusable — the next call re-reads.
-    const second = await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    const second = await resolveLocalizationContext({ ql, organizationId: 'o1' });
     expect(second.timezone).toBe('Asia/Tokyo');
     expect(counts.sys_setting).toBe(2);
   });

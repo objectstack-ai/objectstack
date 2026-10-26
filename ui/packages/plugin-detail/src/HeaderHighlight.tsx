@@ -244,11 +244,22 @@ export const HeaderHighlight: React.FC<HeaderHighlightProps> = ({
             // the HotCRM lead read "+1-555-0" that way. (2) is about the
             // editor, which the declared type picks, so it keeps
             // `resolvedType`.
+            //
+            // `date` and `datetime` joined (1) in objectstack#25897: the
+            // strip writes every date's year (objectui#13331), and a 9rem chip
+            // leaves its value about 103px after the padding. Chromium (Inter,
+            // the strip's 14px semibold) read the compact `datetime` face at
+            // 151-164px (`2026/10/26 上午10:00`, `10/26/2026 10:00 am`) and
+            // the zh-CN `date` face at 114px (`2026年10月26日`), so the
+            // ellipsis landed inside the day: "2026/10/2…". A date that loses
+            // its day is worse than a wider chip; the 16rem floor leaves 216px.
             const isWide =
               drawnType === 'email' ||
               drawnType === 'url' ||
               drawnType === 'phone' ||
               drawnType === 'textarea' ||
+              drawnType === 'date' ||
+              drawnType === 'datetime' ||
               (!!resolvedType && EXPANDABLE_FIELD_TYPES.has(resolvedType));
             const isBoolean = resolvedType === 'boolean';
             // The SAME definition the body grid draws its em-dash from

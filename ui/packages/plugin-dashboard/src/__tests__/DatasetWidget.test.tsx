@@ -197,17 +197,21 @@ describe('DatasetWidget', () => {
   // spelling is now invalid METADATA, rejected where it is authored rather than
   // laundered here.
   it('forwards compareTo unchanged — the executor’s own { kind, dimension? } contract', async () => {
+    // A comparison is asked only over a dated window (objectstack#25970); the
+    // window moves into `timeDimensions` (see DatasetWidget.compareTo.test.tsx).
+    const filter = { close_date: { $gte: '2026-04-01', $lte: '2026-06-30' } };
+    const lowered = { timeDimensions: [{ dimension: 'close_date', dateRange: ['2026-04-01', '2026-06-30'] }] };
     const withDimension = { kind: 'previousPeriod', dimension: 'close_date' };
     const src1 = makeSource(async () => ({ rows: [{ revenue: 1 }] }));
-    render(<DatasetWidget widget={{ type: 'metric', dataset: 'sales', values: ['revenue'], compareTo: withDimension }} dataSource={src1} />);
-    await waitFor(() => expect(src1.queryDataset).toHaveBeenCalledWith('sales', { dimensions: [], measures: ['revenue'], compareTo: withDimension }));
+    render(<DatasetWidget widget={{ type: 'metric', dataset: 'sales', values: ['revenue'], filter, compareTo: withDimension }} dataSource={src1} />);
+    await waitFor(() => expect(src1.queryDataset).toHaveBeenCalledWith('sales', { dimensions: [], measures: ['revenue'], ...lowered, compareTo: withDimension }));
 
     // `dimension` omitted — the executor resolves it (or fails loudly naming the
     // candidates). The widget must NOT fill one in on its way past.
     const bare = { kind: 'previousYear' };
     const src2 = makeSource(async () => ({ rows: [{ revenue: 1 }] }));
-    render(<DatasetWidget widget={{ type: 'metric', dataset: 'sales', values: ['revenue'], compareTo: bare }} dataSource={src2} />);
-    await waitFor(() => expect(src2.queryDataset).toHaveBeenCalledWith('sales', { dimensions: [], measures: ['revenue'], compareTo: bare }));
+    render(<DatasetWidget widget={{ type: 'metric', dataset: 'sales', values: ['revenue'], filter, compareTo: bare }} dataSource={src2} />);
+    await waitFor(() => expect(src2.queryDataset).toHaveBeenCalledWith('sales', { dimensions: [], measures: ['revenue'], ...lowered, compareTo: bare }));
     expect(src2.queryDataset.mock.calls[0][1].compareTo).not.toHaveProperty('dimension');
   });
 

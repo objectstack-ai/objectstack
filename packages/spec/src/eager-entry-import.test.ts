@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 30 — whole-package import: every published entry of the package is imported first in its own fresh tsx child process, eagerly, plus two unflagged controls; slowest CI reading 19.9 s (hourly run 38657693085) x 1.25, rounded up
+// test-budget: 60 — whole-package import: every published entry of the package is imported first in its own fresh tsx child process, eagerly, plus two unflagged controls; re-measured 2026-10-26 over the 8 executed readings in refresh PR #25960's window (hourly runs 40200279306 to 40272142430), slowest 41.61 s (run 40266979145) x 1.25, rounded up
 
 /**
  * Every published entry of `@objectstack/spec` imports cleanly as a process's

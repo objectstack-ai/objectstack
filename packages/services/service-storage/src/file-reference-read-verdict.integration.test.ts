@@ -60,6 +60,7 @@ import type { IStorageService, RouteHandler } from '@objectstack/spec/contracts'
 import { RAW_FILE_VALUES_CONTEXT_KEY, type EngineQueryOptions } from '@objectstack/spec/data';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
+import { resolveThrownHttpError } from '@objectstack/types';
 import { StorageServicePlugin } from './storage-service-plugin.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 
@@ -86,6 +87,10 @@ const F_FREE = 'f_free_ff';
 const F_DEC_ALLOW = 'f_decallow_gg';
 /** Owned by `decision/dec_deny.proof` — the delegate refuses the writer. */
 const F_DEC_DENY = 'f_decdeny_hh';
+/** No owner at all, `acl: 'public_read'`: anyone's to download. */
+const F_PUBLIC_FREE = 'f_publicfree_ii';
+/** [#25694] The guest principal an `authRequired: false` endpoint's write executes as (ADR-0138 D9). */
+const GUEST_CTX = { principalKind: 'guest' as const, positions: ['guest'], isSystem: false };
 
 const silentLogger = () => ({
   info: vi.fn(), warn: vi.fn(), debug: vi.fn(), error: vi.fn(),
@@ -123,6 +128,7 @@ const FILES = [
   fileRow(F_FREE),
   fileRow(F_DEC_ALLOW, owned('decision', 'dec_allow', 'proof')),
   fileRow(F_DEC_DENY, owned('decision', 'dec_deny', 'proof')),
+  fileRow(F_PUBLIC_FREE, { acl: 'public_read' }),
 ];
 
 function makeCtx() {
@@ -419,5 +425,69 @@ describe('#25692 — a record write claims or copies only a file the download do
     const { outcome } = await writeAs(F_CLOSED, { ...SYS, userId: WRITER });
 
     expect(outcome).toBe('copied');
+  });
+
+  describe('[#25694] an anonymous write carries no file, whatever the door would serve it', () => {
+    /**
+     * The refusal as the HTTP boundary answers it (ADR-0112: code and status),
+     * through the one mapping both dispatcher exits and the REST door share.
+     */
+    const expectAnswered400 = (err: unknown) => {
+      const answered = resolveThrownHttpError(err);
+      expect({ status: answered.status, code: answered.code }).toEqual({ status: 400, code: 'VALIDATION_FAILED' });
+      expect(answered.details?.fields).toEqual([expect.objectContaining({ field: 'doc', code: 'invalid_value' })]);
+    };
+
+    /** The write's refusal, and proof that nothing was written: no record, no new file, no owner moved. */
+    const expectRefused = async (data: Record<string, unknown>, context: Record<string, unknown>) => {
+      const recordId = `c_new_${++seq}`;
+      const before = await fileRows();
+      const err = await engine
+        .insert('contract', { id: recordId, title: recordId, ...data } as any, { context })
+        .then(() => null, (e: any) => e);
+      expectAnswered400(err);
+      expect(err?.fields).toEqual([expect.objectContaining({ field: 'doc', code: 'invalid_value' })]);
+      expect(await storedDoc(recordId)).toBeUndefined();
+      expect(await fileRows()).toEqual(before);
+    };
+
+    it('a public_read file another record owns is not copied for the guest', async () => {
+      await expectRefused({ doc: F_PUBLIC }, GUEST_CTX);
+      expect(await fileById(F_PUBLIC)).toMatchObject(owned('vault', 'v_mine', 'annex'));
+    });
+
+    it('an unclaimed public_read file is not claimed for the guest', async () => {
+      await expectRefused({ doc: F_PUBLIC_FREE }, GUEST_CTX);
+      expect((await fileById(F_PUBLIC_FREE))?.ref_id ?? null).toBeNull();
+    });
+
+    it('a file id the guest may not read is not stored either', async () => {
+      await expectRefused({ doc: F_FREE }, GUEST_CTX);
+    });
+
+    it('a value that names no platform file is not stored either', async () => {
+      await expectRefused({ doc: 'https://example.test/report.pdf' }, GUEST_CTX);
+    });
+
+    it('an update carrying a file is refused, and the record keeps what it held', async () => {
+      const recordId = `c_new_${++seq}`;
+      await engine.insert('contract', { id: recordId, title: recordId } as any, { context: GUEST_CTX });
+      const err = await engine
+        .update('contract', { id: recordId, doc: F_PUBLIC_FREE } as any, { context: GUEST_CTX })
+        .then(() => null, (e: any) => e);
+      expectAnswered400(err);
+      expect(await storedDoc(recordId)).toBeNull();
+      expect((await fileById(F_PUBLIC_FREE))?.ref_id ?? null).toBeNull();
+    });
+
+    it('CONTROL — a guest write that carries no file is written', async () => {
+      const recordId = `c_new_${++seq}`;
+      await engine.insert('contract', { id: recordId, title: recordId, doc: null } as any, { context: GUEST_CTX });
+      expect(await storedDoc(recordId)).toBeNull();
+    });
+
+    it('CONTROL — a signed-in writer still takes the same public_read file', async () => {
+      expect((await writeAs(F_PUBLIC_FREE, WRITER_CTX)).outcome).toBe('claimed');
+    });
   });
 });
