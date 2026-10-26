@@ -9,7 +9,7 @@
       "title": "Row-level security: restricted member sees only their rows; admin sees all",
       "since": "v15",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -83,7 +83,7 @@
       ],
       "automated": {
         "kind": "verify",
-        "ref": "packages/verify/src/rls.ts (objectstack verify) + packages/qa/dogfood/test/showcase-private-owd.dogfood.test.ts"
+        "ref": "`objectstack verify --rls` (packages/verify/src/rls.ts runRlsProofs) + packages/qa/dogfood/test/showcase-private-owd.dogfood.test.ts. packages/verify/src/rls.ts is a source file, not a test: acceptance[4] scores from a run that executes the command over the showcase, and no pin does — rls-fixture.dogfood.test.ts and rls-multitenant.dogfood.test.ts run runRlsProofs on purpose-built fixtures only. The showcase pin's foreign PATCH asserts only status >= 300; the row-unchanged re-read acceptance[2] and negative[0] require is pinned for a fixture object in packages/qa/dogfood/test/rls-fixture.dogfood.test.ts, not for showcase_private_note, so on the showcase that re-read is hand-driven"
       },
       "source": [
         "packages/verify/src/rls.ts",
@@ -130,6 +130,12 @@
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated (own port + file DB per dogfood skill §0)' → 'boot the showcase on its own port and file DB (dogfood skill §0)'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
           "ref": "#25003"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-26",
+          "change": "Two checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96. a4: automated.ref named packages/verify/src/rls.ts, a source file; no pin runs runRlsProofs over the showcase (rls-fixture / rls-multitenant run it on purpose-built fixtures), so the ref now names the command and says the clause scores from a run of it. a2/n0: the showcase pin's foreign PATCH asserts only status >= 300; the row-unchanged re-read is pinned for a fixture object in rls-fixture.dogfood.test.ts, which the ref now says. No clause or status changed",
+          "ref": "#25835"
         }
       ]
     },
@@ -138,7 +144,7 @@
       "title": "Write-path guards: readonly strip, owner_id forge/transfer denied, bulk validation",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -212,7 +218,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/owner-anchor-and-bulk-writes.dogfood.test.ts (+ showcase-static-readonly.dogfood.test.ts, showcase-readonly-when-parent.dogfood.test.ts); negative[1] (the isSystem exemption, which no REST door reaches by design) by packages/objectql/src/engine-insert-static-readonly-strip.test.ts ('isSystem seeds the readonly column — the exemption the ruling names', the INSERT path) + packages/objectql/src/engine-readonly-strip-caller-values.test.ts ('an isSystem caller is untouched by any of this', the UPDATE path on a static readonly column), both on a real engine"
+        "ref": "packages/qa/dogfood/test/owner-anchor-and-bulk-writes.dogfood.test.ts (+ showcase-static-readonly.dogfood.test.ts, showcase-readonly-when-parent.dogfood.test.ts); negative[1] (the isSystem exemption, which no REST door reaches by design) by packages/objectql/src/engine-insert-static-readonly-strip.test.ts ('isSystem seeds the readonly column — the exemption the ruling names', the INSERT path) + packages/objectql/src/engine-readonly-strip-caller-values.test.ts ('an isSystem caller is untouched by any of this', the UPDATE path on a static readonly column), both on a real engine over a recording / fake driver and their own test objects, not showcase_contact's lead_score — they score the one engine function negative[1] names, and the showcase field is not observed. What the dogfood pins do not assert: acceptance[0]'s droppedFields on the INSERT strip (showcase-static-readonly asserts the stripped value, not the advertisement); acceptance[4] and acceptance[6] — owner-anchor-and-bulk-writes' bulk cases are engine-direct ql.update / ql.delete owner scoping, with no createMany stamping and no per-row validation; acceptance[5]'s mixed updateMany (results[i].droppedFields) and the line's product field — showcase-readonly-when-parent pins the single-row PATCH strip and the X-ObjectStack-Dropped-Fields header only. Those legs are hand-driven"
       },
       "traps": [
         "wrong-persona"
@@ -261,6 +267,12 @@
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
           "ref": "#25003"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-26",
+          "change": "Four checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96. a4/a6: automated.ref named owner-anchor-and-bulk-writes for bulk writes, but its bulk cases are engine-direct ql.update / ql.delete owner scoping, with no createMany stamping and no per-row validation. a5: showcase-readonly-when-parent pins the single-row PATCH strip and the header; the mixed updateMany leg and the product field are unpinned. a0: showcase-static-readonly asserts no droppedFields on the INSERT strip. n1: the two objectql pins run a recording / fake driver on their own objects, not showcase lead_score. The ref names each. No clause or status changed",
+          "ref": "#25835"
         }
       ]
     },
@@ -269,7 +281,7 @@
       "title": "Record-grained access explain shows per-layer attribution and a verdict",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -333,7 +345,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/showcase-permission-zoo.dogfood.test.ts (explain vama_bypass case)"
+        "ref": "packages/qa/dogfood/test/showcase-permission-zoo.dogfood.test.ts (explain vama_bypass case). Layer (RUNNER rule 6): that case calls the security service's explain() in-process, under a system context (isSystem: true), and asserts allowed, the vama_bypass layer and showcase_auditor as contributor — it never drives the POST /api/v1/security/explain door acceptance[1] names, so acceptance[1] scores partial from it. No pin makes a plain-member (deny-side) explain call: acceptance[2]'s explain half, acceptance[3] and negative[0] are hand-driven, and only the denied GET of acceptance[2] is pinned elsewhere"
       },
       "source": [
         "#3358 §5",
@@ -358,6 +370,12 @@
           "date": "2026-10-19",
           "change": "steps[1] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24559, access-security.record-access-explain; wave anchor #24579 §3): the step named 'the console's access explain panel' without saying where it opens; at the console pin 4016370a it is the 'Explain access' action in Studio's Access pillar header (/_console/studio/PKG/access), the route the run drove. No clause changed",
           "ref": "#24632"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-26",
+          "change": "Two checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96 in showcase-permission-zoo.dogfood.test.ts. a1: the explain vama_bypass case asserts through in-process security.explain() under an isSystem context, not the POST /api/v1/security/explain door the oracle names. a2/a3/n0: the pin makes no deny-side explain call. automated.ref names the layer and the hand-driven legs. No clause or status changed",
+          "ref": "#25835"
         }
       ]
     },
@@ -618,7 +636,7 @@
       "title": "Sharing-model / OWD matrix: private, public_read, public_read_write, controlled_by_parent each enforce their declared baseline",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -701,7 +719,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/showcase-private-owd.dogfood.test.ts + showcase-public-read-owd.dogfood.test.ts + controlled-by-parent.dogfood.test.ts + showcase-invoice-cbp.dogfood.test.ts"
+        "ref": "packages/qa/dogfood/test/showcase-private-owd.dogfood.test.ts + showcase-public-read-owd.dogfood.test.ts + controlled-by-parent.dogfood.test.ts + showcase-invoice-cbp.dogfood.test.ts. Not every model is pinned, and the ones that are fall short of their clauses in named ways: acceptance[0] — showcase-private-owd asserts the denied PATCH's status only (no admin re-read of the row) and the by-id GET as not-200 rather than non-2xx; acceptance[2] (modifyAllRecords crossing the owner-writes baseline), acceptance[3] (public_read_write) and acceptance[5] (the auditor's viewAllRecords over derived lines) have no pin; acceptance[4] — showcase-invoice-cbp boots a test-local fallback set (showcase_cbp_member), not the C1/C2 contributor personas, and asserts by-id read and write but no list exclusion, while controlled-by-parent.dogfood.test.ts runs a synthetic cbp_account / cbp_note fixture, not showcase_invoice_line. Those legs are hand-driven"
       },
       "traps": [
         "wrong-persona"
@@ -737,6 +755,12 @@
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
           "ref": "#25003"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-26",
+          "change": "Three checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96; automated.ref read as if all four OWD models were pinned. a0: the private pin asserts the denied PATCH by status with no admin re-read, and the by-id GET as not-200. a2/a3/a5: no pin covers the modifyAllRecords bypass, public_read_write or the auditor's VAMA over derived lines. a4: showcase-invoice-cbp uses a test-local fallback set and no list exclusion, and controlled-by-parent.dogfood.test.ts is a synthetic fixture. The ref names each gap. No clause or status changed",
+          "ref": "#25835"
         }
       ]
     },
@@ -745,7 +769,7 @@
       "title": "Field-level security: editable:false strips/denies writes API-side and renders read-only in the UI; masked-read half needs an authored readable:false grant",
       "since": "v15",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -816,7 +840,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/showcase-permission-zoo.dogfood.test.ts (FLS budget case — WRITE half: the showcase's own readable:true/editable:false grant) + packages/qa/dogfood/test/showcase-fls-read-mask-strip.dogfood.test.ts (READ half, asserted server-side: a readable:false field is STRIPPED — the KEY is absent from the by-id record, from every listed row and from an explicit `select` that names it, and it is neither nulled nor replaced by a placeholder — while the entitled caller still receives it on the same row and request; filtering or sorting on the stripped field is refused 403 PERMISSION_DENIED naming the field, and the entitled caller can still do both; the read-deny's write complement is refused and the stored value is unchanged. The scratch readable:false set is authored at runtime, per this item's own steps). STILL MANUAL: (a) clause 3 and the UI half of clause 4 — the console render of the FLS state — have no pin; (b) the partial-MASKING path (#8993 `maskingRule`: key PRESENT, value replaced by a mask image) is unpinned and has no fixture anywhere in this repo — NO object declares a maskingRule, so the masked-value wire shape cannot be asserted on the stock showcase. The read pin covers the STRIP mechanism only; do not read it as covering the masked one."
+        "ref": "packages/qa/dogfood/test/showcase-permission-zoo.dogfood.test.ts (FLS budget case — WRITE half: the showcase's own readable:true/editable:false grant) + packages/qa/dogfood/test/showcase-fls-read-mask-strip.dogfood.test.ts (READ half, asserted server-side: a readable:false field is STRIPPED — the KEY is absent from the by-id record, from every listed row and from an explicit `select` that names it, and it is neither nulled nor replaced by a placeholder — while the entitled caller still receives it on the same row and request; filtering or sorting on the stripped field is refused 403 PERMISSION_DENIED naming the field, and the entitled caller can still do both; the read-deny's write complement is refused and the stored value is unchanged. The scratch readable:false set is authored at runtime, per this item's own steps). STILL MANUAL: (a) clause 3 and the UI half of clause 4 — the console render of the FLS state — have no pin; (a2) clause 2, the admin's budget write on the other side of the lock, is asserted by neither pin; (a0) clause 0's re-read leg — the zoo FLS case asserts the contributor's name PATCH status (< 300) only, never a re-read showing the name changed; (b) the partial-MASKING path (#8993 `maskingRule`: key PRESENT, value replaced by a mask image) is unpinned and has no fixture anywhere in this repo — NO object declares a maskingRule, so the masked-value wire shape cannot be asserted on the stock showcase. The read pin covers the STRIP mechanism only; do not read it as covering the masked one."
       },
       "source": [
         "examples/app-showcase/src/security/permission-sets.ts (contributor FLS)",
@@ -853,6 +877,12 @@
           "date": "2026-10-19",
           "change": "steps[5] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24559, access-security.fls-mask-and-strip steps[5]; wave anchor #24579 §3): the step still told the run to author a scratch readable:false set, while fixtures.requires[2] and knownGaps[0] already record that the stock showcase_client_liaison set (examples/app-showcase/src/security/permission-sets.ts) is that grant. The step now grants the stock set to a fresh member who holds no showcase_contributor. No clause changed",
           "ref": "#24632"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-26",
+          "change": "Two checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96 in showcase-permission-zoo.dogfood.test.ts and showcase-fls-read-mask-strip.dogfood.test.ts: acceptance[2]'s admin-side budget write is asserted by neither pin, and acceptance[0]'s re-read leg is unpinned (the zoo asserts the name PATCH status only). automated.ref's STILL MANUAL list names both. No clause or status changed",
+          "ref": "#25835"
         }
       ]
     },
@@ -1662,7 +1692,7 @@
       "title": "A public form's withdrawal holds across the layers of the environment's definition: an administrator's save is environment-wide whatever organization is active and its withdrawal closes the form, a withdrawal in any package's body of the view name closes it in every package, only an explicit false withdraws, a package's shipped false withdraws, and the package-less environment-wide copy may open a form a package ships closed",
       "since": "v17.7",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1740,7 +1770,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/showcase-public-form-withdrawal-layers.dogfood.test.ts ('showcase: a public form withdrawal at any metadata layer holds', 3 cases: the precondition, acceptance[0] through the save's env-wide message, and acceptance[1], end to end on a showcase boot with an organization active) + packages/rest/src/public-form-withdrawal.test.ts (the doors: '[#21331] public form withdrawal reaches every intake door', including '[ADR-0131 C7] no view read names an organization, whatever the tenancy answers: one environment read per door', and 'a public form withdrawal is a kill switch: one package's withdrawal of a view name closes its form') + packages/metadata-protocol/src/protocol.org-scoped-write-refused.test.ts ('[ADR-0131 D6] no organization-scoped metadata write is accepted', 'two packages shipping a view name' and 'each package's copy of a view container expands into its own package's slot', blocks (a) to (f)) + packages/metadata-core/src/anonymous-form-intake.test.ts (the anonymousFormIntakeWithdrawnIn cases). The no-organization read of step 4 has no end-to-end pin, and acceptance[2] to acceptance[5] have no stock fixture (knownGaps)"
+        "ref": "packages/qa/dogfood/test/showcase-public-form-withdrawal-layers.dogfood.test.ts ('showcase: a public form withdrawal at any metadata layer holds', 3 cases: the precondition, acceptance[0] through the save's env-wide message, and acceptance[1], end to end on a showcase boot with an organization active) + packages/rest/src/public-form-withdrawal.test.ts (the doors: '[#21331] public form withdrawal reaches every intake door', including '[ADR-0131 C7] no view read names an organization, whatever the tenancy answers: one environment read per door', and 'a public form withdrawal is a kill switch: one package's withdrawal of a view name closes its form') + packages/metadata-protocol/src/protocol.org-scoped-write-refused.test.ts ('[ADR-0131 D6] no organization-scoped metadata write is accepted', 'two packages shipping a view name' and 'each package's copy of a view container expands into its own package's slot', blocks (a) to (f)) + packages/metadata-core/src/anonymous-form-intake.test.ts (the anonymousFormIntakeWithdrawnIn cases). The no-organization read of step 4 has no end-to-end pin, so acceptance[0] does not score from the pins alone: the dogfood pin carries the save's 200 naming the environment-wide scope, both doors' 404 FORM_NOT_FOUND and the 0 landed rows, and the no-organization read is a live leg. acceptance[2] to acceptance[5] have no stock fixture (knownGaps); their pins are a unit (the rest file drives RestServer over a mocked protocol) and an in-process protocol over a stub registry (the metadata-protocol file), which is the layer their test oracle asks for"
       },
       "source": [
         "packages/metadata-core/src/anonymous-form-intake.ts#anonymousFormIntakeWithdrawnIn (the one judgement the doors make over the environment's list: a body of the same view name withdraws a candidate matched by slot or by slug; the package is not compared)",
@@ -1770,6 +1800,12 @@
           "date": "2026-10-17",
           "change": "acceptance[0]'s verify re-pointed (the domain:cli pointer on #24036, comment 6227883776): it cited registerFormEndpoints in packages/rest/src/rest-server.ts for the code that reads the environment's view list and drops a withdrawn candidate. PR #24054 (#23050 slice 11, c40a0dd9c8) moved that body to the exported registerFormEndpoints in packages/rest/src/form-routes.ts and re-pointed source[2] only; the old anchor kept resolving through the private RestServer method left behind as a stub that hands the moved body its host, so the gate stayed green. Confirmed on main c40506aac. Anchor only: no clause, step, fixture or oracle changed, so no re-run is owed",
           "ref": "#24128"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-26",
+          "change": "Two checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96. a0: the ref conceded no end-to-end pin for step 4's no-organization read; it now draws the consequence (acceptance[0] does not score from pins alone) and names which legs the dogfood pin does carry. a2-a5: the record measured the rest pin as a unit over a mocked protocol and the protocol pin as in-process over a stub registry, both fitting the test oracle; the ref names those layers. No clause or status changed",
+          "ref": "#25835"
         }
       ]
     },
@@ -2295,7 +2331,7 @@
       "title": "A package-declared capability is served by the registry (no sys_capability row — the object is retired, ADR-0131 D3) and resolves across the grant/require three-way (ADR-0066) on the PLATFORM action path; platform names cannot be shadowed",
       "since": "v17",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2329,7 +2365,7 @@
         "REGRANT leg: showcase_ops is sealed (PUT /api/v1/meta/permission/showcase_ops → 403 NOT_OVERRIDABLE), so clone it (fixtures.requires[1]) and grant the CLONE to a fresh member through a sys_user_permission_set row; invoke showcase_zoo_perm_held as that member → executes; withdraw showcase.export_data from the CLONE's systemPermissions (PUT /api/v1/meta/permission/<clone> with the read-back item minus that entry), re-invoke → refused; restore it, re-invoke → executes again",
         "invoke showcase_zoo_perm_missing (requires showcase.restricted_ops, granted to nobody) as EVERY persona incl. the OpsPermissionSet holder → refused for all; and showcase_zoo_perm_empty (requiredPermissions:[]) → executes for all, since 'declares nothing' is not 'denies everything'",
         "author a scratch package declaring a capability whose name is in PLATFORM_CAPABILITY_NAMES and BOOT it: os validate and os build both pass the declaration (the name is lexically valid), and the refusal is the registry's one-holder check at boot, which stops the process. The runtime door is closed to the same attempt: PUT /api/v1/meta/capability/<a platform name> answers 403 NOT_OVERRIDABLE (capability is a code-only type)",
-        "the capability write doors validate before anything reaches the authorization namespace (the #5961 concern): author a scratch capability with a malformed shape (e.g. scope 'galaxy') in source as a RAW `capabilities: [{…}]` entry and run os validate — refused at parse with the located `capabilities.0.scope` error. ⚠️ Not through defineCapability: it parses its argument itself (packages/spec/src/security/capabilities.ts#defineCapability), so the malformed shape throws while the config loads and os validate never reaches its located message; the runtime metadata door refuses the type outright, PUT /api/v1/meta/capability/<new name> → 403 NOT_CREATABLE (capability is allowRuntimeCreate:false and allowEnvironmentOverlay:false, packages/spec/src/kernel/metadata-plugin.zod.ts); and there is no sys_capability table to upsert into (step 1's 404)"
+        "the capability write doors validate before anything reaches the authorization namespace (the #5961 concern): author a scratch capability with a malformed shape (e.g. scope 'galaxy') in source as a RAW `capabilities: [{…}]` entry and run os validate — refused at parse with the located `capabilities.N.scope` error, N being the raw entry's own position in the array: appended after the showcase's two declared capabilities (examples/app-showcase/src/security/capabilities.ts) it is `capabilities.2.scope`, and `.0` only when it is the first entry. ⚠️ Not through defineCapability: it parses its argument itself (packages/spec/src/security/capabilities.ts#defineCapability), so the malformed shape throws while the config loads and os validate never reaches its located message; the runtime metadata door refuses the type outright, PUT /api/v1/meta/capability/<new name> → 403 NOT_CREATABLE (capability is allowRuntimeCreate:false and allowEnvironmentOverlay:false, packages/spec/src/kernel/metadata-plugin.zod.ts); and there is no sys_capability table to upsert into (step 1's 404)"
       ],
       "acceptance": [
         {
@@ -2405,6 +2441,12 @@
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
           "ref": "#25003"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-26",
+          "change": "One checklist-accuracy finding of manual-set record #25817, re-read on main b4199c96: steps[7] expected `capabilities.0.scope`, but the located path carries the raw entry's index, `.2` when the scratch entry is appended after the showcase's two capabilities. The step now says so. The record's second line (surface `mixed` yet no browser oracle) is not applied: in this ledger `mixed` names an item driven on more than one execution surface, browser or not (31 other active mixed items carry no screenshot or dom oracle), and this item is driven over the API and the build / CLI. No clause or status changed",
+          "ref": "#25835"
         }
       ]
     },
@@ -2413,22 +2455,22 @@
       "title": "A session with no active organization is a LEGAL state with fail-closed semantics: tenant-scoped reads resolve to nothing, tenant-scoped writes are refused loudly naming the missing org, and nothing is ever NULL-stamped",
       "since": "v17",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P0",
       "surface": "api",
       "personas": [
-        "a user holding NO membership (producer (1) of fixtures.knownGaps[0]): on the walled invite-only boot, minted by the operator with POST /api/v1/auth/admin/create-user, which answers membershipCreated:false",
-        "an organization member whose session has cleared its active organization (producer (2) of fixtures.knownGaps[0]): POST /api/v1/auth/organization/set-active {\"organizationId\": null}",
+        "a user holding NO membership (producer (1) of fixtures.knownGaps[0]) — since #25626 no measured HTTP door mints one on a walled boot (knownGaps[0]); the operator's POST /api/v1/auth/admin/create-user now yields a MEMBER of the operator's active organization, which serves the persona below",
+        "an organization member whose session has cleared its active organization (producer (2) of fixtures.knownGaps[0]): POST /api/v1/auth/organization/set-active {\"organizationId\": null}. Minted by the operator with POST /api/v1/auth/admin/create-user after the operator has created an organization and set it active — the new user joins it as member",
         "seeded admin (control — has an active organization)"
       ],
       "fixtures": {
         "app": "showcase",
         "requires": [
           "a tenancy-walled deployment (ADR-0095 Layer 0 active on at least one tenant-scoped object) — confirm the posture before scoring, since on an unwalled deployment every clause here is vacuous",
-          "one of the two durable producers fixtures.knownGaps[0] names, on that walled boot: a user minted by POST /api/v1/auth/admin/create-user under OS_AUTH_MEMBERSHIP_POLICY=invite-only (membershipCreated:false, no sys_member row), or a member who sends POST /api/v1/auth/organization/set-active {\"organizationId\": null}"
+          "the durable producer fixtures.knownGaps[0] still names a door for, on that walled boot: producer (2), a member who sends POST /api/v1/auth/organization/set-active {\"organizationId\": null}, minted by the operator's POST /api/v1/auth/admin/create-user once the operator has created an organization and set it active (since #25626 the new user joins the operator's active organization as member, invite-only included; with no active organization the call answers 400 NO_ACTIVE_ORGANIZATION and creates nothing). A member-less user (producer (1)) has no measured walled producer since #25626, so the legs scored on it record blocked(fixture)"
         ],
         "knownGaps": [
-          "The state needs a producer, and two are durable and non-racy on the walled boot (knownGaps[2]), both measured by QA run #24783 on `isolated` and `group`. (1) NO membership: under OS_AUTH_MEMBERSHIP_POLICY=invite-only a user minted by POST /api/v1/auth/admin/create-user answers membershipCreated:false and holds no sys_member row, because the reconciler answers `policy-skip` under invite-only (packages/plugins/plugin-auth/src/reconcile-membership.ts#reconcileMembership, packages/plugins/plugin-auth/src/admin-user-endpoints.ts#bindUserToSoleOrganization), so every session it mints reads activeOrganizationId null. (An explicitly declared `auto` binds nobody under a wall either, ADR-0093 D1 `no-target-org`; no run has measured that boot.) (2) A member who CLEARS its active organization: POST /api/v1/auth/organization/set-active {\"organizationId\": null}, after which GET /api/v1/auth/get-session reads null. The two differ under `group`, where the scope is the membership set (acceptance[0]), so record WHICH producer each clause was scored on. Two former producers no longer yield the state. The signup race is gone: the session seam settles a newly created user's membership before its first session resolves an organization (ADR-0123 D3; packages/plugins/plugin-auth/src/auth-manager.ts#composeDatabaseHooks, its defaultActiveOrg hook), so only a policy that binds nobody leaves that session without one. The removed-member path ends the session's claim instead: removing a user's last membership revokes each live session that named that organization, and a user still holding another membership has such a session re-pointed to it (packages/plugins/plugin-auth/src/membership-ended-session.ts#endSessionClaimsForEndedMembership); QA run #24783 measured the removed member's token answering 401 UNAUTHENTICATED",
+          "The state needs a producer. QA run #24783 measured two durable, non-racy ones on the walled boot (knownGaps[2]), on `isolated` and `group`; since #25626 only (2) has a door. (1) NO membership: at #24783 a user minted by POST /api/v1/auth/admin/create-user under OS_AUTH_MEMBERSHIP_POLICY=invite-only answered membershipCreated:false and held no sys_member row. #25626 retired that recipe: in multi-org mode create-user joins the new user to the operator's ACTIVE organization as member, invite-only included, and with no active organization answers 400 NO_ACTIVE_ORGANIZATION and creates no user (packages/plugins/plugin-auth/src/admin-user-endpoints.ts, the ADR-0093 D3 amendment; packages/qa/dogfood/test/create-user-organization-join.dogfood.test.ts, J1 and J2). The reconciler still answers `policy-skip` under invite-only for automatic binding (packages/plugins/plugin-auth/src/reconcile-membership.ts#reconcileMembership), but no HTTP door that mints a member-less user on a walled boot has been measured since, so a clause or leg scored on producer (1) records blocked(fixture) naming this line until a run measures one. (An explicitly declared `auto` binds nobody under a wall either, ADR-0093 D1 `no-target-org`; no run has measured that boot.) (2) A member who CLEARS its active organization: POST /api/v1/auth/organization/set-active {\"organizationId\": null}, after which GET /api/v1/auth/get-session reads null. The two differ under `group`, where the scope is the membership set (acceptance[0]), so record WHICH producer each clause was scored on. Two former producers no longer yield the state. The signup race is gone: the session seam settles a newly created user's membership before its first session resolves an organization (ADR-0123 D3; packages/plugins/plugin-auth/src/auth-manager.ts#composeDatabaseHooks, its defaultActiveOrg hook), so only a policy that binds nobody leaves that session without one. The removed-member path ends the session's claim instead: removing a user's last membership revokes each live session that named that organization, and a user still holding another membership has such a session re-pointed to it (packages/plugins/plugin-auth/src/membership-ended-session.ts#endSessionClaimsForEndedMembership); QA run #24783 measured the removed member's token answering 401 UNAUTHENTICATED",
           "`invite-only` is no longer a fixture gap: the walled boot must declare a membership policy anyway (RUNNER.md 'A walled boot is a fixture of its own', prerequisite 3), and declaring `invite-only` gives knownGaps[0]'s producer (1). SSO-JIT-pending still has no stock fixture: that producer is blocked(fixture) unless the run configures SSO.",
           "requires[0]'s tenancy-walled deployment is a walled boot. On 18.0.0 os serve — and os dev / os start, which boot through it — boots OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true): 18.x step 4 (#24580) deleted the walled boot refusal (serve.ts walledPostureRefusal) before 18.0.0, and of the published prereleases only 18.0.0-next.5 carries it. The walled boot is provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own': the multi-org runtime declared by the app (no example app declares it), OS_PLATFORM_OWNER_EMAIL, and a declared OS_AUTH_MEMBERSHIP_POLICY; each one absent refuses an os dev boot naming itself, while a bare os serve in production mode judges none of them until OS_AUTH_SECRET is set (that entry). The item stays blocked (fixture, #9334) because every clause is a walled leg and the stock showcase provisions no walled boot, not for want of a producer (knownGaps[0]); its pin (automated.ref) boots the posture in-process.",
           "acceptance[4] has an open question for a user who holds NO membership at all (producer (1) of knownGaps[0]): its login/logout rows in sys_audit_log carry tenant_id null, because no organization exists to stamp and ADR-0123 D3's ordering fix 'must not manufacture a membership that policy says must not exist'. QA run #24783 read those rows only as the platform operator (GET /api/v1/data/sys_audit_log filtered by user_id answered 200), while the user itself gets 403 on sys_audit_log, on both postures. ADR-0123 does not state whether that is the intended answer: D3 forbids a NULL-tenanted row under this state 'in any subsystem' and pays the audit ledger by ordering, which binds nobody under invite-only. ADR-0131 D7 moves the clause's premise without answering the question: sys_audit_log is a deployment-level ledger with no organization column, its tenant_id is an attribution field the tenant-field resolver does not claim, 'never the tenancy anchor', and such objects are 'governed by object permission, not by the wall'. So Layer 0 is inert on the ledger, and the clause's 'invisible to RLS readers' (written for #8245, when the ledger was walled) no longer names its read path; ADR-0131 D9 scopes the no-NULL rule to tenant-column objects ('column ⇒ in scope'). Neither ADR states whether a member-less actor's row may carry a NULL attribution, nor who must be able to read it. The operator's 200 and the user's 403 are the implementation: packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts, whose tenant_id docblock says NULL means a deployment-level action and whose defaultRowScope sys_audit_log_org reads tenant_id == current_user.organization_id, which a NULL row matches for no organization reader. The clause stands as written. Until the question is ruled (raised by QA run #24783's finding F3 for wave anchor #24579; no card carries it yet), score acceptance[4] on that user from what is measured (the raw rows, their tenant_id and the readers that see them) and name this question beside the verdict",
@@ -2439,7 +2481,7 @@
       "blocked": { "by": "fixture", "ref": "#9334" },
       "automated": {
         "kind": "unit",
-        "ref": "packages/plugins/plugin-security/src/no-active-organization-write-refusal.test.ts — pins every clause of this item at unit level, INCLUDING a control asserting that the `single` posture has no wall, i.e. the test itself agrees the stock showcase configuration makes the item vacuous. The layer it drives is a plugin unit: SecurityPlugin's middleware over a stub terminal that stands in for the engine, so a case that 'lands' there means the middleware called next(), and the engine's own insert path never runs. Its `group` describe's CONTROL 'a NON-EMPTY membership set lands, even with no active organization' therefore proves the plugin-security wall lets that write through and nothing past it: on a full walled group boot the engine refuses the same write with 500 ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED (#24784). Under RUNNER rule 6 the pin scores a clause whose oracle is the HTTP answer partial at most, naming the engine and HTTP layers as missing, and it cannot score acceptance[7] at all"
+        "ref": "packages/plugins/plugin-security/src/no-active-organization-write-refusal.test.ts — a plugin unit: SecurityPlugin's middleware over a stub terminal that stands in for the engine, so a case that 'lands' there means the middleware called next(), and the engine's own insert path never runs. It has cases for acceptance[0] (the read deny sentinel), acceptance[1] and acceptance[2] (insert, update and bulk insert refused naming the missing active organization, nothing stamped), and a control asserting that the `single` posture has no wall — the test itself agrees the stock showcase configuration makes the item vacuous. It has NO case, at any level, for acceptance[3], acceptance[4], acceptance[5] or acceptance[6]. Its `group` describe now asserts 'a NON-EMPTY membership set with NO active organization: an insert has nowhere to land, and is refused the same way' (the #24784 fix, PR #24819), still at the plugin layer. + packages/qa/dogfood/test/no-active-organization-write-refusal.dogfood.test.ts (HTTP, a `posture-only` isolated showcase boot whose admin session carries no active organization: the write is refused 403 naming the missing organization and nothing is written — acceptance[1], acceptance[2], negative[1]) + packages/qa/dogfood/test/sharing-rule-org-less-caller.dogfood.test.ts (HTTP: the #8158 manage_sharing holder with no active organization is refused list, by-name and by-id read, evaluate, delete and create, and an org-scoped grant confers nothing — acceptance[3], negative[0]) + packages/plugins/plugin-security/src/no-active-organization-insert-union-scope.test.ts (ENGINE: a real ObjectQL engine and SqlDriver, the `group` refusal with nothing stored — acceptance[7]'s shape in-process, not the live walled group boot acceptance[7] requires). Under RUNNER rule 6 the plugin-unit pin scores an HTTP-oracle clause partial at most, naming the engine and HTTP layers as missing, and no pin scores acceptance[7]"
       },
       "steps": [
         "establish the state and PROVE it: obtain a session whose `activeOrganizationId` is null, and cite the evidence (session row / session endpoint payload) — do not infer the state from the symptom you are about to test",
@@ -2568,6 +2610,12 @@
           "date": "2026-10-20",
           "change": "fixtures.knownGaps[3] sharpened with ADR-0131 D7's reading — carried item of wave anchor #24579 round 13 (PR #24801 named it in knownGaps[3]; #24343 reads sys_audit_log.tenant_id as D7's attribution field, not the anchor). Decided by governing text, read at base 7697ddcf94: D7 makes sys_audit_log a deployment-level ledger with no organization column, whose tenant_id is an attribution field and never the tenancy anchor, governed by object permission and not by the wall, and D9 scopes the no-NULL rule to tenant-column objects. No ADR states that a member-less actor's audit row may read NULL, or that the platform operator reads such rows, so acceptance[4] stays as written and knownGaps[3] names the question with the D7 reading. No clause changed",
           "ref": "#24850"
+        },
+        {
+          "revision": 9,
+          "date": "2026-10-26",
+          "change": "Six checklist-accuracy findings, re-read on main b4199c96. Five from Tier 1 record #25815: automated.ref quoted the unit pin's group CONTROL as 'a NON-EMPTY membership set lands, even with no active organization'; on this tree that case reads 'a NON-EMPTY membership set with NO active organization: an insert has nowhere to land, and is refused the same way' and asserts refusal (#24784, PR #24819) — the ref now quotes it. The ref claimed the pin covers every clause; acceptance[3] to acceptance[6] have no case in it, and the ref says so. Three existing pins join the ref with their layers: no-active-organization-write-refusal.dogfood.test.ts (HTTP, a1/a2/n1), sharing-rule-org-less-caller.dogfood.test.ts (HTTP, a3/n0) and no-active-organization-insert-union-scope.test.ts (engine, a7's shape, which still does not score a7). From addendum record #25823 (after #25626): the operator create-user producer of a member-less user is retired — under a wall create-user joins the operator's active organization, or answers 400 NO_ACTIVE_ORGANIZATION — so personas[0], personas[1], fixtures.requires[1] and knownGaps[0] now mint producer (2)'s member that way and record producer (1) blocked(fixture). knownGaps[4] and knownGaps[5] still read #24784 as open; #24784 closed 2026-10-20 (PR #24819), and their own text asks for a live walled group re-run before the line drops, so they are left for that run. No clause or status changed",
+          "ref": "#25835"
         }
       ]
     },
@@ -2937,7 +2985,7 @@
       "title": "OS_PLATFORM_OWNER_EMAIL platform-admin anchor: only a VERIFIED stored-email match confers PLATFORM_ADMIN — unset, unverified match, non-match and malformed lists each confer nothing, fail closed",
       "since": "v17",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3021,7 +3069,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/core/src/security/resolve-authz-context.platform-admin-config.test.ts (the acceptance criterion, all four fail-closed arms, the ⭐ stored-row-not-seed pin, the #11663 L5 posture split of the legacy grant anchor, the '[ADR-0131 D5] under `single` the Default Organization's admin_full_access grant is the anchor' describe) + packages/core/src/security/platform-admin.test.ts (parse/refusal/memo) + packages/core/src/security/admin-standing-surface.test.ts. STILL MANUAL: the live-HTTP arms over a real boot (clauses 1-4; clause 6 is test-only) — the pins run the derivation in-process; this item's live legs prove the same verdicts through the mounted server"
+        "ref": "packages/core/src/security/resolve-authz-context.platform-admin-config.test.ts (the acceptance criterion, all four fail-closed arms, the ⭐ stored-row-not-seed pin, the #11663 L5 posture split of the legacy grant anchor, the '[ADR-0131 D5] under `single` the Default Organization's admin_full_access grant is the anchor' describe) + packages/core/src/security/platform-admin.test.ts (parse/refusal/memo) + packages/core/src/security/admin-standing-surface.test.ts. STILL MANUAL: the live-HTTP arms over a real boot (clauses 1-4; clause 6 is test-only) — the pins run the derivation in-process; this item's live legs prove the same verdicts through the mounted server. Also unpinned: negative[0]'s declaration — ADMIN_STANDING_NON_TABLE_INPUTS in packages/core/src/security/admin-standing-surface.ts, where OS_PLATFORM_OWNER_EMAIL is declared a non-table derivation input — is asserted by no test; admin-standing-surface.test.ts pins ADMIN_STANDING_SURFACE (the tables the resolver reads) and never reads the non-table list, so a run reads that declaration from source"
       },
       "source": [
         "packages/core/src/security/resolve-authz-context.ts#hasPlatformAdminStanding (§6b-config — the config anchor inside the ONE derivation site; additive, never subtractive) + (hasPlatformAdminStanding, the id-shaped projection)",
@@ -3083,6 +3131,12 @@
           "date": "2026-10-23",
           "change": "Re-authored for the Default Organization grant — clause 6's own re-author trigger fired. #11979 (Choice 4B) landed by PR #24373 (b2e78701f7): the single first-user promotion writes its admin_full_access grant owned by the Default Organization (ADR-0131 D5, bootstrap-platform-admin.ts). PR #24872 (94842bad2a) then retired the organization-less row's single-posture anchor: grantAnchorsPlatformStanding answers yes for the Default Organization's grant only. Six texts still named the organization-less row as the live door — personas[0], fixtures.knownGaps[0], acceptance[0], acceptance[5], variants[6], source[2]; each now names the Default Organization's grant, and personas[0], acceptance[5], variants[6] and source[2] add that an organization-less row anchors nothing on any posture. Clause 6's verify and automated.ref cite the '[ADR-0131 D5] under `single` the Default Organization's admin_full_access grant is the anchor' describe; source gains bootstrap-platform-admin.ts#readPromotionGrantOwner. PR #24463 had re-pointed source[2]'s anchor at grantAnchorsPlatformStanding and left the revision at 3. Read at base 9dc1f42d50. No clause verdict changed: M is refused, the seeded admin answers 200, the walled grant confers no standing, the config anchor confers",
           "ref": "#24465"
+        },
+        {
+          "revision": 9,
+          "date": "2026-10-26",
+          "change": "Two checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96. n0: admin-standing-surface.test.ts never asserts ADMIN_STANDING_NON_TABLE_INPUTS, the OS_PLATFORM_OWNER_EMAIL non-table declaration negative[0] cites (no test in the repo names it); automated.ref now says so. a0-a3: the record confirms the ref already records these as STILL MANUAL live-HTTP arms that the unit pins do not score — no edit was owed for that line. No clause or status changed",
+          "ref": "#25835"
         }
       ]
     },
@@ -3091,7 +3145,7 @@
       "title": "The /auth/me/permissions aggregation (and its /auth/me/localization + /me/apps siblings) mirrors server-side enforcement in both directions — and the trio's anonymous 200 is the deliberate exception to the 401 floor",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3186,7 +3240,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/me-apps-and-everyone-baseline.dogfood.test.ts (the /me/apps half: member sees showcase, requiredPermissions gates, anonymous [], tabPermissions hidden drop and more-visible grant wins) + plugin-hono-server unit suites hono-current-user-endpoints.test.ts / current-user-endpoints-additive-baseline.test.ts / current-user-endpoints-position-grants.test.ts / current-user-endpoints-delegated-resolution.test.ts + plugin-security get-effective-object-permissions.test.ts (the plain-wildcard parity table behind the plain-wildcard clause: shipped and authored plain-'*' subjects x registered objects x every can() verb, the map read through the real can() against PermissionEvaluator.checkObjectPermission — a unit oracle over fixture schemas, not the live stack). STILL MANUAL: the live parity cross-check of the returned maps against actual enforcement responses (clauses 1-2 and the plain-wildcard clause) and the self-scoping probe"
+        "ref": "packages/qa/dogfood/test/me-apps-and-everyone-baseline.dogfood.test.ts (the /me/apps half: member sees showcase, requiredPermissions gates, anonymous [], tabPermissions hidden drop and more-visible grant wins) + plugin-hono-server unit suites hono-current-user-endpoints.test.ts / current-user-endpoints-additive-baseline.test.ts / current-user-endpoints-position-grants.test.ts / current-user-endpoints-delegated-resolution.test.ts / current-user-endpoints-localization.test.ts (the locale and timezone floors of the localization clause, unit layer) + plugin-security get-effective-object-permissions.test.ts (the plain-wildcard parity table behind the plain-wildcard clause: shipped and authored plain-'*' subjects x registered objects x every can() verb, the map read through the real can() against PermissionEvaluator.checkObjectPermission — a unit oracle over fixture schemas, not the live stack). STILL MANUAL: the live parity cross-check of the returned maps against actual enforcement responses (clauses 1-2 and the plain-wildcard clause) and the self-scoping probe; the admin half of the /me/apps clause (the dogfood pin asserts only that the member does not see a gated app, never that admin does); and the anonymous-trio clause on a real stack — hono-current-user-endpoints.test.ts pins the three 200 shapes on a bare HonoServerPlugin with no auth service and no auth gate, where the 401-floor regression the clause guards cannot occur, and the dogfood anonymous /me/apps case asserts body.apps ?? [] only, never the status"
       },
       "source": [
         "packages/plugins/plugin-hono-server/src/current-user-endpoints.ts#tabPermissions (/auth/me/permissions aggregation + most-permissive merge), (/auth/me/localization), (/me/apps requiredPermissions/tabPermissions filter), (the /api/v1 prefix)",
@@ -3214,6 +3268,12 @@
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
           "ref": "#25003"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-26",
+          "change": "Three checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96. a2: me-apps-and-everyone-baseline.dogfood.test.ts asserts only the member side of the gated-app clause. a3: the anonymous trio's 200 shapes are pinned only on a bare HonoServerPlugin with no auth service or gate, and the dogfood anonymous /me/apps case reads the body without the status. a5: packages/plugins/plugin-hono-server/src/current-user-endpoints-localization.test.ts (locale/timezone floors, unit) joins automated.ref. The STILL MANUAL list names the first two. No clause or status changed",
+          "ref": "#25835"
         }
       ]
     },
@@ -3222,7 +3282,7 @@
       "title": "Opt-in record-view auditing writes `read` rows for exactly the opted-in objects' detail reads, batched off the request path — stock boot audits nothing, excluded names refuse loudly, values never copied",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -3286,7 +3346,7 @@
         }
       ],
       "negative": [
-        "an audit write must never break the read: reads answer 200 even when the ledger write fails — the failure is reported once per process with the durability text (read-audit.ts) and rows are LOST, not retried. Observing that needs a broken ledger and is out of scope for a stock run; do not fabricate it",
+        "an audit write must never break the read: reads answer 200 even when the ledger write fails — the failure is reported once per CAUSE with the durability text (read-audit.ts; #18247): a second, different cause reports again at error, and a repeat of a cause already reported degrades to debug. Rows are LOST, not retried. Observing that needs a broken ledger and is out of scope for a stock run; do not fabricate it",
         "a read with no principal (no userId and no actor) lands no row — noise in the WHO ledger is refused by design (read-audit.ts)",
         "cross-ref access-security.audit-log-browser — WRITE auditing, the browser UI, and the append-only guard belong there; this item owes only the read-writer's contract (one ledger, two items, no double-scoring). The append-only negative there covers action:'read' rows too: user-context POSTs to sys_audit_log are refused regardless of action"
       ],
@@ -3305,7 +3365,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/plugins/plugin-audit/src/read-audit.test.ts (discriminator, batching/flush, isSystem + no-principal skips, exclusion filter) + audit-plugin.test.ts. STILL MANUAL: the stock-boot honest-default (clause 1) and the configured live loop through the mounted server (clauses 2-5, fixture-gapped per knownGaps)"
+        "ref": "packages/plugins/plugin-audit/src/read-audit.test.ts (discriminator, batching/flush, isSystem + no-principal skips, exclusion filter) + audit-plugin.test.ts. STILL MANUAL: the stock-boot honest-default (clause 1) and the configured live loop through the mounted server (clauses 2-5, fixture-gapped per knownGaps). For clause 5 in particular: the exclusion-filter pin probes sys_audit_log and sys_session, not the sys_job the clause names (sys_job is still on AUDIT_EXCLUDED_OBJECTS, audit-writers.ts), and no pin observes the AuditPlugin install line ('record-view auditing installed on N object(s)'), so both halves of its log oracle are read from a live boot"
       },
       "source": [
         "packages/plugins/plugin-audit/src/read-audit.ts#READ_AUDIT_ACTION (READ_AUDIT_ACTION, installReadAuditWriter opt-in + exclusion filter, extractDetailReadId, buildRow nulls + view instant, isSystem/no-principal skips, batcher)",
@@ -3331,6 +3391,12 @@
           "date": "2026-10-20",
           "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). acceptance[2].clause cited lines 516-521 of read-audit.ts in the comma-range spelling, the second range of the two-range list 45397edf53 authored (55-75 and 516-521). At that commit lines 516-521 were the audit row's old_value / new_value nulls; at this base they hold a docblock, and the nulls sit in the buildRow closure of installReadAuditWriter. The clause now anchors read-audit.ts#buildRow and names the header section that gives the reason in prose. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed",
           "ref": "#24752"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-26",
+          "change": "Two checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96. n0: negative[0] said a ledger write failure is reported once per process; read-audit.test.ts's '#18247' describe pins once per CAUSE (a second, different cause reports again at error), so the text now says that. a4: clause 5 cites sys_job while the pin probes sys_audit_log / sys_session, and no pin observes the install line; automated.ref says both halves of the log oracle are live. No clause's assertion or status changed",
+          "ref": "#25835"
         }
       ]
     },
@@ -3339,7 +3405,7 @@
       "title": "The /s/:token share-link landing page renders the resolved record minus redacted fields, gates on password, and refuses dead links with designed states — never a blank page or a raw error",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -3356,7 +3422,7 @@
         "knownGaps": [
           "automated.ref lives ENTIRELY in the objectui repo — from this checkout it is neither runnable nor pin-evidenced (the RUNNER standing fact): drive the item by hand in the browser, or run the pin in an objectui checkout and name the revision",
           "the ai_conversations transcript branch (objectui SharedRecordPage.tsx: the SharedRecordPage component's ai_conversations branch, with its messages-fetch effect and the ChatbotEnhanced readOnly transcript) is ai_conversations-only (Cloud/EE service-ai) — the same knownGap split the API item records for /:token/messages; not runnable on open-framework showcase",
-          "FIXED, regression row, expected PASS (objectui#11649): the page no longer folds every 401 into the password prompt. Measured at objectui 1fb1ced36243 (the pin this row was written at), again at daeb77fc84dd (#23878) and at f8267df93aba (this repo's .objectui-sha when revision 3 was written; re-read it at whatever pin the run boots): SharedRecordPage.tsx reads a 401 by the body's error.code through shared-record-shape.ts resolveGateOf — NEEDS_PASSWORD and WRONG_PASSWORD open the password prompt, SIGN_IN_REQUIRED opens the sign-in gate, and any other code shows the server's message, not a prompt — so a signed_in-audience link opened anonymously renders the dedicated 'Sign in required' state, never 'Password required'. acceptance[3] now asserts that state (QA run #23163 saw it live at objectstack 36b2889c). The objectui pins are apps/console/src/pages/SharedRecordPage-11649.test.tsx ('shows the sign-in path back to this link, and no password prompt') and shared-record-shape.test.ts ('reads each 401 code as its gate'), objectui-repo-only like knownGaps[0]"
+          "FIXED, regression row, expected PASS (objectui#11649): the page no longer folds every 401 into the password prompt. Measured at objectui 1fb1ced36243 (the pin this row was written at), again at daeb77fc84dd (#23878) and at f8267df93aba (the objectui pin when revision 3 was written). The pin is retired (#25745): the console a run boots is built from this repo's ui/ by `pnpm console:build` into packages/console/dist (gitignored; `pnpm build` does not refresh it), so re-read ui/apps/console/src/pages/SharedRecordPage.tsx at the run's own framework sha: SharedRecordPage.tsx reads a 401 by the body's error.code through shared-record-shape.ts resolveGateOf — NEEDS_PASSWORD and WRONG_PASSWORD open the password prompt, SIGN_IN_REQUIRED opens the sign-in gate, and any other code shows the server's message, not a prompt — so a signed_in-audience link opened anonymously renders the dedicated 'Sign in required' state, never 'Password required'. acceptance[3] now asserts that state (QA run #23163 saw it live at objectstack 36b2889c). The objectui pins are apps/console/src/pages/SharedRecordPage-11649.test.tsx ('shows the sign-in path back to this link, and no password prompt') and shared-record-shape.test.ts ('reads each 401 code as its gate'), objectui-repo-only like knownGaps[0]"
         ]
       },
       "steps": [
@@ -3454,6 +3520,12 @@
           "date": "2026-10-20",
           "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). fixtures.knownGaps[1], acceptance[1].verify, acceptance[2].verify and source[1] cited objectui SharedRecordPage.tsx by the line ranges 190-234 (twice), 143-176 and 178-186 in the comma-range spelling (authored in 45397edf53). At the objectui pin that commit shipped, 9602dc820450, those lines were the ai_conversations branch, the password form and the error state; at the shipped pin 12dc7b47c340 all three have moved down, below a sign-in gate and a reworked fetchResolve, and the password branch now reads gate === 'password'. Each now names its branch of the SharedRecordPage component. objectui is read at the shipped pin 12dc7b47c340 and cited in prose, because no objectui anchor resolves in this gate. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed",
           "ref": "#24752"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-26",
+          "change": "Retired-pin text (#26035, which left area files to these ledger cards): knownGaps[2] told the run to re-read SharedRecordPage.tsx 'at whatever pin the run boots', naming this repo's .objectui-sha. The pin is retired (#25745); the console builds from ui/ with `pnpm console:build` into packages/console/dist, which `pnpm build` does not refresh. The row now says so and points at ui/apps/console/src/pages/SharedRecordPage.tsx, read on main b4199c96 (resolveGateOf and both named pins present under ui/apps/console/src/pages/). knownGaps[0] and automated.ref still call the ref objectui-repo-only, in step with RUNNER.md's standing fact, which #25850 owns. No clause or status changed",
+          "ref": "#25835"
         }
       ]
     },
@@ -3673,7 +3745,7 @@
       "title": "/meta read gates added on v18: the authoring-trail doors (history / audit / diff / package commits) refuse a setup.access-only caller, and a list view or dashboard carrying requiredPermissions is withheld from a caller without them on EVERY alternate door",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3722,7 +3794,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/rest/src/meta-history-diff-authoring-door.test.ts + packages/qa/dogfood/test/wall-authoring-trail-doors.dogfood.test.ts + packages/rest/src/meta-view-dashboard-audience-gate.test.ts"
+        "ref": "packages/rest/src/meta-history-diff-authoring-door.test.ts + packages/qa/dogfood/test/wall-authoring-trail-doors.dogfood.test.ts + packages/rest/src/meta-view-dashboard-audience-gate.test.ts. Layers (RUNNER rule 6): meta-view-dashboard-audience-gate.test.ts drives RestServer over a mock server and protocol (unit) and covers list pruning, the plain by-name refusal and the cached arm only — it has no /published, /layers or ?state=draft door and no /history case for a studio.access holder lacking the view's requiredPermissions, so acceptance[2]'s alternate doors and its /history leg stay live. negative[0]'s 304 assertion ('a caller who no longer holds the capability is never answered a 304…') exists only at that unit layer; the live 304 probe is driven by hand"
       },
       "source": [
         "packages/rest/src/meta-item-read-gate.ts#holdsRequiredPermissions",
@@ -3741,6 +3813,12 @@
           "date": "2026-10-19",
           "change": "acceptance[2] (clause, verify) and steps[1] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24559, access-security.meta-authoring-trail-and-audience-gates; wave anchor #24579 §3). The clause said every by-name door of the gated view answers 403 PERMISSION_DENIED. /history is an authoring-trail door: it asks mayReadAuthoringTrail (studio.access or manage_metadata, packages/rest/src/rest-server.ts) before anything, so a member without either is refused 403 FORBIDDEN first — acceptance[1]'s gate — and PERMISSION_DENIED is reached only by a member the trail admits. The run saw exactly that split. The other doors and clauses are unchanged",
           "ref": "#24632"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-26",
+          "change": "Two checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96 in meta-view-dashboard-audience-gate.test.ts. a2: the pin is a unit (RestServer over a mock server and protocol) covering list pruning and the plain by-name refusal; the /published, /layers, ?state=draft doors and the studio.access /history leg are in no pin. n0: the never-a-304 assertion is unit-only. automated.ref names both. No clause or status changed",
+          "ref": "#25835"
         }
       ]
     },
@@ -3749,7 +3827,7 @@
       "title": "Security-catalog doors new on v18: POST /security/_activation/:type/:name switches a position or permission set off and on (holders lose and regain its grants), and POST /security/permission-sets/:name/clone copies a set with its refusal arms",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3801,7 +3879,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/runtime/src/domains/catalog-activation-door.test.ts + packages/qa/dogfood/test/catalog-activation-door.dogfood.test.ts + packages/runtime/src/domains/permission-set-clone.test.ts + packages/qa/dogfood/test/permission-set-clone-door.dogfood.test.ts"
+        "ref": "packages/runtime/src/domains/catalog-activation-door.test.ts + packages/qa/dogfood/test/catalog-activation-door.dogfood.test.ts + packages/runtime/src/domains/permission-set-clone.test.ts + packages/qa/dogfood/test/permission-set-clone-door.dogfood.test.ts. Which arms are pinned over HTTP and which only at the unit layer (the domain handler over fakes): acceptance[2] — the dogfood activation pin drives the unknown-name 404 (and a 400 for a type with no switch); the everyone / guest audience-anchor 400 is asserted only in catalog-activation-door.test.ts. acceptance[3] — the dogfood clone pin drives 200 with the dropped keys, 409 for another set's name, 404, the bad-name 400 and 403; the anonymous 401, the 409 for the source's own name and the closed-body 400 are unit-only. Those HTTP legs are hand-driven"
       },
       "source": [
         "packages/runtime/src/domains/catalog-activation.ts#handleCatalogActivationWrite",
@@ -3815,6 +3893,12 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-26",
+          "change": "Two checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96. a2: the everyone/guest 400 is asserted only by the unit catalog-activation-door.test.ts; the dogfood pin drives the 404 arm (and a no-switch-type 400). a3: the dogfood clone pin drives 200 + dropped keys, 409 (another set's name), 404, bad-name 400 and 403; the anonymous 401, the source-name 409 and the closed-body 400 are unit-only. automated.ref names the split. No clause or status changed",
+          "ref": "#25835"
         }
       ]
     },
@@ -3823,7 +3907,7 @@
       "title": "The security catalog has exactly one holder per name: two packages declaring one permission-set / position name refuse boot (on install-local, 422 PLUGIN_REGISTER_FAILED naming each name and its holder), a body packageId that disagrees with its package is refused, `os migrate security-catalog-overlays` clears environment shadows, and boot reports grants naming undefined catalog entries",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3880,7 +3964,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/runtime/src/standalone-stack-security-catalog-one-holder.test.ts + packages/qa/dogfood/test/security-catalog-cold-boot-environment-holder.dogfood.test.ts + packages/cli/src/commands/migrate/security-catalog-overlays.integration.test.ts + packages/plugins/plugin-security/src/catalog-reference-report.test.ts + packages/spec/src/security/permission-set-owner-binding.test.ts + packages/objectql/src/permission-set-owner-registration.test.ts"
+        "ref": "packages/runtime/src/standalone-stack-security-catalog-one-holder.test.ts + packages/qa/dogfood/test/security-catalog-cold-boot-environment-holder.dogfood.test.ts + packages/cli/src/commands/migrate/security-catalog-overlays.integration.test.ts + packages/plugins/plugin-security/src/catalog-reference-report.test.ts + packages/spec/src/security/permission-set-owner-binding.test.ts + packages/objectql/src/permission-set-owner-registration.test.ts + packages/cloud-connection/src/marketplace-install-local-catalog-name-collision.test.ts. What each clause's pins reach: acceptance[1] — the boot-refusal pins stop at manifest registration; the last file drives POST /marketplace/install-local in-process (the plugin's route handler with a stubbed cloud fetch) and asserts 422 PLUGIN_REGISTER_FAILED with nothing registered, so the install-local door is pinned above HTTP and its live leg stays. acceptance[2] — permission-set-owner-registration.test.ts proves VALIDATION_ERROR / 400 at ObjectQL.registerApp, not on a permission-set save door; no HTTP pin drives the save. acceptance[3] — the CLI integration test runs MigrateSecurityCatalogOverlays.run in-process (oclif), not a spawned process, which the build oracle accepts. acceptance[4] — catalog-reference-report.test.ts asserts the [security] error and info lines on a vi.fn logger; the ≤50-names cap (LOGGED_LIMIT in catalog-reference-report.ts) is asserted by no case"
       },
       "source": [
         "packages/objectql/src/registry.ts#SecurityCatalogNameConflictError",
@@ -3901,6 +3985,12 @@
           "date": "2026-10-19",
           "change": "acceptance[1] (clause, verify, evidence) and the title's install-local parenthetical re-pointed — an assertion defect found by the 18.0 QA sweep (QA run #24558, access-security.security-catalog-one-holder-and-boot-report acceptance[1]: FAIL, confirmed by an independent RUNNER rule 7 re-derivation; card #24567 row 2, folded from #24568). The product is right and the clause was wrong: on an inline manifest the install-local door (packages/cloud-connection/src/marketplace-install-local-plugin.ts) answers its OWN registered 422 PLUGIN_REGISTER_FAILED and interpolates only the register error's message — that route's documented contract in packages/spec/src/api/error-code-ledger.zod.ts — so it never carried NAMESPACE_CONFLICT or a `conflicts[]`, and no pin in automated.ref asserts either at this door. The run measured the refusal twice: the names and their holders inside the message, nothing installed (27 packages before and after). The clause now asserts that; a structured `conflicts[]` on this door would be a separate enhancement decision, not taken here. The other four clauses are unchanged",
           "ref": "#24592"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-26",
+          "change": "Four checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96. a1: packages/cloud-connection/src/marketplace-install-local-catalog-name-collision.test.ts (in-process plugin, stubbed cloud fetch: 422 PLUGIN_REGISTER_FAILED, nothing registered) was not in the ref; it joins it, with its layer. a2: the owner-registration pin proves the 400 at registerApp, not a save door. a3: the CLI runs in-process, which the record judged acceptable for the build oracle; the ref records it. a4: the ≤50-names cap is not asserted. No clause or status changed",
+          "ref": "#25835"
         }
       ]
     },
@@ -3909,7 +3999,7 @@
       "title": "Grant-table write contract (sys_user_permission_set / sys_user_position): the retired permission_set_id column is refused, a duplicate grant is 409, an inverted validity window is 400, granted_by is stamped with the caller, and (walled) a grant to a non-member is refused",
       "since": "v18",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3967,7 +4057,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/plugins/plugin-security/src/grant-permission-set-name.test.ts + packages/plugins/plugin-security/src/sys-user-permission-set-window-order.test.ts + packages/qa/dogfood/test/permission-set-assignment-window.dogfood.test.ts + packages/plugins/plugin-security/src/granted-by-writer-provenance.test.ts + packages/plugins/plugin-security/src/grant-holder-membership-refusal.test.ts"
+        "ref": "packages/plugins/plugin-security/src/grant-permission-set-name.test.ts + packages/plugins/plugin-security/src/sys-user-permission-set-window-order.test.ts + packages/qa/dogfood/test/permission-set-assignment-window.dogfood.test.ts + packages/plugins/plugin-security/src/granted-by-writer-provenance.test.ts + packages/plugins/plugin-security/src/grant-holder-membership-refusal.test.ts. Layers (RUNNER rule 6): the four plugin-security files are ENGINE pins — a real ObjectQL engine and SQL driver, the thrown error read through resolveThrownHttpError — so acceptance[1], acceptance[3] and acceptance[4] (api oracle) score partial from them: no pin here drives the /data door over HTTP for those three. The one HTTP pin, permission-set-assignment-window.dogfood.test.ts › 'the door refuses a window whose end is not after its start…', asserts [400, VALIDATION_FAILED] and fields [[valid_until, rule_violation]] only; acceptance[2]'s authored message, the absent or non-'unevaluable' constraint and the valid-window 201 control are not asserted over HTTP and stay live legs"
       },
       "source": [
         "packages/plugins/plugin-security/src/objects/sys-user-permission-set.object.ts",
@@ -4010,6 +4100,12 @@
           "date": "2026-10-20",
           "change": "knownGaps[0]'s prerequisite sentence says os dev — round 11's carried finding 3 (wave anchor #24579 round 12; report 6285435593 on PR #24801), from QA run #24783's F2: a bare production os serve judges none of the walled prerequisites until OS_AUTH_SECRET is set (RUNNER.md, the serve.ts AuthPlugin-skipped branch at base 307ce4c4b4). The same sentence PR #24801 wrote into four other walled items, byte for byte. No clause changed",
           "ref": "#24824"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-26",
+          "change": "Two checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96. a1/a3/a4: the plugin-security pins in automated.ref run at the engine layer (real ObjectQL + SqlDriver, errors through resolveThrownHttpError), so the api-oracle clauses score partial from them; the ref now names the layer. a2: the dogfood window case asserts status, code and the fields pair only; the message, constraint and 201 control legs are named live. No clause or status changed",
+          "ref": "#25835"
         }
       ]
     },
@@ -4018,7 +4114,7 @@
       "title": "Write guards tightened on v18: a walled update cannot null out organization_id, a detail write naming an unreadable header is reference_not_found, a validation rule reading an unreadable header answers like a missing one, and a controlled_by_parent child's attachments / comments / explain follow the master's edit grant",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -4076,7 +4172,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/plugins/plugin-security/src/tenant-wall-organization-removal.test.ts + packages/objectql/src/engine-unreadable-master-detail-header.test.ts + packages/objectql/src/engine-predicate-related-master-detail-header.test.ts + packages/qa/dogfood/test/cbp-parent-attachment-comment-gates.dogfood.test.ts + packages/qa/dogfood/test/cbp-explain-master-write.dogfood.test.ts + packages/plugins/plugin-security/src/controlled-by-parent-chain-middle-master.test.ts"
+        "ref": "packages/plugins/plugin-security/src/tenant-wall-organization-removal.test.ts + packages/objectql/src/engine-unreadable-master-detail-header.test.ts + packages/objectql/src/engine-predicate-related-master-detail-header.test.ts + packages/qa/dogfood/test/cbp-parent-attachment-comment-gates.dogfood.test.ts + packages/qa/dogfood/test/cbp-explain-master-write.dogfood.test.ts + packages/plugins/plugin-security/src/controlled-by-parent-chain-middle-master.test.ts. Layers (RUNNER rule 6): tenant-wall-organization-removal.test.ts and the two engine master-detail-header tests are in-process — a real engine and SecurityPlugin over SQL drivers, the answer read off the thrown statusCode or through resolveThrownHttpError — so acceptance[1], acceptance[2] and negative[0] (api oracle) score partial from them: no pin here drives those doors over HTTP. The 18.0 sweep's PASS for them at revision 4 (#24840) predates the layer rule; it is not a precedent for scoring them pass from these pins"
       },
       "source": [
         "packages/plugins/plugin-security/src/security-plugin.ts#SecurityPlugin",
@@ -4114,6 +4210,12 @@
           "date": "2026-10-20",
           "change": "knownGaps[0]'s prerequisite sentence says os dev — round 11's carried finding 3 (wave anchor #24579 round 12; report 6285435593 on PR #24801), from QA run #24783's F2: a bare production os serve judges none of the walled prerequisites until OS_AUTH_SECRET is set (RUNNER.md, the serve.ts AuthPlugin-skipped branch at base 307ce4c4b4). The same sentence PR #24801 wrote into four other walled items, byte for byte. No clause changed",
           "ref": "#24824"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-26",
+          "change": "One checklist-accuracy finding of Tier 1 record #25815 (a1/a2/n0), re-read on main b4199c96: the walled organization-removal refusal and the unreadable-header parity are pinned only in-process (engine + SecurityPlugin over SQL drivers, thrown statusCode / resolveThrownHttpError), with no HTTP pin for the api-oracle legs; #24840 scored them PASS at revision 4 before the layer rule. automated.ref names the layer and the precedent. No clause or status changed",
+          "ref": "#25835"
         }
       ]
     },
@@ -4122,7 +4224,7 @@
       "title": "Seven deployment tables (sys_job, sys_job_run, sys_job_queue, sys_flow_dispatch, sys_migration, sys_migration_journal, sys_presence) carry no organization column on v18 and are readable only with manage_platform_settings — an org admin who is not platform admin is refused even on single",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -4166,7 +4268,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/platform-objects/src/deployment-level-no-tenant-column.test.ts (sys_job, sys_job_queue, sys_job_run, sys_migration, sys_migration_journal) + packages/services/service-automation/src/sys-flow-dispatch.object.test.ts (sys_flow_dispatch) + packages/services/service-realtime/src/objects/sys-presence.object.test.ts (sys_presence) + packages/plugins/plugin-security/src/authz-identity-objects-boot-refusal.test.ts"
+        "ref": "packages/platform-objects/src/deployment-level-no-tenant-column.test.ts (sys_job, sys_job_queue, sys_job_run, sys_migration, sys_migration_journal) + packages/services/service-automation/src/sys-flow-dispatch.object.test.ts (sys_flow_dispatch) + packages/services/service-realtime/src/objects/sys-presence.object.test.ts (sys_presence) — object-declaration pins (no tenant column, requiredPermissions manage_platform_settings); they score acceptance[0] only. No pin drives either door over HTTP: acceptance[1] (org admin 403, platform admin 200) and acceptance[2] (400 INVALID_FIELD on an organization_id filter) stay live-run clauses"
       },
       "source": [
         "packages/platform-objects/src/audit/sys-job.object.ts",
@@ -4185,6 +4287,12 @@
           "date": "2026-10-19",
           "change": "automated.ref and steps[2] corrected — two checklist-accuracy findings of the 18.0 QA sweep (QA run #24559, access-security.deployment-tables-platform-only; wave anchor #24579 §3). acceptance[0] says the SEVEN tables are pinned, but the named pin, deployment-level-no-tenant-column.test.ts, lists five — the platform-objects ones. sys_flow_dispatch and sys_presence live in service-automation and service-realtime, and each has its own object pin asserting no tenant column and requiredPermissions manage_platform_settings (sys-flow-dispatch.object.test.ts, sys-presence.object.test.ts). automated.ref now names both, so the seven are pinned, and says which tables each file holds. steps[2]'s filter must be URL-encoded. No clause changed",
           "ref": "#24632"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-26",
+          "change": "Two checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96. a0: automated.ref named packages/plugins/plugin-security/src/authz-identity-objects-boot-refusal.test.ts, which pins SecurityPlugin's boot refusal when sys_user / sys_member / sys_organization are not registered — nothing about the seven deployment tables or manage_platform_settings — so it left the ref. a1/a2: the ref now says no pin drives either door over HTTP and both clauses stay live-run. No clause or status changed",
+          "ref": "#25835"
         }
       ]
     },
@@ -4193,7 +4301,7 @@
       "title": "Share links with two gates combined: signed_in + password answers an anonymous caller 401 SIGN_IN_REQUIRED whatever password is sent, email + password answers a uniform 404 INVALID_OR_EXPIRED, and /messages opens exactly where /resolve opens",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -4243,7 +4351,7 @@
       ],
       "automated": {
         "kind": "conformance",
-        "ref": "packages/plugins/plugin-sharing/src/share-link-eligibility.test.ts + packages/plugins/plugin-sharing/src/share-link-envelope.conformance.test.ts + packages/runtime/src/domains/share-links-messages-audience.test.ts (acceptance[3]: `/messages` opens for a caller exactly when `/resolve` opens the same link, on both mounts)"
+        "ref": "packages/plugins/plugin-sharing/src/share-link-eligibility.test.ts + packages/plugins/plugin-sharing/src/share-link-envelope.conformance.test.ts + packages/runtime/src/domains/share-links-messages-audience.test.ts (acceptance[3]: `/messages` opens for a caller exactly when `/resolve` opens the same link, on both mounts) + packages/runtime/src/domains/share-links-refusal-order.test.ts (acceptance[1] and acceptance[2]: the anonymous no-password-oracle row and the email-audience identical-refusal rows). Layers (RUNNER rule 6): the two runtime files are in-process — the domain's route entries kept by a minimal IHttpServer stand-in over a real engine, no Hono and no HTTP — so they score acceptance[0] only; acceptance[1] to acceptance[3] (api oracle) score partial from them, and their live legs are driven over HTTP"
       },
       "source": [
         "packages/plugins/plugin-sharing/src/share-link-routes.ts#registerShareLinkRoutes",
@@ -4268,6 +4376,12 @@
           "date": "2026-10-19",
           "change": "automated.ref gains packages/runtime/src/domains/share-links-messages-audience.test.ts — the out-of-scope §3 note of #24622's round (wave anchor #24579 §3; QA run #24559). That file pins the parity acceptance[3] has asserted since revision 2: /messages hands resolveToken every audience input /resolve hands it, on the plugin mount and the dispatcher twin, so /messages serves exactly the callers /resolve serves. No clause changed",
           "ref": "#24632"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-26",
+          "change": "Two checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96. a1/a2: packages/runtime/src/domains/share-links-refusal-order.test.ts asserts the anonymous no-password-oracle and email-audience identical-refusal rows but was not in the ref; it joins it. a3: share-links-messages-audience.test.ts drives in-process route entries (no Hono, no HTTP), so it scores acceptance[0], not the api oracle of acceptance[3]. automated.ref names the layer of both. No clause or status changed",
+          "ref": "#25835"
         }
       ]
     },
@@ -4276,7 +4390,7 @@
       "title": "An organization administrator creates and removes its own members' position and permission-set assignments inside the organization boundary, in all three tenancy postures; an out-of-boundary set answers 403 naming the set and the condition",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -4331,7 +4445,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "packages/plugins/plugin-security/src/org-admin-assignment-boundary.posture.test.ts + packages/plugins/plugin-security/src/delegated-admin-gate.test.ts (the organization-administrator describe) + packages/plugins/plugin-security/src/objects/rbac-objects.test.ts (the boundary pin over the shipped sets)"
+        "ref": "packages/plugins/plugin-security/src/org-admin-assignment-boundary.posture.test.ts + packages/plugins/plugin-security/src/delegated-admin-gate.test.ts (the organization-administrator describe) + packages/plugins/plugin-security/src/objects/rbac-objects.test.ts (the boundary pin over the shipped sets). negative[2]'s full out-of-boundary list is pinned unevenly: the three-posture file's out-of-boundary set is admin_full_access only, so per posture only that one set is exercised; an adminScope set, a platform-capability set, either organization-administrator set and the agent ceilings are refused only by the unit gate in delegated-admin-gate.test.ts, with no posture dimension. A run that scores negative[2] per posture drives the other sets by hand"
       },
       "source": [
         "packages/plugins/plugin-security/src/delegated-admin-gate.ts#organizationAdminFailure",
@@ -4344,6 +4458,12 @@
           "date": "2026-10-20",
           "change": "initial — the organization administrator's assignment boundary (ADR-0090 D12 as amended 2026-10-17), run once on the PR head through the automated pins",
           "ref": "#24136"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-26",
+          "change": "One checklist-accuracy finding of Tier 1 record #25815 (negative[2]), re-read on main b4199c96: org-admin-assignment-boundary.posture.test.ts exercises only admin_full_access out of boundary in each posture; the rest of negative[2]'s set list is asserted only by the unit gate in delegated-admin-gate.test.ts. automated.ref says so. No clause or status changed",
+          "ref": "#25835"
         }
       ]
     }
