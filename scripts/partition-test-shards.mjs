@@ -162,7 +162,9 @@ const TIMINGS_PATH = path.join(REPO_ROOT, 'scripts', 'test-shard-timings.json');
 // them by that same wall model (WHOLE_LEG_PARALLELISM), so a slice shard no
 // longer carries a whole-package leg ahead of its slice; on the committed
 // dataset's full list the predicted steps move from 1277s on the three slice
-// shards (643s elsewhere) to 966s on the slice shards and 830s elsewhere.
+// shards (643s elsewhere) to 966s on the slice shards and 830s elsewhere. On
+// the 2026-10-26 refresh, with the CLI cut into 4 slices (pin 3c, below), all
+// eight read ~738s.
 export const SHARD_COUNT = 8;
 
 // The acceptance bound #10472 set: the slowest shard within ~1.3x the mean.
@@ -360,9 +362,22 @@ export function timingModeNote(event) {
 //   n = 2    869.44s   1.52x                  still the floor
 //   n = 3    579.63s   1.01x                  meets -- spec's task is the floor
 //
-// So n = 3, and pin 3c holds it there. Slices are placed at their PLAIN weight
-// (partition() is unchanged), so every bin keeps the density the whole-package
+// So n = 3, and pin 3c held it there. Slices were placed at their PLAIN weight
+// (partition() unchanged), so every bin kept the density the whole-package
 // split had -- see densityCap() for the hard limit on that and its pin.
+//
+// RE-DERIVED AT 4 (#25870), on the 14-run refresh of 2026-10-26 (newest run
+// 40272142430): the CLI at 2697.45s. `@objectstack/spec` (1168.98s) and
+// `@objectstack/runtime` (793.70s) each run as two tasks, so the heaviest
+// other serial task is `@objectstack/metadata-protocol`'s 670.12s, and a slice
+// must sit within 1.3 x 670.12 = 871.16s.
+//
+//   n = 3    899.15s   1.34x                  still the floor -- pin 3c refused 3
+//   n = 4    674.36s   1.01x                  meets -- metadata-protocol is the floor
+//
+// Since #25870 partition() places a slice at its wall share rather than its
+// plain weight (WHOLE_LEG_PARALLELISM); `total`, and so the density cap, still
+// reads plain sums.
 //
 // ⛔ THE COUNT IS CONFIGURED; WHETHER A RUN SLICES IS DECIDED BY THAT RUN. A
 // pull_request or merge_group run splits its own affected set, so planShards()
@@ -384,7 +399,7 @@ export function timingModeNote(event) {
 // a change to what that generator can DECODE, which is why the map it replaced
 // is kept below.
 export const FILE_SHARDED_PACKAGES = Object.freeze({
-  '@objectstack/cli': 3,
+  '@objectstack/cli': 4,
 });
 
 // THE MAP AS IT STOOD BEFORE ITS LAST CHANGE, read only by the generator's
@@ -412,8 +427,10 @@ export const FILE_SHARDED_PACKAGES = Object.freeze({
 // `test-core-run-summary-*`, #25771), so four days after that PR lands no
 // retained summary predates the change and this map decodes nothing.
 // The outgoing map of #22075's third round was empty -- the runs before it
-// carried no slice -- so this one is empty too.
-export const PREVIOUS_FILE_SHARDED_PACKAGES = Object.freeze({});
+// carried no slice. #25870 raised the CLI from 3 slices to 4, so this holds 3.
+export const PREVIOUS_FILE_SHARDED_PACKAGES = Object.freeze({
+  '@objectstack/cli': 3,
+});
 
 // The item grammar. A shard item is a package (`@objectstack/cli`) or a SLICE
 // of one (`@objectstack/cli 1/2`), and this pair of functions is the only place
