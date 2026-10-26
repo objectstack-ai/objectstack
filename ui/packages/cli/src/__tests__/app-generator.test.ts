@@ -80,6 +80,7 @@ import {
   type AppGeneratorContext,
   type RouteInfo
 } from '../utils/app-generator.js';
+import { changesetConfigPath } from '../../../../scripts/workspace-root.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 /** packages/cli/src/__tests__ -> repo root */
@@ -741,8 +742,10 @@ describe('generated app manifests', () => {
     // current and guaranteed to exist on the registry. If that group were ever
     // split, deriving the range would silently start naming versions that were
     // never published — so the premise is asserted, not assumed.
+    // The tree's own config standalone, the monorepo root's when nested under
+    // objectstack's `ui/` (objectstack#25711): changesets reads one per repository.
     const changesetConfig = JSON.parse(
-      readFileSync(resolve(REPO_ROOT, '.changeset/config.json'), 'utf-8')
+      readFileSync(changesetConfigPath(REPO_ROOT), 'utf-8')
     ) as { fixed?: string[][] };
     const cliVersion = readManifest(CLI_MANIFEST_PATH).version as string;
     const platformPackages = Object.entries(DEPENDENCY_ANCHORS)

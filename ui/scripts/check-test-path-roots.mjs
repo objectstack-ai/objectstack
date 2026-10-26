@@ -187,7 +187,7 @@ const FS_MODULES = new Set(['fs', 'node:fs', 'fs/promises', 'node:fs/promises', 
  * what it excuses.
  */
 export const SUBJECT_IS_THE_CWD = Object.freeze([
-  'packages/cli/src/__tests__/app-generator.test.ts:1326 -- `contextOfCurrentProcess()` mirrors the ambient cwd on BOTH sides of the assertion deliberately: the writer under test derives its context from `process.cwd()` and the expectation derives it the same way, so the pair is self-consistent under either cwd. Re-rooting one side desyncs the mirror and turns a passing test red. The real cost -- that WHICH generator branch those two cases pin is decided by the launch directory -- is filed as objectui#7807 and is closed in the same file by two further cases that name their branch instead of inheriting it.',
+  'packages/cli/src/__tests__/app-generator.test.ts:1329 -- `contextOfCurrentProcess()` mirrors the ambient cwd on BOTH sides of the assertion deliberately: the writer under test derives its context from `process.cwd()` and the expectation derives it the same way, so the pair is self-consistent under either cwd. Re-rooting one side desyncs the mirror and turns a passing test red. The real cost -- that WHICH generator branch those two cases pin is decided by the launch directory -- is filed as objectui#7807 and is closed in the same file by two further cases that name their branch instead of inheriting it.',
 ]);
 
 /**

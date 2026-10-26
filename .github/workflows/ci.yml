@@ -3244,6 +3244,21 @@ jobs:
               --filter='./ui/examples/*'
           fi
 
+      # ui/tsconfig.vitest-setup.json resolves five @object-ui packages through
+      # their built declarations (its `paths` comment measures the from-source
+      # route at 484 errors). The step above builds them only when they are in
+      # its affected scope, and a pull_request whose ui scope is empty builds
+      # nothing, so the next step failed with TS2882/TS2307. Turbo replays
+      # them from the cache when the step above or main's cache already built them.
+      - name: Build the ui packages the vitest setup files import
+        run: |
+          pnpm exec turbo run build --concurrency=4 \
+            --filter=@object-ui/components \
+            --filter=@object-ui/fields \
+            --filter=@object-ui/plugin-dashboard \
+            --filter=@object-ui/plugin-grid \
+            --filter=@object-ui/i18n
+
       - name: Type-check ui repo-root vitest setup files
         run: pnpm --dir ui run type-check:vitest-setup
 
