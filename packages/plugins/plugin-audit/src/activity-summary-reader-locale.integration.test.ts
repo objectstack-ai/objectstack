@@ -66,7 +66,7 @@ describe('sys_activity summary — rendered in the reader\'s language (#26167)',
       where: { object_name: CONTRACT, record_id: recordId },
       ...extra,
       ...opts,
-    } as any)) as Row[];
+    })) as Row[];
   }
   /** The three mirror rows' summaries — created, the tracked change, the named-field update — as `opts` reads them. */
   async function summaries(opts: Record<string, unknown>): Promise<Array<string | undefined>> {
@@ -122,10 +122,10 @@ describe('sys_activity summary — rendered in the reader\'s language (#26167)',
     });
 
     // Written as the system: the workspace locale is the default, `en`.
-    const created = (await engine.insert(CONTRACT, { name: 'NDA', stage: 'draft' }, SYS as any)) as Row;
+    const created = (await engine.insert(CONTRACT, { name: 'NDA', stage: 'draft' }, SYS)) as Row;
     recordId = String(created.id);
-    await engine.update(CONTRACT, { stage: 'signed' }, { where: { id: recordId }, ...SYS } as any);
-    await engine.update(CONTRACT, { note: 'countersigned' }, { where: { id: recordId }, ...SYS } as any);
+    await engine.update(CONTRACT, { stage: 'signed' }, { where: { id: recordId }, ...SYS });
+    await engine.update(CONTRACT, { note: 'countersigned' }, { where: { id: recordId }, ...SYS });
     const atRest = await read(SYS);
     expect(atRest).toHaveLength(3);
     for (const row of atRest) {
@@ -200,7 +200,7 @@ describe('sys_activity summary — rendered in the reader\'s language (#26167)',
         record_label: 'NDA',
         metadata: JSON.stringify({ old: null, new: { name: 'NDA' } }),
       },
-      SYS as any,
+      SYS,
     );
     const legacy = (await read(reader('zh-CN'))).filter((r) => r.timestamp === '2020-01-01T00:00:00.000Z');
     expect(legacy.map((r) => r.summary)).toEqual(['Created Contract "NDA"']);

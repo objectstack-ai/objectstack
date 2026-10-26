@@ -98,7 +98,7 @@ describe('audit writers — a localization change reaches the very next @mention
   let comments = 0;
   /** Mention one user in a comment on the task, as the admin; answer the title the mention was given. */
   async function mentionTitle(): Promise<string> {
-    if (!taskId) taskId = String(((await engine.insert('biz_task', { name: 'thread' }, asAdmin as any)) as any).id);
+    if (!taskId) taskId = String(((await engine.insert('biz_task', { name: 'thread' }, asAdmin)) as any).id);
     comments += 1;
     const before = mentionTitles.length;
     await engine.insert(
@@ -110,7 +110,7 @@ describe('audit writers — a localization change reaches the very next @mention
         body: `note ${comments}`,
         mentions: '["u_bob"]',
       },
-      asAdmin as any,
+      asAdmin,
     );
     expect(mentionTitles.length - before).toBe(1);
     return mentionTitles[mentionTitles.length - 1];
