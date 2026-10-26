@@ -2561,6 +2561,10 @@ const ko = {
       // field's reveal toggle, and the footer's legal links.
       welcomeTitle: "다시 오신 것을 환영합니다",
       welcomeDescription: "로그인하고 작업을 계속하세요",
+      invitationTitle: "초대 수락",
+      invitationDescription: "초대를 받은 이메일 주소를 사용하세요.",
+      invitationSignUpButton: "계정 만들고 참여하기",
+      invitationSignInDivider: "또는 기존 계정으로 로그인",
       showPasswordText: "비밀번호 표시",
       hidePasswordText: "비밀번호 숨기기",
       footer: {
@@ -2571,6 +2575,8 @@ const ko = {
     register: {
       title: "계정 만들기",
       description: "정보를 입력하여 시작하세요",
+      invitationTitle: "계정을 만들고 참여하기",
+      invitationDescription: "초대를 받은 이메일 주소로 가입하세요. 초대는 해당 주소로만 수락할 수 있습니다.",
       nameLabel: "이름",
       namePlaceholder: "홍길동",
       emailLabel: "이메일",
@@ -3369,6 +3375,7 @@ const ko = {
       organization: "조직",
       role: "역할",
       expiresAt: "만료",
+      invitedBy: "초대한 사람",
       accept: "초대 수락",
       accepted: "초대를 수락함",
       acceptFailed: "초대 수락 실패",

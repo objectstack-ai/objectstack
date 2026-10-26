@@ -2561,6 +2561,10 @@ const de = {
       // field's reveal toggle, and the footer's legal links.
       welcomeTitle: "Willkommen zurück",
       welcomeDescription: "Melden Sie sich an, um weiterzuarbeiten",
+      invitationTitle: "Einladung annehmen",
+      invitationDescription: "Verwenden Sie die E-Mail-Adresse, an die die Einladung gesendet wurde.",
+      invitationSignUpButton: "Konto erstellen und beitreten",
+      invitationSignInDivider: "oder mit einem bestehenden Konto anmelden",
       showPasswordText: "Passwort anzeigen",
       hidePasswordText: "Passwort verbergen",
       footer: {
@@ -2571,6 +2575,8 @@ const de = {
     register: {
       title: "Konto erstellen",
       description: "Geben Sie Ihre Daten ein, um loszulegen",
+      invitationTitle: "Konto erstellen, um beizutreten",
+      invitationDescription: "Registrieren Sie sich mit der E-Mail-Adresse, an die die Einladung gesendet wurde. Nur mit dieser Adresse kann sie angenommen werden.",
       nameLabel: "Name",
       namePlaceholder: "Max Mustermann",
       emailLabel: "E-Mail",
@@ -3370,6 +3376,7 @@ const de = {
       organization: "Organisation",
       role: "Rolle",
       expiresAt: "Läuft ab am",
+      invitedBy: "Eingeladen von",
       accept: "Einladung annehmen",
       accepted: "Einladung angenommen",
       acceptFailed: "Einladung konnte nicht angenommen werden",

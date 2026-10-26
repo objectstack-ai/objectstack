@@ -3058,6 +3058,14 @@ const en = {
       // field's reveal toggle, and the footer's legal links.
       welcomeTitle: 'Welcome back',
       welcomeDescription: 'Sign in to continue your work',
+      // The same card's header when the visitor arrived signed out from an
+      // invitation link (`?redirect=/accept-invitation/ID`), and the
+      // register-first action above the form. The copy names no organization
+      // or inviter: a signed-out page has no read of the invitation (#25886).
+      invitationTitle: 'Accept your invitation',
+      invitationDescription: 'Use the email address the invitation was sent to.',
+      invitationSignUpButton: 'Create an account and join',
+      invitationSignInDivider: 'or sign in to an existing account',
       showPasswordText: 'Show password',
       hidePasswordText: 'Hide password',
       footer: {
@@ -3077,6 +3085,8 @@ const en = {
     register: {
       title: 'Create an account',
       description: 'Create your account to start building.',
+      invitationTitle: 'Create an account to join',
+      invitationDescription: 'Register with the email address the invitation was sent to. The invitation can only be accepted with that address.',
       nameLabel: 'Name',
       namePlaceholder: 'John Doe',
       emailLabel: 'Email',
@@ -4073,6 +4083,7 @@ const en = {
       organization: 'Organization',
       role: 'Role',
       expiresAt: 'Expires',
+      invitedBy: 'Invited by',
       accept: 'Accept invitation',
       accepted: 'Invitation accepted',
       acceptFailed: 'Failed to accept invitation',

@@ -2613,6 +2613,10 @@ const es = {
       // field's reveal toggle, and the footer's legal links.
       welcomeTitle: "Bienvenido de nuevo",
       welcomeDescription: "Inicia sesión para continuar con tu trabajo",
+      invitationTitle: "Acepta tu invitación",
+      invitationDescription: "Usa el correo al que se envió la invitación.",
+      invitationSignUpButton: "Crear una cuenta y unirme",
+      invitationSignInDivider: "o inicia sesión con una cuenta existente",
       showPasswordText: "Mostrar contraseña",
       hidePasswordText: "Ocultar contraseña",
       footer: {
@@ -2623,6 +2627,8 @@ const es = {
     register: {
       title: "Crear una cuenta",
       description: "Ingresa tu información para comenzar",
+      invitationTitle: "Crea una cuenta para unirte",
+      invitationDescription: "Regístrate con el correo al que se envió la invitación. Solo se puede aceptar con esa dirección.",
       nameLabel: "Nombre",
       namePlaceholder: "Juan Pérez",
       emailLabel: "Correo electrónico",
@@ -3428,6 +3434,7 @@ const es = {
       organization: "Organización",
       role: "Rol",
       expiresAt: "Caduca",
+      invitedBy: "Invitado por",
       accept: "Aceptar invitación",
       accepted: "Invitación aceptada",
       acceptFailed: "No se pudo aceptar la invitación",

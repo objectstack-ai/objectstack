@@ -2670,6 +2670,10 @@ const ru = {
       // field's reveal toggle, and the footer's legal links.
       welcomeTitle: "С возвращением",
       welcomeDescription: "Войдите, чтобы продолжить работу",
+      invitationTitle: "Примите приглашение",
+      invitationDescription: "Используйте адрес электронной почты, на который пришло приглашение.",
+      invitationSignUpButton: "Создать учётную запись и присоединиться",
+      invitationSignInDivider: "или войдите в существующую учётную запись",
       showPasswordText: "Показать пароль",
       hidePasswordText: "Скрыть пароль",
       footer: {
@@ -2680,6 +2684,8 @@ const ru = {
     register: {
       title: "Создать аккаунт",
       description: "Введите свои данные, чтобы начать",
+      invitationTitle: "Создайте учётную запись, чтобы присоединиться",
+      invitationDescription: "Зарегистрируйтесь с адресом, на который пришло приглашение. Принять его можно только с этим адресом.",
       nameLabel: "Имя",
       namePlaceholder: "Иван Иванов",
       emailLabel: "Электронная почта",
@@ -3495,6 +3501,7 @@ const ru = {
       organization: "Организация",
       role: "Роль",
       expiresAt: "Истекает",
+      invitedBy: "Приглашение от",
       accept: "Принять приглашение",
       accepted: "Приглашение принято",
       acceptFailed: "Не удалось принять приглашение",

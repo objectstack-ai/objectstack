@@ -2608,6 +2608,10 @@ const pt = {
       // field's reveal toggle, and the footer's legal links.
       welcomeTitle: "Bem-vindo de volta",
       welcomeDescription: "Entre para continuar seu trabalho",
+      invitationTitle: "Aceite seu convite",
+      invitationDescription: "Use o e-mail para o qual o convite foi enviado.",
+      invitationSignUpButton: "Criar conta e participar",
+      invitationSignInDivider: "ou entre com uma conta existente",
       showPasswordText: "Mostrar senha",
       hidePasswordText: "Ocultar senha",
       footer: {
@@ -2618,6 +2622,8 @@ const pt = {
     register: {
       title: "Criar uma conta",
       description: "Digite suas informações para começar",
+      invitationTitle: "Crie uma conta para participar",
+      invitationDescription: "Cadastre-se com o e-mail para o qual o convite foi enviado. Ele só pode ser aceito com esse endereço.",
       nameLabel: "Nome",
       namePlaceholder: "João Silva",
       emailLabel: "E-mail",
@@ -3423,6 +3429,7 @@ const pt = {
       organization: "Organização",
       role: "Função",
       expiresAt: "Expira em",
+      invitedBy: "Convidado por",
       accept: "Aceitar convite",
       accepted: "Convite aceito",
       acceptFailed: "Falha ao aceitar o convite",
