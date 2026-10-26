@@ -191,6 +191,22 @@ describe('CONTROLS: the page registers only while it holds edits (objectui#13231
     fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
     await waitFor(() => expect(screen.queryByTestId('settings-unsaved-count')).toBeNull());
 
+    // The bar goes in the commit that clears the draft; the registration goes a
+    // step later, in the passive effect that releases it
+    // (`useRegisterUnsavedEdits`). The save settles outside `act`, so React runs
+    // that effect as a task of its own, and on a loaded machine the wait above
+    // can return in between: the Profile click then meets a page still
+    // registered, `confirmUnsavedLeave` asks, the stubbed Cancel keeps the page,
+    // and 'Profile page' never comes, at any timeout (objectstack#26096; the
+    // same race as `SettingsView.leaveGuard-13163`'s save case, objectui#13317).
+    // So wait on the registration itself, the fact this case asserts: once a
+    // tab close is not held, nothing is registered and the click below leaves.
+    await waitFor(() => {
+      const unload = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(unload);
+      expect(unload.defaultPrevented).toBe(false);
+    });
+
     fireEvent.click(screen.getByRole('button', { name: 'Profile' }));
     expect(await screen.findByText('Profile page')).toBeTruthy();
     expect(confirmSpy).not.toHaveBeenCalled();

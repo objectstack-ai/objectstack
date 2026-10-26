@@ -9,6 +9,14 @@
  * the members the two bodies call (`applyIndexDriftOp`, `buildRebuiltColumn`,
  * `syncTableIndexes` and the rest).
  *
+ * [#25521 cut 8] `applyIndexDriftOp`, which applies one index drift op on
+ * every dialect, and `restoreBareIndexAfterFailedTighten`, the restore it runs
+ * when a NULL-safe tightening cannot be created after the old index is gone,
+ * moved here beside them the same way. The class keeps both methods too, and
+ * `SchemaSyncHost` grew by exactly the members these two bodies read. The
+ * ADR-0120 tightening ceremony these bodies carry is anchored on this module
+ * (`scripts/adr-anchors/`).
+ *
  * A MOVE, not a redesign. Each function below is the body of the `SqlDriver`
  * method of the same name as it stood, re-indented one level and otherwise
  * unedited: the same dialect statements, the same rebuild procedure, the same
@@ -54,16 +62,153 @@ export interface SchemaSyncHost {
   applyIndexDriftOp: SqlDriver['applyIndexDriftOp'];
   buildRebuiltColumn: SqlDriver['buildRebuiltColumn'];
   readonly dialectName: SqlDriver['dialectName'];
+  dropIndexIfExists: SqlDriver['dropIndexIfExists'];
+  dropOrphanedHashShadowColumn: SqlDriver['dropOrphanedHashShadowColumn'];
+  getExistingIndexNames: SqlDriver['getExistingIndexNames'];
   introspectColumns: SqlDriver['introspectColumns'];
   readonly isMysql: SqlDriver['isMysql'];
   readonly isPostgres: SqlDriver['isPostgres'];
   readonly knex: SqlDriver['knex'];
+  logDurabilityFailure: SqlDriver['logDurabilityFailure'];
   readonly logger: SqlDriver['logger'];
   readonly managedObjectFields: SqlDriver['managedObjectFields'];
   readonly managedObjectIndexes: SqlDriver['managedObjectIndexes'];
   nowColumnDefault: SqlDriver['nowColumnDefault'];
+  probeNullSafeUniqueDuplicates: SqlDriver['probeNullSafeUniqueDuplicates'];
   resolveTenantField: SqlDriver['resolveTenantField'];
+  restoreBareIndexAfterFailedTighten: SqlDriver['restoreBareIndexAfterFailedTighten'];
+  syncDeclaredIndexes: SqlDriver['syncDeclaredIndexes'];
   syncTableIndexes: SqlDriver['syncTableIndexes'];
+}
+
+/** The body of `SqlDriver#applyIndexDriftOp`; the method's docblock there is its contract. */
+export async function applyIndexDriftOp(this: Pick<SchemaSyncHost, 'dropIndexIfExists' | 'dropOrphanedHashShadowColumn' | 'getExistingIndexNames' | 'knex' | 'logDurabilityFailure' | 'logger' | 'probeNullSafeUniqueDuplicates' | 'restoreBareIndexAfterFailedTighten' | 'syncDeclaredIndexes'>, op: DriftOp): Promise<boolean> {
+  // REPORT ONLY: there is no column to build the index over, so no DDL can
+  // apply it and the remedy is a metadata edit. Answered before any read, and
+  // on every dialect, so `applyMigrationEntries` reports it `skipped`. The
+  // `default` arm below would say the same; this names the reason.
+  if (op.type === 'unbuildable_index') return false;
+  const physicalColumns = new Set(Object.keys(await this.knex(op.table).columnInfo()));
+  const ensure = (name: string, columns: string[], unique: boolean, nullSafeColumns?: string[]) =>
+    this.syncDeclaredIndexes(op.table, [{ name, fields: columns, unique, nullSafeColumns }], physicalColumns);
+
+  switch (op.type) {
+    case 'replace_unique_index': {
+      // CREATE before DROP: the composite and the legacy index have different
+      // names, so uniqueness is never unenforced in between. If the create
+      // fails we have not dropped anything yet and the schema is untouched.
+      await ensure(op.createIndexName, op.createColumns, true, op.nullSafeColumns);
+      // …and only drop once the replacement is confirmed present. This is a
+      // relaxation, not a removal: if `syncDeclaredIndexes` skipped the create
+      // (a column it references is not materialized), dropping the legacy
+      // index would leave the field with NO uniqueness at all.
+      if (!(await this.getExistingIndexNames(op.table)).has(op.createIndexName)) {
+        this.logger.warn(
+          `[schema-drift] keeping legacy unique index(es) ${op.dropIndexNames.join(', ')} on '${op.table}' — ` +
+            `the replacement '${op.createIndexName}' could not be created.`,
+        );
+        return false;
+      }
+      for (const name of op.dropIndexNames) {
+        await this.dropIndexIfExists(op.table, name);
+      }
+      return true;
+    }
+    case 'create_index':
+      await ensure(op.indexName, op.columns, op.unique, op.nullSafeColumns);
+      // Honest applied-reporting: `syncDeclaredIndexes` degrades some
+      // failures (a NULL-safe unique over data that still violates it) into
+      // a loud log instead of a throw, so presence is the only proof.
+      return (await this.getExistingIndexNames(op.table)).has(op.indexName);
+    case 'drop_index': {
+      // #13056: a TERMINAL removal — the name is retired, nothing will
+      // re-declare it, and the #11627 hash shadow derived from that name is
+      // dead the moment the index goes. Index FIRST, then the column it
+      // keyed: MySQL refuses to drop a column a key still uses, and the
+      // reverse order would take the constraint down with the column while
+      // the operator was told only that an index was dropped.
+      //
+      // ⚠️ Deliberately HERE and not inside `dropIndexIfExists`. That helper
+      // has two other callers and neither is terminal: `recreate_index`
+      // drops in order to re-create under the SAME name — routing it through
+      // this cleanup would destroy the survivor commit cd1348802's `reusable` branch
+      // exists to re-key in place, turning every rebuild into a full
+      // regeneration of a STORED generated column — and
+      // `replace_unique_index` cannot reach a shadow at all (its legacy
+      // detection excludes `isHashShadowCarrier`, stated outright in
+      // `diffManagedIndexes` precisely because that op DROPS the legacy
+      // name). "Which caller" is the wrong axis; "is this name coming back"
+      // is the right one, and only the op knows.
+      const dropped = await this.dropIndexIfExists(op.table, op.indexName);
+      // Applied when EITHER half changed the table. A half-applied migration
+      // leaves the index gone and the column behind, so an already-absent
+      // index is exactly the state whose leftover column still needs
+      // collecting — reporting that as `skipped` would claim the apply did
+      // nothing to a table it had just rewritten.
+      const shadowDropped = await this.dropOrphanedHashShadowColumn(op.table, op.indexName);
+      return dropped || shadowDropped;
+    }
+    case 'recreate_index': {
+      // Same name on both sides — the drop has to come first, and a UNIQUE
+      // target can fail on existing duplicates. That is why this op is
+      // categorised destructive when unique (see `diffManagedIndexes`).
+      //
+      // ADR-0120 D4: the NULL-safe tightening re-runs the duplicate
+      // pre-flight HERE, immediately before the drop — the plan-time probe
+      // may be stale, and at no point may a constraint be dropped without
+      // its replacement being creatable. Duplicates → refuse, old index
+      // untouched.
+      const nullSafe = op.unique && (op.nullSafeColumns?.length ?? 0) > 0;
+      if (nullSafe) {
+        const duplicates = await this.probeNullSafeUniqueDuplicates(
+          op.table,
+          op.columns,
+          op.nullSafeColumns!,
+        );
+        if (duplicates.length > 0) {
+          this.logDurabilityFailure(
+            `[schema-drift] REFUSING to rebuild '${op.indexName}' on '${op.table}' as a NULL-safe unique — ` +
+              `${duplicates.length} duplicate group(s) violate it (e.g. ${duplicates[0].key} × ${duplicates[0].rows} rows). ` +
+              `The existing index is left in place; deduplicate and re-run "os migrate plan" (ADR-0120 D4).`,
+          );
+          return false;
+        }
+      }
+      await this.dropIndexIfExists(op.table, op.indexName);
+      try {
+        await ensure(op.indexName, op.columns, op.unique, op.nullSafeColumns);
+      } catch (e) {
+        if (nullSafe) await this.restoreBareIndexAfterFailedTighten(op, e);
+        throw e;
+      }
+      const present = (await this.getExistingIndexNames(op.table)).has(op.indexName);
+      if (!present && nullSafe) await this.restoreBareIndexAfterFailedTighten(op, undefined);
+      return present;
+    }
+    default:
+      return false;
+  }
+}
+
+/** The body of `SqlDriver#restoreBareIndexAfterFailedTighten`; the method's docblock there is its contract. */
+export async function restoreBareIndexAfterFailedTighten(this: Pick<SchemaSyncHost, 'getExistingIndexNames' | 'knex' | 'logDurabilityFailure' | 'syncDeclaredIndexes'>, op: Extract<DriftOp, { type: 'recreate_index' }>, cause: unknown): Promise<void> {
+  try {
+    await this.syncDeclaredIndexes(
+      op.table,
+      [{ name: op.indexName, fields: op.columns, unique: op.unique }],
+      new Set(Object.keys(await this.knex(op.table).columnInfo())),
+    );
+  } catch {
+    /* the error below reports the state either way */
+  }
+  const restored = (await this.getExistingIndexNames(op.table)).has(op.indexName);
+  this.logDurabilityFailure(
+    `[schema-drift] could not create the NULL-safe unique '${op.indexName}' on '${op.table}' after dropping ` +
+      `the old index${restored ? ' — restored the previous bare composite' : ' — AND the restore failed, so the ' +
+      'constraint is currently NOT enforced'}. Rows without an organization are ${restored ? 'still ' : ''}not ` +
+      `constrained, because SQL UNIQUE is NULL-distinct; re-run "os migrate plan" and apply the reported op (ADR-0120 D4).`,
+    (cause as any)?.message ?? cause,
+  );
 }
 
 /** The body of `SqlDriver#applyDriftOpInPlace`; the method's docblock there is its contract. */
