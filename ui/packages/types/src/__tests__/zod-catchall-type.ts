@@ -53,7 +53,7 @@ type LiteralKeys< T > = keyof {
   [K in keyof T as string extends K ? never : number extends K ? never : K]: 0;
 };
 
-type IsUnknown< T > = unknown extends T ? ([T] extends [{}] ? false : true) : false;
+type IsUnknown< T > = unknown extends T ? ([keyof T] extends [never] ? true : false) : false;
 
 export type WithoutCatchall< T > =
   T extends (...args: never[]) => unknown ? T
