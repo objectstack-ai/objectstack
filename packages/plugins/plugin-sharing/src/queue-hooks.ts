@@ -154,7 +154,10 @@ export function bindQueueGuards(engine: MinimalEngine, queues: Pick<OwnershipQue
 export async function reportShadowedAuthoredQueues(
   engine: MinimalEngine,
   queues: Pick<OwnershipQueueService, 'isDeclaredQueueName'>,
-  logger?: OptionalSharingLogger & { error?: (msg: string, meta?: Record<string, any>) => void },
+  logger?: {
+    warn: (msg: string, meta?: Record<string, any>) => void;
+    error?: (msg: string, meta?: Record<string, any>) => void;
+  },
 ): Promise<void> {
   if (typeof engine.find !== 'function') return;
   let rows: any[] = [];
@@ -166,12 +169,12 @@ export async function reportShadowedAuthoredQueues(
   for (const row of Array.isArray(rows) ? rows : []) {
     const name = present(row?.name);
     if (!name || !queues.isDeclaredQueueName(name)) continue;
-    (logger?.error ?? logger?.warn)?.call(
-      logger,
+    const msg =
       `[queue] an organization's queue '${name}' is shadowed by a queue an installed app declares under the same ` +
-        'name — the declared queue answers for it. Rename the organization\'s queue to keep it.',
-      { queue: name, organization: present(row?.organization_id) },
-    );
+      'name — the declared queue answers for it. Rename the organization\'s queue to keep it.';
+    const meta = { queue: name, organization: present(row?.organization_id) };
+    if (logger?.error) logger.error(msg, meta);
+    else logger?.warn(msg, meta);
   }
 }
 
