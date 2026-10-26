@@ -107,6 +107,7 @@
     "defineSharingRule": "src/security/sharing.zod.ts#defineSharingRule (function)",
     "describeAnchorForbiddenBits": "src/security/high-privilege.ts#describeAnchorForbiddenBits (function)",
     "describeHighPrivilegeBits": "src/security/high-privilege.ts#describeHighPrivilegeBits (function)",
+    "findHierarchyScopeGrants": "src/security/permission.zod.ts#findHierarchyScopeGrants (function)",
     "judgePermissionSetOwnerBinding": "src/security/permission-set-owner-binding.ts#judgePermissionSetOwnerBinding (function)",
     "normalizeTenancyPosture": "src/security/tenancy-posture.ts#normalizeTenancyPosture (function)",
     "objectPermissionGrants": "src/security/permission.zod.ts#objectPermissionGrants (function)",

@@ -1367,6 +1367,9 @@ export const ERROR_CODE_LEDGER = {
     'QUEUE_NOT_FOUND',
     'SUGGESTION_NOT_FOUND',
     'SUGGESTION_STATE',           // suggestion exists but is not in a confirmable/dismissable state
+    // [#26189] `DelegationScopeViolationError` (`errors.ts`), thrown by the
+    // delegated-administration gate (`delegated-admin-gate.ts`).
+    'DELEGATION_SCOPE_VIOLATION', // [#26189] 403: a delegated administrator's write on `sys_user_position` / `sys_user_permission_set` falls outside the caller's OWN `adminScope` (ADR-0090 D12): a business unit outside the delegated subtree, a permission set not in the scope's allowlist, or a target user outside the subtree. The message is the gate's reason, which describes only the caller's own scope, so a client may show it; every other refusal of the gate stays `PERMISSION_DENIED`, opaque (ruling #24914 B′). Its own meaning, not a synonym: `PERMISSION_DENIED` says nothing about which scope refused
   ],
   '@objectstack/plugin-webhooks': [
     // [#13353] The redeliver endpoint's malformed-body refusal — the plugin

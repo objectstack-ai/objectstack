@@ -267,6 +267,13 @@ describe('#22110 — renderTextSlot, the one text renderer', () => {
     it('leaves a single-brace token as literal text — the doors refuse it before a run, so the renderer never reads it', () => {
         expect(renderTextSlot('Hello {record.name}', vars({ record: ACME }))).toBe('Hello {record.name}');
     });
+
+    it('a flow variable named `locale` is a value a hole prints, not the formatters\' locale (#26232)', () => {
+        // Expected text from `Intl` itself, so a newer ICU in CI cannot drift it.
+        const amount = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(1234567.5);
+        expect(renderTextSlot('{{ amount | number:2 }} ({{ locale }})', vars({ amount: 1234567.5, locale: 'de-DE' })))
+            .toBe(`${amount} (de-DE)`);
+    });
 });
 
 /** This package's `src` — the runtime whose `$` variables the spec judge lists. */

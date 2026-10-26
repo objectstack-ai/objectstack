@@ -2626,7 +2626,7 @@ os doctor -v        # Show fix suggestions for warnings
 | `os login` | Sign in and store credentials in `~/.objectstack/credentials.json` |
 | `os whoami` | Show the current authenticated user |
 | `os logout` | Revoke the server session and clear local credentials |
-| `os cloud login` | Sign in to ObjectStack Cloud (the hosted package registry) and store credentials in `~/.objectstack/cloud.json` |
+| `os cloud login` | Sign in to ObjectOS Cloud (the hosted package registry) and store credentials in `~/.objectstack/cloud.json` |
 
 #### `os register`
 
@@ -2727,7 +2727,7 @@ os logout
 
 #### `os cloud login`
 
-Signs you in to **ObjectStack Cloud** — the hosted package registry — rather
+Signs you in to **ObjectOS Cloud** — the hosted package registry — rather
 than to a runtime instance. It is the credential `os package publish` and the
 marketplace commands use, and it lands in its own file
 (`~/.objectstack/cloud.json`), separate from `os login`'s
@@ -2823,12 +2823,12 @@ is available in your deployment.
 
 The two commands that move a compiled app onto a platform. They target
 **different systems and authenticate as different identities**: publish uploads
-to ObjectStack Cloud (the catalog), install registers an app into a **running
+to ObjectOS Cloud (the catalog), install registers an app into a **running
 runtime**.
 
 | Command | Talks to | Description |
 |---------|----------|-------------|
-| `os package publish [artifact]` | ObjectStack Cloud | Upload a compiled artifact as a versioned package in your organization |
+| `os package publish [artifact]` | ObjectOS Cloud | Upload a compiled artifact as a versioned package in your organization |
 | `os package install <package>` | A running runtime | Install a package into a live kernel, from that runtime's catalog or from a local artifact |
 
 For which one to reach for and the preview patterns around them, see
@@ -2882,7 +2882,7 @@ when both files' `url`s agree.
 | `--display-name <name>` | — | Name shown in the Marketplace (default `artifact.manifest.name`) |
 | `--description <text>` | — | Short package description |
 | `--category <slug>` | — | Marketplace category slug (`crm`, `hr`, `devtools`, …) |
-| `--visibility <level>` | — | `org` (installable across your organization) · `private` (explicit grants only) · `marketplace` (public after review). Omitted: not sent, so the control plane decides — an existing package keeps its visibility, a new one gets the control plane's default (`org` on ObjectStack Cloud) |
+| `--visibility <level>` | — | `org` (installable across your organization) · `private` (explicit grants only) · `marketplace` (public after review). Omitted: not sent, so the control plane decides — an existing package keeps its visibility, a new one gets the control plane's default (`org` on ObjectOS Cloud) |
 | `--org <id>` | `OS_ORG_ID` | `owner_org_id`. Required with a bearer key in service mode; ignored in user mode |
 | `--env <id>` | `OS_ENVIRONMENT_ID` | Environment to install the new version into. Defaults to the environment [`os environments switch`](#cloud-environments) — or `os environments create --activate` — recorded **for this control plane** in `~/.objectstack/cloud.json` |
 | `--install` | — | Auto-install into `--env` after publishing. With no `--env`, no `$OS_ENVIRONMENT_ID` and no active environment for this control plane, it reports that and publishes without installing |
@@ -3018,7 +3018,7 @@ A `404` means the target runtime does not mount `MarketplaceInstallLocalPlugin`
 (from `@objectstack/cloud-connection`). The endpoint is opt-in, so a runtime
 composed without it will not accept installs.
 
-In catalog mode, a runtime connected to an ObjectStack Cloud account presents its connection credential to the cloud catalog — see [Cloud Connection](/docs/deployment/cloud-connection).
+In catalog mode, a runtime connected to an ObjectOS Cloud account presents its connection credential to the cloud catalog — see [Cloud Connection](/docs/deployment/cloud-connection).
 
 ## Configuration
 

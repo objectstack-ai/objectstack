@@ -58,6 +58,39 @@ export class PermissionDeniedError extends Error {
 }
 
 /**
+ * The delegated-administration gate's refusal of a write that falls outside
+ * the caller's OWN `adminScope` (ADR-0090 D12) → `403
+ * DELEGATION_SCOPE_VIOLATION` (#26189, ruling on #26059 Q3).
+ *
+ * Three reasons take it, and no others: a business unit outside the delegated
+ * subtree, a permission set not in the scope's allowlist, a target user
+ * outside the subtree. Each describes only the caller's own scope, so the
+ * reason is safe to show, and a client branches on this code to show it.
+ * Every other refusal of the gate stays a {@link PermissionDeniedError},
+ * whose message a client must not surface (ruling #24914 B′).
+ *
+ * Still a refusal, so `403`; its own ADR-0112 ledger row, not a synonym of
+ * `PERMISSION_DENIED`.
+ *
+ * ⚠️ The message deliberately does NOT open with `[Security] Access denied`:
+ * that prefix is a MATCHER ({@link isPermissionDeniedError}, `mapDataError`,
+ * `security-routes.ts`) and would re-flatten this code to `PERMISSION_DENIED`
+ * on the wire. `status` AND `statusCode`, for the reason the classes below
+ * record.
+ */
+export class DelegationScopeViolationError extends Error {
+  readonly code = 'DELEGATION_SCOPE_VIOLATION';
+  readonly status = 403;
+  readonly statusCode = 403;
+  readonly details?: Record<string, unknown>;
+  constructor(message: string, details?: Record<string, unknown>) {
+    super(message);
+    this.name = 'DelegationScopeViolationError';
+    this.details = details;
+  }
+}
+
+/**
  * ## The three NON-VERDICT legs of `assertControlledByParentWrite` (#7474)
  *
  * That gate used to funnel SIX distinct conditions through one `deny()` helper,

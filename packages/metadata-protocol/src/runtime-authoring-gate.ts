@@ -76,7 +76,7 @@ import {
 } from '@objectstack/sdui-parser';
 import type { RuntimeAuthoringIssue } from '@objectstack/spec/api';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
-import type { TenancyPosture } from '@objectstack/spec/security';
+import { findHierarchyScopeGrants, type TenancyPosture } from '@objectstack/spec/security';
 // [#21476] The ONE answer to "can this open public form take anonymous intake
 // on this posture, and why not" — the same export both anonymous form doors and
 // the administrator's read of the view call (`@objectstack/rest`), so the
@@ -451,6 +451,80 @@ export function findPublicFormIntakeGaps(args: {
         });
     }
     return issues;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #26188 — a HIERARCHY scope on a runtime with no hierarchy resolver.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The rule id of the finding below. Refused on publish (inside the gate's one
+ * 422 `INVALID_METADATA` envelope), a `warning` advisory on a draft save.
+ *
+ * ## The defect this closes
+ *
+ * `own_and_reports` / `unit` / `unit_and_below` are enforced only by the
+ * enterprise hierarchy resolver (the `hierarchy-scope-resolver` service that
+ * `@objectstack/security-enterprise` registers, capability `hierarchy-security`,
+ * ADR-0057). Without it the open sharing service fails closed to owner-only. So
+ * a permission set granting one of them on such a runtime is metadata that says
+ * one thing while the runtime does another — the inert declaration ADR-0078
+ * forbids and ADR-0049 calls worse than absent. `defineStack` already refuses
+ * the same grant at authoring time (`STACK_HIERARCHY_SCOPE_CAPABILITY_REQUIRED`);
+ * a runtime save accepted it with no word.
+ *
+ * ## Why it is gate-local, and why a draft hears it too
+ *
+ * Its input is a fact about the DEPLOYMENT (is a resolver mounted?), which a
+ * build machine cannot know — the reason the #6285 and #21476 rules live here.
+ * D1 still holds: no rule gates a draft. But a draft is where the author is
+ * editing, so it carries the same finding as a `warning` on the 2xx, and the
+ * refusal waits for the publish, the verb that would make the grant live.
+ *
+ * The scope list and the opening sentence are `@objectstack/spec`'s
+ * {@link findHierarchyScopeGrants}, the ones `defineStack` reads.
+ */
+export const HIERARCHY_SCOPE_CAPABILITY_REQUIRED = 'hierarchy-scope-capability-required';
+
+/** The kernel service the enterprise hierarchy resolver registers under (ADR-0057). */
+export const HIERARCHY_SCOPE_RESOLVER_SERVICE = 'hierarchy-scope-resolver' as const;
+
+/**
+ * Judge one permission-set body: one finding per grant whose `readScope` or
+ * `writeScope` is a hierarchy depth, when `hierarchyResolverMounted` is
+ * `false`. `error` on an `active` write, `warning` on a draft; the message and
+ * hint are the same on both.
+ *
+ * PURE — resolver presence arrives as an argument. Absent (a host with no
+ * service registry, such as the CLI) nothing is judged: `defineStack` is that
+ * host's door.
+ */
+export function findHierarchyScopeCapabilityGaps(args: {
+    /** Singular metadata type of the item being written. */
+    type: string;
+    /** Metadata name, used when the body carries none. */
+    name: string;
+    state: 'draft' | 'active';
+    body: unknown;
+    /** Is a hierarchy resolver mounted on this runtime? Absent = unknown, nothing judged. */
+    hierarchyResolverMounted?: boolean;
+}): RuntimeAuthoringIssue[] {
+    if (args.type !== 'permission' || args.hierarchyResolverMounted !== false || !isRec(args.body)) return [];
+    const body = args.body;
+    const setName = typeof body.name === 'string' && body.name ? body.name : args.name;
+    return findHierarchyScopeGrants([{ ...body, name: setName }]).map((g) => ({
+        severity: args.state === 'active' ? 'error' : 'warning',
+        rule: HIERARCHY_SCOPE_CAPABILITY_REQUIRED,
+        where: `permission set "${setName}" · object "${g.object}"`,
+        path: `permissions.${setName}.objects.${g.object}.${g.key}`,
+        message:
+            `${g.finding}. No hierarchy resolver is mounted on this runtime: hierarchy scopes require the ` +
+            `enterprise capability \`hierarchy-security\` (@objectstack/security-enterprise), so this grant ` +
+            `would be enforced as 'own' (owner-only).`,
+        hint:
+            `Set ${g.key} to 'own' or 'org', or publish this permission set on a runtime that mounts the ` +
+            `enterprise hierarchy resolver (\`hierarchy-security\`).`,
+    }));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1035,10 +1109,31 @@ export function evaluateRuntimeAuthoringGate(args: {
      * registry), both are judged as on the CLI: not at all.
      */
     rlsMembershipResolverKeys?: readonly string[];
+    /**
+     * [#26188] Is a hierarchy resolver mounted on this runtime — a service
+     * registered under {@link HIERARCHY_SCOPE_RESOLVER_SERVICE}? A fact only the
+     * host holds, of the #6285 kind: gathered by the impure caller and passed
+     * in so this function stays pure. `false` arms
+     * {@link findHierarchyScopeCapabilityGaps}; absent (a host without a
+     * service registry), nothing is judged, as on the CLI.
+     */
+    hierarchyResolverMounted?: boolean;
 }): RuntimeAuthoringVerdict {
+    // [#26188] The one finding a draft hears: a hierarchy scope this runtime
+    // cannot enforce. Same rule as the publish refusal below, `warning` here.
+    const hierarchyScopeGaps = findHierarchyScopeCapabilityGaps({
+        type: args.type,
+        name: args.name,
+        state: args.state,
+        body: args.body,
+        ...(args.hierarchyResolverMounted !== undefined
+            ? { hierarchyResolverMounted: args.hierarchyResolverMounted }
+            : {}),
+    });
+
     // D1 — drafts are never gated. Publishing one runs this same function.
-    // No rules ran, so there is nothing to report on either half.
-    if (args.state !== 'active') return { error: null, advisories: [] };
+    // No rule ran, so the only thing reported is the warning above.
+    if (args.state !== 'active') return { error: null, advisories: hierarchyScopeGaps };
 
     // The object universe, folded once: the shared rules resolve names against
     // it and the #21476 rule reads a form's target object out of it.
@@ -1111,6 +1206,7 @@ export function evaluateRuntimeAuthoringGate(args: {
     });
     const localIssues = [
         ...scheduleOrgGaps,
+        ...hierarchyScopeGaps,
         ...(pageSourceFindings ?? []).filter((f) => f.severity === 'error').map(toIssue),
     ];
     const advisoryFindings = [
@@ -1172,6 +1268,9 @@ export function evaluateRuntimeAuthoringGate(args: {
         ...result.rulesRun,
         ...(args.type === 'flow' ? [PLATFORM_SCHEDULE_CREATE_RECORD_ORG_MISSING] : []),
         ...(args.type === 'view' ? [PUBLIC_FORM_INTAKE_UNAVAILABLE] : []),
+        ...(args.type === 'permission' && args.hierarchyResolverMounted !== undefined
+            ? [HIERARCHY_SCOPE_CAPABILITY_REQUIRED]
+            : []),
         ...(pageSourceFindings !== null ? [HTML_PAGE_SOURCE_COMPILE, PAGE_REQUIRES_DISAGREES_WITH_SOURCE] : []),
     ];
 

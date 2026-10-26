@@ -2723,6 +2723,7 @@ const fr = {
     },
     shell: {
       tenantHostHint: "Vous vous connectez à ce système",
+      poweredBy: "Propulsé par ObjectStack",
     },
     layout: {
       headline: "Créez des applications métier puissantes, plus vite.",
@@ -3867,7 +3868,7 @@ const fr = {
       cancel: "Annuler",
     },
     bound: {
-      title: "Connecté à ObjectStack Cloud",
+      title: "Connecté à ObjectOS Cloud",
       runtime: "Runtime",
       organization: "Organisation",
       approvedBy: "Approuvé par",
@@ -3988,13 +3989,13 @@ const fr = {
     install: {
       dialogTitle: "Installer {{name}}",
       dialogDescCurrent: "Installer dans cet environnement ({{host}}).",
-      dialogDescPicker: "Choisissez un environnement où installer cette application. Vous devez être connecté à ObjectStack Cloud.",
+      dialogDescPicker: "Choisissez un environnement où installer cette application. Vous devez être connecté à ObjectOS Cloud.",
       environment: "Environnement",
       environmentPlaceholder: "Sélectionner un environnement",
       includeSampleData: "Inclure des données d'exemple",
       noEnvs: "Aucun environnement trouvé dans votre organisation active.",
       noPermission: "Vous n'avez pas la permission d'installer des applications dans un environnement. Seuls les propriétaires et administrateurs de l'organisation peuvent installer — contactez l'administrateur de votre organisation.",
-      signInFirst: "Vous devez d'abord vous connecter à ObjectStack Cloud.",
+      signInFirst: "Vous devez d'abord vous connecter à ObjectOS Cloud.",
       success: "Installé avec succès. Ouvrez l'environnement pour voir la nouvelle application.",
       localSuccess: "v{{version}} installé dans ce runtime. \"{{name}}\" devrait maintenant apparaître dans le sélecteur d'applications.",
       localLoadsAtRestart: "v{{version}} installé dans ce runtime. \"{{name}}\" sera chargé au prochain redémarrage du runtime et n'apparaîtra pas dans le sélecteur d'applications d'ici là.",
@@ -4036,7 +4037,7 @@ const fr = {
     update: {
       dialogTitle: "Mettre à jour {{name}}",
       dialogDescCurrent: "Mettre à jour la copie installée dans cet environnement ({{host}}).",
-      dialogDescPicker: "Choisissez l'environnement dont la copie installée doit être mise à jour. Vous devez être connecté à ObjectStack Cloud.",
+      dialogDescPicker: "Choisissez l'environnement dont la copie installée doit être mise à jour. Vous devez être connecté à ObjectOS Cloud.",
       majorNotice: "Il s'agit d'une mise à jour de version majeure (v{{fromMajor}} → v{{toMajor}}), qui peut comporter des changements incompatibles.",
       releaseNotes: "Lire les notes de version de la v{{version}}",
       success: "Mis à jour vers la v{{version}}.",

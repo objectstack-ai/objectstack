@@ -62,7 +62,7 @@ import { JobSchema } from './system/job.zod';
 
 // Security Protocol
 import { PositionSchema } from './identity/position.zod';
-import { PermissionSetSchema } from './security/permission.zod';
+import { PermissionSetSchema, findHierarchyScopeGrants } from './security/permission.zod';
 import { judgePermissionSetOwnerBinding } from './security/permission-set-owner-binding';
 import { CapabilityDeclarationSchema } from './security/capabilities';
 import { SharingRuleSchema } from './security/sharing.zod';
@@ -4851,29 +4851,16 @@ function mergeActionsIntoObjects(config: ObjectStackDefinition): ObjectStackDefi
  * ADR-0049). This makes that an authoring-time error instead.
  */
 function validateHierarchyScopeCapability(data: unknown): string[] {
-  const errors: string[] = [];
   const d = data as { requires?: unknown; permissions?: unknown };
   const requires = Array.isArray(d?.requires) ? (d.requires as string[]) : [];
-  if (requires.includes('hierarchy-security')) return errors;
-  const HIER = new Set(['unit', 'unit_and_below', 'own_and_reports']);
-  const perms = Array.isArray(d?.permissions) ? (d.permissions as any[]) : [];
-  for (const ps of perms) {
-    const objs = ps?.objects && typeof ps.objects === 'object' ? ps.objects : {};
-    for (const [objName, grant] of Object.entries(objs)) {
-      const g = grant as Record<string, unknown>;
-      for (const key of ['readScope', 'writeScope']) {
-        const v = g?.[key];
-        if (typeof v === 'string' && HIER.has(v)) {
-          errors.push(
-            `permission set '${ps?.name ?? '?'}' grant on '${objName}' uses ${key}='${v}', a HIERARCHY scope. ` +
-            `Declare \`requires: ['hierarchy-security']\` (provided by @objectstack/security-enterprise) — ` +
-            `the open edition cannot enforce it and would fail closed to owner-only.`,
-          );
-        }
-      }
-    }
-  }
-  return errors;
+  if (requires.includes('hierarchy-security')) return [];
+  // The scope list and the finding sentence are shared with the runtime
+  // metadata save/publish gate, which judges the same grant (#26188).
+  return findHierarchyScopeGrants(d?.permissions).map((g) =>
+    `${g.finding}. ` +
+    `Declare \`requires: ['hierarchy-security']\` (provided by @objectstack/security-enterprise) — ` +
+    `the open edition cannot enforce it and would fail closed to owner-only.`,
+  );
 }
 
 /**
