@@ -48,14 +48,15 @@ const mask: (source: string) => string = maskComments;
  * group's own manifests (objectui#12334, under the maintainer's ruling on
  * objectui#12030). The fixtures below pin both directions of that computation.
  *
- * These tests are the second lock. `.github/workflows/changeset-guard.yml`
- * catches it on the PR that adds the changeset; the repo-state test below
- * catches it in `pnpm test` even if that workflow is ever removed or its
- * trigger stops matching.
+ * These tests are the second lock. objectui's `changeset-guard.yml` caught it
+ * on the PR that added the changeset; the repo-state test below catches it in
+ * `pnpm test` even if that workflow is removed or its trigger stops matching.
+ * Under the monorepo that workflow runs nowhere (GitHub runs the root
+ * `.github/workflows/` alone), so the repo-state test, in `Test UI`, is the
+ * lock that runs until sub-issue 4 ports the guard (objectstack#25712).
  */
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const changesetDir = path.join(repoRoot, '.changeset');
-const workflowDir = path.join(repoRoot, '.github/workflows');
 const GATE = path.join(repoRoot, 'scripts/check-changeset-no-major.mjs');
 
 interface Entry {
@@ -410,37 +411,11 @@ describe('the repository itself', () => {
   });
 });
 
-describe('changeset-guard.yml', () => {
-  const guard = fs.readFileSync(path.join(workflowDir, 'changeset-guard.yml'), 'utf8');
-
-  it('runs the guard script', () => {
-    expect(guard).toContain('node scripts/check-changeset-no-major.mjs');
-  });
-
-  it('triggers on `.changeset/**` — the paths every other workflow ignores', () => {
-    // The inverse pin, and the reason `ci.yml` still cannot host this check: on
-    // a changeset-only PR its `Decide whether this change needs a full run` step
-    // finds nothing outside its exclusion list (markdown and `.changeset/**`
-    // among it) and skips every step below itself, so no gate in that workflow
-    // ever reads the changeset. This one has to run outside that decision.
-    //
-    // Not the reason this comment used to give — "a changeset-only PR matches
-    // its `paths-ignore` twice over, so no job in it would ever run". Since
-    // objectui#3523 step 2, `paths-ignore` is gone from the `pull_request`
-    // trigger and survives only on `push`: such a PR does start `ci.yml` and
-    // does produce its contexts (measured — PR #3856, one markdown file, 16
-    // checks; PR #4339, one line added to AGENTS.md, 17). The conclusion
-    // outlived the premise; objectui#3857 pinned the correction.
-    //
-    // That surviving `push` copy is what the two assertions below read, and it
-    // is why they stay green — `ci.yml` genuinely still declares `paths-ignore`
-    // with markdown in it, on `push`. The in-job exclusion list is held
-    // identical to that filter by `scripts/__tests__/merge-queue-reporting.test.ts`,
-    // so the pair cannot drift apart silently.
-    expect(guard).toMatch(/paths:\s*\n\s*- '\.changeset\/\*\*'/);
-
-    const ci = fs.readFileSync(path.join(workflowDir, 'ci.yml'), 'utf8');
-    expect(ci).toContain("paths-ignore:");
-    expect(ci).toContain("- '**/*.md'");
-  });
-});
+// `changeset-guard.yml` (`runs the guard script`, and `triggers on
+// .changeset/** — the paths every other workflow ignores`) retired with
+// objectstack#25712. Both cases read objectui's `changeset-guard.yml` and its
+// `ci.yml`, which run nowhere under the monorepo: GitHub runs the root
+// `.github/workflows/` alone, and no root workflow runs this gate. The guard is
+// row 3 of the objectstack#25697 workflow roster (→ sub-issue 4); a port brings
+// these pins back against its root workflow, by path. The repo-state cases
+// above are the lock that runs meanwhile.

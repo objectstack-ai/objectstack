@@ -2081,6 +2081,9 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "measures.derived": {
         label: "Derived From"
+      },
+      "measures.duration": {
+        label: "Duration"
       }
     }
   },

@@ -3,7 +3,7 @@
 import type { AnalyticsQuery, AnalyticsResult } from '@objectstack/spec/contracts';
 import type { Cube } from '@objectstack/spec/data';
 import { AggregationMetricType, NUMERIC_VALUE_TYPES, type AggregationFunction } from '@objectstack/spec/data';
-import type { AnalyticsStrategy, StrategyContext, DatasetScopedStrategyContext } from './types.js';
+import type { AnalyticsStrategy, StrategyContext, DatasetScopedStrategyContext, DurationMeasureSpec } from './types.js';
 import {
   declaredDatetimeLowering,
   findNestedRelationCondition,
@@ -45,6 +45,8 @@ import { datasetInvalidError, invalidMemberError } from '../dataset-refusal.js';
 import { type LikeShape } from '../like-pattern.js';
 import { textMatchPredicateSql, sqlDialectFor, type AnalyticsSqlDialect } from '../text-match-sql.js';
 import { whereContainsMembershipSql } from '../contains-membership-sql.js';
+// [#25778] The per-row operand of a dataset duration measure, per dialect.
+import { durationMeasureIn, durationMeasureKey, durationOperandSql, hasDurationSql } from '../duration-measure-sql.js';
 import { isJsonStoredShape } from '../contains-membership-sql.js';
 import { expandEmptyOperator } from '@objectstack/spec/data';
 import { resolveAnalyticsDateRangeString } from '@objectstack/core';
@@ -824,6 +826,15 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // reason: one owner of the composition, no second copy here. Every object
     // the statement scopes is read, as the cross-field decline reads them.
     if (this.readScopeCarriesReadableIds(query, ctx)) return false;
+    // ── [#25778] DECLINE a duration measure on a dialect nobody named ──────
+    //
+    // A dataset duration measure is the time between two `datetime` columns of
+    // a row, and the difference of two instants is spelled per dialect
+    // (`duration-measure-sql.ts`); on `'unknown'` there is no spelling to
+    // emit. Declined here, before anything compiles, as the JSON-function
+    // decline above is: the query routes on, and the service refuses a
+    // duration measure no native statement serves, with the reason.
+    if (this.durationMeasureOnUnknownDialectIn(query, ctx)) return false;
     const caps = ctx.queryCapabilities(query.cube);
     return caps.nativeSql && typeof ctx.executeRawSql === 'function';
   }
@@ -845,6 +856,20 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       ? [...scoped]
       : [this.extractObjectName(cube), ...Object.keys(cube.joins ?? {}).map((alias) => cube.joins?.[alias]?.name ?? alias)];
     return objects.some((object) => findReadableIdsLeaf(ctx.getReadScope!(object)) !== null);
+  }
+
+  /**
+   * [#25778] Does this query request a dataset duration measure on a base
+   * object whose SQL dialect the host cannot name? See the decline at
+   * {@link canHandle}. A duration reads two columns of the base object, so
+   * the base object's dialect is the one asked.
+   */
+  private durationMeasureOnUnknownDialectIn(query: AnalyticsQuery, ctx: StrategyContext): boolean {
+    const cube = query.cube ? ctx.getCube(query.cube) : undefined;
+    if (!cube) return false;
+    const durations = (ctx as DatasetScopedStrategyContext).getDatasetScope?.(query.cube!)?.measureDurations;
+    if (!(query.measures ?? []).some((measure) => durationMeasureIn(durations, measure, cube.name))) return false;
+    return !hasDurationSql(sqlDialectFor(ctx, this.extractObjectName(cube)));
   }
 
   /**
@@ -1164,6 +1189,12 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // `ORDER BY` and window had already placed and paged the NULL. The dataset
     // door's `DatasetExecutor` fill still runs after this and is idempotent on
     // an answered identity.
+    // [#25778] A dataset duration measure is absent from the cube and carries
+    // its aggregate in the dataset scope; its identity is answered in the
+    // statement the same way (`resolveDurationMeasureSql`), and it answers a
+    // number whatever its aggregate.
+    const durations = (ctx as DatasetScopedStrategyContext).getDatasetScope?.(query.cube!)?.measureDurations;
+    const durationOf = (member: string) => durationMeasureIn(durations, member, cube.name);
 
     // [#20889] A measure column `fields[]` declares `number` answers a number,
     // on every dialect. The SQL client hands an aggregate back as the wire type
@@ -1189,6 +1220,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     const declaredType = (ctx as DatasetScopedStrategyContext).declaredFieldType;
     const referenceOf = relationshipReferenceOf(ctx);
     const numberMeasures = (query.measures ?? []).filter((member) => {
+      if (durationOf(member)) return true;
       const measure = this.lookupMember(cube, member, 'measure');
       if (!measure?.type || !Object.prototype.hasOwnProperty.call(AGGREGATE_ANSWER_KIND, measure.type)) return false;
       if (AGGREGATE_ANSWER_KIND[measure.type as AggregationFunction] === 'number') return true;
@@ -1313,7 +1345,10 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
         // loop, so its bound values are pushed onto `params` in the order the
         // placeholders appear in the statement — the SELECT list precedes the
         // WHERE clause, and `$n` is positional.
-        const measureFilter = datasetScope?.measureFilters?.[measure];
+        // [#25778] A duration measure named `<cube>.<name>` reads the filter
+        // its dataset scoped under `<name>`.
+        const durationKey = durationMeasureKey(datasetScope?.measureDurations, measure, cube.name);
+        const measureFilter = datasetScope?.measureFilters?.[durationKey ?? measure];
         const predicate = measureFilter
           ? this.compileFilterNode(
               normalizeAnalyticsFilterTree(judgedComparands({ where: measureFilter }, comparandTypeOf), lowering),
@@ -1324,7 +1359,10 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
               ctx,
             )
           : null;
-        const aggExpr = this.resolveMeasureSql(cube, measure, tableName, joins, predicate, ctx);
+        const duration = durationKey === undefined ? undefined : datasetScope!.measureDurations![durationKey];
+        const aggExpr = duration
+          ? this.resolveDurationMeasureSql(cube, measure, duration, tableName, joins, predicate, ctx)
+          : this.resolveMeasureSql(cube, measure, tableName, joins, predicate, ctx);
         selectClauses.push(`${aggExpr} AS "${measure}"`);
       }
     }
@@ -1813,6 +1851,51 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // refused (bare, undeclared 500, the spec's own words) every type it does
     // not key, before anything was lowered.
     return withEmptyGroupIdentity(aggregate, AGGREGATE_SQL[aggregate](col));
+  }
+
+  /**
+   * [#25778] A dataset duration measure: `aggregate` over the per-row time
+   * from `duration.from` to `duration.to`, two `datetime` columns of the base
+   * object, in `duration.unit` (`duration-measure-sql.ts`). Each column reads
+   * through the host's temporal repair, as a filter on it does, so a legacy
+   * SQLite column that still holds epoch integers measures the same instants.
+   * Under a measure filter the operand takes the conditional aggregate, as
+   * every other measure's does, and over nothing it answers its aggregate's
+   * declared identity in the statement ({@link withEmptyGroupIdentity}), so a
+   * `sum` with no record carrying both columns sorts and pages as its `0`.
+   */
+  private resolveDurationMeasureSql(
+    cube: Cube,
+    member: string,
+    duration: DurationMeasureSpec,
+    parentTable: string,
+    joins: StatementJoins,
+    predicate: string | null,
+    ctx: StrategyContext,
+  ): string {
+    const dialect = sqlDialectFor(ctx, parentTable);
+    // Unreachable by construction: {@link canHandle} declines a duration
+    // measure on `'unknown'`. Deliberately BARE, an undeclared 500, the tier
+    // of {@link assertNoCrossFieldComparison}: arriving here is drift between
+    // our own routing gate and this emitter, never the author's mistake.
+    if (!hasDurationSql(dialect)) {
+      throw new Error(
+        `[native-sql-strategy] duration measure "${member}" on cube "${cube.name}" reached the SQL ` +
+          `compiler on a datasource whose dialect the host does not name; \`canHandle\` declines it there.`,
+      );
+    }
+    const column = (field: string) => this.temporalColumn(
+      ctx,
+      { object: parentTable, field },
+      this.qualifyAndRegisterJoin(field, parentTable, joins, cube),
+    );
+    const operand = durationOperandSql(dialect, column(duration.from), column(duration.to), duration.unit);
+    return withEmptyGroupIdentity(
+      duration.aggregate,
+      predicate !== null
+        ? CONDITIONAL_AGGREGATE_SQL[duration.aggregate](operand, predicate)
+        : AGGREGATE_SQL[duration.aggregate](operand),
+    );
   }
 
   private resolveFieldSql(

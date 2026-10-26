@@ -60,6 +60,7 @@ export {
   validateDatasetMeasureAggregates,
   MEASURE_AGGREGATE_FIELD_TYPE_REFUSED,
   DIMENSION_JSON_STORED_FIELD_REFUSED,
+  MEASURE_DURATION_FIELD_TYPE_REFUSED,
   // [#23235] The dimension leg's group-key verdict on its own, so a consumer
   // deriving dataset dimensions (cloud's AI build) asks the door's two
   // predicates in the door's order here rather than composing them itself.

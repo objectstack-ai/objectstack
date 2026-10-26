@@ -162,9 +162,12 @@ const PIN_APP: any = {
           ),
         },
         // ② / ③ declared here; their handlers are code registered by PIN_HANDLER_PLUGIN.
-        { name: 'handler_engine_reads_family', label: 'Handler engine read', type: 'script' },
-        { name: 'handler_engine_reads_history', label: 'Handler engine history read', type: 'script' },
-        { name: 'handler_api_reads_family', label: 'Handler api read', type: 'script' },
+        // [#25744] An object's own action is stored as its `ActionSchema` parse
+        // too, so each names its handler (`target`), as a body-less `script`
+        // action must; dispatch is by handler key, so the pins' subject is unchanged.
+        { name: 'handler_engine_reads_family', label: 'Handler engine read', type: 'script', target: 'handler_engine_reads_family' },
+        { name: 'handler_engine_reads_history', label: 'Handler engine history read', type: 'script', target: 'handler_engine_reads_history' },
+        { name: 'handler_api_reads_family', label: 'Handler api read', type: 'script', target: 'handler_api_reads_family' },
         // EVALUATE shapes — each body attempts to evaluate the stored body or
         // hash. [#21594] A body's read is refused whatever it carries, so each
         // answers the body boundary's refusal, the same as a plain read. The
@@ -222,7 +225,7 @@ const PIN_APP: any = {
         },
         // ② the engine handle's evaluate shape — a handler whose ctx.engine.find
         // filters the body column is refused the same way.
-        { name: 'handler_engine_filters_body', label: 'Handler engine filters body', type: 'script' },
+        { name: 'handler_engine_filters_body', label: 'Handler engine filters body', type: 'script', target: 'handler_engine_filters_body' },
         // [#21594] subject-record control: an ordinary row is handed to a body as before.
         { name: 'note_reads_record', label: 'Body reads its subject record', type: 'script', body: actionBody(RETURN_RECORD) },
       ],

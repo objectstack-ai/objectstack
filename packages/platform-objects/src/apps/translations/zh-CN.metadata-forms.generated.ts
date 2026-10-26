@@ -2081,6 +2081,9 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "measures.derived": {
         label: "派生自"
+      },
+      "measures.duration": {
+        label: "时长"
       }
     }
   },

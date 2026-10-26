@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { globMatches, jobBlock, repoPath, rootCi, triggerBlock, uiFilterGlobs, UI_JOBS, withoutComments } from './helpers/root-ci';
+
 /**
  * objectui#3261: the header comment in `.github/workflows/lint.yml` said
  * `eslint.config.js` sets *three* `object-ui/*` rules to `error` and named the
@@ -78,17 +80,29 @@ import { fileURLToPath } from 'node:url';
  * `eslint.config.js`, where each rule's ADR/issue sits in the comment beside it.
  * A reference cannot drift out of step with its target; a copy of its contents
  * is the thing that had already gone stale three times.
+ *
+ * ## The workflow is the root's now (objectstack#25712)
+ *
+ * GitHub runs only the repository root's `.github/workflows/`, and
+ * objectstack#25697 ported `lint.yml`'s `Lint` job to the root `ci.yml` as
+ * `lint-ui` (roster row 16). objectui's own `lint.yml` runs nowhere, so the
+ * workflow surface is that job: its text for the rule-name check, its comments
+ * for the count check. The trigger claims are the root's too. Its `on:` block
+ * filters no paths at all, so the ignore list the second claim read is gone; a
+ * pull request reaches `lint-ui` through the `filter` job's `ui` globs, and
+ * those are what may not skip a TypeScript source.
  */
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 const read = (relative: string): string => fs.readFileSync(path.join(repoRoot, relative), 'utf8');
 
 /** Repo-relative, so the same string labels the surface in failure messages. */
-const WORKFLOW = '.github/workflows/lint.yml';
+const WORKFLOW = `ci.yml (${UI_JOBS.lint})`;
 const COVERAGE_SCRIPT = 'scripts/check-lint-coverage.mjs';
 const DOC = 'content/docs/guide/ci-cd-pipeline.md';
 
-const workflow = read(WORKFLOW);
+const ci = rootCi();
+const workflow = jobBlock(ci, UI_JOBS.lint);
 const coverageScript = read(COVERAGE_SCRIPT);
 const doc = read(DOC);
 
@@ -120,16 +134,14 @@ const objectUiErrorRules = eslintConfig
   .map(([name]) => name);
 
 /**
- * The `# …` prose block between `name:` and `on:` — the workflow comment this
- * issue is about. Scoped so the assertions below read the explanation, not the
- * YAML.
+ * The job's `# …` comment lines, the explanation its steps carry. Scoped so the
+ * count assertion reads the prose, not the YAML.
  */
-function workflowHeaderComment(): string {
-  const start = workflow.indexOf('\n#');
-  const end = workflow.indexOf('\non:');
-  expect(start, `${WORKFLOW} must still carry a header comment above \`on:\``).toBeGreaterThan(-1);
-  expect(end, `${WORKFLOW} must still have a top-level \`on:\` block`).toBeGreaterThan(start);
-  return workflow.slice(start, end);
+function workflowComments(): string {
+  return workflow
+    .split('\n')
+    .filter((line) => /^\s*#/.test(line))
+    .join('\n');
 }
 
 /**
@@ -191,7 +203,7 @@ const SURFACES: ProseSurface[] = [
   {
     label: WORKFLOW,
     text: workflow,
-    prose: () => unwrap(workflowHeaderComment(), /^[ \t]*#[ \t]?/gm),
+    prose: () => unwrap(workflowComments(), /^[ \t]*#[ \t]?/gm),
   },
   {
     label: COVERAGE_SCRIPT,
@@ -211,8 +223,10 @@ const SURFACES: ProseSurface[] = [
  * word `pull_request` also appears in `concurrency`/`github.ref` expressions.
  */
 function onBlock(): string {
-  const start = workflow.indexOf('\non:');
-  const rest = workflow.slice(start + 1);
+  const triggers = withoutComments(triggerBlock(ci));
+  const start = triggers.indexOf('\non:');
+  expect(start, 'the root ci.yml must still have a top-level `on:` block').toBeGreaterThan(-1);
+  const rest = triggers.slice(start + 1);
   const next = rest.search(/\n[a-z_]+:/);
   return next === -1 ? rest : rest.slice(0, next);
 }
@@ -296,54 +310,52 @@ describe('the premise both comments rest on', () => {
   });
 });
 
-describe('lint.yml — the trigger claims its header comment still makes', () => {
+describe('the root Lint UI job — the trigger claims the ratchets rest on', () => {
   it('still runs on pull requests, so those rules are not inert again (#2923)', () => {
     const on = onBlock();
 
     expect(
       on,
-      `lint.yml no longer triggers on \`pull_request\`. That is exactly the state ` +
-        `#2923 fixed: every \`object-ui/*\` rule \`eslint.config.js\` sets to \`error\` ` +
-        `goes silently inert, because the only thing that runs them on a PR is this ` +
-        `workflow. The header comment describes that as history — keep it history.`,
+      `the root ci.yml no longer triggers on \`pull_request\`. That is exactly the ` +
+        `state #2923 fixed: every \`object-ui/*\` rule \`eslint.config.js\` sets to ` +
+        `\`error\` goes silently inert, because the only thing that runs them on a PR ` +
+        `is the ${UI_JOBS.lint} job.`,
     ).toMatch(/^\s{2}pull_request:/m);
+
+    const condition = workflow.match(/^ {4}if: (.*)$/m)?.[1] ?? '';
+    expect(
+      condition,
+      `${WORKFLOW}'s \`if:\` reads the event name, so some event no longer lints: ${condition}`,
+    ).not.toMatch(/event_name/);
   });
 
   it('does not skip the TypeScript sources those rules lint', () => {
-    // A narrow tripwire, not a glob engine (the repo has no glob matcher at the
-    // root, and vendoring one for this would cost more than it protects). The
-    // realistic way to un-gate the ratchets without touching the triggers above
-    // is adding a TypeScript pattern to the ignore list; today's entries are all
-    // markdown, `content/**`, `docs/**` and `.changeset/**`.
-    //
-    // That list now lives in TWO places and both have to be read, which is the
-    // objectui#3523 change: `paths-ignore` stayed on the `push` trigger, but for
-    // pull requests it moved INTO the job, as `:(exclude,glob)…` pathspecs in
-    // the `Decide whether this change needs a full run` step. Reading only the
-    // `on:` block would have gone on passing while a `**/*.ts` exclusion was
-    // added to the job — the gate reporting green having linted nothing.
-    // `merge-queue-reporting.test.ts` pins the two lists to each other and pins
-    // why the trigger may not filter pull requests at all; this one stays on its
-    // own question, which is what may be in the list.
-    const ignored = [
-      ...[...onBlock().matchAll(/^\s*-\s*'([^']+)'/gm)].map((m) => m[1]),
-      ...[...workflow.matchAll(/':\(exclude,glob\)([^']+)'/g)].map((m) => m[1]),
-    ];
+    // The realistic way to un-gate the ratchets without touching the triggers
+    // above is a filter that stops matching TypeScript. objectui's `lint.yml`
+    // kept an ignore list in two places (`paths-ignore` on `push`, and
+    // `:(exclude,glob)` pathspecs in the job for pull requests, objectui#3523).
+    // The root ci.yml keeps neither: its `on:` block filters no paths, and the
+    // `filter` job's `ui` globs decide whether `lint-ui` runs. So both are read
+    // here: no paths filter comes back on the trigger, no exclusion appears in
+    // the job, and a ui `.ts` or `.tsx` change still matches a `ui` glob.
+    expect(onBlock(), 'the root ci.yml\'s `on:` block filters paths again').not.toMatch(
+      /^\s+paths(-ignore)?:/m,
+    );
+    const excluded = [...withoutComments(workflow).matchAll(/':\(exclude,glob\)([^']+)'/g)].map((m) => m[1]);
+    expect(excluded, `${WORKFLOW} excludes paths from its run`).toEqual([]);
 
+    const globs = uiFilterGlobs(ci);
+    const missed = ['packages/core/src/index.ts', 'packages/components/src/index.ts', 'apps/console/src/App.tsx']
+      .map(repoPath)
+      .filter((file) => !globs.some((glob) => globMatches(glob, file)));
     expect(
-      ignored.length,
-      'lint.yml must still declare an ignore list — on the `push` trigger, in the job, or both',
-    ).toBeGreaterThan(0);
-
-    const swallowsSource = ignored.filter((pattern) => /\.tsx?$/.test(pattern));
-    expect(
-      swallowsSource,
-      `lint.yml skips TypeScript changes:\n` +
-        swallowsSource.map((p) => `  - ${p}`).join('\n') +
+      missed,
+      `the root \`filter\` job's \`ui\` globs no longer match these TypeScript sources:\n` +
+        missed.map((p) => `  - ${p}`).join('\n') +
         `\n\nEvery \`object-ui/*\` rule \`eslint.config.js\` sets to \`error\` only gates ` +
-        `a PR because this workflow lints the .ts/.tsx it touches. Excluding them is the ` +
-        `pre-#2923 inert state with extra steps — and since objectui#3523 it is the quieter ` +
-        `version of it, because the \`Lint\` check still reports, green.`,
+        `a PR because ${UI_JOBS.lint} lints the .ts/.tsx it touches. A filter that skips ` +
+        `them is the pre-#2923 inert state with extra steps, and the quieter version of ` +
+        `it, because \`Lint UI\` still reports, skipped, which counts as success.`,
     ).toEqual([]);
   });
 });

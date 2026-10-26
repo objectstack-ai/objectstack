@@ -10,6 +10,7 @@ import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { I18nLabelSchema } from './i18n.zod';
 import { AggregationFunction, DateGranularity } from '../data/query.zod';
 import {
+  ANALYTICS_BASE_COLUMN,
   ANALYTICS_COLUMN_PATH,
   ANALYTICS_COLUMN_REFERENCE,
   rowWildcardOutsideCount,
@@ -81,8 +82,9 @@ const DATASET_HISTORY =
 const DATASET_NO_SQL =
   'the dataset layer takes no raw SQL — it is deliberately smaller than a query (ADR-0021). '
   + 'A dimension names a `field` (a base field or a `relationship[.relationship].field` path); '
-  + 'a measure names an `aggregate` + `field`, and the only computed form is '
-  + '`derived: { op, of: [...] }`, which combines OTHER measures in this dataset by name. '
+  + 'a measure names an `aggregate` + `field`, and the two computed forms are '
+  + '`derived: { op, of: [...] }`, which combines OTHER measures in this dataset by name, and '
+  + '`duration: { from, to, unit }`, which aggregates the time between two datetime columns of each record. '
   + 'Joins are compiled from `Dataset.include` — you never write an ON clause.';
 
 /**
@@ -128,10 +130,13 @@ const DATASET_MEASURE_FIELD_NOT_COLUMN =
   + `a count may also omit \`field\`. ${DATASET_FIELD_EXPRESSION_REFUSED} Name the column the measure `
   + 'aggregates. A derived value is declared in the ADR-0021 form, where the platform judges every field it '
   + 'reads: a conditional count or sum is a measure with its own structured `filter` '
-  + '(`{ name: \'done_count\', aggregate: \'count\', filter: { status: \'done\' } }`), and a ratio, sum, '
+  + '(`{ name: \'done_count\', aggregate: \'count\', filter: { status: \'done\' } }`), a ratio, sum, '
   + 'difference or product of measures is `derived: { op, of: [...] }` over measures named in this dataset '
   + '(`{ name: \'done_rate\', derived: { op: \'ratio\', of: [\'done_count\', \'task_count\'] }, format: '
-  + '\'0.0%\' }` — a 0–1 fraction, which the `%` pattern displays as a percentage).';
+  + '\'0.0%\' }` — a 0–1 fraction, which the `%` pattern displays as a percentage), and the time between two '
+  + 'datetime columns of the same record is `duration: { from, to, unit }` '
+  + '(`{ name: \'avg_cycle_days\', aggregate: \'avg\', duration: { from: \'submitted_at\', to: \'activated_at\', '
+  + 'unit: \'days\' } }`).';
 
 /**
  * Dimension — a groupable axis (e.g. "region", "close_date by quarter").
@@ -208,6 +213,105 @@ export const DatasetDimensionSchema = lazySchema(() => strictObject({
 export const DerivedMeasureOp = z.enum(['ratio', 'sum', 'difference', 'product']);
 
 /**
+ * [#25778] The unit a duration measure's number is expressed in. Fixed-length
+ * units only: a month or a year has no one length in seconds, so a duration in
+ * either would depend on which calendar months the interval crosses.
+ */
+export const DatasetDurationUnit = z.enum(['seconds', 'minutes', 'hours', 'days']);
+
+/**
+ * [#25778] Seconds per {@link DatasetDurationUnit} — the one conversion every
+ * consumer divides by (the SQL compiler, the draft-preview evaluator, a
+ * renderer suffixing the unit), so no two of them can disagree about a day.
+ */
+export const DATASET_DURATION_UNIT_SECONDS: Readonly<Record<z.infer<typeof DatasetDurationUnit>, number>> =
+  Object.freeze({ seconds: 1, minutes: 60, hours: 3600, days: 86400 });
+
+/**
+ * [#25778] The aggregates a duration measure takes. Each reads the per-record
+ * duration as a number: `avg` and `sum` add them up, `min` and `max` pick one.
+ * `count` and `count_distinct` are not here: a count of records with both
+ * instants set is a `count` measure with a `filter`, not a duration.
+ */
+export const DATASET_DURATION_AGGREGATES = ['avg', 'min', 'max', 'sum'] as const;
+
+/**
+ * [#25778] The one field type a duration measure's `from` and `to` may be
+ * declared as. A `datetime` is an instant (ADR-0053), and the time between two
+ * instants is the same number on every backend. A `date` is a calendar day and
+ * a `time` a wall clock, so neither is a point a duration is measured from;
+ * a `text` holding ISO strings is not an instant the database knows. Judged
+ * where the declaration is in hand: the dataset compile (`400 DATASET_INVALID`)
+ * and `os validate` (`measure-duration-field-type-refused`).
+ */
+export const DATASET_DURATION_FIELD_TYPE = 'datetime';
+
+const DATASET_DURATION_COLUMN_NOT_BASE =
+  'a duration reads two columns of the SAME record: name a `datetime` field of the dataset\'s own object '
+  + '(`submitted_at`), by its bare name. A relationship path, a SQL expression, `\'*\'` or an empty string '
+  + 'is refused: the dataset layer takes no raw SQL or expressions (ADR-0021).';
+
+/**
+ * [#25778] A duration measure's column pair: the time from `from` to `to` on
+ * each record, in `unit`, which the measure's `aggregate` then reduces.
+ *
+ * Both columns are `datetime` fields of the dataset's own object — the time
+ * between two instants of one record (cycle time, time in stage, time to
+ * first response). The type is judged where the declarations are in hand: at
+ * authoring (`measure-duration-field-type-refused`) and when the dataset is
+ * compiled (`400 DATASET_INVALID`).
+ *
+ * A record whose `from` or `to` is null contributes nothing: it is excluded
+ * from `avg`, `min`, `max` and `sum` alike, so `avg` is the mean over records
+ * with both instants set. A record whose `to` is before its `from` contributes
+ * a NEGATIVE duration, as written — the measure reports the data, it does not
+ * repair it; filter such records out with the measure's `filter` if they are
+ * errors.
+ *
+ * The result is a number of `unit`s (`1.5` with `unit: 'days'` is a day and a
+ * half), the same on every SQL dialect the analytics runtime serves. No
+ * expression language and no raw SQL: the pair is two column names and a unit
+ * word, so every field it reads stays judgeable (ADR-0021).
+ */
+export const DatasetMeasureDurationSchema = lazySchema(() => strictObject({
+  surface: 'this duration-measure spec',
+  history: DATASET_HISTORY,
+  aliases: {
+    start: 'from',
+    begin: 'from',
+    since: 'from',
+    startField: 'from',
+    fromField: 'from',
+    end: 'to',
+    until: 'to',
+    endField: 'to',
+    toField: 'to',
+    units: 'unit',
+    interval: 'unit',
+  },
+  guidance: {
+    sql: DATASET_NO_SQL,
+    expression: DATASET_NO_SQL,
+    formula: DATASET_NO_SQL,
+    field:
+      'a duration reads TWO columns — name them in `from` (the earlier instant) and `to` (the later one); '
+      + 'the measure itself carries no `field`.',
+  },
+}, {
+  from: z.string()
+    .regex(ANALYTICS_BASE_COLUMN, { error: () => DATASET_DURATION_COLUMN_NOT_BASE })
+    .describe('The earlier instant: a datetime field of the dataset\'s own object, by its bare name.')
+    .meta({ title: 'From' }),
+  to: z.string()
+    .regex(ANALYTICS_BASE_COLUMN, { error: () => DATASET_DURATION_COLUMN_NOT_BASE })
+    .describe('The later instant: a datetime field of the dataset\'s own object, by its bare name.')
+    .meta({ title: 'To' }),
+  unit: DatasetDurationUnit
+    .describe('Unit of the result: the measure answers a number of these (1.5 with "days" is a day and a half).')
+    .meta({ title: 'Unit' }),
+}));
+
+/**
  * Measure — an aggregatable value (e.g. "revenue = sum(amount)"). Defined ONCE
  * here; every presentation references it by name.
  */
@@ -243,6 +347,9 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
     // Computed measures.
     calculated: 'derived',
     computed: 'derived',
+    // [#25778] The column-pair measure.
+    elapsed: 'duration',
+    timeBetween: 'duration',
   },
   guidance: {
     sql: DATASET_NO_SQL,
@@ -361,7 +468,83 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
     /** Names of other measures in this dataset (2+ for ratio/difference). */
     of: z.array(SnakeCaseIdentifierSchema).min(1),
   }).optional().meta({ title: 'Derived From' }),
+  /**
+   * [#25778] Duration measure — the time between two `datetime` columns of
+   * each record, in `unit`, reduced by `aggregate` (`avg` / `min` / `max` /
+   * `sum`): e.g. `{ aggregate: 'avg', duration: { from: 'submitted_at', to:
+   * 'activated_at', unit: 'days' } }` is the average cycle time in days. See
+   * {@link DatasetMeasureDurationSchema}. Excludes `field` and `derived`: the
+   * two columns are the measure's source.
+   */
+  duration: DatasetMeasureDurationSchema.optional().describe(
+    'Time between two datetime columns of each record ({ from, to, unit }), reduced by `aggregate` '
+    + '(avg / min / max / sum). Records with either instant null are excluded. Replaces `field`.',
+  ).meta({ title: 'Duration' }),
 }).superRefine((measure, ctx) => {
+  // [#25778] A duration measure's source is its column pair, and its value is
+  // a number of `unit`s: so no `field` beside it (two sources), no `derived`
+  // (two computed forms), only the aggregates that read a number, and no
+  // `currency` (a duration is no amount of money).
+  if (measure.duration) {
+    if (measure.field !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['field'],
+        message:
+          'a duration measure reads the two columns named in `duration.from` / `duration.to` — it takes no '
+          + '`field`. Delete `field`, or delete `duration` to aggregate one column.',
+      });
+    }
+    if (measure.derived !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['derived'],
+        message:
+          'a measure is either `derived` (combines other measures by name) or a `duration` (two columns of '
+          + 'each record), never both. Declare them as two measures; a derived measure may name the duration one in `of`.',
+      });
+    }
+    if (measure.aggregate === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['aggregate'],
+        message:
+          `a duration measure needs \`aggregate\` — one of ${DATASET_DURATION_AGGREGATES.join(', ')} — to reduce `
+          + 'the per-record durations to one number (e.g. `aggregate: \'avg\'` for the average cycle time).',
+      });
+    } else if (!(DATASET_DURATION_AGGREGATES as readonly string[]).includes(measure.aggregate)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['aggregate'],
+        message:
+          `a duration measure takes \`aggregate\` ${DATASET_DURATION_AGGREGATES.join(' / ')}, not `
+          + `"${measure.aggregate}": the per-record duration is a number to average, add up or pick the least or `
+          + 'greatest of. To count records, declare a `count` measure (with a `filter` for the records whose '
+          + 'two instants are set).',
+      });
+    }
+    // Judged here rather than on the duration spec itself, so the published
+    // JSON Schema keeps ONE dropped-refinement site for the measure.
+    if (measure.duration.from === measure.duration.to) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['duration', 'to'],
+        message:
+          `\`duration.from\` and \`duration.to\` both name "${measure.duration.from}", so every record's duration `
+          + 'is zero. Name the two instants the duration spans — e.g. `from: \'submitted_at\'`, `to: \'activated_at\'`.',
+      });
+    }
+    if (measure.currency !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['currency'],
+        message:
+          'a duration measure answers a number of `duration.unit`s, not an amount of money — delete `currency`. '
+          + 'Decimals and grouping go in `format` (e.g. "0.0").',
+      });
+    }
+  }
+
   // [#21409] `'*'` is the row wildcard a `count` aggregates (`COUNT(*)`), and
   // only a `count` consumes it: under any other aggregate — or none, as on a
   // `derived` measure — it names no column. Measured at
@@ -463,6 +646,10 @@ export const DatasetSchema = lazySchema(() => strictObject({
   }
   // Derived measures may only reference OTHER measures declared in this dataset.
   for (const m of ds.measures) {
+    // [#25778] A duration measure's aggregate and column pair are judged on the
+    // measure itself (`DatasetMeasureSchema`'s refinement); it carries no
+    // `field` and names no other measure, so neither check below is its.
+    if (m.duration) continue;
     if (!m.derived) {
       // A non-derived measure must declare an aggregate (a derived measure
       // omits it — it combines other measures by name instead).
@@ -518,6 +705,8 @@ export function defineDataset(dataset: Dataset): Dataset {
 
 export type DatasetDimension = z.input<typeof DatasetDimensionSchema>;
 export type DatasetMeasure = z.input<typeof DatasetMeasureSchema>;
+export type DatasetMeasureDuration = z.input<typeof DatasetMeasureDurationSchema>;
+export type DatasetDurationUnit = z.input<typeof DatasetDurationUnit>;
 export type DerivedMeasureOpValue = z.input<typeof DerivedMeasureOp>;
 export type Dataset = z.input<typeof DatasetSchema>;
 

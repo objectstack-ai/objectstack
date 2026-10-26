@@ -69,6 +69,7 @@ import {
   warnAuthoredTenantPolicyOnce,
   writeCheckFieldOptions,
   type ObjectInputsHost,
+  type FieldWriteRow,
 } from './security-plugin-object-inputs.js';
 // [#25223 cut 2] The controlled-by-parent master relation (ADR-0055 §1) and its
 // two reports; the methods of the same names below hand each body the members
@@ -5608,6 +5609,18 @@ export class SecurityPlugin implements Plugin {
    * throws on a non-empty answer, and {@link canWriteObject}'s field arm, which
    * denies on one. {@link getWritableFields} is their complement over the same
    * posture and the same fold ({@link resolveProjectionFieldMask}).
+   *
+   * [#25866 / ruling of record 6408558941] `row` is the row the entries that
+   * carry a `when` (`FieldPermissionSchema.when`) are judged on: each incoming
+   * row of an insert, the caller-read stored row of a by-id update (BEFORE the
+   * write). A row that cannot be judged — a predicate update, a stored row the
+   * caller cannot read, a reader that holds no row, a condition that does not
+   * resolve for the request — applies the entry as its LOCK. The judge is the
+   * write gate's own in-process one (`RLSCompiler.compileRowPredicate` +
+   * `storedFormCheckJudge`), never a query rewrite; the row-blind readers of
+   * the same map ({@link getWritableFields}, the query guard, the result
+   * masker) read every conditioned entry as its lock, so none is wider than
+   * this gate.
    */
   private computeForbiddenFieldWrites(
     objectName: string,
@@ -5615,16 +5628,31 @@ export class SecurityPlugin implements Plugin {
     secMeta: Pick<ObjectSecurityMeta, 'fieldRequiredPermissions'>,
     permissionSets: PermissionSet[],
     delegatorSets: PermissionSet[] | null,
-  ): string[] {
+    row: FieldWriteRow,
+  ): Promise<string[]> {
     // [#25223 cut 1] The body moved to `security-plugin-object-inputs.ts` (see `ObjectInputsHost`).
+    const readDatetimeFieldNamesCache = () => this.datetimeFieldNamesCache;
     const readFieldMasker = () => this.fieldMasker;
+    const readLogger = () => this.logger;
+    const readMetadata = () => this.metadata;
+    const readNumberComparandFieldsCache = () => this.numberComparandFieldsCache;
     const readPermissionEvaluator = () => this.permissionEvaluator;
-    const host: Pick<ObjectInputsHost, 'fieldMasker' | 'foldFieldRequiredPermissions' | 'permissionEvaluator'> = {
+    const readQl = () => this.ql;
+    const readRlsCompiler = () => this.rlsCompiler;
+    const host: Pick<ObjectInputsHost, 'datetimeFieldNamesCache' | 'fieldMasker' | 'foldFieldRequiredPermissions' | 'getObjectFieldNames' | 'logger' | 'metadata' | 'numberComparandFieldsCache' | 'permissionEvaluator' | 'ql' | 'rlsCompiler' | 'writeCheckFieldOptions'> = {
+      get datetimeFieldNamesCache() { return readDatetimeFieldNamesCache(); },
       get fieldMasker() { return readFieldMasker(); },
       foldFieldRequiredPermissions: (...a) => this.foldFieldRequiredPermissions(...a),
+      getObjectFieldNames: (...a) => this.getObjectFieldNames(...a),
+      get logger() { return readLogger(); },
+      get metadata() { return readMetadata(); },
+      get numberComparandFieldsCache() { return readNumberComparandFieldsCache(); },
       get permissionEvaluator() { return readPermissionEvaluator(); },
+      get ql() { return readQl(); },
+      get rlsCompiler() { return readRlsCompiler(); },
+      writeCheckFieldOptions: (...a) => this.writeCheckFieldOptions(...a),
     };
-    return computeForbiddenFieldWrites.call(host, objectName, data, secMeta, permissionSets, delegatorSets);
+    return computeForbiddenFieldWrites.call(host, objectName, data, secMeta, permissionSets, delegatorSets, row);
   }
 
   /**
