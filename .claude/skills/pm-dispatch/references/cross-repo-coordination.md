@@ -45,3 +45,5 @@
 - 该评论点名席位与步骤;无既有卡承载且请求自身即立卡门 ①②④ 时才立新卡。
 - 跨不可达仓的卡立卡或首触按仓拆:该仓部分由可达席立卡,或挂 `domain:cloud`+`status:parked`。
 - 本卡只留本仓活,不读他仓;拆不开先立该仓前置卡;依赖即 `pm:blocked`+`Blocked-by: owner/repo#N`。
+- 开发中涉 cloud 车道者由席位同拆:报告 `open_questions`/`out_of_scope_findings`、复核/落地所见。
+- ⛔ 不记而弃、不并入本仓 PR、不留 `carrier: none`;停放卡加 `repo:cloud`,出处行与一行判据。

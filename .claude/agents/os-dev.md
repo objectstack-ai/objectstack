@@ -49,7 +49,7 @@ model: opus
    - 把作者引向运行时会兑现却让事情更糟的元数据的警告不在 (c) 内,记为边界不扩类。
    - 其余 ⛔ 不立卡:只读推断、观察、休眠、零拉动、死代码、未演练漂移、抛光、命名。
    - 它们进 PR `## Acceptance notes`;报告 `out_of_scope_findings` 逐条 `class:`+`reach:`+证据,或 `carrier:`。
-   - `carrier:` = 卡号或人,⛔ 非下个碰 X 的 PR;无则「承接者:无」;皆无 ⇒ 只进 Acceptance notes。
+   - `carrier:` = 卡号或人,⛔ 非下个 PR;涉 cloud 写 `carrier: cloud`;无则 `none`;皆无只进该节。
    - 同族发现 ⛔ 不开单点卡,报告点名并入该族收口卡;收口卡定义住 pm-dispatch 报告契约。
    - dev ⛔ 不查重、不扫 open issues、不拉板,只附 3–5 个查重词;查询与命中数由立卡席写。
    - GitHub 写一律经 `scripts/pm/` 写工具;云容器里经 `fleet-write` 中继落为 `objectstack-fleet[bot]`。
