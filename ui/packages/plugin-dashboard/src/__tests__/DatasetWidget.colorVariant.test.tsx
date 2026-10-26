@@ -152,12 +152,14 @@ describe('DatasetWidget metric card — the declared colorVariant (#3359)', () =
 
   it('keeps the comparison trend row untouched by the accent', async () => {
     const rows = [{ revenue: 510000, revenue__compare: 400000 }];
-    const plain = await renderMetric({ compareTo: { kind: 'previousPeriod' } }, rows);
+    // A comparison is asked only over a dated window (objectstack#25970).
+    const filter = { close_date: { $gte: '2026-04-01', $lte: '2026-06-30' } };
+    const plain = await renderMetric({ filter, compareTo: { kind: 'previousPeriod' } }, rows);
     const plainHtml = plain.innerHTML;
     cleanup();
     // The delta row renders (that is what makes this case worth pinning) …
     expect(plainHtml).toContain('data-testid="dataset-compare-trend"');
-    const tinted = await renderMetric({ compareTo: { kind: 'previousPeriod' }, colorVariant: 'danger' }, rows);
+    const tinted = await renderMetric({ filter, compareTo: { kind: 'previousPeriod' }, colorVariant: 'danger' }, rows);
     // … and the tinted render differs from it in exactly one place: the value's
     // class attribute. The trend's own up/down colouring is data-driven and must
     // not inherit the widget's accent.
