@@ -222,7 +222,8 @@ for (const cell of CELLS) {
       it("the card's row: ordered, offset 1, no limit — both faces answer every row after the first", async () => {
         const native = await ask('native', OFFSET_ONLY);
         expect(native.statements, 'the native face ran ONE statement').toHaveLength(1);
-        expect(native.statements[0].endsWith(`ORDER BY "note" ASC${cell.noLimit} OFFSET 1`), native.statements[0]).toBe(true);
+        // [#25907] The order states its NULL placement on this dialect.
+        expect(native.statements[0].endsWith(`ORDER BY "note" ASC NULLS LAST${cell.noLimit} OFFSET 1`), native.statements[0]).toBe(true);
         expect(tuples(native.res.rows, ['note', 'amount_sum']), 'native face').toEqual(AFTER_FIRST);
 
         const objectql = await ask('objectql', OFFSET_ONLY);
@@ -253,7 +254,7 @@ for (const cell of CELLS) {
       it('CONTROL: an integer window keeps its bytes — `LIMIT 2 OFFSET 1` — and both faces agree', async () => {
         const query = { ...OFFSET_ONLY, limit: 2 };
         const native = await ask('native', query);
-        expect(native.statements[0].endsWith('ORDER BY "note" ASC LIMIT 2 OFFSET 1'), native.statements[0]).toBe(true);
+        expect(native.statements[0].endsWith('ORDER BY "note" ASC NULLS LAST LIMIT 2 OFFSET 1'), native.statements[0]).toBe(true);
         expect(tuples(native.res.rows, ['note', 'amount_sum'])).toEqual([['x', 15], ['y', 20]]);
         const objectql = await ask('objectql', query);
         expect(tuples(objectql.res.rows, ['note', 'amount_sum'])).toEqual([['x', 15], ['y', 20]]);
