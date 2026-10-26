@@ -1163,9 +1163,11 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
   private assertNoCrossFieldComparison(query: AnalyticsQuery, ctx: StrategyContext): void {
     const hit = this.crossFieldComparisonIn(query, ctx);
     if (!hit) return;
+    const comparand = hit.ref === '$now'
+      ? 'a now-anchored comparand { "$now": true, "addDays": … }'
+      : `a field reference { "$field": "${hit.ref}" }`;
     throw new Error(
-      `[native-sql-strategy] ${hit.source} carries a field reference ` +
-      `{ "$field": "${hit.ref}" } under "${hit.op}" on "${hit.field}", which this strategy does not ` +
+      `[native-sql-strategy] ${hit.source} carries ${comparand} under "${hit.op}" on "${hit.field}", which this strategy does not ` +
       `compile into a column-to-column comparison — it would BIND the reference object as the ` +
       `comparison's value and answer a wrong row set silently. \`canHandle\` declines such a ` +
       `query so it routes to the ObjectQL/engine path, whose driver compiles it and enforces the ` +

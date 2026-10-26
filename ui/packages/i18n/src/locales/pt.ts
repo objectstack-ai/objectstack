@@ -219,6 +219,8 @@ const pt = {
     update: "Atualizar",
     createSuccess: "{{object}} criado",
     updateSuccess: "{{object}} atualizado",
+    createdNamed: "{{object}} \"{{title}}\" criado",
+    updatedNamed: "{{object}} \"{{title}}\" atualizado",
     created: "Criado",
     saved: "Salvo",
     savedNamed: "{{title}} salvo",
@@ -2720,6 +2722,7 @@ const pt = {
     },
     shell: {
       tenantHostHint: "Você está fazendo login neste sistema",
+      poweredBy: "Desenvolvido por ObjectStack",
     },
     layout: {
       headline: "Crie aplicativos de negócios poderosos, com mais rapidez.",
@@ -3864,7 +3867,7 @@ const pt = {
       cancel: "Cancelar",
     },
     bound: {
-      title: "Conectado ao ObjectStack Cloud",
+      title: "Conectado ao ObjectOS Cloud",
       runtime: "Runtime",
       organization: "Organização",
       approvedBy: "Aprovado por",
@@ -3985,13 +3988,13 @@ const pt = {
     install: {
       dialogTitle: "Instalar {{name}}",
       dialogDescCurrent: "Instalar neste ambiente ({{host}}).",
-      dialogDescPicker: "Escolha um ambiente para instalar este aplicativo. Você deve estar conectado ao ObjectStack Cloud.",
+      dialogDescPicker: "Escolha um ambiente para instalar este aplicativo. Você deve estar conectado ao ObjectOS Cloud.",
       environment: "Ambiente",
       environmentPlaceholder: "Selecionar ambiente",
       includeSampleData: "Incluir dados de amostra",
       noEnvs: "Nenhum ambiente encontrado em sua organização ativa.",
       noPermission: "Você não tem permissão para instalar aplicativos em um ambiente. Somente proprietários e administradores da organização podem instalar — fale com o administrador da sua organização.",
-      signInFirst: "Você deve primeiro fazer login no ObjectStack Cloud.",
+      signInFirst: "Você deve primeiro fazer login no ObjectOS Cloud.",
       success: "Instalado com sucesso. Abra o ambiente para ver o novo aplicativo.",
       localSuccess: "v{{version}} instalado neste runtime. \"{{name}}\" deve aparecer no seletor de aplicativos agora.",
       localLoadsAtRestart: "v{{version}} instalado neste runtime. \"{{name}}\" será carregado na próxima reinicialização do runtime e não aparecerá no seletor de aplicativos até lá.",
@@ -4033,7 +4036,7 @@ const pt = {
     update: {
       dialogTitle: "Atualizar {{name}}",
       dialogDescCurrent: "Atualizar a cópia instalada neste ambiente ({{host}}).",
-      dialogDescPicker: "Escolha o ambiente cuja cópia instalada deseja atualizar. Você deve estar conectado ao ObjectStack Cloud.",
+      dialogDescPicker: "Escolha o ambiente cuja cópia instalada deseja atualizar. Você deve estar conectado ao ObjectOS Cloud.",
       majorNotice: "Esta é uma atualização de versão principal (v{{fromMajor}} → v{{toMajor}}), que pode incluir alterações incompatíveis.",
       releaseNotes: "Ler as notas da versão v{{version}}",
       success: "Atualizado para a v{{version}}.",

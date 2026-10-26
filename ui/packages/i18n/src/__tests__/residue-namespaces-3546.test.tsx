@@ -383,10 +383,12 @@ describe('objectui#3546 slice seven — the ratchet residue', () => {
     }
     // PageView uses it twice on the same button (title + aria-label) and
     // RelatedList twice in two different affordances — the counts are pinned so a
-    // silent drop of one of them is visible.
+    // silent drop of one of them is visible. AppContent's two record-save toast
+    // sites share one message builder since objectstack-ai/objectstack#26172,
+    // so its fallback label is written once.
     expect(sourceOf(PAGE_VIEW).split("t('common.editInStudio', { defaultValue: 'Edit in studio' })").length - 1).toBe(2);
     expect(sourceOf(RELATED_LIST).split("t('detail.add', { defaultValue: 'Add' })").length - 1).toBe(2);
-    expect(sourceOf(APP_CONTENT).split("t('common.record', { defaultValue: 'Record' })").length - 1).toBe(2);
+    expect(sourceOf(APP_CONTENT).split("t('common.record', { defaultValue: 'Record' })").length - 1).toBe(1);
   });
 
   it('dashboard.loading matches useSafeTranslate positional fallback, not a defaultValue', () => {

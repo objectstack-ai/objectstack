@@ -12,7 +12,7 @@ import { printHeader, printSuccess, printError, emitJson, errorCodeFields } from
 import { deleteCloudConfig, tryReadCloudConfig } from '../../utils/cloud-config.js';
 
 export default class CloudLogout extends Command {
-  static override description = 'Clear stored ObjectStack Cloud credentials';
+  static override description = 'Clear stored ObjectOS Cloud credentials';
 
   static override examples = ['$ os cloud logout'];
 
@@ -24,7 +24,7 @@ export default class CloudLogout extends Command {
     const { flags } = await this.parse(CloudLogout);
 
     try {
-      if (!flags.json) printHeader('ObjectStack Cloud Logout');
+      if (!flags.json) printHeader('ObjectOS Cloud Logout');
 
       const config = await tryReadCloudConfig();
       if (config?.token && config?.url) {

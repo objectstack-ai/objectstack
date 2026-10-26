@@ -406,3 +406,95 @@ export function portTextReadNotice(
     + chalk.dim(fix)
   );
 }
+
+/**
+ * The environment a port given on argv is exported as: `OS_PORT` and `PORT`,
+ * one value (#12992, #26243).
+ *
+ * ## Who calls it, and why one writer
+ *
+ * A port flag has two readers: the listener, and whatever reads the port from
+ * the environment, which includes a config evaluated at module load
+ * (`examples/app-showcase/src/system/self-url.ts` builds its self URL from
+ * `env.OS_PORT?.trim() || env.PORT?.trim()`). Each door that takes `--port`
+ * hands the flag to the second reader through this function, so all three
+ * write the same pair the same way:
+ *
+ *  - `os start` merges it into its `serve` child's environment (#12992).
+ *  - `os dev` merges it into its own `process.env`, which the compile, the
+ *    watch recompiles and the `serve` child all run in (#26243).
+ *  - `os serve` merges it into its own `process.env` before it loads the
+ *    config (#26243).
+ *
+ * Measured before #26243, on `examples/app-showcase` with no `OS_PORT`/`PORT`:
+ * `os dev -p 41302` and `os serve --port 41303` both served
+ * `/api/v1/meta/connector/showcase_status_api` with `http://127.0.0.1:3000`, and
+ * the self-ping flow answered `400 FLOW_FAILED … fetch failed`; `os start
+ * --port 41304`, the one door that already called this, served `:41304` and the
+ * ping answered 200.
+ *
+ * ## ⭐ The channel was the defect, not the value (#12992)
+ *
+ * `start` used to write the flag as `{ PORT: String(flags.port) }` and leave an
+ * inherited `$OS_PORT` in place beside it. The child resolves
+ * `readEnvWithDeprecation('OS_PORT', 'PORT')` — `OS_PORT` FIRST — so an explicit
+ * `--port` was handed down on the channel its own child ranks LAST and lost to
+ * an environment variable the flag's help text says it overrides. Measured on a
+ * real boot before this function existed:
+ *
+ * ```
+ *   OS_PORT=41077 os start --port 41078   →  curl finds the server on 41077
+ * ```
+ *
+ * The child's precedence is CORRECT and is not what changed. The parent writes
+ * the canonical name, so the explicit flag arrives first in the order the child
+ * already reads.
+ *
+ * ## Why BOTH names, and why that is one statement rather than two channels
+ *
+ * `OS_PORT` alone would satisfy the CLI, because the CLI reads the pair through
+ * one reader with a declared precedence. But the environment is read by more
+ * than the CLI: app code and third-party libraries read `process.env.PORT`
+ * directly, as the showcase's self URL does. Leaving a stale `PORT` behind would
+ * repair the bind and leave the app computing its own address from a port
+ * nothing is listening on. So the pair is written together and always agrees:
+ * ONE value, on a canonical name and its own documented alias.
+ *
+ * ## The value is the port, not the text
+ *
+ * Callers pass {@link parseRequestedPort}'s answer (`os start`'s
+ * `Flags.integer` has already parsed it). `--port 3e3` selects port 3, so the
+ * environment says `3`, the port the listener asks for; the text `3e3` would
+ * give a config a URL nothing serves. ⚠️ So `os dev`, which keeps forwarding its
+ * flag TEXT to the `serve` child on argv, states one port on two channels.
+ * That is deliberate and cannot drift: both come from one variable at one
+ * door, the environment carries the port the argv text selects, and the argv
+ * text is what lets the child's {@link portTextReadNotice} tell the operator
+ * that `3e3` was read as 3, under the `--port` spelling they typed. `os start`
+ * forwards on the environment alone; its integer flag has no such text.
+ *
+ * ## The deprecation hazard: MEASURED ABSENT (#12992)
+ *
+ *  - `OS_PORT` is the **preferred** argument of `readEnvWithDeprecation`, not
+ *    the legacy one. The warning branch fires only when the preferred name is
+ *    `undefined` and a LEGACY alias supplies the value, so setting the preferred
+ *    name is the one input that can never reach it.
+ *  - Every read site of this pair in the repository passes `{ silent: true }`
+ *    (`commands/dev.ts`, `commands/serve.ts`, `commands/start.ts`).
+ *
+ * ## ⛔ `!== undefined`, never a falsy test
+ *
+ * 0 is a legal port ({@link MIN_PORT}; it asks the kernel for any free one). A
+ * falsy guard once DROPPED `os start --port 0`: measured, `OS_PORT=41077 os
+ * start --port 0` bound **41077**, the flag never forwarded at all.
+ *
+ * @param flagPort the port the flag selected; `undefined` when no flag was
+ *   given.
+ * @returns the keys to merge into the environment; EMPTY when no flag was
+ *   given, so an operator's own `$PORT`/`$OS_PORT` stay as they are.
+ */
+export function portFlagEnv(flagPort: number | undefined): Record<string, string> {
+  if (flagPort === undefined) return {};
+  const value = String(flagPort);
+  return { OS_PORT: value, PORT: value };
+}

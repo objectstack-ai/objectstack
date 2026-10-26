@@ -29,7 +29,8 @@ import { DatasetTotalsSchema } from '@objectstack/spec/api';
 describe('objectui#11073 — the spec`s DatasetTotals is the request, not a result grouping', () => {
   it('declares `groupings` and none of the result grouping`s members', () => {
     const keys = Object.keys((DatasetTotalsSchema as unknown as { shape: Record<string, unknown> }).shape);
-    expect(keys).toEqual(['groupings']);
+    // By name (#26238): the request side is identified by `groupings`.
+    expect(keys).toContain('groupings');
     for (const resultMember of ['dimensions', 'rows']) expect(keys).not.toContain(resultMember);
   });
 });

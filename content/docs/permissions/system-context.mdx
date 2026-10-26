@@ -210,7 +210,7 @@ a reader tracing where elevation travels needs them.
 
 | # | Site | Package | What it does |
 |:--|:---|:---|:---|
-| 63 | `packages/objectql/src/engine.ts#buildSession` | objectql | Propagates `isSystem` into the hook session so hooks can tell engine self-writes from user writes |
+| 63 | `packages/objectql/src/engine-execution-plumbing.ts#buildSession` | objectql | Propagates `isSystem` into the hook session so hooks can tell engine self-writes from user writes |
 | 64 | `packages/objectql/src/engine.ts#isSystem` | objectql | `ScopedContext.isSystem` getter — re-exposes the underlying execution context's flag |
 | 65 | `packages/runtime/src/sandbox/body-runner.ts#executionContextFromHook` | runtime | Rebuilds an `ExecutionContext` from a hook session, carrying the flag across |
 

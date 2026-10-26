@@ -650,6 +650,8 @@
     "data/NormalizedFilter:$and",
     "data/NormalizedFilter:$not",
     "data/NormalizedFilter:$or",
+    "data/NowAnchor:$now",
+    "data/NowAnchor:addDays",
     "data/Object:_lock",
     "data/Object:_lockDocsUrl",
     "data/Object:_lockReason",
