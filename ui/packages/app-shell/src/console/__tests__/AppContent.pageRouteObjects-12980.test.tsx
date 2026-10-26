@@ -298,7 +298,8 @@ describe('a page route reads the objects its page binds, never the whole registr
 
     act(() => server.release());
     await waitFor(() =>
-      expect(screen.getByTestId('page-blocks').getAttribute('data-lookup-href')).toBe('/apps/crm/sys_user/record/u1'),
+      // On the app's package id, its one address (objectstack-ai/objectstack#26183).
+      expect(screen.getByTestId('page-blocks').getAttribute('data-lookup-href')).toBe('/apps/app.crm/sys_user/record/u1'),
     );
     expect(objectCalls()).not.toContain('object');
   });

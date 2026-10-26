@@ -262,7 +262,8 @@ describe('a page bound through the missed object arms reads them in the route sc
     // Known on the first render: the route held the page until they answered,
     // so no block's ask had to start an on-demand read.
     expect(probe.first).toEqual(
-      Object.fromEntries(probe.armObjects.map((name) => [name, `/apps/crm/${name}/record/r1`])),
+      // On the app's package id, its one address (objectstack-ai/objectstack#26183).
+      Object.fromEntries(probe.armObjects.map((name) => [name, `/apps/app.crm/${name}/record/r1`])),
     );
     expect(objectCalls()).not.toContain('object');
     expect(objectCalls()[0]).toBe(`object?package=${CRM}`);
