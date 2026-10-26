@@ -50,7 +50,6 @@
     "census:body-dialect-producers": "node scripts/body-dialect-producer-scan.mjs",
     "census:tsconfig-test-parity": "node scripts/tsconfig-test-parity-census.mjs",
     "census:cross-file-line-citations": "node scripts/cross-file-line-citation-census.mjs",
-    "census:page-key-reads": "node scripts/page-key-read-census.mjs",
     "census:dollar-dialect-aliases": "node scripts/dollar-dialect-alias-census.mjs",
     "census:changeset-polarity": "node scripts/changeset-polarity-census.mjs",
     "check:new-line-citations": "node scripts/check-new-cross-file-line-citations.mjs",
