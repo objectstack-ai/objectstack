@@ -468,6 +468,26 @@ export function formatExhaustedPortSearchNotice(requestedPort: number, cause: un
 }
 
 /**
+ * The notice for a development auto-shift that succeeded (#12543): the port
+ * asked for, that it could not be had, and the port taken instead.
+ *
+ * One function because two processes print it (#26270): `os serve` when its
+ * own walk shifts, and the `os dev` parent, which runs the same walk before it
+ * compiles so the config reads the port the server will bind. Whichever shifts
+ * says so in these words; the other never shifts on that boot.
+ */
+export function formatDevPortShiftNotice(requestedPort: number, port: number): string {
+  return (
+    '\n'
+    + chalk.yellow(`  ⚠ Port ${requestedPort} is in use — serving on ${port} instead.\n`)
+    + chalk.dim(`     Development auto-shift: ${requestedPort} was not free, so this server took\n`)
+    + chalk.dim(`     the next one that was (${port}). Anything still pointed at ${requestedPort} — a\n`)
+    + chalk.dim('     proxy, an OAuth callback URL, another terminal, a test harness — is\n')
+    + chalk.dim(`     talking to whatever holds ${requestedPort}, not to this server.`)
+  );
+}
+
+/**
  * The port the HTTP server ACTUALLY bound, read off the transport that bound it
  * (#13062).
  *
@@ -2340,14 +2360,16 @@ export default class Serve extends Command {
         // line cannot be swallowed, and it survives a boot that dies later. A
         // drifted port is a plausible CAUSE of such a death, so the notice has
         // to outlive it.
-        printDiagnostic(
-          '\n'
-          + chalk.yellow(`  ⚠ Port ${requestedPort} is in use — serving on ${port} instead.\n`)
-          + chalk.dim(`     Development auto-shift: ${requestedPort} was not free, so this server took\n`)
-          + chalk.dim(`     the next one that was (${port}). Anything still pointed at ${requestedPort} — a\n`)
-          + chalk.dim('     proxy, an OAuth callback URL, another terminal, a test harness — is\n')
-          + chalk.dim(`     talking to whatever holds ${requestedPort}, not to this server.`),
-        );
+        printDiagnostic(formatDevPortShiftNotice(requestedPort, port));
+        // ── …and the shifted port is the port the config reads (#26270) ──
+        // The config is loaded further down in this process, and it may read
+        // `OS_PORT`/`PORT` at module evaluation (the showcase's self URL does),
+        // as may the dev compile a direct `os serve --dev` runs. Without this
+        // they read the port that was busy: measured on the showcase,
+        // `/api/v1/meta/connector/showcase_status_api` named the held port and
+        // the self-ping flow answered `400 FLOW_FAILED`. Exported on the same
+        // two names a port flag is (`portFlagEnv`), so nothing restates them.
+        Object.assign(process.env, portFlagEnv(port));
       }
     } else if (!(await isPortAvailable(requestedPort))) {
       // One write, for the reason spelled out at the "Nothing to serve" exit

@@ -53,7 +53,10 @@ import {
 } from '../utils/dev-tls-contract.js';
 // The auth base-URL precedence chain, borrowed from the command that owns it
 // (#16734). ⛔ `dev` declares no chain of its own — see printMcpConnectHint.
-import { resolveAuthBaseUrl } from './serve.js';
+// The development auto-shift and its notice, borrowed from the command that owns
+// them (#26270): this process runs the same walk before it compiles, so the
+// config reads the port the `serve` child will bind.
+import { resolveAuthBaseUrl, getAvailablePort, formatDevPortShiftNotice } from './serve.js';
 import type { ResolvedProjectDatabaseUrl } from '@objectstack/runtime';
 
 /**
@@ -516,7 +519,7 @@ export default class Dev extends Command {
         printKV('Config', configPath, '📂');
       }
 
-      const port = flags.port ?? readEnvWithDeprecation('OS_PORT', 'PORT', { silent: true });
+      let port = flags.port ?? readEnvWithDeprecation('OS_PORT', 'PORT', { silent: true });
 
       // ── dev's own door on the ONE port contract (#12673) ──────────────
       // Everything about the port — the range, the reader, the refusal prose —
@@ -570,6 +573,43 @@ export default class Dev extends Command {
         // config exactly as it does for the listener. With no flag, the
         // operator's own variables stay as they are.
         if (flags.port !== undefined) Object.assign(process.env, portFlagEnv(parseRequestedPort(port) ?? undefined));
+      }
+
+      const requestedPort = port ?? '3000';
+
+      // ── The port the server will bind is the port the config reads (#26270) ──
+      // The `serve` child shifts off a busy port, but it did so after the
+      // compile below and its own config load had both read the requested
+      // port. Measured on the showcase with 41310 held: `os dev -p 41310`
+      // served on 41311 while `/api/v1/meta/connector/showcase_status_api`
+      // named 41310 and the self-ping flow answered `400 FLOW_FAILED`.
+      //
+      // So this process runs the child's walk (`getAvailablePort`, from the
+      // same requested port) ahead of the first config evaluation. On a shift
+      // it says so in the child's words, exports the port on the one channel a
+      // config reads (`portFlagEnv`, for the compile, the watch recompiles and
+      // the child), and forwards it as the child's `--port`, so the child binds
+      // it without walking again and every restart keeps it.
+      //
+      // ⚠️ The probe releases the port before the child binds it. A port taken
+      // in that window makes the child shift once more: it says so, and exports
+      // its own port for the config it loads (`serve.ts`), but the artifact
+      // compiled here keeps this port until the next recompile. An exhausted
+      // walk is left to the child, which repeats it and prints why.
+      const askedFor = parseRequestedPort(requestedPort);
+      if (askedFor !== null) {
+        let bound = askedFor;
+        try {
+          bound = await getAvailablePort(askedFor);
+        } catch {
+          // The child's own walk reports this (`formatExhaustedPortSearchNotice`).
+        }
+        if (bound !== askedFor) {
+          // stderr, for the #7915 reason the port refusal above gives.
+          process.stderr.write(`${formatDevPortShiftNotice(askedFor, bound)}\n`);
+          Object.assign(process.env, portFlagEnv(bound));
+          port = String(bound);
+        }
       }
 
       // Compile only when the boot's artifact is one this command builds — a
@@ -822,7 +862,6 @@ export default class Dev extends Command {
       printKV('Database', redactConnectionUrl(effectiveDb), '🗄️');
 
       const binPath = process.argv[1];
-      const requestedPort = port ?? '3000';
 
       // ── Serve child under restart supervision (#5148) ───────────────
       // The watcher below rebuilds dist/objectstack.json, but a running
