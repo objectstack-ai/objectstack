@@ -36,7 +36,7 @@ import { useSignedInUserLocale } from '../hooks/useUserLocale.js';
 import { resolveRecordFormTarget, resolveRecordFormModalLayout, resolveNavigateCreateUrl, resolveNavigateEditUrl, resolvePostCreateTarget, recordFormCreateValues, readRecordFormCreateValues, RECORD_FORM_CREATE_VALUES_STATE } from '../utils/recordFormNavigation.js';
 import { deriveRecordSurface, deriveRecordFlowSurface } from '@object-ui/plugin-view';
 import { RECORD_FORM_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_FORM_LINK_PARAM } from '../urlParams.js';
-import { appRouteSegment, matchAppBySegment } from '../utils/appRoute.js';
+import { appAddressSegment, appRouteSegment, canonicalAppPathname, matchAppBySegment } from '../utils/appRoute.js';
 import { resolveHref, type NavTemplateContext } from '@object-ui/layout';
 import type { NavigationItem } from '@object-ui/types';
 
@@ -375,11 +375,28 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
       : undefined);
 
   // ADR-0048 (A) — the segment every `/apps/…` path this component builds is
-  // keyed on: the URL's own (`appName` — the package id, or the name alias the
-  // user followed), else the resolved app's route segment. Never `activeApp.name`
-  // raw: on a package-id route that is a second address for the same app, and
-  // the recent-items tracker below matches it against the URL (objectui#11818).
-  const appSegment = appName ?? appRouteSegment(activeApp);
+  // keyed on: the matched app's one address (`appAddressSegment` — its package
+  // id), else the URL's own, else the resolved app's route segment. Never
+  // `activeApp.name` raw: on a package-id route that is a second address for
+  // the same app, and the recent-items tracker below matches it against the URL
+  // (objectui#11818).
+  const appSegment = appAddressSegment(apps, matchedApp) ?? appName ?? appRouteSegment(activeApp);
+
+  // objectstack-ai/objectstack#26183 — a URL that reached the app through its
+  // NAME alias moves to the app's one address, path, search, hash and history
+  // state kept. The alias still opens (old bookmarks and shared links keep
+  // working), but a page left on it built every link on the alias while the
+  // sidebar built on the package id: one app, two address families. `replace`,
+  // so Back never returns to the alias. An effect rather than a `<Navigate>`
+  // return, so a layout already on screen is not unmounted for the swap.
+  const canonicalPathname = canonicalAppPathname(apps, appName, location.pathname);
+  useEffect(() => {
+    if (!canonicalPathname) return;
+    navigate(`${canonicalPathname}${location.search}${location.hash}`, {
+      replace: true,
+      state: location.state,
+    });
+  }, [canonicalPathname, location.search, location.hash, location.state, navigate]);
 
   // objectui#12809 — the lazy metadata buckets the CURRENT route reads at
   // render (`appRouteMetadataReads.ts` declares them per route). This used to
