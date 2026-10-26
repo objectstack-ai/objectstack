@@ -12,6 +12,7 @@ import {
   OBJECT_PERMISSION_VERB_NAMES,
   objectPermissionGrants,
   resolveObjectPermissionVerb,
+  findHierarchyScopeGrants,
 } from './permission.zod';
 import { ObjectStackDefinitionSchema } from '../stack.zod';
 
@@ -1432,8 +1433,7 @@ describe('objectPermissionGrants — the fold, not the bare bit', () => {
 // [#26188] The one list of hierarchy depths and the one finding sentence, read
 // by `defineStack` and by the runtime metadata save/publish gate.
 describe('findHierarchyScopeGrants', () => {
-  it('names every hierarchy depth on either axis, and nothing else', async () => {
-    const { findHierarchyScopeGrants } = await import('./permission.zod');
+  it('names every hierarchy depth on either axis, and nothing else', () => {
     const grants = findHierarchyScopeGrants([
       {
         name: 'managers',
@@ -1452,8 +1452,7 @@ describe('findHierarchyScopeGrants', () => {
     expect(grants[0]!.finding).toBe("permission set 'managers' grant on 'task' uses readScope='unit_and_below', a HIERARCHY scope");
   });
 
-  it('contributes nothing for a value that is not a list of permission sets', async () => {
-    const { findHierarchyScopeGrants } = await import('./permission.zod');
+  it('contributes nothing for a value that is not a list of permission sets', () => {
     for (const input of [undefined, null, {}, 'x', [null], [{ objects: null }]]) {
       expect(findHierarchyScopeGrants(input)).toEqual([]);
     }
