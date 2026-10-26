@@ -9,7 +9,7 @@ fix(spec,service-settings): the AI 501 remedy and the AI / knowledge settings hi
 Clause-②: no
 Metadata-protocol: none
 
-ObjectOS is the product, in Community, Cloud and Enterprise editions; ObjectStack is the protocol, SDK, CLI and framework. Three runtime sentences still named the hosted product "ObjectStack Cloud":
+ObjectOS is the product, in Community, Cloud and Enterprise editions; ObjectStack is the protocol, SDK, CLI and framework. Three runtime sentences still named the hosted product by its retired name:
 
 - **`@objectstack/spec`.** `REMEDY_DETAIL['ai']` — the message every `/ai/*` route's 501 body carries and `/discovery` reports as `services.ai.message` on an open-edition boot — now reads "Provided by @objectstack/service-ai in ObjectOS Cloud/Enterprise — no implementation ships in the open framework".
 - **`@objectstack/service-settings`.** The AI live-call hint ("realized only by an ObjectOS Cloud tier") and the knowledge `turso` adapter's "Test connection" hint ("built in the ObjectOS Cloud monorepo") on Settings → AI & Embedder.
