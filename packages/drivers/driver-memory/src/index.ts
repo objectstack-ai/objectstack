@@ -1,8 +1,11 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { InMemoryDriver } from './memory-driver.js';
-
-export { InMemoryDriver }; // Export class for direct usage
+// No default export, on purpose (#26206). The package used to default-export a
+// legacy `{ id, version, onEnable }` object that no kernel ever calls (the
+// plugin contract is `init`/`start`/`destroy`), and under `require()` it sat on
+// a `.default` property the CommonJS caller never sees. Compose the driver
+// through `DriverPlugin` with the named `InMemoryDriver` export instead.
+export { InMemoryDriver } from './memory-driver.js';
 export type { InMemoryDriverConfig, PersistenceAdapterInterface } from './memory-driver.js';
 
 export { FileSystemPersistenceAdapter } from './persistence/file-adapter.js';
@@ -60,21 +63,3 @@ export type {
   TenantOptOutRecord,
   UniqueAwareSchema,
 } from './memory-unique-constraint.js';
-
-export default {
-  id: 'com.objectstack.driver.memory',
-  version: '1.0.0',
-
-  onEnable: async (context: any) => {
-    const { logger, config, drivers } = context;
-    logger.info('[Memory Driver] Initializing...');
-
-    if (drivers) {
-       const driver = new InMemoryDriver(config);
-       drivers.register(driver);
-       logger.info(`[Memory Driver] Registered driver: ${driver.name}`);
-    } else {
-       logger.warn('[Memory Driver] No driver registry found in context.');
-    }
-  }
-};
