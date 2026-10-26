@@ -1,5 +1,7 @@
 # Metadata Property Liveness & Necessity Audit
 
+> **Lifecycle of a file in `docs/audits/`:** an audit is *open* while its findings are being worked and *closed* once each one is fixed, ruled out or carried into a tracked ledger or issue; a closed audit moves to `docs/audits/archive/`, and git history keeps every version.
+
 A protocol-level audit of **every ObjectStack metadata type**: for each schema property, cross-reference its spec definition against its **actual consumers** (`file:line`) in the runtime and renderers, to answer two questions in order — **(1) does the property take effect?** and **(2) is it necessary / reasonable?**
 
 Liveness is judged by **code consumption**, not browser observation (an unreactive UI can't distinguish "dead property" from "data didn't trigger it"). "DEAD" = parsed but read by no non-spec/non-test consumer → a **silent no-op** for authors.
