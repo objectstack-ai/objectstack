@@ -452,7 +452,7 @@ describe('connect-src names the host the storage service presigns browser upload
       const request = await mount({ services });
       const res = await request('/_console/');
       const connectSrc = directives(res.headers.get('content-security-policy')).get('connect-src')!;
-      expect(connectSrc, options.s3.endpoint ?? options.s3.region).toEqual([
+      expect(connectSrc, options.s3?.endpoint ?? options.s3?.region).toEqual([
         "'self'",
         'https://demotiles.maplibre.org',
         new URL(presigned.uploadUrl).origin,
