@@ -30,15 +30,19 @@ import 'better-auth/plugins';
 import 'better-auth/plugins/bearer';
 import 'better-auth/plugins/generic-oauth';
 import 'better-auth/plugins/organization';
-import '@better-auth/oauth-provider';
+import { oauthProviderOpenIdConfigMetadata } from '@better-auth/oauth-provider';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const PASSWORD = 'S3cure!Passw0rd-25529';
 const OP = 'https://op.example.test';
-const RP = 'http://localhost:3000';
+const RP = 'https://rp.example.test';
 const AUTH = '/api/v1/auth';
 const AFTER = `${RP}/after-sign-in`;
 const SUPPORTED = ['en', 'zh-CN', 'ja-JP'];
+const DISCOVERY = `${OP}/.well-known/openid-configuration`;
+// RFC 7636 Appendix B verifier/challenge pair: the provider requires PKCE of every client.
+const PKCE_VERIFIER = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
+const PKCE_CHALLENGE = 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM';
 /** The RP's generic-OAuth callback, in both spellings better-auth has used. */
 const RP_REDIRECTS = [
   `${RP}${AUTH}/oauth2/callback/${PLATFORM_IDP_PROVIDER_ID}`,
@@ -100,7 +104,7 @@ async function createClient(op: AuthManager, cookie: string, scope: string) {
     cookie,
   );
   const body: any = await res.json().catch(() => null);
-  expect(res.status, JSON.stringify(body)).toBe(200);
+  expect(res.status, JSON.stringify(body)).toBe(201);
   expect(body?.client_id && body?.client_secret, JSON.stringify(body)).toBeTruthy();
   return { clientId: body.client_id as string, clientSecret: body.client_secret as string };
 }
@@ -131,6 +135,8 @@ async function grant(op: AuthManager, cookie: string, scope: string) {
   url.searchParams.set('response_type', 'code');
   url.searchParams.set('scope', scope);
   url.searchParams.set('state', 'st');
+  url.searchParams.set('code_challenge', PKCE_CHALLENGE);
+  url.searchParams.set('code_challenge_method', 'S256');
   const back = await authorizeAs(op, cookie, url.toString());
   const code = back.searchParams.get('code');
   expect(code, `no authorization code: ${back.href}`).toBeTruthy();
@@ -144,6 +150,7 @@ async function grant(op: AuthManager, cookie: string, scope: string) {
         redirect_uri: RP_REDIRECTS[0]!,
         client_id: clientId,
         client_secret: clientSecret,
+        code_verifier: PKCE_VERIFIER,
       }).toString(),
     }),
   );
@@ -263,15 +270,26 @@ describe('one round trip end to end: the platform RP stores the OP\'s claim', ()
     const { manager: op } = makeOp(opEngine);
     const { cookie: opCookie, row } = await signUp(op, opEngine, 'mia@example.test');
     row.locale = 'zh-CN';
+    // A cloud account's address is verified; the RP refuses to JIT-create from an unverified one.
+    row.email_verified = true;
     const { clientId, clientSecret } = await createClient(op, opCookie, 'openid profile email');
 
     // The RP reaches the OP only through `fetch`: route the OP's origin to its
     // handler, as a network would.
     const realFetch = globalThis.fetch;
+    /** What the RP asked the OP, for the failure messages below. */
+    const opCalls: string[] = [];
     vi.stubGlobal('fetch', async (input: any, init?: any) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
       if (!url.startsWith(OP)) return realFetch(input, init);
-      return op.handleRequest(new Request(input, init));
+      // The discovery document is mounted at the issuer's origin by the plugin's
+      // route registration (`registerOidcDiscoveryRoutes`), from this provider helper.
+      const res =
+        url === DISCOVERY
+          ? await oauthProviderOpenIdConfigMetadata((await op.getAuthInstance()) as any)(new Request(url))
+          : await op.handleRequest(new Request(input, init));
+      opCalls.push(`${init?.method ?? 'GET'} ${url} -> ${res.status} ${await res.clone().text()}`);
+      return res;
     });
 
     const rpEngine = createMemoryEngine();
@@ -284,11 +302,9 @@ describe('one round trip end to end: the platform RP stores the OP\'s claim', ()
           providerId: PLATFORM_IDP_PROVIDER_ID,
           clientId,
           clientSecret,
-          authorizationUrl: `${OP}${AUTH}/oauth2/authorize`,
-          tokenUrl: `${OP}${AUTH}/oauth2/token`,
-          userInfoUrl: `${OP}${AUTH}/oauth2/userinfo`,
+          discoveryUrl: DISCOVERY,
           scopes: ['openid', 'profile', 'email'],
-          pkce: false,
+          pkce: true,
         },
       ],
       getI18n: () => ({ getLocales: () => SUPPORTED }),
@@ -311,7 +327,7 @@ describe('one round trip end to end: the platform RP stores the OP\'s claim', ()
       new Request(back.href.replace(/^https?:\/\/[^/]+/, RP), { headers: { cookie: cookiesOf(begin) } }),
     );
     expect(callback.status, await callback.clone().text()).toBe(302);
-    expect(new URL(callback.headers.get('location')!, RP).href).toBe(AFTER);
+    expect(new URL(callback.headers.get('location')!, RP).href, opCalls.join('\n')).toBe(AFTER);
 
     const rpUser = (rpEngine.tables.get('sys_user') ?? []).find((u: any) => u.email === 'mia@example.test');
     expect(rpUser, 'the RP JIT-created no user').toBeDefined();
