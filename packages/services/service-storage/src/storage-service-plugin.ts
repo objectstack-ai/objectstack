@@ -66,6 +66,7 @@ import { installFileReferenceHooks, type FileReferenceReadAuthorizer } from './f
 import { installAttachmentAccessHooks, installAttachmentReadVisibility } from './attachment-access-hooks.js';
 import { contributeAttachmentDeleteFloorAlternate } from './attachment-delete-floor-alternate.js';
 import { FileAttachmentService, type FileAttachmentEngine } from './file-attachment-service.js';
+import { FieldFileService } from './field-file-service.js';
 import { SystemFile, SystemUploadSession } from './objects/index.js';
 // ADR-0052 §3 ownership: `sys_attachment` (a file↔record link) belongs with the
 // storage domain, not the audit/compliance ledger. Definition stays in
@@ -196,8 +197,12 @@ export class StorageServicePlugin implements Plugin {
    * [#23306] `file-attachments` (`FILE_ATTACHMENT_SERVICE`) is the server-side
    * attach verb (`file-attachment-service.ts`): a slot of its own, because the
    * `storage` slot's contract is the adapters' blob store.
+   *
+   * [#25779] `field-files` (`FIELD_FILE_SERVICE`) is the server-side verb for a
+   * file FIELD's file (`field-file-service.ts`), which the seed loader stores
+   * the files a package ships through.
    */
-  providesServices = ['storage', 'file-storage', 'file-attachments'];
+  providesServices = ['storage', 'file-storage', 'file-attachments', 'field-files'];
   /**
    * `com.objectstack.engine.objectql` — init() registers sys_file /
    * sys_upload_session / sys_attachment through the `manifest` service
@@ -393,6 +398,24 @@ export class StorageServicePlugin implements Plugin {
             return null;
           }
         },
+      }),
+    );
+    // [#25779] The server-side field-file verb, under `FIELD_FILE_SERVICE`.
+    // Its engine is read per call, so it serves from the moment the data
+    // engine is registered — a seed loaded in a plugin's `start()` included.
+    ctx.registerService(
+      'field-files',
+      new FieldFileService({
+        getEngine: () => {
+          try {
+            return ctx.getService<any>('objectql') ?? null;
+          } catch {
+            return null;
+          }
+        },
+        getStorage: () => storage,
+        getLimitsSnapshot: () => storage.getLimitsSnapshot(),
+        logger: ctx.logger,
       }),
     );
     ctx.logger.info(

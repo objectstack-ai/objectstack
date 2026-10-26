@@ -526,3 +526,121 @@ export interface IFileAttachmentService {
     /** Store `input.data` and attach it to the parent record, as one file and one attachment. */
     attachFile(input: AttachFileInput): Promise<AttachedFile>;
 }
+
+// ==========================================
+// Server-side field files: store bytes a record's file field will own (#25779)
+// ==========================================
+
+/**
+ * Service-registry slot for {@link IFieldFileService}.
+ *
+ * `@objectstack/service-storage` registers it, beside
+ * {@link FILE_ATTACHMENT_SERVICE}: that package owns `sys_file` and the
+ * field-reference ownership it keeps (ADR-0104 D3 wave 2). The seed loader
+ * reaches it to store a file a seed record writes into a file field
+ * (`seedFile(path)`, `@objectstack/spec/data`).
+ */
+export const FIELD_FILE_SERVICE = 'field-files' as const;
+
+/** What {@link IFieldFileService.storeFile} stores. */
+export interface StoreFieldFileInput {
+    /**
+     * The organization the file is stored in, or `null` for none. Required, so
+     * that storing in no organization is stated, never a field left out. The
+     * record that will own the file is written in the same organization.
+     */
+    organizationId: string | null;
+    /** The file name a download is saved as. Its extension is kept on the storage key. */
+    filename: string;
+    /** The file's media type. */
+    mimeType: string;
+    /**
+     * The bytes. Their length is judged against the deployment's upload size
+     * limit (the `max_upload_mb` storage setting) before anything is stored.
+     */
+    data: Buffer;
+    /**
+     * Provenance the stored file keeps (on `sys_file.metadata`), read back by
+     * {@link IFieldFileService.describeFiles}: the seed loader records the seed
+     * file path and the SHA-256 of the bytes, so a later load can tell an
+     * unchanged file from a changed one.
+     */
+    metadata?: Record<string, string>;
+}
+
+/** What {@link IFieldFileService.storeFile} stored. */
+export interface StoredFieldFile {
+    /** The new `sys_file` row's id: the value a file field holds. */
+    fileId: string;
+    /** The number of bytes stored. */
+    size: number;
+}
+
+/** The (object, record, field) slot that owns a field file (ADR-0104 D3 wave 2). */
+export interface FieldFileSlot {
+    /** The owning record's object, by its short name. */
+    object: string;
+    /** The owning record's id. */
+    recordId: string;
+    /** The file-class field on that record whose value is the file's id. */
+    field: string;
+}
+
+/** One stored file, as {@link IFieldFileService.describeFiles} answers it. */
+export interface FieldFileDescription {
+    /** The `sys_file` row's id. */
+    fileId: string;
+    /** The file name a download is saved as. */
+    name: string;
+    /** The file's media type, or `null` when none was recorded. */
+    mimeType: string | null;
+    /** `pending` until a record owns it; `deleted` for a tombstone in its grace window. */
+    status: 'pending' | 'committed' | 'deleted';
+    /** The slot that owns the file, or `null` while none does. */
+    owner: FieldFileSlot | null;
+    /** The provenance {@link StoreFieldFileInput.metadata} recorded; `{}` when none. */
+    metadata: Record<string, string>;
+}
+
+/**
+ * The server-side door for a FILE FIELD's file: store bytes as a `sys_file`
+ * no record owns yet, then hand that file to the record whose field holds its
+ * id — the ownership an upload gets when a record write references it.
+ *
+ * For a producer with no upload in front of it — the seed loader, which writes
+ * the files a package ships (`seedFile(path)`) — so it acts as the SYSTEM:
+ * there is no caller whose read of the file could be asked. What it does run is
+ * what an upload runs: the upload size limit, the organization the file is
+ * stored in, and the storage key layout of the upload doors.
+ *
+ * Refusals carry `code` and `status` (ADR-0112):
+ *  - `VALIDATION_ERROR` / 400: a malformed input;
+ *  - `PAYLOAD_TOO_LARGE` / 413: the bytes are over the upload size limit,
+ *    refused before anything is stored;
+ *  - `RESOURCE_CONFLICT` / 409: `claimFiles` named a file another slot owns —
+ *    a field file has one owner, and it is never transferred;
+ *  - `RECORD_NOT_FOUND` / 404: `claimFiles` named a file that does not exist
+ *    in the organization;
+ *  - `SERVICE_UNAVAILABLE` / 503: no data engine is wired into this kernel.
+ *
+ * A stored file stays `pending` until `claimFiles` commits it, so a file whose
+ * record never lands is reclaimed — row and bytes — by the platform's
+ * pending-upload retention.
+ */
+export interface IFieldFileService {
+    /** Store `input.data` as a `pending` `sys_file` no record owns yet. */
+    storeFile(input: StoreFieldFileInput): Promise<StoredFieldFile>;
+    /**
+     * The files among `fileIds` that exist in `organizationId` (every
+     * organization's, for `null`), by id. An id missing from the answer names
+     * no file there.
+     */
+    describeFiles(fileIds: readonly string[], organizationId: string | null): Promise<Map<string, FieldFileDescription>>;
+    /**
+     * Make `slot` the owner of exactly `fileIds`: each one is committed and
+     * owned by the slot, and every other file the slot owned is released, as a
+     * record write that replaces the field's value releases it. Idempotent: a
+     * file the slot already owns, committed, is left as it is.
+     */
+    claimFiles(slot: FieldFileSlot, fileIds: readonly string[], organizationId: string | null): Promise<void>;
+}

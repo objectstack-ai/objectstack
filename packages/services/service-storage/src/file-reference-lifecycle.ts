@@ -849,7 +849,7 @@ async function collectionOpen(engine: FileReferenceEngine): Promise<boolean> {
  * own never-completed reap policy, and re-tombstoning a `deleted` row would
  * reset its grace clock.
  */
-async function releaseOwnership(
+export async function releaseOwnership(
   engine: FileReferenceEngine,
   logger: FileReferenceLogger,
   rows: Array<Record<string, unknown>>,
@@ -884,7 +884,7 @@ async function releaseOwnership(
 }
 
 /** Files currently owned by a specific slot. */
-async function ownedBySlot(
+export async function ownedBySlot(
   engine: FileReferenceEngine,
   object: string,
   recordId: string,
