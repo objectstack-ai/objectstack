@@ -3292,11 +3292,16 @@ jobs:
   # vitest root, so the suite must run with cwd = ui/ (it does, below); run
   # from this repo's root every key misses and every file weighs the median.
   #
-  # Every event runs the whole suite. objectui's affected-test selector
-  # (ui/scripts/select-affected-tests.mjs) reads `git diff --name-only`, which
-  # prints paths relative to the GIT root — `ui/packages/...` here — against a
-  # package graph spelled relative to the objectui root, so it is not wired
-  # until objectui's repo-root lookups are migrated (sub-issue 2 of the epic).
+  # ── Test UI: the two speeds (#25868) ────────────────────────────────────
+  # `push`, `schedule` and `workflow_dispatch` run the whole suite: the full
+  # battery. `pull_request` and `merge_group` run the files
+  # ui/scripts/select-affected-tests.mjs selects -- the ui packages the change
+  # sits in and their dependents, plus the tests the package graph cannot
+  # place, which run on every change -- or the whole suite when the change
+  # reaches something every ui test runs through, outside ui/ included (a
+  # non-documentation root file, `patches/`, one of the seven packages the
+  # `ui_consumers` filter names). The selector's header states the rules and
+  # what it does not see; the full battery on `main` is the backstop.
   test-ui:
     name: Test UI (${{ matrix.shard }}/16)
     needs: filter
@@ -3313,6 +3318,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          # The select step below diffs against the base commit, which needs
+          # the base's history in the clone.
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -3363,13 +3372,85 @@ jobs:
             --filter=@objectstack/sdui-parser... \
             --filter=@objectstack/types...
 
+      # Fails OPEN: a selector that exits non-zero, prints no verdict, or has
+      # no base to diff against means the whole suite, never a skip. The exit
+      # status is captured beside the output, not through a command
+      # substitution. A pull request diffs from merge-base(origin/<base ref>,
+      # HEAD), never the payload's `base.sha`, which is frozen when the PR is
+      # opened: everything `main` gained since would be charged to this PR,
+      # and a lockfile change among it would make every long-open PR a full
+      # run (Test Core's "WHERE THE AFFECTED DIFF STARTS" above is the same
+      # fact). A merge group diffs from its `base_sha`. Every shard computes
+      # the same selection from the same checkout, so `--shard` partitions
+      # one set.
+      - name: Select the tests this change affects
+        id: select
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          QUEUE_BASE: ${{ github.event.merge_group.base_sha }}
+        run: |
+          base=''
+          case "$EVENT" in
+            pull_request)
+              if [ -n "$PR_BASE_REF" ]; then
+                base=$(git merge-base "refs/remotes/origin/$PR_BASE_REF" HEAD) || base=''
+              fi
+              ;;
+            merge_group) base="$QUEUE_BASE" ;;
+            *)
+              echo 'mode=full' >> "$GITHUB_OUTPUT"
+              echo "A $EVENT run is the full battery: every ui test file, sixteen shards."
+              exit 0
+              ;;
+          esac
+          status=0
+          if [ -z "$base" ]; then
+            echo "::warning::no diff base on this $EVENT event; running the full suite rather than guessing."
+            status=2
+          else
+            echo "Diff base: $base"
+            node ui/scripts/select-affected-tests.mjs --base "$base" --out "$RUNNER_TEMP/affected-tests.txt" \
+              > "$RUNNER_TEMP/select.out" || status=$?
+            cat "$RUNNER_TEMP/select.out"
+          fi
+          verdict=''
+          if [ "$status" -eq 0 ]; then
+            verdict=$(tail -n 1 "$RUNNER_TEMP/select.out")
+          fi
+          case "$verdict" in
+            mode=affected | mode=full) ;;
+            *)
+              echo "::warning::the affected-test selector reached no verdict (exit $status); running the full suite rather than skipping silently."
+              verdict='mode=full'
+              ;;
+          esac
+          echo "$verdict" >> "$GITHUB_OUTPUT"
+
+      # `$MODE` is the VALUE of the select step's output `mode`: its
+      # `mode=affected` line is GitHub's `key=value` form, so what arrives here
+      # is `affected` or `full`, never the line itself.
+      # ui/scripts/__tests__/select-affected-tests-wiring.test.ts runs both
+      # steps as written, so neither end can be renamed alone. The filters are
+      # paths relative to ui/, the vitest root, passed as positionals with no
+      # `--`, the only spelling ui/scripts/vitest-invocation-guard.mjs admits.
+      #
       # objectui's full-battery runs also pass its per-file timings reporter
       # and upload the result for the weekly dataset refresh. Both belong to
       # that refresh workflow, which is in the governance-workflow audit
       # (sub-issue 4 of the epic); until it is ported the committed dataset
       # is what the sequencer reads.
       - name: Run the ui tests (shard ${{ matrix.shard }}/16)
-        run: pnpm --dir ui run test --shard=${{ matrix.shard }}/16 --reporter=default --reporter=github-actions
+        env:
+          MODE: ${{ steps.select.outputs.mode }}
+        run: |
+          if [ "$MODE" = 'affected' ]; then
+            mapfile -t filters < "$RUNNER_TEMP/affected-tests.txt"
+            echo "Affected speed: ${#filters[@]} vitest filter(s), shard ${{ matrix.shard }} of 16."
+            pnpm --dir ui exec vitest run --shard=${{ matrix.shard }}/16 --reporter=default --reporter=github-actions "${filters[@]}"
+          else
+            pnpm --dir ui run test --shard=${{ matrix.shard }}/16 --reporter=default --reporter=github-actions
+          fi
 
       - name: Save Turbo cache (main only)
         if: always() && github.event_name == 'push' && matrix.shard == 1
